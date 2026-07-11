@@ -4,9 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
+<meta name="tool-version" content="1.0.0">
+<meta name="engine-version" content="1.0.0">
 <title>数学可视化起步模板 · Math-Viz Starter</title>
 <!-- ============================================================
-  数学可视化交互教学工具 · 起步模板 v1.0
+  数学可视化交互教学工具 · 起步模板 · STARTER_VERSION 1.0.0
   设计规范：math-viz-design-system.md（令牌 / 组件 / 绘制语言 / 交互词汇）
 
   制作新工具只需修改三处（均在脚本区顶部，以 ①②③ 标记）：
@@ -14,6 +16,9 @@
     ② SCENES      —— 注册场景页签（brand / tips / views / toggles / draw / readout）
     ③ pushSample  —— 按需扩展采样字段（原则：记录当时的真实值）
   引擎区（相机 / 投影 / 绘制部件 / 交互 / 主循环）一般无需改动。
+
+  版本记录（changelog，新→旧）：
+    1.0.0  2026-07-11  引擎接入双语 i18n 与版本机制；此后为受管版本
 ============================================================ -->
 <style>
 :root{
@@ -73,6 +78,12 @@ body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)
 .panel-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px 10px;
   font-size:13px;font-weight:600;letter-spacing:.06em;color:#dbe6f5}
 .panel:not(.collapsed) .panel-head{border-bottom:1px solid var(--panel-line)}
+.ph-right{display:flex;align-items:center;gap:7px}
+.ver{font-family:var(--font-mono);font-size:10px;color:rgba(159,176,200,.55)}
+.lang{padding:3px 8px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:11px;cursor:pointer}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
 .fold{width:24px;height:24px;border-radius:8px;border:1px solid var(--panel-line);
   background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:14px;line-height:1;cursor:pointer}
 .fold:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
@@ -147,7 +158,8 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 <nav class="tabs" id="tabsNav"></nav>
 
 <aside class="panel" id="panel">
-  <div class="panel-head"><span>参数与视角</span><button class="fold" id="btnFold" title="收起 / 展开">−</button></div>
+  <div class="panel-head"><span id="panelTitle">参数与视角</span>
+    <span class="ph-right"><span class="ver" id="verBadge"></span><button class="lang" id="btnLang" title="切换语言 / Switch language">EN</button><button class="fold" id="btnFold" title="收起 / 展开">−</button></span></div>
   <div class="panel-body">
     <div id="paramsHost"></div>
     <div class="row">
@@ -165,16 +177,53 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 
 <script>
 'use strict';
+/* ================= i18n 核心（引擎区） ================= */
+const LANG_KEY = 'mathviz-lang';
+function resolveLang(){
+  try{
+    const q = new URLSearchParams(location.search).get('lang');
+    if (q === 'zh' || q === 'en') return q;
+    const s = localStorage.getItem(LANG_KEY);
+    if (s === 'zh' || s === 'en') return s;
+  }catch(e){}
+  return (navigator.language || 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+let LANG = resolveLang();
+function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
+
+const STARTER_VERSION = '1.0.0';
+const VERSION = document.querySelector('meta[name="tool-version"]').content;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ⓪ 工具元信息 —— id 与双语标题                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const TOOL = {
+  id: 'math-viz-starter',
+  title: { zh: '数学可视化起步模板 · Math-Viz Starter', en: 'Math-Viz Starter Template' },
+  h1:    { zh: '数学可视化 · 起步模板', en: 'Math Viz · Starter' }
+};
+
+/* 引擎 UI 文案（一般无需改动） */
+const UI = {
+  panelTitle: { zh: '参数与视角', en: 'Parameters & Views' },
+  pause:  { zh: '⏸ 暂停', en: '⏸ Pause' },
+  resume: { zh: '▶ 继续', en: '▶ Resume' },
+  reset:  { zh: '↺ 重置', en: '↺ Reset' },
+  views:  { zh: '视角', en: 'View' },
+  hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
+            en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
+};
+
 /* ╔══════════════════════════════════════════════════════════╗
    ║  ① 参数声明 —— 自动生成滑杆                                ║
    ║  key: state 中的键 · label: 支持 <i>数学符号</i>            ║
    ║  fmt: 格式化"滑杆原始值"用于显示 · map(可选): 原始值→状态值   ║
    ╚══════════════════════════════════════════════════════════╝ */
 const PARAMS = [
-  { key: 'omega',     label: '角速度 <i>ω</i>',  min: 0.2, max: 4,   step: 0.05, value: 1,   fmt: v => fmt(v) + ' rad/s' },
-  { key: 'amp',       label: '振幅 <i>A</i>',    min: 0.2, max: 1.5, step: 0.05, value: 1,   fmt: v => fmt(v) },
-  { key: 'phi',       label: '初相位 <i>φ</i>',  min: 0,   max: 2,   step: 0.05, value: 0,   fmt: v => fmt(v) + ' π', map: v => v * Math.PI },
-  { key: 'waveSpeed', label: '波形展开速度',      min: 0.5, max: 2.5, step: 0.05, value: 1.2, fmt: v => fmt(v) + ' 单位/s' }
+  { key: 'omega',     label: { zh: '角速度 <i>ω</i>', en: 'Angular speed <i>ω</i>' }, min: 0.2, max: 4,   step: 0.05, value: 1,   fmt: v => fmt(v) + ' rad/s' },
+  { key: 'amp',       label: { zh: '振幅 <i>A</i>',   en: 'Amplitude <i>A</i>' },     min: 0.2, max: 1.5, step: 0.05, value: 1,   fmt: v => fmt(v) },
+  { key: 'phi',       label: { zh: '初相位 <i>φ</i>', en: 'Initial phase <i>φ</i>' }, min: 0,   max: 2,   step: 0.05, value: 0,   fmt: v => fmt(v) + ' π', map: v => v * Math.PI },
+  { key: 'waveSpeed', label: { zh: '波形展开速度',     en: 'Wave unroll speed' },      min: 0.5, max: 2.5, step: 0.05, value: 1.2, fmt: v => fmt(v) + t({ zh: ' 单位/s', en: ' units/s' }) }
 ];
 
 /* ╔══════════════════════════════════════════════════════════╗
@@ -188,17 +237,19 @@ const SCENES = {
 
   /* ────── 示例场景：利萨茹图形（演示模板全部约定） ────── */
   lissa: {
-    label: '利萨茹图形',
-    brand: '两个方向相互垂直、频率成 3:2 的简谐振动叠加，轨迹便是利萨茹图形。拖动 φ 改变姿态，拖拽画布旋转观察。',
-    tips: '提示：x 与 y 是两只互相垂直的「弹簧」，频率比决定花形、初相位 φ 决定姿态。本场景演示了模板的全部约定——曲线配色、投影虚线、读数区与视角预设。',
+    label: { zh: '利萨茹图形', en: 'Lissajous figure' },
+    brand: { zh: '两个方向相互垂直、频率成 3:2 的简谐振动叠加，轨迹便是利萨茹图形。拖动 φ 改变姿态，拖拽画布旋转观察。',
+             en: 'Two perpendicular simple harmonic oscillations with a 3:2 frequency ratio combine to trace a Lissajous figure. Drag φ to change its shape, and drag the canvas to rotate the view.' },
+    tips: { zh: '提示：x 与 y 是两只互相垂直的「弹簧」，频率比决定花形、初相位 φ 决定姿态。本场景演示了模板的全部约定——曲线配色、投影虚线、读数区与视角预设。',
+            en: 'Tip: x and y are two perpendicular "springs" — the frequency ratio shapes the pattern, and the initial phase φ sets its orientation. This scene demonstrates every convention of the template: curve colors, projection guides, the readout panel, and view presets.' },
     views: {
-      iso:   { label: '立体',     az: -0.7,  el: 0.35, dist: 8.5, tx: 0, ty: 0, tz: 0 },
-      front: { label: '正视 x·y', az: 0.001, el: 0.02, dist: 6.5, tx: 0, ty: 0, tz: 0 }
+      iso:   { label: { zh: '立体',     en: '3D' },       az: -0.7,  el: 0.35, dist: 8.5, tx: 0, ty: 0, tz: 0 },
+      front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 6.5, tx: 0, ty: 0, tz: 0 }
     },
     toggles: [
-      { key: 'showTrail',  label: '运动轨迹',   color: '#fb7185', checked: true },
-      { key: 'showGuides', label: '投影辅助线', color: '#fbbf24', checked: true },
-      { key: 'showGrid',   label: '网格',       color: '#64748b', checked: true }
+      { key: 'showTrail',  label: { zh: '运动轨迹',   en: 'Trail' },              color: '#fb7185', checked: true },
+      { key: 'showGuides', label: { zh: '投影辅助线', en: 'Projection guides' },  color: '#fbbf24', checked: true },
+      { key: 'showGrid',   label: { zh: '网格',       en: 'Grid' },               color: '#64748b', checked: true }
     ],
     sampleWindow: () => TAU / state.omega * 1.05 + 0.3,
     draw(C) {
@@ -241,23 +292,25 @@ const SCENES = {
       return readoutHead() +
         '<div class="cosC">x = A·sin(3ωt+φ) = <b>' + fmtS(x) + '</b></div>' +
         '<div class="sinC">y = A·sin(2ωt) = <b>' + fmtS(y) + '</b></div>' +
-        '<div class="dim">频率比 3 : 2&ensp;·&ensp;图形周期 = 2π/ω = ' + fmt(TAU / state.omega) + ' s</div>';
+        '<div class="dim">' + t({ zh: '频率比 3 : 2', en: 'frequency ratio 3 : 2' }) + '&ensp;·&ensp;图形周期 = 2π/ω = ' + fmt(TAU / state.omega) + ' s</div>';
     }
   },
 
   /* ────── 空白骨架：复制本对象并改名，即是你的新场景 ────── */
   blank: {
-    label: '新场景模板',
-    brand: '这是一个空白场景骨架：引擎、坐标轴、网格与主循环已就绪，在 draw(C) 中开始绘制你的数学对象。',
-    tips: '提示：复制 SCENES 中任一场景对象并改名即可开出新页签；在 PARAMS 声明滑杆、在 toggles 声明开关（曲线按 rose→violet→emerald→orange 取色），其余交给引擎。',
+    label: { zh: '新场景模板', en: 'Blank scene' },
+    brand: { zh: '这是一个空白场景骨架：引擎、坐标轴、网格与主循环已就绪，在 draw(C) 中开始绘制你的数学对象。',
+             en: 'This is a blank scene skeleton: the engine, axes, grid, and main loop are ready — start drawing your math object in draw(C).' },
+    tips: { zh: '提示：复制 SCENES 中任一场景对象并改名即可开出新页签；在 PARAMS 声明滑杆、在 toggles 声明开关（曲线按 rose→violet→emerald→orange 取色），其余交给引擎。',
+            en: 'Tip: copy any scene object in SCENES and rename it to open a new tab; declare sliders in PARAMS and switches in toggles (curves take colors in rose → violet → emerald → orange order), and let the engine handle the rest.' },
     views: {
-      iso:   { label: '立体',     az: -0.95,      el: 0.30,  dist: 11,   tx: 0, ty: 0, tz: 2.8 },
-      front: { label: '正视 x·y', az: 0.001,      el: 0.02,  dist: 7.5,  tx: 0, ty: 0, tz: 0.5 },
-      side:  { label: '侧视 y·t', az: -Math.PI/2, el: 0.001, dist: 11.5, tx: 0, ty: 0, tz: 3.4 }
+      iso:   { label: { zh: '立体',     en: '3D' },        az: -0.95,      el: 0.30,  dist: 11,   tx: 0, ty: 0, tz: 2.8 },
+      front: { label: { zh: '正视 x·y', en: 'Front x·y' },  az: 0.001,      el: 0.02,  dist: 7.5,  tx: 0, ty: 0, tz: 0.5 },
+      side:  { label: { zh: '侧视 y·t', en: 'Side y·t' },   az: -Math.PI/2, el: 0.001, dist: 11.5, tx: 0, ty: 0, tz: 3.4 }
     },
     toggles: [
-      { key: 'showGuides', label: '投影辅助线', color: '#fbbf24', checked: true },
-      { key: 'showGrid',   label: '网格',       color: '#64748b', checked: true }
+      { key: 'showGuides', label: { zh: '投影辅助线', en: 'Projection guides' }, color: '#fbbf24', checked: true },
+      { key: 'showGrid',   label: { zh: '网格',       en: 'Grid' },              color: '#64748b', checked: true }
     ],
     sampleWindow: () => WAVE_LEN / state.waveSpeed + 0.5,
     draw(C) {
@@ -267,7 +320,7 @@ const SCENES = {
       if (state.showGuides) {
         drawPeriodBracket(C, TAU / state.omega, v, 0, -1.6, 'T = ' + fmt(TAU / state.omega) + ' s');
       }
-      label3(C, [0, 0.55, 2.5], '在 draw(C) 中绘制场景内容',
+      label3(C, [0, 0.55, 2.5], t({ zh: '在 draw(C) 中绘制场景内容', en: 'Draw your scene in draw(C)' }),
         { size: 12, color: 'rgba(159,176,200,.55)', align: 'center' });
       /* 可用部件速查：
          strokePoly(C, pts, {width,color|fade,dash,alpha})   折线（支持 null 断点）
@@ -297,6 +350,7 @@ const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
 const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
 const samples = [];
 let curTab = null;
+const RELABEL = [];
 const cams = {};
 let cam = null;
 let tween = null;
@@ -591,8 +645,10 @@ function drawAngleArc(C, th, A) {
 /* 读数区固定首两行 */
 function readoutHead() {
   const th = state.theta;
+  const deg = (mod2pi(th) * 180 / Math.PI).toFixed(0);
+  const lap = fmt(th / TAU);
   return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;θ = ωt = <b>' + fmt(th) + '</b> rad</div>' +
-         '<div class="dim">≡ ' + (mod2pi(th) * 180 / Math.PI).toFixed(0) + '°（第 ' + fmt(th / TAU) + ' 圈）</div>';
+         '<div class="dim">' + t({ zh: '≡ ' + deg + '°（第 ' + lap + ' 圈）', en: '≡ ' + deg + '° (turn ' + lap + ')' }) + '</div>';
 }
 
 /* ================= 主绘制与主循环 ================= */
@@ -650,7 +706,7 @@ function buildParams() {
   PARAMS.forEach(p => {
     const wrap = document.createElement('div');
     wrap.className = 'ctl';
-    wrap.innerHTML = '<div class="top"><label>' + p.label + '</label><span class="val"></span></div>';
+    wrap.innerHTML = '<div class="top"><label></label><span class="val"></span></div>';
     const input = document.createElement('input');
     input.type = 'range';
     input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
@@ -663,7 +719,9 @@ function buildParams() {
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
-    upd();
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
+    RELABEL.push(relabel);
+    relabel();
   });
 }
 
@@ -678,12 +736,15 @@ function buildToggles() {
       const lab = document.createElement('label');
       lab.className = 'tg';
       lab.innerHTML = '<input type="checkbox" data-key="' + tg.key + '"' + (state[tg.key] ? ' checked' : '') + '>' +
-        '<i class="dot" style="--c:' + tg.color + '"></i>' + tg.label;
+        '<i class="dot" style="--c:' + tg.color + '"></i><span class="tgl"></span>';
       const cb = lab.querySelector('input');
       cb.addEventListener('change', () => {
         state[tg.key] = cb.checked;
         document.querySelectorAll('input[data-key="' + tg.key + '"]').forEach(o => { o.checked = cb.checked; });
       });
+      const relabel = () => { lab.querySelector('.tgl').innerHTML = t(tg.label); };
+      RELABEL.push(relabel);
+      relabel();
       grp.appendChild(lab);
     });
     host.appendChild(grp);
@@ -698,15 +759,19 @@ function buildViews() {
     row.dataset.tab = id;
     const lab = document.createElement('span');
     lab.className = 'vlabel';
-    lab.textContent = '视角';
     row.appendChild(lab);
+    const labRelabel = () => { lab.textContent = t(UI.views); };
+    RELABEL.push(labRelabel);
+    labRelabel();
     Object.keys(SCENES[id].views).forEach(name => {
       const b = document.createElement('button');
       b.className = 'btn vbtn';
       b.dataset.view = name;
-      b.textContent = SCENES[id].views[name].label;
       b.addEventListener('click', () => applyView(name));
       row.appendChild(b);
+      const relabel = () => { b.textContent = t(SCENES[id].views[name].label); };
+      RELABEL.push(relabel);
+      relabel();
     });
     host.appendChild(row);
   });
@@ -718,9 +783,11 @@ function buildTabs() {
     const b = document.createElement('button');
     b.className = 'tab';
     b.dataset.tab = id;
-    b.textContent = SCENES[id].label;
     b.addEventListener('click', () => switchTab(id));
     nav.appendChild(b);
+    const relabel = () => { b.textContent = t(SCENES[id].label); };
+    RELABEL.push(relabel);
+    relabel();
   });
 }
 
@@ -757,8 +824,8 @@ function switchTab(id) {
     el.style.display = el.dataset.tab === id ? '' : 'none';
   });
   cam = cams[id];
-  brandDesc.textContent = SCENES[id].brand;
-  tipsEl.textContent = SCENES[id].tips;
+  brandDesc.textContent = t(SCENES[id].brand);
+  tipsEl.textContent = t(SCENES[id].tips);
   refreshViewButtons();
   updateReadout();
 }
@@ -767,7 +834,7 @@ function switchTab(id) {
 const btnPlay = document.getElementById('btnPlay');
 function togglePlay() {
   state.running = !state.running;
-  btnPlay.textContent = state.running ? '⏸ 暂停' : '▶ 继续';
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
 }
 btnPlay.addEventListener('click', togglePlay);
 document.getElementById('btnReset').addEventListener('click', resetSim);
@@ -782,6 +849,34 @@ if (window.innerWidth < 760) {
   panel.classList.add('collapsed');
   btnFold.textContent = '+';
 }
+
+/* ================= 语言切换 ================= */
+function applyLang() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.title = t(TOOL.title);
+  document.querySelector('.brand h1').textContent = t(TOOL.h1);
+  document.getElementById('panelTitle').textContent = t(UI.panelTitle);
+  document.querySelector('.hint').textContent = t(UI.hint);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+  document.getElementById('btnReset').textContent = t(UI.reset);
+  RELABEL.forEach(f => f());
+  brandDesc.textContent = t(SCENES[curTab].brand);
+  tipsEl.textContent = t(SCENES[curTab].tips);
+  updateReadout();
+}
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('lang', l);
+    history.replaceState(null, '', u);
+  } catch (e) {}
+  applyLang();
+}
+document.getElementById('btnLang').addEventListener('click', () => setLang(LANG === 'zh' ? 'en' : 'zh'));
+document.getElementById('verBadge').textContent = 'v' + VERSION;
 
 /* ================= 交互：旋转 / 平移 / 缩放 ================= */
 const pointers = new Map();
@@ -882,6 +977,7 @@ Object.keys(SCENES).forEach(id => {
   lastView[id] = first;
 });
 switchTab(Object.keys(SCENES)[0]);
+applyLang();
 resetSim();
 requestAnimationFrame(frame);
 </script>
