@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A collection of **single-file, zero-dependency HTML math/physics visualization teaching tools** with a Chinese-language UI. Each `.html` opens directly in a browser — no build system, package manager, or dependencies. All tools share one Canvas-2D engine that renders a rotatable 3D scene ("dark oscilloscope / astronomical instrument" aesthetic).
+A collection of **single-file, zero-dependency HTML math/physics visualization teaching tools** with a bilingual Chinese/English UI (Chinese default). Each `.html` opens directly in a browser — no build system, package manager, or dependencies. All tools share one Canvas-2D engine that renders a rotatable 3D scene ("dark oscilloscope / astronomical instrument" aesthetic).
 
 - `design-system/math-viz-design-system.md` — **the design spec and source of truth** (Chinese). Tokens, components, canvas drawing language, interaction vocabulary.
 - `design-system/math-viz-starter.html` — the canonical starting template. Contains all design tokens + the full engine + a declarative config layer. **Copy this to make a new tool.**

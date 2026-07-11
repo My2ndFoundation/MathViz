@@ -167,14 +167,14 @@ major = breaking rework · minor = new feature/scene · patch = fix or copy twea
 
 ```js
 myScene: {
-  label: '页签名',
-  brand: '一句话讲清数学本质 + 一句交互引导',
-  tips:  '一个顿悟点 + 指向具体视角或开关',
+  label: { zh: '页签名', en: 'Tab name' },
+  brand: { zh: '一句话讲清数学本质 + 一句交互引导', en: 'One sentence on the math essence + one on interaction' },
+  tips:  { zh: '一个顿悟点 + 指向具体视角或开关', en: 'One epiphany + pointer to a specific view or toggle' },
   views: {
-    iso:   { label: '立体', az: -0.7, el: 0.35, dist: 8.5, tx: 0, ty: 0, tz: 0 }, // first = iso
-    front: { label: '正视 x·y', az: 0.001, el: 0.02, dist: 6.5 },                 // epiphany view
+    iso:   { label: { zh: '立体', en: '3D' }, az: -0.7, el: 0.35, dist: 8.5, tx: 0, ty: 0, tz: 0 }, // first = iso
+    front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 6.5 },           // epiphany view
   },
-  toggles: [ { key: 'showTrail', label: '运动轨迹', color: '#fb7185', checked: true } ],
+  toggles: [ { key: 'showTrail', label: { zh: '运动轨迹', en: 'Trail' }, color: '#fb7185', checked: true } ],
   sampleWindow: () => TAU / state.omega * 1.05 + 0.3,
   draw(C) { /* compose from engine parts; painter's order per §4.5 */ },
   readout() { return readoutHead() + '<div class="sinC">…<b>value</b></div>'; },

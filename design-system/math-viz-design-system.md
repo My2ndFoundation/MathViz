@@ -321,7 +321,7 @@ tips：**一段话只讲一个顿悟点**，并指向具体操作（某视角 / 
 
 基于 `math-viz-starter.html`（内含本规范全部令牌 + 完整引擎 + 声明式配置层）：
 
-1. 复制模板，改 `<title>` 与品牌区 h1；
+1. 复制模板，填写 ⓪ `TOOL`（id 与双语标题，运行时驱动 `<title>`/`<h1>`）；
 2. 在 `PARAMS` 数组声明滑杆（key / label / 范围 / 格式化 / 可选映射函数）；
 3. 在 `SCENES` 注册场景：`label`（页签名）、`brand`、`tips`、`views`（首项 iso）、`toggles`（曲线开关按启用顺序取色）、`draw(C)`、`readout()`；
 4. 按需扩展 `pushSample` 的采样字段（原则：记录当时真实值）；
