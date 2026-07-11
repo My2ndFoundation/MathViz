@@ -52,7 +52,7 @@ Note: the original hand-written tool the design system was extracted from now li
 
 ## Conventions
 
-- UI language is Chinese; code comments and the design doc are Chinese.
+- UI is bilingual (zh default, en switchable); code comments and the design doc are Chinese.
 - Colors are declared as CSS vars in `:root` and reused as **the same literal values inside Canvas**. Curve enable order is fixed: rose → violet → emerald → orange.
 - Text: minus sign is U+2212 (−), values default to 2 decimals, angles are integers, `|v| > 999` shows ±∞.
 - `tips` copy explains exactly one epiphany and points to a specific view or toggle.
