@@ -9,6 +9,8 @@ description: >-
   "做一个 X 的可视化", "add a tool for Y", or "可视化一下 Z" without naming the design system or the
   starter template. Do NOT use it for editing the design system docs themselves, or for building
   unrelated web pages / charts / dashboards that aren't a math-concept viz built on this engine.
+  Also use it when the developer wants to improve, adjust, upgrade, or 改进/调整/升级 an existing
+  tool in outputs/ — version bump and changelog rules apply.
 ---
 
 # Building a Math-Viz Teaching Tool
@@ -102,7 +104,8 @@ caught now and not after 800 lines of canvas code.
 
 1. **Copy** `design-system/math-viz-starter.html` to `outputs/<slug>.html`. Match the existing naming:
    concept-based, e.g. `complex-essence-3d.html`, `conic-essence-3d.html` (`-essence-3d` for
-   "本质/essence" themes, `-3d` otherwise).
+   "本质/essence" themes, `-3d` otherwise). Fill in ⓪ `TOOL` (id and bilingual title); write all
+   copy as `{zh,en}` objects (§9).
 2. Change `<title>` and the brand `<h1>`; the eyebrow stays `INTERACTIVE MATH · 交互式数学`.
 3. Fill in **① PARAMS**, **② SCENES** (first view `iso`; `toggles` colored in enable order), and
    **③ pushSample** — record the *true value at that instant*, never a recomputed one, so mid-run
@@ -133,10 +136,32 @@ The design system's acceptance gate plus a real look in a browser:
   - **Pause still lets the camera move** (pause freezes only the simulation).
   - Changing a slider mid-run does **not** rewrite past history.
   - Mobile: the panel collapses into a bottom drawer at ≤760px.
+  - **i18n**: every visible string is a `{zh,en}` object rendered through `t()` (§9); the language
+    toggle switches instantly and `?lang=en`/`?lang=zh` opens directly in that language.
+  - **Versioning**: `tool-version` meta and the header changelog block agree with the semver you're
+    about to register (§10).
 - **Run the §8 self-check list** and fix anything that fails.
 
 Only after the run looks right should you tell the developer it's done — and point them at the epiphany
 view so they see the payoff immediately.
+
+## Step 4 — Register & publish (a tool is not "done" until it is registered)
+
+1. Add an entry to `tools.json`: id / file / accent (design-system trace color) / bilingual
+   kicker · title · desc · tag / `version: "1.0.0"` / `engine` (the starter's STARTER_VERSION
+   you copied) / one changelog entry. Validate: `python3 -c "import json;json.load(open('tools.json'))"`.
+2. Mirror the same entry into the `TOOLS` array embedded in `index.html` (field-for-field; no
+   changelog there). The landing page renders from it.
+3. Add a row to the README tools table.
+4. Re-run the §8 self-check (now includes i18n + versioning gates), then commit the tool,
+   registry, landing page and README together.
+
+## Upgrading an existing tool
+
+Any change to a shipped tool MUST: bump the semver in three places — `tools.json`, the
+`tool-version` meta + header changelog block in the HTML, nothing else displays it (the badge
+reads the meta) — and add a bilingual changelog entry to both `tools.json` and the header block.
+major = breaking rework · minor = new feature/scene · patch = fix or copy tweak.
 
 ## Quick reference: the SCENES shape
 

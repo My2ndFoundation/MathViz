@@ -9,6 +9,8 @@ A collection of **single-file, zero-dependency HTML math/physics visualization t
 - `design-system/math-viz-design-system.md` — **the design spec and source of truth** (Chinese). Tokens, components, canvas drawing language, interaction vocabulary.
 - `design-system/math-viz-starter.html` — the canonical starting template. Contains all design tokens + the full engine + a declarative config layer. **Copy this to make a new tool.**
 - `outputs/*.html` — finished tools built on the engine.
+- `tools.json` — the registry of record for every published tool (id, bilingual copy, semver `version`, `engine`, `changelog`); `index.html` embeds a mirrored `TOOLS` array, and both are updated together whenever a tool is published or upgraded.
+- `archive/` — retired tools that are no longer registered or linked from the landing page (e.g. `trig-essence-3d.html`, the original hand-written tool the design system was extracted from).
 
 ## Commands
 
@@ -46,7 +48,7 @@ New tools modify only three things, all marked ①②③ near the top of the `<s
 
 Compose `draw(C)` from engine parts: `drawAxes / drawGridXY / drawTimeGrid / drawPeriodBracket / drawCircle / drawAngleArc / strokePoly / line3 / glowDot / solidDot / label3 / arrowAt`. See §8 of the spec for the full new-tool checklist and the Claude Code task-brief template.
 
-Note: `outputs/trig-essence-3d.html` is the **original** hand-written tool the design system was extracted from and predates the declarative PARAMS/SCENES layer — follow the starter's declarative model, not that file. `fourier-essence-3d.html` is a current example that uses the declarative engine.
+Note: the original hand-written tool the design system was extracted from now lives in `archive/trig-essence-3d.html` and predates the declarative PARAMS/SCENES layer — follow the starter's declarative model, not that file. `outputs/trig-essence-3d-new.html` is its non-declarative legacy replacement: a hand-written static panel, bilingual via `data-i18n` attributes plus a page-local `STR` dict (not the PARAMS/SCENES `RELABEL` mechanism), `engine-version: pre-declarative`. `fourier-essence-3d.html` is a current example that uses the declarative engine.
 
 ## Conventions
 
@@ -54,3 +56,5 @@ Note: `outputs/trig-essence-3d.html` is the **original** hand-written tool the d
 - Colors are declared as CSS vars in `:root` and reused as **the same literal values inside Canvas**. Curve enable order is fixed: rose → violet → emerald → orange.
 - Text: minus sign is U+2212 (−), values default to 2 decimals, angles are integers, `|v| > 999` shows ±∞.
 - `tips` copy explains exactly one epiphany and points to a specific view or toggle.
+- All user-facing copy is a `{zh,en}` object rendered through the engine's `t()` (§9); the language toggle switches instantly and persists via `localStorage`, and `?lang=en`/`?lang=zh` opens a tool directly in that language.
+- Versions land in three places on every publish or upgrade: `tools.json` (`version` + `changelog`), the HTML's `tool-version` meta + header changelog block, and the panel version badge (which reads the meta, so it never needs separate editing) (§10).

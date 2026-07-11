@@ -28,7 +28,7 @@ Open any file in `outputs/` directly in a browser — no setup required.
 
 ```bash
 git clone git@github.com:My2ndFoundation/MathViz.git
-open MathViz/outputs/trig-essence-3d.html   # macOS; or just double-click the file
+open MathViz/outputs/trig-essence-3d-new.html   # macOS; or just double-click the file
 ```
 
 **Controls** (mouse or touch): drag to rotate · scroll / pinch to zoom · right-click or Shift-drag to pan · double-click to reset the view · `Space` to pause · `1`–`9` for preset viewing angles · `T` to switch tabs.
