@@ -1,0 +1,56 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this repo is
+
+A collection of **single-file, zero-dependency HTML math/physics visualization teaching tools** with a Chinese-language UI. Each `.html` opens directly in a browser — no build system, package manager, or dependencies. All tools share one Canvas-2D engine that renders a rotatable 3D scene ("dark oscilloscope / astronomical instrument" aesthetic).
+
+- `design-system/math-viz-design-system.md` — **the design spec and source of truth** (Chinese). Tokens, components, canvas drawing language, interaction vocabulary.
+- `design-system/math-viz-starter.html` — the canonical starting template. Contains all design tokens + the full engine + a declarative config layer. **Copy this to make a new tool.**
+- `outputs/*.html` — finished tools built on the engine.
+
+## Commands
+
+There is no build/lint/test toolchain. To develop:
+
+- **Run**: open the `.html` file directly in a browser (or use the `/run` skill).
+- **Syntax check** (the design system's only acceptance gate, §8): `node --check` cannot read `.html`, so extract the inline script first:
+  ```
+  awk '/<script>/{f=1;next}/<\/script>/{f=0}f' outputs/FILE.html | node --check /dev/stdin
+  ```
+
+## Design-system-first discipline
+
+The markdown spec governs the code. When changing a design token, **change the doc first, then the code** (per the spec's footer). Every tool must honor the five non-negotiable principles and pass the §8 self-check.
+
+The five principles: (1) single file, zero dependencies; (2) canvas is the star — full-screen, all UI floats over it and never splits it; (3) **one curve = one color reused in six places** (legend dot, curve body, projection dash, head glow dot, bold readout value, formula label); (4) all math symbols in serif italic (`--font-math`: Georgia → Songti SC), in Canvas and HTML alike; (5) every tool needs an "epiphany view" (顿悟视角) — an orthographic preset that makes the abstract relation suddenly visible.
+
+## Engine architecture (in the starter and every output)
+
+- **Orbital camera** in spherical params `{az, el, dist, tx, ty, tz}`, up = (0,1,0). Perspective projection `FOCAL = 1.2·min(H, W·1.1)`, near-clip `NEAR = 0.15` with per-segment clipping. Polylines support `null` break points (for asymptote discontinuities).
+- **World coordinates**: x horizontal, y vertical (geometry lives on plane z=0), **z = time axis** (visible length `WAVE_LEN = 8`). History curves "flow out" of the geometry along +z; the newest sample sits at z=0.
+- **Fixed painter's-algorithm draw order**: background → grid → reference dashes → axes/ticks → history curves → structure lines → circle → angle arc → radius → projection dashes → head glow dots → main point → formula labels.
+- **Single shared state, per-tab view**: all tabs share one `state` (params) and `samples` (history) — the theme is "same motion, different measurement." Only the camera and display toggles are per-tab; each tab remembers its own camera.
+- **History invariant**: `pushSample()` records the *true value at that instant*. Changing a parameter mid-run never recomputes past samples — the historical waveform keeps its real trajectory.
+- Phase is integrated (`theta += ω·dt`); φ is applied at display only (`th = theta + phi`). `dt` is clamped to `[0, 0.05]` to survive background-tab jumps.
+- **Pause freezes only the simulation** — camera, rendering, and sliders keep working (the current point uses live params).
+
+## Authoring model — three edit points
+
+New tools modify only three things, all marked ①②③ near the top of the `<script>`. Everything below (camera / projection / drawing parts / interaction / main loop) is the engine and is normally untouched.
+
+1. **`PARAMS`** — declare sliders (UI auto-generated): `{ key, label, min, max, step, value, fmt, map? }`. `label` may contain `<i>math symbol</i>`.
+2. **`SCENES`** — one key = one tab. Required: `label, brand, tips, views (first entry MUST be `iso`, the double-click home), toggles (curves colored in fixed order rose → violet → emerald → orange), draw(C), readout()`. Optional: `sampleWindow()`, `views[x].onSelect` (linkage, e.g. auto-enable a curve).
+3. **`pushSample()`** — extend the recorded sample fields (record true values).
+
+Compose `draw(C)` from engine parts: `drawAxes / drawGridXY / drawTimeGrid / drawPeriodBracket / drawCircle / drawAngleArc / strokePoly / line3 / glowDot / solidDot / label3 / arrowAt`. See §8 of the spec for the full new-tool checklist and the Claude Code task-brief template.
+
+Note: `outputs/trig-essence-3d.html` is the **original** hand-written tool the design system was extracted from and predates the declarative PARAMS/SCENES layer — follow the starter's declarative model, not that file. `fourier-essence-3d.html` is a current example that uses the declarative engine.
+
+## Conventions
+
+- UI language is Chinese; code comments and the design doc are Chinese.
+- Colors are declared as CSS vars in `:root` and reused as **the same literal values inside Canvas**. Curve enable order is fixed: rose → violet → emerald → orange.
+- Text: minus sign is U+2212 (−), values default to 2 decimals, angles are integers, `|v| > 999` shows ±∞.
+- `tips` copy explains exactly one epiphany and points to a specific view or toggle.
