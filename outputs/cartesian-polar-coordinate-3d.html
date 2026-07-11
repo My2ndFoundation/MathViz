@@ -1,0 +1,1308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="tool-version" content="1.0.0">
+<meta name="engine-version" content="1.0.0">
+<title>直角坐标 × 极坐标 · 变换可视化</title>
+<!-- ============================================================
+  直角坐标 ⇄ 极坐标 变换可视化
+  基于 math-viz-design-system.md 与 math-viz-starter.html 构建
+
+  场景一「弯折变换」：把 r = f(θ) 的直角图像（θ 水平、r 竖直的带状图）
+    连续"卷"成极坐标曲线。水平线弯成同心圆、竖直线收成射线、θ 轴缩成极点。
+    第三维 z 存放变换进度 k 的幽灵切片（变换全景）。
+  场景二「坐标换算」：点 P 沿曲线运动，同屏展示极坐标读法 (r, θ)
+    与直角坐标读法 (x, y)，x = r·cosθ、y = r·sinθ。
+
+  版本记录（新→旧）：
+    1.0.0  2026-07-11  首个版本（含双语）
+============================================================ -->
+<style>
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  --angle-amber:#fbbf24;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none}
+body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)}
+#scene{position:fixed;inset:0;display:block;touch-action:none;cursor:grab}
+#scene.dragging{cursor:grabbing}
+
+/* ---- 标题区 ---- */
+.brand{position:fixed;top:20px;left:24px;pointer-events:none;user-select:none;max-width:min(520px,42vw)}
+.brand .eyebrow{font-size:10px;letter-spacing:.22em;color:rgba(159,176,200,.72);margin-bottom:6px}
+.brand h1{margin:0;font-family:var(--font-math);font-weight:600;font-size:26px;letter-spacing:.08em;
+  color:#eef3fa;text-shadow:0 2px 20px rgba(45,212,234,.20)}
+.brand p{margin:7px 0 0;font-size:12.5px;line-height:1.65;color:rgba(159,176,200,.85)}
+
+/* ---- 页签 ---- */
+.tabs{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:5;
+  display:flex;gap:4px;padding:4px;border-radius:999px;
+  background:var(--panel-bg);border:1px solid var(--panel-line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
+.tab{border:1px solid transparent;background:transparent;color:#b8c6da;
+  font-size:12.5px;font-family:var(--font-cn);padding:6px 15px;border-radius:999px;cursor:pointer;
+  transition:color .15s,border-color .15s,background .15s}
+.tab:hover{color:#e8f2fb}
+.tab:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.tab.active{background:rgba(45,212,234,.13);border-color:rgba(45,212,234,.55);color:#9be8f7}
+
+/* ---- 底部提示 ---- */
+.hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);pointer-events:none;user-select:none;
+  font-size:11px;letter-spacing:.05em;color:rgba(159,176,200,.6);white-space:nowrap}
+
+/* ---- 控制面板 ---- */
+.panel{position:fixed;top:14px;right:14px;width:304px;max-height:calc(100vh - 28px);overflow-y:auto;
+  background:var(--panel-bg);border:1px solid var(--panel-line);border-radius:16px;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 18px 50px rgba(0,0,0,.45);user-select:none}
+.panel::-webkit-scrollbar{width:6px}
+.panel::-webkit-scrollbar-thumb{background:rgba(148,163,184,.25);border-radius:3px}
+.panel-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px 10px;
+  font-size:13px;font-weight:600;letter-spacing:.06em;color:#dbe6f5}
+.panel:not(.collapsed) .panel-head{border-bottom:1px solid var(--panel-line)}
+.ph-right{display:flex;align-items:center;gap:7px}
+.ver{font-family:var(--font-mono);font-size:10px;color:rgba(159,176,200,.55)}
+.lang{padding:3px 8px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:11px;cursor:pointer}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.fold{width:24px;height:24px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:14px;line-height:1;cursor:pointer}
+.fold:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.panel.collapsed .panel-body{display:none}
+.panel-body{padding:6px 14px 14px}
+
+/* 滑杆 */
+.ctl{margin:11px 0 3px}
+.ctl .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.ctl label{font-size:12px;color:#c6d2e4}
+.ctl label i{font-family:var(--font-math);font-style:italic;font-size:13px}
+.ctl label sub{font-size:9px;letter-spacing:0}
+.ctl .val{font-family:var(--font-mono);font-size:11.5px;color:#7dd3fc}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;cursor:pointer;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--trace-cyan);margin-top:-5px;border:2px solid #0b1220;box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-moz-range-thumb{width:11px;height:11px;border:2px solid #0b1220;border-radius:50%;
+  background:var(--trace-cyan);box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-offset:2px;border-radius:4px}
+
+/* 按钮 */
+.row{display:flex;gap:8px;margin:13px 0 4px}
+.btn{padding:6px 10px;border-radius:9px;border:1px solid rgba(148,163,184,.25);
+  background:rgba(30,41,59,.55);color:#d7e2f2;font-size:12px;font-family:var(--font-cn);cursor:pointer;
+  transition:border-color .15s,color .15s,background .15s}
+.btn:hover{border-color:rgba(45,212,234,.55)}
+.btn:focus-visible,.fold:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.btn.wide{flex:1}
+.btn.active{border-color:rgba(45,212,234,.8);background:rgba(45,212,234,.12);color:#9be8f7}
+.views{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 2px}
+.views .vlabel{font-size:11.5px;color:rgba(159,176,200,.8);margin-right:2px}
+.vbtn{padding:5px 9px;font-size:11.5px}
+
+/* 开关 */
+.toggles{display:flex;flex-wrap:wrap;gap:7px 12px;margin:12px 0 2px}
+.tg{display:flex;align-items:center;gap:6px;font-size:12px;color:#c6d2e4;cursor:pointer}
+.tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
+.tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
+
+/* 读数与提示 */
+.readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
+  font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
+.readout b{font-weight:600;color:#e8eef7}
+.readout .cR b{color:var(--trace-rose)}
+.readout .cV b{color:var(--trace-violet)}
+.readout .cE b{color:var(--trace-emerald)}
+.readout .cA b{color:var(--angle-amber)}
+.readout .dim{color:rgba(159,176,200,.6)}
+.tips{margin-top:11px;font-size:11px;line-height:1.65;color:rgba(159,176,200,.72)}
+
+@media (max-width:760px){
+  .brand{top:12px;left:14px;max-width:70vw}
+  .brand h1{font-size:20px}
+  .brand p{display:none}
+  .tabs{top:52px;left:14px;transform:none}
+  .panel{left:10px;right:10px;top:auto;bottom:10px;width:auto;max-height:62vh}
+  .hint{display:none}
+}
+</style>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+
+<div class="brand">
+  <div class="eyebrow">INTERACTIVE MATH · 交互式数学</div>
+  <h1>直角坐标 × 极坐标</h1>
+  <p id="brandDesc"></p>
+</div>
+
+<nav class="tabs" id="tabsNav"></nav>
+
+<aside class="panel" id="panel">
+  <div class="panel-head"><span id="panelTitle">参数与视角</span>
+    <span class="ph-right"><span class="ver" id="verBadge"></span><button class="lang" id="btnLang" title="切换语言 / Switch language">EN</button><button class="fold" id="btnFold" title="收起 / 展开">−</button></span></div>
+  <div class="panel-body">
+    <div id="paramsHost"></div>
+    <div class="row">
+      <button class="btn wide" id="btnPlay">⏸ 暂停</button>
+      <button class="btn" id="btnReset">↺ 重置</button>
+    </div>
+    <div class="views" id="presetsHost"><span class="vlabel" id="presetLabel">函数</span></div>
+    <div id="togglesHost"></div>
+    <div id="viewsHost"></div>
+    <div class="readout" id="readout"></div>
+    <div class="tips" id="tips"></div>
+  </div>
+</aside>
+
+<div class="hint">拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签</div>
+
+<script>
+'use strict';
+/* ================= i18n 核心（引擎区） ================= */
+const LANG_KEY = 'mathviz-lang';
+function resolveLang(){
+  try{
+    const q = new URLSearchParams(location.search).get('lang');
+    if (q === 'zh' || q === 'en') return q;
+    const s = localStorage.getItem(LANG_KEY);
+    if (s === 'zh' || s === 'en') return s;
+  }catch(e){}
+  return (navigator.language || 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+let LANG = resolveLang();
+function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
+
+const VERSION = document.querySelector('meta[name="tool-version"]').content;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ⓪ 工具元信息 —— id 与双语标题                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const TOOL = {
+  id: 'cartesian-polar-coordinate-3d',
+  title: { zh: '直角坐标 × 极坐标 · 变换可视化', en: 'Cartesian × Polar · A Bending Morph' },
+  h1:    { zh: '直角坐标 × 极坐标', en: 'Cartesian × Polar' }
+};
+
+/* 引擎 UI 文案（一般无需改动） */
+const UI = {
+  panelTitle: { zh: '参数与视角', en: 'Parameters & Views' },
+  pause:  { zh: '⏸ 暂停', en: '⏸ Pause' },
+  resume: { zh: '▶ 继续', en: '▶ Resume' },
+  reset:  { zh: '↺ 重置', en: '↺ Reset' },
+  views:  { zh: '视角', en: 'View' },
+  functionGroup: { zh: '函数', en: 'Function' },
+  hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
+            en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
+};
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  函数预设 —— 每个键就是「函数」一栏中的一个按钮               ║
+   ║  f(th) 读取 state.p1 / state.p2 · thetaMax 单位为 π         ║
+   ║  p1 / p2 为该预设下两根滑杆的配置（p2 可为 null → 隐藏）      ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const DEFAULT_PRESET = 'rose';
+let curPreset = DEFAULT_PRESET;
+
+const PRESETS = {
+  linear: {
+    btn: { zh: '一次函数', en: 'Linear' }, formula: 'r = aθ + b',
+    f: th => state.p1 * th + state.p2,
+    name: () => t({ zh: '阿基米德螺线', en: 'Archimedean spiral' }),
+    thetaMax: 4, negR: false,
+    p1: { label: { zh: '斜率 <i>a</i>', en: 'Slope <i>a</i>' }, sym: 'a', min: 0.03, max: 0.22, step: 0.005, value: 0.12, fmt: v => fmt(v) },
+    p2: { label: { zh: '截距 <i>b</i>', en: 'Intercept <i>b</i>' }, sym: 'b', min: 0, max: 0.8, step: 0.05, value: 0.15, fmt: v => fmt(v) },
+    tip: { zh: '一次函数读作极坐标便是阿基米德螺线：每多转一圈（θ 增加 2π），半径恰好均匀增加 2πa。',
+           en: 'Read in polar form, a linear function becomes an Archimedean spiral: every extra turn (θ up by 2π) adds exactly 2πa to the radius.' }
+  },
+  quad: {
+    btn: { zh: '二次函数', en: 'Quadratic' }, formula: 'r = aθ²',
+    f: th => state.p1 * th * th,
+    name: () => t({ zh: '抛物型螺线', en: 'Parabolic spiral' }),
+    thetaMax: 3, negR: false,
+    p1: { label: { zh: '系数 <i>a</i>', en: 'Coefficient <i>a</i>' }, sym: 'a', min: 0.006, max: 0.05, step: 0.002, value: 0.022, fmt: v => fmt(v, 3) },
+    p2: null,
+    tip: { zh: '抛物线卷成螺线后圈距不再均匀——半径随 θ² 增长，越向外转扩张越快。',
+           en: 'Rolled into a spiral, the parabola loses even turn spacing — the radius grows with θ², so each outward turn expands faster than the last.' }
+  },
+  rose: {
+    btn: { zh: '玫瑰线', en: 'Rose' }, formula: 'r = A·cos(nθ)',
+    f: th => state.p1 * Math.cos(state.p2 * th),
+    name: () => {
+      const n = Math.round(state.p2);
+      if (n === 1) return t({ zh: '过极点的圆', en: 'Circle through the pole' });
+      const petals = n % 2 ? n : 2 * n;
+      return LANG === 'zh' ? (petals + ' 瓣玫瑰线') : (petals + '-petal rose');
+    },
+    thetaMax: 2, negR: true,
+    p1: { label: { zh: '振幅 <i>A</i>', en: 'Amplitude <i>A</i>' }, sym: 'A', min: 0.4, max: 2, step: 0.05, value: 1.35, fmt: v => fmt(v) },
+    p2: { label: { zh: '花瓣参数 <i>n</i>', en: 'Petal count <i>n</i>' }, sym: 'n', min: 1, max: 8, step: 1, value: 3, fmt: v => v.toFixed(0) },
+    tip: { zh: '余弦的波峰波谷卷成花瓣：n 为奇数开 n 瓣、偶数开 2n 瓣；r<0 的波谷穿过极点开到对侧。把 n 调到 1——它竟是一个圆。',
+           en: 'The peaks and troughs of cosine curl into petals: odd n opens n petals, even n opens 2n; the negative troughs pass through the pole to the opposite side. Set n to 1 — it turns out to be a circle.' }
+  },
+  cardioid: {
+    btn: { zh: '心形线', en: 'Cardioid' }, formula: 'r = a(1 + cos θ)',
+    f: th => state.p1 * (1 + Math.cos(th)),
+    name: () => t({ zh: '心形线', en: 'Cardioid' }),
+    thetaMax: 2, negR: false,
+    p1: { label: { zh: '尺寸 <i>a</i>', en: 'Size <i>a</i>' }, sym: 'a', min: 0.3, max: 1.2, step: 0.05, value: 0.85, fmt: v => fmt(v) },
+    p2: null,
+    tip: { zh: 'r = a(1+cosθ) 处处非负，θ 扫过一整圈后曲线在极点处轻轻合拢，得名心形线。',
+           en: 'r = a(1+cosθ) is never negative; as θ sweeps a full turn the curve pinches gently shut at the pole — hence the name cardioid.' }
+  },
+  circle: {
+    btn: { zh: '圆', en: 'Circle' }, formula: 'r = R',
+    f: () => state.p1,
+    name: () => t({ zh: '圆（圆心在极点）', en: 'Circle (centered at the pole)' }),
+    thetaMax: 2, negR: false,
+    p1: { label: { zh: '半径 <i>R</i>', en: 'Radius <i>R</i>' }, sym: 'R', min: 0.3, max: 2.2, step: 0.05, value: 1.3, fmt: v => fmt(v) },
+    p2: null,
+    tip: { zh: '常数函数是最朴素的极坐标方程：到极点距离恒为 R，一条水平直线弯成等距的圆。',
+           en: 'A constant function is the simplest polar equation: the distance to the pole stays R, so a horizontal line bends into a circle of equal radius everywhere.' }
+  },
+  conic: {
+    btn: { zh: '椭圆', en: 'Ellipse' }, formula: 'r = p / (1 − e·cos θ)',
+    f: th => state.p1 / (1 - state.p2 * Math.cos(th)),
+    name: () => (state.p2 < 0.02 ? t({ zh: '圆（e = 0）', en: 'Circle (e = 0)' }) : t({ zh: '椭圆 · 焦点在极点', en: 'Ellipse · focus at the pole' })),
+    thetaMax: 2, negR: false,
+    p1: { label: { zh: '半通径 <i>p</i>', en: 'Semi-latus rectum <i>p</i>' }, sym: 'p', min: 0.25, max: 1.2, step: 0.05, value: 0.7, fmt: v => fmt(v) },
+    p2: { label: { zh: '离心率 <i>e</i>', en: 'Eccentricity <i>e</i>' }, sym: 'e', min: 0, max: 0.9, step: 0.05, value: 0.55, fmt: v => fmt(v) },
+    tip: { zh: '椭圆的极坐标方程把极点放在焦点上——开普勒描述行星轨道用的正是它。把 e 拖向 0.9，椭圆被急剧拉长。',
+           en: 'The polar equation of an ellipse places the pole at a focus — the very form Kepler used to describe planetary orbits. Drag e toward 0.9 and the ellipse stretches dramatically.' }
+  }
+};
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ① 参数声明 —— 自动生成滑杆（p1 / p2 由预设动态重配置）      ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const PARAMS = [
+  { key: 'morphK', label: { zh: '变换进度 <i>k</i>', en: 'Morph progress <i>k</i>' }, min: 0, max: 1, step: 0.002, value: 0, fmt: v => fmt(v) },
+  Object.assign({ key: 'p1' }, PRESETS[DEFAULT_PRESET].p1),
+  Object.assign({ key: 'p2' }, PRESETS[DEFAULT_PRESET].p2),
+  { key: 'thetaMax', label: { zh: '定义域 <i>θ</i><sub>max</sub>', en: 'Domain <i>θ</i><sub>max</sub>' }, min: 0.5, max: 6, step: 0.25,
+    value: PRESETS[DEFAULT_PRESET].thetaMax, fmt: v => fmt(v) + ' π' },
+  { key: 'speed', label: { zh: '演示速度', en: 'Demo speed' }, min: 0.2, max: 2.4, step: 0.05, value: 1, fmt: v => fmt(v) + ' ×' }
+];
+
+/* ================= 常量与状态 ================= */
+const TAU = Math.PI * 2;
+const NEAR = 0.15;        // 近裁剪面
+const XSPAN = 3.8;        // 直角形态下 θ 轴带宽（世界单位）
+const ZSPAN = 5.5;        // 变换全景切片的纵深
+const CLIP = 2.6;         // |r| 超过此值时断线（设计规范 §6）
+
+const FONT_CN = 'ui-sans-serif,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif';
+const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
+
+const state = { running: true, t: 0, theta: 0, kPhase: 0 };  // 参数键与开关键自动注入
+const samples = [];
+let curTab = null;
+const cams = {};
+let cam = null;
+let tween = null;
+const lastView = {};
+const paramRefs = {};
+const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ================= 基础数学 ================= */
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const mod2pi = a => { a %= TAU; if (a < 0) a += TAU; return a; };
+const wrapPI = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
+const ease = k => k < 0.5 ? 4*k*k*k : 1 - Math.pow(-2*k + 2, 3) / 2;
+const fmt = (x, d = 2) => x.toFixed(d);
+const fmtS = (x, d = 2) => (x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
+
+const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+const dot3 = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+
+/* ================= 变换核心 =================
+   把直角图像上的点 (θ, r) 连续弯折到极坐标位置：
+   · k = 0：世界坐标 (Sθ·θ + x0, r)，即带状直角图像
+   · k = 1：世界坐标 (r·cosθ, −r·sinθ)，与教科书极坐标图形一致
+             （所有内置预设均为 θ 的偶函数，最终点集与标准图完全相同）
+   · 中间态：θ 轴弯成曲率中心位于下方的圆弧，同时整体旋转 −kπ/2
+   r < 0 的部分在弯折后穿过极点出现在反方向——这正是极坐标的负半径规则 */
+function morphPoint(th, r, k, S, z) {
+  const x0 = -XSPAN / 2 * (1 - k);
+  if (k < 1e-4) return [S * th + x0, r, z || 0];
+  const d = S * (1 - k) / k;
+  const R = d + r;
+  const a = k * th;
+  const u = R * Math.sin(a);
+  const v = R * Math.cos(a) - d;
+  const rho = -k * Math.PI / 2;
+  const c = Math.cos(rho), s = Math.sin(rho);
+  return [c * u - s * v + x0, s * u + c * v, z || 0];
+}
+
+function curF(th) { return PRESETS[curPreset].f(th); }
+function curThetaMax() { return state.thetaMax * Math.PI; }
+function curScale() { return XSPAN / curThetaMax(); }
+function curRMin() { return PRESETS[curPreset].negR ? -2 : 0; }
+
+/* 场景二的当前运动点（θ 折回定义域内） */
+function pointNow() {
+  const tm = curThetaMaxSafe();
+  let a = state.theta % tm;
+  if (a < 0) a += tm;
+  const r = curF(a);
+  return { th: a, r: r, x: r * Math.cos(a), y: r * Math.sin(a) };
+}
+function curThetaMaxSafe() { const tm = curThetaMax(); return tm > 1e-6 ? tm : TAU; }
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ③ 采样 —— 记录"当时的真实值"，参数中途改变时历史不重算       ║
+   ╚══════════════════════════════════════════════════════════╝ */
+function pushSample() {
+  const p = pointNow();
+  samples.push({ t: state.t, x: p.x, y: p.y });
+}
+
+/* ================= 画布 ================= */
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = 1, FOCAL = 900, CX = 0, CY = 0, bgGrad = null;
+
+function resize() {
+  DPR = Math.min(2.5, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  CX = W / 2; CY = H / 2;
+  FOCAL = 1.2 * Math.min(H, W * 1.1);
+  bgGrad = ctx.createRadialGradient(W*0.5, H*0.3, 0, W*0.5, H*0.42, Math.max(W, H)*0.95);
+  bgGrad.addColorStop(0, '#0c1526');
+  bgGrad.addColorStop(1, '#05070d');
+}
+window.addEventListener('resize', resize);
+
+/* ================= 轨道相机与投影 ================= */
+function makeCam() {
+  const cp = Math.cos(cam.el), sp = Math.sin(cam.el);
+  const eye = [
+    cam.tx + cam.dist * cp * Math.sin(cam.az),
+    cam.ty + cam.dist * sp,
+    cam.tz + cam.dist * cp * Math.cos(cam.az)
+  ];
+  const f = norm(sub([cam.tx, cam.ty, cam.tz], eye));
+  const r = norm(cross(f, [0, 1, 0]));
+  const u = cross(r, f);
+  return { eye, f, r, u };
+}
+function camPt(C, p) {
+  const d = sub(p, C.eye);
+  return [dot3(d, C.r), dot3(d, C.u), dot3(d, C.f)];
+}
+function scr(c) { const s = FOCAL / c[2]; return [CX + c[0]*s, CY - c[1]*s]; }
+function proj(C, p) { const c = camPt(C, p); return c[2] < NEAR ? null : scr(c); }
+function clipNear(a, b) {
+  const t = (NEAR - a[2]) / (b[2] - a[2]);
+  return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, NEAR];
+}
+
+/* 折线路径（支持 null 断点 + 近平面裁剪）；返回 [首点, 末点] 屏幕坐标 */
+function polyPath(C, pts) {
+  if (pts.length < 2) return null;
+  let head = null, tail = null, contin = false, prev = null;
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    const P = pts[i];
+    if (P === null) { prev = null; contin = false; continue; }
+    const cur = camPt(C, P);
+    if (prev !== null) {
+      let a = prev, b = cur;
+      const av = a[2] >= NEAR, bv = b[2] >= NEAR;
+      if (av || bv) {
+        if (!av) a = clipNear(a, b);
+        if (!bv) b = clipNear(b, a);
+        const sA = scr(a), sB = scr(b);
+        if (!contin) ctx.moveTo(sA[0], sA[1]);
+        ctx.lineTo(sB[0], sB[1]);
+        if (!head) head = sA;
+        tail = sB;
+        contin = bv;
+      } else {
+        contin = false;
+      }
+    }
+    prev = cur;
+  }
+  return head ? [head, tail] : null;
+}
+
+function strokePoly(C, pts, o) {
+  const ht = polyPath(C, pts);
+  if (!ht) return;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = o.width || 2;
+  if (o.alpha != null) ctx.globalAlpha = o.alpha;
+  if (o.dash) ctx.setLineDash(o.dash);
+  if (o.fade) {
+    const h = ht[0], t = ht[1];
+    if (Math.hypot(t[0]-h[0], t[1]-h[1]) < 2) {
+      ctx.strokeStyle = o.fade[0];
+    } else {
+      const g = ctx.createLinearGradient(h[0], h[1], t[0], t[1]);
+      g.addColorStop(0, o.fade[0]);
+      g.addColorStop(1, o.fade[1]);
+      ctx.strokeStyle = g;
+    }
+  } else {
+    ctx.strokeStyle = o.color;
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+const line3 = (C, a, b, o) => strokePoly(C, [a, b], o);
+
+function glowDot(s, r, core, mid) {
+  const g = ctx.createRadialGradient(s[0], s[1], 0, s[0], s[1], r);
+  g.addColorStop(0, core);
+  g.addColorStop(0.35, mid);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+function solidDot(C, p, r, color) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+
+function label3(C, p, text, o) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.save();
+  ctx.font = o.font || ((o.size || 12) + 'px ' + FONT_CN);
+  ctx.fillStyle = o.color || '#c4d2e6';
+  ctx.textAlign = o.align || 'left';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(3,6,12,.85)';
+  ctx.shadowBlur = 4;
+  ctx.fillText(text, s[0] + (o.dx || 0), s[1] + (o.dy || 0));
+  ctx.restore();
+}
+
+function arrowAt(C, tip3, before3, color) {
+  const t = proj(C, tip3), b = proj(C, before3);
+  if (!t || !b) return;
+  if (Math.hypot(t[0]-b[0], t[1]-b[1]) < 1.5) return;
+  const a = Math.atan2(t[1]-b[1], t[0]-b[0]);
+  const L = 9;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.4;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a-0.42), t[1]-L*Math.sin(a-0.42));
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a+0.42), t[1]-L*Math.sin(a+0.42));
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* ================= 常用场景部件 ================= */
+const AXIS = 'rgba(159,176,200,0.9)';
+const AXIS_DIM = 'rgba(159,176,200,0.5)';
+
+/* 直角 x·y 坐标轴（场景二用）：o = { ex, ey, yTicks:[], xTicks:[] } */
+function drawAxes(C, o) {
+  const ex = o.ex, ey = o.ey;
+  line3(C, [-ex, 0, 0], [ex, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [ex, 0, 0], [ex - 0.2, 0, 0], AXIS);
+  label3(C, [ex + 0.22, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  line3(C, [0, -ey, 0], [0, ey, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, ey, 0], [0, ey - 0.2, 0], AXIS);
+  label3(C, [0, ey + 0.18, 0], 'y', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  for (const k of (o.yTicks || [])) {
+    for (const yv of [k, -k]) {
+      line3(C, [-0.05, yv, 0], [0.05, yv, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [-0.13, yv, 0], (yv < 0 ? '−' : '') + Math.abs(yv), { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+    }
+  }
+  for (const k of (o.xTicks || [])) {
+    for (const xv of [k, -k]) {
+      line3(C, [xv, -0.05, 0], [xv, 0.05, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [xv, -0.24, 0], (xv < 0 ? '−' : '') + Math.abs(xv), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+    }
+  }
+}
+
+/* ================= 场景一：弯折变换的绘制部件 ================= */
+
+/* 当前曲线在变换进度 k 下的采样折线（|r|>CLIP 处断线） */
+function buildCurvePts(k, S, tm, z) {
+  const N = 320;
+  const pts = [];
+  for (let i = 0; i <= N; i++) {
+    const th = tm * i / N;
+    const r = curF(th);
+    if (!isFinite(r) || Math.abs(r) > CLIP) { pts.push(null); continue; }
+    pts.push(morphPoint(th, r, k, S, z));
+  }
+  return pts;
+}
+
+/* 变形网格：水平线 r = c 弯成同心圆，竖直线 θ = c 保持直线收成射线 */
+function drawMorphGrid(C, k, S, tm, rMin) {
+  const gcol = 'rgba(148,163,184,0.10)';
+  for (const r of [-2, -1.5, -1, -0.5, 0.5, 1.5, 2]) {
+    if (r < rMin - 1e-9 || r > 2.001) continue;
+    const pts = [];
+    for (let j = 0; j <= 64; j++) pts.push(morphPoint(tm * j / 64, r, k, S, 0));
+    strokePoly(C, pts, { width: 1, color: gcol });
+  }
+  const stepT = Math.PI / 4;
+  for (let i = 1; i * stepT <= tm + 1e-6; i++) {
+    const th = i * stepT;
+    line3(C, morphPoint(th, rMin, k, S, 0), morphPoint(th, 2, k, S, 0),
+      { width: 1, color: 'rgba(148,163,184,0.08)' });
+  }
+}
+
+/* r = 1 基准线（琥珀虚线）：直线弯成单位圆 */
+function drawRef1(C, k, S, tm) {
+  const pts = [];
+  for (let j = 0; j <= 64; j++) pts.push(morphPoint(tm * j / 64, 1, k, S, 0));
+  strokePoly(C, pts, { width: 1.2, dash: [5, 6], color: 'rgba(251,191,36,0.75)' });
+  label3(C, morphPoint(tm * 0.52, 1, k, S, 0), 'r = 1',
+    { font: 'italic 11px ' + FONT_MATH, color: 'rgba(251,191,36,.9)', align: 'center', dy: -10 });
+}
+
+/* 变形中的 θ 轴与 r 轴；θ 轴随 k→1 收缩为极点 */
+function drawMorphAxes(C, k, S, tm, rMin) {
+  /* θ 轴（r = 0 的整条水平线，弯折后缩向极点） */
+  const axPts = [];
+  const tEnd = tm + 0.3;
+  for (let j = 0; j <= 64; j++) axPts.push(morphPoint(tEnd * j / 64, 0, k, S, 0));
+  strokePoly(C, axPts, { width: 1.4, color: AXIS });
+  const fade = clamp(1 - k * 1.12, 0, 1);
+  if (fade > 0.04) {
+    const col = 'rgba(159,176,200,' + fmt(0.9 * fade) + ')';
+    arrowAt(C, morphPoint(tEnd, 0, k, S, 0), morphPoint(tEnd - 0.12, 0, k, S, 0), col);
+    label3(C, morphPoint(tEnd + 0.32, 0, k, S, 0), 'θ',
+      { font: 'italic 15px ' + FONT_MATH, color: 'rgba(196,210,230,' + fmt(fade) + ')', align: 'center' });
+  }
+  /* r 轴（θ = 0 的竖直线，弯折后成为极轴，沿 +x 方向） */
+  line3(C, morphPoint(0, Math.min(rMin, 0) - 0.15, k, S, 0), morphPoint(0, 2.3, k, S, 0),
+    { width: 1.4, color: AXIS });
+  arrowAt(C, morphPoint(0, 2.3, k, S, 0), morphPoint(0, 2.18, k, S, 0), AXIS);
+  label3(C, morphPoint(0, 2.52, k, S, 0), 'r',
+    { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  /* r 轴刻度 1、2 */
+  const dth = 0.045 / S;
+  for (const rv of [1, 2]) {
+    line3(C, morphPoint(-dth, rv, k, S, 0), morphPoint(dth, rv, k, S, 0), { width: 1.2, color: AXIS_DIM });
+    label3(C, morphPoint(-dth * 3.2, rv, k, S, 0), String(rv),
+      { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+  }
+  /* 极点浮现 */
+  const pf = clamp((k - 0.55) / 0.45, 0, 1);
+  if (pf > 0.03) {
+    solidDot(C, [0, 0, 0], 2.2, 'rgba(251,191,36,' + fmt(0.9 * pf) + ')');
+    label3(C, [0, 0, 0], t({ zh: '极点 O', en: 'Pole O' }), { size: 10.5, color: 'rgba(251,191,36,' + fmt(0.85 * pf) + ')', dx: 9, dy: 12 });
+  }
+}
+
+/* 变换全景：k = 0…1 的幽灵切片沿 z 排开（紫），并附各自的 θ 轴弧 */
+function drawGhosts(C, S, tm) {
+  for (let i = 0; i <= 8; i++) {
+    const k = i / 8;
+    const z = (1 - k) * ZSPAN;
+    const ax = [];
+    for (let j = 0; j <= 48; j++) ax.push(morphPoint(tm * j / 48, 0, k, S, z));
+    strokePoly(C, ax, { width: 1, color: 'rgba(148,163,184,0.14)' });
+    strokePoly(C, buildCurvePts(k, S, tm, z),
+      { width: 1.6, color: 'rgba(167,139,250,' + fmt(0.10 + 0.10 * k) + ')' });
+  }
+  label3(C, [0, 2.55, ZSPAN], 'k = 0 · ' + t({ zh: '直角坐标形态', en: 'Cartesian form' }), { size: 10.5, color: 'rgba(159,176,200,.6)', align: 'center' });
+  label3(C, [2.1, -2.45, 0], 'k = 1 · ' + t({ zh: '极坐标形态', en: 'Polar form' }), { size: 10.5, color: 'rgba(159,176,200,.6)', align: 'center' });
+}
+
+/* 点的迁移线（翠）：固定 θ 的曲线点在整个变换中的三维轨迹 */
+function drawThreads(C, S, tm) {
+  for (let j = 0; j < 10; j++) {
+    const th = (j + 0.5) / 10 * tm;
+    const r = curF(th);
+    if (!isFinite(r) || Math.abs(r) > CLIP) continue;
+    const pts = [];
+    for (let m = 0; m <= 36; m++) {
+      const k = m / 36;
+      pts.push(morphPoint(th, r, k, S, (1 - k) * ZSPAN));
+    }
+    strokePoly(C, pts, { width: 1.3, color: 'rgba(52,211,153,0.38)' });
+  }
+}
+
+/* ================= 场景二：坐标换算的绘制部件 ================= */
+
+/* 极坐标网格：同心圆 + 每 π/6 一条射线 */
+function drawPolarGrid(C) {
+  for (const r of [0.5, 1, 1.5, 2]) {
+    const pts = [];
+    for (let i = 0; i <= 72; i++) {
+      const a = i / 72 * TAU;
+      pts.push([r * Math.cos(a), r * Math.sin(a), 0]);
+    }
+    strokePoly(C, pts, { width: 1, color: 'rgba(148,163,184,' + (r === 1 ? '0.13' : '0.08') + ')' });
+  }
+  for (let i = 0; i < 12; i++) {
+    const a = i * Math.PI / 6;
+    line3(C, [0.14 * Math.cos(a), 0.14 * Math.sin(a), 0],
+             [2.2 * Math.cos(a), 2.2 * Math.sin(a), 0],
+             { width: 1, color: 'rgba(148,163,184,0.07)' });
+  }
+}
+
+/* 角度弧（琥珀）：θ 可超过 2π，弧半径随角度缓慢外扩成小螺旋 */
+function drawThetaArc(C, a1) {
+  if (a1 < 0.05) return;
+  const n = Math.min(500, Math.max(2, Math.ceil(a1 / 0.05)));
+  const pts = [];
+  for (let j = 0; j <= n; j++) {
+    const a = a1 * j / n;
+    const rad = 0.3 + 0.045 * a;
+    pts.push([rad * Math.cos(a), rad * Math.sin(a), 0]);
+  }
+  strokePoly(C, pts, { width: 1.6, color: 'rgba(251,191,36,0.9)' });
+  arrowAt(C, pts[pts.length - 1], pts[pts.length - 2], 'rgba(251,191,36,0.9)');
+  const radL = 0.3 + 0.045 * a1 + 0.2;
+  label3(C, [radL * Math.cos(a1 * 0.82), radL * Math.sin(a1 * 0.82), 0], 'θ',
+    { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ② 场景注册                                                ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const SCENES = {
+
+  /* ────── 场景一：弯折变换 ────── */
+  morph: {
+    label: { zh: '弯折变换', en: 'Bending morph' },
+    brand: { zh: '同一个函数 r = f(θ)：按直角坐标读，是熟悉的函数图像；按极坐标读，则是螺线、玫瑰线与椭圆。拖动进度 k，看整张平面如何弯折。',
+             en: 'The same function r = f(θ): read as Cartesian, it is a familiar function graph; read as polar, it becomes a spiral, a rose, or an ellipse. Drag progress k to watch the whole plane bend.' },
+    tipsBase: { zh: '提示：拖动「变换进度 k」或按空格自动演示——水平线 r=c 弯成同心圆，竖直线 θ=c 收成射线，整条 θ 轴缩成极点。',
+                en: 'Tip: drag "morph progress k" or press space to auto-demo — horizontal lines r=c bend into concentric circles, vertical lines θ=c collapse into rays, and the whole θ axis shrinks to the pole.' },
+    tips: '',
+    views: {
+      iso:   { label: { zh: '立体',      en: '3D' },       az: -0.8,  el: 0.30, dist: 11,  tx: 0, ty: 0.1,  tz: 1.8 },
+      front: { label: { zh: '正视 x·y',  en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 7.6, tx: 0, ty: 0.15, tz: 0 },
+      pano:  { label: { zh: '纵览 全景', en: 'Overview' },  az: -1.25, el: 0.33, dist: 13,  tx: 0, ty: 0.1,  tz: 2.6,
+        onSelect() { setToggle('showGhost', true); setToggle('showThreads', true); } }
+    },
+    toggles: [
+      { key: 'showCurve',   label: { zh: '函数曲线',        en: 'Function curve' },       color: '#fb7185', checked: true },
+      { key: 'showGhost',   label: { zh: '变换全景（切片）', en: 'Morph panorama (slices)' }, color: '#a78bfa', checked: true },
+      { key: 'showThreads', label: { zh: '点的迁移线',      en: 'Migration threads' },    color: '#34d399', checked: false },
+      { key: 'showRef1',    label: { zh: 'r = 1 基准线',    en: 'r = 1 reference' },      color: '#fbbf24', checked: true },
+      { key: 'showGrid',    label: { zh: '网格',            en: 'Grid' },                 color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => 0.6,
+    draw(C) {
+      const P = PRESETS[curPreset];
+      const k = state.morphK;
+      const tm = curThetaMax();
+      const S = curScale();
+      const rMin = curRMin();
+
+      if (state.showGhost) drawGhosts(C, S, tm);
+      if (state.showThreads) drawThreads(C, S, tm);
+      if (state.showGrid) drawMorphGrid(C, k, S, tm, rMin);
+      if (state.showRef1) drawRef1(C, k, S, tm);
+      drawMorphAxes(C, k, S, tm, rMin);
+
+      if (state.showCurve) {
+        const pts = buildCurvePts(k, S, tm, 0);
+        strokePoly(C, pts, { width: 5.5, color: 'rgba(251,113,133,0.13)' });
+        strokePoly(C, pts, { width: 2.2, color: 'rgba(251,113,133,0.95)' });
+        const rEnd = curF(tm);
+        if (isFinite(rEnd) && Math.abs(rEnd) <= CLIP) {
+          const sp = proj(C, morphPoint(tm, rEnd, k, S, 0));
+          if (sp) glowDot(sp, 9, '#ffffff', 'rgba(251,113,133,0.85)');
+        }
+        label3(C, [-2.6, 2.5, 0], P.formula,
+          { font: 'italic 13px ' + FONT_MATH, color: '#fb7185', align: 'left' });
+        label3(C, [-2.6, 2.22, 0], P.name(),
+          { size: 11, color: 'rgba(159,176,200,.8)', align: 'left' });
+      }
+    },
+    readout() {
+      const P = PRESETS[curPreset];
+      const k = state.morphK;
+      const stage = k < 0.02 ? t({ zh: '直角坐标形态', en: 'Cartesian form' })
+                  : k > 0.98 ? t({ zh: '极坐标形态', en: 'Polar form' })
+                  : t({ zh: '弯折中', en: 'Morphing' });
+      const parts = [];
+      if (P.p1) parts.push(P.p1.sym + ' = ' + paramRefs.p1.cfg.fmt(state.p1));
+      if (P.p2) parts.push(P.p2.sym + ' = ' + paramRefs.p2.cfg.fmt(state.p2));
+      parts.push('θ ∈ [0, ' + fmt(state.thetaMax) + 'π]');
+      return '<div>' + t({ zh: '变换进度 k = ', en: 'Morph progress k = ' }) + '<b>' + fmt(k) + '</b>&ensp;·&ensp;' + stage + '</div>' +
+        '<div class="cR">' + P.formula + ' —— <b>' + P.name() + '</b></div>' +
+        '<div class="dim">' + parts.join(' · ') + '</div>' +
+        '<div class="dim">t = ' + fmt(state.t) + ' s · k: 0 ' + t({ zh: '直角', en: 'Cartesian' }) + ' ⇄ 1 ' + t({ zh: '极坐标', en: 'polar' }) + '</div>';
+    }
+  },
+
+  /* ────── 场景二：坐标换算 ────── */
+  convert: {
+    label: { zh: '坐标换算', en: 'Coordinate conversion' },
+    brand: { zh: '同一个点的两套坐标：(x, y) 用两段垂直投影定位，(r, θ) 用一段距离和一个角度定位。换算桥梁：x = r·cosθ，y = r·sinθ。',
+             en: 'Two coordinate systems for the same point: (x, y) locates it with two perpendicular projections, (r, θ) with one distance and one angle. The bridge between them: x = r·cosθ, y = r·sinθ.' },
+    tips: { zh: '提示：同一个点，直角坐标用 (x, y) 两段投影描述，极坐标用 (r, θ) 一段距离一个角度描述。反向换算 r = √(x²+y²)，θ 由 atan2(y, x) 按象限确定。',
+            en: 'Tip: the same point is described by (x, y) as two projections in Cartesian, and by (r, θ) as one distance and one angle in polar. To convert back, r = √(x²+y²), and θ is fixed by atan2(y, x) according to the quadrant.' },
+    views: {
+      iso:   { label: { zh: '立体',     en: '3D' },       az: -0.55, el: 0.38, dist: 8.2, tx: 0, ty: 0, tz: 0 },
+      front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 6.4, tx: 0, ty: 0, tz: 0 }
+    },
+    toggles: [
+      { key: 'showCurve', label: { zh: '函数曲线',   en: 'Function curve' }, color: '#fb7185', checked: true },
+      { key: 'showPolar', label: { zh: 'r 与 θ',     en: 'r and θ' },        color: '#fbbf24', checked: true },
+      { key: 'showXProj', label: { zh: 'x 投影',     en: 'x projection' },   color: '#a78bfa', checked: true },
+      { key: 'showYProj', label: { zh: 'y 投影',     en: 'y projection' },   color: '#34d399', checked: true },
+      { key: 'showTrail', label: { zh: '运动轨迹',   en: 'Trail' },          color: '#e2e8f0', checked: true },
+      { key: 'showGrid',  label: { zh: '极坐标网格', en: 'Polar grid' },     color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => 7,
+    draw(C) {
+      const tm = curThetaMaxSafe();
+
+      if (state.showGrid) drawPolarGrid(C);
+      drawAxes(C, { ex: 2.45, ey: 2.35, xTicks: [1, 2], yTicks: [1, 2] });
+
+      /* 曲线（标准极坐标绘制） */
+      if (state.showCurve) {
+        const pts = [];
+        for (let i = 0; i <= 360; i++) {
+          const th = tm * i / 360;
+          const r = curF(th);
+          if (!isFinite(r) || Math.abs(r) > CLIP) { pts.push(null); continue; }
+          pts.push([r * Math.cos(th), r * Math.sin(th), 0]);
+        }
+        strokePoly(C, pts, { width: 5.5, color: 'rgba(251,113,133,0.12)' });
+        strokePoly(C, pts, { width: 2, color: 'rgba(251,113,133,0.9)' });
+      }
+
+      /* 运动轨迹（由新到旧渐隐；θ 折返处断线） */
+      if (state.showTrail && samples.length > 1) {
+        const pts = [];
+        let prev = null;
+        for (let i = samples.length - 1; i >= 0; i--) {
+          const sm = samples[i];
+          if (prev && Math.hypot(sm.x - prev.x, sm.y - prev.y) > 0.9) pts.push(null);
+          pts.push([sm.x, sm.y, 0]);
+          prev = sm;
+        }
+        strokePoly(C, pts, { width: 1.6, fade: ['rgba(226,232,240,.85)', 'rgba(226,232,240,0)'] });
+      }
+
+      const pn = pointNow();
+      const rr = Math.hypot(pn.x, pn.y);
+      let dx = pn.x, dy = pn.y;
+      if (rr > CLIP) { dx *= CLIP / rr; dy *= CLIP / rr; }
+
+      /* 极坐标读法：半径 + 角度弧 */
+      if (state.showPolar) {
+        line3(C, [0, 0, 0], [dx, dy, 0], { width: 2, color: 'rgba(241,245,249,0.92)' });
+        drawThetaArc(C, pn.th);
+        label3(C, [dx * 0.55, dy * 0.55, 0], 'r = ' + fmtS(pn.r),
+          { font: 'italic 12px ' + FONT_MATH, color: '#fbbf24', align: 'center', dy: -9 });
+      }
+
+      /* x 投影（紫） */
+      if (state.showXProj) {
+        line3(C, [dx, dy, 0], [dx, 0, 0], { width: 1.5, dash: [7, 7], color: 'rgba(167,139,250,0.8)' });
+        const fx = proj(C, [dx, 0, 0]);
+        if (fx) glowDot(fx, 8, '#ffffff', 'rgba(167,139,250,0.85)');
+        label3(C, [dx, dy >= 0 ? -0.26 : 0.26, 0], 'x = ' + fmtS(pn.x),
+          { font: 'italic 11px ' + FONT_MATH, color: '#a78bfa', align: 'center' });
+      }
+
+      /* y 投影（翠） */
+      if (state.showYProj) {
+        line3(C, [dx, dy, 0], [0, dy, 0], { width: 1.5, dash: [7, 7], color: 'rgba(52,211,153,0.8)' });
+        const fy = proj(C, [0, dy, 0]);
+        if (fy) glowDot(fy, 8, '#ffffff', 'rgba(52,211,153,0.85)');
+        label3(C, [0, dy, 0], 'y = ' + fmtS(pn.y),
+          { font: 'italic 11px ' + FONT_MATH, color: '#34d399',
+            align: dx >= 0 ? 'right' : 'left', dx: dx >= 0 ? -10 : 10 });
+      }
+
+      /* 主运动点 */
+      const sp = proj(C, [dx, dy, 0]);
+      if (sp) glowDot(sp, 15, '#ffffff', 'rgba(186,240,255,0.9)');
+
+      label3(C, [-2.45, 2.3, 0], 'x = r·cos θ',
+        { font: 'italic 13px ' + FONT_MATH, color: '#a78bfa', align: 'left' });
+      label3(C, [-2.45, 2.02, 0], 'y = r·sin θ',
+        { font: 'italic 13px ' + FONT_MATH, color: '#34d399', align: 'left' });
+    },
+    readout() {
+      const pn = pointNow();
+      const deg = (pn.th * 180 / Math.PI).toFixed(0);
+      let degBack = Math.atan2(pn.y, pn.x) * 180 / Math.PI;
+      if (degBack < 0) degBack += 360;
+      const negNote = pn.r < 0 ? (' · ' + t({ zh: 'r<0：点位于 θ+π 方向', en: 'r<0: point lies along θ+π' })) : '';
+      return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;θ = <b>' + fmt(pn.th) + '</b> rad ≡ ' + deg + '°</div>' +
+        '<div class="cR">r = f(θ) = <b>' + fmtS(pn.r) + '</b></div>' +
+        '<div><span class="cV">x = r·cosθ = <b>' + fmtS(pn.x) + '</b></span>&ensp;·&ensp;' +
+        '<span class="cE">y = r·sinθ = <b>' + fmtS(pn.y) + '</b></span></div>' +
+        '<div class="dim">' + t({ zh: '反算：', en: 'Inverse: ' }) + '√(x²+y²) = ' + fmt(Math.hypot(pn.x, pn.y)) +
+        ' · atan2(y, x) ≡ ' + degBack.toFixed(0) + '°' + negNote + '</div>';
+    }
+  }
+};
+
+/* ================= 主绘制与主循环 ================= */
+function draw() {
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+  const C = makeCam();
+  SCENES[curTab].draw(C);
+}
+
+function resetSim() {
+  state.t = 0;
+  state.theta = 0;
+  state.kPhase = 0;
+  state.morphK = 0;
+  syncKSlider();
+  samples.length = 0;
+  pushSample();
+}
+
+/* 播放时 k 由余弦相位往复驱动（端点自然减速）；手动拖 k 时自动暂停并反解相位续播 */
+function syncKSlider() {
+  const ref = paramRefs.morphK;
+  if (!ref) return;
+  ref.input.value = state.morphK;
+  ref.val.textContent = ref.cfg.fmt(state.morphK);
+}
+
+let lastTs = performance.now(), lastRO = 0;
+function frame(ts) {
+  const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
+  lastTs = ts;
+
+  if (tween) {
+    const k = Math.min(1, (ts - tween.t0) / tween.dur);
+    const e = ease(k);
+    const f = tween.from, o = tween.to;
+    cam.az = f.az + wrapPI(o.az - f.az) * e;
+    cam.el = f.el + (o.el - f.el) * e;
+    cam.dist = f.dist + (o.dist - f.dist) * e;
+    cam.tx = f.tx + (o.tx - f.tx) * e;
+    cam.ty = f.ty + (o.ty - f.ty) * e;
+    cam.tz = f.tz + (o.tz - f.tz) * e;
+    if (k >= 1) tween = null;
+  }
+
+  if (state.running) {
+    state.t += dt;
+    state.theta += state.speed * 0.75 * dt;
+    state.kPhase += state.speed * 0.55 * dt;
+    state.morphK = 0.5 - 0.5 * Math.cos(state.kPhase);
+    syncKSlider();
+    pushSample();
+  }
+  const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
+  while (samples.length && samples[0].t < state.t - windowSec) samples.shift();
+
+  draw();
+  if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
+  requestAnimationFrame(frame);
+}
+
+const roEl = document.getElementById('readout');
+function updateReadout() { if (curTab) roEl.innerHTML = SCENES[curTab].readout(); }
+
+/* ================= UI 生成 ================= */
+const RELABEL = [];
+function buildParams() {
+  const host = document.getElementById('paramsHost');
+  PARAMS.forEach(p => {
+    const wrap = document.createElement('div');
+    wrap.className = 'ctl';
+    wrap.innerHTML = '<div class="top"><label></label><span class="val"></span></div>';
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
+    const val = wrap.querySelector('.val');
+    const ref = { cfg: p, wrap: wrap, labelEl: wrap.querySelector('label'), input: input, val: val };
+    ref.upd = () => {
+      const raw = parseFloat(input.value);
+      state[p.key] = ref.cfg.map ? ref.cfg.map(raw) : raw;
+      val.textContent = ref.cfg.fmt(raw);
+    };
+    input.addEventListener('input', () => {
+      ref.upd();
+      if (p.key === 'morphK') manualK();
+      updateReadout();
+    });
+    wrap.appendChild(input);
+    host.appendChild(wrap);
+    paramRefs[p.key] = ref;
+    ref.relabel = () => { ref.labelEl.innerHTML = t(ref.cfg.label); };
+    RELABEL.push(ref.relabel);
+    ref.relabel();
+    ref.upd();
+  });
+}
+
+/* 用户手动拖动 k：暂停演示，并把余弦相位对齐到当前 k，续播无跳变 */
+function manualK() {
+  if (state.running) {
+    state.running = false;
+    btnPlay.textContent = t(UI.resume);
+  }
+  state.kPhase = Math.acos(clamp(1 - 2 * state.morphK, -1, 1));
+}
+
+/* 按预设动态重配置 p1 / p2 滑杆（p2 缺省则隐藏该行）；label 双语，随语言切换重渲染 */
+function configParam(key, cfg) {
+  const ref = paramRefs[key];
+  if (!cfg) { ref.wrap.style.display = 'none'; return; }
+  ref.wrap.style.display = '';
+  ref.cfg = Object.assign({}, ref.cfg, cfg);
+  ref.relabel();
+  ref.input.min = cfg.min;
+  ref.input.max = cfg.max;
+  ref.input.step = cfg.step;
+  ref.input.value = cfg.value;
+  ref.upd();
+}
+function setParamValue(key, v) {
+  const ref = paramRefs[key];
+  ref.input.value = v;
+  ref.upd();
+}
+
+function buildToggles() {
+  const host = document.getElementById('togglesHost');
+  Object.keys(SCENES).forEach(id => {
+    const grp = document.createElement('div');
+    grp.className = 'toggles';
+    grp.dataset.tab = id;
+    SCENES[id].toggles.forEach(tg => {
+      if (!(tg.key in state)) state[tg.key] = tg.checked;
+      const lab = document.createElement('label');
+      lab.className = 'tg';
+      lab.innerHTML = '<input type="checkbox" data-key="' + tg.key + '"' + (state[tg.key] ? ' checked' : '') + '>' +
+        '<i class="dot" style="--c:' + tg.color + '"></i><span class="tgl"></span>';
+      const cb = lab.querySelector('input');
+      cb.addEventListener('change', () => {
+        state[tg.key] = cb.checked;
+        document.querySelectorAll('input[data-key="' + tg.key + '"]').forEach(o => { o.checked = cb.checked; });
+      });
+      const relabel = () => { lab.querySelector('.tgl').innerHTML = t(tg.label); };
+      RELABEL.push(relabel);
+      relabel();
+      grp.appendChild(lab);
+    });
+    host.appendChild(grp);
+  });
+}
+function setToggle(key, v) {
+  state[key] = v;
+  document.querySelectorAll('input[data-key="' + key + '"]').forEach(o => { o.checked = v; });
+}
+
+function buildViews() {
+  const host = document.getElementById('viewsHost');
+  Object.keys(SCENES).forEach(id => {
+    const row = document.createElement('div');
+    row.className = 'views';
+    row.dataset.tab = id;
+    const lab = document.createElement('span');
+    lab.className = 'vlabel';
+    row.appendChild(lab);
+    const labRelabel = () => { lab.textContent = t(UI.views); };
+    RELABEL.push(labRelabel);
+    labRelabel();
+    Object.keys(SCENES[id].views).forEach(name => {
+      const b = document.createElement('button');
+      b.className = 'btn vbtn';
+      b.dataset.view = name;
+      b.addEventListener('click', () => applyView(name));
+      row.appendChild(b);
+      const relabel = () => { b.textContent = t(SCENES[id].views[name].label); };
+      RELABEL.push(relabel);
+      relabel();
+    });
+    host.appendChild(row);
+  });
+}
+
+function buildTabs() {
+  const nav = document.getElementById('tabsNav');
+  Object.keys(SCENES).forEach(id => {
+    const b = document.createElement('button');
+    b.className = 'tab';
+    b.dataset.tab = id;
+    b.addEventListener('click', () => switchTab(id));
+    nav.appendChild(b);
+    const relabel = () => { b.textContent = t(SCENES[id].label); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+function buildPresets() {
+  const host = document.getElementById('presetsHost');
+  Object.keys(PRESETS).forEach(id => {
+    const b = document.createElement('button');
+    b.className = 'btn vbtn pbtn';
+    b.dataset.preset = id;
+    b.addEventListener('click', () => applyPreset(id));
+    host.appendChild(b);
+    const relabel = () => { b.textContent = t(PRESETS[id].btn); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+function applyPreset(id) {
+  curPreset = id;
+  document.querySelectorAll('.pbtn').forEach(b => b.classList.toggle('active', b.dataset.preset === id));
+  const P = PRESETS[id];
+  configParam('p1', P.p1);
+  configParam('p2', P.p2);
+  setParamValue('thetaMax', P.thetaMax);
+  refreshTips();
+  updateReadout();
+}
+
+function refreshTips() {
+  if (!curTab) return;
+  if (curTab === 'morph') {
+    tipsEl.textContent = t(SCENES.morph.tipsBase) + ' ' + t(PRESETS[curPreset].tip);
+  } else {
+    tipsEl.textContent = t(SCENES[curTab].tips);
+  }
+}
+
+/* ================= 视角与页签 ================= */
+function refreshViewButtons() {
+  document.querySelectorAll('.vbtn:not(.pbtn)').forEach(b => {
+    const row = b.closest('.views');
+    b.classList.toggle('active', row.dataset.tab === curTab && b.dataset.view === lastView[curTab]);
+  });
+}
+function viewDist(d) { return (W < 820 || W < H) ? d * 1.4 : d; }
+function applyView(name) {
+  const vw = SCENES[curTab].views[name];
+  if (!vw) return;
+  if (vw.onSelect) vw.onSelect();
+  tween = {
+    from: { az: cam.az, el: cam.el, dist: cam.dist, tx: cam.tx, ty: cam.ty, tz: cam.tz },
+    to:   { az: vw.az, el: vw.el, dist: viewDist(vw.dist), tx: vw.tx || 0, ty: vw.ty || 0, tz: vw.tz || 0 },
+    t0: performance.now(),
+    dur: REDUCED ? 1 : 750
+  };
+  lastView[curTab] = name;
+  refreshViewButtons();
+}
+
+const brandDesc = document.getElementById('brandDesc');
+const tipsEl = document.getElementById('tips');
+function switchTab(id) {
+  if (id === curTab) return;
+  curTab = id;
+  tween = null;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+  document.querySelectorAll('.toggles[data-tab], .views[data-tab]').forEach(el => {
+    el.style.display = el.dataset.tab === id ? '' : 'none';
+  });
+  cam = cams[id];
+  brandDesc.textContent = t(SCENES[id].brand);
+  refreshTips();
+  refreshViewButtons();
+  updateReadout();
+}
+
+/* ================= 播放 / 重置 / 折叠 ================= */
+const btnPlay = document.getElementById('btnPlay');
+function togglePlay() {
+  state.running = !state.running;
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+}
+btnPlay.addEventListener('click', togglePlay);
+document.getElementById('btnReset').addEventListener('click', resetSim);
+
+const panel = document.getElementById('panel');
+const btnFold = document.getElementById('btnFold');
+btnFold.addEventListener('click', () => {
+  const c = panel.classList.toggle('collapsed');
+  btnFold.textContent = c ? '+' : '−';
+});
+if (window.innerWidth < 760) {
+  panel.classList.add('collapsed');
+  btnFold.textContent = '+';
+}
+
+/* ================= 语言切换 ================= */
+function applyLang() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.title = t(TOOL.title);
+  document.querySelector('.brand h1').textContent = t(TOOL.h1);
+  document.getElementById('panelTitle').textContent = t(UI.panelTitle);
+  document.getElementById('presetLabel').textContent = t(UI.functionGroup);
+  document.querySelector('.hint').textContent = t(UI.hint);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+  document.getElementById('btnReset').textContent = t(UI.reset);
+  RELABEL.forEach(f => f());
+  brandDesc.textContent = t(SCENES[curTab].brand);
+  refreshTips();
+  updateReadout();
+}
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('lang', l);
+    history.replaceState(null, '', u);
+  } catch (e) {}
+  applyLang();
+}
+document.getElementById('btnLang').addEventListener('click', () => setLang(LANG === 'zh' ? 'en' : 'zh'));
+document.getElementById('verBadge').textContent = 'v' + VERSION;
+
+/* ================= 交互：旋转 / 平移 / 缩放 ================= */
+const pointers = new Map();
+let pinch = null;
+
+function pan(dx, dy) {
+  const C = makeCam();
+  const s = cam.dist / FOCAL;
+  cam.tx = clamp(cam.tx - C.r[0]*dx*s + C.u[0]*dy*s, -6, 6);
+  cam.ty = clamp(cam.ty - C.r[1]*dx*s + C.u[1]*dy*s, -5, 5);
+  cam.tz = clamp(cam.tz - C.r[2]*dx*s + C.u[2]*dy*s, -3, 11);
+}
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, btn: e.button });
+  tween = null;
+  lastView[curTab] = null;
+  refreshViewButtons();
+  if (pointers.size === 2) {
+    const vs = Array.from(pointers.values());
+    pinch = {
+      gap: Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y),
+      cx: (vs[0].x + vs[1].x) / 2,
+      cy: (vs[0].y + vs[1].y) / 2
+    };
+  }
+  canvas.classList.add('dragging');
+});
+
+canvas.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  p.x = e.clientX;
+  p.y = e.clientY;
+  if (pointers.size === 1) {
+    const panMode = e.shiftKey || (e.buttons & 2) || p.btn === 2 || p.btn === 1;
+    if (panMode) {
+      pan(dx, dy);
+    } else {
+      cam.az -= dx * 0.0055;
+      cam.el = clamp(cam.el + dy * 0.0055, -1.45, 1.53);
+    }
+  } else if (pointers.size === 2 && pinch) {
+    const vs = Array.from(pointers.values());
+    const gap = Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y);
+    const cx = (vs[0].x + vs[1].x) / 2, cy = (vs[0].y + vs[1].y) / 2;
+    if (gap > 1) cam.dist = clamp(cam.dist * pinch.gap / gap, 4.5, 60);
+    pan(cx - pinch.cx, cy - pinch.cy);
+    pinch = { gap: gap, cx: cx, cy: cy };
+  }
+});
+
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+  if (!pointers.size) canvas.classList.remove('dragging');
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  tween = null;
+  cam.dist = clamp(cam.dist * Math.exp(e.deltaY * 0.0012), 4.5, 60);
+}, { passive: false });
+
+canvas.addEventListener('dblclick', () => applyView(Object.keys(SCENES[curTab].views)[0]));
+
+window.addEventListener('keydown', e => {
+  const tg = e.target.tagName;
+  if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || tg === 'BUTTON') return;
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'r' || e.key === 'R') resetSim();
+  else if (e.key === 't' || e.key === 'T') {
+    const keys = Object.keys(SCENES);
+    switchTab(keys[(keys.indexOf(curTab) + 1) % keys.length]);
+  }
+  else if (e.key >= '1' && e.key <= '9') {
+    const names = Object.keys(SCENES[curTab].views);
+    const i = +e.key - 1;
+    if (i < names.length) applyView(names[i]);
+  }
+});
+
+/* ================= 启动 ================= */
+resize();
+buildTabs();
+buildParams();
+buildToggles();
+buildViews();
+buildPresets();
+Object.keys(SCENES).forEach(id => {
+  const first = Object.keys(SCENES[id].views)[0];
+  const v = SCENES[id].views[first];
+  cams[id] = { az: v.az, el: v.el, dist: viewDist(v.dist), tx: v.tx || 0, ty: v.ty || 0, tz: v.tz || 0 };
+  lastView[id] = first;
+});
+switchTab(Object.keys(SCENES)[0]);
+applyPreset(DEFAULT_PRESET);
+applyLang();
+resetSim();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
