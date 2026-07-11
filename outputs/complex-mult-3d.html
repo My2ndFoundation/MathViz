@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
+<meta name="tool-version" content="1.1.0">
+<meta name="engine-version" content="1.0.0">
 <title>复数乘法的本质 · Complex Multiplication</title>
 <!-- ============================================================
   复数乘法的本质 · 交互式数学可视化
@@ -24,6 +26,10 @@
     ② SCENES      —— 注册场景页签（brand / tips / views / toggles / draw / readout）
     ③ pushSample  —— 按需扩展采样字段（原则：记录当时的真实值）
   引擎区（相机 / 投影 / 绘制部件 / 交互 / 主循环）一般无需改动。
+
+  版本记录（新→旧）：
+    1.1.0  2026-07-11  全量双语支持（中/EN 切换）
+    1.0.0  2026-07-11  首个版本
 ============================================================ -->
 <style>
 :root{
@@ -83,6 +89,12 @@ body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)
 .panel-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px 10px;
   font-size:13px;font-weight:600;letter-spacing:.06em;color:#dbe6f5}
 .panel:not(.collapsed) .panel-head{border-bottom:1px solid var(--panel-line)}
+.ph-right{display:flex;align-items:center;gap:7px}
+.ver{font-family:var(--font-mono);font-size:10px;color:rgba(159,176,200,.55)}
+.lang{padding:3px 8px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:11px;cursor:pointer}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
 .fold{width:24px;height:24px;border-radius:8px;border:1px solid var(--panel-line);
   background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:14px;line-height:1;cursor:pointer}
 .fold:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
@@ -157,7 +169,8 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 <nav class="tabs" id="tabsNav"></nav>
 
 <aside class="panel" id="panel">
-  <div class="panel-head"><span>参数与视角</span><button class="fold" id="btnFold" title="收起 / 展开">−</button></div>
+  <div class="panel-head"><span id="panelTitle">参数与视角</span>
+    <span class="ph-right"><span class="ver" id="verBadge"></span><button class="lang" id="btnLang" title="切换语言 / Switch language">EN</button><button class="fold" id="btnFold" title="收起 / 展开">−</button></span></div>
   <div class="panel-body">
     <div id="paramsHost"></div>
     <div class="row">
@@ -175,17 +188,53 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 
 <script>
 'use strict';
+/* ================= i18n 核心（引擎区） ================= */
+const LANG_KEY = 'mathviz-lang';
+function resolveLang(){
+  try{
+    const q = new URLSearchParams(location.search).get('lang');
+    if (q === 'zh' || q === 'en') return q;
+    const s = localStorage.getItem(LANG_KEY);
+    if (s === 'zh' || s === 'en') return s;
+  }catch(e){}
+  return (navigator.language || 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+let LANG = resolveLang();
+function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
+
+const VERSION = document.querySelector('meta[name="tool-version"]').content;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ⓪ 工具元信息 —— id 与双语标题                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const TOOL = {
+  id: 'complex-mult-3d',
+  title: { zh: '复数乘法的本质 · Complex Multiplication', en: 'The Essence of Complex Multiplication' },
+  h1:    { zh: '复数乘法的本质', en: 'The Essence of Complex Multiplication' }
+};
+
+/* 引擎 UI 文案（一般无需改动） */
+const UI = {
+  panelTitle: { zh: '参数与视角', en: 'Parameters & Views' },
+  pause:  { zh: '⏸ 暂停', en: '⏸ Pause' },
+  resume: { zh: '▶ 继续', en: '▶ Resume' },
+  reset:  { zh: '↺ 重置', en: '↺ Reset' },
+  views:  { zh: '视角', en: 'View' },
+  hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
+            en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
+};
+
 /* ╔══════════════════════════════════════════════════════════╗
    ║  ① 参数声明 —— 自动生成滑杆                                ║
    ║  key: state 中的键 · label: 支持 <i>数学符号</i>            ║
    ║  fmt: 格式化"滑杆原始值"用于显示 · map(可选): 原始值→状态值   ║
    ╚══════════════════════════════════════════════════════════╝ */
 const PARAMS = [
-  { key: 'r1',        label: '输入模长 |<i>z</i>₁|', min: 0.3, max: 1.5, step: 0.05, value: 1,    fmt: v => fmt(v) },
-  { key: 'r2',        label: '乘数模长 |<i>z</i>₂|', min: 0.4, max: 1.6, step: 0.05, value: 1.2,  fmt: v => fmt(v) },
-  { key: 'phi2',      label: '乘数幅角 <i>φ</i>₂',   min: 0,   max: 2,   step: 0.02, value: 0.33, fmt: v => fmt(v) + ' π (' + (v * 180).toFixed(0) + '°)', map: v => v * Math.PI },
-  { key: 'omega',     label: '旋转速度 <i>ω</i>',    min: 0.2, max: 3,   step: 0.05, value: 0.8,  fmt: v => fmt(v) + ' rad/s' },
-  { key: 'waveSpeed', label: '螺旋展开速度',          min: 0.5, max: 2.5, step: 0.05, value: 1.2,  fmt: v => fmt(v) + ' 单位/s' }
+  { key: 'r1',        label: { zh: '输入模长 |<i>z</i>₁|', en: 'Input modulus |<i>z</i>₁|' },   min: 0.3, max: 1.5, step: 0.05, value: 1,    fmt: v => fmt(v) },
+  { key: 'r2',        label: { zh: '乘数模长 |<i>z</i>₂|', en: 'Multiplier modulus |<i>z</i>₂|' }, min: 0.4, max: 1.6, step: 0.05, value: 1.2,  fmt: v => fmt(v) },
+  { key: 'phi2',      label: { zh: '乘数幅角 <i>φ</i>₂',   en: 'Multiplier argument <i>φ</i>₂' }, min: 0,   max: 2,   step: 0.02, value: 0.33, fmt: v => fmt(v) + ' π (' + (v * 180).toFixed(0) + '°)', map: v => v * Math.PI },
+  { key: 'omega',     label: { zh: '旋转速度 <i>ω</i>',    en: 'Rotation speed <i>ω</i>' },     min: 0.2, max: 3,   step: 0.05, value: 0.8,  fmt: v => fmt(v) + ' rad/s' },
+  { key: 'waveSpeed', label: { zh: '螺旋展开速度',          en: 'Helix unroll speed' },          min: 0.5, max: 2.5, step: 0.05, value: 1.2,  fmt: v => fmt(v) + t({ zh: ' 单位/s', en: ' units/s' }) }
 ];
 
 /* ── 复数乘法工具：颜色语义与场景小部件 ──
@@ -280,19 +329,21 @@ const SCENES = {
 
   /* ────── 页签一：旋转伸缩（复数乘法的本质） ────── */
   mult: {
-    label: '旋转伸缩',
-    brand: '两个复数相乘 z₁·z₂：乘积的幅角是两者幅角之和、模长是两者模长之积——等价于把 z₁ 旋转 φ₂、再伸缩 r₂ 倍。让 z₁ 匀速转动，看乘积（翠绿）始终领先 φ₂、长度恒为 r₂ 倍。',
-    tips: '提示：切到「正视 复平面」——无论 z₁（玫红）转到哪，乘积 z₁z₂（翠绿）与它始终锁定同一夹角 φ₂、长度比恒为 r₂。两段琥珀弧演示幅角如何「叠加」：从 z₁ 的角再加 φ₂，正好落到乘积上。',
+    label: { zh: '旋转伸缩', en: 'Rotate & scale' },
+    brand: { zh: '两个复数相乘 z₁·z₂：乘积的幅角是两者幅角之和、模长是两者模长之积——等价于把 z₁ 旋转 φ₂、再伸缩 r₂ 倍。让 z₁ 匀速转动，看乘积（翠绿）始终领先 φ₂、长度恒为 r₂ 倍。',
+             en: 'Multiplying two complex numbers z₁·z₂: the product\'s argument is the sum of the two arguments, and its modulus is the product of the two moduli — equivalent to rotating z₁ by φ₂ and scaling it by r₂. Let z₁ spin at constant speed and watch the product (emerald) stay φ₂ ahead, always r₂ times as long.' },
+    tips: { zh: '提示：切到「正视 复平面」——无论 z₁（玫红）转到哪，乘积 z₁z₂（翠绿）与它始终锁定同一夹角 φ₂、长度比恒为 r₂。两段琥珀弧演示幅角如何「叠加」：从 z₁ 的角再加 φ₂，正好落到乘积上。',
+            en: 'Tip: switch to "Front: complex plane" — wherever z₁ (rose) points, the product z₁z₂ (emerald) stays locked φ₂ away from it, with a length ratio always r₂. The two amber arcs show how the arguments "add": start from z₁\'s angle, add φ₂, and you land exactly on the product.' },
     views: {
-      iso:   { label: '立体',       az: -0.7,  el: 0.35, dist: 7.2, tx: 0, ty: 0.1, tz: 0 },
-      front: { label: '正视 复平面', az: 0.001, el: 0.02, dist: 6.2, tx: 0, ty: 0,   tz: 0 }
+      iso:   { label: { zh: '立体', en: '3D' },                   az: -0.7,  el: 0.35, dist: 7.2, tx: 0, ty: 0.1, tz: 0 },
+      front: { label: { zh: '正视 复平面', en: 'Front: complex plane' }, az: 0.001, el: 0.02, dist: 6.2, tx: 0, ty: 0,   tz: 0 }
     },
     toggles: [
-      { key: 'showZ1',     label: '输入 <i>z</i>₁',        color: '#fb7185', checked: true },
-      { key: 'showZ2',     label: '乘数 <i>z</i>₂',        color: '#a78bfa', checked: true },
-      { key: 'showW',      label: '乘积 <i>z</i>₁<i>z</i>₂', color: '#34d399', checked: true },
-      { key: 'showGuides', label: '幅角/投影辅助',          color: '#fbbf24', checked: true },
-      { key: 'showGrid',   label: '网格',                  color: '#64748b', checked: true }
+      { key: 'showZ1',     label: { zh: '输入 <i>z</i>₁', en: 'Input <i>z</i>₁' },                        color: '#fb7185', checked: true },
+      { key: 'showZ2',     label: { zh: '乘数 <i>z</i>₂', en: 'Multiplier <i>z</i>₂' },                    color: '#a78bfa', checked: true },
+      { key: 'showW',      label: { zh: '乘积 <i>z</i>₁<i>z</i>₂', en: 'Product <i>z</i>₁<i>z</i>₂' },     color: '#34d399', checked: true },
+      { key: 'showGuides', label: { zh: '幅角/投影辅助', en: 'Arg / projection guides' },                   color: '#fbbf24', checked: true },
+      { key: 'showGrid',   label: { zh: '网格', en: 'Grid' },                                              color: '#64748b', checked: true }
     ],
     sampleWindow: () => WAVE_LEN / state.waveSpeed + 0.5,
     draw(C) {
@@ -356,25 +407,27 @@ const SCENES = {
         '<div class="z1C">z₁ = <b>' + cfmt(z1[0],z1[1]) + '</b>&ensp;·&ensp;|z₁| = ' + fmt(r1) + ' ∠ ' + dz1 + '°</div>' +
         '<div class="z2C">z₂ = <b>' + cfmt(z2[0],z2[1]) + '</b>&ensp;·&ensp;|z₂| = ' + fmt(r2) + ' ∠ ' + dz2 + '°</div>' +
         '<div class="wC">z₁z₂ = <b>' + cfmt(w[0],w[1]) + '</b>&ensp;·&ensp;|z₁z₂| = ' + fmt(rw) + ' ∠ ' + dw + '°</div>' +
-        '<div class="dim">幅角相加 ' + dz1 + '° + ' + dz2 + '° → ' + dw + '°&ensp;·&ensp;模长相乘 ' + fmt(r1) + ' × ' + fmt(r2) + ' = ' + fmt(rw) + '</div>';
+        '<div class="dim">' + t({ zh: '幅角相加', en: 'Argument sum' }) + ' ' + dz1 + '° + ' + dz2 + '° → ' + dw + '°&ensp;·&ensp;' + t({ zh: '模长相乘', en: 'Modulus product' }) + ' ' + fmt(r1) + ' × ' + fmt(r2) + ' = ' + fmt(rw) + '</div>';
     }
   },
 
   /* ────── 页签二：螺旋展开（旋转沿时间轴展开 = 正弦；乘 z₂ = 增益 + 相移） ────── */
   helix: {
-    label: '螺旋展开',
-    brand: '把 z₁ 的匀速转动沿时间轴展开成一条螺旋：乘以 z₂ 只做两件事——把螺旋半径放大 r₂ 倍、把整条螺旋沿时间平移 φ₂/ω。拖拽旋转，从侧面看它就是两条正弦波。',
-    tips: '提示：切到「侧视 y·t」——两条螺旋压成正弦波：乘积波（翠绿）比输入波（玫红）高 r₂ 倍、相位超前 φ₂。这就是「模长相乘 = 振幅增益」「幅角相加 = 相位移动」——工程上的复数乘法。',
+    label: { zh: '螺旋展开', en: 'Unrolled helix' },
+    brand: { zh: '把 z₁ 的匀速转动沿时间轴展开成一条螺旋：乘以 z₂ 只做两件事——把螺旋半径放大 r₂ 倍、把整条螺旋沿时间平移 φ₂/ω。拖拽旋转，从侧面看它就是两条正弦波。',
+             en: 'Unroll z₁\'s constant-speed rotation along the time axis into a helix: multiplying by z₂ does just two things — scale the helix radius by r₂, and shift the whole helix along time by φ₂/ω. Drag to rotate, and viewed from the side it\'s just two sine waves.' },
+    tips: { zh: '提示：切到「侧视 y·t」——两条螺旋压成正弦波：乘积波（翠绿）比输入波（玫红）高 r₂ 倍、相位超前 φ₂。这就是「模长相乘 = 振幅增益」「幅角相加 = 相位移动」——工程上的复数乘法。',
+            en: 'Tip: switch to "Side y·t" — the two helices flatten into sine waves: the product wave (emerald) is r₂ times taller than the input wave (rose), and leads it by phase φ₂. This is "modulus product = amplitude gain" and "argument sum = phase shift" — complex multiplication as engineers use it.' },
     views: {
-      iso:  { label: '立体',      az: -0.85,      el: 0.3,   dist: 11.5, tx: 0, ty: 0, tz: 2.6 },
-      face: { label: '本面 x·y',  az: 0.001,      el: 0.02,  dist: 8,    tx: 0, ty: 0, tz: 0.4 },
-      side: { label: '侧视 y·t',  az: -Math.PI/2, el: 0.001, dist: 11.5, tx: 0, ty: 0, tz: 3.4 }
+      iso:  { label: { zh: '立体', en: '3D' },           az: -0.85,      el: 0.3,   dist: 11.5, tx: 0, ty: 0, tz: 2.6 },
+      face: { label: { zh: '本面 x·y', en: 'Base plane x·y' }, az: 0.001,      el: 0.02,  dist: 8,    tx: 0, ty: 0, tz: 0.4 },
+      side: { label: { zh: '侧视 y·t', en: 'Side y·t' },  az: -Math.PI/2, el: 0.001, dist: 11.5, tx: 0, ty: 0, tz: 3.4 }
     },
     toggles: [
-      { key: 'showZ1',     label: '输入螺旋 <i>z</i>₁',        color: '#fb7185', checked: true },
-      { key: 'showW',      label: '乘积螺旋 <i>z</i>₁<i>z</i>₂', color: '#34d399', checked: true },
-      { key: 'showGuides', label: '相位/参考辅助',              color: '#fbbf24', checked: true },
-      { key: 'showGrid',   label: '网格',                      color: '#64748b', checked: true }
+      { key: 'showZ1',     label: { zh: '输入螺旋 <i>z</i>₁', en: 'Input helix <i>z</i>₁' },             color: '#fb7185', checked: true },
+      { key: 'showW',      label: { zh: '乘积螺旋 <i>z</i>₁<i>z</i>₂', en: 'Product helix <i>z</i>₁<i>z</i>₂' }, color: '#34d399', checked: true },
+      { key: 'showGuides', label: { zh: '相位/参考辅助', en: 'Phase / reference guides' },                 color: '#fbbf24', checked: true },
+      { key: 'showGrid',   label: { zh: '网格', en: 'Grid' },                                              color: '#64748b', checked: true }
     ],
     sampleWindow: () => WAVE_LEN / state.waveSpeed + 0.5,
     draw(C) {
@@ -430,27 +483,29 @@ const SCENES = {
       const r1 = state.r1, r2 = state.r2, p2 = state.phi2;
       const dp = (mod2pi(p2) * 180 / Math.PI).toFixed(0);
       return readoutHead() +
-        '<div class="z1C">输入 z₁(t) = r₁·e^(iωt)&ensp;·&ensp;振幅 <b>' + fmt(r1) + '</b></div>' +
-        '<div class="wC">乘积 w(t) = r₁r₂·e^(i(ωt+φ₂))&ensp;·&ensp;振幅 <b>' + fmt(r1 * r2) + '</b></div>' +
-        '<div class="z2C">乘 z₂：相位 <b>+' + dp + '°</b>（超前）· 振幅 <b>×' + fmt(r2) + '</b></div>' +
+        '<div class="z1C">' + t({ zh: '输入', en: 'Input' }) + ' z₁(t) = r₁·e^(iωt)&ensp;·&ensp;' + t({ zh: '振幅', en: 'Amplitude' }) + ' <b>' + fmt(r1) + '</b></div>' +
+        '<div class="wC">' + t({ zh: '乘积', en: 'Product' }) + ' w(t) = r₁r₂·e^(i(ωt+φ₂))&ensp;·&ensp;' + t({ zh: '振幅', en: 'Amplitude' }) + ' <b>' + fmt(r1 * r2) + '</b></div>' +
+        '<div class="z2C">' + t({ zh: '乘 z₂：相位', en: 'Multiply by z₂: phase' }) + ' <b>+' + dp + '°</b>' + t({ zh: '（超前）· ', en: ' (leading) · ' }) + t({ zh: '振幅', en: 'amplitude' }) + ' <b>×' + fmt(r2) + '</b></div>' +
         '<div class="dim">T = 2π/ω = ' + fmt(TAU / state.omega) + ' s&ensp;·&ensp;Δt = φ₂/ω = ' + fmt(p2 / state.omega) + ' s</div>';
     }
   },
 
   /* ────── 页签三：反复相乘（各次幂 z₂ⁿ 排成对数螺旋） ────── */
   power: {
-    label: '反复相乘',
-    brand: '反复乘同一个 z₂：每乘一次就旋转 φ₂、伸缩 r₂ 倍，各次幂 z₂ⁿ 便排成一条对数螺旋——等角步进、等比放缩。主时钟每转一圈，就沿螺旋再乘一次 z₂。',
-    tips: '提示：切到「正视 复平面」——相邻两幂之间角度都是 φ₂（等角）、半径每步 ×r₂（等比），这正是对数螺旋。把「乘数模长 r₂」调到 1，各次幂全部落到单位圆、等角分布——就是单位根。',
+    label: { zh: '反复相乘', en: 'Repeated powers' },
+    brand: { zh: '反复乘同一个 z₂：每乘一次就旋转 φ₂、伸缩 r₂ 倍，各次幂 z₂ⁿ 便排成一条对数螺旋——等角步进、等比放缩。主时钟每转一圈，就沿螺旋再乘一次 z₂。',
+             en: 'Multiply by the same z₂ over and over: each multiply rotates by φ₂ and scales by r₂, so the successive powers z₂ⁿ trace a logarithmic spiral — equal angle steps, equal ratio steps. Each turn of the master clock is one more multiply along the spiral.' },
+    tips: { zh: '提示：切到「正视 复平面」——相邻两幂之间角度都是 φ₂（等角）、半径每步 ×r₂（等比），这正是对数螺旋。把「乘数模长 r₂」调到 1，各次幂全部落到单位圆、等角分布——就是单位根。',
+            en: 'Tip: switch to "Front: complex plane" — the angle between any two adjacent powers is always φ₂ (equal angle), and the radius scales by ×r₂ each step (equal ratio) — exactly a logarithmic spiral. Set "multiplier modulus r₂" to 1 and all the powers land on the unit circle, equally spaced — the roots of unity.' },
     views: {
-      iso:   { label: '立体',       az: -0.6,  el: 0.4,  dist: 8, tx: 0, ty: 0, tz: 0 },
-      front: { label: '正视 复平面', az: 0.001, el: 0.02, dist: 7, tx: 0, ty: 0, tz: 0 }
+      iso:   { label: { zh: '立体', en: '3D' },                   az: -0.6,  el: 0.4,  dist: 8, tx: 0, ty: 0, tz: 0 },
+      front: { label: { zh: '正视 复平面', en: 'Front: complex plane' }, az: 0.001, el: 0.02, dist: 7, tx: 0, ty: 0, tz: 0 }
     },
     toggles: [
-      { key: 'showSteps',  label: '各次幂 <i>z</i>₂ⁿ', color: '#a78bfa', checked: true },
-      { key: 'showSpiral', label: '对数螺旋',          color: '#34d399', checked: true },
-      { key: 'showGuides', label: '角度步进辅助',      color: '#fbbf24', checked: true },
-      { key: 'showGrid',   label: '网格',             color: '#64748b', checked: true }
+      { key: 'showSteps',  label: { zh: '各次幂 <i>z</i>₂ⁿ', en: 'Powers <i>z</i>₂ⁿ' },   color: '#a78bfa', checked: true },
+      { key: 'showSpiral', label: { zh: '对数螺旋', en: 'Log spiral' },                    color: '#34d399', checked: true },
+      { key: 'showGuides', label: { zh: '角度步进辅助', en: 'Angle-step guides' },          color: '#fbbf24', checked: true },
+      { key: 'showGrid',   label: { zh: '网格', en: 'Grid' },                              color: '#64748b', checked: true }
     ],
     sampleWindow: () => WAVE_LEN / state.waveSpeed + 0.5,
     draw(C) {
@@ -488,7 +543,7 @@ const SCENES = {
       const mp = proj(C, [R*Math.cos(a), R*Math.sin(a), 0]);
       if (mp) glowDot(mp, 12, '#ffffff', 'rgba(186,240,255,0.9)');
 
-      label3(C, [-2.6, 2.35, 0], 'zⁿ = rⁿ·e^(i n φ)  （角 ×n、模 ^n）',
+      label3(C, [-2.6, 2.35, 0], 'zⁿ = rⁿ·e^(i n φ)  ' + t({ zh: '（角 ×n、模 ^n）', en: '(angle ×n, modulus ^n)' }),
         { font: 'italic 13px ' + FONT_MATH, color: '#e8eef7', align: 'left' });
     },
     readout() {
@@ -497,9 +552,9 @@ const SCENES = {
       const dp = (mod2pi(p2) * 180 / Math.PI).toFixed(0);
       const isRoot = Math.abs(r2 - 1) < 0.03;
       return readoutHead() +
-        '<div class="wC">当前 z₂^p，p = <b>' + fmt(p) + '</b>&ensp;·&ensp;|z₂^p| = r₂^p = <b>' + fmt(R) + '</b></div>' +
-        '<div class="z2C">z₂ = ' + fmt(r2) + ' ∠ ' + dp + '°&ensp;·&ensp;每乘一次：角 <b>+' + dp + '°</b>、模 <b>×' + fmt(r2) + '</b></div>' +
-        '<div class="dim">第 n 次幂：模长 r₂ⁿ、幅角 nφ₂' + (isRoot ? '&ensp;·&ensp;r₂ = 1 → 各幂落在单位圆、等角分布（单位根）' : '') + '</div>';
+        '<div class="wC">' + t({ zh: '当前 z₂^p，p = ', en: 'Current z₂^p, p = ' }) + '<b>' + fmt(p) + '</b>&ensp;·&ensp;|z₂^p| = r₂^p = <b>' + fmt(R) + '</b></div>' +
+        '<div class="z2C">z₂ = ' + fmt(r2) + ' ∠ ' + dp + '°&ensp;·&ensp;' + t({ zh: '每乘一次：角', en: 'Each multiply: angle' }) + ' <b>+' + dp + '°</b>' + t({ zh: '、模', en: ', modulus' }) + ' <b>×' + fmt(r2) + '</b></div>' +
+        '<div class="dim">' + t({ zh: '第 n 次幂：模长 r₂ⁿ、幅角 nφ₂', en: 'nth power: modulus r₂ⁿ, argument nφ₂' }) + (isRoot ? ('&ensp;·&ensp;' + t({ zh: 'r₂ = 1 → 各幂落在单位圆、等角分布（单位根）', en: 'r₂ = 1 → all powers land on the unit circle, equally spaced (roots of unity)' })) : '') + '</div>';
     }
   }
 };
@@ -515,6 +570,7 @@ const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
 const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
 const samples = [];
 let curTab = null;
+const RELABEL = [];
 const cams = {};
 let cam = null;
 let tween = null;
@@ -810,8 +866,10 @@ function drawAngleArc(C, th, A) {
 /* 读数区固定首两行 */
 function readoutHead() {
   const th = state.theta;
+  const deg = (mod2pi(th) * 180 / Math.PI).toFixed(0);
+  const lap = fmt(th / TAU);
   return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;θ = ωt = <b>' + fmt(th) + '</b> rad</div>' +
-         '<div class="dim">≡ ' + (mod2pi(th) * 180 / Math.PI).toFixed(0) + '°（第 ' + fmt(th / TAU) + ' 圈）</div>';
+         '<div class="dim">' + t({ zh: '≡ ' + deg + '°（第 ' + lap + ' 圈）', en: '≡ ' + deg + '° (turn ' + lap + ')' }) + '</div>';
 }
 
 /* ================= 主绘制与主循环 ================= */
@@ -869,7 +927,7 @@ function buildParams() {
   PARAMS.forEach(p => {
     const wrap = document.createElement('div');
     wrap.className = 'ctl';
-    wrap.innerHTML = '<div class="top"><label>' + p.label + '</label><span class="val"></span></div>';
+    wrap.innerHTML = '<div class="top"><label></label><span class="val"></span></div>';
     const input = document.createElement('input');
     input.type = 'range';
     input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
@@ -882,7 +940,9 @@ function buildParams() {
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
-    upd();
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
+    RELABEL.push(relabel);
+    relabel();
   });
 }
 
@@ -897,12 +957,15 @@ function buildToggles() {
       const lab = document.createElement('label');
       lab.className = 'tg';
       lab.innerHTML = '<input type="checkbox" data-key="' + tg.key + '"' + (state[tg.key] ? ' checked' : '') + '>' +
-        '<i class="dot" style="--c:' + tg.color + '"></i>' + tg.label;
+        '<i class="dot" style="--c:' + tg.color + '"></i><span class="tgl"></span>';
       const cb = lab.querySelector('input');
       cb.addEventListener('change', () => {
         state[tg.key] = cb.checked;
         document.querySelectorAll('input[data-key="' + tg.key + '"]').forEach(o => { o.checked = cb.checked; });
       });
+      const relabel = () => { lab.querySelector('.tgl').innerHTML = t(tg.label); };
+      RELABEL.push(relabel);
+      relabel();
       grp.appendChild(lab);
     });
     host.appendChild(grp);
@@ -917,15 +980,19 @@ function buildViews() {
     row.dataset.tab = id;
     const lab = document.createElement('span');
     lab.className = 'vlabel';
-    lab.textContent = '视角';
     row.appendChild(lab);
+    const labRelabel = () => { lab.textContent = t(UI.views); };
+    RELABEL.push(labRelabel);
+    labRelabel();
     Object.keys(SCENES[id].views).forEach(name => {
       const b = document.createElement('button');
       b.className = 'btn vbtn';
       b.dataset.view = name;
-      b.textContent = SCENES[id].views[name].label;
       b.addEventListener('click', () => applyView(name));
       row.appendChild(b);
+      const relabel = () => { b.textContent = t(SCENES[id].views[name].label); };
+      RELABEL.push(relabel);
+      relabel();
     });
     host.appendChild(row);
   });
@@ -937,9 +1004,11 @@ function buildTabs() {
     const b = document.createElement('button');
     b.className = 'tab';
     b.dataset.tab = id;
-    b.textContent = SCENES[id].label;
     b.addEventListener('click', () => switchTab(id));
     nav.appendChild(b);
+    const relabel = () => { b.textContent = t(SCENES[id].label); };
+    RELABEL.push(relabel);
+    relabel();
   });
 }
 
@@ -976,8 +1045,8 @@ function switchTab(id) {
     el.style.display = el.dataset.tab === id ? '' : 'none';
   });
   cam = cams[id];
-  brandDesc.textContent = SCENES[id].brand;
-  tipsEl.textContent = SCENES[id].tips;
+  brandDesc.textContent = t(SCENES[id].brand);
+  tipsEl.textContent = t(SCENES[id].tips);
   refreshViewButtons();
   updateReadout();
 }
@@ -986,7 +1055,7 @@ function switchTab(id) {
 const btnPlay = document.getElementById('btnPlay');
 function togglePlay() {
   state.running = !state.running;
-  btnPlay.textContent = state.running ? '⏸ 暂停' : '▶ 继续';
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
 }
 btnPlay.addEventListener('click', togglePlay);
 document.getElementById('btnReset').addEventListener('click', resetSim);
@@ -1001,6 +1070,34 @@ if (window.innerWidth < 760) {
   panel.classList.add('collapsed');
   btnFold.textContent = '+';
 }
+
+/* ================= 语言切换 ================= */
+function applyLang() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.title = t(TOOL.title);
+  document.querySelector('.brand h1').textContent = t(TOOL.h1);
+  document.getElementById('panelTitle').textContent = t(UI.panelTitle);
+  document.querySelector('.hint').textContent = t(UI.hint);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+  document.getElementById('btnReset').textContent = t(UI.reset);
+  RELABEL.forEach(f => f());
+  brandDesc.textContent = t(SCENES[curTab].brand);
+  tipsEl.textContent = t(SCENES[curTab].tips);
+  updateReadout();
+}
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('lang', l);
+    history.replaceState(null, '', u);
+  } catch (e) {}
+  applyLang();
+}
+document.getElementById('btnLang').addEventListener('click', () => setLang(LANG === 'zh' ? 'en' : 'zh'));
+document.getElementById('verBadge').textContent = 'v' + VERSION;
 
 /* ================= 交互：旋转 / 平移 / 缩放 ================= */
 const pointers = new Map();
@@ -1101,6 +1198,7 @@ Object.keys(SCENES).forEach(id => {
   lastView[id] = first;
 });
 switchTab(Object.keys(SCENES)[0]);
+applyLang();
 resetSim();
 requestAnimationFrame(frame);
 </script>
