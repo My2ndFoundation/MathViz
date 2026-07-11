@@ -104,7 +104,8 @@ function t(s){ return (s && typeof s === 'object') ? (s[LANG] ?? s.zh) : s; }
 ## F. 退役与存量改造
 
 - `git mv outputs/trig-essence-3d.html archive/`，从落地页与 README 移除（README 可留一行归档说明）。
-- 存量 4 个工具全部双语改造 + 版本内嵌：`trig-essence-3d-new`、`fourier-essence-3d`、`complex-mult-3d`、`cartesian-polar-coordinate-3d`（后者顺带首次登记、上落地页、提交）。
+- 存量工具全部双语改造 + 版本内嵌：`trig-essence-3d-new`、`fourier-essence-3d`、`complex-mult-3d`、`cartesian-polar-coordinate-3d`、`conic-essence-3d`（后两者尚未发布，顺带首次登记为 1.0.0、上落地页、提交）。
+- 补充发现：`trig-essence-3d-new` 的面板为手写静态 HTML（非声明式架构），双语改造采用 data-i18n 标记 + 页面级词典的一次性方案，不强行重建为声明式。
 
 ## 实施顺序（design-system-first）
 
