@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
+<meta name="tool-version" content="1.1.0">
+<meta name="engine-version" content="1.0.0">
 <title>傅立叶变换的本质 · Fourier Essence</title>
 <!-- ============================================================
   傅立叶变换的本质 · 交互式数学可视化
@@ -20,6 +22,10 @@
 
   信号约定：g(θ) = Σ (4A/nπ)·sin(nθ)，n ∈ {1,3,5,7}（方波奇次谐波）
   采样原则：记录当时的真实值（谐波开关 / 参数中途改变，历史不重算）
+
+  版本记录（新→旧）：
+    1.1.0  2026-07-11  全量双语支持（中/EN 切换）
+    1.0.0  2026-07-11  首个版本
 ============================================================ -->
 <style>
 :root{
@@ -81,6 +87,12 @@ body[data-tab="wind"] .tab.active{background:rgba(251,191,36,.12);border-color:r
 .panel-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px 10px;
   font-size:13px;font-weight:600;letter-spacing:.06em;color:#dbe6f5}
 .panel:not(.collapsed) .panel-head{border-bottom:1px solid var(--panel-line)}
+.ph-right{display:flex;align-items:center;gap:7px}
+.ver{font-family:var(--font-mono);font-size:10px;color:rgba(159,176,200,.55)}
+.lang{padding:3px 8px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:11px;cursor:pointer}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
 .fold{width:24px;height:24px;border-radius:8px;border:1px solid var(--panel-line);
   background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:14px;line-height:1;cursor:pointer}
 .fold:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
@@ -157,7 +169,8 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 <nav class="tabs" id="tabsNav"></nav>
 
 <aside class="panel" id="panel">
-  <div class="panel-head"><span>参数与视角</span><button class="fold" id="btnFold" title="收起 / 展开">−</button></div>
+  <div class="panel-head"><span id="panelTitle">参数与视角</span>
+    <span class="ph-right"><span class="ver" id="verBadge"></span><button class="lang" id="btnLang" title="切换语言 / Switch language">EN</button><button class="fold" id="btnFold" title="收起 / 展开">−</button></span></div>
   <div class="panel-body">
     <div id="paramsHost"></div>
     <div class="row">
@@ -175,14 +188,50 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 
 <script>
 'use strict';
+/* ================= i18n 核心（引擎区） ================= */
+const LANG_KEY = 'mathviz-lang';
+function resolveLang(){
+  try{
+    const q = new URLSearchParams(location.search).get('lang');
+    if (q === 'zh' || q === 'en') return q;
+    const s = localStorage.getItem(LANG_KEY);
+    if (s === 'zh' || s === 'en') return s;
+  }catch(e){}
+  return (navigator.language || 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+let LANG = resolveLang();
+function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
+
+const VERSION = document.querySelector('meta[name="tool-version"]').content;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ⓪ 工具元信息 —— id 与双语标题                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const TOOL = {
+  id: 'fourier-essence-3d',
+  title: { zh: '傅立叶变换的本质 · Fourier Essence', en: 'The Essence of the Fourier Transform' },
+  h1:    { zh: '傅立叶变换的本质', en: 'The Essence of the Fourier Transform' }
+};
+
+/* 引擎 UI 文案（一般无需改动） */
+const UI = {
+  panelTitle: { zh: '参数与视角', en: 'Parameters & Views' },
+  pause:  { zh: '⏸ 暂停', en: '⏸ Pause' },
+  resume: { zh: '▶ 继续', en: '▶ Resume' },
+  reset:  { zh: '↺ 重置', en: '↺ Reset' },
+  views:  { zh: '视角', en: 'View' },
+  hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
+            en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
+};
+
 /* ╔══════════════════════════════════════════════════════════╗
    ║  ① 参数声明 —— 自动生成滑杆                                ║
    ╚══════════════════════════════════════════════════════════╝ */
 const PARAMS = [
-  { key: 'omega',     label: '基频 <i>ω</i>',      min: 0.3, max: 3,   step: 0.05, value: 1,   fmt: v => fmt(v) + ' rad/s' },
-  { key: 'amp',       label: '振幅 <i>A</i>',      min: 0.2, max: 1.4, step: 0.05, value: 1,   fmt: v => fmt(v) },
-  { key: 'wind',      label: '缠绕频率 <i>f</i>',  min: 0,   max: 8,   step: 0.02, value: 1,   fmt: v => fmt(v) + ' × f₀' },
-  { key: 'waveSpeed', label: '波形展开速度',        min: 0.5, max: 2.5, step: 0.05, value: 1.2, fmt: v => fmt(v) + ' 单位/s' }
+  { key: 'omega',     label: { zh: '基频 <i>ω</i>', en: 'Base frequency <i>ω</i>' },      min: 0.3, max: 3,   step: 0.05, value: 1,   fmt: v => fmt(v) + ' rad/s' },
+  { key: 'amp',       label: { zh: '振幅 <i>A</i>', en: 'Amplitude <i>A</i>' },           min: 0.2, max: 1.4, step: 0.05, value: 1,   fmt: v => fmt(v) },
+  { key: 'wind',      label: { zh: '缠绕频率 <i>f</i>', en: 'Winding frequency <i>f</i>' }, min: 0,   max: 8,   step: 0.02, value: 1,   fmt: v => fmt(v) + ' × f₀' },
+  { key: 'waveSpeed', label: { zh: '波形展开速度', en: 'Wave unroll speed' },              min: 0.5, max: 2.5, step: 0.05, value: 1.2, fmt: v => fmt(v) + t({ zh: ' 单位/s', en: ' units/s' }) }
 ];
 
 /* ── 傅立叶工具常量与辅助（曲线按 rose→violet→emerald→orange 启用） ── */
@@ -295,21 +344,23 @@ const SCENES = {
 
   /* ────── 页签一：谐波叠加（傅立叶级数） ────── */
   synth: {
-    label: '谐波叠加',
-    brand: '任何周期信号都能拆成一组正弦谐波：方波的四个奇次谐波各自在自己的频率平面上振动，它们的和在最左侧平面随时间流出——这就是傅立叶级数。逐个开关谐波，看方波被一点点搭出来。',
-    tips: '提示：切到「频谱 x·y」——每条谐波塌缩成一根振幅竖线，横轴化作频率轴，这幅正视图本身就是频谱。留意方波跳变处约 9% 的过冲：这是吉布斯（Gibbs）现象，增加谐波也不会消失。',
+    label: { zh: '谐波叠加', en: 'Harmonic sum' },
+    brand: { zh: '任何周期信号都能拆成一组正弦谐波：方波的四个奇次谐波各自在自己的频率平面上振动，它们的和在最左侧平面随时间流出——这就是傅立叶级数。逐个开关谐波，看方波被一点点搭出来。',
+             en: 'Any periodic signal can be split into a set of sine harmonics: the square wave\'s four odd harmonics each oscillate on their own frequency plane, and their sum flows out over time on the leftmost plane — that is the Fourier series. Toggle the harmonics one by one and watch the square wave get built up piece by piece.' },
+    tips: { zh: '提示：切到「频谱 x·y」——每条谐波塌缩成一根振幅竖线，横轴化作频率轴，这幅正视图本身就是频谱。留意方波跳变处约 9% 的过冲：这是吉布斯（Gibbs）现象，增加谐波也不会消失。',
+            en: 'Tip: switch to "Spectrum x·y" — each harmonic collapses into a single amplitude bar, the horizontal axis becomes the frequency axis, and this front view is itself the spectrum. Notice the roughly 9% overshoot at the square wave\'s jumps: this is the Gibbs phenomenon, and adding more harmonics never makes it go away.' },
     views: {
-      iso:   { label: '立体',      az: -0.9,        el: 0.33,  dist: 15,   tx: 2.1,  ty: 0.1,   tz: 2.4 },
-      front: { label: '频谱 x·y',  az: 0.001,       el: 0.02,  dist: 12,   tx: 2.45, ty: -0.05, tz: 0 },
-      side:  { label: '叠加 y·t',  az: -Math.PI/2,  el: 0.001, dist: 12.5, tx: 0,    ty: 0,     tz: 3.3 }
+      iso:   { label: { zh: '立体', en: '3D' },          az: -0.9,        el: 0.33,  dist: 15,   tx: 2.1,  ty: 0.1,   tz: 2.4 },
+      front: { label: { zh: '频谱 x·y', en: 'Spectrum x·y' }, az: 0.001,       el: 0.02,  dist: 12,   tx: 2.45, ty: -0.05, tz: 0 },
+      side:  { label: { zh: '叠加 y·t', en: 'Sum y·t' },  az: -Math.PI/2,  el: 0.001, dist: 12.5, tx: 0,    ty: 0,     tz: 3.3 }
     },
     toggles: [
-      { key: 'h1', label: '谐波 <i>ω</i>',  color: '#fb7185', checked: true },
-      { key: 'h2', label: '谐波 3<i>ω</i>', color: '#a78bfa', checked: true },
-      { key: 'h3', label: '谐波 5<i>ω</i>', color: '#34d399', checked: true },
-      { key: 'h4', label: '谐波 7<i>ω</i>', color: '#fb923c', checked: true },
-      { key: 'showGuides', label: '投影辅助线', color: '#fbbf24', checked: true },
-      { key: 'showGrid',   label: '网格',       color: '#64748b', checked: true }
+      { key: 'h1', label: { zh: '谐波 <i>ω</i>', en: 'Harmonic <i>ω</i>' },   color: '#fb7185', checked: true },
+      { key: 'h2', label: { zh: '谐波 3<i>ω</i>', en: 'Harmonic 3<i>ω</i>' }, color: '#a78bfa', checked: true },
+      { key: 'h3', label: { zh: '谐波 5<i>ω</i>', en: 'Harmonic 5<i>ω</i>' }, color: '#34d399', checked: true },
+      { key: 'h4', label: { zh: '谐波 7<i>ω</i>', en: 'Harmonic 7<i>ω</i>' }, color: '#fb923c', checked: true },
+      { key: 'showGuides', label: { zh: '投影辅助线', en: 'Projection guides' }, color: '#fbbf24', checked: true },
+      { key: 'showGrid',   label: { zh: '网格', en: 'Grid' },                  color: '#64748b', checked: true }
     ],
     sampleWindow: () => Math.max(WAVE_LEN / state.waveSpeed + 0.5, WIND_M * TAU / state.omega + 1),
     draw(C) {
@@ -381,7 +432,7 @@ const SCENES = {
       const sp = proj(C, [0, lv.g, 0]);
       if (sp) glowDot(sp, 12, '#ffffff', 'rgba(186,240,255,0.9)');
 
-      label3(C, [1.15, 1.92, 0], 'g(t) = (4A/π)·Σ sin(nωt)/n,  n 为奇数',
+      label3(C, [1.15, 1.92, 0], 'g(t) = (4A/π)·Σ sin(nωt)/n,  ' + t({ zh: 'n 为奇数', en: 'n odd' }),
         { font: 'italic 13px ' + FONT_MATH, color: '#e8eef7', align: 'left' });
     },
     readout() {
@@ -393,28 +444,30 @@ const SCENES = {
         rows += '<div class="h' + (n + 1) + 'C">' + NM[n] + ' = <b>' + fmtS(lv.h[n]) + '</b></div>';
       }
       return readoutHead() + rows +
-        '<div>g = Σ谐波 = <b>' + fmtS(lv.g) + '</b></div>' +
+        '<div>g = Σ' + t({ zh: '谐波', en: 'harmonics' }) + ' = <b>' + fmtS(lv.g) + '</b></div>' +
         '<div class="dim">f₀ = ω/2π = ' + (state.omega / TAU).toFixed(3) + ' Hz&ensp;·&ensp;T = ' + fmt(TAU / state.omega) + ' s</div>';
     }
   },
 
   /* ────── 页签二：旋转向量（本轮 · 圆周运动的叠加） ────── */
   cycle: {
-    label: '旋转向量',
-    brand: '把每个谐波看成一支匀速旋转的向量，按频率首尾相接：链条末端的高度就是所有谐波之和。拖拽旋转，看几个圆周运动如何联手画出方波。',
-    tips: '提示：切到「方波 y·t」侧视——所有圆盘侧立消失，链尖流出的正是方波。这种首尾相接的圆叫「本轮」(epicycle)，托勒密曾用它描述行星轨道，傅立叶级数让它重获新生。',
+    label: { zh: '旋转向量', en: 'Rotating vectors' },
+    brand: { zh: '把每个谐波看成一支匀速旋转的向量，按频率首尾相接：链条末端的高度就是所有谐波之和。拖拽旋转，看几个圆周运动如何联手画出方波。',
+             en: 'Think of each harmonic as a vector spinning at constant speed, chained tip-to-tail by frequency: the height of the chain\'s end is the sum of all the harmonics. Drag to rotate and watch several circular motions team up to draw the square wave.' },
+    tips: { zh: '提示：切到「方波 y·t」侧视——所有圆盘侧立消失，链尖流出的正是方波。这种首尾相接的圆叫「本轮」(epicycle)，托勒密曾用它描述行星轨道，傅立叶级数让它重获新生。',
+            en: 'Tip: switch to "Square wave y·t" side view — all the discs edge-on disappear, and what flows out from the chain tip is exactly the square wave. This chain of circles is called an "epicycle" — Ptolemy once used it to describe planetary orbits, and the Fourier series gave it new life.' },
     views: {
-      iso:   { label: '立体',      az: -0.85,      el: 0.3,   dist: 11.5, tx: 0, ty: 0, tz: 2.6 },
-      front: { label: '本轮 x·y',  az: 0.001,      el: 0.02,  dist: 8,    tx: 0, ty: 0, tz: 0.4 },
-      side:  { label: '方波 y·t',  az: -Math.PI/2, el: 0.001, dist: 11.5, tx: 0, ty: 0, tz: 3.4 }
+      iso:   { label: { zh: '立体', en: '3D' },                   az: -0.85,      el: 0.3,   dist: 11.5, tx: 0, ty: 0, tz: 2.6 },
+      front: { label: { zh: '本轮 x·y', en: 'Epicycles x·y' },    az: 0.001,      el: 0.02,  dist: 8,    tx: 0, ty: 0, tz: 0.4 },
+      side:  { label: { zh: '方波 y·t', en: 'Square wave y·t' },  az: -Math.PI/2, el: 0.001, dist: 11.5, tx: 0, ty: 0, tz: 3.4 }
     },
     toggles: [
-      { key: 'h1', label: '谐波 <i>ω</i>',  color: '#fb7185', checked: true },
-      { key: 'h2', label: '谐波 3<i>ω</i>', color: '#a78bfa', checked: true },
-      { key: 'h3', label: '谐波 5<i>ω</i>', color: '#34d399', checked: true },
-      { key: 'h4', label: '谐波 7<i>ω</i>', color: '#fb923c', checked: true },
-      { key: 'showGuides', label: '投影辅助线', color: '#fbbf24', checked: true },
-      { key: 'showGrid',   label: '网格',       color: '#64748b', checked: true }
+      { key: 'h1', label: { zh: '谐波 <i>ω</i>', en: 'Harmonic <i>ω</i>' },   color: '#fb7185', checked: true },
+      { key: 'h2', label: { zh: '谐波 3<i>ω</i>', en: 'Harmonic 3<i>ω</i>' }, color: '#a78bfa', checked: true },
+      { key: 'h3', label: { zh: '谐波 5<i>ω</i>', en: 'Harmonic 5<i>ω</i>' }, color: '#34d399', checked: true },
+      { key: 'h4', label: { zh: '谐波 7<i>ω</i>', en: 'Harmonic 7<i>ω</i>' }, color: '#fb923c', checked: true },
+      { key: 'showGuides', label: { zh: '投影辅助线', en: 'Projection guides' }, color: '#fbbf24', checked: true },
+      { key: 'showGrid',   label: { zh: '网格', en: 'Grid' },                  color: '#64748b', checked: true }
     ],
     sampleWindow: () => Math.max(WAVE_LEN / state.waveSpeed + 0.5, WIND_M * TAU / state.omega + 1),
     draw(C) {
@@ -490,33 +543,35 @@ const SCENES = {
         rows += '<div class="h' + (n + 1) + 'C">' + SUBL[n] + ' = 4A/' + den + ' = <b>' + fmt(ampN(n)) + '</b>&ensp;·&ensp;∠ = ' + deg + '°</div>';
       }
       return readoutHead() +
-        '<div>链尖高度 y = Σ = <b>' + fmtS(lv.g) + '</b></div>' + rows +
-        '<div class="dim">向量长度 ∝ 1/n&ensp;·&ensp;T = ' + fmt(TAU / state.omega) + ' s</div>';
+        '<div>' + t({ zh: '链尖高度', en: 'Chain tip height' }) + ' y = Σ = <b>' + fmtS(lv.g) + '</b></div>' + rows +
+        '<div class="dim">' + t({ zh: '向量长度', en: 'Vector length' }) + ' ∝ 1/n&ensp;·&ensp;T = ' + fmt(TAU / state.omega) + ' s</div>';
     }
   },
 
   /* ────── 页签三：频率缠绕（几乎就是傅立叶变换） ────── */
   wind: {
-    label: '频率缠绕',
-    brand: '把信号 g(t) 以频率 f 缠绕到原点四周，再取所有点的质心：当 f 恰好命中信号所含的频率时，质心猛然偏离原点。把每个 f 的质心模长记下来，就得到频谱——这就是傅立叶变换的做法。',
-    tips: '提示：缓慢拖动缠绕频率 f 扫过 1、3、5、7 倍基频，质心（琥珀点）的每次跳动都对应频谱上的一个尖峰；停在偶数倍上质心缩回原点——方波里没有偶次谐波。也可先按空格暂停，再细细扫频。',
+    label: { zh: '频率缠绕', en: 'Frequency winding' },
+    brand: { zh: '把信号 g(t) 以频率 f 缠绕到原点四周，再取所有点的质心：当 f 恰好命中信号所含的频率时，质心猛然偏离原点。把每个 f 的质心模长记下来，就得到频谱——这就是傅立叶变换的做法。',
+             en: 'Wind the signal g(t) around the origin at frequency f, then take the centroid of all the points: when f exactly matches a frequency contained in the signal, the centroid suddenly jumps away from the origin. Record the centroid\'s magnitude for every f, and you get the spectrum — that is exactly what the Fourier transform does.' },
+    tips: { zh: '提示：缓慢拖动缠绕频率 f 扫过 1、3、5、7 倍基频，质心（琥珀点）的每次跳动都对应频谱上的一个尖峰；停在偶数倍上质心缩回原点——方波里没有偶次谐波。也可先按空格暂停，再细细扫频。',
+            en: 'Tip: slowly drag the winding frequency f across 1, 3, 5, and 7 times the base frequency — every jump of the centroid (amber dot) corresponds to a peak on the spectrum; stop on an even multiple and the centroid snaps back to the origin, since the square wave has no even harmonics. You can also pause with the space bar first, then sweep the frequency carefully.' },
     views: {
-      iso:  { label: '立体',      az: -0.5,  el: 0.45, dist: 13.5, tx: 2.4, ty: -0.1,  tz: 0 },
-      pano: { label: '全景',      az: 0.001, el: 0.02, dist: 11.8, tx: 2.5, ty: -0.1,  tz: 0 },
-      whl:  { label: '缠绕 x·y',  az: 0.001, el: 0.02, dist: 6.8,  tx: 0,   ty: 0.05,  tz: 0 },
-      spec: { label: '频谱 f',    az: 0.001, el: 0.02, dist: 8.2,  tx: 4.8, ty: -0.15, tz: 0,
+      iso:  { label: { zh: '立体', en: '3D' },          az: -0.5,  el: 0.45, dist: 13.5, tx: 2.4, ty: -0.1,  tz: 0 },
+      pano: { label: { zh: '全景', en: 'Panorama' },     az: 0.001, el: 0.02, dist: 11.8, tx: 2.5, ty: -0.1,  tz: 0 },
+      whl:  { label: { zh: '缠绕 x·y', en: 'Winding x·y' }, az: 0.001, el: 0.02, dist: 6.8,  tx: 0,   ty: 0.05,  tz: 0 },
+      spec: { label: { zh: '频谱 f', en: 'Spectrum f' }, az: 0.001, el: 0.02, dist: 8.2,  tx: 4.8, ty: -0.15, tz: 0,
         onSelect: () => {
           state.showSpec = true;
           document.querySelectorAll('input[data-key="showSpec"]').forEach(o => { o.checked = true; });
         } }
     },
     toggles: [
-      { key: 'h1', label: '谐波 <i>ω</i>',  color: '#fb7185', checked: true },
-      { key: 'h2', label: '谐波 3<i>ω</i>', color: '#a78bfa', checked: true },
-      { key: 'h3', label: '谐波 5<i>ω</i>', color: '#34d399', checked: true },
-      { key: 'h4', label: '谐波 7<i>ω</i>', color: '#fb923c', checked: true },
-      { key: 'showSpec', label: '频谱 <i>|X(f)|</i>', color: '#fbbf24', checked: true },
-      { key: 'showGrid', label: '网格',              color: '#64748b', checked: true }
+      { key: 'h1', label: { zh: '谐波 <i>ω</i>', en: 'Harmonic <i>ω</i>' },   color: '#fb7185', checked: true },
+      { key: 'h2', label: { zh: '谐波 3<i>ω</i>', en: 'Harmonic 3<i>ω</i>' }, color: '#a78bfa', checked: true },
+      { key: 'h3', label: { zh: '谐波 5<i>ω</i>', en: 'Harmonic 5<i>ω</i>' }, color: '#34d399', checked: true },
+      { key: 'h4', label: { zh: '谐波 7<i>ω</i>', en: 'Harmonic 7<i>ω</i>' }, color: '#fb923c', checked: true },
+      { key: 'showSpec', label: { zh: '频谱 <i>|X(f)|</i>', en: 'Spectrum <i>|X(f)|</i>' }, color: '#fbbf24', checked: true },
+      { key: 'showGrid', label: { zh: '网格', en: 'Grid' },                  color: '#64748b', checked: true }
     ],
     sampleWindow: () => Math.max(WAVE_LEN / state.waveSpeed + 0.5, WIND_M * TAU / state.omega + 1),
     draw(C) {
@@ -557,7 +612,7 @@ const SCENES = {
         line3(C, [0, 0, 0], [com[0], com[1], 0], { width: 2, color: 'rgba(251,191,36,0.9)' });
         const cp = proj(C, [com[0], com[1], 0]);
         if (cp) glowDot(cp, 9, '#ffffff', 'rgba(251,191,36,0.9)');
-        label3(C, [com[0], com[1], 0], '质心', { size: 11, color: 'rgba(251,191,36,0.9)', align: 'left', dx: 12, dy: -2 });
+        label3(C, [com[0], com[1], 0], t({ zh: '质心', en: 'Centroid' }), { size: 11, color: 'rgba(251,191,36,0.9)', align: 'left', dx: 12, dy: -2 });
 
         /* 频谱 |X(f)|：质心模长随缠绕频率的曲线 */
         if (state.showSpec) {
@@ -621,9 +676,9 @@ const SCENES = {
       }
       const mag = Math.hypot(com[0], com[1]);
       return readoutHead() +
-        '<div class="amC">缠绕频率 f = <b>' + fmt(k) + '</b> × f₀ = ' + (k * state.omega / TAU).toFixed(3) + ' Hz</div>' +
-        '<div class="amC">质心 |X| = <b>' + fmt(mag) + '</b>&ensp;(Re ' + fmtS(com[0]) + ' · Im ' + fmtS(com[1]) + ')</div>' +
-        '<div class="dim">窗口 = 最近 ' + fmt(m, 1) + ' 个周期&ensp;·&ensp;理论峰值 |X(nf₀)| = 2A/nπ</div>';
+        '<div class="amC">' + t({ zh: '缠绕频率', en: 'Winding frequency' }) + ' f = <b>' + fmt(k) + '</b> × f₀ = ' + (k * state.omega / TAU).toFixed(3) + ' Hz</div>' +
+        '<div class="amC">' + t({ zh: '质心', en: 'Centroid' }) + ' |X| = <b>' + fmt(mag) + '</b>&ensp;(Re ' + fmtS(com[0]) + ' · Im ' + fmtS(com[1]) + ')</div>' +
+        '<div class="dim">' + t({ zh: '窗口 = 最近 ' + fmt(m, 1) + ' 个周期', en: 'Window = last ' + fmt(m, 1) + ' periods' }) + '&ensp;·&ensp;' + t({ zh: '理论峰值', en: 'Theoretical peak' }) + ' |X(nf₀)| = 2A/nπ</div>';
     }
   }
 };
@@ -639,6 +694,7 @@ const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
 const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
 const samples = [];
 let curTab = null;
+const RELABEL = [];
 const cams = {};
 let cam = null;
 let tween = null;
@@ -929,8 +985,10 @@ function drawAngleArc(C, th, A) {
 /* 读数区固定首两行 */
 function readoutHead() {
   const th = state.theta;
+  const deg = (mod2pi(th) * 180 / Math.PI).toFixed(0);
+  const lap = fmt(th / TAU);
   return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;θ = ωt = <b>' + fmt(th) + '</b> rad</div>' +
-         '<div class="dim">≡ ' + (mod2pi(th) * 180 / Math.PI).toFixed(0) + '°（第 ' + fmt(th / TAU) + ' 圈）</div>';
+         '<div class="dim">' + t({ zh: '≡ ' + deg + '°（第 ' + lap + ' 圈）', en: '≡ ' + deg + '° (turn ' + lap + ')' }) + '</div>';
 }
 
 /* ================= 主绘制与主循环 ================= */
@@ -988,7 +1046,7 @@ function buildParams() {
   PARAMS.forEach(p => {
     const wrap = document.createElement('div');
     wrap.className = 'ctl';
-    wrap.innerHTML = '<div class="top"><label>' + p.label + '</label><span class="val"></span></div>';
+    wrap.innerHTML = '<div class="top"><label></label><span class="val"></span></div>';
     const input = document.createElement('input');
     input.type = 'range';
     input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
@@ -1001,7 +1059,9 @@ function buildParams() {
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
-    upd();
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
+    RELABEL.push(relabel);
+    relabel();
   });
 }
 
@@ -1016,12 +1076,15 @@ function buildToggles() {
       const lab = document.createElement('label');
       lab.className = 'tg';
       lab.innerHTML = '<input type="checkbox" data-key="' + tg.key + '"' + (state[tg.key] ? ' checked' : '') + '>' +
-        '<i class="dot" style="--c:' + tg.color + '"></i>' + tg.label;
+        '<i class="dot" style="--c:' + tg.color + '"></i><span class="tgl"></span>';
       const cb = lab.querySelector('input');
       cb.addEventListener('change', () => {
         state[tg.key] = cb.checked;
         document.querySelectorAll('input[data-key="' + tg.key + '"]').forEach(o => { o.checked = cb.checked; });
       });
+      const relabel = () => { lab.querySelector('.tgl').innerHTML = t(tg.label); };
+      RELABEL.push(relabel);
+      relabel();
       grp.appendChild(lab);
     });
     host.appendChild(grp);
@@ -1036,15 +1099,19 @@ function buildViews() {
     row.dataset.tab = id;
     const lab = document.createElement('span');
     lab.className = 'vlabel';
-    lab.textContent = '视角';
     row.appendChild(lab);
+    const labRelabel = () => { lab.textContent = t(UI.views); };
+    RELABEL.push(labRelabel);
+    labRelabel();
     Object.keys(SCENES[id].views).forEach(name => {
       const b = document.createElement('button');
       b.className = 'btn vbtn';
       b.dataset.view = name;
-      b.textContent = SCENES[id].views[name].label;
       b.addEventListener('click', () => applyView(name));
       row.appendChild(b);
+      const relabel = () => { b.textContent = t(SCENES[id].views[name].label); };
+      RELABEL.push(relabel);
+      relabel();
     });
     host.appendChild(row);
   });
@@ -1056,9 +1123,11 @@ function buildTabs() {
     const b = document.createElement('button');
     b.className = 'tab';
     b.dataset.tab = id;
-    b.textContent = SCENES[id].label;
     b.addEventListener('click', () => switchTab(id));
     nav.appendChild(b);
+    const relabel = () => { b.textContent = t(SCENES[id].label); };
+    RELABEL.push(relabel);
+    relabel();
   });
 }
 
@@ -1096,8 +1165,8 @@ function switchTab(id) {
     el.style.display = el.dataset.tab === id ? '' : 'none';
   });
   cam = cams[id];
-  brandDesc.textContent = SCENES[id].brand;
-  tipsEl.textContent = SCENES[id].tips;
+  brandDesc.textContent = t(SCENES[id].brand);
+  tipsEl.textContent = t(SCENES[id].tips);
   refreshViewButtons();
   updateReadout();
 }
@@ -1106,7 +1175,7 @@ function switchTab(id) {
 const btnPlay = document.getElementById('btnPlay');
 function togglePlay() {
   state.running = !state.running;
-  btnPlay.textContent = state.running ? '⏸ 暂停' : '▶ 继续';
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
 }
 btnPlay.addEventListener('click', togglePlay);
 document.getElementById('btnReset').addEventListener('click', resetSim);
@@ -1121,6 +1190,34 @@ if (window.innerWidth < 760) {
   panel.classList.add('collapsed');
   btnFold.textContent = '+';
 }
+
+/* ================= 语言切换 ================= */
+function applyLang() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.title = t(TOOL.title);
+  document.querySelector('.brand h1').textContent = t(TOOL.h1);
+  document.getElementById('panelTitle').textContent = t(UI.panelTitle);
+  document.querySelector('.hint').textContent = t(UI.hint);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+  document.getElementById('btnReset').textContent = t(UI.reset);
+  RELABEL.forEach(f => f());
+  brandDesc.textContent = t(SCENES[curTab].brand);
+  tipsEl.textContent = t(SCENES[curTab].tips);
+  updateReadout();
+}
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('lang', l);
+    history.replaceState(null, '', u);
+  } catch (e) {}
+  applyLang();
+}
+document.getElementById('btnLang').addEventListener('click', () => setLang(LANG === 'zh' ? 'en' : 'zh'));
+document.getElementById('verBadge').textContent = 'v' + VERSION;
 
 /* ================= 交互：旋转 / 平移 / 缩放 ================= */
 const pointers = new Map();
@@ -1221,6 +1318,7 @@ Object.keys(SCENES).forEach(id => {
   lastView[id] = first;
 });
 switchTab(Object.keys(SCENES)[0]);
+applyLang();
 resetSim();
 requestAnimationFrame(frame);
 </script>
