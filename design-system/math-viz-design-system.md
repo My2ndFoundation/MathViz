@@ -306,7 +306,7 @@ tips：**一段话只讲一个顿悟点**，并指向具体操作（某视角 / 
 
 ## 7. 文案规范
 
-界面语言为中文；数学符号（ω、A、φ、θ、T、sin…）保持原样并交给 math 字体。负号一律 U+2212（−），数值默认两位小数，角度取整，`|值|>999` 显示 `±∞`。
+界面语言为中英双语（见 §9）；默认按「URL 参数 → localStorage → 浏览器语言」解析，右上角可切换。数学符号（ω、A、φ、θ、T、sin…）不翻译，保持原样并交给 math 字体。负号一律 U+2212（−），数值默认两位小数，角度取整，`|值|>999` 显示 `±∞`——中英一致。英文文案用 sentence case，不用 Title Case 与全大写（品牌眉题除外）；语句简洁地道，不逐字直译中文。品牌眉题 `INTERACTIVE MATH · 交互式数学` 是常量，不参与切换。
 
 | 文案位 | 公式 | 示例 |
 |---|---|---|
@@ -326,7 +326,7 @@ tips：**一段话只讲一个顿悟点**，并指向具体操作（某视角 / 
 3. 在 `SCENES` 注册场景：`label`（页签名）、`brand`、`tips`、`views`（首项 iso）、`toggles`（曲线开关按启用顺序取色）、`draw(C)`、`readout()`；
 4. 按需扩展 `pushSample` 的采样字段（原则：记录当时真实值）；
 5. 用引擎部件拼场景：`drawAxes / drawGridXY / drawTimeGrid / drawPeriodBracket / drawCircle / drawAngleArc / strokePoly / line3 / glowDot / label3`；
-6. 自查清单：□ 曲线六处同源 □ 有顿悟视角 □ tips 只讲一件事 □ 暂停时相机仍可动 □ 参数中途可调且历史不重算 □ 移动端折叠正常 □ `node --check` 通过。
+6. 自查清单：□ 曲线六处同源 □ 有顿悟视角 □ tips 只讲一件事 □ 暂停时相机仍可动 □ 参数中途可调且历史不重算 □ 移动端折叠正常 □ `node --check` 通过 □ 双语：全部文案为 `{zh,en}` 对象并经 `t()`；`?lang=en` 直达、切换按钮、记忆、`<html lang>`/`document.title` 跟随均正常（§9）□ 版本：meta 两枚 + 头注释 changelog + 面板角标齐备；已登记 `tools.json` 并同步 `index.html` 内嵌 TOOLS 与 README 工具表（§10）
 
 ### 给 Claude Code 的任务简报模板
 
@@ -342,6 +342,35 @@ tips：**一段话只讲一个顿悟点**，并指向具体操作（某视角 / 
 特殊处理：〔奇点/渐近线/无界值？参照第 6 节裁剪与断开约定〕
 验收：node --check 通过；符合第 8 节自查清单。
 ```
+
+---
+
+## 9. 双语规范（i18n）
+
+**就地双语对象，不设集中词典。** 一切面向人的文案在声明处写成 `{ zh: '运动轨迹', en: 'Trail' }`；引擎提供
+
+    function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
+
+传对象取当前语言（缺英文回退中文），传字符串原样返回——数学符号与数字天然免翻译。
+
+**覆盖范围**：`PARAMS[].label`、`SCENES` 的 `label / brand / tips`、`views[].label`、`toggles[].label`、`readout()` 中的说明文字、Canvas 内标注（绘制时经 `t()`）、`<title>` 与 `<h1>`（经工具元信息 `TOOL.title / TOOL.h1`）、引擎 UI 常量 `UI`（面板标题、暂停/继续/重置、视角、hint）。眉题不参与。
+
+**语言解析优先级**：`?lang=` → `localStorage('mathviz-lang')` → `navigator.language`（zh* → zh，否则 en）→ 默认 zh。localStorage 不可用时静默降级。
+
+**切换行为**：面板头部 `中 / EN` 按钮（按钮显示目标语言）；切换时 `history.replaceState` 更新 URL、写 localStorage、更新 `<html lang>`、`document.title`，并重打全部 UI 标签（`applyLang()`）；Canvas 下一帧自然跟随。滑杆当前值、开关状态、相机、历史采样一律不受切换影响。落地页工具链接携带当前 `?lang=`。
+
+**fmt 中的单位**：含中文单位的 fmt 写作 `v => fmt(v) + t({ zh: ' 单位/s', en: ' units/s' })`。
+
+## 10. 版本管理
+
+每个工具独立语义化版本：不兼容大改 major · 新增功能/场景 minor · 修复与文案微调 patch。
+
+**三处落地，注册表为准**：
+1. `tools.json`（仓库根）：`version` + 双语 `changelog`（新→旧）。
+2. 工具 HTML：`<meta name="tool-version" content="x.y.z">`、`<meta name="engine-version" content="a.b.c">`（复制时 starter 的版本），文件头注释内 changelog 块。
+3. 面板头部版本角标 `vx.y.z`（从 meta 读取，运行时填充）。
+
+**强制规则**：对已有工具的任何修改必须 bump 版本，并同步 tools.json 与文件内两处 changelog；这是 §8 验收门槛之一。starter 自身以 `STARTER_VERSION` 管理版本，工具复制时把它记入 `engine-version`。
 
 ---
 
