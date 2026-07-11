@@ -17,6 +17,7 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [三角函数的本质 · 单位圆与正弦波](outputs/trig-essence-3d.html) | How uniform circular motion on the unit circle unfolds into the sine wave over time |
 | [三角函数的本质 · 单位圆 / 正弦 / 正切](outputs/trig-essence-3d-new.html) | The circle, sine, and tangent as one motion measured different ways |
 | [傅立叶变换的本质 · Fourier Essence](outputs/fourier-essence-3d.html) | How a signal winds around a circle and its frequencies emerge |
+| [复数乘法的本质 · Complex Multiplication](outputs/complex-mult-3d.html) | Why multiplying two complex numbers adds their angles and multiplies their lengths |
 
 ## Usage
 
