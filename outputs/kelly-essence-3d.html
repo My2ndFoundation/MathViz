@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="tool-version" content="1.0.0">
+<meta name="engine-version" content="1.0.0">
+<title>凯利公式的本质 · 最优下注比例</title>
+<!-- ============================================================
+  凯利公式的本质 · Kelly Criterion Essence
+  设计规范：math-viz-design-system.md（令牌 / 组件 / 绘制语言 / 交互词汇）
+  引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
+
+  版本记录（changelog，新→旧）：
+    1.0.0  2026-07-12  首个版本（含双语）
+============================================================ -->
+<style>
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  --angle-amber:#fbbf24;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none}
+body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)}
+#scene{position:fixed;inset:0;display:block;touch-action:none;cursor:grab}
+#scene.dragging{cursor:grabbing}
+
+/* ---- 标题区 ---- */
+.brand{position:fixed;top:20px;left:24px;pointer-events:none;user-select:none;max-width:min(520px,42vw)}
+.brand .eyebrow{font-size:10px;letter-spacing:.22em;color:rgba(159,176,200,.72);margin-bottom:6px}
+.brand h1{margin:0;font-family:var(--font-math);font-weight:600;font-size:26px;letter-spacing:.08em;
+  color:#eef3fa;text-shadow:0 2px 20px rgba(45,212,234,.20)}
+.brand p{margin:7px 0 0;font-size:12.5px;line-height:1.65;color:rgba(159,176,200,.85)}
+
+/* ---- 页签 ---- */
+.tabs{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:5;
+  display:flex;gap:4px;padding:4px;border-radius:999px;
+  background:var(--panel-bg);border:1px solid var(--panel-line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
+.tab{border:1px solid transparent;background:transparent;color:#b8c6da;
+  font-size:12.5px;font-family:var(--font-cn);padding:6px 15px;border-radius:999px;cursor:pointer;
+  transition:color .15s,border-color .15s,background .15s}
+.tab:hover{color:#e8f2fb}
+.tab:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.tab.active{background:rgba(45,212,234,.13);border-color:rgba(45,212,234,.55);color:#9be8f7}
+
+/* ---- 底部提示 ---- */
+.hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);pointer-events:none;user-select:none;
+  font-size:11px;letter-spacing:.05em;color:rgba(159,176,200,.6);white-space:nowrap}
+
+/* ---- 控制面板 ---- */
+.panel{position:fixed;top:14px;right:14px;width:304px;max-height:calc(100vh - 28px);overflow-y:auto;
+  background:var(--panel-bg);border:1px solid var(--panel-line);border-radius:16px;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 18px 50px rgba(0,0,0,.45);user-select:none}
+.panel::-webkit-scrollbar{width:6px}
+.panel::-webkit-scrollbar-thumb{background:rgba(148,163,184,.25);border-radius:3px}
+.panel-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px 10px;
+  font-size:13px;font-weight:600;letter-spacing:.06em;color:#dbe6f5}
+.panel:not(.collapsed) .panel-head{border-bottom:1px solid var(--panel-line)}
+.ph-right{display:flex;align-items:center;gap:7px}
+.ver{font-family:var(--font-mono);font-size:10px;color:rgba(159,176,200,.55)}
+.lang{padding:3px 8px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:11px;cursor:pointer}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.fold{width:24px;height:24px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:14px;line-height:1;cursor:pointer}
+.fold:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.panel.collapsed .panel-body{display:none}
+.panel-body{padding:6px 14px 14px}
+
+/* 滑杆 */
+.ctl{margin:11px 0 3px}
+.ctl .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.ctl label{font-size:12px;color:#c6d2e4}
+.ctl label i{font-family:var(--font-math);font-style:italic;font-size:13px}
+.ctl .val{font-family:var(--font-mono);font-size:11.5px;color:#7dd3fc}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;cursor:pointer;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--trace-cyan);margin-top:-5px;border:2px solid #0b1220;box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-moz-range-thumb{width:11px;height:11px;border:2px solid #0b1220;border-radius:50%;
+  background:var(--trace-cyan);box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-offset:2px;border-radius:4px}
+
+/* 按钮 */
+.row{display:flex;gap:8px;margin:13px 0 4px}
+.btn{padding:6px 10px;border-radius:9px;border:1px solid rgba(148,163,184,.25);
+  background:rgba(30,41,59,.55);color:#d7e2f2;font-size:12px;font-family:var(--font-cn);cursor:pointer;
+  transition:border-color .15s,color .15s,background .15s}
+.btn:hover{border-color:rgba(45,212,234,.55)}
+.btn:focus-visible,.fold:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.btn.wide{flex:1}
+.btn.active{border-color:rgba(45,212,234,.8);background:rgba(45,212,234,.12);color:#9be8f7}
+.views{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 2px}
+.views .vlabel{font-size:11.5px;color:rgba(159,176,200,.8);margin-right:2px}
+.vbtn{padding:5px 9px;font-size:11.5px}
+
+/* 开关 */
+.toggles{display:flex;flex-wrap:wrap;gap:7px 12px;margin:12px 0 2px}
+.tg{display:flex;align-items:center;gap:6px;font-size:12px;color:#c6d2e4;cursor:pointer}
+.tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
+.tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
+
+/* 读数与提示 */
+.readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
+  font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
+.readout b{font-weight:600;color:#e8eef7}
+.readout .sinC b{color:var(--trace-rose)}
+.readout .cosC b{color:var(--trace-violet)}
+.readout .tanC b{color:var(--trace-emerald)}
+.readout .cotC b{color:var(--trace-orange)}
+.readout .dim{color:rgba(159,176,200,.6)}
+.tips{margin-top:11px;font-size:11px;line-height:1.65;color:rgba(159,176,200,.72)}
+
+@media (max-width:760px){
+  .brand{top:12px;left:14px;max-width:70vw}
+  .brand h1{font-size:20px}
+  .brand p{display:none}
+  .tabs{top:52px;left:14px;transform:none}
+  .panel{left:10px;right:10px;top:auto;bottom:10px;width:auto;max-height:62vh}
+  .hint{display:none}
+}
+</style>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+
+<div class="brand">
+  <div class="eyebrow">INTERACTIVE MATH · 交互式数学</div>
+  <h1>凯利公式的本质</h1>
+  <p id="brandDesc"></p>
+</div>
+
+<nav class="tabs" id="tabsNav"></nav>
+
+<aside class="panel" id="panel">
+  <div class="panel-head"><span id="panelTitle">参数与视角</span>
+    <span class="ph-right"><span class="ver" id="verBadge"></span><button class="lang" id="btnLang" title="切换语言 / Switch language">EN</button><button class="fold" id="btnFold" title="收起 / 展开">−</button></span></div>
+  <div class="panel-body">
+    <div id="paramsHost"></div>
+    <div class="row">
+      <button class="btn wide" id="btnPlay">⏸ 暂停</button>
+      <button class="btn" id="btnReset">↺ 重置</button>
+    </div>
+    <div id="togglesHost"></div>
+    <div id="viewsHost"></div>
+    <div class="readout" id="readout"></div>
+    <div class="tips" id="tips"></div>
+  </div>
+</aside>
+
+<div class="hint">拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签</div>
+
+<script>
+'use strict';
+/* ================= i18n 核心（引擎区） ================= */
+const LANG_KEY = 'mathviz-lang';
+function resolveLang(){
+  try{
+    const q = new URLSearchParams(location.search).get('lang');
+    if (q === 'zh' || q === 'en') return q;
+    const s = localStorage.getItem(LANG_KEY);
+    if (s === 'zh' || s === 'en') return s;
+  }catch(e){}
+  return (navigator.language || 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+let LANG = resolveLang();
+function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
+
+const VERSION = document.querySelector('meta[name="tool-version"]').content;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ⓪ 工具元信息 —— id 与双语标题                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const TOOL = {
+  id: 'kelly-essence-3d',
+  title: { zh: '凯利公式的本质 · 最优下注比例', en: 'The Essence of the Kelly Criterion' },
+  h1:    { zh: '凯利公式的本质', en: 'The Kelly Criterion' }
+};
+
+/* 引擎 UI 文案（一般无需改动） */
+const UI = {
+  panelTitle: { zh: '参数与视角', en: 'Parameters & Views' },
+  pause:  { zh: '⏸ 暂停', en: '⏸ Pause' },
+  resume: { zh: '▶ 继续', en: '▶ Resume' },
+  reset:  { zh: '↺ 重置', en: '↺ Reset' },
+  views:  { zh: '视角', en: 'View' },
+  hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
+            en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
+};
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ① 参数声明 —— 自动生成滑杆                                ║
+   ║  key: state 中的键 · label: 支持 <i>数学符号</i>            ║
+   ║  fmt: 格式化"滑杆原始值"用于显示 · map(可选): 原始值→状态值   ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const PARAMS = [
+  { key: 'p',     label: { zh: '胜率 <i>p</i>',       en: 'Win probability <i>p</i>' }, min: 0.30, max: 0.80, step: 0.01, value: 0.60, fmt: v => (v * 100).toFixed(0) + ' %' },
+  { key: 'b',     label: { zh: '净赔率 <i>b</i>',     en: 'Net odds <i>b</i>' },         min: 0.5,  max: 3,    step: 0.05, value: 1,    fmt: v => fmt(v) + ' : 1' },
+  { key: 'f',     label: { zh: '你的下注比例 <i>f</i>', en: 'Your bet fraction <i>f</i>' }, min: 0,    max: 0.95, step: 0.01, value: 0.25, fmt: v => (v * 100).toFixed(0) + ' %' },
+  { key: 'omega', label: { zh: '下注节奏 <i>ω</i>',   en: 'Betting pace <i>ω</i>' },     min: 0.5,  max: 5,    step: 0.1,  value: 2,    fmt: v => fmt(v, 1) + t({ zh: ' 局/s', en: ' bets/s' }) }
+];
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ② 场景注册 —— 每个键就是一个页签                           ║
+   ║  必填：label / brand / tips / views(首项即"立体"，双击回正)  ║
+   ║        toggles(曲线按 rose→violet→emerald→orange 取色)     ║
+   ║        draw(C) / readout()                                ║
+   ║  可选：sampleWindow() 历史滑窗秒数 · views[x].onSelect 联动 ║
+   ╚══════════════════════════════════════════════════════════╝ */
+/* ────── 场景级：凯利数学与绘图助手（引擎之上，引擎零改动） ────── */
+const V_FLOW = 0.6;    // 财富曲线沿 t 轴流出速度（单位/s）
+const XS = 2.0;        // 下注比例 f∈[0,1] → 世界 x∈[0,XS]
+const YS = 15;         // 增长率 g 的 y 放大倍数
+const G_CLIP = 0.13;   // 增长率显示裁剪：|g| > G_CLIP 截断（§6 裁剪约定）
+const YW = 0.8;        // ln W 的 y 缩放
+const W_CLIP = 2.3;    // ln W 显示裁剪
+const ZB = 3.2;        // 山脉切片：赔率 b 每 1 → z 方向 3.2 单位
+
+const kellyF = (p, b) => Math.max(0, p - (1 - p) / b);
+const growth = (f, p, b) => p * Math.log(1 + b * f) + (1 - p) * Math.log(1 - Math.min(f, 0.999999));
+
+/* 峰值右侧 g(f)=0 的根 f₀（f* > 0 时存在且唯一） */
+function zeroGrowth(p, b) {
+  const fs = kellyF(p, b);
+  if (fs <= 0) return 0;
+  let lo = fs, hi = 0.999999;
+  for (let i = 0; i < 50; i++) {
+    const mid = (lo + hi) / 2;
+    if (growth(mid, p, b) > 0) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+/* g(f) 曲线折线点：|g| 超出显示窗即断线（§6：裁剪 + null 断点），z 为所在切片深度 */
+function growthPts(p, b, z) {
+  const pts = [];
+  let out = false;
+  for (let i = 0; i <= 200; i++) {
+    const f = i / 200;
+    const g = growth(f, p, b);
+    if (g < -G_CLIP) break;                 // 峰后跌出下缘：曲线到此为止（渐近线接力）
+    if (g > G_CLIP) {                       // 峰顶高出上缘：断开，越过后再接回
+      if (!out) { pts.push(null); out = true; }
+      continue;
+    }
+    out = false;
+    pts.push([f * XS, g * YS, z]);
+  }
+  return pts;
+}
+
+/* 「增长率之山」的 f·g 坐标轴（f 只有正半轴，刻度是 g 的真值） */
+function drawKellyAxes(C) {
+  const gTop = G_CLIP * YS;
+  line3(C, [-0.15, 0, 0], [XS + 0.35, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [XS + 0.35, 0, 0], [XS + 0.15, 0, 0], AXIS);
+  label3(C, [XS + 0.55, 0, 0], 'f', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  for (let i = 1; i <= 4; i++) {
+    const fv = i / 4;
+    line3(C, [fv * XS, -0.05, 0], [fv * XS, 0.05, 0], { width: 1.2, color: AXIS_DIM });
+    label3(C, [fv * XS, -0.24, 0], fv.toFixed(2), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+  }
+  line3(C, [0, -gTop - 0.2, 0], [0, gTop + 0.4, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, gTop + 0.4, 0], [0, gTop + 0.2, 0], AXIS);
+  label3(C, [0, gTop + 0.64, 0], 'g', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  for (const gv of [0.10, 0.05, -0.05, -0.10]) {
+    line3(C, [-0.04, gv * YS, 0], [0.04, gv * YS, 0], { width: 1.2, color: AXIS_DIM });
+    label3(C, [-0.11, gv * YS, 0], (gv < 0 ? '−' : '') + Math.abs(gv).toFixed(2),
+      { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+  }
+}
+
+/* 财富竞赛的四位选手（enable 顺序 rose → violet → emerald → orange） */
+const RACERS = [
+  { key: 'you',   tg: 'showYou',   c: '#fb7185', cA: 'rgba(251,113,133,1)', cM: 'rgba(251,113,133,0.85)', cF: 'rgba(251,113,133,0.05)', name: { zh: '你', en: 'You' } },
+  { key: 'half',  tg: 'showHalf',  c: '#a78bfa', cA: 'rgba(167,139,250,1)', cM: 'rgba(167,139,250,0.85)', cF: 'rgba(167,139,250,0.05)', name: { zh: '½f*', en: '½f*' } },
+  { key: 'kelly', tg: 'showKelly', c: '#34d399', cA: 'rgba(52,211,153,1)',  cM: 'rgba(52,211,153,0.85)',  cF: 'rgba(52,211,153,0.05)',  name: { zh: 'f*', en: 'f*' } },
+  { key: 'twok',  tg: 'showTwok',  c: '#fb923c', cA: 'rgba(251,146,60,1)',  cM: 'rgba(251,146,60,0.85)',  cF: 'rgba(251,146,60,0.05)',  name: { zh: '2f*', en: '2f*' } }
+];
+
+const SCENES = {
+
+  /* ────── 场景一：增长率之山 ────── */
+  mountain: {
+    label: { zh: '增长率之山', en: 'Growth mountain' },
+    brand: { zh: '算术期望随下注比例一路上扬，长期复利增长率却是一座有峰的山——峰顶 f* = p − q/b 就是凯利公式。拖动胜率与赔率，旋转看山脊。',
+             en: 'Expected value climbs forever with bet size, but long-run compound growth is a mountain with a peak — and the peak, f* = p − q/b, is the Kelly criterion. Drag the sliders and rotate to see the ridge.' },
+    tips: { zh: '提示：切到「正视 f·g」——期望直线冲出画面时，增长率早已越过山峰掉头向下；再切「俯视 山脊」从上往下看 f–b 平面，翠绿虚线弯出的正是公式 f* = p − q/b。',
+            en: 'Tip: switch to "Front f·g" — while the expectation line shoots off screen, growth has already crested and turned down; then try "Top: ridge" to look down on the f–b plane, where the emerald dashed curve is exactly f* = p − q/b.' },
+    views: {
+      iso:   { label: { zh: '立体',      en: '3D' },            az: -0.75,      el: 0.32, dist: 9.5, tx: 0.8, ty: -0.3, tz: 2.2 },
+      front: { label: { zh: '正视 f·g',  en: 'Front f·g' },     az: 0.001,      el: 0.02, dist: 7,   tx: 1.0, ty: -0.2, tz: 0 },
+      ridge: { label: { zh: '俯视 山脊', en: 'Top: ridge' },    az: 0.15,       el: 1.0,  dist: 12.5, tx: 1.0, ty: -0.2, tz: 2.4,
+               onSelect: () => { state.showRidge = true; document.querySelectorAll('input[data-key="showRidge"]').forEach(o => { o.checked = true; }); } }
+    },
+    toggles: [
+      { key: 'showG',     label: { zh: '增长率 <i>g</i>(<i>f</i>)', en: 'Growth <i>g</i>(<i>f</i>)' },        color: '#fb7185', checked: true },
+      { key: 'showE',     label: { zh: '期望 <i>E</i>(<i>f</i>)',   en: 'Expectation <i>E</i>(<i>f</i>)' },   color: '#a78bfa', checked: true },
+      { key: 'showRidge', label: { zh: '山脊线 <i>f</i>*(<i>b</i>)', en: 'Ridge <i>f</i>*(<i>b</i>)' },       color: '#34d399', checked: false },
+      { key: 'showMont',  label: { zh: '山脉切片', en: 'Mountain slices' },                                   color: '#cbd5e1', checked: true },
+      { key: 'showGuides', label: { zh: '标注辅助', en: 'Annotations' },                                      color: '#fbbf24', checked: true },
+      { key: 'showGrid',  label: { zh: '网格', en: 'Grid' },                                                  color: '#64748b', checked: false }
+    ],
+    sampleWindow: () => WAVE_LEN / V_FLOW + 0.5,
+    draw(C) {
+      const p = state.p, b = state.b;
+      const gTop = G_CLIP * YS;
+      if (state.showGrid) drawGridXY(C, 2, 0.5);
+      drawKellyAxes(C);
+
+      /* 山脉切片：其他赔率 b 的 g 曲线（幽灵），当前切片永远在 z=0 */
+      if (state.showMont) {
+        for (let bs = 0.5; bs <= 3.001; bs += 0.25) {
+          if (Math.abs(bs - b) < 0.124) continue;
+          strokePoly(C, growthPts(p, bs, (bs - b) * ZB), { width: 1, color: 'rgba(203,213,225,0.15)' });
+        }
+      }
+
+      /* 山脊线：峰顶连线（超出显示窗即断）+ 地面投影（f–b 平面里的公式曲线，俯视看） */
+      if (state.showRidge) {
+        const crest = [], ground = [];
+        let out = false;
+        for (let bs = 0.5; bs <= 3.001; bs += 0.05) {
+          const fsb = kellyF(p, bs);
+          const gpk = fsb > 0 ? growth(fsb, p, bs) : 0;
+          const z = (bs - b) * ZB;
+          ground.push([fsb * XS, 0, z]);
+          if (gpk > G_CLIP) {
+            if (!out) { crest.push(null); out = true; }
+          } else {
+            out = false;
+            crest.push([fsb * XS, gpk * YS, z]);
+          }
+        }
+        strokePoly(C, crest, { width: 5, color: 'rgba(52,211,153,0.15)' });
+        strokePoly(C, crest, { width: 2, color: 'rgba(52,211,153,0.9)' });
+        strokePoly(C, ground, { width: 1.4, dash: [6, 6], color: 'rgba(52,211,153,0.55)' });
+        label3(C, ground[Math.floor(ground.length * 0.72)], 'f* = p − q/b',
+          { font: 'italic 12px ' + FONT_MATH, color: '#34d399', align: 'left', dx: 12 });
+      }
+
+      /* 期望参照线 E(f) = f·(bp − q)：线性，永远上扬（虚线参照） */
+      if (state.showE) {
+        const edge = b * p - (1 - p);
+        const fEnd = edge !== 0 ? Math.min(1, G_CLIP / Math.abs(edge)) : 1;
+        line3(C, [0, 0, 0], [fEnd * XS, fEnd * edge * YS, 0],
+          { width: 1.6, dash: [6, 6], color: 'rgba(167,139,250,0.85)' });
+        label3(C, [fEnd * 0.62 * XS, fEnd * 0.62 * edge * YS, 0], 'E(f) = f·(bp − q)',
+          { font: 'italic 12px ' + FONT_MATH, color: '#a78bfa', align: 'left', dx: 10 });
+      }
+
+      /* 主角：当前赔率的增长率曲线 g(f)（玫红，柔光衬底） */
+      if (state.showG) {
+        const pts = growthPts(p, b, 0);
+        strokePoly(C, pts, { width: 6, color: 'rgba(251,113,133,0.14)' });
+        strokePoly(C, pts, { width: 2.4, color: 'rgba(251,113,133,0.95)' });
+        label3(C, [1.15 * XS, -gTop * 0.62, 0], 'g(f) = p·ln(1+bf) + q·ln(1−f)',
+          { font: 'italic 12px ' + FONT_MATH, color: '#fb7185', align: 'left' });
+      }
+
+      /* f = 1 渐近线：g → −∞（§6 奇点约定） */
+      line3(C, [XS, -gTop, 0], [XS, gTop * 0.5, 0], { width: 1, dash: [5, 6], color: 'rgba(159,176,200,0.4)' });
+      label3(C, [XS, -gTop - 0.28, 0], '−∞', { font: 'italic 14px ' + FONT_MATH, color: 'rgba(251,113,133,0.8)', align: 'center' });
+
+      /* 琥珀标注：峰顶 f*、零增长点 f₀，以及你的 f 光点 */
+      if (state.showGuides) {
+        const fs = kellyF(p, b);
+        if (fs > 0.005) {
+          const gpk = growth(fs, p, b);
+          line3(C, [fs * XS, 0, 0], [fs * XS, gpk * YS, 0], { width: 1.4, dash: [5, 5], color: 'rgba(251,191,36,0.75)' });
+          const pk = proj(C, [fs * XS, gpk * YS, 0]);
+          if (pk) glowDot(pk, 10, '#ffffff', 'rgba(251,191,36,0.9)');
+          label3(C, [fs * XS, gpk * YS + 0.3, 0], 'f*', { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+          const f0 = zeroGrowth(p, b);
+          line3(C, [f0 * XS, -0.09, 0], [f0 * XS, 0.09, 0], { width: 1.6, color: 'rgba(251,191,36,0.9)' });
+          label3(C, [f0 * XS, 0.3, 0], 'f₀', { font: 'italic 12px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+        }
+        const gy = growth(state.f, p, b);
+        if (gy > -G_CLIP) {
+          line3(C, [state.f * XS, 0, 0], [state.f * XS, gy * YS, 0], { width: 1.2, dash: [3, 5], color: 'rgba(251,113,133,0.5)' });
+          const sp = proj(C, [state.f * XS, gy * YS, 0]);
+          if (sp) glowDot(sp, 13, '#ffffff', 'rgba(186,240,255,0.9)');
+        } else {
+          const sp = proj(C, [state.f * XS, -G_CLIP * YS, 0]);
+          if (sp) glowDot(sp, 9, '#ffffff', 'rgba(251,113,133,0.6)');
+        }
+      }
+    },
+    readout() {
+      const p = state.p, b = state.b, f = state.f;
+      const fs = kellyF(p, b);
+      const gy = growth(f, p, b), gs = fs > 0 ? growth(fs, p, b) : 0;
+      const f0 = zeroGrowth(p, b);
+      const warn = fs <= 0 ? { zh: '无优势，任何下注长期必亏', en: 'no edge — any bet loses long-run' }
+                 : (f > f0 ? { zh: '已越过 f₀，长期必亏', en: 'past f₀ — sure long-run loss' } : null);
+      return '<div>f* = p − q/b = <b>' + fs.toFixed(3) + '</b>&ensp;·&ensp;g(f*) = <b>' + fmtS(gs, 4) + '</b></div>' +
+        '<div class="sinC">g(' + t({ zh: '你的', en: 'your' }) + ' f = ' + f.toFixed(2) + ') = <b>' + fmtS(gy, 4) + '</b></div>' +
+        '<div class="dim">f₀ (' + t({ zh: '零增长', en: 'zero growth' }) + ') = ' + (fs > 0 ? f0.toFixed(3) : '—') +
+        (warn ? '&ensp;·&ensp;' + t(warn) : '') + '</div>';
+    }
+  },
+
+  /* ────── 场景二：财富竞赛 ────── */
+  race: {
+    label: { zh: '财富竞赛', en: 'Wealth race' },
+    brand: { zh: '四种策略同赌同一串胜负：半凯利、凯利、双倍凯利，以及你自选的比例。财富的对数随时间流出——看谁真正跑得快。',
+             en: 'Four strategies bet on the same coin flips: half Kelly, Kelly, double Kelly, and your own fraction. Log wealth streams out over time — watch who actually wins.' },
+    tips: { zh: '提示：切到「侧视 y·t」多看几十局——双倍凯利押得比凯利多一倍，长期却在原地踏步（g(2f*) ≈ 0）；把你的 f 拖过 f₀，曲线必然向下。按 R 重开一局。',
+            en: 'Tip: go to "Side y·t" and let a few dozen rounds run — double Kelly bets twice as much yet goes nowhere long-run (g(2f*) ≈ 0); drag your f past f₀ and your curve must sink. Press R to rerun.' },
+    views: {
+      iso:  { label: { zh: '立体',     en: '3D' },       az: -0.95,      el: 0.30,  dist: 11,   tx: 0, ty: 0, tz: 2.8 },
+      side: { label: { zh: '侧视 y·t', en: 'Side y·t' }, az: -Math.PI/2, el: 0.001, dist: 11.5, tx: 0, ty: 0, tz: 3.4 }
+    },
+    toggles: [
+      { key: 'showYou',   label: { zh: '你的 <i>f</i>',    en: 'Your <i>f</i>' },      color: '#fb7185', checked: true },
+      { key: 'showHalf',  label: { zh: '半凯利 <i>f</i>*/2', en: 'Half Kelly <i>f</i>*/2' }, color: '#a78bfa', checked: true },
+      { key: 'showKelly', label: { zh: '凯利 <i>f</i>*',   en: 'Kelly <i>f</i>*' },    color: '#34d399', checked: true },
+      { key: 'showTwok',  label: { zh: '双倍 2<i>f</i>*',  en: 'Double 2<i>f</i>*' },  color: '#fb923c', checked: true },
+      { key: 'showGrid',  label: { zh: '网格', en: 'Grid' },                           color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => WAVE_LEN / V_FLOW + 0.5,
+    draw(C) {
+      if (state.showGrid) drawTimeGrid(C, { yMax: 2, v: V_FLOW });
+      drawAxes(C, { ex: 0.4, ey: 2.4, yTicks: [], xTicks: [], tAxis: true, v: V_FLOW });
+
+      /* y 轴刻度是 ln W 的真值 */
+      for (const k of [2, 1, -1, -2]) {
+        const yv = k * YW;
+        line3(C, [-0.05, yv, 0], [0.05, yv, 0], { width: 1.2, color: AXIS_DIM });
+        label3(C, [-0.13, yv, 0], (k < 0 ? '−' : '') + Math.abs(k), { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+      }
+      label3(C, [0, 2.4, 0], 'ln W', { font: 'italic 13px ' + FONT_MATH, color: '#c4d2e6', align: 'left', dx: 16, dy: 4 });
+
+      /* 四条财富曲线：由新到旧沿 t 轴流出，头亮尾隐 */
+      for (const r of RACERS) {
+        if (!state[r.tg] || samples.length < 2) continue;
+        const pts = [];
+        for (let i = samples.length - 1; i >= 0; i--) {
+          const s = samples[i];
+          const z = (state.t - s.t) * V_FLOW;
+          if (z > WAVE_LEN) break;
+          pts.push([0, clamp(s[r.key] * YW, -W_CLIP, W_CLIP), z]);
+        }
+        if (pts.length < 2) continue;
+        strokePoly(C, pts, { width: 5, color: r.cF.replace('0.05', '0.10') });
+        strokePoly(C, pts, { width: 2.1, fade: [r.cA, r.cF] });
+        const yHead = pts[0][1];
+        const hp = proj(C, [0, yHead, 0]);
+        if (hp) glowDot(hp, 9, '#ffffff', r.cM);
+        const W = Math.exp(samples[samples.length - 1][r.key]);
+        const wTxt = W > 999 ? '∞' : (W < 0.01 ? '≈0' : W.toFixed(2));
+        label3(C, [0, yHead, 0], t(r.name) + ' ×' + wTxt,
+          { font: 'italic 11px ' + FONT_MATH, color: r.c, align: 'left', dx: 10, dy: -2 });
+      }
+    },
+    readout() {
+      const n = sim.flips.length;
+      const fs = Math.min(0.95, kellyF(state.p, state.b));
+      const wf = k => { const W = Math.exp(sim.lw[k]); return W > 999 ? '∞' : (W < 0.01 ? '≈0' : W.toFixed(2)); };
+      return '<div>' + t({ zh: '第 ', en: 'Round ' }) + '<b>' + n + '</b>' + t({ zh: ' 局', en: '' }) +
+        '&ensp;·&ensp;f* = <b>' + fs.toFixed(2) + '</b></div>' +
+        '<div class="sinC">' + t({ zh: '你的', en: 'your' }) + ' f = ' + (state.f * 100).toFixed(0) + '% · W = <b>×' + wf('you') + '</b></div>' +
+        '<div class="cosC">½f* · W = <b>×' + wf('half') + '</b></div>' +
+        '<div class="tanC">f* · W = <b>×' + wf('kelly') + '</b></div>' +
+        '<div class="cotC">2f* · W = <b>×' + wf('twok') + '</b></div>';
+    }
+  }
+};
+
+/* ================= 常量与状态（引擎区，以下一般无需改动） ================= */
+const TAU = Math.PI * 2;
+const WAVE_LEN = 8;      // t 轴的世界长度（可视窗口）
+const NEAR = 0.15;       // 近裁剪面
+
+const FONT_CN = 'ui-sans-serif,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif';
+const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
+
+const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
+const samples = [];
+let curTab = null;
+const RELABEL = [];
+const cams = {};
+let cam = null;
+let tween = null;
+const lastView = {};
+const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ③ 采样 —— 按你的工具需要扩展字段                           ║
+   ║  原则：记录"当时的真实值"，参数中途改变时历史不重算            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+/* 模拟状态：θ 是下注时钟（θ 每 +1 结算一局）；θ 回退（重置）即重开一局换随机数 */
+const sim = { last: -1, flips: [], lw: { you: 0, half: 0, kelly: 0, twok: 0 } };
+
+function pushSample() {
+  if (state.theta < sim.last) {
+    sim.flips.length = 0;
+    sim.lw = { you: 0, half: 0, kelly: 0, twok: 0 };
+  }
+  sim.last = state.theta;
+
+  /* 结算到第 n 局：四种策略共用同一枚硬币，用「当时的真实参数」下注（历史不重算） */
+  const n = Math.floor(state.theta);
+  while (sim.flips.length < n) {
+    const p = state.p, b = state.b;
+    const win = Math.random() < p;
+    sim.flips.push(win);
+    const fs = Math.min(0.95, kellyF(p, b));
+    const bet = (key, frac) => {
+      const fx = clamp(frac, 0, 0.95);
+      sim.lw[key] += win ? Math.log(1 + b * fx) : Math.log(1 - fx);
+    };
+    bet('you', state.f); bet('half', fs / 2); bet('kelly', fs); bet('twok', 2 * fs);
+  }
+
+  samples.push({ t: state.t, you: sim.lw.you, half: sim.lw.half, kelly: sim.lw.kelly, twok: sim.lw.twok });
+}
+
+/* ================= 画布 ================= */
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = 1, FOCAL = 900, CX = 0, CY = 0, bgGrad = null;
+
+function resize() {
+  DPR = Math.min(2.5, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  CX = W / 2; CY = H / 2;
+  FOCAL = 1.2 * Math.min(H, W * 1.1);
+  bgGrad = ctx.createRadialGradient(W*0.5, H*0.3, 0, W*0.5, H*0.42, Math.max(W, H)*0.95);
+  bgGrad.addColorStop(0, '#0c1526');
+  bgGrad.addColorStop(1, '#05070d');
+}
+window.addEventListener('resize', resize);
+
+/* ================= 基础数学 ================= */
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const mod2pi = a => { a %= TAU; if (a < 0) a += TAU; return a; };
+const wrapPI = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
+const ease = k => k < 0.5 ? 4*k*k*k : 1 - Math.pow(-2*k + 2, 3) / 2;
+const fmt = (x, d = 2) => x.toFixed(d);
+const fmtS = (x, d = 2) => (x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
+
+const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+const dot3 = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+
+/* ================= 轨道相机与投影 ================= */
+function makeCam() {
+  const cp = Math.cos(cam.el), sp = Math.sin(cam.el);
+  const eye = [
+    cam.tx + cam.dist * cp * Math.sin(cam.az),
+    cam.ty + cam.dist * sp,
+    cam.tz + cam.dist * cp * Math.cos(cam.az)
+  ];
+  const f = norm(sub([cam.tx, cam.ty, cam.tz], eye));
+  const r = norm(cross(f, [0, 1, 0]));
+  const u = cross(r, f);
+  return { eye, f, r, u };
+}
+function camPt(C, p) {
+  const d = sub(p, C.eye);
+  return [dot3(d, C.r), dot3(d, C.u), dot3(d, C.f)];
+}
+function scr(c) { const s = FOCAL / c[2]; return [CX + c[0]*s, CY - c[1]*s]; }
+function proj(C, p) { const c = camPt(C, p); return c[2] < NEAR ? null : scr(c); }
+function clipNear(a, b) {
+  const t = (NEAR - a[2]) / (b[2] - a[2]);
+  return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, NEAR];
+}
+
+/* 折线路径（支持 null 断点 + 近平面裁剪）；返回 [首点, 末点] 屏幕坐标 */
+function polyPath(C, pts) {
+  if (pts.length < 2) return null;
+  let head = null, tail = null, contin = false, prev = null;
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    const P = pts[i];
+    if (P === null) { prev = null; contin = false; continue; }
+    const cur = camPt(C, P);
+    if (prev !== null) {
+      let a = prev, b = cur;
+      const av = a[2] >= NEAR, bv = b[2] >= NEAR;
+      if (av || bv) {
+        if (!av) a = clipNear(a, b);
+        if (!bv) b = clipNear(b, a);
+        const sA = scr(a), sB = scr(b);
+        if (!contin) ctx.moveTo(sA[0], sA[1]);
+        ctx.lineTo(sB[0], sB[1]);
+        if (!head) head = sA;
+        tail = sB;
+        contin = bv;
+      } else {
+        contin = false;
+      }
+    }
+    prev = cur;
+  }
+  return head ? [head, tail] : null;
+}
+
+function strokePoly(C, pts, o) {
+  const ht = polyPath(C, pts);
+  if (!ht) return;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = o.width || 2;
+  if (o.alpha != null) ctx.globalAlpha = o.alpha;
+  if (o.dash) ctx.setLineDash(o.dash);
+  if (o.fade) {
+    const h = ht[0], t = ht[1];
+    if (Math.hypot(t[0]-h[0], t[1]-h[1]) < 2) {
+      ctx.strokeStyle = o.fade[0];
+    } else {
+      const g = ctx.createLinearGradient(h[0], h[1], t[0], t[1]);
+      g.addColorStop(0, o.fade[0]);
+      g.addColorStop(1, o.fade[1]);
+      ctx.strokeStyle = g;
+    }
+  } else {
+    ctx.strokeStyle = o.color;
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+const line3 = (C, a, b, o) => strokePoly(C, [a, b], o);
+
+function glowDot(s, r, core, mid) {
+  const g = ctx.createRadialGradient(s[0], s[1], 0, s[0], s[1], r);
+  g.addColorStop(0, core);
+  g.addColorStop(0.35, mid);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+function solidDot(C, p, r, color) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+
+function label3(C, p, text, o) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.save();
+  ctx.font = o.font || ((o.size || 12) + 'px ' + FONT_CN);
+  ctx.fillStyle = o.color || '#c4d2e6';
+  ctx.textAlign = o.align || 'left';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(3,6,12,.85)';
+  ctx.shadowBlur = 4;
+  ctx.fillText(text, s[0] + (o.dx || 0), s[1] + (o.dy || 0));
+  ctx.restore();
+}
+
+function arrowAt(C, tip3, before3, color) {
+  const t = proj(C, tip3), b = proj(C, before3);
+  if (!t || !b) return;
+  const a = Math.atan2(t[1]-b[1], t[0]-b[0]);
+  const L = 9;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.4;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a-0.42), t[1]-L*Math.sin(a-0.42));
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a+0.42), t[1]-L*Math.sin(a+0.42));
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* ================= 常用场景部件 ================= */
+const AXIS = 'rgba(159,176,200,0.9)';
+const AXIS_DIM = 'rgba(159,176,200,0.5)';
+
+/* 坐标轴：o = { ex, ey, yTicks:[], xTicks:[], tAxis:bool, v(秒刻度间距的波速) } */
+function drawAxes(C, o) {
+  const ex = o.ex, ey = o.ey;
+  line3(C, [-ex, 0, 0], [ex, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [ex, 0, 0], [ex - 0.2, 0, 0], AXIS);
+  label3(C, [ex + 0.22, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  line3(C, [0, -ey, 0], [0, ey, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, ey, 0], [0, ey - 0.2, 0], AXIS);
+  label3(C, [0, ey + 0.18, 0], 'y', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  if (o.tAxis) {
+    line3(C, [0, 0, 0], [0, 0, WAVE_LEN + 0.5], { width: 1.4, color: AXIS });
+    arrowAt(C, [0, 0, WAVE_LEN + 0.5], [0, 0, WAVE_LEN + 0.3], AXIS);
+    label3(C, [0, 0, WAVE_LEN + 0.9], 't', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+    const v = o.v || 1;
+    const every = v < 0.8 ? 2 : 1;
+    for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+      line3(C, [0, -0.06, k*v], [0, 0.06, k*v], { width: 1.2, color: AXIS_DIM });
+      if (k % every === 0) {
+        label3(C, [0, -0.25, k*v], k + 's', { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+      }
+    }
+  }
+  for (const k of (o.yTicks || [])) {
+    for (const yv of [k, -k]) {
+      line3(C, [-0.05, yv, 0], [0.05, yv, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [-0.13, yv, 0], (yv < 0 ? '−' : '') + Math.abs(yv), { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+    }
+  }
+  for (const k of (o.xTicks || [])) {
+    for (const xv of [k, -k]) {
+      line3(C, [xv, -0.05, 0], [xv, 0.05, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [xv, -0.24, 0], (xv < 0 ? '−' : '') + Math.abs(xv), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+    }
+  }
+}
+
+/* z=0 平面方格网格（几何类场景） */
+function drawGridXY(C, g, step) {
+  const n = Math.round(g / step);
+  for (let i = -n; i <= n; i++) {
+    if (i === 0) continue;
+    const u = i * step;
+    line3(C, [u, -g, 0], [u, g, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+    line3(C, [-g, u, 0], [g, u, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+  }
+}
+
+/* y–t 时间平面网格（流式波形类场景）：o = { yMax, v } */
+function drawTimeGrid(C, o) {
+  const g = o.yMax, v = o.v;
+  for (let i = Math.round(-g*2); i <= Math.round(g*2); i++) {
+    if (i === 0) continue;
+    line3(C, [0, i/2, 0], [0, i/2, WAVE_LEN], { width: 1, color: 'rgba(148,163,184,0.10)' });
+  }
+  for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+    line3(C, [0, -g, k*v], [0, g, k*v], { width: 1, color: 'rgba(148,163,184,0.07)' });
+  }
+}
+
+/* 周期标尺（琥珀）：在平面 x=px、高度 yb 处，从 z=0 画到 z=T·v */
+function drawPeriodBracket(C, Tsec, v, px, yb, text) {
+  const zT = Tsec * v;
+  if (zT > WAVE_LEN + 0.01) return;
+  const amber = 'rgba(251,191,36,0.75)';
+  line3(C, [px, yb, 0], [px, yb, zT], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, 0], [px, yb + 0.06, 0], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, zT], [px, yb + 0.06, zT], { width: 1.2, color: amber });
+  label3(C, [px, yb - 0.2, zT/2], text, { size: 10.5, color: 'rgba(251,191,36,.9)', align: 'center' });
+}
+
+/* 单位圆（半径 A，位于 z=0 平面，青色源几何） */
+function drawCircle(C, A) {
+  const cpts = [];
+  for (let i = 0; i <= 72; i++) {
+    const a = i / 72 * TAU;
+    cpts.push([A * Math.cos(a), A * Math.sin(a), 0]);
+  }
+  strokePoly(C, cpts, { width: 6, color: 'rgba(45,212,234,0.13)' });
+  strokePoly(C, cpts, { width: 2, color: 'rgba(45,212,234,0.95)' });
+  for (let q = 0; q < 4; q++) {
+    const a = q * Math.PI / 2;
+    line3(C, [A*0.95*Math.cos(a), A*0.95*Math.sin(a), 0],
+             [A*1.06*Math.cos(a), A*1.06*Math.sin(a), 0],
+             { width: 1, color: 'rgba(45,212,234,0.5)' });
+  }
+  solidDot(C, [0, 0, 0], 2.2, 'rgba(159,176,200,0.9)');
+}
+
+/* 角度弧 θ（琥珀度量注记） */
+function drawAngleArc(C, th, A) {
+  const thm = mod2pi(th);
+  if (thm <= 0.03) return;
+  const r0 = Math.max(0.14, Math.min(0.34, 0.5 * A));
+  const n = Math.max(2, Math.ceil(thm / 0.06));
+  const apts = [];
+  for (let j = 0; j <= n; j++) {
+    const a = thm * j / n;
+    apts.push([r0 * Math.cos(a), r0 * Math.sin(a), 0]);
+  }
+  strokePoly(C, apts, { width: 1.6, color: 'rgba(251,191,36,0.9)' });
+  label3(C, [(r0 + 0.15) * Math.cos(thm/2), (r0 + 0.15) * Math.sin(thm/2), 0], 'θ',
+    { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+}
+
+/* 读数区固定首两行 */
+function readoutHead() {
+  const th = state.theta;
+  const deg = (mod2pi(th) * 180 / Math.PI).toFixed(0);
+  const lap = fmt(th / TAU);
+  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;θ = ωt = <b>' + fmt(th) + '</b> rad</div>' +
+         '<div class="dim">' + t({ zh: '≡ ' + deg + '°（第 ' + lap + ' 圈）', en: '≡ ' + deg + '° (turn ' + lap + ')' }) + '</div>';
+}
+
+/* ================= 主绘制与主循环 ================= */
+function draw() {
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+  const C = makeCam();
+  SCENES[curTab].draw(C);
+}
+
+function resetSim() {
+  state.t = 0;
+  state.theta = 0;
+  samples.length = 0;
+  pushSample();
+}
+
+let lastTs = performance.now(), lastRO = 0;
+function frame(ts) {
+  const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
+  lastTs = ts;
+
+  if (tween) {
+    const k = Math.min(1, (ts - tween.t0) / tween.dur);
+    const e = ease(k);
+    const f = tween.from, o = tween.to;
+    cam.az = f.az + wrapPI(o.az - f.az) * e;
+    cam.el = f.el + (o.el - f.el) * e;
+    cam.dist = f.dist + (o.dist - f.dist) * e;
+    cam.tx = f.tx + (o.tx - f.tx) * e;
+    cam.ty = f.ty + (o.ty - f.ty) * e;
+    cam.tz = f.tz + (o.tz - f.tz) * e;
+    if (k >= 1) tween = null;
+  }
+
+  if (state.running) {
+    state.t += dt;
+    state.theta += state.omega * dt;
+    pushSample();
+  }
+  const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
+  while (samples.length && samples[0].t < state.t - windowSec) samples.shift();
+
+  draw();
+  if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
+  requestAnimationFrame(frame);
+}
+
+const roEl = document.getElementById('readout');
+function updateReadout() { roEl.innerHTML = SCENES[curTab].readout(); }
+
+/* ================= UI 生成（由 ①② 声明驱动） ================= */
+function buildParams() {
+  const host = document.getElementById('paramsHost');
+  PARAMS.forEach(p => {
+    const wrap = document.createElement('div');
+    wrap.className = 'ctl';
+    wrap.innerHTML = '<div class="top"><label></label><span class="val"></span></div>';
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
+    const val = wrap.querySelector('.val');
+    const upd = () => {
+      const raw = parseFloat(input.value);
+      state[p.key] = p.map ? p.map(raw) : raw;
+      val.textContent = p.fmt(raw);
+    };
+    input.addEventListener('input', upd);
+    wrap.appendChild(input);
+    host.appendChild(wrap);
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+function buildToggles() {
+  const host = document.getElementById('togglesHost');
+  Object.keys(SCENES).forEach(id => {
+    const grp = document.createElement('div');
+    grp.className = 'toggles';
+    grp.dataset.tab = id;
+    SCENES[id].toggles.forEach(tg => {
+      if (!(tg.key in state)) state[tg.key] = tg.checked;
+      const lab = document.createElement('label');
+      lab.className = 'tg';
+      lab.innerHTML = '<input type="checkbox" data-key="' + tg.key + '"' + (state[tg.key] ? ' checked' : '') + '>' +
+        '<i class="dot" style="--c:' + tg.color + '"></i><span class="tgl"></span>';
+      const cb = lab.querySelector('input');
+      cb.addEventListener('change', () => {
+        state[tg.key] = cb.checked;
+        document.querySelectorAll('input[data-key="' + tg.key + '"]').forEach(o => { o.checked = cb.checked; });
+      });
+      const relabel = () => { lab.querySelector('.tgl').innerHTML = t(tg.label); };
+      RELABEL.push(relabel);
+      relabel();
+      grp.appendChild(lab);
+    });
+    host.appendChild(grp);
+  });
+}
+
+function buildViews() {
+  const host = document.getElementById('viewsHost');
+  Object.keys(SCENES).forEach(id => {
+    const row = document.createElement('div');
+    row.className = 'views';
+    row.dataset.tab = id;
+    const lab = document.createElement('span');
+    lab.className = 'vlabel';
+    row.appendChild(lab);
+    const labRelabel = () => { lab.textContent = t(UI.views); };
+    RELABEL.push(labRelabel);
+    labRelabel();
+    Object.keys(SCENES[id].views).forEach(name => {
+      const b = document.createElement('button');
+      b.className = 'btn vbtn';
+      b.dataset.view = name;
+      b.addEventListener('click', () => applyView(name));
+      row.appendChild(b);
+      const relabel = () => { b.textContent = t(SCENES[id].views[name].label); };
+      RELABEL.push(relabel);
+      relabel();
+    });
+    host.appendChild(row);
+  });
+}
+
+function buildTabs() {
+  const nav = document.getElementById('tabsNav');
+  Object.keys(SCENES).forEach(id => {
+    const b = document.createElement('button');
+    b.className = 'tab';
+    b.dataset.tab = id;
+    b.addEventListener('click', () => switchTab(id));
+    nav.appendChild(b);
+    const relabel = () => { b.textContent = t(SCENES[id].label); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+/* ================= 视角与页签 ================= */
+function refreshViewButtons() {
+  document.querySelectorAll('.vbtn').forEach(b => {
+    const row = b.closest('.views');
+    b.classList.toggle('active', row.dataset.tab === curTab && b.dataset.view === lastView[curTab]);
+  });
+}
+function viewDist(d) { return (W < 820 || W < H) ? d * 1.4 : d; }
+function applyView(name) {
+  const vw = SCENES[curTab].views[name];
+  if (!vw) return;
+  if (vw.onSelect) vw.onSelect();   /* 可选联动：如自动开启该视角对应的曲线开关 */
+  tween = {
+    from: { az: cam.az, el: cam.el, dist: cam.dist, tx: cam.tx, ty: cam.ty, tz: cam.tz },
+    to:   { az: vw.az, el: vw.el, dist: viewDist(vw.dist), tx: vw.tx || 0, ty: vw.ty || 0, tz: vw.tz || 0 },
+    t0: performance.now(),
+    dur: REDUCED ? 1 : 750
+  };
+  lastView[curTab] = name;
+  refreshViewButtons();
+}
+
+const brandDesc = document.getElementById('brandDesc');
+const tipsEl = document.getElementById('tips');
+function switchTab(id) {
+  if (id === curTab) return;
+  curTab = id;
+  tween = null;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+  document.querySelectorAll('.toggles[data-tab], .views[data-tab]').forEach(el => {
+    el.style.display = el.dataset.tab === id ? '' : 'none';
+  });
+  cam = cams[id];
+  brandDesc.textContent = t(SCENES[id].brand);
+  tipsEl.textContent = t(SCENES[id].tips);
+  refreshViewButtons();
+  updateReadout();
+}
+
+/* ================= 播放 / 重置 / 折叠 ================= */
+const btnPlay = document.getElementById('btnPlay');
+function togglePlay() {
+  state.running = !state.running;
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+}
+btnPlay.addEventListener('click', togglePlay);
+document.getElementById('btnReset').addEventListener('click', resetSim);
+
+const panel = document.getElementById('panel');
+const btnFold = document.getElementById('btnFold');
+btnFold.addEventListener('click', () => {
+  const c = panel.classList.toggle('collapsed');
+  btnFold.textContent = c ? '+' : '−';
+});
+if (window.innerWidth < 760) {
+  panel.classList.add('collapsed');
+  btnFold.textContent = '+';
+}
+
+/* ================= 语言切换 ================= */
+function applyLang() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.title = t(TOOL.title);
+  document.querySelector('.brand h1').textContent = t(TOOL.h1);
+  document.getElementById('panelTitle').textContent = t(UI.panelTitle);
+  document.querySelector('.hint').textContent = t(UI.hint);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+  document.getElementById('btnReset').textContent = t(UI.reset);
+  RELABEL.forEach(f => f());
+  brandDesc.textContent = t(SCENES[curTab].brand);
+  tipsEl.textContent = t(SCENES[curTab].tips);
+  updateReadout();
+}
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('lang', l);
+    history.replaceState(null, '', u);
+  } catch (e) {}
+  applyLang();
+}
+document.getElementById('btnLang').addEventListener('click', () => setLang(LANG === 'zh' ? 'en' : 'zh'));
+document.getElementById('verBadge').textContent = 'v' + VERSION;
+
+/* ================= 交互：旋转 / 平移 / 缩放 ================= */
+const pointers = new Map();
+let pinch = null;
+
+function pan(dx, dy) {
+  const C = makeCam();
+  const s = cam.dist / FOCAL;
+  cam.tx = clamp(cam.tx - C.r[0]*dx*s + C.u[0]*dy*s, -6, 6);
+  cam.ty = clamp(cam.ty - C.r[1]*dx*s + C.u[1]*dy*s, -5, 5);
+  cam.tz = clamp(cam.tz - C.r[2]*dx*s + C.u[2]*dy*s, -3, 11);
+}
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, btn: e.button });
+  tween = null;
+  lastView[curTab] = null;
+  refreshViewButtons();
+  if (pointers.size === 2) {
+    const vs = Array.from(pointers.values());
+    pinch = {
+      gap: Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y),
+      cx: (vs[0].x + vs[1].x) / 2,
+      cy: (vs[0].y + vs[1].y) / 2
+    };
+  }
+  canvas.classList.add('dragging');
+});
+
+canvas.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  p.x = e.clientX;
+  p.y = e.clientY;
+  if (pointers.size === 1) {
+    const panMode = e.shiftKey || (e.buttons & 2) || p.btn === 2 || p.btn === 1;
+    if (panMode) {
+      pan(dx, dy);
+    } else {
+      cam.az -= dx * 0.0055;
+      cam.el = clamp(cam.el + dy * 0.0055, -1.45, 1.53);
+    }
+  } else if (pointers.size === 2 && pinch) {
+    const vs = Array.from(pointers.values());
+    const gap = Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y);
+    const cx = (vs[0].x + vs[1].x) / 2, cy = (vs[0].y + vs[1].y) / 2;
+    if (gap > 1) cam.dist = clamp(cam.dist * pinch.gap / gap, 4.5, 60);
+    pan(cx - pinch.cx, cy - pinch.cy);
+    pinch = { gap: gap, cx: cx, cy: cy };
+  }
+});
+
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+  if (!pointers.size) canvas.classList.remove('dragging');
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  tween = null;
+  cam.dist = clamp(cam.dist * Math.exp(e.deltaY * 0.0012), 4.5, 60);
+}, { passive: false });
+
+canvas.addEventListener('dblclick', () => applyView(Object.keys(SCENES[curTab].views)[0]));
+
+window.addEventListener('keydown', e => {
+  const tg = e.target.tagName;
+  if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || tg === 'BUTTON') return;
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'r' || e.key === 'R') resetSim();
+  else if (e.key === 't' || e.key === 'T') {
+    const keys = Object.keys(SCENES);
+    switchTab(keys[(keys.indexOf(curTab) + 1) % keys.length]);
+  }
+  else if (e.key >= '1' && e.key <= '9') {
+    const names = Object.keys(SCENES[curTab].views);
+    const i = +e.key - 1;
+    if (i < names.length) applyView(names[i]);
+  }
+});
+
+/* ================= 启动 ================= */
+resize();
+buildTabs();
+buildParams();
+buildToggles();
+buildViews();
+Object.keys(SCENES).forEach(id => {
+  const first = Object.keys(SCENES[id].views)[0];
+  const v = SCENES[id].views[first];
+  cams[id] = { az: v.az, el: v.el, dist: viewDist(v.dist), tx: v.tx || 0, ty: v.ty || 0, tz: v.tz || 0 };
+  lastView[id] = first;
+});
+switchTab(Object.keys(SCENES)[0]);
+applyLang();
+resetSim();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
