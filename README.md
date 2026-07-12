@@ -21,6 +21,7 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [圆锥曲线的本质](outputs/conic-essence-3d.html) | Ellipse, parabola, and hyperbola as one cone sliced at continuously changing angles |
 | [凯利公式的本质 · Kelly Criterion](outputs/kelly-essence-3d.html) | Why the optimal bet size is a peak, not "more" — long-run growth crests at f* = p − q/b |
 | [三角恒等式的本质 · Trig Identities](outputs/trig-identity-3d.html) | The whole identity handbook as one machine: angle sums as rotation, reduction formulas as mirrors, the auxiliary angle as vector addition |
+| [导数与微分的本质 · Derivatives](outputs/derivative-essence-3d.html) | Replace curved with flat: secants snapping into tangents, increments splitting into dy + o(Δx), and partial derivatives spanning the tangent plane |
 | [万能代换的本质 · Weierstrass Substitution](outputs/weierstrass-essence-3d.html) | t = tan(x/2) as the slope of a chord from (−1,0): half angles from the inscribed angle theorem, rational points and Pythagorean triples, and why trig integrals rationalize |
 | [反三角函数的本质 · Inverse Trig](outputs/inverse-trig-essence-3d.html) | Retrieving the angle from a value: principal branches on the circle, the y=x mirror with reciprocal slopes, and arcsin(sin θ) folding into a triangle wave |
 | [极限的本质 · Limits](outputs/limit-essence-3d.html) | Order decides everything: infinitesimals under rescaling, series one order apart converging or diverging, and a microscope sorting smooth, kinked, and broken |
