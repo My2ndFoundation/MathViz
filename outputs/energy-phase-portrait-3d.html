@@ -1,0 +1,1399 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="tool-version" content="1.0.0">
+<meta name="engine-version" content="1.0.0">
+<title>能量、势能与相图 · 交互式可视化</title>
+<!-- ============================================================
+  能量、势能与相图 · Energy Landscape & Phase Portrait
+  基于 math-viz-starter.html（STARTER_VERSION 1.0.0）构建
+  设计规范：math-viz-design-system.md（令牌 / 组件 / 绘制语言 / 交互词汇）
+
+  核心顿悟：系统的运动不是任意的，而是沿着能量允许的几何轨道行进——
+  相图轨道就是能量曲面 E(x,v) = ½mv² + V(x) 的一条水平等高线。
+
+  三处改动（①②③）：
+    ① PARAMS      —— 势能形状 / 初始位置 x₀ / 初始速度 v₀ / 质量 m / 阻尼 γ / 展开速度
+    ② SCENES      —— 势能景观 / 能量曲面 / 相图 三个页签
+    ③ pushSample  —— 每帧 RK4 积分 x″ = −V′(x)/m − γx′ 并记录 (t, x, v, E, V) 真实值
+
+  版本记录（changelog，新→旧）：
+    1.0.0  2026-07-12  首个版本：势能景观 / 能量曲面 (x,v,E) / 相图等能线 三场景，
+                       四种势能族（谐振子 / 单摆 / 双阱 / 势垒），可选阻尼演示能量泄漏
+============================================================ -->
+<style>
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  --angle-amber:#fbbf24;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none}
+body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)}
+#scene{position:fixed;inset:0;display:block;touch-action:none;cursor:grab}
+#scene.dragging{cursor:grabbing}
+
+/* ---- 标题区 ---- */
+.brand{position:fixed;top:20px;left:24px;pointer-events:none;user-select:none;max-width:min(520px,42vw)}
+.brand .eyebrow{font-size:10px;letter-spacing:.22em;color:rgba(159,176,200,.72);margin-bottom:6px}
+.brand h1{margin:0;font-family:var(--font-math);font-weight:600;font-size:26px;letter-spacing:.08em;
+  color:#eef3fa;text-shadow:0 2px 20px rgba(45,212,234,.20)}
+.brand p{margin:7px 0 0;font-size:12.5px;line-height:1.65;color:rgba(159,176,200,.85)}
+
+/* ---- 页签 ---- */
+.tabs{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:5;
+  display:flex;gap:4px;padding:4px;border-radius:999px;
+  background:var(--panel-bg);border:1px solid var(--panel-line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
+.tab{border:1px solid transparent;background:transparent;color:#b8c6da;
+  font-size:12.5px;font-family:var(--font-cn);padding:6px 15px;border-radius:999px;cursor:pointer;
+  transition:color .15s,border-color .15s,background .15s}
+.tab:hover{color:#e8f2fb}
+.tab:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.tab.active{background:rgba(45,212,234,.13);border-color:rgba(45,212,234,.55);color:#9be8f7}
+
+/* ---- 底部提示 ---- */
+.hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);pointer-events:none;user-select:none;
+  font-size:11px;letter-spacing:.05em;color:rgba(159,176,200,.6);white-space:nowrap}
+
+/* ---- 控制面板 ---- */
+.panel{position:fixed;top:14px;right:14px;width:304px;max-height:calc(100vh - 28px);overflow-y:auto;
+  background:var(--panel-bg);border:1px solid var(--panel-line);border-radius:16px;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 18px 50px rgba(0,0,0,.45);user-select:none}
+.panel::-webkit-scrollbar{width:6px}
+.panel::-webkit-scrollbar-thumb{background:rgba(148,163,184,.25);border-radius:3px}
+.panel-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px 10px;
+  font-size:13px;font-weight:600;letter-spacing:.06em;color:#dbe6f5}
+.panel:not(.collapsed) .panel-head{border-bottom:1px solid var(--panel-line)}
+.ph-right{display:flex;align-items:center;gap:7px}
+.ver{font-family:var(--font-mono);font-size:10px;color:rgba(159,176,200,.55)}
+.lang{padding:3px 8px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:11px;cursor:pointer}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.fold{width:24px;height:24px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:14px;line-height:1;cursor:pointer}
+.fold:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.panel.collapsed .panel-body{display:none}
+.panel-body{padding:6px 14px 14px}
+
+/* 滑杆 */
+.ctl{margin:11px 0 3px}
+.ctl .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.ctl label{font-size:12px;color:#c6d2e4}
+.ctl label i{font-family:var(--font-math);font-style:italic;font-size:13px}
+.ctl .val{font-family:var(--font-mono);font-size:11.5px;color:#7dd3fc}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;cursor:pointer;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--trace-cyan);margin-top:-5px;border:2px solid #0b1220;box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-moz-range-thumb{width:11px;height:11px;border:2px solid #0b1220;border-radius:50%;
+  background:var(--trace-cyan);box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-offset:2px;border-radius:4px}
+
+/* 按钮 */
+.row{display:flex;gap:8px;margin:13px 0 4px}
+.btn{padding:6px 10px;border-radius:9px;border:1px solid rgba(148,163,184,.25);
+  background:rgba(30,41,59,.55);color:#d7e2f2;font-size:12px;font-family:var(--font-cn);cursor:pointer;
+  transition:border-color .15s,color .15s,background .15s}
+.btn:hover{border-color:rgba(45,212,234,.55)}
+.btn:focus-visible,.fold:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.btn.wide{flex:1}
+.btn.active{border-color:rgba(45,212,234,.8);background:rgba(45,212,234,.12);color:#9be8f7}
+.views{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 2px}
+.views .vlabel{font-size:11.5px;color:rgba(159,176,200,.8);margin-right:2px}
+.vbtn{padding:5px 9px;font-size:11.5px}
+
+/* 开关 */
+.toggles{display:flex;flex-wrap:wrap;gap:7px 12px;margin:12px 0 2px}
+.tg{display:flex;align-items:center;gap:6px;font-size:12px;color:#c6d2e4;cursor:pointer}
+.tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
+.tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
+
+/* 读数与提示 */
+.readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
+  font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
+.readout b{font-weight:600;color:#e8eef7}
+.readout .sinC b{color:var(--trace-rose)}
+.readout .cosC b{color:var(--trace-violet)}
+.readout .tanC b{color:var(--trace-emerald)}
+.readout .cotC b{color:var(--trace-orange)}
+.readout .dim{color:rgba(159,176,200,.6)}
+.tips{margin-top:11px;font-size:11px;line-height:1.65;color:rgba(159,176,200,.72)}
+
+@media (max-width:760px){
+  .brand{top:12px;left:14px;max-width:70vw}
+  .brand h1{font-size:20px}
+  .brand p{display:none}
+  .tabs{top:52px;left:14px;transform:none}
+  .panel{left:10px;right:10px;top:auto;bottom:10px;width:auto;max-height:62vh}
+  .hint{display:none}
+}
+</style>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+
+<div class="brand">
+  <div class="eyebrow">INTERACTIVE MATH · 交互式数学</div>
+  <h1>能量、势能与相图</h1>
+  <p id="brandDesc"></p>
+</div>
+
+<nav class="tabs" id="tabsNav"></nav>
+
+<aside class="panel" id="panel">
+  <div class="panel-head"><span id="panelTitle">参数与视角</span>
+    <span class="ph-right"><span class="ver" id="verBadge"></span><button class="lang" id="btnLang" title="切换语言 / Switch language">EN</button><button class="fold" id="btnFold" title="收起 / 展开">−</button></span></div>
+  <div class="panel-body">
+    <div id="paramsHost"></div>
+    <div class="row">
+      <button class="btn wide" id="btnPlay">⏸ 暂停</button>
+      <button class="btn" id="btnReset">↺ 重置</button>
+    </div>
+    <div id="togglesHost"></div>
+    <div id="viewsHost"></div>
+    <div class="readout" id="readout"></div>
+    <div class="tips" id="tips"></div>
+  </div>
+</aside>
+
+<div class="hint">拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签</div>
+
+<script>
+'use strict';
+/* ================= i18n 核心（引擎区） ================= */
+const LANG_KEY = 'mathviz-lang';
+function resolveLang(){
+  try{
+    const q = new URLSearchParams(location.search).get('lang');
+    if (q === 'zh' || q === 'en') return q;
+    const s = localStorage.getItem(LANG_KEY);
+    if (s === 'zh' || s === 'en') return s;
+  }catch(e){}
+  return (navigator.language || 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+let LANG = resolveLang();
+function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
+
+const STARTER_VERSION = '1.0.0';
+const VERSION = document.querySelector('meta[name="tool-version"]').content;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ⓪ 工具元信息 —— id 与双语标题                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const TOOL = {
+  id: 'energy-phase-portrait-3d',
+  title: { zh: '能量、势能与相图 · 交互式可视化', en: 'Energy Landscape & Phase Portrait' },
+  h1:    { zh: '能量、势能与相图', en: 'Energy & Phase Portrait' }
+};
+
+/* 引擎 UI 文案（一般无需改动） */
+const UI = {
+  panelTitle: { zh: '参数与视角', en: 'Parameters & Views' },
+  pause:  { zh: '⏸ 暂停', en: '⏸ Pause' },
+  resume: { zh: '▶ 继续', en: '▶ Resume' },
+  reset:  { zh: '↺ 重置', en: '↺ Reset' },
+  views:  { zh: '视角', en: 'View' },
+  hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
+            en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
+};
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ① 参数声明 —— 自动生成滑杆                                ║
+   ║  key: state 中的键 · label: 支持 <i>数学符号</i>            ║
+   ║  fmt: 格式化"滑杆原始值"用于显示 · map(可选): 原始值→状态值   ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const PARAMS = [
+  { key: 'pot',       label: { zh: '势能形状 <i>V</i>(<i>x</i>)', en: 'Potential <i>V</i>(<i>x</i>)' }, min: 0, max: 3, step: 1, value: 0, fmt: v => t(POTS[Math.round(v)].name) },
+  { key: 'x0',        label: { zh: '初始位置 <i>x</i>₀', en: 'Initial position <i>x</i>₀' }, min: -2.2, max: 2.2, step: 0.05, value: 1.4, fmt: v => fmtS(v) },
+  { key: 'v0',        label: { zh: '初始速度 <i>v</i>₀', en: 'Initial velocity <i>v</i>₀' }, min: -2,   max: 2,   step: 0.05, value: 0,   fmt: v => fmtS(v) },
+  { key: 'm',         label: { zh: '质量 <i>m</i>',      en: 'Mass <i>m</i>' },              min: 0.5,  max: 2,   step: 0.05, value: 1,   fmt: v => fmt(v) },
+  { key: 'gamma',     label: { zh: '阻尼 <i>γ</i>',      en: 'Damping <i>γ</i>' },           min: 0,    max: 0.4, step: 0.01, value: 0,   fmt: v => v === 0 ? t({ zh: '0（守恒）', en: '0 (conserved)' }) : fmt(v) },
+  { key: 'waveSpeed', label: { zh: '波形展开速度',        en: 'Wave unroll speed' },          min: 0.5,  max: 2.5, step: 0.05, value: 1.1, fmt: v => fmt(v) + t({ zh: ' 单位/s', en: ' units/s' }) }
+];
+
+/* ════ 场景层助手（新增于 SCENES 之上，不改动任何引擎函数） ════ */
+const SY = 0.6;                          /* 能量 → 世界 y 比例 */
+const SV = 0.85;                         /* 速度 → 世界 z（曲面页）/ 世界 y（相图页）比例 */
+const ECLIP_HI = 2.35, ECLIP_LO = -1.35; /* 能量方向绘制裁剪（世界单位） */
+const VCLIP = 2.6;                       /* 速度方向绘制裁剪（速度单位） */
+const ZR = 2.6;                          /* 相平面 v 方向可视半宽（速度单位） */
+
+/* 四种势能族：V(x)、V′(x)、定义域、分界能量 E_s、等能线族 */
+const POTS = [
+  { name: { zh: '谐振子', en: 'Harmonic' },    formula: 'V = ½x²',
+    xmin: -2.3, xmax: 2.3, wrap: false, escape: false, Esep: null,
+    family: [0.25, 0.75, 1.5, 2.4],
+    V: x => 0.5 * x * x,               dV: x => x },
+  { name: { zh: '单摆', en: 'Pendulum' },      formula: 'V = 1 − cos 1.4x',
+    xmin: -Math.PI / 1.4, xmax: Math.PI / 1.4, wrap: true, escape: false, Esep: 2,
+    family: [0.5, 1.2, 2.7, 3.5],
+    V: x => 1 - Math.cos(1.4 * x),     dV: x => 1.4 * Math.sin(1.4 * x) },
+  { name: { zh: '双阱', en: 'Double well' },   formula: 'V = x⁴ − x²',
+    xmin: -1.7, xmax: 1.7, wrap: false, escape: false, Esep: 0,
+    family: [-0.18, -0.08, 0.5, 1.4],
+    V: x => x * x * x * x - x * x,     dV: x => 4 * x * x * x - 2 * x },
+  { name: { zh: '势垒', en: 'Barrier' },       formula: 'V = x² − x³/1.8',
+    xmin: -1.5, xmax: 2.8, wrap: false, escape: true, Esep: 0.48,
+    family: [0.15, 0.35, 0.9],
+    V: x => x * x - x * x * x / 1.8,   dV: x => 2 * x - x * x / 0.6 }
+];
+const curPot = () => POTS[Math.round(state.pot)];
+const energyNow = () => { const P = curPot(); return 0.5 * state.m * sim.v * sim.v + P.V(sim.x); };
+
+/* 开关联动（视角 onSelect 用） */
+function setTog(key, val) {
+  state[key] = val;
+  document.querySelectorAll('input[data-key="' + key + '"]').forEach(o => { o.checked = val; });
+}
+
+/* E0 = V(x) 的根（转折点），扫描 + 二分 */
+function turningPoints(E0, P) {
+  const N = 240, out = [];
+  let px = P.xmin, pf = E0 - P.V(px);
+  for (let i = 1; i <= N; i++) {
+    const x = P.xmin + (P.xmax - P.xmin) * i / N, f = E0 - P.V(x);
+    if ((pf <= 0) !== (f <= 0)) {
+      let a = px, b = x, fa = pf;
+      for (let k = 0; k < 28; k++) {
+        const m2 = (a + b) / 2, fm = E0 - P.V(m2);
+        if ((fa <= 0) !== (fm <= 0)) { b = m2; } else { a = m2; fa = fm; }
+      }
+      out.push((a + b) / 2);
+    }
+    px = x; pf = f;
+  }
+  return out;
+}
+
+/* 等能线 ½mv² + V(x) = E0 → 若干 (x, v) 折线（可能多支；|v|>VCLIP 处断开） */
+function levelCurves(E0, m, P) {
+  const N = 170, xs = P.xmin, xe = P.xmax, h = (xe - xs) / N, eps = 1e-4;
+  const segs = []; let a = null;
+  for (let i = 0; i <= N; i++) {
+    const x = xs + h * i;
+    if (E0 >= P.V(x)) { if (a === null) a = x; if (i === N) segs.push([a, x]); }
+    else if (a !== null) { segs.push([a, xs + h * (i - 1)]); a = null; }
+  }
+  const out = [];
+  for (const s of segs) {
+    let x1 = s[0], x2 = s[1];
+    if (x1 > xs + eps) {           /* 二分精化左转折点 */
+      let lo = x1 - h, hi = x1;
+      for (let k = 0; k < 26; k++) { const m2 = (lo + hi) / 2; if (E0 >= P.V(m2)) hi = m2; else lo = m2; }
+      x1 = hi;
+    }
+    if (x2 < xe - eps) {           /* 二分精化右转折点 */
+      let lo = x2, hi = x2 + h;
+      for (let k = 0; k < 26; k++) { const m2 = (lo + hi) / 2; if (E0 >= P.V(m2)) lo = m2; else hi = m2; }
+      x2 = lo;
+    }
+    if (x2 - x1 < 1e-3) continue;
+    const M = 90, up = [], dn = [];
+    for (let i = 0; i <= M; i++) {
+      const x = x1 + (x2 - x1) * i / M;
+      const k2 = Math.max(0, E0 - P.V(x)), v = Math.sqrt(2 * k2 / m);
+      if (v > VCLIP) { up.push(null); dn.push(null); }
+      else { up.push([x, v]); dn.push([x, -v]); }
+    }
+    const cL = x1 > xs + eps, cR = x2 < xe - eps;
+    if (cL && cR) { const loop = up.concat(dn.slice().reverse()); loop.push(up[0]); out.push(loop); }
+    else if (cL)  { out.push(dn.slice().reverse().concat(up)); }
+    else if (cR)  { out.push(up.concat(dn.slice().reverse())); }
+    else          { out.push(up); out.push(dn); }
+  }
+  return out;
+}
+
+/* 场景轴：势能景观（x 横 · E 纵 · 可选 t 沿 z） */
+function drawEnergyAxes(C, P, withT) {
+  const x0 = P.xmin - 0.3, x1 = P.xmax + 0.45, yTop = ECLIP_HI + 0.15;
+  line3(C, [x0, 0, 0], [x1, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [x1, 0, 0], [x1 - 0.2, 0, 0], AXIS);
+  label3(C, [x1 + 0.22, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  line3(C, [0, ECLIP_LO * 0.4, 0], [0, yTop, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, yTop, 0], [0, yTop - 0.2, 0], AXIS);
+  label3(C, [0, yTop + 0.18, 0], 'E', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  for (const e of [1, 2, 3]) {
+    const y = e * SY;
+    if (y > yTop - 0.1) break;
+    line3(C, [-0.05, y, 0], [0.05, y, 0], { width: 1.2, color: AXIS_DIM });
+    label3(C, [-0.14, y, 0], '' + e, { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+  }
+  for (const xv of [1, 2, -1, -2]) {
+    if (xv < P.xmin || xv > P.xmax) continue;
+    line3(C, [xv, -0.05, 0], [xv, 0.05, 0], { width: 1.2, color: AXIS_DIM });
+    label3(C, [xv, -0.22, 0], (xv < 0 ? '−' : '') + Math.abs(xv), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+  }
+  if (withT) {
+    line3(C, [0, 0, 0], [0, 0, WAVE_LEN + 0.5], { width: 1.4, color: AXIS });
+    arrowAt(C, [0, 0, WAVE_LEN + 0.5], [0, 0, WAVE_LEN + 0.3], AXIS);
+    label3(C, [0, 0, WAVE_LEN + 0.9], 't', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+    const v = state.waveSpeed, every = v < 0.8 ? 2 : 1;
+    for (let k = 1; k * v <= WAVE_LEN + 1e-6; k++) {
+      line3(C, [0, -0.06, k * v], [0, 0.06, k * v], { width: 1.2, color: AXIS_DIM });
+      if (k % every === 0) label3(C, [0, -0.25, k * v], k + 's', { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+    }
+  }
+}
+
+/* 场景轴：能量曲面（x 横 · v 沿 z · E 纵角柱） */
+function drawSurfaceAxes(C, P) {
+  const x1 = P.xmax + 0.45, z1 = ZR * SV + 0.4;
+  line3(C, [P.xmin - 0.3, 0, 0], [x1, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [x1, 0, 0], [x1 - 0.2, 0, 0], AXIS);
+  label3(C, [x1 + 0.22, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  line3(C, [0, 0, -ZR * SV], [0, 0, z1], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, 0, z1], [0, 0, z1 - 0.2], AXIS);
+  label3(C, [0, 0, z1 + 0.35], 'v', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  for (const vv of [1, 2, -1, -2]) {
+    line3(C, [-0.05, 0, vv * SV], [0.05, 0, vv * SV], { width: 1.2, color: AXIS_DIM });
+    label3(C, [-0.2, 0, vv * SV], (vv < 0 ? '−' : '') + Math.abs(vv), { size: 10, color: 'rgba(159,176,200,.55)', align: 'right' });
+  }
+  const cx = P.xmin - 0.3, cz = -ZR * SV, yTop = ECLIP_HI + 0.15;
+  line3(C, [cx, 0, cz], [cx, yTop, cz], { width: 1.4, color: AXIS });
+  arrowAt(C, [cx, yTop, cz], [cx, yTop - 0.2, cz], AXIS);
+  label3(C, [cx, yTop + 0.18, cz], 'E', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  for (const e of [1, 2, 3]) {
+    const y = e * SY;
+    if (y > yTop - 0.1) break;
+    line3(C, [cx - 0.05, y, cz], [cx + 0.05, y, cz], { width: 1.2, color: AXIS_DIM });
+    label3(C, [cx - 0.16, y, cz], '' + e, { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+  }
+}
+
+/* 场景轴：相图（x 横 · v 纵） */
+function drawPhaseAxes(C, P) {
+  const x1 = P.xmax + 0.45, vy = ZR * SV + 0.25;
+  line3(C, [P.xmin - 0.3, 0, 0], [x1, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [x1, 0, 0], [x1 - 0.2, 0, 0], AXIS);
+  label3(C, [x1 + 0.22, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  line3(C, [0, -vy, 0], [0, vy, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, vy, 0], [0, vy - 0.2, 0], AXIS);
+  label3(C, [0, vy + 0.18, 0], 'v', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  for (const xv of [1, 2, -1, -2]) {
+    if (xv < P.xmin || xv > P.xmax) continue;
+    line3(C, [xv, -0.05, 0], [xv, 0.05, 0], { width: 1.2, color: AXIS_DIM });
+    label3(C, [xv, -0.22, 0], (xv < 0 ? '−' : '') + Math.abs(xv), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+  }
+  for (const vv of [1, 2, -1, -2]) {
+    line3(C, [-0.05, vv * SV, 0], [0.05, vv * SV, 0], { width: 1.2, color: AXIS_DIM });
+    label3(C, [-0.14, vv * SV, 0], (vv < 0 ? '−' : '') + Math.abs(vv), { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+  }
+}
+
+/* 相平面地板网格（y = 0，能量曲面页） */
+function drawPhaseFloor(C, P) {
+  for (let xv = Math.ceil(P.xmin); xv <= Math.floor(P.xmax); xv++) {
+    if (xv === 0) continue;
+    line3(C, [xv, 0, -ZR * SV], [xv, 0, ZR * SV], { width: 1, color: 'rgba(148,163,184,0.08)' });
+  }
+  for (let k = -4; k <= 4; k++) {
+    if (k === 0) continue;
+    line3(C, [P.xmin, 0, k * 0.65 * SV], [P.xmax, 0, k * 0.65 * SV], { width: 1, color: 'rgba(148,163,184,0.08)' });
+  }
+}
+
+/* 三个页签共用的读数区 */
+function sceneReadout() {
+  const P = curPot(), E0 = energyNow(), Vb = P.V(sim.x), K = Math.max(0, E0 - Vb);
+  let s = '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;' + t({ zh: '势能：', en: 'V: ' }) + t(P.name) + '</div>';
+  s += '<div class="cosC">E = ½mv² + V(x) = <b>' + fmtS(E0) + '</b></div>';
+  s += '<div><span class="tanC">K = <b>' + fmtS(K) + '</b></span>&ensp;·&ensp;<span style="color:#2dd4ea">V(x) = <b style="color:#2dd4ea">' + fmtS(Vb) + '</b></span></div>';
+  s += '<div class="sinC">x = <b>' + fmtS(sim.x) + '</b>&ensp;·&ensp;v = <b>' + fmtS(sim.v) + '</b></div>';
+  let dim;
+  if (P.Esep != null) {
+    const rel = E0 < P.Esep
+      ? t({ zh: 'E &lt; E<sub>s</sub>：束缚轨道', en: 'E &lt; E<sub>s</sub>: bound orbit' })
+      : t({ zh: 'E &gt; E<sub>s</sub>：越过 · 开放轨道', en: 'E &gt; E<sub>s</sub>: crossing · open orbit' });
+    dim = '<span class="cotC">E<sub>s</sub> = <b>' + fmt(P.Esep) + '</b></span>&ensp;·&ensp;' + rel;
+  } else {
+    const tp = turningPoints(E0, P);
+    dim = tp.length
+      ? t({ zh: '转折点 x ≈ ', en: 'turning points x ≈ ' }) + tp.map(x => fmtS(x)).join(', ')
+      : t({ zh: '无转折点', en: 'no turning point' });
+  }
+  dim += state.gamma > 0
+    ? t({ zh: ' · γ&gt;0：E 缓慢泄漏', en: ' · γ&gt;0: E leaks away' })
+    : t({ zh: ' · γ=0：E 守恒', en: ' · γ=0: E conserved' });
+  return s + '<div class="dim">' + dim + '</div>';
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ② 场景注册 —— 每个键就是一个页签                           ║
+   ║  必填：label / brand / tips / views(首项即"立体"，双击回正)  ║
+   ║        toggles(曲线按 rose→violet→emerald→orange 取色)     ║
+   ║        draw(C) / readout()                                ║
+   ║  可选：sampleWindow() 历史滑窗秒数 · views[x].onSelect 联动 ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const SCENES = {
+
+  /* ────── 页签一：势能景观 —— 山谷、能量线与转折点 ────── */
+  land: {
+    label: { zh: '势能景观', en: 'Landscape' },
+    brand: { zh: '把 V(x) 看作一座山谷：总能量 E = ½mv² + V(x) 是一条水平线，动能是 E 线与山坡之间的落差。小球恰好在 E = V(x) 处耗尽动能，掉头返回。',
+             en: 'Think of V(x) as a valley: total energy E = ½mv² + V(x) is a horizontal line, and kinetic energy is the gap between that line and the hillside. The ball spends its last bit of kinetic energy exactly where E = V(x), then turns back.' },
+    tips: { zh: '提示：切到「正视 x·E」——小球永远在 E 线与势能曲线的两个交点（琥珀色转折点）之间往返，那正是 K = E − V ≥ 0 的全部区域。把阻尼 γ 调大，看 E 线缓缓下沉。',
+            en: 'Tip: switch to "Front x·E" — the ball forever shuttles between the two amber turning points where the E-line meets the potential curve, exactly the region where K = E − V ≥ 0. Raise damping γ and watch the E-line sink.' },
+    views: {
+      iso:   { label: { zh: '立体',     en: '3D' },        az: -0.85, el: 0.32, dist: 10.5, tx: 0, ty: 0.5,  tz: 2.2 },
+      front: { label: { zh: '正视 x·E', en: 'Front x·E' }, az: 0.001, el: 0.02, dist: 7.5,  tx: 0, ty: 0.62, tz: 0,
+               onSelect() { setTog('showE', true); setTog('showK', true); } },
+      top:   { label: { zh: '俯视 x·t', en: 'Top x·t' },   az: 0.001, el: 1.5,  dist: 10.5, tx: 0, ty: 0,    tz: 3.2,
+               onSelect() { setTog('showTrail', true); } }
+    },
+    toggles: [
+      { key: 'showTrail', label: { zh: '运动轨迹',   en: 'Trail' },           color: '#fb7185', checked: true },
+      { key: 'showE',     label: { zh: '能量线 E',   en: 'Energy line E' },   color: '#a78bfa', checked: true },
+      { key: 'showK',     label: { zh: '动能段 K',   en: 'Kinetic gap K' },   color: '#34d399', checked: true },
+      { key: 'showAids',  label: { zh: '转折点辅助', en: 'Turning points' },  color: '#fbbf24', checked: true },
+      { key: 'showGrid',  label: { zh: '网格',       en: 'Grid' },            color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => Math.max(WAVE_LEN / state.waveSpeed + 0.5, 14),
+    draw(C) {
+      const P = curPot(), E0 = energyNow(), xb = sim.x, Vb = P.V(xb);
+      if (state.showGrid) drawGridXY(C, 2, 0.5);
+      drawEnergyAxes(C, P, true);
+
+      /* 势能曲线（青 · 源几何） */
+      const vp = [], N = 150;
+      for (let i = 0; i <= N; i++) {
+        const x = P.xmin + (P.xmax - P.xmin) * i / N, y = P.V(x) * SY;
+        vp.push((y > ECLIP_HI || y < ECLIP_LO) ? null : [x, y, 0]);
+      }
+      strokePoly(C, vp, { width: 6, color: 'rgba(45,212,234,0.13)' });
+      strokePoly(C, vp, { width: 2, color: 'rgba(45,212,234,0.95)' });
+      label3(C, [P.xmin + 0.12, clamp(P.V(P.xmin) * SY, ECLIP_LO, ECLIP_HI) + 0.26, 0], P.formula,
+        { font: 'italic 13px ' + FONT_MATH, color: '#2dd4ea', align: 'left' });
+
+      /* 运动历史（玫红 · (x, V(x)) 随时间沿 z 流出） */
+      if (state.showTrail && samples.length > 1) {
+        const pts = [];
+        for (let i = samples.length - 1; i >= 0; i--) {
+          const s = samples[i], z = (state.t - s.t) * state.waveSpeed;
+          if (z > WAVE_LEN) break;
+          const y = s.V * SY;
+          pts.push((y > ECLIP_HI || y < ECLIP_LO) ? null : [s.x, y, z]);
+          if (s.brk) pts.push(null);
+        }
+        strokePoly(C, pts, { width: 5.5, color: 'rgba(251,113,133,0.13)' });
+        strokePoly(C, pts, { width: 2.2, fade: ['rgba(251,113,133,1)', 'rgba(251,113,133,0.04)'] });
+        label3(C, [P.xmax * 0.55, -0.3, WAVE_LEN * 0.62], 'x(t)',
+          { font: 'italic 13px ' + FONT_MATH, color: '#fb7185', align: 'left' });
+      }
+
+      /* 能量线（紫 · 水平的总能量） */
+      const yE = E0 * SY;
+      if (state.showE && yE < ECLIP_HI && yE > ECLIP_LO) {
+        line3(C, [P.xmin, yE, 0], [P.xmax, yE, 0], { width: 5, color: 'rgba(167,139,250,0.12)' });
+        line3(C, [P.xmin, yE, 0], [P.xmax, yE, 0], { width: 1.6, color: 'rgba(167,139,250,0.85)' });
+        label3(C, [P.xmax + 0.16, yE, 0], 'E', { font: 'italic 13px ' + FONT_MATH, color: '#a78bfa', align: 'left' });
+        const sE = proj(C, [xb, yE, 0]);
+        if (sE) glowDot(sE, 9, '#ffffff', 'rgba(167,139,250,0.9)');
+      }
+
+      /* 动能段（翠绿粗线 = E − V 的落差） */
+      if (state.showK && state.showE && Math.abs(E0 - Vb) > 1e-4) {
+        line3(C, [xb, Vb * SY, 0], [xb, yE, 0], { width: 6, color: 'rgba(52,211,153,0.26)' });
+        line3(C, [xb, Vb * SY, 0], [xb, yE, 0], { width: 3, color: 'rgba(52,211,153,0.95)' });
+        label3(C, [xb + 0.14, (Vb + E0) / 2 * SY, 0], 'K', { font: 'italic 13px ' + FONT_MATH, color: '#34d399', align: 'left' });
+      }
+
+      /* 转折点（琥珀）与投影辅助 */
+      if (state.showAids) {
+        for (const xt of turningPoints(E0, P)) {
+          solidDot(C, [xt, E0 * SY, 0], 3, 'rgba(251,191,36,0.95)');
+          line3(C, [xt, E0 * SY, 0], [xt, 0, 0], { width: 1, dash: [4, 5], color: 'rgba(251,191,36,0.35)' });
+        }
+        line3(C, [xb, Vb * SY, 0], [xb, 0, 0], { width: 1.5, dash: [7, 7], color: 'rgba(251,191,36,0.4)' });
+      }
+
+      /* 小球（运动主体） */
+      const sp = proj(C, [xb, Vb * SY, 0]);
+      if (sp && Math.abs(Vb * SY) < 6) glowDot(sp, 15, '#ffffff', 'rgba(186,240,255,0.9)');
+    },
+    readout: sceneReadout
+  },
+
+  /* ────── 页签二：能量曲面 —— 轨迹被钉在等高线上 ────── */
+  surface: {
+    label: { zh: '能量曲面', en: 'Energy surface' },
+    brand: { zh: '把总能量画成相平面 (x, v) 上方的曲面 E(x, v) = ½mv² + V(x)。能量守恒意味着轨迹被钉在这张曲面的一条水平等高线上——它哪儿也去不了。',
+             en: 'Plot total energy as a surface E(x, v) = ½mv² + V(x) above the phase plane. Conservation pins the trajectory onto one horizontal contour of this surface — it can go nowhere else.' },
+    tips: { zh: '提示：切到「俯视 x·v」，曲面塌缩成相平面——等高线的影子就是相图轨道。运动不是任意的，它只能沿能量允许的几何轨道行进。调大 γ，看轨迹沿曲面盘旋滑落。',
+            en: 'Tip: switch to "Top x·v" and the surface collapses into the phase plane — the contour\'s shadow IS the phase-portrait orbit. Motion is not arbitrary: it rides the geometric orbit its energy permits. Raise γ to watch the trajectory spiral down the bowl.' },
+    views: {
+      iso:  { label: { zh: '立体',     en: '3D' },        az: -0.9,  el: 0.42, dist: 11,  tx: 0, ty: 0.4, tz: 0 },
+      top:  { label: { zh: '俯视 x·v', en: 'Top x·v' },   az: 0.001, el: 1.52, dist: 9,   tx: 0, ty: 0,   tz: 0,
+              onSelect() { setTog('showSlice', true); setTog('showTraj', true); } },
+      side: { label: { zh: '正视 E·x', en: 'Front E·x' }, az: 0.001, el: 0.02, dist: 9.5, tx: 0, ty: 0.6, tz: 0,
+              onSelect() { setTog('showSlice', true); } }
+    },
+    toggles: [
+      { key: 'showTraj',  label: { zh: '空间轨迹',   en: '3D trajectory' },     color: '#fb7185', checked: true },
+      { key: 'showSlice', label: { zh: '等能切片 E', en: 'Energy slice E' },    color: '#a78bfa', checked: true },
+      { key: 'showSurf',  label: { zh: '能量曲面',   en: 'Energy surface' },    color: '#2dd4ea', checked: true },
+      { key: 'showProj',  label: { zh: '投影辅助线', en: 'Projection guides' }, color: '#fbbf24', checked: true },
+      { key: 'showGrid',  label: { zh: '网格',       en: 'Grid' },              color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => Math.max(WAVE_LEN / state.waveSpeed + 0.5, 14),
+    draw(C) {
+      const P = curPot(), E0 = energyNow(), m = state.m;
+      if (state.showGrid) drawPhaseFloor(C, P);
+      drawSurfaceAxes(C, P);
+
+      /* 能量曲面线框（青 · 源几何） */
+      if (state.showSurf) {
+        for (let k = -4; k <= 4; k++) {          /* v = 常数 截线 */
+          const v = k * 0.65, pts = [];
+          for (let i = 0; i <= 80; i++) {
+            const x = P.xmin + (P.xmax - P.xmin) * i / 80, y = (0.5 * m * v * v + P.V(x)) * SY;
+            pts.push((y > ECLIP_HI || y < ECLIP_LO) ? null : [x, y, v * SV]);
+          }
+          strokePoly(C, pts, { width: 1, color: 'rgba(45,212,234,0.28)' });
+        }
+        for (let j = 0; j <= 10; j++) {          /* x = 常数 截线 */
+          const x = P.xmin + (P.xmax - P.xmin) * j / 10, pts = [];
+          for (let i = 0; i <= 40; i++) {
+            const v = -ZR + 2 * ZR * i / 40, y = (0.5 * m * v * v + P.V(x)) * SY;
+            pts.push((y > ECLIP_HI || y < ECLIP_LO) ? null : [x, y, v * SV]);
+          }
+          strokePoly(C, pts, { width: 1, color: 'rgba(45,212,234,0.20)' });
+        }
+        label3(C, [P.xmin + 0.1, ECLIP_HI + 0.05, -ZR * SV * 0.55], 'E(x, v) = ½mv² + V(x)',
+          { font: 'italic 13px ' + FONT_MATH, color: '#2dd4ea', align: 'left' });
+      }
+
+      /* 等能切片（紫 · 高度 E 的水平面与等高线） */
+      const yE = E0 * SY;
+      if (state.showSlice && yE < ECLIP_HI && yE > ECLIP_LO) {
+        const zr = ZR * SV, dash = { width: 1, dash: [5, 6], color: 'rgba(167,139,250,0.45)' };
+        line3(C, [P.xmin, yE, -zr], [P.xmax, yE, -zr], dash);
+        line3(C, [P.xmin, yE,  zr], [P.xmax, yE,  zr], dash);
+        line3(C, [P.xmin, yE, -zr], [P.xmin, yE,  zr], dash);
+        line3(C, [P.xmax, yE, -zr], [P.xmax, yE,  zr], dash);
+        for (const c of levelCurves(E0, m, P)) {
+          const pts = c.map(p => p ? [p[0], yE, p[1] * SV] : null);
+          strokePoly(C, pts, { width: 5, color: 'rgba(167,139,250,0.14)' });
+          strokePoly(C, pts, { width: 2.2, color: 'rgba(167,139,250,0.95)' });
+          if (state.showProj) {
+            strokePoly(C, c.map(p => p ? [p[0], 0, p[1] * SV] : null),
+              { width: 1.5, dash: [7, 7], color: 'rgba(167,139,250,0.55)' });
+          }
+        }
+        label3(C, [P.xmax + 0.18, yE, 0], 'E', { font: 'italic 13px ' + FONT_MATH, color: '#a78bfa', align: 'left' });
+      }
+
+      /* 空间轨迹（玫红 · 记录的真实 (x, E, v)，有阻尼时沿曲面盘旋滑落） */
+      if (state.showTraj && samples.length > 1) {
+        const pts = [];
+        for (let i = samples.length - 1; i >= 0; i--) {
+          const s = samples[i], y = s.E * SY;
+          pts.push((y > ECLIP_HI || y < ECLIP_LO || Math.abs(s.v) > VCLIP) ? null : [s.x, y, s.v * SV]);
+          if (s.brk) pts.push(null);
+        }
+        strokePoly(C, pts, { width: 5.5, color: 'rgba(251,113,133,0.13)' });
+        strokePoly(C, pts, { width: 2.2, fade: ['rgba(251,113,133,1)', 'rgba(251,113,133,0.04)'] });
+      }
+
+      /* 当前点：曲面上的 P 与它在相平面上的影子 */
+      const yb = clamp(E0 * SY, ECLIP_LO, ECLIP_HI);
+      if (state.showProj) {
+        line3(C, [sim.x, yb, sim.v * SV], [sim.x, 0, sim.v * SV],
+          { width: 1.5, dash: [7, 7], color: 'rgba(251,113,133,0.7)' });
+        const fs = proj(C, [sim.x, 0, sim.v * SV]);
+        if (fs) glowDot(fs, 9, '#ffffff', 'rgba(251,113,133,0.9)');
+      }
+      const sp = proj(C, [sim.x, yb, sim.v * SV]);
+      if (sp) glowDot(sp, 15, '#ffffff', 'rgba(186,240,255,0.9)');
+    },
+    readout: sceneReadout
+  },
+
+  /* ────── 页签三：相图 —— 等能线族就是轨道族 ────── */
+  phase: {
+    label: { zh: '相图', en: 'Phase portrait' },
+    brand: { zh: '相平面 (x, v) 上，每一条等能线 ½mv² + V(x) = E 就是一条可能的轨道。用 x₀ 与 v₀ 选定能量，小球便沿对应的等能线运行。',
+             en: 'In the phase plane (x, v), every level set ½mv² + V(x) = E is a possible orbit. Pick the energy with x₀ and v₀, and the ball runs along the matching level curve.' },
+    tips: { zh: '提示：切「正视 x·v」，选「单摆」或「双阱」势——橙色分界线（separatrix）把束缚轨道与越过轨道分成两个世界，把 E 调到分界线两侧各看一次。',
+            en: 'Tip: switch to "Front x·v" and pick the pendulum or double-well potential — the orange separatrix splits bound orbits from crossing ones into two different worlds. Set E on each side and compare.' },
+    views: {
+      iso:   { label: { zh: '立体',     en: '3D' },        az: -0.5,  el: 0.25, dist: 9,   tx: 0, ty: 0, tz: 0 },
+      front: { label: { zh: '正视 x·v', en: 'Front x·v' }, az: 0.001, el: 0.02, dist: 7.5, tx: 0, ty: 0, tz: 0,
+               onSelect() { setTog('showLevel', true); } }
+    },
+    toggles: [
+      { key: 'showOrbit',  label: { zh: '运动轨迹',   en: 'Trajectory' },        color: '#fb7185', checked: true },
+      { key: 'showLevel',  label: { zh: '当前等能线', en: 'Current level set' }, color: '#a78bfa', checked: true },
+      { key: 'showFamily', label: { zh: '等能线族',   en: 'Level-set family' },  color: '#2dd4ea', checked: true },
+      { key: 'showSep',    label: { zh: '分界线',     en: 'Separatrix' },        color: '#fb923c', checked: true },
+      { key: 'showGrid',   label: { zh: '网格',       en: 'Grid' },              color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => Math.max(WAVE_LEN / state.waveSpeed + 0.5, 14),
+    draw(C) {
+      const P = curPot(), E0 = energyNow(), m = state.m;
+      if (state.showGrid) drawGridXY(C, 2, 0.5);
+      drawPhaseAxes(C, P);
+
+      /* 等能线族（青 · 不同能量下的全部可能轨道） */
+      if (state.showFamily) {
+        for (const e of P.family) {
+          for (const c of levelCurves(e, m, P)) {
+            strokePoly(C, c.map(p => p ? [p[0], p[1] * SV, 0] : null), { width: 1.2, color: 'rgba(45,212,234,0.30)' });
+          }
+        }
+      }
+
+      /* 分界线（橙 · 束缚与越过的边界） */
+      if (state.showSep && P.Esep != null) {
+        for (const c of levelCurves(P.Esep, m, P)) {
+          const pts = c.map(p => p ? [p[0], p[1] * SV, 0] : null);
+          strokePoly(C, pts, { width: 5, color: 'rgba(251,146,60,0.13)' });
+          strokePoly(C, pts, { width: 1.8, color: 'rgba(251,146,60,0.9)' });
+        }
+        label3(C, [P.xmax - 0.55, ZR * SV - 0.15, 0],
+          t({ zh: '分界线 E = ', en: 'separatrix E = ' }) + fmt(P.Esep),
+          { font: 'italic 12px ' + FONT_MATH, color: '#fb923c', align: 'left' });
+      }
+
+      /* 当前等能线（紫 · 小球被允许的那条轨道） */
+      if (state.showLevel) {
+        for (const c of levelCurves(E0, m, P)) {
+          const pts = c.map(p => p ? [p[0], p[1] * SV, 0] : null);
+          strokePoly(C, pts, { width: 5, color: 'rgba(167,139,250,0.14)' });
+          strokePoly(C, pts, { width: 2.2, color: 'rgba(167,139,250,0.95)' });
+        }
+        for (const xt of turningPoints(E0, P)) solidDot(C, [xt, 0, 0], 3, 'rgba(251,191,36,0.95)');
+        label3(C, [P.xmin + 0.1, ZR * SV + 0.28, 0], '½mv² + V(x) = E',
+          { font: 'italic 13px ' + FONT_MATH, color: '#a78bfa', align: 'left' });
+      }
+
+      /* 实际轨迹（玫红 · 头亮尾隐 + 行进方向箭头） */
+      if (state.showOrbit && samples.length > 1) {
+        const pts = [];
+        for (let i = samples.length - 1; i >= 0; i--) {
+          const s = samples[i];
+          pts.push(Math.abs(s.v) > VCLIP ? null : [s.x, s.v * SV, 0]);
+          if (s.brk) pts.push(null);
+        }
+        strokePoly(C, pts, { width: 5.5, color: 'rgba(251,113,133,0.13)' });
+        strokePoly(C, pts, { width: 2.2, fade: ['rgba(251,113,133,1)', 'rgba(251,113,133,0.04)'] });
+        const s1 = samples[samples.length - 1], s0 = samples[Math.max(0, samples.length - 3)];
+        if (!s1.brk) arrowAt(C, [s1.x, s1.v * SV, 0], [s0.x, s0.v * SV, 0], 'rgba(251,113,133,0.9)');
+      }
+
+      /* 当前点（运动主体） */
+      const sp = proj(C, [sim.x, sim.v * SV, 0]);
+      if (sp) glowDot(sp, 15, '#ffffff', 'rgba(186,240,255,0.9)');
+    },
+    readout: sceneReadout
+  }
+};
+
+/* ================= 常量与状态（引擎区，以下一般无需改动） ================= */
+const TAU = Math.PI * 2;
+const WAVE_LEN = 8;      // t 轴的世界长度（可视窗口）
+const NEAR = 0.15;       // 近裁剪面
+
+const FONT_CN = 'ui-sans-serif,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif';
+const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
+
+const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
+const samples = [];
+let curTab = null;
+const RELABEL = [];
+const cams = {};
+let cam = null;
+let tween = null;
+const lastView = {};
+const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ③ 采样 —— 按你的工具需要扩展字段                           ║
+   ║  原则：记录"当时的真实值"，参数中途改变时历史不重算            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+state.omega = 0;   /* 本工具不使用引擎相位钟；置 0 令 theta 恒为 0（引擎每帧 theta += ω·dt） */
+
+/* 模拟状态：小球的真实 (x, v)，由 RK4 积分推进 */
+const sim = { x: 0, v: 0, lastPot: -1, lastX0: null, lastV0: null, lastT: 0 };
+
+function accel(x, v, P) { return -P.dV(x) / state.m - state.gamma * v; }
+
+function pushSample() {
+  const P = curPot();
+  let brk = false;
+  const fresh = samples.length === 0 ||
+    sim.lastPot !== state.pot || sim.lastX0 !== state.x0 || sim.lastV0 !== state.v0;
+  if (fresh) {
+    /* 重置或初值 / 势能改变 → 重新投放小球（历史保留，轨迹以断点分隔） */
+    sim.x = clamp(state.x0, P.xmin + 0.02, P.xmax - 0.02);
+    sim.v = state.v0;
+    sim.lastPot = state.pot; sim.lastX0 = state.x0; sim.lastV0 = state.v0;
+    brk = true;
+  } else {
+    const dt = clamp(state.t - sim.lastT, 0, 0.05), n = 4, h = dt / n;
+    for (let i = 0; i < n; i++) {       /* RK4：x′ = v，v′ = −V′(x)/m − γv */
+      const x = sim.x, v = sim.v;
+      const k1x = v,               k1v = accel(x, v, P);
+      const k2x = v + 0.5 * h * k1v, k2v = accel(x + 0.5 * h * k1x, v + 0.5 * h * k1v, P);
+      const k3x = v + 0.5 * h * k2v, k3v = accel(x + 0.5 * h * k2x, v + 0.5 * h * k2v, P);
+      const k4x = v + h * k3v,       k4v = accel(x + h * k3x, v + h * k3v, P);
+      sim.x = x + h / 6 * (k1x + 2 * k2x + 2 * k3x + k4x);
+      sim.v = v + h / 6 * (k1v + 2 * k2v + 2 * k3v + k4v);
+    }
+    if (P.wrap && Math.abs(sim.x) > P.xmax) {           /* 单摆越顶：角度回绕 */
+      sim.x -= Math.sign(sim.x) * 2 * P.xmax;
+      brk = true;
+    }
+    if ((P.escape && (sim.x > P.xmax + 0.12 || sim.x < P.xmin - 0.12)) ||
+        !isFinite(sim.x) || !isFinite(sim.v)) {         /* 越过势垒逃逸 → 重新投放 */
+      sim.x = clamp(state.x0, P.xmin + 0.02, P.xmax - 0.02);
+      sim.v = state.v0;
+      brk = true;
+    }
+  }
+  sim.lastT = state.t;
+  /* 原则：记录当时的真实值 —— 参数中途改变，历史不重算 */
+  samples.push({
+    t: state.t,
+    x: sim.x,
+    v: sim.v,
+    E: 0.5 * state.m * sim.v * sim.v + P.V(sim.x),
+    V: P.V(sim.x),
+    brk: brk
+  });
+}
+
+/* ================= 画布 ================= */
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = 1, FOCAL = 900, CX = 0, CY = 0, bgGrad = null;
+
+function resize() {
+  DPR = Math.min(2.5, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  CX = W / 2; CY = H / 2;
+  FOCAL = 1.2 * Math.min(H, W * 1.1);
+  bgGrad = ctx.createRadialGradient(W*0.5, H*0.3, 0, W*0.5, H*0.42, Math.max(W, H)*0.95);
+  bgGrad.addColorStop(0, '#0c1526');
+  bgGrad.addColorStop(1, '#05070d');
+}
+window.addEventListener('resize', resize);
+
+/* ================= 基础数学 ================= */
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const mod2pi = a => { a %= TAU; if (a < 0) a += TAU; return a; };
+const wrapPI = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
+const ease = k => k < 0.5 ? 4*k*k*k : 1 - Math.pow(-2*k + 2, 3) / 2;
+const fmt = (x, d = 2) => x.toFixed(d);
+const fmtS = (x, d = 2) => (x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
+
+const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+const dot3 = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+
+/* ================= 轨道相机与投影 ================= */
+function makeCam() {
+  const cp = Math.cos(cam.el), sp = Math.sin(cam.el);
+  const eye = [
+    cam.tx + cam.dist * cp * Math.sin(cam.az),
+    cam.ty + cam.dist * sp,
+    cam.tz + cam.dist * cp * Math.cos(cam.az)
+  ];
+  const f = norm(sub([cam.tx, cam.ty, cam.tz], eye));
+  const r = norm(cross(f, [0, 1, 0]));
+  const u = cross(r, f);
+  return { eye, f, r, u };
+}
+function camPt(C, p) {
+  const d = sub(p, C.eye);
+  return [dot3(d, C.r), dot3(d, C.u), dot3(d, C.f)];
+}
+function scr(c) { const s = FOCAL / c[2]; return [CX + c[0]*s, CY - c[1]*s]; }
+function proj(C, p) { const c = camPt(C, p); return c[2] < NEAR ? null : scr(c); }
+function clipNear(a, b) {
+  const t = (NEAR - a[2]) / (b[2] - a[2]);
+  return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, NEAR];
+}
+
+/* 折线路径（支持 null 断点 + 近平面裁剪）；返回 [首点, 末点] 屏幕坐标 */
+function polyPath(C, pts) {
+  if (pts.length < 2) return null;
+  let head = null, tail = null, contin = false, prev = null;
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    const P = pts[i];
+    if (P === null) { prev = null; contin = false; continue; }
+    const cur = camPt(C, P);
+    if (prev !== null) {
+      let a = prev, b = cur;
+      const av = a[2] >= NEAR, bv = b[2] >= NEAR;
+      if (av || bv) {
+        if (!av) a = clipNear(a, b);
+        if (!bv) b = clipNear(b, a);
+        const sA = scr(a), sB = scr(b);
+        if (!contin) ctx.moveTo(sA[0], sA[1]);
+        ctx.lineTo(sB[0], sB[1]);
+        if (!head) head = sA;
+        tail = sB;
+        contin = bv;
+      } else {
+        contin = false;
+      }
+    }
+    prev = cur;
+  }
+  return head ? [head, tail] : null;
+}
+
+function strokePoly(C, pts, o) {
+  const ht = polyPath(C, pts);
+  if (!ht) return;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = o.width || 2;
+  if (o.alpha != null) ctx.globalAlpha = o.alpha;
+  if (o.dash) ctx.setLineDash(o.dash);
+  if (o.fade) {
+    const h = ht[0], t = ht[1];
+    if (Math.hypot(t[0]-h[0], t[1]-h[1]) < 2) {
+      ctx.strokeStyle = o.fade[0];
+    } else {
+      const g = ctx.createLinearGradient(h[0], h[1], t[0], t[1]);
+      g.addColorStop(0, o.fade[0]);
+      g.addColorStop(1, o.fade[1]);
+      ctx.strokeStyle = g;
+    }
+  } else {
+    ctx.strokeStyle = o.color;
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+const line3 = (C, a, b, o) => strokePoly(C, [a, b], o);
+
+function glowDot(s, r, core, mid) {
+  const g = ctx.createRadialGradient(s[0], s[1], 0, s[0], s[1], r);
+  g.addColorStop(0, core);
+  g.addColorStop(0.35, mid);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+function solidDot(C, p, r, color) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+
+function label3(C, p, text, o) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.save();
+  ctx.font = o.font || ((o.size || 12) + 'px ' + FONT_CN);
+  ctx.fillStyle = o.color || '#c4d2e6';
+  ctx.textAlign = o.align || 'left';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(3,6,12,.85)';
+  ctx.shadowBlur = 4;
+  ctx.fillText(text, s[0] + (o.dx || 0), s[1] + (o.dy || 0));
+  ctx.restore();
+}
+
+function arrowAt(C, tip3, before3, color) {
+  const t = proj(C, tip3), b = proj(C, before3);
+  if (!t || !b) return;
+  const a = Math.atan2(t[1]-b[1], t[0]-b[0]);
+  const L = 9;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.4;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a-0.42), t[1]-L*Math.sin(a-0.42));
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a+0.42), t[1]-L*Math.sin(a+0.42));
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* ================= 常用场景部件 ================= */
+const AXIS = 'rgba(159,176,200,0.9)';
+const AXIS_DIM = 'rgba(159,176,200,0.5)';
+
+/* 坐标轴：o = { ex, ey, yTicks:[], xTicks:[], tAxis:bool, v(秒刻度间距的波速) } */
+function drawAxes(C, o) {
+  const ex = o.ex, ey = o.ey;
+  line3(C, [-ex, 0, 0], [ex, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [ex, 0, 0], [ex - 0.2, 0, 0], AXIS);
+  label3(C, [ex + 0.22, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  line3(C, [0, -ey, 0], [0, ey, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, ey, 0], [0, ey - 0.2, 0], AXIS);
+  label3(C, [0, ey + 0.18, 0], 'y', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  if (o.tAxis) {
+    line3(C, [0, 0, 0], [0, 0, WAVE_LEN + 0.5], { width: 1.4, color: AXIS });
+    arrowAt(C, [0, 0, WAVE_LEN + 0.5], [0, 0, WAVE_LEN + 0.3], AXIS);
+    label3(C, [0, 0, WAVE_LEN + 0.9], 't', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+    const v = o.v || 1;
+    const every = v < 0.8 ? 2 : 1;
+    for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+      line3(C, [0, -0.06, k*v], [0, 0.06, k*v], { width: 1.2, color: AXIS_DIM });
+      if (k % every === 0) {
+        label3(C, [0, -0.25, k*v], k + 's', { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+      }
+    }
+  }
+  for (const k of (o.yTicks || [])) {
+    for (const yv of [k, -k]) {
+      line3(C, [-0.05, yv, 0], [0.05, yv, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [-0.13, yv, 0], (yv < 0 ? '−' : '') + Math.abs(yv), { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+    }
+  }
+  for (const k of (o.xTicks || [])) {
+    for (const xv of [k, -k]) {
+      line3(C, [xv, -0.05, 0], [xv, 0.05, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [xv, -0.24, 0], (xv < 0 ? '−' : '') + Math.abs(xv), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+    }
+  }
+}
+
+/* z=0 平面方格网格（几何类场景） */
+function drawGridXY(C, g, step) {
+  const n = Math.round(g / step);
+  for (let i = -n; i <= n; i++) {
+    if (i === 0) continue;
+    const u = i * step;
+    line3(C, [u, -g, 0], [u, g, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+    line3(C, [-g, u, 0], [g, u, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+  }
+}
+
+/* y–t 时间平面网格（流式波形类场景）：o = { yMax, v } */
+function drawTimeGrid(C, o) {
+  const g = o.yMax, v = o.v;
+  for (let i = Math.round(-g*2); i <= Math.round(g*2); i++) {
+    if (i === 0) continue;
+    line3(C, [0, i/2, 0], [0, i/2, WAVE_LEN], { width: 1, color: 'rgba(148,163,184,0.10)' });
+  }
+  for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+    line3(C, [0, -g, k*v], [0, g, k*v], { width: 1, color: 'rgba(148,163,184,0.07)' });
+  }
+}
+
+/* 周期标尺（琥珀）：在平面 x=px、高度 yb 处，从 z=0 画到 z=T·v */
+function drawPeriodBracket(C, Tsec, v, px, yb, text) {
+  const zT = Tsec * v;
+  if (zT > WAVE_LEN + 0.01) return;
+  const amber = 'rgba(251,191,36,0.75)';
+  line3(C, [px, yb, 0], [px, yb, zT], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, 0], [px, yb + 0.06, 0], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, zT], [px, yb + 0.06, zT], { width: 1.2, color: amber });
+  label3(C, [px, yb - 0.2, zT/2], text, { size: 10.5, color: 'rgba(251,191,36,.9)', align: 'center' });
+}
+
+/* 单位圆（半径 A，位于 z=0 平面，青色源几何） */
+function drawCircle(C, A) {
+  const cpts = [];
+  for (let i = 0; i <= 72; i++) {
+    const a = i / 72 * TAU;
+    cpts.push([A * Math.cos(a), A * Math.sin(a), 0]);
+  }
+  strokePoly(C, cpts, { width: 6, color: 'rgba(45,212,234,0.13)' });
+  strokePoly(C, cpts, { width: 2, color: 'rgba(45,212,234,0.95)' });
+  for (let q = 0; q < 4; q++) {
+    const a = q * Math.PI / 2;
+    line3(C, [A*0.95*Math.cos(a), A*0.95*Math.sin(a), 0],
+             [A*1.06*Math.cos(a), A*1.06*Math.sin(a), 0],
+             { width: 1, color: 'rgba(45,212,234,0.5)' });
+  }
+  solidDot(C, [0, 0, 0], 2.2, 'rgba(159,176,200,0.9)');
+}
+
+/* 角度弧 θ（琥珀度量注记） */
+function drawAngleArc(C, th, A) {
+  const thm = mod2pi(th);
+  if (thm <= 0.03) return;
+  const r0 = Math.max(0.14, Math.min(0.34, 0.5 * A));
+  const n = Math.max(2, Math.ceil(thm / 0.06));
+  const apts = [];
+  for (let j = 0; j <= n; j++) {
+    const a = thm * j / n;
+    apts.push([r0 * Math.cos(a), r0 * Math.sin(a), 0]);
+  }
+  strokePoly(C, apts, { width: 1.6, color: 'rgba(251,191,36,0.9)' });
+  label3(C, [(r0 + 0.15) * Math.cos(thm/2), (r0 + 0.15) * Math.sin(thm/2), 0], 'θ',
+    { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+}
+
+/* 读数区固定首两行 */
+function readoutHead() {
+  const th = state.theta;
+  const deg = (mod2pi(th) * 180 / Math.PI).toFixed(0);
+  const lap = fmt(th / TAU);
+  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;θ = ωt = <b>' + fmt(th) + '</b> rad</div>' +
+         '<div class="dim">' + t({ zh: '≡ ' + deg + '°（第 ' + lap + ' 圈）', en: '≡ ' + deg + '° (turn ' + lap + ')' }) + '</div>';
+}
+
+/* ================= 主绘制与主循环 ================= */
+function draw() {
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+  const C = makeCam();
+  SCENES[curTab].draw(C);
+}
+
+function resetSim() {
+  state.t = 0;
+  state.theta = 0;
+  samples.length = 0;
+  pushSample();
+}
+
+let lastTs = performance.now(), lastRO = 0;
+function frame(ts) {
+  const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
+  lastTs = ts;
+
+  if (tween) {
+    const k = Math.min(1, (ts - tween.t0) / tween.dur);
+    const e = ease(k);
+    const f = tween.from, o = tween.to;
+    cam.az = f.az + wrapPI(o.az - f.az) * e;
+    cam.el = f.el + (o.el - f.el) * e;
+    cam.dist = f.dist + (o.dist - f.dist) * e;
+    cam.tx = f.tx + (o.tx - f.tx) * e;
+    cam.ty = f.ty + (o.ty - f.ty) * e;
+    cam.tz = f.tz + (o.tz - f.tz) * e;
+    if (k >= 1) tween = null;
+  }
+
+  if (state.running) {
+    state.t += dt;
+    state.theta += state.omega * dt;
+    pushSample();
+  }
+  const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
+  while (samples.length && samples[0].t < state.t - windowSec) samples.shift();
+
+  draw();
+  if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
+  requestAnimationFrame(frame);
+}
+
+const roEl = document.getElementById('readout');
+function updateReadout() { roEl.innerHTML = SCENES[curTab].readout(); }
+
+/* ================= UI 生成（由 ①② 声明驱动） ================= */
+function buildParams() {
+  const host = document.getElementById('paramsHost');
+  PARAMS.forEach(p => {
+    const wrap = document.createElement('div');
+    wrap.className = 'ctl';
+    wrap.innerHTML = '<div class="top"><label></label><span class="val"></span></div>';
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
+    const val = wrap.querySelector('.val');
+    const upd = () => {
+      const raw = parseFloat(input.value);
+      state[p.key] = p.map ? p.map(raw) : raw;
+      val.textContent = p.fmt(raw);
+    };
+    input.addEventListener('input', upd);
+    wrap.appendChild(input);
+    host.appendChild(wrap);
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+function buildToggles() {
+  const host = document.getElementById('togglesHost');
+  Object.keys(SCENES).forEach(id => {
+    const grp = document.createElement('div');
+    grp.className = 'toggles';
+    grp.dataset.tab = id;
+    SCENES[id].toggles.forEach(tg => {
+      if (!(tg.key in state)) state[tg.key] = tg.checked;
+      const lab = document.createElement('label');
+      lab.className = 'tg';
+      lab.innerHTML = '<input type="checkbox" data-key="' + tg.key + '"' + (state[tg.key] ? ' checked' : '') + '>' +
+        '<i class="dot" style="--c:' + tg.color + '"></i><span class="tgl"></span>';
+      const cb = lab.querySelector('input');
+      cb.addEventListener('change', () => {
+        state[tg.key] = cb.checked;
+        document.querySelectorAll('input[data-key="' + tg.key + '"]').forEach(o => { o.checked = cb.checked; });
+      });
+      const relabel = () => { lab.querySelector('.tgl').innerHTML = t(tg.label); };
+      RELABEL.push(relabel);
+      relabel();
+      grp.appendChild(lab);
+    });
+    host.appendChild(grp);
+  });
+}
+
+function buildViews() {
+  const host = document.getElementById('viewsHost');
+  Object.keys(SCENES).forEach(id => {
+    const row = document.createElement('div');
+    row.className = 'views';
+    row.dataset.tab = id;
+    const lab = document.createElement('span');
+    lab.className = 'vlabel';
+    row.appendChild(lab);
+    const labRelabel = () => { lab.textContent = t(UI.views); };
+    RELABEL.push(labRelabel);
+    labRelabel();
+    Object.keys(SCENES[id].views).forEach(name => {
+      const b = document.createElement('button');
+      b.className = 'btn vbtn';
+      b.dataset.view = name;
+      b.addEventListener('click', () => applyView(name));
+      row.appendChild(b);
+      const relabel = () => { b.textContent = t(SCENES[id].views[name].label); };
+      RELABEL.push(relabel);
+      relabel();
+    });
+    host.appendChild(row);
+  });
+}
+
+function buildTabs() {
+  const nav = document.getElementById('tabsNav');
+  Object.keys(SCENES).forEach(id => {
+    const b = document.createElement('button');
+    b.className = 'tab';
+    b.dataset.tab = id;
+    b.addEventListener('click', () => switchTab(id));
+    nav.appendChild(b);
+    const relabel = () => { b.textContent = t(SCENES[id].label); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+/* ================= 视角与页签 ================= */
+function refreshViewButtons() {
+  document.querySelectorAll('.vbtn').forEach(b => {
+    const row = b.closest('.views');
+    b.classList.toggle('active', row.dataset.tab === curTab && b.dataset.view === lastView[curTab]);
+  });
+}
+function viewDist(d) { return (W < 820 || W < H) ? d * 1.4 : d; }
+function applyView(name) {
+  const vw = SCENES[curTab].views[name];
+  if (!vw) return;
+  if (vw.onSelect) vw.onSelect();   /* 可选联动：如自动开启该视角对应的曲线开关 */
+  tween = {
+    from: { az: cam.az, el: cam.el, dist: cam.dist, tx: cam.tx, ty: cam.ty, tz: cam.tz },
+    to:   { az: vw.az, el: vw.el, dist: viewDist(vw.dist), tx: vw.tx || 0, ty: vw.ty || 0, tz: vw.tz || 0 },
+    t0: performance.now(),
+    dur: REDUCED ? 1 : 750
+  };
+  lastView[curTab] = name;
+  refreshViewButtons();
+}
+
+const brandDesc = document.getElementById('brandDesc');
+const tipsEl = document.getElementById('tips');
+function switchTab(id) {
+  if (id === curTab) return;
+  curTab = id;
+  tween = null;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+  document.querySelectorAll('.toggles[data-tab], .views[data-tab]').forEach(el => {
+    el.style.display = el.dataset.tab === id ? '' : 'none';
+  });
+  cam = cams[id];
+  brandDesc.textContent = t(SCENES[id].brand);
+  tipsEl.textContent = t(SCENES[id].tips);
+  refreshViewButtons();
+  updateReadout();
+}
+
+/* ================= 播放 / 重置 / 折叠 ================= */
+const btnPlay = document.getElementById('btnPlay');
+function togglePlay() {
+  state.running = !state.running;
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+}
+btnPlay.addEventListener('click', togglePlay);
+document.getElementById('btnReset').addEventListener('click', resetSim);
+
+const panel = document.getElementById('panel');
+const btnFold = document.getElementById('btnFold');
+btnFold.addEventListener('click', () => {
+  const c = panel.classList.toggle('collapsed');
+  btnFold.textContent = c ? '+' : '−';
+});
+if (window.innerWidth < 760) {
+  panel.classList.add('collapsed');
+  btnFold.textContent = '+';
+}
+
+/* ================= 语言切换 ================= */
+function applyLang() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.title = t(TOOL.title);
+  document.querySelector('.brand h1').textContent = t(TOOL.h1);
+  document.getElementById('panelTitle').textContent = t(UI.panelTitle);
+  document.querySelector('.hint').textContent = t(UI.hint);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+  document.getElementById('btnReset').textContent = t(UI.reset);
+  RELABEL.forEach(f => f());
+  brandDesc.textContent = t(SCENES[curTab].brand);
+  tipsEl.textContent = t(SCENES[curTab].tips);
+  updateReadout();
+}
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('lang', l);
+    history.replaceState(null, '', u);
+  } catch (e) {}
+  applyLang();
+}
+document.getElementById('btnLang').addEventListener('click', () => setLang(LANG === 'zh' ? 'en' : 'zh'));
+document.getElementById('verBadge').textContent = 'v' + VERSION;
+
+/* ================= 交互：旋转 / 平移 / 缩放 ================= */
+const pointers = new Map();
+let pinch = null;
+
+function pan(dx, dy) {
+  const C = makeCam();
+  const s = cam.dist / FOCAL;
+  cam.tx = clamp(cam.tx - C.r[0]*dx*s + C.u[0]*dy*s, -6, 6);
+  cam.ty = clamp(cam.ty - C.r[1]*dx*s + C.u[1]*dy*s, -5, 5);
+  cam.tz = clamp(cam.tz - C.r[2]*dx*s + C.u[2]*dy*s, -3, 11);
+}
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, btn: e.button });
+  tween = null;
+  lastView[curTab] = null;
+  refreshViewButtons();
+  if (pointers.size === 2) {
+    const vs = Array.from(pointers.values());
+    pinch = {
+      gap: Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y),
+      cx: (vs[0].x + vs[1].x) / 2,
+      cy: (vs[0].y + vs[1].y) / 2
+    };
+  }
+  canvas.classList.add('dragging');
+});
+
+canvas.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  p.x = e.clientX;
+  p.y = e.clientY;
+  if (pointers.size === 1) {
+    const panMode = e.shiftKey || (e.buttons & 2) || p.btn === 2 || p.btn === 1;
+    if (panMode) {
+      pan(dx, dy);
+    } else {
+      cam.az -= dx * 0.0055;
+      cam.el = clamp(cam.el + dy * 0.0055, -1.45, 1.53);
+    }
+  } else if (pointers.size === 2 && pinch) {
+    const vs = Array.from(pointers.values());
+    const gap = Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y);
+    const cx = (vs[0].x + vs[1].x) / 2, cy = (vs[0].y + vs[1].y) / 2;
+    if (gap > 1) cam.dist = clamp(cam.dist * pinch.gap / gap, 4.5, 60);
+    pan(cx - pinch.cx, cy - pinch.cy);
+    pinch = { gap: gap, cx: cx, cy: cy };
+  }
+});
+
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+  if (!pointers.size) canvas.classList.remove('dragging');
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  tween = null;
+  cam.dist = clamp(cam.dist * Math.exp(e.deltaY * 0.0012), 4.5, 60);
+}, { passive: false });
+
+canvas.addEventListener('dblclick', () => applyView(Object.keys(SCENES[curTab].views)[0]));
+
+window.addEventListener('keydown', e => {
+  const tg = e.target.tagName;
+  if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || tg === 'BUTTON') return;
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'r' || e.key === 'R') resetSim();
+  else if (e.key === 't' || e.key === 'T') {
+    const keys = Object.keys(SCENES);
+    switchTab(keys[(keys.indexOf(curTab) + 1) % keys.length]);
+  }
+  else if (e.key >= '1' && e.key <= '9') {
+    const names = Object.keys(SCENES[curTab].views);
+    const i = +e.key - 1;
+    if (i < names.length) applyView(names[i]);
+  }
+});
+
+/* ================= 启动 ================= */
+resize();
+buildTabs();
+buildParams();
+buildToggles();
+buildViews();
+Object.keys(SCENES).forEach(id => {
+  const first = Object.keys(SCENES[id].views)[0];
+  const v = SCENES[id].views[first];
+  cams[id] = { az: v.az, el: v.el, dist: viewDist(v.dist), tx: v.tx || 0, ty: v.ty || 0, tz: v.tz || 0 };
+  lastView[id] = first;
+});
+switchTab(Object.keys(SCENES)[0]);
+applyLang();
+resetSim();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

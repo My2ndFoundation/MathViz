@@ -34,6 +34,10 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [三维直线与平面的本质 · Lines & Planes](outputs/lines-planes-3d.html) | Direction vectors and normal vectors pinning freedom and constraint: lines collapse to points, planes fill the view, skew lines "cross" yet never meet |
 | [双曲函数的本质 · Hyperbolic Functions](outputs/hyperbolic-functions-3d.html) | cosh and sinh as the unit hyperbola's natural coordinates — u is twice the sector area, and a hanging chain is not a parabola |
 | [微分方程与相空间 · Differential Equations](outputs/differential-equations-phase-space-3d.html) | Whole trajectories hiding in a local direction rule: direction fields, the (t, y, y′) lift, and damping reshaping phase-plane orbits |
+| [曲面、等高线、梯度和切平面 · Surface, Contours & Gradient](outputs/gradient-contours-surface-3d.html) | Contours as horizontal slices, the gradient cutting perpendicularly through them, and the tangent plane as the local linear stand-in |
+| [运动学：一个运动，多张图像 · Kinematics](outputs/kinematics-projectile-3d.html) | One motion, many graphs: s–t, v–t and the phase view for rectilinear motion; x–t, y–t and the true path for projectiles |
+| [递推、迭代与稳定性 · Recurrence & Iteration](outputs/recurrence-iteration-dynamics-3d.html) | The cobweb machine: staircases converge, spirals alternate, escapes diverge — and Newton–Raphson is the same machine with tangent lines |
+| [能量、势能与相图 · Energy & Phase Portrait](outputs/energy-phase-portrait-3d.html) | Phase-portrait orbits as level sets of E = ½mv² + V(x): turning points, wells, and the separatrix between bound and escape |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 

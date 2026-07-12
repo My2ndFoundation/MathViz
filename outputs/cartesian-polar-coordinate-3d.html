@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.0.0">
 <title>直角坐标 × 极坐标 · 变换可视化</title>
 <!-- ============================================================
@@ -16,8 +16,15 @@
     第三维 z 存放变换进度 k 的幽灵切片（变换全景）。
   场景二「坐标换算」：点 P 沿曲线运动，同屏展示极坐标读法 (r, θ)
     与直角坐标读法 (x, y)，x = r·cosθ、y = r·sinθ。
+  场景三「雅可比」：参数平面上的 dr×dθ 小矩形与 x·y 平面上的扇形细胞
+    并排对照——径向边恒为 dr，切向边 r·dθ 随 r 线性变宽，
+    dA = r·dr·dθ，即 |∂(x,y)/∂(r,θ)| = r 是局部面积放大率。
 
   版本记录（新→旧）：
+    1.1.0  2026-07-12  新增「雅可比」页签：dr×dθ 参数细胞 ⇄ 扇形细胞并排对照，
+                       面积热度网格直观展示 |∂(x,y)/∂(r,θ)| = r
+                       Added "Jacobian" tab: paired dr×dθ parameter cell vs
+                       fan cell; area-factor shading shows |∂(x,y)/∂(r,θ)| = r
     1.0.0  2026-07-11  首个版本（含双语）
 ============================================================ -->
 <style>
@@ -301,7 +308,11 @@ const PARAMS = [
   Object.assign({ key: 'p2' }, PRESETS[DEFAULT_PRESET].p2),
   { key: 'thetaMax', label: { zh: '定义域 <i>θ</i><sub>max</sub>', en: 'Domain <i>θ</i><sub>max</sub>' }, min: 0.5, max: 6, step: 0.25,
     value: PRESETS[DEFAULT_PRESET].thetaMax, fmt: v => fmt(v) + ' π' },
-  { key: 'speed', label: { zh: '演示速度', en: 'Demo speed' }, min: 0.2, max: 2.4, step: 0.05, value: 1, fmt: v => fmt(v) + ' ×' }
+  { key: 'speed', label: { zh: '演示速度', en: 'Demo speed' }, min: 0.2, max: 2.4, step: 0.05, value: 1, fmt: v => fmt(v) + ' ×' },
+  { key: 'cellR',  label: { zh: '细胞位置 <i>r</i><sub>0</sub>（雅可比页）', en: 'Cell position <i>r</i><sub>0</sub> (Jacobian tab)' },
+    min: 0.15, max: 1.6, step: 0.01, value: 0.9, fmt: v => fmt(v) },
+  { key: 'cellTh', label: { zh: '细胞位置 <i>θ</i><sub>0</sub>（雅可比页）', en: 'Cell position <i>θ</i><sub>0</sub> (Jacobian tab)' },
+    min: 0, max: 2, step: 0.01, value: 0.25, fmt: v => fmt(v) + ' π', map: v => v * Math.PI }
 ];
 
 /* ================= 常量与状态 ================= */
@@ -702,6 +713,154 @@ function drawThetaArc(C, a1) {
     { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
 }
 
+/* ================= 场景三：雅可比的绘制部件 =================
+   左侧：参数平面 (θ, r) 的平铺矩形（θ 水平、r 竖直）；
+   右侧：x·y 平面的极坐标网格。同一个 dr×dθ 细胞在两边同时高亮——
+   参数矩形永远一样大，扇形细胞的切向边 r·dθ 却随 r 线性变宽，
+   面积恰为 r·dr·dθ：雅可比 |∂(x,y)/∂(r,θ)| = r 就是局部面积放大率。 */
+const JAC = {
+  PX0: -6.4,          // 参数平面左缘（世界 x）
+  PY0: -1,            // 参数平面 r=0 基线（世界 y）
+  S: 3.4 / TAU,       // θ → 世界 x 的显示比例
+  DR: 0.4,            // 细胞径向尺寸 dr
+  DTH: Math.PI / 8,   // 细胞角向尺寸 dθ
+  RMAX: 2             // 网格最大半径
+};
+
+function jacParamPt(th, r) { return [JAC.PX0 + JAC.S * th, JAC.PY0 + r, 0]; }
+function jacPolarPt(th, r) { return [r * Math.cos(th), r * Math.sin(th), 0]; }
+
+/* 细胞当前位置：「细胞巡游」开启时由共享时钟沿螺旋扫描（θ 匀速转、r 缓慢进出），
+   关闭时由 r₀ / θ₀ 滑杆摆放 */
+function jacCellNow() {
+  if (state.showCruise) {
+    return { th0: mod2pi(state.theta), r0: 0.2 + 0.7 * (1 - Math.cos(state.theta / 3.3)) };
+  }
+  return { th0: state.cellTh, r0: state.cellR };
+}
+
+/* 凸小多边形填充（任一顶点被近裁剪则整体跳过——细胞尺度下可接受） */
+function fillPoly3(C, pts, style) {
+  const sp = [];
+  for (const p of pts) {
+    const s = proj(C, p);
+    if (!s) return;
+    sp.push(s);
+  }
+  ctx.save();
+  ctx.fillStyle = style;
+  ctx.beginPath();
+  ctx.moveTo(sp[0][0], sp[0][1]);
+  for (let i = 1; i < sp.length; i++) ctx.lineTo(sp[i][0], sp[i][1]);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+/* 细胞多边形（内弧 → 外弧回程；mapFn = jacParamPt / jacPolarPt） */
+function jacCellPoly(mapFn, th0, r0) {
+  const n = 6, pts = [];
+  for (let i = 0; i <= n; i++) pts.push(mapFn(th0 + JAC.DTH * i / n, r0));
+  for (let i = 0; i <= n; i++) pts.push(mapFn(th0 + JAC.DTH * (1 - i / n), r0 + JAC.DR));
+  return pts;
+}
+
+/* 面积热度：两侧网格逐格填色，透明度 ∝ 该格的面积放大率 r̄（橙） */
+function jacShadePanels(C) {
+  const dth = Math.PI / 6;
+  for (let j = 0; j < 4; j++) {
+    const r1 = j * 0.5, rm = r1 + 0.25;
+    const col = 'rgba(251,146,60,' + fmt(0.05 + 0.075 * rm, 3) + ')';
+    for (let i = 0; i < 12; i++) {
+      const t1 = i * dth;
+      fillPoly3(C, [jacParamPt(t1, r1), jacParamPt(t1 + dth, r1),
+                    jacParamPt(t1 + dth, r1 + 0.5), jacParamPt(t1, r1 + 0.5)], col);
+      const pts = [];
+      for (let m = 0; m <= 4; m++) pts.push(jacPolarPt(t1 + dth * m / 4, r1));
+      for (let m = 0; m <= 4; m++) pts.push(jacPolarPt(t1 + dth * (1 - m / 4), r1 + 0.5));
+      fillPoly3(C, pts, col);
+    }
+  }
+}
+
+/* 参数平面网格（与极坐标网格同规格：Δθ = π/6、Δr = 0.5） */
+function jacParamGrid(C) {
+  for (let i = 0; i <= 12; i++) {
+    const th = i * Math.PI / 6;
+    line3(C, jacParamPt(th, 0), jacParamPt(th, JAC.RMAX), { width: 1, color: 'rgba(148,163,184,0.08)' });
+  }
+  for (let j = 1; j <= 4; j++) {
+    const r = j * 0.5;
+    line3(C, jacParamPt(0, r), jacParamPt(TAU, r), { width: 1, color: 'rgba(148,163,184,0.10)' });
+  }
+}
+
+/* 参数平面坐标轴（θ 水平、r 竖直）与标题 */
+function drawJacParamAxes(C) {
+  const X0 = JAC.PX0, Y0 = JAC.PY0, xEnd = X0 + JAC.S * TAU + 0.4;
+  line3(C, [X0 - 0.15, Y0, 0], [xEnd, Y0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [xEnd, Y0, 0], [xEnd - 0.2, Y0, 0], AXIS);
+  label3(C, [xEnd + 0.28, Y0, 0], 'θ', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  line3(C, [X0, Y0 - 0.15, 0], [X0, Y0 + 2.3, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [X0, Y0 + 2.3, 0], [X0, Y0 + 2.15, 0], AXIS);
+  label3(C, [X0, Y0 + 2.52, 0], 'r', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  for (const tk of [[Math.PI, 'π'], [TAU, '2π']]) {
+    line3(C, [X0 + JAC.S * tk[0], Y0 - 0.05, 0], [X0 + JAC.S * tk[0], Y0 + 0.05, 0], { width: 1.2, color: AXIS_DIM });
+    label3(C, [X0 + JAC.S * tk[0], Y0 - 0.24, 0], tk[1],
+      { font: 'italic 10px ' + FONT_MATH, color: 'rgba(159,176,200,.7)', align: 'center' });
+  }
+  for (const rv of [1, 2]) {
+    line3(C, [X0 - 0.05, Y0 + rv, 0], [X0 + 0.05, Y0 + rv, 0], { width: 1.2, color: AXIS_DIM });
+    label3(C, [X0 - 0.13, Y0 + rv, 0], String(rv), { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+  }
+  label3(C, [X0 + JAC.S * Math.PI, Y0 + 2.75, 0], t({ zh: '参数平面 (θ, r)', en: 'Parameter plane (θ, r)' }),
+    { size: 11, color: 'rgba(159,176,200,.8)', align: 'center' });
+}
+
+/* 配对连线（玫红，与细胞同色）：细胞四角从参数矩形跃迁到扇形细胞，弧线穿出 z 维 */
+function jacThreads(C, th0, r0) {
+  const corners = [[th0, r0], [th0 + JAC.DTH, r0], [th0 + JAC.DTH, r0 + JAC.DR], [th0, r0 + JAC.DR]];
+  for (const c of corners) {
+    const A = jacParamPt(c[0], c[1]), B = jacPolarPt(c[0], c[1]);
+    const pts = [];
+    for (let i = 0; i <= 14; i++) {
+      const s = i / 14;
+      pts.push([A[0] + (B[0] - A[0]) * s, A[1] + (B[1] - A[1]) * s, Math.sin(s * Math.PI) * 1.15]);
+    }
+    strokePoly(C, pts, { width: 1.1, color: 'rgba(251,113,133,0.30)' });
+  }
+}
+
+/* θ₀ 角度弧（琥珀度量） */
+function jacThetaArc(C, th0) {
+  if (th0 < 0.06) return;
+  const n = Math.max(2, Math.ceil(th0 / 0.07));
+  const pts = [];
+  for (let j = 0; j <= n; j++) {
+    const a = th0 * j / n;
+    pts.push([0.34 * Math.cos(a), 0.34 * Math.sin(a), 0]);
+  }
+  strokePoly(C, pts, { width: 1.6, color: 'rgba(251,191,36,0.9)' });
+  arrowAt(C, pts[n], pts[n - 1], 'rgba(251,191,36,0.9)');
+  label3(C, [0.56 * Math.cos(th0 * 0.6), 0.56 * Math.sin(th0 * 0.6), 0], 'θ₀',
+    { font: 'italic 12px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+}
+
+/* 径向边 dr（紫）：从细胞内角沿 r 方向 */
+function jacEdgeR(C, mapFn, th0, r0) {
+  const a = mapFn(th0, r0), b = mapFn(th0, r0 + JAC.DR);
+  line3(C, a, b, { width: 2.2, color: 'rgba(167,139,250,0.95)' });
+  arrowAt(C, b, a, 'rgba(167,139,250,0.95)');
+}
+
+/* 切向边（翠）：参数侧长 dθ 恒定，极坐标侧弧长 r·dθ 随 r 变宽 */
+function jacEdgeT(C, mapFn, th0, r0) {
+  const n = 8, pts = [];
+  for (let i = 0; i <= n; i++) pts.push(mapFn(th0 + JAC.DTH * i / n, r0));
+  strokePoly(C, pts, { width: 2.2, color: 'rgba(52,211,153,0.95)' });
+  arrowAt(C, pts[n], pts[n - 1], 'rgba(52,211,153,0.95)');
+}
+
 /* ╔══════════════════════════════════════════════════════════╗
    ║  ② 场景注册                                                ║
    ╚══════════════════════════════════════════════════════════╝ */
@@ -879,6 +1038,101 @@ const SCENES = {
         '<span class="cE">y = r·sinθ = <b>' + fmtS(pn.y) + '</b></span></div>' +
         '<div class="dim">' + t({ zh: '反算：', en: 'Inverse: ' }) + '√(x²+y²) = ' + fmt(Math.hypot(pn.x, pn.y)) +
         ' · atan2(y, x) ≡ ' + degBack.toFixed(0) + '°' + negNote + '</div>';
+    }
+  },
+
+  /* ────── 场景三：雅可比 ────── */
+  jac: {
+    label: { zh: '雅可比', en: 'Jacobian' },
+    brand: { zh: '变换 x = r·cosθ、y = r·sinθ 把参数平面上的小矩形 dr×dθ 映成 x·y 平面上的扇形细胞，面积恰好放大 r 倍——这就是雅可比行列式，也是 dA = r·dr·dθ 中 r 的来历。',
+             en: 'The map x = r·cosθ, y = r·sinθ sends a small dr×dθ rectangle in parameter space to a little fan cell in the x·y plane, scaling its area by exactly r — that is the Jacobian determinant, and where the r in dA = r·dr·dθ comes from.' },
+    tips: { zh: '提示：按 2 进入「对照 x·y」——左侧参数矩形全都一样大，右侧扇形格却随 r 变宽：内圈是窄条、外圈是宽扇，每格面积 = r·dr·dθ。「面积热度网格」把放大率 r 直接涂在格子上；关闭「细胞巡游」后，可用 r₀ / θ₀ 滑杆亲手摆放细胞。',
+            en: 'Tip: press 2 for the "Side by side" view — every parameter rectangle on the left is the same size, yet the fan cells on the right widen with r: slivers near the pole, wide fans outside, each with area r·dr·dθ. "Area-factor shading" paints the factor r onto the grid; turn off "Cell rides the clock" to place the cell yourself with the r₀ / θ₀ sliders.' },
+    views: {
+      iso:  { label: { zh: '立体',      en: '3D' },           az: -0.75, el: 0.34, dist: 13,   tx: -1.9,  ty: 0.15, tz: 0.8 },
+      pair: { label: { zh: '对照 x·y',  en: 'Side by side' },  az: 0.001, el: 0.02, dist: 10.5, tx: -1.95, ty: 0.1,  tz: 0,
+        onSelect() { setToggle('showShade', true); setToggle('showCell', true); } },
+      fan:  { label: { zh: '扇形 特写', en: 'Fan close-up' },  az: 0.001, el: 0.02, dist: 6.4,  tx: 0,     ty: 0,    tz: 0,
+        onSelect() { setToggle('showBasisR', true); setToggle('showBasisT', true); } }
+    },
+    toggles: [
+      { key: 'showCell',   label: { zh: 'dA 细胞与配对线', en: 'dA cell & pairing threads' }, color: '#fb7185', checked: true },
+      { key: 'showBasisR', label: { zh: '径向边 dr',       en: 'Radial edge dr' },            color: '#a78bfa', checked: true },
+      { key: 'showBasisT', label: { zh: '切向边 r·dθ',     en: 'Tangential edge r·dθ' },      color: '#34d399', checked: true },
+      { key: 'showShade',  label: { zh: '面积热度网格',    en: 'Area-factor shading' },       color: '#fb923c', checked: true },
+      { key: 'showCruise', label: { zh: '细胞随时钟巡游',  en: 'Cell rides the clock' },      color: '#2dd4ea', checked: true },
+      { key: 'showGrid',   label: { zh: '网格',            en: 'Grid' },                      color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => 0.6,
+    draw(C) {
+      const cell = jacCellNow();
+      if (state.showCruise) {   /* 巡游时把细胞位置回写到滑杆（同 morphK 的 syncKSlider 模式） */
+        setParamValue('cellR', cell.r0);
+        setParamValue('cellTh', cell.th0 / Math.PI);
+      }
+
+      if (state.showShade) jacShadePanels(C);
+      if (state.showGrid) { jacParamGrid(C); drawPolarGrid(C); }
+      drawJacParamAxes(C);
+      drawAxes(C, { ex: 2.45, ey: 2.35, xTicks: [1, 2], yTicks: [1, 2] });
+      label3(C, [-1.75, 2.6, 0], t({ zh: 'x·y 平面', en: 'x·y plane' }),
+        { size: 11, color: 'rgba(159,176,200,.8)', align: 'center' });
+
+      const pp = jacCellPoly(jacParamPt, cell.th0, cell.r0);
+      const fp = jacCellPoly(jacPolarPt, cell.th0, cell.r0);
+
+      if (state.showCell) {
+        jacThreads(C, cell.th0, cell.r0);
+        fillPoly3(C, pp, 'rgba(251,113,133,0.18)');
+        fillPoly3(C, fp, 'rgba(251,113,133,0.22)');
+        strokePoly(C, pp.concat([pp[0]]), { width: 1.6, color: 'rgba(251,113,133,0.9)' });
+        strokePoly(C, fp.concat([fp[0]]), { width: 1.6, color: 'rgba(251,113,133,0.9)' });
+        /* r₀ 半径与 θ₀ 角度弧（琥珀度量注记） */
+        line3(C, [0, 0, 0], jacPolarPt(cell.th0, cell.r0), { width: 1.3, color: 'rgba(241,245,249,0.5)' });
+        label3(C, jacPolarPt(cell.th0, cell.r0 * 0.55), 'r₀',
+          { font: 'italic 12px ' + FONT_MATH, color: '#fbbf24', align: 'center', dy: -9 });
+        jacThetaArc(C, cell.th0);
+      }
+
+      if (state.showBasisR) {
+        jacEdgeR(C, jacParamPt, cell.th0, cell.r0);
+        jacEdgeR(C, jacPolarPt, cell.th0, cell.r0);
+        label3(C, jacParamPt(cell.th0, cell.r0 + JAC.DR / 2), 'dr',
+          { font: 'italic 11px ' + FONT_MATH, color: '#a78bfa', align: 'right', dx: -8 });
+        label3(C, jacPolarPt(cell.th0, cell.r0 + JAC.DR / 2), 'dr',
+          { font: 'italic 11px ' + FONT_MATH, color: '#a78bfa', align: 'left', dx: 10 });
+      }
+      if (state.showBasisT) {
+        jacEdgeT(C, jacParamPt, cell.th0, cell.r0);
+        jacEdgeT(C, jacPolarPt, cell.th0, cell.r0);
+        label3(C, jacParamPt(cell.th0 + JAC.DTH / 2, cell.r0), 'dθ',
+          { font: 'italic 11px ' + FONT_MATH, color: '#34d399', align: 'center', dy: 14 });
+        label3(C, jacPolarPt(cell.th0 + JAC.DTH / 2, cell.r0), 'r·dθ',
+          { font: 'italic 11px ' + FONT_MATH, color: '#34d399', align: 'center', dy: 14 });
+      }
+
+      if (state.showCell) {   /* 细胞内角：两侧同点高亮（玫红曲线头规格） */
+        const sf = proj(C, jacPolarPt(cell.th0, cell.r0));
+        if (sf) glowDot(sf, 12, '#ffffff', 'rgba(251,113,133,0.9)');
+        const sp2 = proj(C, jacParamPt(cell.th0, cell.r0));
+        if (sp2) glowDot(sp2, 8, '#ffffff', 'rgba(251,113,133,0.85)');
+      }
+
+      label3(C, [1.15, 2.95, 0], 'dA = r · dr · dθ',
+        { font: 'italic 13px ' + FONT_MATH, color: '#fb7185', align: 'center' });
+      label3(C, [1.15, 2.67, 0], '|∂(x,y)/∂(r,θ)| = r',
+        { font: 'italic 11px ' + FONT_MATH, color: 'rgba(159,176,200,.8)', align: 'center' });
+    },
+    readout() {
+      const cell = jacCellNow();
+      const deg = (cell.th0 * 180 / Math.PI).toFixed(0);
+      const dPar = JAC.DR * JAC.DTH;
+      const dA = cell.r0 * dPar;
+      return '<div>r₀ = <b>' + fmt(cell.r0) + '</b>&ensp;·&ensp;θ₀ = <b>' + fmt(cell.th0) + '</b> rad ≡ ' + deg + '°</div>' +
+        '<div><span class="cV">|∂P/∂r| = <b>1</b></span>&ensp;·&ensp;<span class="cE">|∂P/∂θ| = r₀ = <b>' + fmt(cell.r0) + '</b></span></div>' +
+        '<div class="cR">dA = r₀·dr·dθ = <b>' + fmt(dA, 3) + '</b> = ' + fmt(cell.r0) + ' × ' + fmt(dPar, 3) + '</div>' +
+        '<div class="dim">' + t({ zh: '参数矩形面积 dr·dθ = ' + fmt(dPar, 3) + ' 恒定 · 扇形细胞 = 它的 r₀ 倍',
+                                  en: 'Parameter rectangle dr·dθ = ' + fmt(dPar, 3) + ' is constant · fan cell = r₀ times that' }) + '</div>';
     }
   }
 };

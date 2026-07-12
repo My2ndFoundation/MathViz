@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.0.0">
 <title>高斯分布的本质 · 钟形曲线从何而来</title>
 <!-- ============================================================
@@ -13,6 +13,8 @@
   引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
 
   版本记录（changelog，新→旧）：
+    1.1.0  2026-07-12  新增「二维联合分布」页签：ρ 决定概率云的方向，边缘分布是云压扁后的影子；等密度椭圆、主轴 vs 回归线、确定性散点
+                       Added the "2D joint distribution" tab: ρ sets the tilt of the probability cloud, marginals are its squashed shadows; iso-density ellipses, principal axis vs regression line, deterministic scatter
     1.0.0  2026-07-12  首个版本（含双语）
 ============================================================ -->
 <style>
@@ -217,8 +219,38 @@ const PARAMS = [
   { key: 'mu',    label: { zh: '均值 <i>μ</i>',       en: 'Mean <i>μ</i>' },          min: -2,  max: 2,   step: 0.05, value: 0, fmt: v => fmtS(v) },
   { key: 'sigma', label: { zh: '标准差 <i>σ</i>',     en: 'Std dev <i>σ</i>' },       min: 0.4, max: 1.8, step: 0.05, value: 1, fmt: v => fmt(v) },
   { key: 'n',     label: { zh: '叠加个数 <i>n</i>',   en: 'Summands <i>n</i>' },      min: 1,   max: 12,  step: 1,    value: 1, fmt: v => v.toFixed(0) },
-  { key: 'omega', label: { zh: '落珠速度 <i>ω</i>',   en: 'Drop rate <i>ω</i>' },     min: 0.5, max: 4,   step: 0.1,  value: 2, fmt: v => fmt(v, 1) + ' rad/s' }
+  { key: 'omega', label: { zh: '落珠速度 <i>ω</i>',   en: 'Drop rate <i>ω</i>' },     min: 0.5, max: 4,   step: 0.1,  value: 2, fmt: v => fmt(v, 1) + ' rad/s' },
+  /* —— 二维联合分布 —— */
+  { key: 'mux', label: { zh: '均值 <i>μ<sub>x</sub></i>',   en: 'Mean <i>μ<sub>x</sub></i>' },    min: -2,    max: 2,    step: 0.05, value: 0,   fmt: v => fmtS(v) },
+  { key: 'muy', label: { zh: '均值 <i>μ<sub>y</sub></i>',   en: 'Mean <i>μ<sub>y</sub></i>' },    min: -2,    max: 2,    step: 0.05, value: 0,   fmt: v => fmtS(v) },
+  { key: 'sgx', label: { zh: '标准差 <i>σ<sub>x</sub></i>', en: 'Std dev <i>σ<sub>x</sub></i>' }, min: 0.5,   max: 1.8,  step: 0.05, value: 1,   fmt: v => fmt(v) },
+  { key: 'sgy', label: { zh: '标准差 <i>σ<sub>y</sub></i>', en: 'Std dev <i>σ<sub>y</sub></i>' }, min: 0.5,   max: 1.8,  step: 0.05, value: 0.6, fmt: v => fmt(v) },
+  { key: 'rho', label: { zh: '相关系数 <i>ρ</i>',           en: 'Correlation <i>ρ</i>' },         min: -0.95, max: 0.95, step: 0.05, value: 0.6, fmt: v => fmtS(v) }
 ];
+
+/* 每个滑杆归属的页签（未列出者在所有页签显示）——场景级 UI 辅助（不改引擎函数）：
+   一个独立的 rAF 轮询在页签切换时更新 .ctl 行显隐，与 PARAMS 顺序一一对应
+   （paramsHost 的第 i 个子节点即 PARAMS[i]）。原有三个页签的滑杆组保持不变。 */
+const PARAM_TABS = {
+  mu:  ['bell', 'clt', 'drops'], sigma: ['bell', 'clt', 'drops'],
+  n:   ['bell', 'clt', 'drops'], omega: ['bell', 'clt', 'drops'],
+  mux: ['joint'], muy: ['joint'], sgx: ['joint'], sgy: ['joint'], rho: ['joint']
+};
+let _paramSyncTab = null;
+function syncParamRows() {
+  if (curTab === _paramSyncTab) return;
+  const host = document.getElementById('paramsHost');
+  if (!host || host.children.length < PARAMS.length) return;
+  _paramSyncTab = curTab;
+  PARAMS.forEach((p, i) => {
+    const row = host.children[i];
+    if (!row) return;
+    const tabs = PARAM_TABS[p.key];
+    row.style.display = (!tabs || tabs.indexOf(curTab) !== -1) ? '' : 'none';
+  });
+}
+/* 首帧后启动（此时引擎已完成同步初始化，curTab 已就绪，避免 TDZ） */
+requestAnimationFrame(function _paramSyncLoop() { syncParamRows(); requestAnimationFrame(_paramSyncLoop); });
 
 /* ╔══════════════════════════════════════════════════════════╗
    ║  ② 场景注册 —— 每个键就是一个页签                           ║
@@ -286,6 +318,67 @@ function drawGaussAxes(C, o) {
     line3(C, [-0.05, tk[1], 0], [0.05, tk[1], 0], { width: 1.2, color: AXIS_DIM });
     label3(C, [-0.13, tk[1], 0], tk[0], { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
   }
+}
+
+/* ── 二维联合分布（joint 页签）：数学与部件（场景级，引擎零改动） ──
+   数学坐标 → 世界坐标：x → x（右）、y → −z（俯视时朝上、ρ>0 斜向右上）、密度 → 世界 y（高度） */
+const J3 = (x, y, h) => [x, h, -y];
+const YSJ = 2.5;                              // 密度 → 世界高度放大
+const EME_A = 'rgba(52,211,153,';
+const ORA_A = 'rgba(251,146,60,';
+
+/* 联合密度 f(x,y)（二元正态） */
+function jointPdf(x, y, mx, my, sx, sy, r) {
+  const a = (x - mx) / sx, b = (y - my) / sy;
+  return Math.exp(-(a * a - 2 * r * a * b + b * b) / (2 * (1 - r * r))) /
+         (2 * Math.PI * sx * sy * Math.sqrt(1 - r * r));
+}
+
+/* 确定性「低差异」标准正态点对：Halton(2,3) + Box–Muller，一次预生成——
+   逐帧只做 Σ 的 Cholesky 变换，绝不逐帧随机（暂停/调参行为完全确定） */
+function halton(i, b) {
+  let r = 0, f = 1;
+  while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); }
+  return r;
+}
+const JPTS = [];
+for (let i = 1; i <= 220; i++) {
+  const u1 = halton(i, 2), u2 = halton(i, 3);
+  const rr = Math.sqrt(-2 * Math.log(u1));
+  JPTS.push([rr * Math.cos(2 * Math.PI * u2), rr * Math.sin(2 * Math.PI * u2)]);
+}
+
+/* 地面网格（世界 y=0 平面） */
+function drawFloorGrid(C) {
+  for (let i = -4; i <= 4; i++) {
+    if (i === 0) continue;
+    line3(C, [i, 0, -4], [i, 0, 4], { width: 1, color: 'rgba(148,163,184,0.08)' });
+    line3(C, [-4, 0, i], [4, 0, i], { width: 1, color: 'rgba(148,163,184,0.08)' });
+  }
+}
+
+/* 联合分布专用坐标轴（地面 x·y 双轴） */
+function drawJointAxes(C) {
+  line3(C, [-4.3, 0, 0], [4.5, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [4.5, 0, 0], [4.3, 0, 0], AXIS);
+  label3(C, [4.78, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  line3(C, [0, 0, 4.3], [0, 0, -4.5], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, 0, -4.5], [0, 0, -4.3], AXIS);
+  label3(C, [0, 0, -4.85], 'y', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  for (let v = -4; v <= 4; v += 2) {
+    if (v === 0) continue;
+    line3(C, [v, 0, -0.08], [v, 0, 0.08], { width: 1.2, color: AXIS_DIM });
+    label3(C, [v, 0, 0.4], (v < 0 ? '−' : '') + Math.abs(v), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+    line3(C, [-0.08, 0, -v], [0.08, 0, -v], { width: 1.2, color: AXIS_DIM });
+    label3(C, [-0.3, 0, -v], (v < 0 ? '−' : '') + Math.abs(v), { size: 10, color: 'rgba(159,176,200,.55)', align: 'right' });
+  }
+}
+
+/* 视角联动：选中视角时自动开启对应开关（同步面板复选框） */
+function jointEnable(key) {
+  if (state[key]) return;
+  state[key] = true;
+  document.querySelectorAll('input[data-key="' + key + '"]').forEach(o => { o.checked = true; });
 }
 
 const SCENES = {
@@ -485,6 +578,160 @@ const SCENES = {
         '<div class="sinC">' + t({ zh: '直方图峰', en: 'histogram peak' }) + ' ≈ <b>' + (sim.total ? fmt(Math.max(...sim.bins) / (sim.total * BW), 3) : '—') + '</b></div>' +
         '<div><span style="color:#2dd4ea">' + t({ zh: '理论峰', en: 'theory peak' }) + ' = <b>' + fmt(stdPdf(n, 0), 3) + '</b></span></div>' +
         '<div class="dim">' + t({ zh: '按 R 清空重下 · 大数定律在工作', en: 'Press R to restart · the law of large numbers at work' }) + '</div>';
+    }
+  },
+
+  /* ────── 四：二维联合分布 · 相关性是云的方向 ────── */
+  joint: {
+    label: { zh: '二维联合分布', en: '2D joint' },
+    brand: { zh: '两个高斯变量的联合密度是一座山：相关系数 ρ 决定概率云倾斜的方向，边缘分布则是山沿某个方向压扁后的影子。拖动 ρ 看云转向、压扁，拖拽画布旋转观察。',
+             en: 'The joint density of two Gaussians is a hill: the correlation ρ sets the tilt of the probability cloud, and each marginal is the hill squashed flat along one axis — its shadow on the wall. Drag ρ to tilt and squeeze the cloud, and drag the canvas to look around.' },
+    tips: { zh: '提示：切「俯视 x·y」，山塌缩成等密度椭圆图——ρ>0 斜向右上，ρ<0 斜向左下，|ρ|→1 时压成一条线；再比较翠绿主轴与橙色回归线：除非 σx = σy，两者并不重合。',
+            en: 'Tip: in "Top x·y" the hill collapses into its iso-density ellipse map — ρ>0 tilts it up-right, ρ<0 down-left, and as |ρ|→1 it squashes into a line; then compare the emerald principal axis with the orange regression line — they differ unless σx = σy.' },
+    views: {
+      iso:   { label: { zh: '立体',     en: '3D' },            az: 0.6,   el: 0.38, dist: 13.5, tx: 0, ty: 0.4, tz: 0 },
+      top:   { label: { zh: '俯视 x·y', en: 'Top x·y' },       az: 0.001, el: 1.52, dist: 13,   tx: 0, ty: 0,   tz: 0, onSelect: () => jointEnable('showEll') },
+      margx: { label: { zh: '边缘 x·p', en: 'Marginal x·p' },  az: 0.001, el: 0.02, dist: 11.5, tx: 0, ty: 0.9, tz: 0, onSelect: () => jointEnable('showMarg') },
+      margy: { label: { zh: '边缘 y·p', en: 'Marginal y·p' },  az: Math.PI / 2 - 0.001, el: 0.02, dist: 11.5, tx: 0, ty: 0.9, tz: 0, onSelect: () => jointEnable('showMarg') }
+    },
+    toggles: [
+      { key: 'showHill', label: { zh: '密度曲面 <i>f</i>(<i>x</i>,<i>y</i>)', en: 'Density surface <i>f</i>(<i>x</i>,<i>y</i>)' }, color: '#2dd4ea', checked: true },
+      { key: 'showEll',  label: { zh: '等密度椭圆', en: 'Iso-density ellipses' }, color: '#fb7185', checked: true },
+      { key: 'showMarg', label: { zh: '边缘分布', en: 'Marginals' },              color: '#a78bfa', checked: true },
+      { key: 'showPrin', label: { zh: '主轴', en: 'Principal axis' },             color: '#34d399', checked: true },
+      { key: 'showReg',  label: { zh: '回归线', en: 'Regression line' },          color: '#fb923c', checked: true },
+      { key: 'showPts',  label: { zh: '样本散点', en: 'Sample scatter' },         color: '#cbd5e1', checked: false },
+      { key: 'showGrid', label: { zh: '网格', en: 'Grid' },                       color: '#64748b', checked: false }
+    ],
+    sampleWindow: () => 10,
+    draw(C) {
+      const mx = state.mux, my = state.muy, sx = state.sgx, sy = state.sgy, r = state.rho;
+      const s1r = Math.sqrt(1 - r * r);
+      const peak = 1 / (TAU * sx * sy * s1r);
+      /* 山的自适应包围盒（±3.2σ，钳制在 ±4 地面内） */
+      const xa = Math.max(-4, mx - 3.2 * sx), xb = Math.min(4, mx + 3.2 * sx);
+      const ya = Math.max(-4, my - 3.2 * sy), yb = Math.min(4, my + 3.2 * sy);
+
+      if (state.showGrid) drawFloorGrid(C);
+      drawJointAxes(C);
+
+      /* μ 落点（琥珀度量）：到两轴的地面投影虚线 */
+      line3(C, J3(mx, my, 0.01), J3(mx, 0, 0.01), { width: 1.2, dash: [7, 7], color: AMB_A + '0.45)' });
+      line3(C, J3(mx, my, 0.01), J3(0, my, 0.01), { width: 1.2, dash: [7, 7], color: AMB_A + '0.45)' });
+      solidDot(C, J3(mx, my, 0.012), 3, AMB_A + '0.9)');
+      label3(C, J3(mx, my, 0.02), 'μ', { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'left', dx: 8, dy: 12 });
+
+      /* 边缘分布（紫）：沿 y 压扁 → 背墙上的 x 边缘钟；沿 x 压扁 → 侧墙上的 y 边缘钟。
+         墙上曲线取山的剪影高度（对另一变量取 max）——正是「影子」；形状恰为 N(μ,σ²) */
+      if (state.showMarg) {
+        const wx = [], wy = [];
+        for (let i = 0; i <= 140; i++) {
+          const u = -4 + 8 * i / 140;
+          wx.push(J3(u, 4.3, peak * Math.exp(-(u - mx) * (u - mx) / (2 * sx * sx)) * YSJ));
+          wy.push(J3(-4.3, u, peak * Math.exp(-(u - my) * (u - my) / (2 * sy * sy)) * YSJ));
+        }
+        strokePoly(C, wx, { width: 5, color: VIO_A + '0.13)' });
+        strokePoly(C, wx, { width: 2, color: VIO_A + '0.9)' });
+        strokePoly(C, wy, { width: 5, color: VIO_A + '0.13)' });
+        strokePoly(C, wy, { width: 2, color: VIO_A + '0.9)' });
+        /* 山顶 → 两面墙的投影虚线（影子从哪里来） */
+        line3(C, J3(mx, my, peak * YSJ), J3(mx, 4.3, peak * YSJ), { width: 1.5, dash: [7, 7], color: VIO_A + '0.5)' });
+        line3(C, J3(mx, my, peak * YSJ), J3(-4.3, my, peak * YSJ), { width: 1.5, dash: [7, 7], color: VIO_A + '0.5)' });
+        const hx = proj(C, J3(mx, 4.3, peak * YSJ));
+        if (hx) glowDot(hx, 8, '#ffffff', VIO_A + '0.85)');
+        const hy = proj(C, J3(-4.3, my, peak * YSJ));
+        if (hy) glowDot(hy, 8, '#ffffff', VIO_A + '0.85)');
+        label3(C, J3(mx, 4.3, peak * YSJ + 0.32), 'x → N(μx, σx²)', { font: 'italic 12px ' + FONT_MATH, color: '#a78bfa', align: 'center' });
+        label3(C, J3(-4.3, my, peak * YSJ + 0.32), 'y → N(μy, σy²)', { font: 'italic 12px ' + FONT_MATH, color: '#a78bfa', align: 'center' });
+      }
+
+      /* 等密度椭圆（玫红）：马氏距离 c = 1σ·2σ·3σ；ρ 决定倾斜，|ρ|→1 压成线 */
+      if (state.showEll) {
+        for (let c = 1; c <= 3; c++) {
+          const ep = [];
+          for (let i = 0; i <= 96; i++) {
+            const a = TAU * i / 96, u = Math.cos(a), v = Math.sin(a);
+            ep.push(J3(mx + c * sx * u, my + c * sy * (r * u + s1r * v), 0.012));
+          }
+          const al = c === 1 ? 0.9 : c === 2 ? 0.5 : 0.28;
+          strokePoly(C, ep, { width: c === 1 ? 2 : 1.4, color: ROSE_A + al + ')' });
+        }
+        label3(C, J3(mx + sx, my + sy * r, 0.02), '1σ', { font: 'italic 10.5px ' + FONT_MATH, color: ROSE_A + '0.9)', align: 'left', dx: 6 });
+        label3(C, J3(mx + 3 * sx, my + 3 * sy * r, 0.02), '3σ', { font: 'italic 10.5px ' + FONT_MATH, color: ROSE_A + '0.55)', align: 'left', dx: 6 });
+      }
+
+      /* 样本散点（确定性 Halton 点集 × Cholesky(Σ)） */
+      if (state.showPts) {
+        for (const p of JPTS) {
+          const px = mx + sx * p[0];
+          const py = my + sy * (r * p[0] + s1r * p[1]);
+          if (px > -4 && px < 4 && py > -4 && py < 4) {
+            solidDot(C, J3(px, py, 0.008), 1.7, 'rgba(203,213,225,0.6)');
+          }
+        }
+      }
+
+      /* 主轴（翠绿，Σ 的第一特征向量）与回归线（橙）：σx ≠ σy 时二者不重合 */
+      const vxy = r * sx * sy;
+      const ang = 0.5 * Math.atan2(2 * vxy, sx * sx - sy * sy);
+      if (state.showPrin) {
+        const lam1 = (sx * sx + sy * sy) / 2 + Math.sqrt(Math.pow((sx * sx - sy * sy) / 2, 2) + vxy * vxy);
+        const L = 3 * Math.sqrt(lam1), ca = Math.cos(ang), sa = Math.sin(ang);
+        line3(C, J3(mx - L * ca, my - L * sa, 0.016), J3(mx + L * ca, my + L * sa, 0.016), { width: 1.6, color: EME_A + '0.8)' });
+        label3(C, J3(mx + L * ca, my + L * sa, 0.05), t({ zh: '主轴', en: 'principal' }), { size: 11, color: '#34d399', align: 'left', dx: 8, dy: -6 });
+      }
+      if (state.showReg) {
+        const b = r * sy / sx;
+        line3(C, J3(mx - 3 * sx, my - 3 * sx * b, 0.02), J3(mx + 3 * sx, my + 3 * sx * b, 0.02), { width: 1.6, color: ORA_A + '0.85)' });
+        label3(C, J3(mx + 3 * sx, my + 3 * sx * b, 0.05), 'y = μy + ρ(σy/σx)(x−μx)', { font: 'italic 12px ' + FONT_MATH, color: '#fb923c', align: 'left', dx: 8, dy: 12 });
+      }
+
+      /* 密度曲面（青，源几何）：线框山 + 过 μ 的两条剖面棱线 */
+      if (state.showHill) {
+        const N = 28;
+        for (let i = 0; i <= N; i++) {
+          const x = xa + (xb - xa) * i / N, row = [];
+          for (let j = 0; j <= N; j++) {
+            const y = ya + (yb - ya) * j / N;
+            row.push(J3(x, y, jointPdf(x, y, mx, my, sx, sy, r) * YSJ));
+          }
+          strokePoly(C, row, { width: 1, color: CYAN_A + '0.28)' });
+        }
+        for (let j = 0; j <= N; j++) {
+          const y = ya + (yb - ya) * j / N, row = [];
+          for (let i = 0; i <= N; i++) {
+            const x = xa + (xb - xa) * i / N;
+            row.push(J3(x, y, jointPdf(x, y, mx, my, sx, sy, r) * YSJ));
+          }
+          strokePoly(C, row, { width: 1, color: CYAN_A + '0.28)' });
+        }
+        const rx = [], ry = [];
+        for (let i = 0; i <= 100; i++) {
+          const x = xa + (xb - xa) * i / 100;
+          rx.push(J3(x, my, jointPdf(x, my, mx, my, sx, sy, r) * YSJ));
+          const y = ya + (yb - ya) * i / 100;
+          ry.push(J3(mx, y, jointPdf(mx, y, mx, my, sx, sy, r) * YSJ));
+        }
+        strokePoly(C, rx, { width: 5, color: CYAN_A + '0.13)' });
+        strokePoly(C, rx, { width: 1.8, color: CYAN_A + '0.9)' });
+        strokePoly(C, ry, { width: 5, color: CYAN_A + '0.13)' });
+        strokePoly(C, ry, { width: 1.8, color: CYAN_A + '0.9)' });
+        label3(C, J3(mx, my, peak * YSJ + 0.28), 'f(x, y)', { font: 'italic 13px ' + FONT_MATH, color: '#2dd4ea', align: 'center', dy: -8 });
+      }
+      /* 山顶主点 */
+      const tp = proj(C, J3(mx, my, peak * YSJ));
+      if (tp) glowDot(tp, 13, '#ffffff', 'rgba(186,240,255,0.9)');
+    },
+    readout() {
+      const mx = state.mux, my = state.muy, sx = state.sgx, sy = state.sgy, r = state.rho;
+      const cov = r * sx * sy;
+      const ang = Math.round(0.5 * Math.atan2(2 * cov, sx * sx - sy * sy) * 180 / Math.PI);
+      return '<div>μ = (<b>' + fmtS(mx) + '</b>, <b>' + fmtS(my) + '</b>)&ensp;·&ensp;ρ = <span class="sinC"><b>' + fmtS(r) + '</b></span></div>' +
+        '<div class="dim">Σ · σx² = ' + fmt(sx * sx) + ' · ρσxσy = ' + fmtS(cov) + ' · σy² = ' + fmt(sy * sy) + '</div>' +
+        '<div class="cosC">' + t({ zh: '边缘', en: 'marginals' }) + ' x → N(' + fmtS(mx) + ', <b>' + fmt(sx * sx) + '</b>) · y → N(' + fmtS(my) + ', <b>' + fmt(sy * sy) + '</b>)</div>' +
+        '<div class="tanC">' + t({ zh: '主轴角', en: 'principal angle' }) + ' = <b>' + (ang < 0 ? '−' : '') + Math.abs(ang) + '°</b></div>' +
+        '<div class="cotC">' + t({ zh: '回归斜率', en: 'regression slope' }) + ' ρσy/σx = <b>' + fmtS(r * sy / sx) + '</b></div>' +
+        '<div class="dim">' + t({ zh: 'σx = σy 时主轴与回归线才重合', en: 'principal axis = regression only when σx = σy' }) + '</div>';
     }
   }
 };
