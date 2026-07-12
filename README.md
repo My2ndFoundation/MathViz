@@ -26,6 +26,7 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [线性代数的本质 · Linear Algebra](outputs/linear-essence-3d.html) | One pair of vectors read three ways: addition & dot-product shadows, the cross product as signed area, and matrices as space-warping columns |
 | [离散傅里叶变换 · The DFT](outputs/dft-essence-3d.html) | Sampling, the spectrum corridor, bit-perfect inverse reconstruction, and filtering as frequency-domain surgery |
 | [极限的本质 · Limits](outputs/limit-essence-3d.html) | Order decides everything: infinitesimals under rescaling, series one order apart converging or diverging, and a microscope sorting smooth, kinked, and broken |
+| [三角恒等式的本质 · Trig Identities](outputs/trig-identity-3d.html) | The whole identity handbook as one machine: angle sums as rotation, reduction formulas as mirrors, the auxiliary angle as vector addition |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
