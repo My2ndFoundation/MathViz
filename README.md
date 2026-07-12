@@ -20,15 +20,15 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [直角坐标 × 极坐标](outputs/cartesian-polar-coordinate-3d.html) | The same point as (x, y) or (r, θ), and the same function read as Cartesian or polar |
 | [圆锥曲线的本质](outputs/conic-essence-3d.html) | Ellipse, parabola, and hyperbola as one cone sliced at continuously changing angles |
 | [凯利公式的本质 · Kelly Criterion](outputs/kelly-essence-3d.html) | Why the optimal bet size is a peak, not "more" — long-run growth crests at f* = p − q/b |
-| [泰勒展开的本质 · Taylor Expansion](outputs/taylor-essence-3d.html) | How polynomials hug a function order by order — and why they can never hug past the radius of convergence |
-| [微积分的本质 · Calculus, Single to Triple](outputs/calculus-essence-3d.html) | Integration as slice → evaluate → stack: FTC in 1D, then double and triple integrals as integrals of integrals |
-| [高斯分布的本质 · The Gaussian](outputs/gaussian-essence-3d.html) | Where the bell curve comes from: σ at the inflection point, sums becoming bells (CLT), and random beads piling into theory |
-| [线性代数的本质 · Linear Algebra](outputs/linear-essence-3d.html) | One pair of vectors read three ways: addition & dot-product shadows, the cross product as signed area, and matrices as space-warping columns |
-| [离散傅里叶变换 · The DFT](outputs/dft-essence-3d.html) | Sampling, the spectrum corridor, bit-perfect inverse reconstruction, and filtering as frequency-domain surgery |
-| [极限的本质 · Limits](outputs/limit-essence-3d.html) | Order decides everything: infinitesimals under rescaling, series one order apart converging or diverging, and a microscope sorting smooth, kinked, and broken |
 | [三角恒等式的本质 · Trig Identities](outputs/trig-identity-3d.html) | The whole identity handbook as one machine: angle sums as rotation, reduction formulas as mirrors, the auxiliary angle as vector addition |
 | [万能代换的本质 · Weierstrass Substitution](outputs/weierstrass-essence-3d.html) | t = tan(x/2) as the slope of a chord from (−1,0): half angles from the inscribed angle theorem, rational points and Pythagorean triples, and why trig integrals rationalize |
 | [反三角函数的本质 · Inverse Trig](outputs/inverse-trig-essence-3d.html) | Retrieving the angle from a value: principal branches on the circle, the y=x mirror with reciprocal slopes, and arcsin(sin θ) folding into a triangle wave |
+| [极限的本质 · Limits](outputs/limit-essence-3d.html) | Order decides everything: infinitesimals under rescaling, series one order apart converging or diverging, and a microscope sorting smooth, kinked, and broken |
+| [离散傅里叶变换 · The DFT](outputs/dft-essence-3d.html) | Sampling, the spectrum corridor, bit-perfect inverse reconstruction, and filtering as frequency-domain surgery |
+| [线性代数的本质 · Linear Algebra](outputs/linear-essence-3d.html) | One pair of vectors read three ways: addition & dot-product shadows, the cross product as signed area, and matrices as space-warping columns |
+| [高斯分布的本质 · The Gaussian](outputs/gaussian-essence-3d.html) | Where the bell curve comes from: σ at the inflection point, sums becoming bells (CLT), and random beads piling into theory |
+| [微积分的本质 · Calculus, Single to Triple](outputs/calculus-essence-3d.html) | Integration as slice → evaluate → stack: FTC in 1D, then double and triple integrals as integrals of integrals |
+| [泰勒展开的本质 · Taylor Expansion](outputs/taylor-essence-3d.html) | How polynomials hug a function order by order — and why they can never hug past the radius of convergence |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
