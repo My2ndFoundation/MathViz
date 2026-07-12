@@ -4,17 +4,24 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.0">
+<meta name="tool-version" content="1.0.0">
 <meta name="engine-version" content="1.0.0">
-<title>线性代数的本质 · 两个向量，三种读法</title>
+<title>微分方程与相空间 · Differential Equations as Flow</title>
 <!-- ============================================================
-  线性代数的本质 · Linear Algebra Essence
+  微分方程与相空间 · Differential Equations as Flow
+  基于 math-viz-starter.html · engine STARTER_VERSION 1.0.0
   设计规范：math-viz-design-system.md（令牌 / 组件 / 绘制语言 / 交互词汇）
-  引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
+
+  本工具的编辑只落在三处（脚本区顶部 ①②③）：
+    ① PARAMS      —— f 规则选择 / 初值 y₀ / 固有频率 ω / 阻尼比 ζ / 展开速度
+    ② SCENES      —— 方向场 / 三维提升 / 二阶振荡 三个页签
+    ③ pushSample  —— 每帧 RK4 积分并记录 (t, y, y′, x, v) 真实值
+  引擎区（相机 / 投影 / 绘制部件 / 交互 / 主循环）与 starter 完全一致。
+
+  核心顿悟：微分方程不是寻找一个神秘公式，而是在一个局部方向规则中寻找完整轨迹。
 
   版本记录（changelog，新→旧）：
-    1.1.0  2026-07-12  新增「特征向量 · 不转弯的方向」页签 / add eigenvectors tab (Av = λv)
-    1.0.0  2026-07-12  首个版本（含双语）
+    1.0.0  2026-07-12  首次发布：方向场 / 三维提升(相图是影子) / 二阶阻尼振荡 三场景
 ============================================================ -->
 <style>
 :root{
@@ -147,7 +154,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 
 <div class="brand">
   <div class="eyebrow">INTERACTIVE MATH · 交互式数学</div>
-  <h1>线性代数的本质</h1>
+  <h1>微分方程与相空间</h1>
   <p id="brandDesc"></p>
 </div>
 
@@ -187,15 +194,16 @@ function resolveLang(){
 let LANG = resolveLang();
 function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
 
+const STARTER_VERSION = '1.0.0';
 const VERSION = document.querySelector('meta[name="tool-version"]').content;
 
 /* ╔══════════════════════════════════════════════════════════╗
    ║  ⓪ 工具元信息 —— id 与双语标题                              ║
    ╚══════════════════════════════════════════════════════════╝ */
 const TOOL = {
-  id: 'linear-essence-3d',
-  title: { zh: '线性代数的本质 · 两个向量，三种读法', en: 'The Essence of Linear Algebra' },
-  h1:    { zh: '线性代数的本质', en: 'Linear Algebra' }
+  id: 'differential-equations-phase-space-3d',
+  title: { zh: '微分方程与相空间 · Differential Equations as Flow', en: 'Differential Equations as Flow' },
+  h1:    { zh: '微分方程与相空间', en: 'Differential Equations as Flow' }
 };
 
 /* 引擎 UI 文案（一般无需改动） */
@@ -214,14 +222,134 @@ const UI = {
    ║  key: state 中的键 · label: 支持 <i>数学符号</i>            ║
    ║  fmt: 格式化"滑杆原始值"用于显示 · map(可选): 原始值→状态值   ║
    ╚══════════════════════════════════════════════════════════╝ */
-const PARAMS = [
-  { key: 'uAng', label: { zh: '<i>u</i> 方向 <i>α</i>', en: '<i>u</i> direction <i>α</i>' }, min: 0, max: 360, step: 1,    value: 20,  fmt: v => v.toFixed(0) + '°', map: v => v * Math.PI / 180 },
-  { key: 'uLen', label: { zh: '<i>u</i> 模长 |<i>u</i>|', en: '<i>u</i> length |<i>u</i>|' }, min: 0.3, max: 2, step: 0.05, value: 1.4, fmt: v => fmt(v) },
-  { key: 'vAng', label: { zh: '<i>v</i> 方向 <i>β</i>', en: '<i>v</i> direction <i>β</i>' }, min: 0, max: 360, step: 1,    value: 75, fmt: v => v.toFixed(0) + '°', map: v => v * Math.PI / 180 },
-  { key: 'vLen', label: { zh: '<i>v</i> 模长 |<i>v</i>|', en: '<i>v</i> length |<i>v</i>|' }, min: 0.3, max: 2, step: 0.05, value: 1.0, fmt: v => fmt(v) },
-  { key: 'k',    label: { zh: '变形进度 <i>k</i>', en: 'Morph <i>k</i>' },                    min: 0,   max: 1, step: 0.01, value: 1,   fmt: v => fmt(v) },
-  { key: 'omega', label: { zh: '演示速度 <i>ω</i>', en: 'Demo speed <i>ω</i>' },              min: 0.2, max: 3, step: 0.05, value: 0.8, fmt: v => fmt(v) + ' rad/s' }
+/* 显示用常量与一阶规则清单（场景层，供 ①②③ 与场景助手共用） */
+const EX = 2.2, EY = 2.2, DSC = 0.62;   // 导数轴 / 数值轴半幅 · 导数显示缩放
+const F_LABELS = [
+  { zh: 'dy/dt = −y',        en: 'dy/dt = −y' },
+  { zh: 'dy/dt = sin t − y', en: 'dy/dt = sin t − y' },
+  { zh: 'dy/dt = y(1 − y)',  en: 'dy/dt = y(1 − y)' }
 ];
+
+const PARAMS = [
+  { key: 'fchoice',   label: { zh: '一阶规则 <i>f</i>(t, y)', en: 'First-order rule <i>f</i>(t, y)' }, min: 0, max: 2, step: 1, value: 1, fmt: v => t(F_LABELS[Math.round(v)]) },
+  { key: 'y0',        label: { zh: '初值 <i>y</i>₀', en: 'Initial <i>y</i>₀' },       min: -1.5, max: 2,  step: 0.05, value: 1,   fmt: v => fmtS(v) },
+  { key: 'omega',     label: { zh: '固有频率 <i>ω</i>', en: 'Natural frequency <i>ω</i>' }, min: 0.4, max: 3, step: 0.05, value: 1.4, fmt: v => fmt(v) + ' rad/s' },
+  { key: 'zeta',      label: { zh: '阻尼比 <i>ζ</i>', en: 'Damping ratio <i>ζ</i>' }, min: 0, max: 2, step: 0.02, value: 0.2, fmt: v => fmt(v) },
+  { key: 'waveSpeed', label: { zh: '展开速度', en: 'Unroll speed' }, min: 0.5, max: 2, step: 0.05, value: 1.1, fmt: v => fmt(v) + t({ zh: ' 单位/s', en: ' units/s' }) }
+];
+
+/* ════ 场景层助手（在 SCENES 之上新增，绝不改动引擎函数）════ */
+/* 一阶方向场 f(t,y) 与 RK4 一步 */
+function fieldF(tt, y) {
+  const i = Math.round(state.fchoice);
+  if (i === 0) return -y;
+  if (i === 1) return Math.sin(tt) - y;
+  return y * (1 - y);
+}
+function rk4y(tt, y, dt) {
+  const k1 = fieldF(tt, y);
+  const k2 = fieldF(tt + dt/2, y + dt/2*k1);
+  const k3 = fieldF(tt + dt/2, y + dt/2*k2);
+  const k4 = fieldF(tt + dt, y + dt*k3);
+  return clamp(y + dt/6*(k1 + 2*k2 + 2*k3 + k4), -5, 5);
+}
+/* 二阶振荡 x″ + 2ζω x′ + ω²x = 0 → 状态 [x, v] 的 RK4 一步 */
+function oscD(x, v) { const w = state.omega, z = state.zeta; return [v, -2*z*w*v - w*w*x]; }
+function rk4osc(x, v, dt) {
+  const a1 = oscD(x, v);
+  const a2 = oscD(x + dt/2*a1[0], v + dt/2*a1[1]);
+  const a3 = oscD(x + dt/2*a2[0], v + dt/2*a2[1]);
+  const a4 = oscD(x + dt*a3[0], v + dt*a3[1]);
+  return [x + dt/6*(a1[0] + 2*a2[0] + 2*a3[0] + a4[0]),
+          v + dt/6*(a1[1] + 2*a2[1] + 2*a3[1] + a4[1])];
+}
+
+/* 自定义字母轴（引擎的 drawAxes 只写 x/y，这里给 y′/v/t 等定制字母） */
+function axis3(C, a, b, letter, lpos) {
+  line3(C, a, b, { width: 1.4, color: AXIS });
+  const before = [b[0] + (a[0]-b[0])*0.06, b[1] + (a[1]-b[1])*0.06, b[2] + (a[2]-b[2])*0.06];
+  arrowAt(C, b, before, AXIS);
+  label3(C, lpos, letter, { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+}
+
+/* 同步开关到 state 与全部同名 checkbox（供视角 onSelect 联动） */
+function setTog(key, val) {
+  state[key] = val;
+  document.querySelectorAll('input[data-key="' + key + '"]').forEach(o => { o.checked = val; });
+}
+
+/* 读数区首行（t 与展开速度） */
+function roHead() {
+  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;' +
+    t({ zh: '展开速度', en: 'unroll' }) + ' = <b>' + fmt(state.waveSpeed) + '</b></div>';
+}
+
+/* 方向场：在 x=0 的 y·t 墙上画局部斜率小段（青色＝源几何/规则本身） */
+function drawDirField(C, v) {
+  for (let yi = -2; yi <= 2.0001; yi += 0.5) {
+    for (let zi = 0.55; zi <= WAVE_LEN - 0.2; zi += 0.72) {
+      const tt = zi / v, f = fieldF(tt, yi);
+      const n = Math.hypot(1, f) || 1, L = 0.3;
+      const uz = 1/n*L, uy = f/n*L;
+      line3(C, [0, yi - uy, zi - uz], [0, yi + uy, zi + uz], { width: 1.2, color: 'rgba(45,212,234,0.5)' });
+      solidDot(C, [0, yi + uy, zi + uz], 1.6, 'rgba(45,212,234,0.85)');
+    }
+  }
+}
+/* 从 t=0 积分出一条解曲线（tab1 用，独立于 samples） */
+function solCurve(y0, v, Tmax) {
+  const pts = []; let y = y0; const h = 0.04;
+  for (let tt = 0; tt <= Tmax + 1e-6; tt += h) { pts.push([0, clamp(y, -EY-0.3, EY+0.3), tt*v]); y = rk4y(tt, y, h); }
+  return pts;
+}
+function integrateTo(y0, target) {
+  let y = y0; const h = 0.04;
+  for (let tt = 0; tt < target - 1e-9; ) { const st = Math.min(h, target - tt); y = rk4y(tt, y, st); tt += st; }
+  return y;
+}
+
+/* 三维提升的通用绘制：轨迹 + 三面墙影子（tab2/tab3 共用）
+   o = { der(s), val(s), letters:{der,val}, labels:{func,rate,phase,main}, envelope? } */
+function drawLift(C, o) {
+  const v = state.waveSpeed, zBack = WAVE_LEN;
+  if (state.showGrid) {
+    const g = 'rgba(148,163,184,0.06)';
+    for (let k = 1; k <= WAVE_LEN - 0.5; k += 2) {
+      line3(C, [-EX, -EY, k], [EX, -EY, k], { width: 1, color: g });
+      line3(C, [-EX, -EY, k], [-EX, EY, k], { width: 1, color: g });
+    }
+  }
+  axis3(C, [-EX, 0, 0], [EX, 0, 0], o.letters.der, [EX + 0.25, 0, 0]);
+  axis3(C, [0, -EY, 0], [0, EY, 0], o.letters.val, [0, EY + 0.22, 0]);
+  axis3(C, [0, 0, 0], [0, 0, WAVE_LEN + 0.5], 't', [0, 0, WAVE_LEN + 0.9]);
+  strokePoly(C, [[-EX,-EY,zBack],[EX,-EY,zBack],[EX,EY,zBack],[-EX,EY,zBack],[-EX,-EY,zBack]],
+    { width: 1, color: 'rgba(148,163,184,0.14)' });
+  if (o.envelope) {
+    line3(C, [-EX, 1, 0], [-EX, 1, WAVE_LEN], { width: 1, dash: [5,6], color: 'rgba(251,191,36,0.5)' });
+    line3(C, [-EX, -1, 0], [-EX, -1, WAVE_LEN], { width: 1, dash: [5,6], color: 'rgba(251,191,36,0.5)' });
+  }
+  if (samples.length > 1) {
+    const main = [], ph = [], fn = [], rt = [];
+    for (let i = samples.length - 1; i >= 0; i--) {
+      const s = samples[i], d = o.der(s)*DSC, va = clamp(o.val(s), -EY, EY), z = (state.t - s.t)*v;
+      main.push([d, va, z]); ph.push([d, va, zBack]); fn.push([-EX, va, z]); rt.push([d, -EY, z]);
+    }
+    if (state.showFunc) { strokePoly(C, fn, { width: 4.5, color: 'rgba(52,211,153,0.12)' }); strokePoly(C, fn, { width: 2, fade: ['rgba(52,211,153,1)','rgba(52,211,153,0.05)'] }); }
+    if (state.showRate) { strokePoly(C, rt, { width: 4.5, color: 'rgba(251,146,60,0.12)' }); strokePoly(C, rt, { width: 2, fade: ['rgba(251,146,60,1)','rgba(251,146,60,0.05)'] }); }
+    if (state.showPhase) { strokePoly(C, ph, { width: 4.5, color: 'rgba(167,139,250,0.12)' }); strokePoly(C, ph, { width: 2, fade: ['rgba(167,139,250,1)','rgba(167,139,250,0.05)'] }); }
+    if (state.showLift) { strokePoly(C, main, { width: 5.5, color: 'rgba(251,113,133,0.13)' }); strokePoly(C, main, { width: 2.4, fade: ['rgba(251,113,133,1)','rgba(251,113,133,0.05)'] }); }
+    const s0 = samples[samples.length - 1], d0 = o.der(s0)*DSC, v0 = clamp(o.val(s0), -EY, EY), P = [d0, v0, 0];
+    if (state.showFunc) { line3(C, P, [-EX, v0, 0], { width: 1.4, dash: [7,7], color: 'rgba(52,211,153,0.75)' }); const f = proj(C, [-EX, v0, 0]); if (f) glowDot(f, 8, '#fff', 'rgba(52,211,153,0.9)'); }
+    if (state.showRate) { line3(C, P, [d0, -EY, 0], { width: 1.4, dash: [7,7], color: 'rgba(251,146,60,0.75)' }); const f = proj(C, [d0, -EY, 0]); if (f) glowDot(f, 8, '#fff', 'rgba(251,146,60,0.9)'); }
+    if (state.showPhase) { line3(C, P, [d0, v0, zBack], { width: 1.4, dash: [7,7], color: 'rgba(167,139,250,0.55)' }); const f = proj(C, [d0, v0, zBack]); if (f) glowDot(f, 8, '#fff', 'rgba(167,139,250,0.9)'); }
+    const sp = proj(C, P); if (sp && state.showLift) glowDot(sp, 14, '#fff', 'rgba(186,240,255,0.9)');
+    if (state.showLift) label3(C, [d0 + 0.15, v0 + 0.28, 0.4], o.labels.main, { font: 'italic 12px ' + FONT_MATH, color: '#fb7185', align: 'left' });
+  }
+  solidDot(C, [0, 0, 0], 2.2, 'rgba(159,176,200,0.9)');
+  if (state.showFunc)  label3(C, [-EX, EY - 0.25, WAVE_LEN*0.45], o.labels.func, { font: 'italic 12px ' + FONT_MATH, color: '#34d399', align: 'center' });
+  if (state.showRate)  label3(C, [EX - 0.3, -EY + 0.05, WAVE_LEN*0.45], o.labels.rate, { font: 'italic 12px ' + FONT_MATH, color: '#fb923c', align: 'center' });
+  if (state.showPhase) label3(C, [EX - 0.5, EY - 0.25, zBack], o.labels.phase, { font: 'italic 12px ' + FONT_MATH, color: '#a78bfa', align: 'center' });
+}
 
 /* ╔══════════════════════════════════════════════════════════╗
    ║  ② 场景注册 —— 每个键就是一个页签                           ║
@@ -230,448 +358,140 @@ const PARAMS = [
    ║        draw(C) / readout()                                ║
    ║  可选：sampleWindow() 历史滑窗秒数 · views[x].onSelect 联动 ║
    ╚══════════════════════════════════════════════════════════╝ */
-/* ────── 场景级：线性代数助手（引擎之上，引擎零改动） ────── */
-const ROSE_A = 'rgba(251,113,133,';
-const VIO_A = 'rgba(167,139,250,';
-const EME_A = 'rgba(52,211,153,';
-const ORG_A = 'rgba(251,146,60,';
-const CYAN_A = 'rgba(45,212,234,';
-const AMB_A = 'rgba(251,191,36,';
-
-const U = () => [state.uLen * Math.cos(state.uAng), state.uLen * Math.sin(state.uAng)];
-const Vv = () => [state.vLen * Math.cos(state.vAng), state.vLen * Math.sin(state.vAng)];
-const dotUV = () => { const u = U(), v = Vv(); return u[0] * v[0] + u[1] * v[1]; };
-const crossUV = () => { const u = U(), v = Vv(); return u[0] * v[1] - u[1] * v[0]; };
-
-/* 平面向量箭头（z=0 平面） */
-function vecArrow(C, p, color, name, w) {
-  line3(C, [0, 0, 0], [p[0], p[1], 0], { width: (w || 2.4), color: color + '0.95)' });
-  line3(C, [0, 0, 0], [p[0], p[1], 0], { width: (w || 2.4) + 3.5, color: color + '0.14)' });
-  arrowAt(C, [p[0], p[1], 0], [p[0] * 0.88, p[1] * 0.88, 0], color + '0.95)');
-  if (name) label3(C, [p[0], p[1], 0], name, { font: 'italic 14px ' + FONT_MATH, color: color + '1)', align: 'center', dy: -14 });
-}
-/* 地面向量箭头（y=0 平面；数学 (a,b) → 世界 (a, 0, −b)，右手系成立） */
-const WG = p => [p[0], 0, -p[1]];
-function vecArrowG(C, p, color, name) {
-  line3(C, [0, 0, 0], WG(p), { width: 2.4, color: color + '0.95)' });
-  line3(C, [0, 0, 0], WG(p), { width: 6, color: color + '0.14)' });
-  arrowAt(C, WG(p), WG([p[0] * 0.88, p[1] * 0.88]), color + '0.95)');
-  if (name) label3(C, WG(p), name, { font: 'italic 14px ' + FONT_MATH, color: color + '1)', align: 'center', dy: -12 });
-}
-/* 两方向间的角度弧（琥珀，z=0 平面） */
-function arcBetween(C, a0, a1, r) {
-  let d = a1 - a0;
-  while (d > Math.PI) d -= TAU;
-  while (d < -Math.PI) d += TAU;
-  const n = Math.max(2, Math.ceil(Math.abs(d) / 0.06));
-  const pts = [];
-  for (let i = 0; i <= n; i++) {
-    const a = a0 + d * i / n;
-    pts.push([r * Math.cos(a), r * Math.sin(a), 0]);
-  }
-  strokePoly(C, pts, { width: 1.5, color: AMB_A + '0.85)' });
-  const mid = a0 + d / 2;
-  label3(C, [(r + 0.18) * Math.cos(mid), (r + 0.18) * Math.sin(mid), 0], 'θ',
-    { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
-}
-/* 夹角 θ ∈ [0, π] */
-function angUV() {
-  const u = U(), v = Vv();
-  const c = dotUV() / (state.uLen * state.vLen);
-  return Math.acos(clamp(c, -1, 1));
-}
-/* 页签三的变换：M = [u v]（î→u、ĵ→v），k 变形，选装 R(45°) 复合 */
-function matAt(k) {
-  const u = U(), v = Vv();
-  let a = (1 - k) + k * u[0], b = k * v[0], c = k * u[1], d = (1 - k) + k * v[1];
-  if (state.showR) {
-    const ca = Math.cos(Math.PI / 4), sa = Math.sin(Math.PI / 4);
-    const a2 = ca * a - sa * c, b2 = ca * b - sa * d;
-    const c2 = sa * a + ca * c, d2 = sa * b + ca * d;
-    a = a2; b = b2; c = c2; d = d2;
-  }
-  return [a, b, c, d];
-}
-const applyM = (m, p) => [m[0] * p[0] + m[1] * p[1], m[2] * p[0] + m[3] * p[1]];
-
-/* 页签四：特征向量 —— 纯 A = [u v]（列即 î、ĵ 的落点，不含 R(45°)） */
-function matA() { const u = U(), v = Vv(); return [u[0], v[0], u[1], v[1]]; }   // [a,b,c,d]
-/* 恒等 → A 的连续变形 M(s) = (1−s)I + sA；与 A 特征向量完全相同（只改特征值） */
-function morphA(s) { const A = matA(); return [(1 - s) + s * A[0], s * A[1], s * A[2], (1 - s) + s * A[3]]; }
-/* 解 (A − λI)x = 0，返回单位特征向量 */
-function eigvecFor(m, lam) {
-  const a = m[0], b = m[1], c = m[2], d = m[3];
-  let vx, vy;
-  if (Math.abs(b) > 1e-7) { vx = b; vy = lam - a; }
-  else if (Math.abs(c) > 1e-7) { vx = lam - d; vy = c; }
-  else { if (Math.abs(lam - a) <= Math.abs(lam - d)) { vx = 1; vy = 0; } else { vx = 0; vy = 1; } }
-  const L = Math.hypot(vx, vy) || 1;
-  return [vx / L, vy / L];
-}
-/* 2×2 闭式特征分解：迹/行列式 → 判别式 → 实/重/复分类 */
-function eigA() {
-  const m = matA(), a = m[0], b = m[1], c = m[2], d = m[3];
-  const tr = a + d, det = a * d - b * c, disc = tr * tr - 4 * det;
-  const r = { tr, det, disc, m };
-  const eps = 1e-6;
-  if (disc < -eps) {
-    r.type = 'complex'; r.re = tr / 2; r.im = Math.sqrt(-disc) / 2; r.lams = []; r.vecs = [];
-  } else {
-    const sq = Math.sqrt(Math.max(0, disc));
-    let l1 = (tr + sq) / 2, l2 = (tr - sq) / 2;
-    if (Math.abs(l2) > Math.abs(l1)) { const tmp = l1; l1 = l2; l2 = tmp; }   // |λ₁| ≥ |λ₂|
-    if (Math.abs(b) < eps && Math.abs(c) < eps && Math.abs(a - d) < eps) {
-      r.type = 'scalar'; r.lams = [l1, l2]; r.vecs = [[1, 0], [0, 1]];         // λI：每个方向都是特征向量
-    } else if (sq < eps) {
-      r.type = 'defective'; r.lams = [l1, l2]; r.vecs = [eigvecFor(m, l1)];    // 重根 · 单一特征方向（剪切）
-    } else {
-      r.type = 'real'; r.lams = [l1, l2]; r.vecs = [eigvecFor(m, l1), eigvecFor(m, l2)];
-    }
-  }
-  return r;
-}
-
 const SCENES = {
 
-  /* ────── 一：向量 · 加法与投影 ────── */
-  vec: {
-    label: { zh: '向量 · 加法与投影', en: 'Vectors · Add & project' },
-    brand: { zh: '两个向量 u、v 是全篇的主角。加法是首尾接力的平行四边形；点乘不神秘——把 u 的影子投到 v 上，影长乘 |v| 就是 u·v。',
-             en: 'Two vectors, u and v, star in every tab. Addition is the parallelogram relay; the dot product is no mystery — cast u’s shadow onto v, and shadow length times |v| is u·v.' },
-    tips: { zh: '提示：切「正视 x·y」把 u 的方向拖过与 v 垂直的位置——琥珀影子缩成一点再反向变负：点乘的正负只是「影子在 v 的哪一边」。',
-            en: 'Tip: in "Front x·y" drag u’s direction past perpendicular to v — the amber shadow shrinks to a point then flips negative: the sign of a dot product is just which side the shadow falls on.' },
+  /* ══════ 页签 1 · 方向场：局部规则的地图 ══════ */
+  field: {
+    label: { zh: '方向场', en: 'Direction field' },
+    brand: { zh: '微分方程 dy/dt = f(t, y) 不是要你猜一个公式，而是在每一点给出一个方向。松开不同初值的小球，它们各自沿方向场流出一条完整轨迹。',
+             en: 'dy/dt = f(t, y) is not a formula to guess — it hands you a direction at every point. Release balls from different starting values and each threads its own trajectory through the field.' },
+    tips: { zh: '提示：方向场就是「局部规则」本身——解曲线处处与小箭头相切。切到「场 y·t」视角正视这面墙，看不同初值如何各走各路。拖动 f 切换规则，拖动 y₀ 高亮某条解。',
+            en: 'Tip: the direction field IS the local rule — a solution is everywhere tangent to the little arrows. Snap to "field y·t" to face the wall and watch different initial values diverge. Drag f to switch rules, y₀ to highlight one solution.' },
     views: {
-      iso:   { label: { zh: '立体',     en: '3D' },        az: -0.6,  el: 0.3,  dist: 9, tx: 0, ty: 0.3, tz: 0 },
-      front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 7, tx: 0, ty: 0.3, tz: 0 }
+      iso:   { label: { zh: '立体',     en: '3D' },        az: -0.9,        el: 0.34,  dist: 12, tx: 0, ty: 0, tz: 3.2 },
+      fieldv:{ label: { zh: '场 y·t',   en: 'Field y·t' },  az: -Math.PI/2,  el: 0.02,  dist: 12, tx: 0, ty: 0, tz: 3.4 }
     },
     toggles: [
-      { key: 'showSum',  label: { zh: '和 <i>u</i>+<i>v</i>', en: 'Sum <i>u</i>+<i>v</i>' }, color: '#34d399', checked: true },
-      { key: 'showProj', label: { zh: '点乘投影', en: 'Dot projection' }, color: '#fbbf24', checked: true },
-      { key: 'showPara', label: { zh: '平行四边形', en: 'Parallelogram' }, color: '#cbd5e1', checked: true },
-      { key: 'showGrid', label: { zh: '网格', en: 'Grid' }, color: '#64748b', checked: true }
+      { key: 'showField',  label: { zh: '方向场',   en: 'Direction field' },  color: '#2dd4ea', checked: true },
+      { key: 'showCurves', label: { zh: '解曲线',   en: 'Solution curves' },  color: '#fb7185', checked: true },
+      { key: 'showGrid',   label: { zh: '网格',     en: 'Grid' },             color: '#64748b', checked: true }
     ],
-    sampleWindow: () => TAU / state.omega * 1.05 + 0.3,
+    sampleWindow: () => WAVE_LEN / state.waveSpeed + 0.5,
     draw(C) {
-      const u = U(), v = Vv();
-      if (state.showGrid) drawGridXY(C, 2.5, 0.5);
-      drawAxes(C, { ex: 2.4, ey: 2.4, yTicks: [1, 2], xTicks: [1, 2], tAxis: false });
-
-      /* 平行四边形（首尾接力虚线） */
-      if (state.showPara && state.showSum) {
-        line3(C, [u[0], u[1], 0], [u[0] + v[0], u[1] + v[1], 0], { width: 1.3, dash: [6, 6], color: 'rgba(203,213,225,0.45)' });
-        line3(C, [v[0], v[1], 0], [u[0] + v[0], u[1] + v[1], 0], { width: 1.3, dash: [6, 6], color: 'rgba(203,213,225,0.45)' });
+      const v = state.waveSpeed, Tmax = WAVE_LEN / v;
+      if (state.showGrid) drawTimeGrid(C, { yMax: EY, v: v });
+      axis3(C, [0, -EY, 0], [0, EY, 0], 'y', [0, EY + 0.22, 0]);
+      axis3(C, [0, 0, 0], [0, 0, WAVE_LEN + 0.5], 't', [0, 0, WAVE_LEN + 0.9]);
+      if (state.showField) drawDirField(C, v);
+      if (state.showCurves) {
+        [-1, -0.4, 0.4, 1, 1.6].forEach(y0 => {
+          strokePoly(C, solCurve(y0, v, Tmax), { width: 1.4, color: 'rgba(226,232,240,0.26)' });
+        });
+        const hi = solCurve(state.y0, v, Tmax);
+        strokePoly(C, hi, { width: 5.5, color: 'rgba(251,113,133,0.13)' });
+        strokePoly(C, hi, { width: 2.4, color: 'rgba(251,113,133,0.95)' });
       }
-      /* 点乘投影（琥珀）：u 在 v 方向上的影子 */
-      if (state.showProj) {
-        const vhat = [v[0] / state.vLen, v[1] / state.vLen];
-        const s = u[0] * vhat[0] + u[1] * vhat[1];          // 影长 = |u|cosθ
-        const foot = [vhat[0] * s, vhat[1] * s];
-        line3(C, [u[0], u[1], 0], [foot[0], foot[1], 0], { width: 1.2, dash: [4, 5], color: AMB_A + '0.6)' });
-        line3(C, [0, 0, 0], [foot[0], foot[1], 0], { width: 4, color: AMB_A + '0.75)' });
-        const fp = proj(C, [foot[0], foot[1], 0]);
-        if (fp) glowDot(fp, 8, '#ffffff', AMB_A + '0.9)');
-        label3(C, [foot[0], foot[1], 0], '|u|cosθ', { font: 'italic 11px ' + FONT_MATH, color: '#fbbf24', align: 'center', dy: 16 });
-        arcBetween(C, state.vAng, state.uAng, 0.42);
-      }
-      /* 和向量（翠绿） */
-      if (state.showSum) vecArrow(C, [u[0] + v[0], u[1] + v[1]], EME_A, 'u+v');
-      /* 主角 u、v */
-      vecArrow(C, u, ROSE_A, 'u');
-      vecArrow(C, v, VIO_A, 'v');
+      const sweep = state.t % Tmax, yc = clamp(integrateTo(state.y0, sweep), -EY, EY);
+      const f = fieldF(sweep, yc), n = Math.hypot(1, f) || 1, L = 0.6;
+      line3(C, [0, yc - f/n*L, sweep*v - 1/n*L*v], [0, yc + f/n*L, sweep*v + 1/n*L*v],
+        { width: 1.6, color: 'rgba(251,113,133,0.55)' });
+      const sp = proj(C, [0, yc, sweep*v]); if (sp) glowDot(sp, 14, '#fff', 'rgba(186,240,255,0.9)');
+      label3(C, [0, EY - 0.2, WAVE_LEN*0.5], t({ zh: '解曲线处处与方向场相切', en: 'solutions stay tangent to the field' }),
+        { size: 11, color: 'rgba(159,176,200,0.55)', align: 'center' });
+      label3(C, [0, -EY + 0.1, WAVE_LEN*0.5], t(F_LABELS[Math.round(state.fchoice)]),
+        { font: 'italic 13px ' + FONT_MATH, color: '#fb7185', align: 'center' });
     },
     readout() {
-      const th = angUV();
-      return '<div class="sinC">u = (' + fmtS(U()[0]) + ', ' + fmtS(U()[1]) + ')</div>' +
-        '<div class="cosC">v = (' + fmtS(Vv()[0]) + ', ' + fmtS(Vv()[1]) + ')</div>' +
-        '<div class="tanC">u+v = (' + fmtS(U()[0] + Vv()[0]) + ', ' + fmtS(U()[1] + Vv()[1]) + ')</div>' +
-        '<div><span style="color:#fbbf24">u·v = |u||v|cosθ = ' + fmt(state.uLen) + '×' + fmt(state.vLen) + '×cos ' +
-        (th * 180 / Math.PI).toFixed(0) + '° = <b>' + fmtS(dotUV()) + '</b></span></div>';
+      const v = state.waveSpeed, Tmax = WAVE_LEN / v, sweep = state.t % Tmax;
+      const yc = integrateTo(state.y0, sweep);
+      return roHead() +
+        '<div class="sinC">' + t({ zh: '当前解 ', en: 'solution ' }) + 'y(' + fmt(sweep) + ') = <b>' + fmtS(yc) + '</b></div>' +
+        '<div class="dim"><i>f</i> = ' + t(F_LABELS[Math.round(state.fchoice)]) + '&ensp;·&ensp;y₀ = ' + fmtS(state.y0) + '</div>';
     }
   },
 
-  /* ────── 二：叉乘 · 面积与右手 ────── */
-  cross: {
-    label: { zh: '叉乘 · 面积与右手', en: 'Cross · Area & hand' },
-    brand: { zh: 'u、v 平躺在地面，u×v 垂直立起：杆的长度恰好等于平行四边形的面积，方向由右手定则决定——叉乘是「带方向的面积」。',
-             en: 'With u and v lying flat, u×v stands straight up: its length equals the parallelogram’s area, its direction follows the right hand — a cross product is signed area.' },
-    tips: { zh: '提示：切「俯视 面积」把 u 的方向慢慢拖过 v——琥珀面积先胀后缩，翠绿杆随之伸缩；u 越过 v 的一瞬间杆子倒向下方：面积没变，方向翻了。',
-            en: 'Tip: in "Top: area" drag u’s direction slowly past v — the amber area swells then shrinks and the emerald rod follows; the instant u crosses v, the rod flips downward: same area, opposite orientation.' },
+  /* ══════ 页签 2 · 三维提升：相图是轨迹的影子 ══════ */
+  lift: {
+    label: { zh: '三维提升', en: '3D lift' },
+    brand: { zh: '把同一条解抬进 (t, y, y′) 三维空间：函数图、变化率、相图，都只是它投在三面墙上的影子。',
+             en: 'Lift the same solution into (t, y, y′) space: the function graph, the rate graph, and the phase portrait are just its shadows on three walls.' },
+    tips: { zh: '提示：相图 (y·y′) 就是轨迹沿时间轴的影子。切到「相图 y·y′」正视，三维轨迹会与它的紫色影子完全重合——那一刻抽象的相图就现形了。',
+            en: 'Tip: the phase portrait (y·y′) is the trajectory’s shadow along the time axis. Snap to "phase y·y′" and the 3D curve lands exactly on its violet shadow — that is the phase portrait made visible.' },
     views: {
-      iso: { label: { zh: '立体', en: '3D' }, az: -0.7, el: 0.42, dist: 9.5, tx: 0, ty: 0.4, tz: 0 },
-      top: { label: { zh: '俯视 面积', en: 'Top: area' }, az: -0.4, el: 1.45, dist: 8.5, tx: 0, ty: 0, tz: 0 },
-      low: { label: { zh: '平视 右手', en: 'Low: the rod' }, az: -0.55, el: 0.12, dist: 9, tx: 0, ty: 0.8, tz: 0 }
+      iso:   { label: { zh: '立体',       en: '3D' },          az: -0.85,       el: 0.32,  dist: 13, tx: 0, ty: 0, tz: 3.4 },
+      phase: { label: { zh: '相图 y·y′',  en: 'Phase y·y′' },   az: 0.001,       el: 0.001, dist: 9,  tx: 0, ty: 0, tz: 3.6, onSelect(){ setTog('showPhase', true); setTog('showLift', true); } },
+      funcv: { label: { zh: '函数图 y·t', en: 'Graph y·t' },    az: -Math.PI/2,  el: 0.02,  dist: 13, tx: 0, ty: 0, tz: 3.4, onSelect(){ setTog('showFunc', true); } },
+      ratev: { label: { zh: '变化率 y′·t',en: 'Rate y′·t' },    az: -Math.PI/2,  el: 1.5,   dist: 13, tx: 0, ty: 0, tz: 3.4, onSelect(){ setTog('showRate', true); } }
     },
     toggles: [
-      { key: 'showCross', label: { zh: '叉乘 <i>u</i>×<i>v</i>', en: 'Cross <i>u</i>×<i>v</i>' }, color: '#34d399', checked: true },
-      { key: 'showArea',  label: { zh: '面积填充', en: 'Area fill' }, color: '#fbbf24', checked: true },
-      { key: 'showPara2', label: { zh: '平行四边形', en: 'Parallelogram' }, color: '#cbd5e1', checked: true }
+      { key: 'showLift',  label: { zh: '三维轨迹',   en: '3D trajectory' }, color: '#fb7185', checked: true },
+      { key: 'showPhase', label: { zh: '相图 y·y′',  en: 'Phase y·y′' },    color: '#a78bfa', checked: true },
+      { key: 'showFunc',  label: { zh: '函数图 y·t', en: 'Graph y·t' },     color: '#34d399', checked: true },
+      { key: 'showRate',  label: { zh: '变化率 y′·t',en: 'Rate y′·t' },     color: '#fb923c', checked: false },
+      { key: 'showGrid',  label: { zh: '网格',       en: 'Grid' },          color: '#64748b', checked: true }
     ],
-    sampleWindow: () => TAU / state.omega * 1.05 + 0.3,
+    sampleWindow: () => WAVE_LEN / state.waveSpeed + 0.5,
     draw(C) {
-      const u = U(), v = Vv(), c = crossUV();
-      /* 地面坐标轴（数学 x·y 平面平躺在世界 y=0） */
-      line3(C, [-2.4, 0, 0], [2.6, 0, 0], { width: 1.4, color: AXIS });
-      arrowAt(C, [2.6, 0, 0], [2.4, 0, 0], AXIS);
-      label3(C, [2.85, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
-      line3(C, WG([0, -2.4]), WG([0, 2.6]), { width: 1.4, color: AXIS });
-      arrowAt(C, WG([0, 2.6]), WG([0, 2.4]), AXIS);
-      label3(C, WG([0, 2.85]), 'y', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
-      /* 地面参考网格（青，源几何的地面） */
-      for (let i = -2; i <= 2; i++) {
-        if (i === 0) continue;
-        line3(C, WG([i, -2.4]), WG([i, 2.4]), { width: 1, color: 'rgba(148,163,184,0.10)' });
-        line3(C, WG([-2.4, i]), WG([2.4, i]), { width: 1, color: 'rgba(148,163,184,0.10)' });
-      }
-
-      /* 面积填充（琥珀，度量语义） */
-      if (state.showArea) {
-        for (let s = 0.06; s < 1; s += 0.07) {
-          line3(C, WG([u[0] * s, u[1] * s]), WG([u[0] * s + v[0], u[1] * s + v[1]]), { width: 2, color: AMB_A + '0.10)' });
-        }
-        label3(C, WG([(u[0] + v[0]) / 2, (u[1] + v[1]) / 2]),
-          t({ zh: '面积', en: 'area' }) + ' = ' + fmt(Math.abs(c)), { size: 11, color: AMB_A + '0.95)', align: 'center' });
-      }
-      /* 平行四边形轮廓 */
-      if (state.showPara2) {
-        line3(C, WG(u), WG([u[0] + v[0], u[1] + v[1]]), { width: 1.3, dash: [6, 6], color: 'rgba(203,213,225,0.45)' });
-        line3(C, WG(v), WG([u[0] + v[0], u[1] + v[1]]), { width: 1.3, dash: [6, 6], color: 'rgba(203,213,225,0.45)' });
-      }
-      /* 主角 u、v（平躺） */
-      vecArrowG(C, u, ROSE_A, 'u');
-      vecArrowG(C, v, VIO_A, 'v');
-      /* 叉乘杆（翠绿，沿世界 y 竖直，长度 = 面积） */
-      if (state.showCross) {
-        const h = c * 0.6;
-        line3(C, [0, 0, 0], [0, h, 0], { width: 6.5, color: EME_A + '0.15)' });
-        line3(C, [0, 0, 0], [0, h, 0], { width: 2.6, color: EME_A + '0.95)' });
-        arrowAt(C, [0, h, 0], [0, h * 0.85 + (h === 0 ? 0.01 : 0), 0], EME_A + '0.95)');
-        const tp = proj(C, [0, h, 0]);
-        if (tp) glowDot(tp, 10, '#ffffff', EME_A + '0.9)');
-        label3(C, [0, h, 0], 'u×v', { font: 'italic 14px ' + FONT_MATH, color: '#34d399', align: 'left', dx: 12, dy: h >= 0 ? -8 : 8 });
-        /* 高度参考虚线到面积标签 */
-        line3(C, [0, h, 0], WG([(u[0] + v[0]) / 2, (u[1] + v[1]) / 2]), { width: 1, dash: [3, 6], color: EME_A + '0.3)' });
-      }
+      drawLift(C, {
+        der: s => s.yp, val: s => s.y,
+        letters: { der: 'y′', val: 'y' },
+        labels: { func: 'y · t', rate: 'y′ · t', phase: 'y′ · y', main: '(y, y′, t)' }
+      });
     },
     readout() {
-      const th = angUV(), c = crossUV();
-      return '<div class="sinC">|u| = <b>' + fmt(state.uLen) + '</b></div>' +
-        '<div class="cosC">|v| = <b>' + fmt(state.vLen) + '</b></div>' +
-        '<div class="tanC">|u×v| = |u||v|sinθ = <b>' + fmt(Math.abs(c)) + '</b>' +
-        '<span class="dim">&ensp;(' + t({ zh: '方向', en: 'dir' }) + ' ' + (c >= 0 ? '+' : '−') + ')</span></div>' +
-        '<div class="dim">θ = ' + (th * 180 / Math.PI).toFixed(0) + '°&ensp;·&ensp;' +
-        t({ zh: '这也是页签三的 det M', en: 'this is also det M in tab 3' }) + '</div>';
+      const s = samples[samples.length - 1] || { y: state.y0, yp: 0 };
+      const val = fmtS(s.y), yp = fmtS(s.yp);
+      return roHead() +
+        '<div class="sinC">' + t({ zh: '轨迹点 ', en: 'lift ' }) + '= <b>(' + val + ', ' + yp + ', ' + fmt(state.t) + ')</b></div>' +
+        '<div class="cosC">' + t({ zh: '相点 ', en: 'phase ' }) + '(y, y′) = <b>(' + val + ', ' + yp + ')</b></div>' +
+        '<div class="tanC">y = <b>' + val + '</b></div>' +
+        '<div class="cotC">y′ = <b>' + yp + '</b></div>' +
+        '<div class="dim">' + t({ zh: '相图 = 轨迹沿 t 轴的影子', en: 'phase portrait = shadow along t' }) + '</div>';
     }
   },
 
-  /* ────── 三：矩阵 · 把空间变形 ────── */
-  mat: {
-    label: { zh: '矩阵 · 空间变形', en: 'Matrix · Warp space' },
-    brand: { zh: '把你摆好的 u、v 竖起来当矩阵的两根列：M = [u v]。矩阵不是数字表格——它是「î 去 u、ĵ 去 v」的空间变形指令，行列式就是上一页的叉乘。',
-             en: 'Stand your posed u and v up as the columns of a matrix: M = [u v]. A matrix is not a table of numbers — it is the instruction "î goes to u, ĵ goes to v", and its determinant is the cross product from the last tab.' },
-    tips: { zh: '提示：把变形进度 k 从 0 拖到 1，青色网格连续变形，玫红 î 落到 u、紫 ĵ 落到 v；琥珀单位方格变成平行四边形——面积倍数 = det M。打开「再乘 R(45°)」：矩阵乘法就是变形接力，先 M 后 R。',
-            en: 'Tip: drag morph k from 0 to 1 — the cyan grid deforms as rose î lands on u and violet ĵ on v; the amber unit square becomes a parallelogram whose area factor is det M. Enable "then R(45°)": matrix multiplication is transformations in relay — M first, R after.' },
+  /* ══════ 页签 3 · 二阶振荡：阻尼塑造相平面 ══════ */
+  osc: {
+    label: { zh: '二阶振荡', en: '2nd-order' },
+    brand: { zh: '二阶振荡 x″ + 2ζω x′ + ω²x = 0：拖动阻尼比 ζ，看轨迹在相平面里从闭合椭圆变成向内的螺旋，再到不再回头的衰减。',
+             en: 'Damped oscillation x″ + 2ζω x′ + ω²x = 0: drag ζ and watch the phase-plane orbit turn from a closed ellipse into an inward spiral, then into a path that never returns.' },
+    tips: { zh: '提示：ζ=0 相图是闭合轨道，0<ζ<1 是向内螺旋，ζ≥1 直接冲向原点不再振荡。切「相图 x·v」看螺旋，切「位移 x·t」看衰减正弦——同一条轨迹的两个影子。',
+            en: 'Tip: ζ=0 gives a closed orbit, 0<ζ<1 an inward spiral, ζ≥1 a direct rush to rest with no oscillation. Snap to "phase x·v" for the spiral, "displacement x·t" for the decaying sinusoid — two shadows of one trajectory.' },
     views: {
-      iso:   { label: { zh: '立体',     en: '3D' },        az: -0.6,  el: 0.3,  dist: 9.5, tx: 0, ty: 0.3, tz: 0 },
-      front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 7.5, tx: 0, ty: 0.3, tz: 0 }
+      iso:   { label: { zh: '立体',       en: '3D' },              az: -0.85,       el: 0.32,  dist: 13, tx: 0, ty: 0, tz: 3.4 },
+      phase: { label: { zh: '相图 x·v',   en: 'Phase x·v' },        az: 0.001,       el: 0.001, dist: 9,  tx: 0, ty: 0, tz: 3.6, onSelect(){ setTog('showPhase', true); setTog('showLift', true); } },
+      funcv: { label: { zh: '位移 x·t',   en: 'Displacement x·t' }, az: -Math.PI/2,  el: 0.02,  dist: 13, tx: 0, ty: 0, tz: 3.4, onSelect(){ setTog('showFunc', true); } },
+      ratev: { label: { zh: '速度 v·t',   en: 'Velocity v·t' },     az: -Math.PI/2,  el: 1.5,   dist: 13, tx: 0, ty: 0, tz: 3.4, onSelect(){ setTog('showRate', true); } }
     },
     toggles: [
-      { key: 'showWarp',   label: { zh: '变形网格', en: 'Warped grid' }, color: '#2dd4ea', checked: true },
-      { key: 'showEll',    label: { zh: '单位圆 → 椭圆', en: 'Circle → ellipse' }, color: '#34d399', checked: true },
-      { key: 'showDet',    label: { zh: '行列式方格', en: 'Determinant cell' }, color: '#fbbf24', checked: true },
-      { key: 'showR',      label: { zh: '再乘 <i>R</i>(45°)', en: 'Then <i>R</i>(45°)' }, color: '#fb923c', checked: false },
-      { key: 'showRef',    label: { zh: '参考网格', en: 'Reference grid' }, color: '#64748b', checked: true }
+      { key: 'showLift',  label: { zh: '三维轨迹', en: '3D trajectory' }, color: '#fb7185', checked: true },
+      { key: 'showPhase', label: { zh: '相图 x·v', en: 'Phase x·v' },    color: '#a78bfa', checked: true },
+      { key: 'showFunc',  label: { zh: '位移 x·t', en: 'Displacement x·t' }, color: '#34d399', checked: true },
+      { key: 'showRate',  label: { zh: '速度 v·t', en: 'Velocity v·t' },  color: '#fb923c', checked: false },
+      { key: 'showGrid',  label: { zh: '网格',     en: 'Grid' },          color: '#64748b', checked: true }
     ],
-    sampleWindow: () => TAU / state.omega * 1.05 + 0.3,
+    sampleWindow: () => WAVE_LEN / state.waveSpeed + 0.5,
     draw(C) {
-      const m = matAt(state.k);
-      if (state.showRef) drawGridXY(C, 2.5, 0.5);
-      drawAxes(C, { ex: 2.4, ey: 2.4, yTicks: [1, 2], xTicks: [1, 2], tAxis: false });
-
-      /* 变形网格（青） */
-      if (state.showWarp) {
-        for (let i = -5; i <= 5; i++) {
-          const g = i * 0.5, l1 = [], l2 = [];
-          for (let j = 0; j <= 20; j++) {
-            const s = -2.5 + 5 * j / 20;
-            const p1 = applyM(m, [g, s]), p2 = applyM(m, [s, g]);
-            l1.push([p1[0], p1[1], 0]);
-            l2.push([p2[0], p2[1], 0]);
-          }
-          const w = (i === 0) ? 1.6 : 1, a = (i === 0) ? '0.55)' : '0.22)';
-          strokePoly(C, l1, { width: w, color: CYAN_A + a });
-          strokePoly(C, l2, { width: w, color: CYAN_A + a });
-        }
-      }
-      /* 行列式方格（琥珀）：单位方格 → 平行四边形 */
-      if (state.showDet) {
-        const e1 = applyM(m, [1, 0]), e2 = applyM(m, [0, 1]), e3 = applyM(m, [1, 1]);
-        strokePoly(C, [[0, 0, 0], [e1[0], e1[1], 0], [e3[0], e3[1], 0], [e2[0], e2[1], 0], [0, 0, 0]],
-          { width: 1.6, dash: [5, 4], color: AMB_A + '0.85)' });
-        const det = m[0] * m[3] - m[1] * m[2];
-        label3(C, [e3[0] / 2, e3[1] / 2, 0], 'det = ' + fmtS(det),
-          { size: 11, color: AMB_A + '0.95)', align: 'center' });
-      }
-      /* 单位圆 → 椭圆（翠绿轨迹 = 时钟点的像的历史，§6 真实记录） */
-      if (state.showEll) {
-        const cp = [];
-        for (let i = 0; i <= 72; i++) {
-          const a = i / 72 * TAU;
-          cp.push([Math.cos(a), Math.sin(a), 0]);
-        }
-        strokePoly(C, cp, { width: 1.2, dash: [4, 5], color: CYAN_A + '0.5)' });
-        if (samples.length > 1) {
-          const tr = [];
-          for (let i = samples.length - 1; i >= 0; i--) tr.push([samples[i].qx, samples[i].qy, 0]);
-          strokePoly(C, tr, { width: 5, color: EME_A + '0.12)' });
-          strokePoly(C, tr, { width: 2, fade: [EME_A + '1)', EME_A + '0.05)'] });
-        }
-        const a0 = state.theta;
-        const p0 = [Math.cos(a0), Math.sin(a0)];
-        const q0 = applyM(m, p0);
-        const sp0 = proj(C, [p0[0], p0[1], 0]);
-        if (sp0) glowDot(sp0, 7, '#ffffff', CYAN_A + '0.8)');
-        const sq0 = proj(C, [q0[0], q0[1], 0]);
-        if (sq0) glowDot(sq0, 11, '#ffffff', EME_A + '0.9)');
-        line3(C, [p0[0], p0[1], 0], [q0[0], q0[1], 0], { width: 1, dash: [3, 5], color: EME_A + '0.35)' });
-      }
-      /* 基向量 î′、ĵ′（玫红 / 紫，= u、v 的 k 程） */
-      const e1 = applyM(m, [1, 0]), e2 = applyM(m, [0, 1]);
-      vecArrow(C, e1, ROSE_A, 'î′', 2.6);
-      vecArrow(C, e2, VIO_A, 'ĵ′', 2.6);
-      /* 公式标签 */
-      label3(C, [-2.35, 2.15, 0], state.showR ? 'R(45°)·M,  M = [u v]' : 'M = [u v],  î→u,  ĵ→v',
-        { font: 'italic 12px ' + FONT_MATH, color: state.showR ? '#fb923c' : '#2dd4ea', align: 'left' });
+      drawLift(C, {
+        der: s => s.v, val: s => s.x,
+        letters: { der: 'v', val: 'x' },
+        labels: { func: 'x · t', rate: 'v · t', phase: 'x · v', main: '(x, v, t)' },
+        envelope: true
+      });
     },
     readout() {
-      const m = matAt(state.k);
-      const det = m[0] * m[3] - m[1] * m[2];
-      return '<div>M(k) = [ <b>' + fmtS(m[0]) + '</b>  <b>' + fmtS(m[1]) + '</b> ; <b>' + fmtS(m[2]) + '</b>  <b>' + fmtS(m[3]) + '</b> ]</div>' +
-        '<div class="sinC">î′ = (' + fmtS(m[0]) + ', ' + fmtS(m[2]) + ')</div>' +
-        '<div class="cosC">ĵ′ = (' + fmtS(m[1]) + ', ' + fmtS(m[3]) + ')</div>' +
-        '<div><span style="color:#fbbf24">det M = <b>' + fmtS(det) + '</b>' +
-        t({ zh: '（面积倍数，= 页签二的 u×v）', en: ' (area factor = tab 2’s u×v)' }) + '</span></div>' +
-        '<div class="dim">' + t({ zh: '注：矩阵加法只是逐项相加，没有几何故事——主角是乘法（复合）', en: 'Note: matrix addition is entrywise, no geometric story — multiplication (composition) is the star' }) + '</div>';
-    }
-  },
-
-  /* ────── 四：特征向量 · 不转弯的方向 ────── */
-  eigen: {
-    label: { zh: '特征向量 · 不转弯的方向', en: 'Eigenvectors · No turning' },
-    brand: { zh: '当整个空间被 A 扭曲，绝大多数向量都会转向；唯有少数「特征方向」只被拉伸、缩短或翻转，方向纹丝不动——它们满足 Av = λv，是这个变换自带的天然坐标轴。',
-             en: 'When A warps the whole plane, almost every vector turns; only a few "eigen-directions" merely stretch, shrink or flip without turning — they satisfy Av = λv, the transform’s own natural axes.' },
-    tips: { zh: '提示：切「正视 x·y」并拖动变形进度 k——青色向量云随空间来回摆动，唯有玫红 v₁、紫 v₂ 的特征方向线定在原地：这正是特征向量的定义，Av 与 v 同向。把 β−α 调到 90° 附近、两模长相等就是纯转动，一条实特征线都没有。',
-            en: 'Tip: switch to "Front x·y" and drag morph k — the cyan vector cloud swings back and forth while the rose v₁ and violet v₂ eigen-lines stay dead still: that is exactly what an eigenvector is, Av parallel to v. Set β−α near 90° with equal lengths for a pure rotation — not a single real eigen-line.' },
-    views: {
-      iso:   { label: { zh: '立体',     en: '3D' },        az: -0.6,  el: 0.3,  dist: 9, tx: 0, ty: 0.3, tz: 0 },
-      front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 7, tx: 0, ty: 0.3, tz: 0 }
-    },
-    toggles: [
-      { key: 'showCloud', label: { zh: '向量云', en: 'Vector cloud' }, color: '#cbd5e1', checked: true },
-      { key: 'showEig1',  label: { zh: '特征方向 <i>v</i>₁', en: 'Eigen-line <i>v</i>₁' }, color: '#fb7185', checked: true },
-      { key: 'showEig2',  label: { zh: '特征方向 <i>v</i>₂', en: 'Eigen-line <i>v</i>₂' }, color: '#a78bfa', checked: true },
-      { key: 'showPow',   label: { zh: '<i>A</i>ⁿ 迭代', en: '<i>A</i>ⁿ iteration' }, color: '#34d399', checked: false },
-      { key: 'showGridE', label: { zh: '参考网格', en: 'Reference grid' }, color: '#64748b', checked: true }
-    ],
-    sampleWindow: () => TAU / state.omega * 1.05 + 0.3,
-    draw(C) {
-      const s = state.k * (0.5 - 0.5 * Math.cos(state.theta));   // 恒等↔A 的呼吸式变形，随时钟摆动
-      const M = morphA(s);
-      const eg = eigA();
-      const N = 36, L = 2.7;
-
-      if (state.showGridE) drawGridXY(C, 2.5, 0.5);
-      drawAxes(C, { ex: 2.6, ey: 2.6, yTicks: [1, 2], xTicks: [1, 2], tAxis: false });
-
-      /* 单位圆（青，源几何）+ 它的像（被 M(s) 扭成的椭圆） */
-      const src = [], img = [];
-      for (let i = 0; i <= 72; i++) { const a = i / 72 * TAU; src.push([Math.cos(a), Math.sin(a), 0]); }
-      strokePoly(C, src, { width: 1.2, dash: [4, 5], color: CYAN_A + '0.4)' });
-      for (let i = 0; i <= N; i++) { const a = i / N * TAU; const p = applyM(M, [Math.cos(a), Math.sin(a)]); img.push([p[0], p[1], 0]); }
-      strokePoly(C, img, { width: 1.6, color: CYAN_A + '0.5)' });
-
-      /* 向量云：从原点辐射的众多方向，随空间转向（中性灰） */
-      if (state.showCloud) {
-        for (let i = 0; i < N; i++) {
-          const a = i / N * TAU;
-          const p = applyM(M, [Math.cos(a), Math.sin(a)]);
-          line3(C, [0, 0, 0], [p[0], p[1], 0], { width: 1, color: 'rgba(159,176,200,0.28)' });
-          const sp = proj(C, [p[0], p[1], 0]);
-          if (sp) glowDot(sp, 3, 'rgba(226,232,240,0.85)', 'rgba(159,176,200,0.5)');
-        }
-      }
-
-      /* 特征方向线（六处同源）：整条直线 + 单位特征向量的像沿线伸缩 */
-      const drawEig = (vec, lam, ca, name, show) => {
-        if (!show || !vec) return;
-        line3(C, [-vec[0] * L, -vec[1] * L, 0], [vec[0] * L, vec[1] * L, 0], { width: 5.5, color: ca + '0.13)' });
-        line3(C, [-vec[0] * L, -vec[1] * L, 0], [vec[0] * L, vec[1] * L, 0], { width: 2, color: ca + '0.9)' });
-        const f = (1 - s) + s * lam;                       // M(s) 对特征向量的缩放因子 = (1−s)+sλ
-        const ip = [vec[0] * f, vec[1] * f];
-        line3(C, [vec[0], vec[1], 0], [ip[0], ip[1], 0], { width: 1.4, dash: [7, 7], color: ca + '0.6)' });
-        if (Math.hypot(ip[0], ip[1]) > 0.06) {
-          arrowAt(C, [ip[0], ip[1], 0], [ip[0] * 0.9, ip[1] * 0.9, 0], ca + '0.9)');
-          const sp = proj(C, [ip[0], ip[1], 0]);
-          if (sp) glowDot(sp, 9, '#ffffff', ca + '0.9)');
-        }
-        label3(C, [vec[0] * L * 0.8, vec[1] * L * 0.8, 0], name + ' λ=' + fmtS(lam),
-          { font: 'italic 12px ' + FONT_MATH, color: ca + '1)', align: 'center', dy: -10 });
-      };
-      if (eg.type === 'complex') {
-        /* 纯转动：画一段琥珀转向弧提示「每个方向都在转」 */
-        const arc = [];
-        for (let i = 0; i <= 24; i++) { const a = 0.3 + i / 24 * (TAU * 0.72); arc.push([0.7 * Math.cos(a), 0.7 * Math.sin(a), 0]); }
-        strokePoly(C, arc, { width: 1.5, color: AMB_A + '0.7)' });
-        arrowAt(C, arc[arc.length - 1], arc[arc.length - 2], AMB_A + '0.9)');
-      } else {
-        drawEig(eg.vecs[0], eg.lams[0], ROSE_A, 'v₁', state.showEig1);
-        drawEig(eg.vecs[1] || eg.vecs[0], eg.lams[1], VIO_A, 'v₂', state.showEig2 && eg.vecs.length > 1);
-      }
-
-      /* Aⁿv 迭代：一般种子反复乘 A，方向逐步倒向 |λ| 最大的特征方向（翠绿） */
-      if (state.showPow && eg.type === 'real' && Math.abs(eg.lams[0]) > Math.abs(eg.lams[1]) + 1e-4) {
-        let w = [Math.cos(0.7), Math.sin(0.7)];             // ~40°，不与特征向量对齐
-        const A = matA(), K = 6;
-        for (let n = 0; n <= K; n++) {
-          const ln = Math.hypot(w[0], w[1]) || 1;
-          const wh = [w[0] / ln * 1.35, w[1] / ln * 1.35];
-          const al = 0.22 + 0.7 * n / K;
-          line3(C, [0, 0, 0], [wh[0], wh[1], 0], { width: 1.6, color: EME_A + al.toFixed(2) + ')' });
-          if (n === K) { const sp = proj(C, [wh[0], wh[1], 0]); if (sp) { glowDot(sp, 7, '#ffffff', EME_A + '0.9)'); } }
-          w = applyM(A, w);
-        }
-        label3(C, [Math.cos(0.7) * 1.55, Math.sin(0.7) * 1.55, 0], 'Aⁿv', { font: 'italic 12px ' + FONT_MATH, color: '#34d399', align: 'left', dx: 6 });
-      }
-
-      /* 标题与分类标签 */
-      const typeTxt = {
-        real:      { zh: '两个实特征方向', en: 'two real eigen-directions' },
-        defective: { zh: '重根 · 单一特征方向（剪切）', en: 'repeated root · single direction (shear)' },
-        scalar:    { zh: '重根 · 每个方向都是特征向量', en: 'repeated root · every direction is an eigenvector' },
-        complex:   { zh: '复特征值 · 没有实特征向量（纯转动）', en: 'complex eigenvalues · no real eigenvector (pure rotation)' }
-      };
-      label3(C, [-2.5, 2.5, 0], 'Av = λv', { font: 'italic 13px ' + FONT_MATH, color: '#2dd4ea', align: 'left' });
-      label3(C, [-2.5, 2.2, 0], t(typeTxt[eg.type]), { size: 11, color: 'rgba(159,176,200,.8)', align: 'left' });
-
-      /* 主角 u、v 仍以淡色示意矩阵两列 */
-      vecArrow(C, U(), ROSE_A, null, 1.4);
-      vecArrow(C, Vv(), VIO_A, null, 1.4);
-    },
-    readout() {
-      const eg = eigA(), m = eg.m;
-      let out = '<div>A = [ <b>' + fmtS(m[0]) + '</b>  <b>' + fmtS(m[1]) + '</b> ; <b>' + fmtS(m[2]) + '</b>  <b>' + fmtS(m[3]) + '</b> ]</div>';
-      if (eg.type === 'complex') {
-        out += '<div>λ = ' + fmtS(eg.re) + ' ± ' + fmt(eg.im) + ' i</div>' +
-          '<div class="dim">' + t({ zh: '判别式 < 0：无实特征向量，每个方向都被转动', en: 'discriminant < 0: no real eigenvector, every direction turns' }) + '</div>';
-      } else {
-        out += '<div class="sinC">λ₁ = <b>' + fmtS(eg.lams[0]) + '</b>' + (eg.vecs[0] ? '&ensp;v₁ = (' + fmtS(eg.vecs[0][0]) + ', ' + fmtS(eg.vecs[0][1]) + ')' : '') + '</div>' +
-          '<div class="cosC">λ₂ = <b>' + fmtS(eg.lams[1]) + '</b>' + (eg.vecs.length > 1 ? '&ensp;v₂ = (' + fmtS(eg.vecs[1][0]) + ', ' + fmtS(eg.vecs[1][1]) + ')' : '&ensp;<span class="dim">' + t({ zh: '（重根，方向重合）', en: '(repeated, one direction)' }) + '</span>') + '</div>';
-      }
-      out += '<div><span style="color:#fbbf24">det A = λ₁λ₂ = <b>' + fmtS(eg.det) + '</b>&ensp;·&ensp;tr A = λ₁+λ₂ = <b>' + fmtS(eg.tr) + '</b></span></div>';
-      if (eg.type === 'real' && Math.abs(eg.lams[0]) > Math.abs(eg.lams[1]) + 1e-4)
-        out += '<div class="tanC">' + t({ zh: 'Aⁿv → v₁ 方向（|λ₁| 最大者主导）', en: 'Aⁿv → v₁ (largest |λ| dominates)' }) + '</div>';
-      else
-        out += '<div class="dim">' + t({ zh: '沿特征方向：Av = λv，只缩放不转向', en: 'Along an eigen-line: Av = λv — pure scaling, no turn' }) + '</div>';
-      return out;
+      const s = samples[samples.length - 1] || { x: 1, v: 0 };
+      const xv = fmtS(s.x), vv = fmtS(s.v), z = state.zeta;
+      const reg = z < 0.001 ? { zh: '无阻尼 · 闭合轨道', en: 'undamped · closed orbit' }
+        : Math.abs(z - 1) < 0.03 ? { zh: '临界阻尼', en: 'critically damped' }
+        : z < 1 ? { zh: '欠阻尼 · 向内螺旋', en: 'underdamped · inward spiral' }
+        : { zh: '过阻尼 · 无振荡', en: 'overdamped · no oscillation' };
+      return roHead() +
+        '<div class="sinC">' + t({ zh: '轨迹点 ', en: 'lift ' }) + '= <b>(' + xv + ', ' + vv + ', ' + fmt(state.t) + ')</b></div>' +
+        '<div class="cosC">' + t({ zh: '相点 ', en: 'phase ' }) + '(x, v) = <b>(' + xv + ', ' + vv + ')</b></div>' +
+        '<div class="tanC">x = <b>' + xv + '</b></div>' +
+        '<div class="cotC">v = <b>' + vv + '</b></div>' +
+        '<div class="dim">ζ = ' + fmt(z) + '&ensp;·&ensp;' + t(reg) + '</div>';
     }
   }
 };
@@ -698,12 +518,21 @@ const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion:
    ║  ③ 采样 —— 按你的工具需要扩展字段                           ║
    ║  原则：记录"当时的真实值"，参数中途改变时历史不重算            ║
    ╚══════════════════════════════════════════════════════════╝ */
+let _y = 0, _ox = 1, _ov = 0;   // 一阶解 y、二阶解 (x, v) 的积分状态
 function pushSample() {
-  /* 页签三：单位圆上的时钟点经当前变换后的像（记录当时的真实值——
-     中途拖 k、u、v 或开关 R(45°)，已画出的椭圆轨迹不重算，§6） */
-  const p = [Math.cos(state.theta), Math.sin(state.theta)];
-  const q = applyM(matAt(state.k), p);
-  samples.push({ t: state.t, qx: q[0], qy: q[1] });
+  if (samples.length === 0) {
+    /* 重置：从当前滑杆初值起步（二阶固定 x₀=1, v₀=0） */
+    _y = state.y0; _ox = 1; _ov = 0;
+    samples.push({ t: state.t, y: _y, yp: fieldF(state.t, _y), x: _ox, v: _ov });
+    return;
+  }
+  const t0 = samples[samples.length - 1].t;
+  let dt = state.t - t0;
+  if (dt < 0) dt = 0; else if (dt > 0.05) dt = 0.05;
+  _y = rk4y(t0, _y, dt);                       // 一阶 y′ = f(t, y)
+  const nx = rk4osc(_ox, _ov, dt); _ox = nx[0]; _ov = nx[1];   // 二阶 [x, v]
+  /* 记录当时的真实值：中途改参数不重算历史 */
+  samples.push({ t: state.t, y: _y, yp: fieldF(state.t, _y), x: _ox, v: _ov });
 }
 
 /* ================= 画布 ================= */
