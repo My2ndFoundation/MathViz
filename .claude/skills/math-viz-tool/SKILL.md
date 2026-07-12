@@ -147,11 +147,14 @@ view so they see the payoff immediately.
 
 ## Step 4 — Register & publish (a tool is not "done" until it is registered)
 
-1. Add an entry to `tools.json`: id / file / accent (design-system trace color) / bilingual
+1. Add an entry to `tools.json`: id / file / accent (design-system trace color) / `category`
+   (subject-area slug — one of the keys in index.html's `CATS`: trig · geom · alg · calc ·
+   dyn · mech · prob · sig; add a new CATS entry first if none fits) / bilingual
    kicker · title · desc · tag / `version: "1.0.0"` / `engine` (the starter's STARTER_VERSION
    you copied) / one changelog entry. Validate: `python3 -c "import json;json.load(open('tools.json'))"`.
-2. Mirror the same entry into the `TOOLS` array embedded in `index.html` (field-for-field; no
-   changelog there). The landing page renders from it.
+2. Mirror the same entry into the `TOOLS` array embedded in `index.html` (field-for-field —
+   `category` is named `cat` there; no changelog). The landing page renders the cards grouped
+   into subject sections from `CATS` order.
 3. Add a row to the README tools table.
 4. Re-run the §8 self-check (now includes i18n + versioning gates), then commit the tool,
    registry, landing page and README together.

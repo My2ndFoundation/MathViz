@@ -4,17 +4,20 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.0">
+<meta name="tool-version" content="1.0.0">
 <meta name="engine-version" content="1.0.0">
-<title>线性代数的本质 · 两个向量，三种读法</title>
+<title>三维直线与平面的本质 · Lines & Planes 3D</title>
 <!-- ============================================================
-  线性代数的本质 · Linear Algebra Essence
-  设计规范：math-viz-design-system.md（令牌 / 组件 / 绘制语言 / 交互词汇）
-  引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
+  三维直线与平面的本质 · Lines, Planes & Skew Geometry 3D
+  基于 math-viz-starter.html（STARTER_VERSION 1.0.0）构建，
+  严格遵循 math-viz-design-system.md 的全部令牌 / 组件 / 绘制语言 / 交互词汇。
+
+  一句话本质：三维解析几何，就是用方向向量 d 与法向量 n
+  在空间里划定"自由度"与"约束"。
 
   版本记录（changelog，新→旧）：
-    1.1.0  2026-07-12  新增「特征向量 · 不转弯的方向」页签 / add eigenvectors tab (Av = λv)
-    1.0.0  2026-07-12  首个版本（含双语）
+    1.0.0  2026-07-12  首发：直线 r=a+λd · 平面 (r−a)·n=0 · 两平面交线
+                       d=n₁×n₂ · 异面直线与公垂线 · 点到平面距离 共五个场景
 ============================================================ -->
 <style>
 :root{
@@ -128,6 +131,8 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 .readout .cosC b{color:var(--trace-violet)}
 .readout .tanC b{color:var(--trace-emerald)}
 .readout .cotC b{color:var(--trace-orange)}
+.readout .cyC b{color:var(--trace-cyan)}
+.readout .amC b{color:var(--angle-amber)}
 .readout .dim{color:rgba(159,176,200,.6)}
 .tips{margin-top:11px;font-size:11px;line-height:1.65;color:rgba(159,176,200,.72)}
 
@@ -147,7 +152,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 
 <div class="brand">
   <div class="eyebrow">INTERACTIVE MATH · 交互式数学</div>
-  <h1>线性代数的本质</h1>
+  <h1>三维直线与平面的本质</h1>
   <p id="brandDesc"></p>
 </div>
 
@@ -187,15 +192,16 @@ function resolveLang(){
 let LANG = resolveLang();
 function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
 
+const STARTER_VERSION = '1.0.0';
 const VERSION = document.querySelector('meta[name="tool-version"]').content;
 
 /* ╔══════════════════════════════════════════════════════════╗
    ║  ⓪ 工具元信息 —— id 与双语标题                              ║
    ╚══════════════════════════════════════════════════════════╝ */
 const TOOL = {
-  id: 'linear-essence-3d',
-  title: { zh: '线性代数的本质 · 两个向量，三种读法', en: 'The Essence of Linear Algebra' },
-  h1:    { zh: '线性代数的本质', en: 'Linear Algebra' }
+  id: 'lines-planes-3d',
+  title: { zh: '三维直线与平面的本质 · Lines & Planes 3D', en: 'Lines, Planes & Skew Geometry 3D' },
+  h1:    { zh: '三维直线与平面的本质', en: 'Lines, Planes & Skew Geometry' }
 };
 
 /* 引擎 UI 文案（一般无需改动） */
@@ -211,467 +217,359 @@ const UI = {
 
 /* ╔══════════════════════════════════════════════════════════╗
    ║  ① 参数声明 —— 自动生成滑杆                                ║
-   ║  key: state 中的键 · label: 支持 <i>数学符号</i>            ║
-   ║  fmt: 格式化"滑杆原始值"用于显示 · map(可选): 原始值→状态值   ║
+   ║  方向 / 法向量用两只角度描述：方向角(绕 y) + 仰角(离水平面)  ║
    ╚══════════════════════════════════════════════════════════╝ */
+const degFmt = v => (v < 0 ? '−' : '') + Math.round(Math.abs(v) * 180 / Math.PI) + '°';
 const PARAMS = [
-  { key: 'uAng', label: { zh: '<i>u</i> 方向 <i>α</i>', en: '<i>u</i> direction <i>α</i>' }, min: 0, max: 360, step: 1,    value: 20,  fmt: v => v.toFixed(0) + '°', map: v => v * Math.PI / 180 },
-  { key: 'uLen', label: { zh: '<i>u</i> 模长 |<i>u</i>|', en: '<i>u</i> length |<i>u</i>|' }, min: 0.3, max: 2, step: 0.05, value: 1.4, fmt: v => fmt(v) },
-  { key: 'vAng', label: { zh: '<i>v</i> 方向 <i>β</i>', en: '<i>v</i> direction <i>β</i>' }, min: 0, max: 360, step: 1,    value: 75, fmt: v => v.toFixed(0) + '°', map: v => v * Math.PI / 180 },
-  { key: 'vLen', label: { zh: '<i>v</i> 模长 |<i>v</i>|', en: '<i>v</i> length |<i>v</i>|' }, min: 0.3, max: 2, step: 0.05, value: 1.0, fmt: v => fmt(v) },
-  { key: 'k',    label: { zh: '变形进度 <i>k</i>', en: 'Morph <i>k</i>' },                    min: 0,   max: 1, step: 0.01, value: 1,   fmt: v => fmt(v) },
-  { key: 'omega', label: { zh: '演示速度 <i>ω</i>', en: 'Demo speed <i>ω</i>' },              min: 0.2, max: 3, step: 0.05, value: 0.8, fmt: v => fmt(v) + ' rad/s' }
+  { key: 'aAz', label: { zh: '方向角 <i>α</i>', en: 'Azimuth <i>α</i>' },   min: 0,     max: 6.28, step: 0.02, value: 0.9,  fmt: degFmt },
+  { key: 'aEl', label: { zh: '仰角 <i>β</i>',   en: 'Elevation <i>β</i>' }, min: -1.2,  max: 1.2,  step: 0.02, value: 0.35, fmt: degFmt },
+  { key: 'bAz', label: { zh: '方向角 <i>γ</i>', en: 'Azimuth <i>γ</i>' },   min: 0,     max: 6.28, step: 0.02, value: 2.4,  fmt: degFmt },
+  { key: 'bEl', label: { zh: '仰角 <i>δ</i>',   en: 'Elevation <i>δ</i>' }, min: -1.2,  max: 1.2,  step: 0.02, value: -0.2, fmt: degFmt },
+  { key: 'lam', label: { zh: '参数 <i>λ</i>',   en: 'Parameter <i>λ</i>' }, min: -3,    max: 3,    step: 0.05, value: 0,    fmt: v => fmtS(v) },
+  { key: 'gap', label: { zh: '间距 <i>h</i>',   en: 'Gap <i>h</i>' },       min: 0.4,   max: 3,    step: 0.05, value: 1.4,  fmt: v => fmtS(v) },
+  { key: 'omega', label: { zh: '演示速度 <i>ω</i>', en: 'Demo speed <i>ω</i>' }, min: 0, max: 2.5, step: 0.05, value: 1, fmt: v => fmt(v) }
 ];
+
+/* ===== 场景级辅助（位于 SCENES 之上；只组合引擎部件，绝不改动引擎函数） ===== */
+const C_ROSE = '#fb7185',   G_ROSE   = 'rgba(251,113,133,0.14)';
+const C_VIOLET = '#a78bfa', G_VIOLET = 'rgba(167,139,250,0.14)';
+const C_EMER = '#34d399',   G_EMER   = 'rgba(52,211,153,0.14)';
+const C_AMBER = '#fbbf24',  G_AMBER  = 'rgba(251,191,36,0.16)';
+const C_CYAN = '#2dd4ea';
+const P_CORE = '#ffffff', P_HALO = 'rgba(186,240,255,0.9)';
+const AMBER_L = 'rgba(251,191,36,0.85)';
+
+const LINE_A = [-1.2, -0.5, 0.7];   /* 直线场景的定点 a */
+const DIST_Q = [1.6, 1.2, 1.4];     /* 距离场景的给定点 Q */
+
+const add = (a, b) => [a[0]+b[0], a[1]+b[1], a[2]+b[2]];
+const scl = (v, s) => [v[0]*s, v[1]*s, v[2]*s];
+
+/* 由方位角 az（绕 y）与仰角 el 得到单位方向向量 */
+function dir(az, el){ const ce = Math.cos(el); return [ce*Math.cos(az), Math.sin(el), ce*Math.sin(az)]; }
+/* 水平方向（仰角固定 0）：用于两平面交线与异面直线，保证公共几何轴恒为 y 轴 */
+function hdir(az){ return [Math.cos(az), 0, Math.sin(az)]; }
+/* 与法向量正交的平面内正交基 */
+function planeBasis(n){ let u = cross(n, [0,1,0]); if (Math.hypot(u[0],u[1],u[2]) < 1e-4) u = cross(n, [1,0,0]); u = norm(u); return [u, norm(cross(n, u))]; }
+
+/* 三维箭头：实线 + 箭头 */
+function vec3(C, from, to, color, w){
+  line3(C, from, to, { width: w || 2, color: color });
+  arrowAt(C, to, [from[0]+(to[0]-from[0])*0.9, from[1]+(to[1]-from[1])*0.9, from[2]+(to[2]-from[2])*0.9], color);
+}
+/* 双描发光直线：过 p，方向 d，向两侧延伸 ext */
+function beamLine(C, p, d, ext, core, glow){
+  const a = [p[0]-d[0]*ext, p[1]-d[1]*ext, p[2]-d[2]*ext];
+  const b = [p[0]+d[0]*ext, p[1]+d[1]*ext, p[2]+d[2]*ext];
+  line3(C, a, b, { width: 5.5, color: glow });
+  line3(C, a, b, { width: 2.2, color: core });
+}
+/* 双描发光线段 */
+function beamSeg(C, a, b, core, glow){
+  line3(C, a, b, { width: 5.5, color: glow });
+  line3(C, a, b, { width: 2.2, color: core });
+}
+/* 平面片：中心 c、法向 n、半宽 half，含淡填充 + 网格 + 亮边 */
+function planePatch(C, c, n, half, edge, grid, fill){
+  const bs = planeBasis(n), u = bs[0], v = bs[1];
+  const corner = (su, sv) => [c[0]+u[0]*su*half+v[0]*sv*half, c[1]+u[1]*su*half+v[1]*sv*half, c[2]+u[2]*su*half+v[2]*sv*half];
+  if (fill){
+    const cs = [corner(-1,-1), corner(1,-1), corner(1,1), corner(-1,1)].map(p => proj(C, p));
+    if (cs.every(Boolean)){
+      ctx.save(); ctx.fillStyle = fill; ctx.beginPath();
+      ctx.moveTo(cs[0][0], cs[0][1]);
+      for (let i = 1; i < 4; i++) ctx.lineTo(cs[i][0], cs[i][1]);
+      ctx.closePath(); ctx.fill(); ctx.restore();
+    }
+  }
+  const g = 4;
+  for (let i = -g; i <= g; i++){
+    const s = i / g;
+    line3(C, corner(s,-1), corner(s,1), { width: 1, color: grid });
+    line3(C, corner(-1,s), corner(1,s), { width: 1, color: grid });
+  }
+  strokePoly(C, [corner(-1,-1), corner(1,-1), corner(1,1), corner(-1,1), corner(-1,-1)], { width: 1.6, color: edge });
+}
+/* 三维坐标轴 x·y·z（短、带箭头与斜体字母） */
+function axes3(C, e){
+  const A = 'rgba(159,176,200,0.82)';
+  const ax = (u, lab) => {
+    line3(C, scl(u, -e), scl(u, e), { width: 1.3, color: A });
+    arrowAt(C, scl(u, e), scl(u, e - 0.2), A);
+    label3(C, scl(u, e + 0.3), lab, { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  };
+  ax([1,0,0], 'x'); ax([0,1,0], 'y'); ax([0,0,1], 'z');
+}
+/* 水平参考网格（y=0 平面） */
+function groundGrid(C, g, step){
+  const n = Math.round(g / step);
+  for (let i = -n; i <= n; i++){
+    if (i === 0) continue;
+    const u = i * step;
+    line3(C, [u, 0, -g], [u, 0, g], { width: 1, color: 'rgba(148,163,184,0.07)' });
+    line3(C, [-g, 0, u], [g, 0, u], { width: 1, color: 'rgba(148,163,184,0.07)' });
+  }
+}
+/* 直角标记：从 corner 沿单位方向 u、v 画一个小方角 */
+function rightAngleMark(C, corner, u, v, s, color){
+  const p1 = add(corner, scl(u, s)), p2 = add(corner, scl(v, s)), p3 = add(corner, add(scl(u, s), scl(v, s)));
+  line3(C, p1, p3, { width: 1, color: color });
+  line3(C, p3, p2, { width: 1, color: color });
+}
+/* 数学标注（衬线斜体 13px，锚在三维点） */
+function mathLabel(C, p, txt, color, align){ label3(C, p, txt, { font: 'italic 13px ' + FONT_MATH, color: color, align: align || 'left' }); }
+/* 顿悟视角联动：把某个滑杆归到规范值（同步 state 与滑杆 UI） */
+function setParam(key, raw){
+  const idx = PARAMS.findIndex(p => p.key === key);
+  if (idx < 0) return;
+  const inp = document.querySelectorAll('#paramsHost input')[idx];
+  if (inp){ inp.value = raw; inp.dispatchEvent(new Event('input')); }
+}
+/* 直线场景当前 λ（滑杆为基准，运动点开启时叠加时钟摆动） */
+function lineLambda(){ return clamp((state.lam || 0) + (state.glide ? 1.6 * Math.sin(state.theta * 0.55) : 0), -3.1, 3.1); }
+function vecS(v){ return '(' + fmtS(v[0]) + ', ' + fmtS(v[1]) + ', ' + fmtS(v[2]) + ')'; }
 
 /* ╔══════════════════════════════════════════════════════════╗
    ║  ② 场景注册 —— 每个键就是一个页签                           ║
-   ║  必填：label / brand / tips / views(首项即"立体"，双击回正)  ║
-   ║        toggles(曲线按 rose→violet→emerald→orange 取色)     ║
-   ║        draw(C) / readout()                                ║
-   ║  可选：sampleWindow() 历史滑窗秒数 · views[x].onSelect 联动 ║
    ╚══════════════════════════════════════════════════════════╝ */
-/* ────── 场景级：线性代数助手（引擎之上，引擎零改动） ────── */
-const ROSE_A = 'rgba(251,113,133,';
-const VIO_A = 'rgba(167,139,250,';
-const EME_A = 'rgba(52,211,153,';
-const ORG_A = 'rgba(251,146,60,';
-const CYAN_A = 'rgba(45,212,234,';
-const AMB_A = 'rgba(251,191,36,';
-
-const U = () => [state.uLen * Math.cos(state.uAng), state.uLen * Math.sin(state.uAng)];
-const Vv = () => [state.vLen * Math.cos(state.vAng), state.vLen * Math.sin(state.vAng)];
-const dotUV = () => { const u = U(), v = Vv(); return u[0] * v[0] + u[1] * v[1]; };
-const crossUV = () => { const u = U(), v = Vv(); return u[0] * v[1] - u[1] * v[0]; };
-
-/* 平面向量箭头（z=0 平面） */
-function vecArrow(C, p, color, name, w) {
-  line3(C, [0, 0, 0], [p[0], p[1], 0], { width: (w || 2.4), color: color + '0.95)' });
-  line3(C, [0, 0, 0], [p[0], p[1], 0], { width: (w || 2.4) + 3.5, color: color + '0.14)' });
-  arrowAt(C, [p[0], p[1], 0], [p[0] * 0.88, p[1] * 0.88, 0], color + '0.95)');
-  if (name) label3(C, [p[0], p[1], 0], name, { font: 'italic 14px ' + FONT_MATH, color: color + '1)', align: 'center', dy: -14 });
-}
-/* 地面向量箭头（y=0 平面；数学 (a,b) → 世界 (a, 0, −b)，右手系成立） */
-const WG = p => [p[0], 0, -p[1]];
-function vecArrowG(C, p, color, name) {
-  line3(C, [0, 0, 0], WG(p), { width: 2.4, color: color + '0.95)' });
-  line3(C, [0, 0, 0], WG(p), { width: 6, color: color + '0.14)' });
-  arrowAt(C, WG(p), WG([p[0] * 0.88, p[1] * 0.88]), color + '0.95)');
-  if (name) label3(C, WG(p), name, { font: 'italic 14px ' + FONT_MATH, color: color + '1)', align: 'center', dy: -12 });
-}
-/* 两方向间的角度弧（琥珀，z=0 平面） */
-function arcBetween(C, a0, a1, r) {
-  let d = a1 - a0;
-  while (d > Math.PI) d -= TAU;
-  while (d < -Math.PI) d += TAU;
-  const n = Math.max(2, Math.ceil(Math.abs(d) / 0.06));
-  const pts = [];
-  for (let i = 0; i <= n; i++) {
-    const a = a0 + d * i / n;
-    pts.push([r * Math.cos(a), r * Math.sin(a), 0]);
-  }
-  strokePoly(C, pts, { width: 1.5, color: AMB_A + '0.85)' });
-  const mid = a0 + d / 2;
-  label3(C, [(r + 0.18) * Math.cos(mid), (r + 0.18) * Math.sin(mid), 0], 'θ',
-    { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
-}
-/* 夹角 θ ∈ [0, π] */
-function angUV() {
-  const u = U(), v = Vv();
-  const c = dotUV() / (state.uLen * state.vLen);
-  return Math.acos(clamp(c, -1, 1));
-}
-/* 页签三的变换：M = [u v]（î→u、ĵ→v），k 变形，选装 R(45°) 复合 */
-function matAt(k) {
-  const u = U(), v = Vv();
-  let a = (1 - k) + k * u[0], b = k * v[0], c = k * u[1], d = (1 - k) + k * v[1];
-  if (state.showR) {
-    const ca = Math.cos(Math.PI / 4), sa = Math.sin(Math.PI / 4);
-    const a2 = ca * a - sa * c, b2 = ca * b - sa * d;
-    const c2 = sa * a + ca * c, d2 = sa * b + ca * d;
-    a = a2; b = b2; c = c2; d = d2;
-  }
-  return [a, b, c, d];
-}
-const applyM = (m, p) => [m[0] * p[0] + m[1] * p[1], m[2] * p[0] + m[3] * p[1]];
-
-/* 页签四：特征向量 —— 纯 A = [u v]（列即 î、ĵ 的落点，不含 R(45°)） */
-function matA() { const u = U(), v = Vv(); return [u[0], v[0], u[1], v[1]]; }   // [a,b,c,d]
-/* 恒等 → A 的连续变形 M(s) = (1−s)I + sA；与 A 特征向量完全相同（只改特征值） */
-function morphA(s) { const A = matA(); return [(1 - s) + s * A[0], s * A[1], s * A[2], (1 - s) + s * A[3]]; }
-/* 解 (A − λI)x = 0，返回单位特征向量 */
-function eigvecFor(m, lam) {
-  const a = m[0], b = m[1], c = m[2], d = m[3];
-  let vx, vy;
-  if (Math.abs(b) > 1e-7) { vx = b; vy = lam - a; }
-  else if (Math.abs(c) > 1e-7) { vx = lam - d; vy = c; }
-  else { if (Math.abs(lam - a) <= Math.abs(lam - d)) { vx = 1; vy = 0; } else { vx = 0; vy = 1; } }
-  const L = Math.hypot(vx, vy) || 1;
-  return [vx / L, vy / L];
-}
-/* 2×2 闭式特征分解：迹/行列式 → 判别式 → 实/重/复分类 */
-function eigA() {
-  const m = matA(), a = m[0], b = m[1], c = m[2], d = m[3];
-  const tr = a + d, det = a * d - b * c, disc = tr * tr - 4 * det;
-  const r = { tr, det, disc, m };
-  const eps = 1e-6;
-  if (disc < -eps) {
-    r.type = 'complex'; r.re = tr / 2; r.im = Math.sqrt(-disc) / 2; r.lams = []; r.vecs = [];
-  } else {
-    const sq = Math.sqrt(Math.max(0, disc));
-    let l1 = (tr + sq) / 2, l2 = (tr - sq) / 2;
-    if (Math.abs(l2) > Math.abs(l1)) { const tmp = l1; l1 = l2; l2 = tmp; }   // |λ₁| ≥ |λ₂|
-    if (Math.abs(b) < eps && Math.abs(c) < eps && Math.abs(a - d) < eps) {
-      r.type = 'scalar'; r.lams = [l1, l2]; r.vecs = [[1, 0], [0, 1]];         // λI：每个方向都是特征向量
-    } else if (sq < eps) {
-      r.type = 'defective'; r.lams = [l1, l2]; r.vecs = [eigvecFor(m, l1)];    // 重根 · 单一特征方向（剪切）
-    } else {
-      r.type = 'real'; r.lams = [l1, l2]; r.vecs = [eigvecFor(m, l1), eigvecFor(m, l2)];
-    }
-  }
-  return r;
-}
-
 const SCENES = {
 
-  /* ────── 一：向量 · 加法与投影 ────── */
-  vec: {
-    label: { zh: '向量 · 加法与投影', en: 'Vectors · Add & project' },
-    brand: { zh: '两个向量 u、v 是全篇的主角。加法是首尾接力的平行四边形；点乘不神秘——把 u 的影子投到 v 上，影长乘 |v| 就是 u·v。',
-             en: 'Two vectors, u and v, star in every tab. Addition is the parallelogram relay; the dot product is no mystery — cast u’s shadow onto v, and shadow length times |v| is u·v.' },
-    tips: { zh: '提示：切「正视 x·y」把 u 的方向拖过与 v 垂直的位置——琥珀影子缩成一点再反向变负：点乘的正负只是「影子在 v 的哪一边」。',
-            en: 'Tip: in "Front x·y" drag u’s direction past perpendicular to v — the amber shadow shrinks to a point then flips negative: the sign of a dot product is just which side the shadow falls on.' },
+  /* ────── 场景一：直线 r = a + λd ────── */
+  line: {
+    label: { zh: '直线 r = a+λd', en: 'Line r = a+λd' },
+    brand: { zh: '一条直线 = 一个定点 a 加一个方向向量 d。参数 λ 每取一个值，就在直线上钉住一个点——这唯一的自由度，正是「直线」的本质。拖拽旋转，从不同角度观察同一条直线。',
+             en: 'A line = one fixed point a plus one direction vector d. Each value of λ pins one point on the line — that single degree of freedom is what "a line" really is. Drag to rotate and view the same line from any angle.' },
+    tips: { zh: '按 2 键「沿 d 塌成点」：整条无限长的直线沿视线塌成一个点，只剩 λ 一个自由度。拖动 λ，或看运动点如何沿轨道滑行。',
+            en: 'Press 2 for "down d": the whole infinite line collapses to a single point along the line of sight, leaving only λ as its one freedom. Drag λ, or watch the moving point glide along the rail.' },
     views: {
-      iso:   { label: { zh: '立体',     en: '3D' },        az: -0.6,  el: 0.3,  dist: 9, tx: 0, ty: 0.3, tz: 0 },
-      front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 7, tx: 0, ty: 0.3, tz: 0 }
+      iso:   { label: { zh: '立体', en: '3D' },          az: -0.8,       el: 0.32,  dist: 9,   tx: 0, ty: 0, tz: 0 },
+      downD: { label: { zh: '沿 d 塌成点', en: 'Down d' }, az: Math.PI/2, el: 0.001, dist: 7,   tx: 0, ty: 0, tz: 0,
+               onSelect: () => { setParam('aAz', 0); setParam('aEl', 0); } },
+      front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001,     el: 0.02,  dist: 7.5, tx: 0, ty: 0, tz: 0 }
     },
     toggles: [
-      { key: 'showSum',  label: { zh: '和 <i>u</i>+<i>v</i>', en: 'Sum <i>u</i>+<i>v</i>' }, color: '#34d399', checked: true },
-      { key: 'showProj', label: { zh: '点乘投影', en: 'Dot projection' }, color: '#fbbf24', checked: true },
-      { key: 'showPara', label: { zh: '平行四边形', en: 'Parallelogram' }, color: '#cbd5e1', checked: true },
-      { key: 'showGrid', label: { zh: '网格', en: 'Grid' }, color: '#64748b', checked: true }
+      { key: 'glide',  label: { zh: '运动点',   en: 'Moving point' }, color: '#2dd4ea', checked: true },
+      { key: 'guides', label: { zh: 'λd 分解',  en: 'λd guide' },     color: '#fbbf24', checked: true },
+      { key: 'grid',   label: { zh: '参考网格', en: 'Reference grid' }, color: '#64748b', checked: true }
     ],
-    sampleWindow: () => TAU / state.omega * 1.05 + 0.3,
-    draw(C) {
-      const u = U(), v = Vv();
-      if (state.showGrid) drawGridXY(C, 2.5, 0.5);
-      drawAxes(C, { ex: 2.4, ey: 2.4, yTicks: [1, 2], xTicks: [1, 2], tAxis: false });
-
-      /* 平行四边形（首尾接力虚线） */
-      if (state.showPara && state.showSum) {
-        line3(C, [u[0], u[1], 0], [u[0] + v[0], u[1] + v[1], 0], { width: 1.3, dash: [6, 6], color: 'rgba(203,213,225,0.45)' });
-        line3(C, [v[0], v[1], 0], [u[0] + v[0], u[1] + v[1], 0], { width: 1.3, dash: [6, 6], color: 'rgba(203,213,225,0.45)' });
+    draw(C){
+      const d = dir(state.aAz, state.aEl), a = LINE_A;
+      if (state.grid) groundGrid(C, 2.6, 0.65);
+      axes3(C, 2.6);
+      beamLine(C, a, d, 3.2, C_ROSE, G_ROSE);
+      vec3(C, a, add(a, d), C_ROSE, 2.2);
+      mathLabel(C, add(a, scl(d, 1.18)), 'd', C_ROSE);
+      solidDot(C, a, 3.2, C_CYAN);
+      mathLabel(C, add(a, [-0.05, -0.3, 0]), 'a', C_CYAN, 'right');
+      const lam = lineLambda(), P = add(a, scl(d, lam));
+      if (state.guides){
+        line3(C, a, P, { width: 1.5, dash: [7, 7], color: AMBER_L });
+        mathLabel(C, add(a, scl(d, lam * 0.5)), 'λd', C_AMBER);
       }
-      /* 点乘投影（琥珀）：u 在 v 方向上的影子 */
-      if (state.showProj) {
-        const vhat = [v[0] / state.vLen, v[1] / state.vLen];
-        const s = u[0] * vhat[0] + u[1] * vhat[1];          // 影长 = |u|cosθ
-        const foot = [vhat[0] * s, vhat[1] * s];
-        line3(C, [u[0], u[1], 0], [foot[0], foot[1], 0], { width: 1.2, dash: [4, 5], color: AMB_A + '0.6)' });
-        line3(C, [0, 0, 0], [foot[0], foot[1], 0], { width: 4, color: AMB_A + '0.75)' });
-        const fp = proj(C, [foot[0], foot[1], 0]);
-        if (fp) glowDot(fp, 8, '#ffffff', AMB_A + '0.9)');
-        label3(C, [foot[0], foot[1], 0], '|u|cosθ', { font: 'italic 11px ' + FONT_MATH, color: '#fbbf24', align: 'center', dy: 16 });
-        arcBetween(C, state.vAng, state.uAng, 0.42);
-      }
-      /* 和向量（翠绿） */
-      if (state.showSum) vecArrow(C, [u[0] + v[0], u[1] + v[1]], EME_A, 'u+v');
-      /* 主角 u、v */
-      vecArrow(C, u, ROSE_A, 'u');
-      vecArrow(C, v, VIO_A, 'v');
+      const sp = proj(C, P);
+      if (sp) glowDot(sp, 14, P_CORE, P_HALO);
+      mathLabel(C, add(P, [0, 0.32, 0]), 'P', P_HALO);
+      mathLabel(C, add(a, [0.25, 1.0, 0]), 'r = a + λd', C_ROSE);
     },
-    readout() {
-      const th = angUV();
-      return '<div class="sinC">u = (' + fmtS(U()[0]) + ', ' + fmtS(U()[1]) + ')</div>' +
-        '<div class="cosC">v = (' + fmtS(Vv()[0]) + ', ' + fmtS(Vv()[1]) + ')</div>' +
-        '<div class="tanC">u+v = (' + fmtS(U()[0] + Vv()[0]) + ', ' + fmtS(U()[1] + Vv()[1]) + ')</div>' +
-        '<div><span style="color:#fbbf24">u·v = |u||v|cosθ = ' + fmt(state.uLen) + '×' + fmt(state.vLen) + '×cos ' +
-        (th * 180 / Math.PI).toFixed(0) + '° = <b>' + fmtS(dotUV()) + '</b></span></div>';
+    readout(){
+      const d = dir(state.aAz, state.aEl), a = LINE_A, lam = lineLambda(), P = add(a, scl(d, lam));
+      return '<div class="sinC">d = <b>' + vecS(d) + '</b></div>' +
+        '<div class="cyC">a = <b>' + vecS(a) + '</b></div>' +
+        '<div class="sinC">λ = <b>' + fmtS(lam) + '</b>&ensp;·&ensp;P = <b>' + vecS(P) + '</b></div>' +
+        '<div class="dim">' + t({ zh: '自由度 1 —— 直线是单参数 λ 的解集', en: '1 DOF — a line is the solution set of one parameter λ' }) + '</div>';
     }
   },
 
-  /* ────── 二：叉乘 · 面积与右手 ────── */
-  cross: {
-    label: { zh: '叉乘 · 面积与右手', en: 'Cross · Area & hand' },
-    brand: { zh: 'u、v 平躺在地面，u×v 垂直立起：杆的长度恰好等于平行四边形的面积，方向由右手定则决定——叉乘是「带方向的面积」。',
-             en: 'With u and v lying flat, u×v stands straight up: its length equals the parallelogram’s area, its direction follows the right hand — a cross product is signed area.' },
-    tips: { zh: '提示：切「俯视 面积」把 u 的方向慢慢拖过 v——琥珀面积先胀后缩，翠绿杆随之伸缩；u 越过 v 的一瞬间杆子倒向下方：面积没变，方向翻了。',
-            en: 'Tip: in "Top: area" drag u’s direction slowly past v — the amber area swells then shrinks and the emerald rod follows; the instant u crosses v, the rod flips downward: same area, opposite orientation.' },
+  /* ────── 场景二：平面 (r − a)·n = 0 ────── */
+  plane: {
+    label: { zh: '平面 (r−a)·n', en: 'Plane (r−a)·n' },
+    brand: { zh: '一个平面 = 一个定点 a 加一个法向量 n。约束 n·(r−a)=0 锁死一个方向，只留下两个自由度——面上的点可沿两条互相独立的方向自由移动。旋转 α、β 让 n 转动，平面随之翻转。',
+             en: 'A plane = one fixed point a plus one normal vector n. The constraint n·(r−a)=0 locks one direction and leaves two degrees of freedom — a point on it can move along two independent directions. Turn α, β to rotate n and watch the plane tilt.' },
+    tips: { zh: '按 2 键「正对平面」：法向量 n 恰好指向你，平面铺满视野。运动点在面上游走的两条方向，就是它的两个自由度。',
+            en: 'Press 2 to face the plane: the normal n points straight at you and the plane fills the view. The two directions the moving point wanders in are its two degrees of freedom.' },
     views: {
-      iso: { label: { zh: '立体', en: '3D' }, az: -0.7, el: 0.42, dist: 9.5, tx: 0, ty: 0.4, tz: 0 },
-      top: { label: { zh: '俯视 面积', en: 'Top: area' }, az: -0.4, el: 1.45, dist: 8.5, tx: 0, ty: 0, tz: 0 },
-      low: { label: { zh: '平视 右手', en: 'Low: the rod' }, az: -0.55, el: 0.12, dist: 9, tx: 0, ty: 0.8, tz: 0 }
+      iso:  { label: { zh: '立体', en: '3D' },           az: -0.8,   el: 0.30,  dist: 9,   tx: 0, ty: 0, tz: 0 },
+      face: { label: { zh: '正对平面', en: 'Facing n' },  az: 0.001,  el: 0.02,  dist: 8,   tx: 0, ty: 0, tz: 0,
+              onSelect: () => { setParam('aAz', Math.PI/2); setParam('aEl', 0); } },
+      top:  { label: { zh: '俯视 x·z', en: 'Top x·z' },   az: 0.001,  el: 1.52,  dist: 9,   tx: 0, ty: 0, tz: 0 }
     },
     toggles: [
-      { key: 'showCross', label: { zh: '叉乘 <i>u</i>×<i>v</i>', en: 'Cross <i>u</i>×<i>v</i>' }, color: '#34d399', checked: true },
-      { key: 'showArea',  label: { zh: '面积填充', en: 'Area fill' }, color: '#fbbf24', checked: true },
-      { key: 'showPara2', label: { zh: '平行四边形', en: 'Parallelogram' }, color: '#cbd5e1', checked: true }
+      { key: 'glide',  label: { zh: '面上动点', en: 'Point on plane' }, color: '#2dd4ea', checked: true },
+      { key: 'guides', label: { zh: '两自由度', en: 'Two DOF' },        color: '#fbbf24', checked: true },
+      { key: 'grid',   label: { zh: '参考网格', en: 'Reference grid' }, color: '#64748b', checked: true }
     ],
-    sampleWindow: () => TAU / state.omega * 1.05 + 0.3,
-    draw(C) {
-      const u = U(), v = Vv(), c = crossUV();
-      /* 地面坐标轴（数学 x·y 平面平躺在世界 y=0） */
-      line3(C, [-2.4, 0, 0], [2.6, 0, 0], { width: 1.4, color: AXIS });
-      arrowAt(C, [2.6, 0, 0], [2.4, 0, 0], AXIS);
-      label3(C, [2.85, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
-      line3(C, WG([0, -2.4]), WG([0, 2.6]), { width: 1.4, color: AXIS });
-      arrowAt(C, WG([0, 2.6]), WG([0, 2.4]), AXIS);
-      label3(C, WG([0, 2.85]), 'y', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
-      /* 地面参考网格（青，源几何的地面） */
-      for (let i = -2; i <= 2; i++) {
-        if (i === 0) continue;
-        line3(C, WG([i, -2.4]), WG([i, 2.4]), { width: 1, color: 'rgba(148,163,184,0.10)' });
-        line3(C, WG([-2.4, i]), WG([2.4, i]), { width: 1, color: 'rgba(148,163,184,0.10)' });
+    draw(C){
+      const n = dir(state.aAz, state.aEl), a = [0, 0, 0];
+      if (state.grid) groundGrid(C, 2.6, 0.65);
+      axes3(C, 2.6);
+      planePatch(C, a, n, 2.0, 'rgba(251,113,133,0.85)', 'rgba(251,113,133,0.26)', 'rgba(251,113,133,0.06)');
+      vec3(C, a, scl(n, 1.7), C_ROSE, 2.4);
+      mathLabel(C, scl(n, 1.95), 'n', C_ROSE);
+      solidDot(C, a, 3.2, C_CYAN);
+      mathLabel(C, [0.16, -0.24, 0.1], 'a', C_CYAN);
+      const bs = planeBasis(n), u = bs[0], v = bs[1];
+      if (state.guides){
+        vec3(C, a, scl(u, 1.4), AMBER_L, 1.6);
+        vec3(C, a, scl(v, 1.4), AMBER_L, 1.6);
       }
-
-      /* 面积填充（琥珀，度量语义） */
-      if (state.showArea) {
-        for (let s = 0.06; s < 1; s += 0.07) {
-          line3(C, WG([u[0] * s, u[1] * s]), WG([u[0] * s + v[0], u[1] * s + v[1]]), { width: 2, color: AMB_A + '0.10)' });
-        }
-        label3(C, WG([(u[0] + v[0]) / 2, (u[1] + v[1]) / 2]),
-          t({ zh: '面积', en: 'area' }) + ' = ' + fmt(Math.abs(c)), { size: 11, color: AMB_A + '0.95)', align: 'center' });
+      if (state.glide){
+        const w = add(a, add(scl(u, 1.5 * Math.cos(state.theta * 0.5)), scl(v, 1.4 * Math.sin(state.theta * 0.65 + 0.6))));
+        const s = proj(C, w);
+        if (s) glowDot(s, 13, P_CORE, P_HALO);
       }
-      /* 平行四边形轮廓 */
-      if (state.showPara2) {
-        line3(C, WG(u), WG([u[0] + v[0], u[1] + v[1]]), { width: 1.3, dash: [6, 6], color: 'rgba(203,213,225,0.45)' });
-        line3(C, WG(v), WG([u[0] + v[0], u[1] + v[1]]), { width: 1.3, dash: [6, 6], color: 'rgba(203,213,225,0.45)' });
-      }
-      /* 主角 u、v（平躺） */
-      vecArrowG(C, u, ROSE_A, 'u');
-      vecArrowG(C, v, VIO_A, 'v');
-      /* 叉乘杆（翠绿，沿世界 y 竖直，长度 = 面积） */
-      if (state.showCross) {
-        const h = c * 0.6;
-        line3(C, [0, 0, 0], [0, h, 0], { width: 6.5, color: EME_A + '0.15)' });
-        line3(C, [0, 0, 0], [0, h, 0], { width: 2.6, color: EME_A + '0.95)' });
-        arrowAt(C, [0, h, 0], [0, h * 0.85 + (h === 0 ? 0.01 : 0), 0], EME_A + '0.95)');
-        const tp = proj(C, [0, h, 0]);
-        if (tp) glowDot(tp, 10, '#ffffff', EME_A + '0.9)');
-        label3(C, [0, h, 0], 'u×v', { font: 'italic 14px ' + FONT_MATH, color: '#34d399', align: 'left', dx: 12, dy: h >= 0 ? -8 : 8 });
-        /* 高度参考虚线到面积标签 */
-        line3(C, [0, h, 0], WG([(u[0] + v[0]) / 2, (u[1] + v[1]) / 2]), { width: 1, dash: [3, 6], color: EME_A + '0.3)' });
-      }
+      mathLabel(C, add(scl(u, 1.1), scl(v, -1.75)), 'n · (r − a) = 0', C_ROSE);
     },
-    readout() {
-      const th = angUV(), c = crossUV();
-      return '<div class="sinC">|u| = <b>' + fmt(state.uLen) + '</b></div>' +
-        '<div class="cosC">|v| = <b>' + fmt(state.vLen) + '</b></div>' +
-        '<div class="tanC">|u×v| = |u||v|sinθ = <b>' + fmt(Math.abs(c)) + '</b>' +
-        '<span class="dim">&ensp;(' + t({ zh: '方向', en: 'dir' }) + ' ' + (c >= 0 ? '+' : '−') + ')</span></div>' +
-        '<div class="dim">θ = ' + (th * 180 / Math.PI).toFixed(0) + '°&ensp;·&ensp;' +
-        t({ zh: '这也是页签三的 det M', en: 'this is also det M in tab 3' }) + '</div>';
+    readout(){
+      const n = dir(state.aAz, state.aEl);
+      return '<div class="sinC">n = <b>' + vecS(n) + '</b></div>' +
+        '<div class="cyC">a = <b>(0.00, 0.00, 0.00)</b></div>' +
+        '<div class="sinC"><b>n · (r − a) = 0</b></div>' +
+        '<div class="dim">' + t({ zh: '自由度 2 —— 一个法向约束抹掉一维', en: '2 DOF — one normal constraint removes one dimension' }) + '</div>';
     }
   },
 
-  /* ────── 三：矩阵 · 把空间变形 ────── */
-  mat: {
-    label: { zh: '矩阵 · 空间变形', en: 'Matrix · Warp space' },
-    brand: { zh: '把你摆好的 u、v 竖起来当矩阵的两根列：M = [u v]。矩阵不是数字表格——它是「î 去 u、ĵ 去 v」的空间变形指令，行列式就是上一页的叉乘。',
-             en: 'Stand your posed u and v up as the columns of a matrix: M = [u v]. A matrix is not a table of numbers — it is the instruction "î goes to u, ĵ goes to v", and its determinant is the cross product from the last tab.' },
-    tips: { zh: '提示：把变形进度 k 从 0 拖到 1，青色网格连续变形，玫红 î 落到 u、紫 ĵ 落到 v；琥珀单位方格变成平行四边形——面积倍数 = det M。打开「再乘 R(45°)」：矩阵乘法就是变形接力，先 M 后 R。',
-            en: 'Tip: drag morph k from 0 to 1 — the cyan grid deforms as rose î lands on u and violet ĵ on v; the amber unit square becomes a parallelogram whose area factor is det M. Enable "then R(45°)": matrix multiplication is transformations in relay — M first, R after.' },
+  /* ────── 场景三：两平面交线 d = n₁ × n₂ ────── */
+  intersect: {
+    label: { zh: '两平面交线', en: 'Two planes' },
+    brand: { zh: '两个平面各是一个约束，一起把三维空间锁成一条公共直线;这条交线的方向恰好是两法向量的叉积 d = n₁ × n₂。转动 α、γ 让两平面绕交线开合。',
+             en: 'Each plane is one constraint; together they lock 3D space down to one shared line. Its direction is exactly the cross product of the two normals, d = n₁ × n₂. Turn α, γ to swing the planes about the line.' },
+    tips: { zh: '按 2 键「沿交线俯视」:两个平面收成两条相交直线,交线缩成一个点——两约束交出一个自由度,看得一清二楚。',
+            en: 'Press 2 to look down the line: the two planes shrink to two crossing lines and the intersection becomes a single point — two constraints leaving one freedom, made obvious.' },
     views: {
-      iso:   { label: { zh: '立体',     en: '3D' },        az: -0.6,  el: 0.3,  dist: 9.5, tx: 0, ty: 0.3, tz: 0 },
-      front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 7.5, tx: 0, ty: 0.3, tz: 0 }
+      iso:   { label: { zh: '立体', en: '3D' },              az: -0.7,   el: 0.32,  dist: 10,  tx: 0, ty: 0, tz: 0 },
+      down:  { label: { zh: '沿交线俯视', en: 'Down the line' }, az: 0.001, el: 1.52,  dist: 9,   tx: 0, ty: 0, tz: 0 },
+      front: { label: { zh: '正视 x·y', en: 'Front x·y' },   az: 0.001,  el: 0.02,  dist: 9,   tx: 0, ty: 0, tz: 0 }
     },
     toggles: [
-      { key: 'showWarp',   label: { zh: '变形网格', en: 'Warped grid' }, color: '#2dd4ea', checked: true },
-      { key: 'showEll',    label: { zh: '单位圆 → 椭圆', en: 'Circle → ellipse' }, color: '#34d399', checked: true },
-      { key: 'showDet',    label: { zh: '行列式方格', en: 'Determinant cell' }, color: '#fbbf24', checked: true },
-      { key: 'showR',      label: { zh: '再乘 <i>R</i>(45°)', en: 'Then <i>R</i>(45°)' }, color: '#fb923c', checked: false },
-      { key: 'showRef',    label: { zh: '参考网格', en: 'Reference grid' }, color: '#64748b', checked: true }
+      { key: 'showD', label: { zh: '交线 d', en: 'Line d' },          color: '#34d399', checked: true },
+      { key: 'glide', label: { zh: '交线上动点', en: 'Point on line' }, color: '#2dd4ea', checked: true },
+      { key: 'grid',  label: { zh: '参考网格', en: 'Reference grid' }, color: '#64748b', checked: true }
     ],
-    sampleWindow: () => TAU / state.omega * 1.05 + 0.3,
-    draw(C) {
-      const m = matAt(state.k);
-      if (state.showRef) drawGridXY(C, 2.5, 0.5);
-      drawAxes(C, { ex: 2.4, ey: 2.4, yTicks: [1, 2], xTicks: [1, 2], tAxis: false });
-
-      /* 变形网格（青） */
-      if (state.showWarp) {
-        for (let i = -5; i <= 5; i++) {
-          const g = i * 0.5, l1 = [], l2 = [];
-          for (let j = 0; j <= 20; j++) {
-            const s = -2.5 + 5 * j / 20;
-            const p1 = applyM(m, [g, s]), p2 = applyM(m, [s, g]);
-            l1.push([p1[0], p1[1], 0]);
-            l2.push([p2[0], p2[1], 0]);
-          }
-          const w = (i === 0) ? 1.6 : 1, a = (i === 0) ? '0.55)' : '0.22)';
-          strokePoly(C, l1, { width: w, color: CYAN_A + a });
-          strokePoly(C, l2, { width: w, color: CYAN_A + a });
-        }
+    draw(C){
+      const n1 = hdir(state.aAz), n2 = hdir(state.bAz), o = [0, 0, 0];
+      if (state.grid) groundGrid(C, 2.6, 0.65);
+      axes3(C, 2.6);
+      planePatch(C, o, n1, 2.1, 'rgba(251,113,133,0.8)', 'rgba(251,113,133,0.24)', 'rgba(251,113,133,0.05)');
+      planePatch(C, o, n2, 2.1, 'rgba(167,139,250,0.8)', 'rgba(167,139,250,0.24)', 'rgba(167,139,250,0.05)');
+      const dn = norm(cross(n1, n2));
+      if (state.showD){
+        beamLine(C, o, [0, 1, 0], 2.4, C_EMER, G_EMER);
+        vec3(C, o, scl(dn, 1.8), C_EMER, 2.4);
+        mathLabel(C, scl(dn, 2.05), 'd = n₁ × n₂', C_EMER);
       }
-      /* 行列式方格（琥珀）：单位方格 → 平行四边形 */
-      if (state.showDet) {
-        const e1 = applyM(m, [1, 0]), e2 = applyM(m, [0, 1]), e3 = applyM(m, [1, 1]);
-        strokePoly(C, [[0, 0, 0], [e1[0], e1[1], 0], [e3[0], e3[1], 0], [e2[0], e2[1], 0], [0, 0, 0]],
-          { width: 1.6, dash: [5, 4], color: AMB_A + '0.85)' });
-        const det = m[0] * m[3] - m[1] * m[2];
-        label3(C, [e3[0] / 2, e3[1] / 2, 0], 'det = ' + fmtS(det),
-          { size: 11, color: AMB_A + '0.95)', align: 'center' });
+      vec3(C, o, scl(n1, 1.7), C_ROSE, 2.2);   mathLabel(C, scl(n1, 1.95), 'n₁', C_ROSE);
+      vec3(C, o, scl(n2, 1.7), C_VIOLET, 2.2); mathLabel(C, scl(n2, 1.95), 'n₂', C_VIOLET);
+      if (state.glide){
+        const P = [0, 1.8 * Math.sin(state.theta * 0.5), 0];
+        const s = proj(C, P);
+        if (s) glowDot(s, 13, P_CORE, P_HALO);
       }
-      /* 单位圆 → 椭圆（翠绿轨迹 = 时钟点的像的历史，§6 真实记录） */
-      if (state.showEll) {
-        const cp = [];
-        for (let i = 0; i <= 72; i++) {
-          const a = i / 72 * TAU;
-          cp.push([Math.cos(a), Math.sin(a), 0]);
-        }
-        strokePoly(C, cp, { width: 1.2, dash: [4, 5], color: CYAN_A + '0.5)' });
-        if (samples.length > 1) {
-          const tr = [];
-          for (let i = samples.length - 1; i >= 0; i--) tr.push([samples[i].qx, samples[i].qy, 0]);
-          strokePoly(C, tr, { width: 5, color: EME_A + '0.12)' });
-          strokePoly(C, tr, { width: 2, fade: [EME_A + '1)', EME_A + '0.05)'] });
-        }
-        const a0 = state.theta;
-        const p0 = [Math.cos(a0), Math.sin(a0)];
-        const q0 = applyM(m, p0);
-        const sp0 = proj(C, [p0[0], p0[1], 0]);
-        if (sp0) glowDot(sp0, 7, '#ffffff', CYAN_A + '0.8)');
-        const sq0 = proj(C, [q0[0], q0[1], 0]);
-        if (sq0) glowDot(sq0, 11, '#ffffff', EME_A + '0.9)');
-        line3(C, [p0[0], p0[1], 0], [q0[0], q0[1], 0], { width: 1, dash: [3, 5], color: EME_A + '0.35)' });
-      }
-      /* 基向量 î′、ĵ′（玫红 / 紫，= u、v 的 k 程） */
-      const e1 = applyM(m, [1, 0]), e2 = applyM(m, [0, 1]);
-      vecArrow(C, e1, ROSE_A, 'î′', 2.6);
-      vecArrow(C, e2, VIO_A, 'ĵ′', 2.6);
-      /* 公式标签 */
-      label3(C, [-2.35, 2.15, 0], state.showR ? 'R(45°)·M,  M = [u v]' : 'M = [u v],  î→u,  ĵ→v',
-        { font: 'italic 12px ' + FONT_MATH, color: state.showR ? '#fb923c' : '#2dd4ea', align: 'left' });
+      solidDot(C, o, 2.6, 'rgba(159,176,200,0.9)');
     },
-    readout() {
-      const m = matAt(state.k);
-      const det = m[0] * m[3] - m[1] * m[2];
-      return '<div>M(k) = [ <b>' + fmtS(m[0]) + '</b>  <b>' + fmtS(m[1]) + '</b> ; <b>' + fmtS(m[2]) + '</b>  <b>' + fmtS(m[3]) + '</b> ]</div>' +
-        '<div class="sinC">î′ = (' + fmtS(m[0]) + ', ' + fmtS(m[2]) + ')</div>' +
-        '<div class="cosC">ĵ′ = (' + fmtS(m[1]) + ', ' + fmtS(m[3]) + ')</div>' +
-        '<div><span style="color:#fbbf24">det M = <b>' + fmtS(det) + '</b>' +
-        t({ zh: '（面积倍数，= 页签二的 u×v）', en: ' (area factor = tab 2’s u×v)' }) + '</span></div>' +
-        '<div class="dim">' + t({ zh: '注：矩阵加法只是逐项相加，没有几何故事——主角是乘法（复合）', en: 'Note: matrix addition is entrywise, no geometric story — multiplication (composition) is the star' }) + '</div>';
+    readout(){
+      const n1 = hdir(state.aAz), n2 = hdir(state.bAz), d = cross(n1, n2);
+      const ang = Math.acos(clamp(Math.abs(dot3(n1, n2)), 0, 1)) * 180 / Math.PI;
+      return '<div class="sinC">n₁ = <b>' + vecS(n1) + '</b></div>' +
+        '<div class="cosC">n₂ = <b>' + vecS(n2) + '</b></div>' +
+        '<div class="tanC">d = n₁×n₂ = <b>' + vecS(d) + '</b></div>' +
+        '<div class="dim">' + t({ zh: '两平面夹角 ', en: 'plane angle ' }) + Math.round(ang) + '°&ensp;·&ensp;' + t({ zh: '自由度 1', en: '1 DOF' }) + '</div>';
     }
   },
 
-  /* ────── 四：特征向量 · 不转弯的方向 ────── */
-  eigen: {
-    label: { zh: '特征向量 · 不转弯的方向', en: 'Eigenvectors · No turning' },
-    brand: { zh: '当整个空间被 A 扭曲，绝大多数向量都会转向；唯有少数「特征方向」只被拉伸、缩短或翻转，方向纹丝不动——它们满足 Av = λv，是这个变换自带的天然坐标轴。',
-             en: 'When A warps the whole plane, almost every vector turns; only a few "eigen-directions" merely stretch, shrink or flip without turning — they satisfy Av = λv, the transform’s own natural axes.' },
-    tips: { zh: '提示：切「正视 x·y」并拖动变形进度 k——青色向量云随空间来回摆动，唯有玫红 v₁、紫 v₂ 的特征方向线定在原地：这正是特征向量的定义，Av 与 v 同向。把 β−α 调到 90° 附近、两模长相等就是纯转动，一条实特征线都没有。',
-            en: 'Tip: switch to "Front x·y" and drag morph k — the cyan vector cloud swings back and forth while the rose v₁ and violet v₂ eigen-lines stay dead still: that is exactly what an eigenvector is, Av parallel to v. Set β−α near 90° with equal lengths for a pure rotation — not a single real eigen-line.' },
+  /* ────── 场景四：异面直线与公垂线 ────── */
+  skew: {
+    label: { zh: '异面直线', en: 'Skew lines' },
+    brand: { zh: '异面直线:既不平行、也不相交,各自躺在不同的平面里。它们之间的最短连线是唯一一条同时垂直于两者的公垂线,其长度就是两线的距离。转 α、γ 改方向,拖 h 改间距。',
+             en: 'Skew lines are neither parallel nor intersecting and lie in different planes. The unique segment perpendicular to both — the common perpendicular — is the shortest link between them, and its length is their distance. Turn α, γ for directions, drag h for the gap.' },
+    tips: { zh: '按 2 键「沿公垂线俯视」:两条线在投影里看似十字交叉,但读数里的间距 h 提醒你——它们其实错开一段、从不相遇。',
+            en: 'Press 2 to look down the common perpendicular: in projection the two lines seem to cross, yet the gap h in the readout reminds you they are offset and never actually meet.' },
     views: {
-      iso:   { label: { zh: '立体',     en: '3D' },        az: -0.6,  el: 0.3,  dist: 9, tx: 0, ty: 0.3, tz: 0 },
-      front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 7, tx: 0, ty: 0.3, tz: 0 }
+      iso:      { label: { zh: '立体', en: '3D' },                   az: -0.7,        el: 0.30,  dist: 10,  tx: 0, ty: 0, tz: 0 },
+      downPerp: { label: { zh: '沿公垂线俯视', en: 'Down perp.' },     az: 0.001,       el: 1.52,  dist: 9,   tx: 0, ty: 0, tz: 0 },
+      side:     { label: { zh: '侧视 见间距', en: 'Side · gap' },     az: -Math.PI/2,  el: 0.03,  dist: 10,  tx: 0, ty: 0, tz: 0 }
     },
     toggles: [
-      { key: 'showCloud', label: { zh: '向量云', en: 'Vector cloud' }, color: '#cbd5e1', checked: true },
-      { key: 'showEig1',  label: { zh: '特征方向 <i>v</i>₁', en: 'Eigen-line <i>v</i>₁' }, color: '#fb7185', checked: true },
-      { key: 'showEig2',  label: { zh: '特征方向 <i>v</i>₂', en: 'Eigen-line <i>v</i>₂' }, color: '#a78bfa', checked: true },
-      { key: 'showPow',   label: { zh: '<i>A</i>ⁿ 迭代', en: '<i>A</i>ⁿ iteration' }, color: '#34d399', checked: false },
-      { key: 'showGridE', label: { zh: '参考网格', en: 'Reference grid' }, color: '#64748b', checked: true }
+      { key: 'perp',  label: { zh: '公垂线',   en: 'Common perp.' }, color: '#fbbf24', checked: true },
+      { key: 'glide', label: { zh: '线上动点', en: 'Point on line' }, color: '#2dd4ea', checked: true },
+      { key: 'grid',  label: { zh: '参考网格', en: 'Reference grid' }, color: '#64748b', checked: true }
     ],
-    sampleWindow: () => TAU / state.omega * 1.05 + 0.3,
-    draw(C) {
-      const s = state.k * (0.5 - 0.5 * Math.cos(state.theta));   // 恒等↔A 的呼吸式变形，随时钟摆动
-      const M = morphA(s);
-      const eg = eigA();
-      const N = 36, L = 2.7;
-
-      if (state.showGridE) drawGridXY(C, 2.5, 0.5);
-      drawAxes(C, { ex: 2.6, ey: 2.6, yTicks: [1, 2], xTicks: [1, 2], tAxis: false });
-
-      /* 单位圆（青，源几何）+ 它的像（被 M(s) 扭成的椭圆） */
-      const src = [], img = [];
-      for (let i = 0; i <= 72; i++) { const a = i / 72 * TAU; src.push([Math.cos(a), Math.sin(a), 0]); }
-      strokePoly(C, src, { width: 1.2, dash: [4, 5], color: CYAN_A + '0.4)' });
-      for (let i = 0; i <= N; i++) { const a = i / N * TAU; const p = applyM(M, [Math.cos(a), Math.sin(a)]); img.push([p[0], p[1], 0]); }
-      strokePoly(C, img, { width: 1.6, color: CYAN_A + '0.5)' });
-
-      /* 向量云：从原点辐射的众多方向，随空间转向（中性灰） */
-      if (state.showCloud) {
-        for (let i = 0; i < N; i++) {
-          const a = i / N * TAU;
-          const p = applyM(M, [Math.cos(a), Math.sin(a)]);
-          line3(C, [0, 0, 0], [p[0], p[1], 0], { width: 1, color: 'rgba(159,176,200,0.28)' });
-          const sp = proj(C, [p[0], p[1], 0]);
-          if (sp) glowDot(sp, 3, 'rgba(226,232,240,0.85)', 'rgba(159,176,200,0.5)');
-        }
+    draw(C){
+      const d1 = hdir(state.aAz), d2 = hdir(state.bAz), h = state.gap;
+      const P1 = [0, h/2, 0], P2 = [0, -h/2, 0];
+      if (state.grid) groundGrid(C, 2.8, 0.7);
+      axes3(C, 2.6);
+      beamLine(C, P1, d1, 3.0, C_ROSE, G_ROSE);
+      beamLine(C, P2, d2, 3.0, C_VIOLET, G_VIOLET);
+      vec3(C, P1, add(P1, d1), C_ROSE, 2);   mathLabel(C, add(P1, scl(d1, 1.18)), 'd₁', C_ROSE);
+      vec3(C, P2, add(P2, d2), C_VIOLET, 2); mathLabel(C, add(P2, scl(d2, 1.18)), 'd₂', C_VIOLET);
+      if (state.perp){
+        beamSeg(C, P1, P2, C_AMBER, G_AMBER);
+        rightAngleMark(C, P1, d1, [0, -1, 0], 0.2, 'rgba(251,191,36,0.9)');
+        rightAngleMark(C, P2, d2, [0, 1, 0], 0.2, 'rgba(251,191,36,0.9)');
+        solidDot(C, P1, 3, C_AMBER); solidDot(C, P2, 3, C_AMBER);
+        mathLabel(C, [0.18, 0, 0], 'h', C_AMBER);
       }
-
-      /* 特征方向线（六处同源）：整条直线 + 单位特征向量的像沿线伸缩 */
-      const drawEig = (vec, lam, ca, name, show) => {
-        if (!show || !vec) return;
-        line3(C, [-vec[0] * L, -vec[1] * L, 0], [vec[0] * L, vec[1] * L, 0], { width: 5.5, color: ca + '0.13)' });
-        line3(C, [-vec[0] * L, -vec[1] * L, 0], [vec[0] * L, vec[1] * L, 0], { width: 2, color: ca + '0.9)' });
-        const f = (1 - s) + s * lam;                       // M(s) 对特征向量的缩放因子 = (1−s)+sλ
-        const ip = [vec[0] * f, vec[1] * f];
-        line3(C, [vec[0], vec[1], 0], [ip[0], ip[1], 0], { width: 1.4, dash: [7, 7], color: ca + '0.6)' });
-        if (Math.hypot(ip[0], ip[1]) > 0.06) {
-          arrowAt(C, [ip[0], ip[1], 0], [ip[0] * 0.9, ip[1] * 0.9, 0], ca + '0.9)');
-          const sp = proj(C, [ip[0], ip[1], 0]);
-          if (sp) glowDot(sp, 9, '#ffffff', ca + '0.9)');
-        }
-        label3(C, [vec[0] * L * 0.8, vec[1] * L * 0.8, 0], name + ' λ=' + fmtS(lam),
-          { font: 'italic 12px ' + FONT_MATH, color: ca + '1)', align: 'center', dy: -10 });
-      };
-      if (eg.type === 'complex') {
-        /* 纯转动：画一段琥珀转向弧提示「每个方向都在转」 */
-        const arc = [];
-        for (let i = 0; i <= 24; i++) { const a = 0.3 + i / 24 * (TAU * 0.72); arc.push([0.7 * Math.cos(a), 0.7 * Math.sin(a), 0]); }
-        strokePoly(C, arc, { width: 1.5, color: AMB_A + '0.7)' });
-        arrowAt(C, arc[arc.length - 1], arc[arc.length - 2], AMB_A + '0.9)');
-      } else {
-        drawEig(eg.vecs[0], eg.lams[0], ROSE_A, 'v₁', state.showEig1);
-        drawEig(eg.vecs[1] || eg.vecs[0], eg.lams[1], VIO_A, 'v₂', state.showEig2 && eg.vecs.length > 1);
+      if (state.glide){
+        const Q = add(P1, scl(d1, 1.8 * Math.sin(state.theta * 0.5)));
+        const s = proj(C, Q);
+        if (s) glowDot(s, 13, P_CORE, P_HALO);
       }
-
-      /* Aⁿv 迭代：一般种子反复乘 A，方向逐步倒向 |λ| 最大的特征方向（翠绿） */
-      if (state.showPow && eg.type === 'real' && Math.abs(eg.lams[0]) > Math.abs(eg.lams[1]) + 1e-4) {
-        let w = [Math.cos(0.7), Math.sin(0.7)];             // ~40°，不与特征向量对齐
-        const A = matA(), K = 6;
-        for (let n = 0; n <= K; n++) {
-          const ln = Math.hypot(w[0], w[1]) || 1;
-          const wh = [w[0] / ln * 1.35, w[1] / ln * 1.35];
-          const al = 0.22 + 0.7 * n / K;
-          line3(C, [0, 0, 0], [wh[0], wh[1], 0], { width: 1.6, color: EME_A + al.toFixed(2) + ')' });
-          if (n === K) { const sp = proj(C, [wh[0], wh[1], 0]); if (sp) { glowDot(sp, 7, '#ffffff', EME_A + '0.9)'); } }
-          w = applyM(A, w);
-        }
-        label3(C, [Math.cos(0.7) * 1.55, Math.sin(0.7) * 1.55, 0], 'Aⁿv', { font: 'italic 12px ' + FONT_MATH, color: '#34d399', align: 'left', dx: 6 });
-      }
-
-      /* 标题与分类标签 */
-      const typeTxt = {
-        real:      { zh: '两个实特征方向', en: 'two real eigen-directions' },
-        defective: { zh: '重根 · 单一特征方向（剪切）', en: 'repeated root · single direction (shear)' },
-        scalar:    { zh: '重根 · 每个方向都是特征向量', en: 'repeated root · every direction is an eigenvector' },
-        complex:   { zh: '复特征值 · 没有实特征向量（纯转动）', en: 'complex eigenvalues · no real eigenvector (pure rotation)' }
-      };
-      label3(C, [-2.5, 2.5, 0], 'Av = λv', { font: 'italic 13px ' + FONT_MATH, color: '#2dd4ea', align: 'left' });
-      label3(C, [-2.5, 2.2, 0], t(typeTxt[eg.type]), { size: 11, color: 'rgba(159,176,200,.8)', align: 'left' });
-
-      /* 主角 u、v 仍以淡色示意矩阵两列 */
-      vecArrow(C, U(), ROSE_A, null, 1.4);
-      vecArrow(C, Vv(), VIO_A, null, 1.4);
     },
-    readout() {
-      const eg = eigA(), m = eg.m;
-      let out = '<div>A = [ <b>' + fmtS(m[0]) + '</b>  <b>' + fmtS(m[1]) + '</b> ; <b>' + fmtS(m[2]) + '</b>  <b>' + fmtS(m[3]) + '</b> ]</div>';
-      if (eg.type === 'complex') {
-        out += '<div>λ = ' + fmtS(eg.re) + ' ± ' + fmt(eg.im) + ' i</div>' +
-          '<div class="dim">' + t({ zh: '判别式 < 0：无实特征向量，每个方向都被转动', en: 'discriminant < 0: no real eigenvector, every direction turns' }) + '</div>';
-      } else {
-        out += '<div class="sinC">λ₁ = <b>' + fmtS(eg.lams[0]) + '</b>' + (eg.vecs[0] ? '&ensp;v₁ = (' + fmtS(eg.vecs[0][0]) + ', ' + fmtS(eg.vecs[0][1]) + ')' : '') + '</div>' +
-          '<div class="cosC">λ₂ = <b>' + fmtS(eg.lams[1]) + '</b>' + (eg.vecs.length > 1 ? '&ensp;v₂ = (' + fmtS(eg.vecs[1][0]) + ', ' + fmtS(eg.vecs[1][1]) + ')' : '&ensp;<span class="dim">' + t({ zh: '（重根，方向重合）', en: '(repeated, one direction)' }) + '</span>') + '</div>';
+    readout(){
+      const d1 = hdir(state.aAz), d2 = hdir(state.bAz);
+      const ang = Math.acos(clamp(Math.abs(dot3(d1, d2)), 0, 1)) * 180 / Math.PI;
+      return '<div class="sinC">d₁ = <b>' + vecS(d1) + '</b></div>' +
+        '<div class="cosC">d₂ = <b>' + vecS(d2) + '</b></div>' +
+        '<div class="amC">' + t({ zh: '公垂线长 ', en: 'common perp. ' }) + 'h = <b>' + fmtS(state.gap) + '</b></div>' +
+        '<div class="dim">' + t({ zh: '不平行 · 不相交 —— 异面 · 线夹角 ', en: 'not parallel, not meeting — skew · line angle ' }) + Math.round(ang) + '°</div>';
+    }
+  },
+
+  /* ────── 场景五：点到平面的距离 ────── */
+  dist: {
+    label: { zh: '点到平面距离', en: 'Point ↔ plane' },
+    brand: { zh: '点到平面的距离,就是把该点沿法向量 n 投影到平面上的那段垂线长度:d = |(Q − a)·n̂|。方向向量与法向量,把「多远」化成一次点乘。拖 h 让平面靠近或穿过 Q。',
+             en: 'The distance from a point to a plane is the length of the perpendicular dropped along the normal n: d = |(Q − a)·n̂|. Direction and normal vectors turn "how far" into a single dot product. Drag h to slide the plane toward or through Q.' },
+    tips: { zh: '按 2 键「平面侧视」:平面收成一条线,Q 到它的垂距一目了然。拖动 h 让平面穿过 Q,看垂距如何归零再反向。',
+            en: 'Press 2 for the edge-on view: the plane shrinks to a line and the perpendicular from Q reads off directly. Drag h so the plane crosses Q and watch the distance shrink to zero, then flip sign.' },
+    views: {
+      iso:   { label: { zh: '立体', en: '3D' },           az: -0.8,       el: 0.30,  dist: 9,   tx: 0, ty: 0, tz: 0 },
+      edge:  { label: { zh: '平面侧视', en: 'Edge-on' },   az: Math.PI/2,  el: 0.001, dist: 8,   tx: 0, ty: 0, tz: 0,
+               onSelect: () => { setParam('aAz', Math.PI/2); setParam('aEl', 0); } },
+      front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001,      el: 0.02,  dist: 8.5, tx: 0, ty: 0, tz: 0 }
+    },
+    toggles: [
+      { key: 'guides', label: { zh: '垂距',     en: 'Perp. distance' }, color: '#fbbf24', checked: true },
+      { key: 'grid',   label: { zh: '参考网格', en: 'Reference grid' }, color: '#64748b', checked: true }
+    ],
+    draw(C){
+      const n = dir(state.aAz, state.aEl), off = state.gap - 1.6, pc = scl(n, off), Q = DIST_Q;
+      if (state.grid) groundGrid(C, 2.6, 0.65);
+      axes3(C, 2.6);
+      planePatch(C, pc, n, 2.0, 'rgba(251,113,133,0.8)', 'rgba(251,113,133,0.24)', 'rgba(251,113,133,0.05)');
+      vec3(C, pc, add(pc, scl(n, 1.4)), C_ROSE, 2);
+      mathLabel(C, add(pc, scl(n, 1.6)), 'n', C_ROSE);
+      solidDot(C, pc, 3, C_CYAN);
+      mathLabel(C, add(pc, [0.14, -0.26, 0]), 'a', C_CYAN);
+      const sq = proj(C, Q);
+      if (sq) glowDot(sq, 13, P_CORE, 'rgba(45,212,234,0.9)');
+      mathLabel(C, add(Q, [0, 0.32, 0]), 'Q', C_CYAN);
+      const sd = dot3(sub(Q, pc), n), foot = sub(Q, scl(n, sd));
+      if (state.guides){
+        beamSeg(C, Q, foot, C_AMBER, G_AMBER);
+        rightAngleMark(C, foot, planeBasis(n)[0], norm(sub(Q, foot)), 0.2, 'rgba(251,191,36,0.9)');
+        solidDot(C, foot, 3, C_AMBER);
+        mathLabel(C, add(foot, scl(sub(Q, foot), 0.5)), 'd', C_AMBER);
       }
-      out += '<div><span style="color:#fbbf24">det A = λ₁λ₂ = <b>' + fmtS(eg.det) + '</b>&ensp;·&ensp;tr A = λ₁+λ₂ = <b>' + fmtS(eg.tr) + '</b></span></div>';
-      if (eg.type === 'real' && Math.abs(eg.lams[0]) > Math.abs(eg.lams[1]) + 1e-4)
-        out += '<div class="tanC">' + t({ zh: 'Aⁿv → v₁ 方向（|λ₁| 最大者主导）', en: 'Aⁿv → v₁ (largest |λ| dominates)' }) + '</div>';
-      else
-        out += '<div class="dim">' + t({ zh: '沿特征方向：Av = λv，只缩放不转向', en: 'Along an eigen-line: Av = λv — pure scaling, no turn' }) + '</div>';
-      return out;
+      mathLabel(C, add(pc, [1.0, -1.75, 0]), 'd = |(Q − a)·n̂|', C_AMBER);
+    },
+    readout(){
+      const n = dir(state.aAz, state.aEl), off = state.gap - 1.6, pc = scl(n, off), Q = DIST_Q;
+      const sd = dot3(sub(Q, pc), n);
+      return '<div class="sinC">n̂ = <b>' + vecS(n) + '</b></div>' +
+        '<div class="cyC">Q = <b>' + vecS(Q) + '</b></div>' +
+        '<div class="amC">d = |(Q−a)·n̂| = <b>' + fmtS(Math.abs(sd)) + '</b></div>' +
+        '<div class="dim">' + t({ zh: '带符号距离 ', en: 'signed distance ' }) + fmtS(sd) + '</div>';
     }
   }
 };
@@ -695,15 +593,11 @@ const lastView = {};
 const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /* ╔══════════════════════════════════════════════════════════╗
-   ║  ③ 采样 —— 按你的工具需要扩展字段                           ║
-   ║  原则：记录"当时的真实值"，参数中途改变时历史不重算            ║
+   ║  ③ 采样 —— 本工具几何为静态摆位，仅用共享时钟驱动"运动点"     ║
+   ║  无需流式历史曲线，采样保持最小                              ║
    ╚══════════════════════════════════════════════════════════╝ */
 function pushSample() {
-  /* 页签三：单位圆上的时钟点经当前变换后的像（记录当时的真实值——
-     中途拖 k、u、v 或开关 R(45°)，已画出的椭圆轨迹不重算，§6） */
-  const p = [Math.cos(state.theta), Math.sin(state.theta)];
-  const q = applyM(matAt(state.k), p);
-  samples.push({ t: state.t, qx: q[0], qy: q[1] });
+  samples.push({ t: state.t });
 }
 
 /* ================= 画布 ================= */
@@ -1138,7 +1032,7 @@ function viewDist(d) { return (W < 820 || W < H) ? d * 1.4 : d; }
 function applyView(name) {
   const vw = SCENES[curTab].views[name];
   if (!vw) return;
-  if (vw.onSelect) vw.onSelect();   /* 可选联动：如自动开启该视角对应的曲线开关 */
+  if (vw.onSelect) vw.onSelect();   /* 可选联动：如把方向 / 法向量归到规范值，配合正交视角显形 */
   tween = {
     from: { az: cam.az, el: cam.el, dist: cam.dist, tx: cam.tx, ty: cam.ty, tz: cam.tz },
     to:   { az: vw.az, el: vw.el, dist: viewDist(vw.dist), tx: vw.tx || 0, ty: vw.ty || 0, tz: vw.tz || 0 },

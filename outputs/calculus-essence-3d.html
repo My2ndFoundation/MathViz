@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.0.0">
 <title>微积分的本质 · 从一重到三重</title>
 <!-- ============================================================
@@ -13,6 +13,9 @@
   引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
 
   版本记录（changelog，新→旧）：
+    1.1.0  2026-07-12  新增「旋转体 · 盘与壳」页签：同一切片游戏换形状——圆盘 πf²dx 与圆柱壳 2πx·f dx
+                       Added the "Revolution · disks & shells" tab: the same slicing game with new slice
+                       shapes — disks πf²dx vs cylindrical shells 2πx·f dx
     1.0.0  2026-07-12  首个版本（含双语）
 ============================================================ -->
 <style>
@@ -216,8 +219,33 @@ const UI = {
 const PARAMS = [
   { key: 'amp',   label: { zh: '起伏幅度 <i>A</i>', en: 'Ripple amplitude <i>A</i>' }, min: 0,   max: 0.9, step: 0.05, value: 0.6, fmt: v => fmt(v) },
   { key: 'k',     label: { zh: '起伏频率 <i>k</i>', en: 'Ripple frequency <i>k</i>' }, min: 0.8, max: 3,   step: 0.05, value: 1.2, fmt: v => fmt(v) },
-  { key: 'omega', label: { zh: '扫描速度 <i>ω</i>', en: 'Sweep speed <i>ω</i>' },      min: 0.2, max: 3,   step: 0.05, value: 0.8, fmt: v => fmt(v) + ' rad/s' }
+  { key: 'omega', label: { zh: '扫描速度 <i>ω</i>', en: 'Sweep speed <i>ω</i>' },      min: 0.2, max: 3,   step: 0.05, value: 0.8, fmt: v => fmt(v) + ' rad/s' },
+  /* —— 旋转体页签专属 —— */
+  { key: 'fam',   label: { zh: '母线形状 <i>f</i>(<i>x</i>)', en: 'Profile curve <i>f</i>(<i>x</i>)' }, min: 0, max: 1, step: 1, value: 0,
+    fmt: v => t({ zh: ['√x 喇叭', '正弦鼓'][Math.round(v)], en: ['√x horn', 'sine drum'][Math.round(v)] }) }
 ];
+
+/* 每个滑杆归属的页签（未列出者在所有页签显示）——用于按页签隐藏无关滑杆。
+   这是场景级 UI 辅助（不改引擎函数）：一个独立的 rAF 轮询在页签切换时更新 .ctl 行的显隐，
+   与 PARAMS 顺序一一对应（paramsHost 的第 i 个子节点即 PARAMS[i]）。 */
+const PARAM_TABS = {
+  fam: ['rev']
+};
+let _paramSyncTab = null;
+function syncParamRows() {
+  if (curTab === _paramSyncTab) return;
+  const host = document.getElementById('paramsHost');
+  if (!host || host.children.length < PARAMS.length) return;
+  _paramSyncTab = curTab;
+  PARAMS.forEach((p, i) => {
+    const row = host.children[i];
+    if (!row) return;
+    const tabs = PARAM_TABS[p.key];
+    row.style.display = (!tabs || tabs.indexOf(curTab) !== -1) ? '' : 'none';
+  });
+}
+/* 首帧后启动（此时引擎已完成同步初始化，curTab 已就绪，避免 TDZ） */
+requestAnimationFrame(function _paramSyncLoop() { syncParamRows(); requestAnimationFrame(_paramSyncLoop); });
 
 /* ╔══════════════════════════════════════════════════════════╗
    ║  ② 场景注册 —— 每个键就是一个页签                           ║
@@ -254,6 +282,31 @@ function intM(z0) {           // M(z₀) = ∬ ρ(x, y, z₀) dx dy
   for (let i = 0; i < n; i++) for (let j = 0; j < n; j++)
     s += rho((i + 0.5) * d, (j + 0.5) * d, z0) * d * d;
   return s;
+}
+
+/* ────── 旋转体（rev 页签）：母线与圆环部件 ────── */
+const REV_X1 = 2;             // 旋转体的定义区间 x ∈ [0, 2]
+function fRev(x) {            // 母线 f(x) > 0：由 fam 滑杆选族，起伏仍由共享的 A、k 塑形
+  if (state.fam < 0.5) {      // √x 喇叭（喇叭壁的起伏随 A、k，f(0) = 0）
+    return 0.85 * Math.sqrt(x / REV_X1) + 0.15 * state.amp * Math.sin(2 * state.k * x) * (x / REV_X1);
+  }
+  return 0.62 + 0.28 * state.amp * Math.sin(2 * state.k * x);   // 正弦鼓（A = 0 时是圆柱）
+}
+/* 圆环折线：绕 x 轴（圆心在世界 x = cx、半径 r）/ 绕 y 轴（高度 cy、半径 r） */
+function ringPtsX(cx, r, n = 48) {
+  const pts = [];
+  for (let i = 0; i <= n; i++) { const a = i / n * TAU; pts.push([cx, r * Math.cos(a), r * Math.sin(a)]); }
+  return pts;
+}
+function ringPtsY(cy, r, n = 48) {
+  const pts = [];
+  for (let i = 0; i <= n; i++) { const a = i / n * TAU; pts.push([r * Math.cos(a), cy, r * Math.sin(a)]); }
+  return pts;
+}
+/* 视角联动：设置开关状态并同步复选框（场景级，不改引擎） */
+function setRevToggle(key, val) {
+  state[key] = val;
+  document.querySelectorAll('input[data-key="' + key + '"]').forEach(o => { o.checked = val; });
 }
 
 /* 场景级坐标轴：正半轴 + 自定义刻度 */
@@ -500,6 +553,141 @@ const SCENES = {
         '<div class="cosC">' + t({ zh: '质量', en: 'mass' }) + ' = ∭ ρ = ∫ M dz = <b>' + fmt(sim.Mass) + '</b></div>' +
         '<div class="dim">' + t({ zh: '切片 → 求值 → 堆叠，一路递归', en: 'slice → evaluate → stack, recursively' }) + '</div>';
     }
+  },
+
+  /* ────── 旋转体：盘与壳 ────── */
+  rev: {
+    label: { zh: '旋转体 · 盘与壳', en: 'Revolution · disks & shells' },
+    brand: { zh: '把 f(x) 下方的区域绕轴一转，切片游戏只是换了形状：切出的不再是矩形条，而是圆盘 πf(x)²dx 或圆柱壳 2πx·f(x)dx——堆叠起来就是体积。勾选「壳层法」换一条轴再切一次。',
+             en: 'Spin the region under f(x) around an axis and the slicing game merely changes shape: the slices are no longer rectangles but disks πf(x)²dx or cylindrical shells 2πx·f(x)dx — stack them and you get volume. Check "Shell method" to slice along the other axis.' },
+    tips: { zh: '提示：切「圆盘 · 轴向」正对旋转轴看——切片塌缩成一个纯粹的圆，πr² 一目了然；再切「侧视 · 堆叠」，堆叠又变回第一页的一重积分。同一套切片 → 求值 → 堆叠，只是切片换了形状。',
+            en: 'Tip: in "Disk · axial" you look straight down the rotation axis — the slice collapses into a pure circle and πr² stares back at you; then "Side · stack" turns the stacking back into tab one’s single integral. Same slice → evaluate → stack, only the slice changed shape.' },
+    views: {
+      iso:   { label: { zh: '立体', en: '3D' }, az: -0.65, el: 0.32, dist: 9.5, tx: 0, ty: 0.3, tz: 0 },
+      axial: { label: { zh: '圆盘 · 轴向', en: 'Disk · axial' }, az: Math.PI / 2, el: 0.02, dist: 7.5, tx: 0, ty: 0.3, tz: 0,
+               onSelect: () => { setRevToggle('shellMode', false); setRevToggle('showSliceR', true); } },
+      top:   { label: { zh: '圆柱壳 · 俯视', en: 'Shell · top' }, az: -Math.PI / 2, el: 1.52, dist: 9, tx: 0, ty: 0, tz: 0,
+               onSelect: () => { setRevToggle('shellMode', true); setRevToggle('showSliceR', true); } },
+      side:  { label: { zh: '侧视 · 堆叠', en: 'Side · stack' }, az: 0.001, el: 0.02, dist: 8.5, tx: 0, ty: 0.5, tz: 0 }
+    },
+    toggles: [
+      { key: 'showSurfR',  label: { zh: '旋转面', en: 'Surface of revolution' }, color: '#2dd4ea', checked: true },
+      { key: 'showSliceR', label: { zh: '当前切片 d<i>V</i>', en: 'Current slice d<i>V</i>' }, color: '#fb7185', checked: true },
+      { key: 'showVR',     label: { zh: '累积体积 <i>V</i>(<i>x</i>)', en: 'Volume <i>V</i>(<i>x</i>)' }, color: '#a78bfa', checked: true },
+      { key: 'shellMode',  label: { zh: '壳层法 · 绕 <i>y</i> 轴', en: 'Shell method · about <i>y</i>' }, color: '#fbbf24', checked: false },
+      { key: 'showGrid',   label: { zh: '网格', en: 'Grid' }, color: '#64748b', checked: false }
+    ],
+    sampleWindow: () => 10,
+    draw(C) {
+      const p = sweepP(), xr = REV_X1 * p, fr = fRev(xr);
+      if (state.shellMode) {
+        /* ── 壳层法：绕 y 轴 ── */
+        if (state.showGrid) drawGridXY(C, 2.5, 0.5);
+        drawCalcAxes(C, { x0: 0, x1: REV_X1 + 0.15, xName: 'x', yName: 'y', yAt: 0,
+          xTicks: [['1', 1], ['2', 2]], y1: 1.25, yTicks: [['1', 1]] });
+        /* 累积体积 V(x) 投到后墙 z = −2.6（紫）：与二三重页签的侧墙曲线同语法 */
+        if (state.showVR && sim.trR.length > 1) {
+          line3(C, [0, 0, -2.6], [REV_X1, 0, -2.6], { width: 1, color: 'rgba(148,163,184,0.35)' });
+          const vp = sim.trR.map(q => [q[0], 0.17 * q[2], -2.6]);
+          strokePoly(C, vp, { width: 5, color: VIO_A + '0.15)' });
+          strokePoly(C, vp, { width: 2.2, color: VIO_A + '0.95)' });
+          label3(C, vp[vp.length - 1], 'V(x₀) = ∫ 2πx·f dx', { font: 'italic 12px ' + FONT_MATH, color: '#a78bfa', align: 'left', dx: 10 });
+          const hp = proj(C, [xr, 0.17 * sim.Vs, -2.6]);
+          if (hp) glowDot(hp, 9, '#ffffff', VIO_A + '0.9)');
+        }
+        /* 旋转面线框（青，源几何）：纬线圈 + 母线经线 + 底缘 */
+        if (state.showSurfR) {
+          for (let i = 1; i <= 12; i++) {
+            const x = REV_X1 * i / 12;
+            strokePoly(C, ringPtsY(fRev(x), x), { width: 1, color: CYAN_A + '0.22)' });
+          }
+          strokePoly(C, ringPtsY(0, REV_X1), { width: 1, color: CYAN_A + '0.30)' });
+          for (let a = 0; a < 8; a++) {
+            const ca = Math.cos(a / 8 * TAU), sa = Math.sin(a / 8 * TAU), lp = [];
+            for (let i = 0; i <= 36; i++) { const x = REV_X1 * i / 36; lp.push([x * ca, fRev(x), x * sa]); }
+            strokePoly(C, lp, { width: 1, color: CYAN_A + '0.22)' });
+          }
+          label3(C, [-REV_X1, fRev(REV_X1), 0], 'y = f(x)', { font: 'italic 12px ' + FONT_MATH, color: '#2dd4ea', align: 'right', dx: -8, dy: -8 });
+        }
+        /* 琥珀扫描进度（沿半径方向推进到 x₀） */
+        line3(C, [0, 0, 0], [xr, 0, 0], { width: 2, color: AMB_A + '0.55)' });
+        line3(C, [xr, -0.07, 0], [xr, 0.07, 0], { width: 1.4, color: AMB_A + '0.9)' });
+        label3(C, [xr, -0.32, 0], 'x₀', { font: 'italic 12px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+        /* 当前圆柱壳（玫红）：半径 x₀、高 f(x₀) */
+        if (state.showSliceR && xr > 0.02) {
+          strokePoly(C, ringPtsY(fr, xr), { width: 4.5, color: ROSE_A + '0.18)' });
+          strokePoly(C, ringPtsY(fr, xr), { width: 2.2, color: ROSE_A + '0.95)' });
+          strokePoly(C, ringPtsY(0, xr), { width: 2, color: ROSE_A + '0.6)' });
+          for (let a = 0; a < 10; a++) {
+            const ca = Math.cos(a / 10 * TAU), sa = Math.sin(a / 10 * TAU);
+            line3(C, [xr * ca, 0, xr * sa], [xr * ca, fr, xr * sa], { width: 1.2, color: ROSE_A + '0.45)' });
+          }
+          line3(C, [xr, fr, 0], [xr, 0, 0], { width: 1.5, dash: [7, 7], color: ROSE_A + '0.8)' });
+          const hd = proj(C, [xr, fr, 0]);
+          if (hd) glowDot(hd, 10, '#ffffff', ROSE_A + '0.9)');
+          label3(C, [xr, fr + 0.22, 0], 'dV = 2π·x₀·f(x₀) dx', { font: 'italic 12px ' + FONT_MATH, color: '#fb7185', align: 'left', dx: 6 });
+        }
+      } else {
+        /* ── 圆盘法：绕 x 轴 ── */
+        const Wd = x => x - 1;   // 数学 x ∈ [0,2] → 世界 x ∈ [−1,1]
+        if (state.showGrid) drawGridXY(C, 2.5, 0.5);
+        drawCalcAxes(C, { x0: Wd(0), x1: Wd(REV_X1) + 0.15, xName: 'x', yName: 'y', yAt: Wd(0),
+          xTicks: [['1', Wd(1)], ['2', Wd(2)]], y1: 1.25, yTicks: [['1', 1]] });
+        /* 累积体积 V(x) 投到后墙 z = −1.5（紫） */
+        if (state.showVR && sim.trR.length > 1) {
+          line3(C, [Wd(0), 0, -1.5], [Wd(REV_X1), 0, -1.5], { width: 1, color: 'rgba(148,163,184,0.35)' });
+          const vp = sim.trR.map(q => [Wd(q[0]), 0.3 * q[1], -1.5]);
+          strokePoly(C, vp, { width: 5, color: VIO_A + '0.15)' });
+          strokePoly(C, vp, { width: 2.2, color: VIO_A + '0.95)' });
+          label3(C, vp[vp.length - 1], 'V(x₀) = ∫ π·f² dx', { font: 'italic 12px ' + FONT_MATH, color: '#a78bfa', align: 'left', dx: 10 });
+          const hp = proj(C, [Wd(xr), 0.3 * sim.Vd, -1.5]);
+          if (hp) glowDot(hp, 9, '#ffffff', VIO_A + '0.9)');
+        }
+        /* 旋转面线框（青，源几何）：纬线圈 + 母线经线 */
+        if (state.showSurfR) {
+          for (let i = 0; i <= 12; i++) {
+            const x = REV_X1 * i / 12, r = fRev(x);
+            if (r > 0.02) strokePoly(C, ringPtsX(Wd(x), r), { width: 1, color: CYAN_A + '0.22)' });
+          }
+          for (let a = 0; a < 8; a++) {
+            const ca = Math.cos(a / 8 * TAU), sa = Math.sin(a / 8 * TAU), lp = [];
+            for (let i = 0; i <= 36; i++) { const x = REV_X1 * i / 36, r = fRev(x); lp.push([Wd(x), r * ca, r * sa]); }
+            strokePoly(C, lp, { width: 1, color: CYAN_A + '0.22)' });
+          }
+          label3(C, [Wd(REV_X1), fRev(REV_X1), 0], 'y = f(x)', { font: 'italic 12px ' + FONT_MATH, color: '#2dd4ea', align: 'left', dx: 8, dy: -8 });
+        }
+        /* 琥珀扫描进度（沿旋转轴推进到 x₀） */
+        line3(C, [Wd(0), 0, 0], [Wd(xr), 0, 0], { width: 2, color: AMB_A + '0.55)' });
+        line3(C, [Wd(xr), -0.07, 0], [Wd(xr), 0.07, 0], { width: 1.4, color: AMB_A + '0.9)' });
+        label3(C, [Wd(xr), -0.32, 0], 'x₀', { font: 'italic 12px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+        /* 当前圆盘（玫红）：半径 f(x₀)、厚 dx 的薄片 */
+        if (state.showSliceR && fr > 0.02) {
+          const h = 0.05;
+          strokePoly(C, ringPtsX(Wd(xr - h), fr), { width: 2, color: ROSE_A + '0.55)' });
+          for (let a = 0; a < 8; a++) {
+            const ca = Math.cos(a / 8 * TAU), sa = Math.sin(a / 8 * TAU);
+            line3(C, [Wd(xr - h), fr * ca, fr * sa], [Wd(xr + h), fr * ca, fr * sa], { width: 1.2, color: ROSE_A + '0.5)' });
+          }
+          for (const kf of [0.33, 0.66]) strokePoly(C, ringPtsX(Wd(xr), fr * kf), { width: 1, color: ROSE_A + '0.25)' });
+          strokePoly(C, ringPtsX(Wd(xr + h), fr), { width: 4.5, color: ROSE_A + '0.18)' });
+          strokePoly(C, ringPtsX(Wd(xr + h), fr), { width: 2.2, color: ROSE_A + '0.95)' });
+          line3(C, [Wd(xr), fr, 0], [Wd(xr), 0, 0], { width: 1.5, dash: [7, 7], color: ROSE_A + '0.8)' });
+          const hd = proj(C, [Wd(xr), fr, 0]);
+          if (hd) glowDot(hd, 10, '#ffffff', ROSE_A + '0.9)');
+          label3(C, [Wd(xr), fr + 0.22, 0], 'dV = π·f(x₀)² dx', { font: 'italic 12px ' + FONT_MATH, color: '#fb7185', align: 'left', dx: 6 });
+        }
+      }
+    },
+    readout() {
+      const p = sweepP(), xr = REV_X1 * p, shell = state.shellMode;
+      const dv = shell ? sim.curGs : sim.curGd, V = shell ? sim.Vs : sim.Vd;
+      return '<div>x₀ = <b>' + fmt(xr) + '</b>&ensp;·&ensp;f(x₀) = <b>' + fmt(sim.curR) + '</b>&ensp;·&ensp;' + t({ zh: '扫描', en: 'sweep' }) + ' ' + (p * 100).toFixed(0) + '%</div>' +
+        '<div class="sinC">' + (shell ? 'dV/dx = 2π·x₀·f(x₀) = ' : 'dV/dx = π·f(x₀)² = ') + '<b>' + fmt(dv) + '</b></div>' +
+        '<div class="cosC">V(x₀) = ' + (shell ? '∫ 2πx·f dx' : '∫ π·f² dx') + ' = <b>' + fmt(V) + '</b></div>' +
+        '<div class="dim">' + t(shell
+          ? { zh: '同一游戏：换绕 x 轴，切片即圆盘 π f² dx', en: 'same game: about x, the slice is a disk π f² dx' }
+          : { zh: '同一游戏：换绕 y 轴，切片即圆柱壳 2πx·f dx', en: 'same game: about y, the slice is a shell 2πx·f dx' }) + '</div>';
+    }
   }
 };
 
@@ -529,15 +717,17 @@ const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion:
    记录的是「当时的真实值」——中途改滑杆，已扫过的曲线不重算；回卷时清空重扫 */
 const sim = {
   lastP: 2, lastPt: -1,
-  A: 0, V: 0, Mass: 0,
-  curF: 0, curS: 0, curM: 0,
-  lastF: null, lastS: null, lastM: null,
-  tr1: [], tr2: [], tr3: []
+  A: 0, V: 0, Mass: 0, Vd: 0, Vs: 0,
+  curF: 0, curS: 0, curM: 0, curR: 0, curGd: 0, curGs: 0,
+  lastF: null, lastS: null, lastM: null, lastGd: null, lastGs: null,
+  tr1: [], tr2: [], tr3: [], trR: []
 };
 function resetSweep() {
   sim.A = sim.V = sim.Mass = 0;
+  sim.Vd = sim.Vs = 0;
   sim.lastF = sim.lastS = sim.lastM = null;
-  sim.tr1.length = 0; sim.tr2.length = 0; sim.tr3.length = 0;
+  sim.lastGd = sim.lastGs = null;
+  sim.tr1.length = 0; sim.tr2.length = 0; sim.tr3.length = 0; sim.trR.length = 0;
   sim.lastPt = -1;
 }
 
@@ -547,21 +737,27 @@ function pushSample() {
   const dp = p - Math.min(sim.lastP, p);
   sim.lastP = p;
 
-  const x0 = 6 * p, y0 = -2 + 4 * p, z0 = 2 * p;
+  const x0 = 6 * p, y0 = -2 + 4 * p, z0 = 2 * p, xr = REV_X1 * p;
   const fv = f1(x0), Sv = intS(y0), Mv = intM(z0);
+  const fr = fRev(xr), gd = Math.PI * fr * fr, gs = TAU * xr * fr;   // 旋转体：盘 πf² · 壳 2πxf
   sim.curF = fv; sim.curS = Sv; sim.curM = Mv;
+  sim.curR = fr; sim.curGd = gd; sim.curGs = gs;
 
   if (sim.lastF != null && dp > 0) {               // 梯形法累积（真实增量）
     sim.A    += (fv + sim.lastF) / 2 * 6 * dp;
     sim.V    += (Sv + sim.lastS) / 2 * 4 * dp;
     sim.Mass += (Mv + sim.lastM) / 2 * 2 * dp;
+    sim.Vd   += (gd + sim.lastGd) / 2 * REV_X1 * dp;
+    sim.Vs   += (gs + sim.lastGs) / 2 * REV_X1 * dp;
   }
   sim.lastF = fv; sim.lastS = Sv; sim.lastM = Mv;
+  sim.lastGd = gd; sim.lastGs = gs;
 
   if (p - sim.lastPt >= 1 / 300 || sim.lastPt < 0) {  // 记录扫描轨迹（抽稀）
     sim.tr1.push([x0, sim.A]);
     sim.tr2.push([y0, Sv]);
     sim.tr3.push([z0, Mv]);
+    sim.trR.push([xr, sim.Vd, sim.Vs]);
     sim.lastPt = p;
   }
   samples.push({ t: state.t, p: p });

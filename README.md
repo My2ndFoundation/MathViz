@@ -30,6 +30,14 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [高斯分布的本质 · The Gaussian](outputs/gaussian-essence-3d.html) | Where the bell curve comes from: σ at the inflection point, sums becoming bells (CLT), and random beads piling into theory |
 | [微积分的本质 · Calculus, Single to Triple](outputs/calculus-essence-3d.html) | Integration as slice → evaluate → stack: FTC in 1D, then double and triple integrals as integrals of integrals |
 | [泰勒展开的本质 · Taylor Expansion](outputs/taylor-essence-3d.html) | How polynomials hug a function order by order — and why they can never hug past the radius of convergence |
+| [参数方程的本质 · Parametric Curves](outputs/parametric-curves-3d.html) | One moving point, two coordinate logs: lift the motion into (x, y, t) and the component graphs are its shadows |
+| [三维直线与平面的本质 · Lines & Planes](outputs/lines-planes-3d.html) | Direction vectors and normal vectors pinning freedom and constraint: lines collapse to points, planes fill the view, skew lines "cross" yet never meet |
+| [双曲函数的本质 · Hyperbolic Functions](outputs/hyperbolic-functions-3d.html) | cosh and sinh as the unit hyperbola's natural coordinates — u is twice the sector area, and a hanging chain is not a parabola |
+| [微分方程与相空间 · Differential Equations](outputs/differential-equations-phase-space-3d.html) | Whole trajectories hiding in a local direction rule: direction fields, the (t, y, y′) lift, and damping reshaping phase-plane orbits |
+| [曲面、等高线、梯度和切平面 · Surface, Contours & Gradient](outputs/gradient-contours-surface-3d.html) | Contours as horizontal slices, the gradient cutting perpendicularly through them, and the tangent plane as the local linear stand-in |
+| [运动学：一个运动，多张图像 · Kinematics](outputs/kinematics-projectile-3d.html) | One motion, many graphs: s–t, v–t and the phase view for rectilinear motion; x–t, y–t and the true path for projectiles |
+| [递推、迭代与稳定性 · Recurrence & Iteration](outputs/recurrence-iteration-dynamics-3d.html) | The cobweb machine: staircases converge, spirals alternate, escapes diverge — and Newton–Raphson is the same machine with tangent lines |
+| [能量、势能与相图 · Energy & Phase Portrait](outputs/energy-phase-portrait-3d.html) | Phase-portrait orbits as level sets of E = ½mv² + V(x): turning points, wells, and the separatrix between bound and escape |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 

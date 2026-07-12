@@ -4,17 +4,30 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.0">
+<meta name="tool-version" content="1.0.0">
 <meta name="engine-version" content="1.0.0">
-<title>线性代数的本质 · 两个向量，三种读法</title>
+<title>递推、迭代与稳定性 · Recurrence & Iteration</title>
 <!-- ============================================================
-  线性代数的本质 · Linear Algebra Essence
+  递推、迭代与稳定性 · 交互式数学可视化
+  基于 math-viz-starter.html v1.0.0 制作
   设计规范：math-viz-design-system.md（令牌 / 组件 / 绘制语言 / 交互词汇）
-  引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
+
+  核心顿悟：递推关系不是直接给出数列，而是定义一台
+  反复把输出送回输入的机器 xₙ₊₁ = f(xₙ)。
+
+  三个页签共享同一只步进时钟（n = ⌊ωt⌋，同一台机器、不同的测量）：
+    蛛网图   —— 竖线撞曲线、横线回对角线，机器的运转轨迹
+                顿悟视角：「正视蛛网」收敛 / 交替 / 发散 / 2 周期一目了然
+    三维序列 —— 序列抬进 (xₙ, xₙ₊₁, n) 空间成一条空间折线
+                顿悟视角：「正视 xₙ·xₙ₊₁」折线塌缩到曲线 y=f(x) 上
+    牛顿迭代 —— f(x) = x − g(x)/g′(x) 只是另一台迭代机
+                顿悟视角：「迭代机 f」切线步骤原来就是蛛网图
+
+  采样原则：orbit 记录每一步的真实迭代值；参数中途改变只影响
+  未来的步骤，历史轨迹绝不重算；重置（R）以 x₀ 重新播种。
 
   版本记录（changelog，新→旧）：
-    1.1.0  2026-07-12  新增「特征向量 · 不转弯的方向」页签 / add eigenvectors tab (Av = λv)
-    1.0.0  2026-07-12  首个版本（含双语）
+    1.0.0  2026-07-12  首个版本：蛛网图 / 三维序列 / 牛顿迭代三页签
 ============================================================ -->
 <style>
 :root{
@@ -147,7 +160,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 
 <div class="brand">
   <div class="eyebrow">INTERACTIVE MATH · 交互式数学</div>
-  <h1>线性代数的本质</h1>
+  <h1>递推 · 迭代与稳定性</h1>
   <p id="brandDesc"></p>
 </div>
 
@@ -187,15 +200,16 @@ function resolveLang(){
 let LANG = resolveLang();
 function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
 
+const STARTER_VERSION = '1.0.0';
 const VERSION = document.querySelector('meta[name="tool-version"]').content;
 
 /* ╔══════════════════════════════════════════════════════════╗
    ║  ⓪ 工具元信息 —— id 与双语标题                              ║
    ╚══════════════════════════════════════════════════════════╝ */
 const TOOL = {
-  id: 'linear-essence-3d',
-  title: { zh: '线性代数的本质 · 两个向量，三种读法', en: 'The Essence of Linear Algebra' },
-  h1:    { zh: '线性代数的本质', en: 'Linear Algebra' }
+  id: 'recurrence-iteration-dynamics-3d',
+  title: { zh: '递推、迭代与稳定性 · Recurrence & Iteration', en: 'Recurrence & Iterative Dynamics' },
+  h1:    { zh: '递推 · 迭代与稳定性', en: 'Recurrence · Iteration' }
 };
 
 /* 引擎 UI 文案（一般无需改动） */
@@ -214,13 +228,198 @@ const UI = {
    ║  key: state 中的键 · label: 支持 <i>数学符号</i>            ║
    ║  fmt: 格式化"滑杆原始值"用于显示 · map(可选): 原始值→状态值   ║
    ╚══════════════════════════════════════════════════════════╝ */
+/* ============ 场景级辅助（工具区，位于引擎之上，不改引擎） ============ */
+const ROSE = '#fb7185', VIOLET = '#a78bfa', EMERALD = '#34d399',
+      CYAN = '#2dd4ea', AMBER = '#fbbf24', WHITE = '#e2e8f0';
+const ORBIT_MAX = 400;   /* 迭代步数上限 */
+const DIVERGE = 1e6;     /* 视为发散的阈值 */
+const CLIPW = 3.0;       /* 世界坐标裁剪（§6 奇点约定） */
+const ZSTEP = 0.5;       /* 三维序列页：每一步沿 n 轴的世界间距 */
+
+/* —— 迭代机家族（蛛网 / 三维序列页共用） —— */
+const FAMS = [
+  { name: { zh: '线性 a·x + b', en: 'linear a·x + b' } },
+  { name: { zh: '逻辑 r·x(1−x)', en: 'logistic r·x(1−x)' } }
+];
+function famIdx() { return Math.round(state.family); }
+function fMap(x) { return famIdx() === 0 ? state.a * x + state.b : state.r * x * (1 - x); }
+function fDer(x) { return famIdx() === 0 ? state.a : state.r * (1 - 2 * x); }
+function fLabel() {
+  return famIdx() === 0
+    ? 'f(x) = ' + fmtS(state.a) + '·x ' + (state.b < 0 ? '− ' : '+ ') + fmt(Math.abs(state.b))
+    : 'f(x) = ' + fmt(state.r) + '·x(1−x)';
+}
+/* 值 → 世界坐标（线性族 1:1 缩放，逻辑族把 [0,1] 摊满画面） */
+function mx(x) { return famIdx() === 0 ? x * 0.9 : (x - 0.5) * 3.6; }
+function famDom() { return famIdx() === 0 ? [-2.4, 2.4] : [-0.03, 1.03]; }
+function famTicks() { return famIdx() === 0 ? [-2, -1, 1, 2] : [0, 1]; }
+/* |值| > 999 显示 ±∞（§7），d 为小数位 */
+function fmtV(v, d) { return (isFinite(v) && Math.abs(v) <= 999) ? fmtS(v, d == null ? 2 : d) : '±∞'; }
+
+/* —— 牛顿迭代页：g(x) 与迭代机 f(x) = x − g/g′ —— */
+const GS = [
+  { label: 'g(x) = x²−2', g: x => x * x - 2,   d: x => 2 * x,         roots: [-Math.SQRT2, Math.SQRT2], ys: 0.72, xr: 2.4 },
+  { label: 'g(x) = x³−x', g: x => x * x * x - x, d: x => 3 * x * x - 1, roots: [-1, 0, 1],                ys: 0.5,  xr: 2.2 }
+];
+function gCur() { return GS[Math.round(state.gsel)]; }
+function nMap(x) {
+  const G = gCur(), d = G.d(x);
+  if (Math.abs(d) < 1e-6) return Infinity;
+  return x - G.g(x) / d;
+}
+const mxN = x => x * 0.9;
+
+/* —— 轨道（orbit = 数列本身；同一只步进时钟 n = ⌊ωt⌋ 驱动两台机器） —— */
+let orbF = [0], orbN = [0];
+function reseed() {
+  orbF = [famIdx() === 0 ? clamp(state.x0, -2, 2) : clamp(state.x0, 0.02, 0.98)];
+  orbN = [clamp(state.x0, -2, 2)];
+}
+function stepVal(map, x) {
+  if (!isFinite(x) || Math.abs(x) > DIVERGE) return Infinity;
+  const y = map(x);
+  return (!isFinite(y) || Math.abs(y) > DIVERGE) ? Infinity : y;
+}
+function nNow() { return Math.min(Math.floor(state.theta), ORBIT_MAX - 1); }
+
+/* —— 蛛网折线（顶点由新到旧，头亮尾隐；越界裁剪并断开） —— */
+function cobwebPts(orb, M, maxV) {
+  const fwd = [];
+  const P = (x, y) => {
+    const wx = M(x), wy = M(y);
+    if (!isFinite(wx) || !isFinite(wy)) { fwd.push(null); return; }
+    if (Math.abs(wx) > CLIPW || Math.abs(wy) > CLIPW) {
+      fwd.push([clamp(wx, -CLIPW, CLIPW), clamp(wy, -CLIPW, CLIPW), 0]);
+      fwd.push(null);
+      return;
+    }
+    fwd.push([wx, wy, 0]);
+  };
+  if (orb.length && isFinite(orb[0])) P(orb[0], 0);
+  for (let i = 0; i + 1 < orb.length; i++) {
+    const a = orb[i], b = orb[i + 1];
+    if (!isFinite(a) || !isFinite(b)) { fwd.push(null); continue; }
+    P(a, b);   /* 竖线：撞向曲线取 f(xₙ) */
+    P(b, b);   /* 横线：滑回对角线换座 */
+  }
+  let arr = fwd;
+  if (arr.length > maxV) arr = arr.slice(arr.length - maxV);
+  return arr.slice().reverse();
+}
+
+/* —— 函数曲线折线（越界与陡跳处以 null 断开，§6） —— */
+function curvePts(fn, xa, xb, N, MXf, MYf, lim) {
+  const pts = [];
+  let pw = null;
+  for (let i = 0; i <= N; i++) {
+    const x = xa + (xb - xa) * i / N;
+    const y = fn(x);
+    const wy = isFinite(y) ? MYf(y) : Infinity;
+    if (!isFinite(wy) || Math.abs(wy) > lim) { pts.push(null); pw = null; continue; }
+    if (pw !== null && Math.abs(wy - pw) > 1.2) pts.push(null);
+    pts.push([MXf(x), wy, 0]);
+    pw = wy;
+  }
+  return pts;
+}
+
+/* —— 自定义二维轴（xₙ / xₙ₊₁ 等标签，场景级组合，不动引擎 drawAxes） —— */
+function axes2D(C, ex, ey, xl, yl, ticks, M) {
+  line3(C, [-ex, 0, 0], [ex, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [ex, 0, 0], [ex - 0.2, 0, 0], AXIS);
+  label3(C, [ex + 0.3, 0, 0], xl, { font: 'italic 14px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  line3(C, [0, -ey, 0], [0, ey, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, ey, 0], [0, ey - 0.2, 0], AXIS);
+  label3(C, [0, ey + 0.2, 0], yl, { font: 'italic 14px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  for (const v of (ticks || [])) {
+    const w = M(v);
+    if (Math.abs(w) > ex) continue;
+    const lb = (v < 0 ? '−' : '') + Math.abs(v);
+    line3(C, [w, -0.05, 0], [w, 0.05, 0], { width: 1.2, color: AXIS_DIM });
+    label3(C, [w, -0.22, 0], lb, { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+    line3(C, [-0.05, w, 0], [0.05, w, 0], { width: 1.2, color: AXIS_DIM });
+    label3(C, [-0.14, w, 0], lb, { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+  }
+}
+
+/* —— 三维序列页：n 轴（沿 z，最新一步贴在 z=0） —— */
+function axisN(C) {
+  line3(C, [0, 0, 0], [0, 0, WAVE_LEN + 0.5], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, 0, WAVE_LEN + 0.5], [0, 0, WAVE_LEN + 0.3], AXIS);
+  label3(C, [0, 0, WAVE_LEN + 0.9], 'n', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  const k = nNow();
+  for (let j = 1; j * ZSTEP <= WAVE_LEN + 1e-6; j++) {
+    if (k - j < 0) break;
+    line3(C, [0, -0.06, j * ZSTEP], [0, 0.06, j * ZSTEP], { width: 1.2, color: AXIS_DIM });
+    if (j % 4 === 0) label3(C, [0, -0.25, j * ZSTEP], 'n−' + j, { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+  }
+}
+
+/* —— 三维序列点集（由新到旧）：Pᵢ = (xᵢ, xᵢ₊₁, (k−1−i)·ZSTEP) —— */
+function liftPts() {
+  const k = orbF.length - 1, out = [];
+  for (let i = k - 1; i >= 0; i--) {
+    const z = (k - 1 - i) * ZSTEP;
+    if (z > WAVE_LEN) break;
+    const a = orbF[i], b = orbF[i + 1];
+    if (!isFinite(a) || !isFinite(b)) { out.push(null); continue; }
+    const wx = mx(a), wy = mx(b);
+    if (Math.abs(wx) > CLIPW || Math.abs(wy) > CLIPW) { out.push(null); continue; }
+    out.push([wx, wy, z]);
+  }
+  return out;
+}
+
+/* —— 联动：视角选中时自动开启对应开关（§5.3） —— */
+function forceToggle(key) {
+  if (state[key]) return;
+  state[key] = true;
+  document.querySelectorAll('input[data-key="' + key + '"]').forEach(o => { o.checked = true; });
+}
+
+/* —— 读数区固定首两行（步进时钟版本） —— */
+function roHead(machine) {
+  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;n = ⌊ωt⌋ = <b>' + nNow() + '</b></div>' +
+         '<div class="dim">' + t({ zh: '迭代机 ', en: 'machine ' }) + machine + '</div>';
+}
+function seqTail(orb, m) {
+  const k = orb.length - 1, parts = [];
+  for (let i = Math.max(0, k - m); i <= k; i++) parts.push(fmtV(orb[i]));
+  return (k - m > 0 ? '… ' : '') + parts.join(' → ');
+}
+function capNote() {
+  return orbF.length >= ORBIT_MAX
+    ? '<div class="dim">' + t({ zh: '已达迭代上限 · 按 R 重置', en: 'iteration cap reached · press R to reset' }) + '</div>'
+    : '';
+}
+function fmtErr(e) {
+  if (!isFinite(e)) return '±∞';
+  if (e === 0) return '0';
+  return e < 0.005 ? e.toExponential(1).replace('-', '−') : fmt(e);
+}
+function regimeStr() {
+  if (famIdx() === 0) {
+    const a = state.a;
+    if (Math.abs(a) >= 1) return t({ zh: '|a| ≥ 1 · 蛛网被甩出（发散）', en: '|a| ≥ 1 · thrown outward (diverges)' });
+    return a >= 0
+      ? t({ zh: '0 ≤ a < 1 · 单调收敛', en: '0 ≤ a < 1 · monotone convergence' })
+      : t({ zh: '−1 < a < 0 · 交替收敛（螺旋）', en: '−1 < a < 0 · alternating (spiral) convergence' });
+  }
+  const r = state.r;
+  if (r < 1) return t({ zh: 'r < 1 · 收敛到 0', en: 'r < 1 · converges to 0' });
+  if (r < 3) return t({ zh: '1 < r < 3 · 收敛到 x* = 1−1/r', en: '1 < r < 3 · converges to x* = 1−1/r' });
+  if (r < 3.45) return t({ zh: 'r > 3 · 2 周期环（蛛网方框）', en: 'r > 3 · period-2 cycle (cobweb box)' });
+  return t({ zh: 'r 更大 · 周期倍增 → 混沌', en: 'larger r · period doubling → chaos' });
+}
+
 const PARAMS = [
-  { key: 'uAng', label: { zh: '<i>u</i> 方向 <i>α</i>', en: '<i>u</i> direction <i>α</i>' }, min: 0, max: 360, step: 1,    value: 20,  fmt: v => v.toFixed(0) + '°', map: v => v * Math.PI / 180 },
-  { key: 'uLen', label: { zh: '<i>u</i> 模长 |<i>u</i>|', en: '<i>u</i> length |<i>u</i>|' }, min: 0.3, max: 2, step: 0.05, value: 1.4, fmt: v => fmt(v) },
-  { key: 'vAng', label: { zh: '<i>v</i> 方向 <i>β</i>', en: '<i>v</i> direction <i>β</i>' }, min: 0, max: 360, step: 1,    value: 75, fmt: v => v.toFixed(0) + '°', map: v => v * Math.PI / 180 },
-  { key: 'vLen', label: { zh: '<i>v</i> 模长 |<i>v</i>|', en: '<i>v</i> length |<i>v</i>|' }, min: 0.3, max: 2, step: 0.05, value: 1.0, fmt: v => fmt(v) },
-  { key: 'k',    label: { zh: '变形进度 <i>k</i>', en: 'Morph <i>k</i>' },                    min: 0,   max: 1, step: 0.01, value: 1,   fmt: v => fmt(v) },
-  { key: 'omega', label: { zh: '演示速度 <i>ω</i>', en: 'Demo speed <i>ω</i>' },              min: 0.2, max: 3, step: 0.05, value: 0.8, fmt: v => fmt(v) + ' rad/s' }
+  { key: 'family', label: { zh: '函数家族 <i>f</i>',  en: 'Family <i>f</i>' },          min: 0,    max: 1,   step: 1,    value: 0,   fmt: v => t(FAMS[Math.round(v)].name) },
+  { key: 'a',      label: { zh: '线性斜率 <i>a</i>',  en: 'Linear slope <i>a</i>' },    min: -1.6, max: 1.6, step: 0.05, value: 0.6, fmt: v => fmtS(v) },
+  { key: 'b',      label: { zh: '线性截距 <i>b</i>',  en: 'Linear intercept <i>b</i>' },min: -1,   max: 1,   step: 0.05, value: 0.5, fmt: v => fmtS(v) },
+  { key: 'r',      label: { zh: '逻辑参数 <i>r</i>',  en: 'Logistic <i>r</i>' },        min: 0.5,  max: 4,   step: 0.05, value: 2.8, fmt: v => fmt(v) },
+  { key: 'x0',     label: { zh: '初值 <i>x₀</i>',     en: 'Seed <i>x₀</i>' },           min: -2,   max: 2,   step: 0.05, value: 0.3, fmt: v => fmtS(v) },
+  { key: 'omega',  label: { zh: '迭代速度 <i>ω</i>',  en: 'Iteration speed <i>ω</i>' }, min: 0.2,  max: 5,   step: 0.1,  value: 1,   fmt: v => fmt(v, 1) + t({ zh: ' 步/s', en: ' steps/s' }) },
+  { key: 'gsel',   label: { zh: '牛顿目标 <i>g</i>',  en: 'Newton target <i>g</i>' },   min: 0,    max: 1,   step: 1,    value: 0,   fmt: v => GS[Math.round(v)].label }
 ];
 
 /* ╔══════════════════════════════════════════════════════════╗
@@ -230,448 +429,275 @@ const PARAMS = [
    ║        draw(C) / readout()                                ║
    ║  可选：sampleWindow() 历史滑窗秒数 · views[x].onSelect 联动 ║
    ╚══════════════════════════════════════════════════════════╝ */
-/* ────── 场景级：线性代数助手（引擎之上，引擎零改动） ────── */
-const ROSE_A = 'rgba(251,113,133,';
-const VIO_A = 'rgba(167,139,250,';
-const EME_A = 'rgba(52,211,153,';
-const ORG_A = 'rgba(251,146,60,';
-const CYAN_A = 'rgba(45,212,234,';
-const AMB_A = 'rgba(251,191,36,';
-
-const U = () => [state.uLen * Math.cos(state.uAng), state.uLen * Math.sin(state.uAng)];
-const Vv = () => [state.vLen * Math.cos(state.vAng), state.vLen * Math.sin(state.vAng)];
-const dotUV = () => { const u = U(), v = Vv(); return u[0] * v[0] + u[1] * v[1]; };
-const crossUV = () => { const u = U(), v = Vv(); return u[0] * v[1] - u[1] * v[0]; };
-
-/* 平面向量箭头（z=0 平面） */
-function vecArrow(C, p, color, name, w) {
-  line3(C, [0, 0, 0], [p[0], p[1], 0], { width: (w || 2.4), color: color + '0.95)' });
-  line3(C, [0, 0, 0], [p[0], p[1], 0], { width: (w || 2.4) + 3.5, color: color + '0.14)' });
-  arrowAt(C, [p[0], p[1], 0], [p[0] * 0.88, p[1] * 0.88, 0], color + '0.95)');
-  if (name) label3(C, [p[0], p[1], 0], name, { font: 'italic 14px ' + FONT_MATH, color: color + '1)', align: 'center', dy: -14 });
-}
-/* 地面向量箭头（y=0 平面；数学 (a,b) → 世界 (a, 0, −b)，右手系成立） */
-const WG = p => [p[0], 0, -p[1]];
-function vecArrowG(C, p, color, name) {
-  line3(C, [0, 0, 0], WG(p), { width: 2.4, color: color + '0.95)' });
-  line3(C, [0, 0, 0], WG(p), { width: 6, color: color + '0.14)' });
-  arrowAt(C, WG(p), WG([p[0] * 0.88, p[1] * 0.88]), color + '0.95)');
-  if (name) label3(C, WG(p), name, { font: 'italic 14px ' + FONT_MATH, color: color + '1)', align: 'center', dy: -12 });
-}
-/* 两方向间的角度弧（琥珀，z=0 平面） */
-function arcBetween(C, a0, a1, r) {
-  let d = a1 - a0;
-  while (d > Math.PI) d -= TAU;
-  while (d < -Math.PI) d += TAU;
-  const n = Math.max(2, Math.ceil(Math.abs(d) / 0.06));
-  const pts = [];
-  for (let i = 0; i <= n; i++) {
-    const a = a0 + d * i / n;
-    pts.push([r * Math.cos(a), r * Math.sin(a), 0]);
-  }
-  strokePoly(C, pts, { width: 1.5, color: AMB_A + '0.85)' });
-  const mid = a0 + d / 2;
-  label3(C, [(r + 0.18) * Math.cos(mid), (r + 0.18) * Math.sin(mid), 0], 'θ',
-    { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
-}
-/* 夹角 θ ∈ [0, π] */
-function angUV() {
-  const u = U(), v = Vv();
-  const c = dotUV() / (state.uLen * state.vLen);
-  return Math.acos(clamp(c, -1, 1));
-}
-/* 页签三的变换：M = [u v]（î→u、ĵ→v），k 变形，选装 R(45°) 复合 */
-function matAt(k) {
-  const u = U(), v = Vv();
-  let a = (1 - k) + k * u[0], b = k * v[0], c = k * u[1], d = (1 - k) + k * v[1];
-  if (state.showR) {
-    const ca = Math.cos(Math.PI / 4), sa = Math.sin(Math.PI / 4);
-    const a2 = ca * a - sa * c, b2 = ca * b - sa * d;
-    const c2 = sa * a + ca * c, d2 = sa * b + ca * d;
-    a = a2; b = b2; c = c2; d = d2;
-  }
-  return [a, b, c, d];
-}
-const applyM = (m, p) => [m[0] * p[0] + m[1] * p[1], m[2] * p[0] + m[3] * p[1]];
-
-/* 页签四：特征向量 —— 纯 A = [u v]（列即 î、ĵ 的落点，不含 R(45°)） */
-function matA() { const u = U(), v = Vv(); return [u[0], v[0], u[1], v[1]]; }   // [a,b,c,d]
-/* 恒等 → A 的连续变形 M(s) = (1−s)I + sA；与 A 特征向量完全相同（只改特征值） */
-function morphA(s) { const A = matA(); return [(1 - s) + s * A[0], s * A[1], s * A[2], (1 - s) + s * A[3]]; }
-/* 解 (A − λI)x = 0，返回单位特征向量 */
-function eigvecFor(m, lam) {
-  const a = m[0], b = m[1], c = m[2], d = m[3];
-  let vx, vy;
-  if (Math.abs(b) > 1e-7) { vx = b; vy = lam - a; }
-  else if (Math.abs(c) > 1e-7) { vx = lam - d; vy = c; }
-  else { if (Math.abs(lam - a) <= Math.abs(lam - d)) { vx = 1; vy = 0; } else { vx = 0; vy = 1; } }
-  const L = Math.hypot(vx, vy) || 1;
-  return [vx / L, vy / L];
-}
-/* 2×2 闭式特征分解：迹/行列式 → 判别式 → 实/重/复分类 */
-function eigA() {
-  const m = matA(), a = m[0], b = m[1], c = m[2], d = m[3];
-  const tr = a + d, det = a * d - b * c, disc = tr * tr - 4 * det;
-  const r = { tr, det, disc, m };
-  const eps = 1e-6;
-  if (disc < -eps) {
-    r.type = 'complex'; r.re = tr / 2; r.im = Math.sqrt(-disc) / 2; r.lams = []; r.vecs = [];
-  } else {
-    const sq = Math.sqrt(Math.max(0, disc));
-    let l1 = (tr + sq) / 2, l2 = (tr - sq) / 2;
-    if (Math.abs(l2) > Math.abs(l1)) { const tmp = l1; l1 = l2; l2 = tmp; }   // |λ₁| ≥ |λ₂|
-    if (Math.abs(b) < eps && Math.abs(c) < eps && Math.abs(a - d) < eps) {
-      r.type = 'scalar'; r.lams = [l1, l2]; r.vecs = [[1, 0], [0, 1]];         // λI：每个方向都是特征向量
-    } else if (sq < eps) {
-      r.type = 'defective'; r.lams = [l1, l2]; r.vecs = [eigvecFor(m, l1)];    // 重根 · 单一特征方向（剪切）
-    } else {
-      r.type = 'real'; r.lams = [l1, l2]; r.vecs = [eigvecFor(m, l1), eigvecFor(m, l2)];
-    }
-  }
-  return r;
-}
-
 const SCENES = {
 
-  /* ────── 一：向量 · 加法与投影 ────── */
-  vec: {
-    label: { zh: '向量 · 加法与投影', en: 'Vectors · Add & project' },
-    brand: { zh: '两个向量 u、v 是全篇的主角。加法是首尾接力的平行四边形；点乘不神秘——把 u 的影子投到 v 上，影长乘 |v| 就是 u·v。',
-             en: 'Two vectors, u and v, star in every tab. Addition is the parallelogram relay; the dot product is no mystery — cast u’s shadow onto v, and shadow length times |v| is u·v.' },
-    tips: { zh: '提示：切「正视 x·y」把 u 的方向拖过与 v 垂直的位置——琥珀影子缩成一点再反向变负：点乘的正负只是「影子在 v 的哪一边」。',
-            en: 'Tip: in "Front x·y" drag u’s direction past perpendicular to v — the amber shadow shrinks to a point then flips negative: the sign of a dot product is just which side the shadow falls on.' },
+  /* ────── 页签 1：蛛网图 —— 迭代机的运转轨迹 ────── */
+  cobweb: {
+    label: { zh: '蛛网图', en: 'Cobweb' },
+    brand: { zh: '递推 xₙ₊₁ = f(xₙ) 不是给出数列，而是一台把输出送回输入的机器。竖线撞向曲线取值、横线滑回对角线换座——蛛网图就是机器运转的轨迹。切换函数家族、拖动 a 或 r 观察收敛与发散。',
+             en: 'A recurrence xₙ₊₁ = f(xₙ) does not hand you the sequence — it defines a machine that feeds output back into input. Vertical to the curve, horizontal to the diagonal: the cobweb is the machine running. Switch families and drag a or r to watch it converge or escape.' },
+    tips: { zh: '提示：不动点处 |f′| < 1 时蛛网被吸进去（0 < a < 1 单调爬近，−1 < a < 0 螺旋交替），|f′| > 1 被甩出去；逻辑家族把 r 推过 3，蛛网收敛成一个方框——2 周期诞生。按 2「正视蛛网」看得最清。',
+            en: 'Tip: at a fixed point |f′| < 1 sucks the cobweb in (0 < a < 1 climbs monotonically, −1 < a < 0 spirals alternately) while |f′| > 1 throws it out; push logistic r past 3 and the cobweb settles into a box — a 2-cycle is born. Press 2 for the front view.' },
     views: {
-      iso:   { label: { zh: '立体',     en: '3D' },        az: -0.6,  el: 0.3,  dist: 9, tx: 0, ty: 0.3, tz: 0 },
-      front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 7, tx: 0, ty: 0.3, tz: 0 }
+      iso:   { label: { zh: '立体',     en: '3D' },         az: -0.7,  el: 0.35, dist: 8.5, tx: 0, ty: 0, tz: 0 },
+      front: { label: { zh: '正视蛛网', en: 'Front cobweb' }, az: 0.001, el: 0.02, dist: 6.2, tx: 0, ty: 0, tz: 0 }
     },
     toggles: [
-      { key: 'showSum',  label: { zh: '和 <i>u</i>+<i>v</i>', en: 'Sum <i>u</i>+<i>v</i>' }, color: '#34d399', checked: true },
-      { key: 'showProj', label: { zh: '点乘投影', en: 'Dot projection' }, color: '#fbbf24', checked: true },
-      { key: 'showPara', label: { zh: '平行四边形', en: 'Parallelogram' }, color: '#cbd5e1', checked: true },
-      { key: 'showGrid', label: { zh: '网格', en: 'Grid' }, color: '#64748b', checked: true }
+      { key: 'showF',   label: { zh: '曲线 y = f(x)',   en: 'Curve y = f(x)' },      color: '#fb7185', checked: true },
+      { key: 'showWeb', label: { zh: '蛛网轨迹',        en: 'Cobweb trail' },        color: '#e2e8f0', checked: true },
+      { key: 'showFix', label: { zh: '不动点与稳定性',  en: 'Fixed points' },        color: '#fbbf24', checked: true },
+      { key: 'showGrid',label: { zh: '网格',            en: 'Grid' },                color: '#64748b', checked: true }
     ],
-    sampleWindow: () => TAU / state.omega * 1.05 + 0.3,
+    sampleWindow: () => 12,
     draw(C) {
-      const u = U(), v = Vv();
-      if (state.showGrid) drawGridXY(C, 2.5, 0.5);
-      drawAxes(C, { ex: 2.4, ey: 2.4, yTicks: [1, 2], xTicks: [1, 2], tAxis: false });
+      const dom = famDom();
+      if (state.showGrid) drawGridXY(C, 2, 0.5);
+      axes2D(C, 2.4, 2.4, 'xₙ', 'xₙ₊₁', famTicks(), mx);
 
-      /* 平行四边形（首尾接力虚线） */
-      if (state.showPara && state.showSum) {
-        line3(C, [u[0], u[1], 0], [u[0] + v[0], u[1] + v[1], 0], { width: 1.3, dash: [6, 6], color: 'rgba(203,213,225,0.45)' });
-        line3(C, [v[0], v[1], 0], [u[0] + v[0], u[1] + v[1], 0], { width: 1.3, dash: [6, 6], color: 'rgba(203,213,225,0.45)' });
-      }
-      /* 点乘投影（琥珀）：u 在 v 方向上的影子 */
-      if (state.showProj) {
-        const vhat = [v[0] / state.vLen, v[1] / state.vLen];
-        const s = u[0] * vhat[0] + u[1] * vhat[1];          // 影长 = |u|cosθ
-        const foot = [vhat[0] * s, vhat[1] * s];
-        line3(C, [u[0], u[1], 0], [foot[0], foot[1], 0], { width: 1.2, dash: [4, 5], color: AMB_A + '0.6)' });
-        line3(C, [0, 0, 0], [foot[0], foot[1], 0], { width: 4, color: AMB_A + '0.75)' });
-        const fp = proj(C, [foot[0], foot[1], 0]);
-        if (fp) glowDot(fp, 8, '#ffffff', AMB_A + '0.9)');
-        label3(C, [foot[0], foot[1], 0], '|u|cosθ', { font: 'italic 11px ' + FONT_MATH, color: '#fbbf24', align: 'center', dy: 16 });
-        arcBetween(C, state.vAng, state.uAng, 0.42);
-      }
-      /* 和向量（翠绿） */
-      if (state.showSum) vecArrow(C, [u[0] + v[0], u[1] + v[1]], EME_A, 'u+v');
-      /* 主角 u、v */
-      vecArrow(C, u, ROSE_A, 'u');
-      vecArrow(C, v, VIO_A, 'v');
-    },
-    readout() {
-      const th = angUV();
-      return '<div class="sinC">u = (' + fmtS(U()[0]) + ', ' + fmtS(U()[1]) + ')</div>' +
-        '<div class="cosC">v = (' + fmtS(Vv()[0]) + ', ' + fmtS(Vv()[1]) + ')</div>' +
-        '<div class="tanC">u+v = (' + fmtS(U()[0] + Vv()[0]) + ', ' + fmtS(U()[1] + Vv()[1]) + ')</div>' +
-        '<div><span style="color:#fbbf24">u·v = |u||v|cosθ = ' + fmt(state.uLen) + '×' + fmt(state.vLen) + '×cos ' +
-        (th * 180 / Math.PI).toFixed(0) + '° = <b>' + fmtS(dotUV()) + '</b></span></div>';
-    }
-  },
+      /* 对角线 y = x（青 · 源几何：机器的「换座」轨道） */
+      line3(C, [-2.25, -2.25, 0], [2.25, 2.25, 0], { width: 6, color: 'rgba(45,212,234,0.13)' });
+      line3(C, [-2.25, -2.25, 0], [2.25, 2.25, 0], { width: 1.8, color: 'rgba(45,212,234,0.9)' });
+      label3(C, [2.05, 1.85, 0], 'y = x', { font: 'italic 13px ' + FONT_MATH, color: CYAN, align: 'left' });
 
-  /* ────── 二：叉乘 · 面积与右手 ────── */
-  cross: {
-    label: { zh: '叉乘 · 面积与右手', en: 'Cross · Area & hand' },
-    brand: { zh: 'u、v 平躺在地面，u×v 垂直立起：杆的长度恰好等于平行四边形的面积，方向由右手定则决定——叉乘是「带方向的面积」。',
-             en: 'With u and v lying flat, u×v stands straight up: its length equals the parallelogram’s area, its direction follows the right hand — a cross product is signed area.' },
-    tips: { zh: '提示：切「俯视 面积」把 u 的方向慢慢拖过 v——琥珀面积先胀后缩，翠绿杆随之伸缩；u 越过 v 的一瞬间杆子倒向下方：面积没变，方向翻了。',
-            en: 'Tip: in "Top: area" drag u’s direction slowly past v — the amber area swells then shrinks and the emerald rod follows; the instant u crosses v, the rod flips downward: same area, opposite orientation.' },
-    views: {
-      iso: { label: { zh: '立体', en: '3D' }, az: -0.7, el: 0.42, dist: 9.5, tx: 0, ty: 0.4, tz: 0 },
-      top: { label: { zh: '俯视 面积', en: 'Top: area' }, az: -0.4, el: 1.45, dist: 8.5, tx: 0, ty: 0, tz: 0 },
-      low: { label: { zh: '平视 右手', en: 'Low: the rod' }, az: -0.55, el: 0.12, dist: 9, tx: 0, ty: 0.8, tz: 0 }
-    },
-    toggles: [
-      { key: 'showCross', label: { zh: '叉乘 <i>u</i>×<i>v</i>', en: 'Cross <i>u</i>×<i>v</i>' }, color: '#34d399', checked: true },
-      { key: 'showArea',  label: { zh: '面积填充', en: 'Area fill' }, color: '#fbbf24', checked: true },
-      { key: 'showPara2', label: { zh: '平行四边形', en: 'Parallelogram' }, color: '#cbd5e1', checked: true }
-    ],
-    sampleWindow: () => TAU / state.omega * 1.05 + 0.3,
-    draw(C) {
-      const u = U(), v = Vv(), c = crossUV();
-      /* 地面坐标轴（数学 x·y 平面平躺在世界 y=0） */
-      line3(C, [-2.4, 0, 0], [2.6, 0, 0], { width: 1.4, color: AXIS });
-      arrowAt(C, [2.6, 0, 0], [2.4, 0, 0], AXIS);
-      label3(C, [2.85, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
-      line3(C, WG([0, -2.4]), WG([0, 2.6]), { width: 1.4, color: AXIS });
-      arrowAt(C, WG([0, 2.6]), WG([0, 2.4]), AXIS);
-      label3(C, WG([0, 2.85]), 'y', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
-      /* 地面参考网格（青，源几何的地面） */
-      for (let i = -2; i <= 2; i++) {
-        if (i === 0) continue;
-        line3(C, WG([i, -2.4]), WG([i, 2.4]), { width: 1, color: 'rgba(148,163,184,0.10)' });
-        line3(C, WG([-2.4, i]), WG([2.4, i]), { width: 1, color: 'rgba(148,163,184,0.10)' });
+      /* 曲线 y = f(x)（玫红 · 第一主曲线） */
+      if (state.showF) {
+        const pts = curvePts(fMap, dom[0], dom[1], 160, mx, mx, 2.5);
+        strokePoly(C, pts, { width: 5.5, color: 'rgba(251,113,133,0.13)' });
+        strokePoly(C, pts, { width: 2.2, color: 'rgba(251,113,133,0.95)' });
+        label3(C, [mx(dom[0]) + 0.15, 2.15, 0], fLabel(), { font: 'italic 13px ' + FONT_MATH, color: ROSE, align: 'left' });
       }
 
-      /* 面积填充（琥珀，度量语义） */
-      if (state.showArea) {
-        for (let s = 0.06; s < 1; s += 0.07) {
-          line3(C, WG([u[0] * s, u[1] * s]), WG([u[0] * s + v[0], u[1] * s + v[1]]), { width: 2, color: AMB_A + '0.10)' });
+      /* 不动点（琥珀 · 度量注记）：f(x*) = x*，|f′| 判稳定 */
+      if (state.showFix) {
+        const fps = famIdx() === 0
+          ? (Math.abs(1 - state.a) < 1e-3 ? [] : [state.b / (1 - state.a)])
+          : (state.r > 1 ? [0, 1 - 1 / state.r] : [0]);
+        for (const xs of fps) {
+          const w = mx(xs);
+          if (Math.abs(w) > 2.25) continue;
+          const der = Math.abs(fDer(xs)), stable = der < 1;
+          solidDot(C, [w, w, 0], 3, 'rgba(251,191,36,0.95)');
+          label3(C, [w + 0.14, w - 0.18, 0],
+            (stable ? t({ zh: '稳定', en: 'stable' }) : t({ zh: '不稳定', en: 'unstable' })) + ' |f′| = ' + fmt(der),
+            { size: 10.5, color: 'rgba(251,191,36,.9)', align: 'left' });
         }
-        label3(C, WG([(u[0] + v[0]) / 2, (u[1] + v[1]) / 2]),
-          t({ zh: '面积', en: 'area' }) + ' = ' + fmt(Math.abs(c)), { size: 11, color: AMB_A + '0.95)', align: 'center' });
       }
-      /* 平行四边形轮廓 */
-      if (state.showPara2) {
-        line3(C, WG(u), WG([u[0] + v[0], u[1] + v[1]]), { width: 1.3, dash: [6, 6], color: 'rgba(203,213,225,0.45)' });
-        line3(C, WG(v), WG([u[0] + v[0], u[1] + v[1]]), { width: 1.3, dash: [6, 6], color: 'rgba(203,213,225,0.45)' });
-      }
-      /* 主角 u、v（平躺） */
-      vecArrowG(C, u, ROSE_A, 'u');
-      vecArrowG(C, v, VIO_A, 'v');
-      /* 叉乘杆（翠绿，沿世界 y 竖直，长度 = 面积） */
-      if (state.showCross) {
-        const h = c * 0.6;
-        line3(C, [0, 0, 0], [0, h, 0], { width: 6.5, color: EME_A + '0.15)' });
-        line3(C, [0, 0, 0], [0, h, 0], { width: 2.6, color: EME_A + '0.95)' });
-        arrowAt(C, [0, h, 0], [0, h * 0.85 + (h === 0 ? 0.01 : 0), 0], EME_A + '0.95)');
-        const tp = proj(C, [0, h, 0]);
-        if (tp) glowDot(tp, 10, '#ffffff', EME_A + '0.9)');
-        label3(C, [0, h, 0], 'u×v', { font: 'italic 14px ' + FONT_MATH, color: '#34d399', align: 'left', dx: 12, dy: h >= 0 ? -8 : 8 });
-        /* 高度参考虚线到面积标签 */
-        line3(C, [0, h, 0], WG([(u[0] + v[0]) / 2, (u[1] + v[1]) / 2]), { width: 1, dash: [3, 6], color: EME_A + '0.3)' });
-      }
-    },
-    readout() {
-      const th = angUV(), c = crossUV();
-      return '<div class="sinC">|u| = <b>' + fmt(state.uLen) + '</b></div>' +
-        '<div class="cosC">|v| = <b>' + fmt(state.vLen) + '</b></div>' +
-        '<div class="tanC">|u×v| = |u||v|sinθ = <b>' + fmt(Math.abs(c)) + '</b>' +
-        '<span class="dim">&ensp;(' + t({ zh: '方向', en: 'dir' }) + ' ' + (c >= 0 ? '+' : '−') + ')</span></div>' +
-        '<div class="dim">θ = ' + (th * 180 / Math.PI).toFixed(0) + '°&ensp;·&ensp;' +
-        t({ zh: '这也是页签三的 det M', en: 'this is also det M in tab 3' }) + '</div>';
-    }
-  },
 
-  /* ────── 三：矩阵 · 把空间变形 ────── */
-  mat: {
-    label: { zh: '矩阵 · 空间变形', en: 'Matrix · Warp space' },
-    brand: { zh: '把你摆好的 u、v 竖起来当矩阵的两根列：M = [u v]。矩阵不是数字表格——它是「î 去 u、ĵ 去 v」的空间变形指令，行列式就是上一页的叉乘。',
-             en: 'Stand your posed u and v up as the columns of a matrix: M = [u v]. A matrix is not a table of numbers — it is the instruction "î goes to u, ĵ goes to v", and its determinant is the cross product from the last tab.' },
-    tips: { zh: '提示：把变形进度 k 从 0 拖到 1，青色网格连续变形，玫红 î 落到 u、紫 ĵ 落到 v；琥珀单位方格变成平行四边形——面积倍数 = det M。打开「再乘 R(45°)」：矩阵乘法就是变形接力，先 M 后 R。',
-            en: 'Tip: drag morph k from 0 to 1 — the cyan grid deforms as rose î lands on u and violet ĵ on v; the amber unit square becomes a parallelogram whose area factor is det M. Enable "then R(45°)": matrix multiplication is transformations in relay — M first, R after.' },
-    views: {
-      iso:   { label: { zh: '立体',     en: '3D' },        az: -0.6,  el: 0.3,  dist: 9.5, tx: 0, ty: 0.3, tz: 0 },
-      front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 7.5, tx: 0, ty: 0.3, tz: 0 }
-    },
-    toggles: [
-      { key: 'showWarp',   label: { zh: '变形网格', en: 'Warped grid' }, color: '#2dd4ea', checked: true },
-      { key: 'showEll',    label: { zh: '单位圆 → 椭圆', en: 'Circle → ellipse' }, color: '#34d399', checked: true },
-      { key: 'showDet',    label: { zh: '行列式方格', en: 'Determinant cell' }, color: '#fbbf24', checked: true },
-      { key: 'showR',      label: { zh: '再乘 <i>R</i>(45°)', en: 'Then <i>R</i>(45°)' }, color: '#fb923c', checked: false },
-      { key: 'showRef',    label: { zh: '参考网格', en: 'Reference grid' }, color: '#64748b', checked: true }
-    ],
-    sampleWindow: () => TAU / state.omega * 1.05 + 0.3,
-    draw(C) {
-      const m = matAt(state.k);
-      if (state.showRef) drawGridXY(C, 2.5, 0.5);
-      drawAxes(C, { ex: 2.4, ey: 2.4, yTicks: [1, 2], xTicks: [1, 2], tAxis: false });
+      /* 蛛网轨迹（白 · 运动主体，头亮尾隐） */
+      if (state.showWeb) {
+        const pts = cobwebPts(orbF, mx, 900);
+        strokePoly(C, pts, { width: 5, color: 'rgba(226,232,240,0.10)' });
+        strokePoly(C, pts, { width: 1.8, fade: ['rgba(226,232,240,0.95)', 'rgba(226,232,240,0.05)'] });
+      }
 
-      /* 变形网格（青） */
-      if (state.showWarp) {
-        for (let i = -5; i <= 5; i++) {
-          const g = i * 0.5, l1 = [], l2 = [];
-          for (let j = 0; j <= 20; j++) {
-            const s = -2.5 + 5 * j / 20;
-            const p1 = applyM(m, [g, s]), p2 = applyM(m, [s, g]);
-            l1.push([p1[0], p1[1], 0]);
-            l2.push([p2[0], p2[1], 0]);
+      /* 当前一步：曲线头（玫红）→ 投影虚线读出新值 → 对角线上的主点 P */
+      const k = orbF.length - 1;
+      if (k >= 1 && isFinite(orbF[k - 1]) && isFinite(orbF[k])) {
+        const cw = [mx(orbF[k - 1]), mx(orbF[k]), 0];
+        if (Math.abs(cw[0]) <= CLIPW && Math.abs(cw[1]) <= CLIPW) {
+          if (state.showF) {
+            line3(C, cw, [0, cw[1], 0], { width: 1.5, dash: [7, 7], color: 'rgba(251,113,133,0.8)' });
+            const hs = proj(C, cw);
+            if (hs) glowDot(hs, 9, '#ffffff', 'rgba(251,113,133,0.9)');
           }
-          const w = (i === 0) ? 1.6 : 1, a = (i === 0) ? '0.55)' : '0.22)';
-          strokePoly(C, l1, { width: w, color: CYAN_A + a });
-          strokePoly(C, l2, { width: w, color: CYAN_A + a });
         }
       }
-      /* 行列式方格（琥珀）：单位方格 → 平行四边形 */
-      if (state.showDet) {
-        const e1 = applyM(m, [1, 0]), e2 = applyM(m, [0, 1]), e3 = applyM(m, [1, 1]);
-        strokePoly(C, [[0, 0, 0], [e1[0], e1[1], 0], [e3[0], e3[1], 0], [e2[0], e2[1], 0], [0, 0, 0]],
-          { width: 1.6, dash: [5, 4], color: AMB_A + '0.85)' });
-        const det = m[0] * m[3] - m[1] * m[2];
-        label3(C, [e3[0] / 2, e3[1] / 2, 0], 'det = ' + fmtS(det),
-          { size: 11, color: AMB_A + '0.95)', align: 'center' });
-      }
-      /* 单位圆 → 椭圆（翠绿轨迹 = 时钟点的像的历史，§6 真实记录） */
-      if (state.showEll) {
-        const cp = [];
-        for (let i = 0; i <= 72; i++) {
-          const a = i / 72 * TAU;
-          cp.push([Math.cos(a), Math.sin(a), 0]);
+      if (isFinite(orbF[k])) {
+        const w = mx(orbF[k]);
+        if (Math.abs(w) <= CLIPW) {
+          const sp = proj(C, [w, w, 0]);
+          if (sp) glowDot(sp, 15, '#ffffff', 'rgba(186,240,255,0.9)');
         }
-        strokePoly(C, cp, { width: 1.2, dash: [4, 5], color: CYAN_A + '0.5)' });
-        if (samples.length > 1) {
-          const tr = [];
-          for (let i = samples.length - 1; i >= 0; i--) tr.push([samples[i].qx, samples[i].qy, 0]);
-          strokePoly(C, tr, { width: 5, color: EME_A + '0.12)' });
-          strokePoly(C, tr, { width: 2, fade: [EME_A + '1)', EME_A + '0.05)'] });
-        }
-        const a0 = state.theta;
-        const p0 = [Math.cos(a0), Math.sin(a0)];
-        const q0 = applyM(m, p0);
-        const sp0 = proj(C, [p0[0], p0[1], 0]);
-        if (sp0) glowDot(sp0, 7, '#ffffff', CYAN_A + '0.8)');
-        const sq0 = proj(C, [q0[0], q0[1], 0]);
-        if (sq0) glowDot(sq0, 11, '#ffffff', EME_A + '0.9)');
-        line3(C, [p0[0], p0[1], 0], [q0[0], q0[1], 0], { width: 1, dash: [3, 5], color: EME_A + '0.35)' });
       }
-      /* 基向量 î′、ĵ′（玫红 / 紫，= u、v 的 k 程） */
-      const e1 = applyM(m, [1, 0]), e2 = applyM(m, [0, 1]);
-      vecArrow(C, e1, ROSE_A, 'î′', 2.6);
-      vecArrow(C, e2, VIO_A, 'ĵ′', 2.6);
-      /* 公式标签 */
-      label3(C, [-2.35, 2.15, 0], state.showR ? 'R(45°)·M,  M = [u v]' : 'M = [u v],  î→u,  ĵ→v',
-        { font: 'italic 12px ' + FONT_MATH, color: state.showR ? '#fb923c' : '#2dd4ea', align: 'left' });
     },
     readout() {
-      const m = matAt(state.k);
-      const det = m[0] * m[3] - m[1] * m[2];
-      return '<div>M(k) = [ <b>' + fmtS(m[0]) + '</b>  <b>' + fmtS(m[1]) + '</b> ; <b>' + fmtS(m[2]) + '</b>  <b>' + fmtS(m[3]) + '</b> ]</div>' +
-        '<div class="sinC">î′ = (' + fmtS(m[0]) + ', ' + fmtS(m[2]) + ')</div>' +
-        '<div class="cosC">ĵ′ = (' + fmtS(m[1]) + ', ' + fmtS(m[3]) + ')</div>' +
-        '<div><span style="color:#fbbf24">det M = <b>' + fmtS(det) + '</b>' +
-        t({ zh: '（面积倍数，= 页签二的 u×v）', en: ' (area factor = tab 2’s u×v)' }) + '</span></div>' +
-        '<div class="dim">' + t({ zh: '注：矩阵加法只是逐项相加，没有几何故事——主角是乘法（复合）', en: 'Note: matrix addition is entrywise, no geometric story — multiplication (composition) is the star' }) + '</div>';
+      const k = orbF.length - 1;
+      const xk = orbF[k];
+      return roHead(fLabel()) +
+        '<div>xₙ = <b>' + fmtV(xk) + '</b></div>' +
+        '<div class="sinC">xₙ₊₁ = f(xₙ) = <b>' + fmtV(fMap(xk)) + '</b></div>' +
+        '<div class="dim">' + seqTail(orbF, 4) + '</div>' +
+        '<div class="dim">' + regimeStr() + '</div>' + capNote();
     }
   },
 
-  /* ────── 四：特征向量 · 不转弯的方向 ────── */
-  eigen: {
-    label: { zh: '特征向量 · 不转弯的方向', en: 'Eigenvectors · No turning' },
-    brand: { zh: '当整个空间被 A 扭曲，绝大多数向量都会转向；唯有少数「特征方向」只被拉伸、缩短或翻转，方向纹丝不动——它们满足 Av = λv，是这个变换自带的天然坐标轴。',
-             en: 'When A warps the whole plane, almost every vector turns; only a few "eigen-directions" merely stretch, shrink or flip without turning — they satisfy Av = λv, the transform’s own natural axes.' },
-    tips: { zh: '提示：切「正视 x·y」并拖动变形进度 k——青色向量云随空间来回摆动，唯有玫红 v₁、紫 v₂ 的特征方向线定在原地：这正是特征向量的定义，Av 与 v 同向。把 β−α 调到 90° 附近、两模长相等就是纯转动，一条实特征线都没有。',
-            en: 'Tip: switch to "Front x·y" and drag morph k — the cyan vector cloud swings back and forth while the rose v₁ and violet v₂ eigen-lines stay dead still: that is exactly what an eigenvector is, Av parallel to v. Set β−α near 90° with equal lengths for a pure rotation — not a single real eigen-line.' },
+  /* ────── 页签 2：三维序列 —— 数列抬进 (xₙ, xₙ₊₁, n) 空间 ────── */
+  lift: {
+    label: { zh: '三维序列', en: '3D sequence' },
+    brand: { zh: '把数列抬进三维：第 n 步是空间中一点 (xₙ, xₙ₊₁, n)，整个序列成为一条空间折线。它在底面上的影子是蛛网轨道，在侧面上的影子是时间序列——同一条折线，两种读法。',
+             en: 'Lift the sequence into 3D: step n is the point (xₙ, xₙ₊₁, n), so the whole sequence becomes a space polyline. Its shadow on the floor is the cobweb orbit; its side shadow is the time series — one polyline, two readings.' },
+    tips: { zh: '提示：按 2「正视 xₙ·xₙ₊₁」——所有点瞬间塌缩到曲线 y = f(x) 上，因为 xₙ₊₁ 本来就是 f(xₙ)：每个序列点都活在函数上。按 3 侧视，同一条折线又变回时间序列。',
+            en: 'Tip: press 2 (front xₙ·xₙ₊₁) — every point instantly collapses onto the curve y = f(x), because xₙ₊₁ simply is f(xₙ): each point of the sequence lives on the function. Press 3 for the side view and the same polyline becomes a time series.' },
     views: {
-      iso:   { label: { zh: '立体',     en: '3D' },        az: -0.6,  el: 0.3,  dist: 9, tx: 0, ty: 0.3, tz: 0 },
-      front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 7, tx: 0, ty: 0.3, tz: 0 }
+      iso:   { label: { zh: '立体', en: '3D' },                    az: -0.95,        el: 0.30,  dist: 11,   tx: 0, ty: 0, tz: 2.8 },
+      front: { label: { zh: '正视 xₙ·xₙ₊₁', en: 'Front xₙ·xₙ₊₁' }, az: 0.001,        el: 0.02,  dist: 7,    tx: 0, ty: 0, tz: 0.5,
+               onSelect() { forceToggle('showF'); forceToggle('showProj'); } },
+      side:  { label: { zh: '侧视 序列·n', en: 'Side x·n' },        az: -Math.PI / 2, el: 0.001, dist: 11.5, tx: 0, ty: 0, tz: 3.4 }
     },
     toggles: [
-      { key: 'showCloud', label: { zh: '向量云', en: 'Vector cloud' }, color: '#cbd5e1', checked: true },
-      { key: 'showEig1',  label: { zh: '特征方向 <i>v</i>₁', en: 'Eigen-line <i>v</i>₁' }, color: '#fb7185', checked: true },
-      { key: 'showEig2',  label: { zh: '特征方向 <i>v</i>₂', en: 'Eigen-line <i>v</i>₂' }, color: '#a78bfa', checked: true },
-      { key: 'showPow',   label: { zh: '<i>A</i>ⁿ 迭代', en: '<i>A</i>ⁿ iteration' }, color: '#34d399', checked: false },
-      { key: 'showGridE', label: { zh: '参考网格', en: 'Reference grid' }, color: '#64748b', checked: true }
+      { key: 'showF',    label: { zh: '底面曲线 f 与 y = x', en: 'Floor curve f & y = x' }, color: '#fb7185', checked: true },
+      { key: 'showSeq',  label: { zh: '序列折线',            en: 'Sequence polyline' },     color: '#a78bfa', checked: true },
+      { key: 'showProj', label: { zh: '投影辅助线',          en: 'Projection guides' },     color: '#fbbf24', checked: true },
+      { key: 'showGrid', label: { zh: '网格',                en: 'Grid' },                  color: '#64748b', checked: true }
     ],
-    sampleWindow: () => TAU / state.omega * 1.05 + 0.3,
+    sampleWindow: () => 12,
     draw(C) {
-      const s = state.k * (0.5 - 0.5 * Math.cos(state.theta));   // 恒等↔A 的呼吸式变形，随时钟摆动
-      const M = morphA(s);
-      const eg = eigA();
-      const N = 36, L = 2.7;
+      const dom = famDom();
+      if (state.showGrid) drawGridXY(C, 2, 0.5);
+      axes2D(C, 2.4, 2.4, 'xₙ', 'xₙ₊₁', famTicks(), mx);
+      axisN(C);
 
-      if (state.showGridE) drawGridXY(C, 2.5, 0.5);
-      drawAxes(C, { ex: 2.6, ey: 2.6, yTicks: [1, 2], xTicks: [1, 2], tAxis: false });
+      /* 底面：对角线（青）与曲线 f（玫红）——影子将落在它上面 */
+      if (state.showF) {
+        line3(C, [-2.25, -2.25, 0], [2.25, 2.25, 0], { width: 1.6, color: 'rgba(45,212,234,0.8)' });
+        label3(C, [2.05, 1.85, 0], 'y = x', { font: 'italic 13px ' + FONT_MATH, color: CYAN, align: 'left' });
+        const pts = curvePts(fMap, dom[0], dom[1], 160, mx, mx, 2.5);
+        strokePoly(C, pts, { width: 5.5, color: 'rgba(251,113,133,0.13)' });
+        strokePoly(C, pts, { width: 2, color: 'rgba(251,113,133,0.9)' });
+        label3(C, [mx(dom[0]) + 0.15, 2.15, 0], fLabel(), { font: 'italic 13px ' + FONT_MATH, color: ROSE, align: 'left' });
+      }
 
-      /* 单位圆（青，源几何）+ 它的像（被 M(s) 扭成的椭圆） */
-      const src = [], img = [];
-      for (let i = 0; i <= 72; i++) { const a = i / 72 * TAU; src.push([Math.cos(a), Math.sin(a), 0]); }
-      strokePoly(C, src, { width: 1.2, dash: [4, 5], color: CYAN_A + '0.4)' });
-      for (let i = 0; i <= N; i++) { const a = i / N * TAU; const p = applyM(M, [Math.cos(a), Math.sin(a)]); img.push([p[0], p[1], 0]); }
-      strokePoly(C, img, { width: 1.6, color: CYAN_A + '0.5)' });
+      const pts = liftPts();   /* 由新到旧，最新一对贴在 n 轴零点 */
 
-      /* 向量云：从原点辐射的众多方向，随空间转向（中性灰） */
-      if (state.showCloud) {
-        for (let i = 0; i < N; i++) {
-          const a = i / N * TAU;
-          const p = applyM(M, [Math.cos(a), Math.sin(a)]);
-          line3(C, [0, 0, 0], [p[0], p[1], 0], { width: 1, color: 'rgba(159,176,200,0.28)' });
-          const sp = proj(C, [p[0], p[1], 0]);
-          if (sp) glowDot(sp, 3, 'rgba(226,232,240,0.85)', 'rgba(159,176,200,0.5)');
+      /* 投影辅助：紫色影子点铺满底面（精确落在曲线上），琥珀虚线只画最近几步 */
+      if (state.showProj) {
+        let cnt = 0;
+        for (const p of pts) {
+          if (!p) continue;
+          solidDot(C, [p[0], p[1], 0], 2.5, 'rgba(167,139,250,0.5)');
+          if (cnt++ < 8) line3(C, p, [p[0], p[1], 0], { width: 1.3, dash: [7, 7], color: 'rgba(251,191,36,0.5)' });
         }
       }
 
-      /* 特征方向线（六处同源）：整条直线 + 单位特征向量的像沿线伸缩 */
-      const drawEig = (vec, lam, ca, name, show) => {
-        if (!show || !vec) return;
-        line3(C, [-vec[0] * L, -vec[1] * L, 0], [vec[0] * L, vec[1] * L, 0], { width: 5.5, color: ca + '0.13)' });
-        line3(C, [-vec[0] * L, -vec[1] * L, 0], [vec[0] * L, vec[1] * L, 0], { width: 2, color: ca + '0.9)' });
-        const f = (1 - s) + s * lam;                       // M(s) 对特征向量的缩放因子 = (1−s)+sλ
-        const ip = [vec[0] * f, vec[1] * f];
-        line3(C, [vec[0], vec[1], 0], [ip[0], ip[1], 0], { width: 1.4, dash: [7, 7], color: ca + '0.6)' });
-        if (Math.hypot(ip[0], ip[1]) > 0.06) {
-          arrowAt(C, [ip[0], ip[1], 0], [ip[0] * 0.9, ip[1] * 0.9, 0], ca + '0.9)');
-          const sp = proj(C, [ip[0], ip[1], 0]);
-          if (sp) glowDot(sp, 9, '#ffffff', ca + '0.9)');
+      /* 序列折线（紫 · 第二曲线，头亮尾隐）+ 逐点光点 */
+      if (state.showSeq && pts.length > 1) {
+        strokePoly(C, pts, { width: 5.5, color: 'rgba(167,139,250,0.14)' });
+        strokePoly(C, pts, { width: 2.2, fade: ['rgba(167,139,250,1)', 'rgba(167,139,250,0.05)'] });
+        let cnt = 0;
+        for (const p of pts) {
+          if (!p) continue;
+          if (cnt > 0 && cnt < 14) solidDot(C, p, 2.5, 'rgba(167,139,250,0.85)');
+          cnt++;
         }
-        label3(C, [vec[0] * L * 0.8, vec[1] * L * 0.8, 0], name + ' λ=' + fmtS(lam),
-          { font: 'italic 12px ' + FONT_MATH, color: ca + '1)', align: 'center', dy: -10 });
-      };
-      if (eg.type === 'complex') {
-        /* 纯转动：画一段琥珀转向弧提示「每个方向都在转」 */
-        const arc = [];
-        for (let i = 0; i <= 24; i++) { const a = 0.3 + i / 24 * (TAU * 0.72); arc.push([0.7 * Math.cos(a), 0.7 * Math.sin(a), 0]); }
-        strokePoly(C, arc, { width: 1.5, color: AMB_A + '0.7)' });
-        arrowAt(C, arc[arc.length - 1], arc[arc.length - 2], AMB_A + '0.9)');
-      } else {
-        drawEig(eg.vecs[0], eg.lams[0], ROSE_A, 'v₁', state.showEig1);
-        drawEig(eg.vecs[1] || eg.vecs[0], eg.lams[1], VIO_A, 'v₂', state.showEig2 && eg.vecs.length > 1);
-      }
-
-      /* Aⁿv 迭代：一般种子反复乘 A，方向逐步倒向 |λ| 最大的特征方向（翠绿） */
-      if (state.showPow && eg.type === 'real' && Math.abs(eg.lams[0]) > Math.abs(eg.lams[1]) + 1e-4) {
-        let w = [Math.cos(0.7), Math.sin(0.7)];             // ~40°，不与特征向量对齐
-        const A = matA(), K = 6;
-        for (let n = 0; n <= K; n++) {
-          const ln = Math.hypot(w[0], w[1]) || 1;
-          const wh = [w[0] / ln * 1.35, w[1] / ln * 1.35];
-          const al = 0.22 + 0.7 * n / K;
-          line3(C, [0, 0, 0], [wh[0], wh[1], 0], { width: 1.6, color: EME_A + al.toFixed(2) + ')' });
-          if (n === K) { const sp = proj(C, [wh[0], wh[1], 0]); if (sp) { glowDot(sp, 7, '#ffffff', EME_A + '0.9)'); } }
-          w = applyM(A, w);
+        const head = pts[0];
+        if (head) {
+          const hs = proj(C, head);
+          if (hs) glowDot(hs, 10, '#ffffff', 'rgba(167,139,250,0.9)');
         }
-        label3(C, [Math.cos(0.7) * 1.55, Math.sin(0.7) * 1.55, 0], 'Aⁿv', { font: 'italic 12px ' + FONT_MATH, color: '#34d399', align: 'left', dx: 6 });
+        label3(C, [0.2, -2.15, 1.6], '(xₙ, xₙ₊₁, n)', { font: 'italic 13px ' + FONT_MATH, color: VIOLET, align: 'left' });
       }
-
-      /* 标题与分类标签 */
-      const typeTxt = {
-        real:      { zh: '两个实特征方向', en: 'two real eigen-directions' },
-        defective: { zh: '重根 · 单一特征方向（剪切）', en: 'repeated root · single direction (shear)' },
-        scalar:    { zh: '重根 · 每个方向都是特征向量', en: 'repeated root · every direction is an eigenvector' },
-        complex:   { zh: '复特征值 · 没有实特征向量（纯转动）', en: 'complex eigenvalues · no real eigenvector (pure rotation)' }
-      };
-      label3(C, [-2.5, 2.5, 0], 'Av = λv', { font: 'italic 13px ' + FONT_MATH, color: '#2dd4ea', align: 'left' });
-      label3(C, [-2.5, 2.2, 0], t(typeTxt[eg.type]), { size: 11, color: 'rgba(159,176,200,.8)', align: 'left' });
-
-      /* 主角 u、v 仍以淡色示意矩阵两列 */
-      vecArrow(C, U(), ROSE_A, null, 1.4);
-      vecArrow(C, Vv(), VIO_A, null, 1.4);
     },
     readout() {
-      const eg = eigA(), m = eg.m;
-      let out = '<div>A = [ <b>' + fmtS(m[0]) + '</b>  <b>' + fmtS(m[1]) + '</b> ; <b>' + fmtS(m[2]) + '</b>  <b>' + fmtS(m[3]) + '</b> ]</div>';
-      if (eg.type === 'complex') {
-        out += '<div>λ = ' + fmtS(eg.re) + ' ± ' + fmt(eg.im) + ' i</div>' +
-          '<div class="dim">' + t({ zh: '判别式 < 0：无实特征向量，每个方向都被转动', en: 'discriminant < 0: no real eigenvector, every direction turns' }) + '</div>';
-      } else {
-        out += '<div class="sinC">λ₁ = <b>' + fmtS(eg.lams[0]) + '</b>' + (eg.vecs[0] ? '&ensp;v₁ = (' + fmtS(eg.vecs[0][0]) + ', ' + fmtS(eg.vecs[0][1]) + ')' : '') + '</div>' +
-          '<div class="cosC">λ₂ = <b>' + fmtS(eg.lams[1]) + '</b>' + (eg.vecs.length > 1 ? '&ensp;v₂ = (' + fmtS(eg.vecs[1][0]) + ', ' + fmtS(eg.vecs[1][1]) + ')' : '&ensp;<span class="dim">' + t({ zh: '（重根，方向重合）', en: '(repeated, one direction)' }) + '</span>') + '</div>';
+      const k = orbF.length - 1, xk = orbF[k];
+      return roHead(fLabel()) +
+        '<div class="cosC">' + t({ zh: '序列点', en: 'point' }) + ' (xₙ, xₙ₊₁) = (<b>' +
+          (k >= 1 ? fmtV(orbF[k - 1]) : fmtV(xk)) + '</b>, <b>' +
+          (k >= 1 ? fmtV(xk) : fmtV(fMap(xk))) + '</b>)</div>' +
+        '<div class="dim">' + seqTail(orbF, 4) + '</div>' +
+        '<div class="dim">' + t({ zh: '正视底面（按 2）：折线塌缩到 y = f(x) 上', en: 'front view (press 2): polyline collapses onto y = f(x)' }) + '</div>' + capNote();
+    }
+  },
+
+  /* ────── 页签 3：牛顿迭代 —— 求根也是同一台机器 ────── */
+  newton: {
+    label: { zh: '牛顿迭代', en: 'Newton' },
+    brand: { zh: '牛顿法只是另一台迭代机：f(x) = x − g(x)/g′(x)。每一步在 (xₙ, g(xₙ)) 作切线、滑到与 x 轴的交点，就得到 xₙ₊₁；在根附近误差按平方缩小。',
+             en: 'Newton’s method is just another iteration machine: f(x) = x − g(x)/g′(x). Each step draws the tangent at (xₙ, g(xₙ)) and slides to where it hits the x-axis — that is xₙ₊₁. Near a root the error shrinks quadratically.' },
+    tips: { zh: '提示：盯住读数区的误差——每一步大约是前一步的平方（二次收敛）。按 3「迭代机 f」：切线步骤原来就是同一张蛛网图，只是这台 f 在根处斜率为 0，把蛛网吸得飞快。',
+            en: 'Tip: watch the error in the readout — each step is roughly the square of the last (quadratic convergence). Press 3 (machine f): the tangent steps are the very same cobweb, except this f has slope 0 at the root, so the web gets sucked in fast.' },
+    views: {
+      iso:     { label: { zh: '立体',     en: '3D' },           az: -0.7,  el: 0.35, dist: 8.5, tx: 0, ty: 0, tz: 0 },
+      front:   { label: { zh: '正视切线', en: 'Front tangent' }, az: 0.001, el: 0.02, dist: 6.2, tx: 0, ty: 0, tz: 0 },
+      machine: { label: { zh: '迭代机 f', en: 'Machine f' },     az: 0.001, el: 0.02, dist: 6.2, tx: 0, ty: 0, tz: 0,
+                 onSelect() { forceToggle('showMachine'); } }
+    },
+    toggles: [
+      { key: 'showG',       label: { zh: '曲线 g(x)',        en: 'Curve g(x)' },        color: '#fb7185', checked: true },
+      { key: 'showTan',     label: { zh: '切线步骤',         en: 'Tangent steps' },     color: '#34d399', checked: true },
+      { key: 'showMachine', label: { zh: '迭代机 f 与 y = x', en: 'Machine f & y = x' }, color: '#a78bfa', checked: false },
+      { key: 'showGrid',    label: { zh: '网格',              en: 'Grid' },              color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => 12,
+    draw(C) {
+      const G = gCur(), MY = y => y * G.ys, k = orbN.length - 1;
+      if (state.showGrid) drawGridXY(C, 2, 0.5);
+      axes2D(C, 2.4, 2.4, 'x', 'g(x)', [-2, -1, 1, 2], mxN);
+
+      /* 根（琥珀 · 度量注记） */
+      for (const rt of G.roots) {
+        const w = mxN(rt);
+        line3(C, [w, -0.09, 0], [w, 0.09, 0], { width: 1.6, color: 'rgba(251,191,36,0.9)' });
+        label3(C, [w, 0.24, 0], 'x*', { font: 'italic 12px ' + FONT_MATH, color: AMBER, align: 'center' });
       }
-      out += '<div><span style="color:#fbbf24">det A = λ₁λ₂ = <b>' + fmtS(eg.det) + '</b>&ensp;·&ensp;tr A = λ₁+λ₂ = <b>' + fmtS(eg.tr) + '</b></span></div>';
-      if (eg.type === 'real' && Math.abs(eg.lams[0]) > Math.abs(eg.lams[1]) + 1e-4)
-        out += '<div class="tanC">' + t({ zh: 'Aⁿv → v₁ 方向（|λ₁| 最大者主导）', en: 'Aⁿv → v₁ (largest |λ| dominates)' }) + '</div>';
-      else
-        out += '<div class="dim">' + t({ zh: '沿特征方向：Av = λv，只缩放不转向', en: 'Along an eigen-line: Av = λv — pure scaling, no turn' }) + '</div>';
-      return out;
+
+      /* 曲线 g(x)（玫红 · 第一主曲线） */
+      if (state.showG) {
+        const pts = curvePts(G.g, -G.xr, G.xr, 200, mxN, MY, 2.5);
+        strokePoly(C, pts, { width: 5.5, color: 'rgba(251,113,133,0.13)' });
+        strokePoly(C, pts, { width: 2.2, color: 'rgba(251,113,133,0.95)' });
+        label3(C, [-2.25, 2.15, 0], G.label, { font: 'italic 13px ' + FONT_MATH, color: ROSE, align: 'left' });
+      }
+
+      /* 迭代机 f = x − g/g′（紫）与对角线（青）：牛顿法的蛛网真身 */
+      if (state.showMachine) {
+        line3(C, [-2.25, -2.25, 0], [2.25, 2.25, 0], { width: 1.6, color: 'rgba(45,212,234,0.8)' });
+        label3(C, [2.05, 1.85, 0], 'y = x', { font: 'italic 13px ' + FONT_MATH, color: CYAN, align: 'left' });
+        const pts = curvePts(nMap, -G.xr, G.xr, 260, mxN, mxN, 2.5);
+        strokePoly(C, pts, { width: 5.5, color: 'rgba(167,139,250,0.13)' });
+        strokePoly(C, pts, { width: 2, color: 'rgba(167,139,250,0.9)' });
+        label3(C, [-2.25, -2.15, 0], 'f(x) = x − g/g′', { font: 'italic 13px ' + FONT_MATH, color: VIOLET, align: 'left' });
+        const web = cobwebPts(orbN, mxN, 70);
+        strokePoly(C, web, { width: 1.6, fade: ['rgba(167,139,250,0.9)', 'rgba(167,139,250,0.05)'] });
+      }
+
+      /* 切线步骤（翠绿 · 结构线）：新一步实亮，旧几步渐隐 */
+      if (state.showTan) {
+        for (let j = Math.min(4, k); j >= 1; j--) {
+          const a = orbN[k - j], b = orbN[k - j + 1];
+          if (!isFinite(a) || !isFinite(b)) continue;
+          const wa = [mxN(a), MY(G.g(a)), 0], wb = [mxN(b), 0, 0];
+          if (Math.abs(wa[0]) > CLIPW || Math.abs(wa[1]) > CLIPW || Math.abs(wb[0]) > CLIPW) continue;
+          const alpha = j === 1 ? 0.9 : 0.45 / j;
+          line3(C, wa, wb, { width: j === 1 ? 1.8 : 1.2, color: 'rgba(52,211,153,' + alpha + ')' });
+          if (j === 1) {
+            /* 投影虚线（玫红）：从 x 轴交点抬回曲线，即下一步的 g(xₙ₊₁) */
+            const gb = MY(G.g(b));
+            if (Math.abs(gb) <= CLIPW) line3(C, wb, [wb[0], gb, 0], { width: 1.5, dash: [7, 7], color: 'rgba(251,113,133,0.8)' });
+            const hs = proj(C, wa);
+            if (hs) glowDot(hs, 9, '#ffffff', 'rgba(251,113,133,0.9)');
+            label3(C, [wb[0], -0.3, 0], 'xₙ₊₁', { font: 'italic 12px ' + FONT_MATH, color: AMBER, align: 'center' });
+          }
+        }
+      }
+
+      /* 主点 P：x 轴上的当前迭代值 */
+      if (isFinite(orbN[k])) {
+        const w = mxN(orbN[k]);
+        if (Math.abs(w) <= CLIPW) {
+          const sp = proj(C, [w, 0, 0]);
+          if (sp) glowDot(sp, 14, '#ffffff', 'rgba(186,240,255,0.9)');
+        }
+      }
+    },
+    readout() {
+      const G = gCur(), k = orbN.length - 1, xk = orbN[k];
+      let err = '±∞', errP = '±∞';
+      if (isFinite(xk)) {
+        let m = Infinity;
+        for (const rt of G.roots) m = Math.min(m, Math.abs(xk - rt));
+        err = fmtErr(m);
+      }
+      if (k >= 1 && isFinite(orbN[k - 1])) {
+        let m = Infinity;
+        for (const rt of G.roots) m = Math.min(m, Math.abs(orbN[k - 1] - rt));
+        errP = fmtErr(m);
+      }
+      return roHead('f(x) = x − g/g′ · ' + G.label) +
+        '<div>xₙ = <b>' + fmtV(xk, 4) + '</b></div>' +
+        '<div class="sinC">g(xₙ) = <b>' + (isFinite(xk) ? fmtV(G.g(xk), 4) : '±∞') + '</b></div>' +
+        '<div class="tanC">g′(xₙ) = <b>' + (isFinite(xk) ? fmtV(G.d(xk)) : '±∞') + '</b></div>' +
+        '<div class="dim">|xₙ − x*| = ' + err + '&ensp;·&ensp;' + t({ zh: '上一步 ', en: 'prev ' }) + errP + '</div>' +
+        '<div class="dim">' + t({ zh: '误差 ≈ 前误差²（二次收敛）', en: 'error ≈ (previous error)² — quadratic' }) + '</div>' + capNote();
     }
   }
 };
@@ -699,11 +725,22 @@ const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion:
    ║  原则：记录"当时的真实值"，参数中途改变时历史不重算            ║
    ╚══════════════════════════════════════════════════════════╝ */
 function pushSample() {
-  /* 页签三：单位圆上的时钟点经当前变换后的像（记录当时的真实值——
-     中途拖 k、u、v 或开关 R(45°)，已画出的椭圆轨迹不重算，§6） */
-  const p = [Math.cos(state.theta), Math.sin(state.theta)];
-  const q = applyM(matAt(state.k), p);
-  samples.push({ t: state.t, qx: q[0], qy: q[1] });
+  /* 步进时钟：n = ⌊ωt⌋；每跨过一个整数，两台机器各前进一步。
+     orbit 记录的是"当时的真实迭代值"——参数中途改变只影响未来步骤，
+     历史轨迹绝不重算（§6）。θ = 0 意味着刚重置：以 x₀ 重新播种。 */
+  if (state.theta === 0) reseed();
+  const nT = nNow();
+  while (orbF.length - 1 < nT) {
+    orbF.push(stepVal(fMap, orbF[orbF.length - 1]));
+    orbN.push(stepVal(nMap, orbN[orbN.length - 1]));
+  }
+  const i = Math.min(nT, orbF.length - 1);
+  samples.push({
+    t: state.t,
+    n: i,
+    xf: isFinite(orbF[i]) ? orbF[i] : null,
+    xn: isFinite(orbN[i]) ? orbN[i] : null
+  });
 }
 
 /* ================= 画布 ================= */
