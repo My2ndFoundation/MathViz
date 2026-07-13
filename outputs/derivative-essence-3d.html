@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.0.0">
 <title>导数与微分的本质 · 以直代曲</title>
 <!-- ============================================================
@@ -13,7 +13,8 @@
   引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
 
   版本记录（changelog，新→旧）：
-    1.0.0  2026-07-12  首个版本（含双语）
+    1.1.0  2026-07-13  新增「链式法则 · 两次缩放」页签：三级映射站台看小步 h 被 g′ 与 f′ 连乘缩放，倍数相乘 = 复合曲线斜率 · Added the "Chain rule · Two scalings" tab: a three-station mapping pipeline shows the step h scaled by g′ then f′ — the factors multiply into the composite curve's slope
+    1.0.0  2026-07-12  首个版本（含双语）· First release (bilingual)
 ============================================================ -->
 <style>
 :root{
@@ -218,8 +219,38 @@ const PARAMS = [
   { key: 'dx',    label: { zh: '增量 Δ<i>x</i>', en: 'Increment Δ<i>x</i>' },   min: 0.02, max: 1.5, step: 0.01, value: 0.8, fmt: v => fmt(v) },
   { key: 'lam',   label: { zh: '显微倍率 <i>λ</i>', en: 'Zoom <i>λ</i>' },      min: 1,    max: 20,  step: 0.5,  value: 1,   fmt: v => fmt(v, 1) + '×' },
   { key: 'y0',    label: { zh: '切点 <i>y</i>₀', en: 'Point <i>y</i>₀' },       min: -1.8, max: 1.8, step: 0.05, value: 0.4, fmt: v => fmtS(v) },
-  { key: 'omega', label: { zh: '探针速度 <i>ω</i>', en: 'Probe speed <i>ω</i>' }, min: 0.2, max: 3,  step: 0.05, value: 0.8, fmt: v => fmt(v) + ' rad/s' }
+  { key: 'omega', label: { zh: '探针速度 <i>ω</i>', en: 'Probe speed <i>ω</i>' }, min: 0.2, max: 3,  step: 0.05, value: 0.8, fmt: v => fmt(v) + ' rad/s' },
+  /* —— 链式法则页专用 —— */
+  { key: 'pairSel', label: { zh: '函数组合 <i>f</i>∘<i>g</i>', en: 'Function pair <i>f</i>∘<i>g</i>' }, min: 0, max: 1, step: 1, value: 0,
+    fmt: v => t({ zh: ['y = sin(x²/2)', 'y = sin²x'][v], en: ['y = sin(x²/2)', 'y = sin²x'][v] }) },
+  { key: 'hStep', label: { zh: '小步长 <i>h</i>', en: 'Small step <i>h</i>' }, min: 0.05, max: 1, step: 0.01, value: 0.5, fmt: v => fmt(v) }
 ];
+
+/* 每个滑杆归属的页签（未列出者在所有页签显示，如 x₀、ω）——用于按页签隐藏无关滑杆。
+   这是场景级 UI 辅助（不改引擎函数）：一个独立的 rAF 轮询在页签切换时更新 .ctl 行的显隐，
+   与 PARAMS 顺序一一对应（paramsHost 的第 i 个子节点即 PARAMS[i]）。 */
+const PARAM_TABS = {
+  dx:  ['secant', 'diff', 'partial'],
+  lam: ['secant', 'diff', 'partial'],
+  y0:  ['secant', 'diff', 'partial'],
+  pairSel: ['chain'],
+  hStep:   ['chain']
+};
+let _paramSyncTab = null;
+function syncParamRows() {
+  if (curTab === _paramSyncTab) return;
+  const host = document.getElementById('paramsHost');
+  if (!host || host.children.length < PARAMS.length) return;
+  _paramSyncTab = curTab;
+  PARAMS.forEach((p, i) => {
+    const row = host.children[i];
+    if (!row) return;
+    const tabs = PARAM_TABS[p.key];
+    row.style.display = (!tabs || tabs.indexOf(curTab) !== -1) ? '' : 'none';
+  });
+}
+/* 首帧后启动（此时引擎已完成同步初始化，curTab 已就绪，避免 TDZ） */
+requestAnimationFrame(function _paramSyncLoop() { syncParamRows(); requestAnimationFrame(_paramSyncLoop); });
 
 /* ╔══════════════════════════════════════════════════════════╗
    ║  ② 场景注册 —— 每个键就是一个页签                           ║
@@ -254,6 +285,41 @@ function drawCurveF(C, x0, x1, fn, z, w, col) {
   for (let i = 0; i <= 180; i++) { const x = x0 + (x1 - x0) * i / 180; pts.push([x, fn(x), z]); }
   strokePoly(C, pts, { width: w + 3.5, color: col + '0.13)' });
   strokePoly(C, pts, { width: w, color: col + '0.95)' });
+}
+
+/* ── 链式法则（页签三）：函数组合库与三级映射站台 ──
+   区间一律用线性化（微分）端点：|du| = |g′|·h、|dy| = |f′·g′|·h，
+   长度之比就是缩放倍数——倍数连乘可被「看见」。 */
+const ORA_A = 'rgba(251,146,60,';
+const CHAIN_PAIRS = [
+  { g: x => x * x / 2, dg: x => x, f: u => Math.sin(u), df: u => Math.cos(u), uOff: -1, yOff: 0,
+    uLab: 'u = g(x) = x²/2', yLab: 'y = f(u) = sin u', cLab: 'y = sin(x²/2)',
+    dLab: '(sin(x²/2))′ = cos(x²/2)·x' },
+  { g: x => Math.sin(x), dg: x => Math.cos(x), f: u => u * u, df: u => 2 * u, uOff: 0, yOff: -0.5,
+    uLab: 'u = g(x) = sin x', yLab: 'y = f(u) = u²', cLab: 'y = sin²x',
+    dLab: '(sin²x)′ = 2 sin x·cos x = sin 2x' }
+];
+const chainPair = () => CHAIN_PAIRS[Math.round(state.pairSel || 0)];
+/* x₀：滑杆摆位；开「时钟扫描」时由共享时钟带着扫过定义域（含 g′ 变号处） */
+function chainX0() { return state.chainSweep ? 1.95 * Math.sin(state.theta) : clamp(state.x0, -2, 2); }
+/* 站台：z=0 平面上高度 y 处的一条水平数轴；off = 站台读数 → 世界坐标的平移 */
+function chainStation(C, y, off, axLab, labCol) {
+  line3(C, [-2.8, y, 0], [2.85, y, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [2.85, y, 0], [2.65, y, 0], AXIS);
+  for (let w = -2; w <= 2; w++) {
+    line3(C, [w, y - 0.05, 0], [w, y + 0.05, 0], { width: 1.2, color: AXIS_DIM });
+    const val = w - off;
+    label3(C, [w, y - 0.22, 0], (val < 0 ? '−' : '') + Math.abs(val), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+  }
+  label3(C, [-2.9, y, 0], axLab, { font: 'italic 13px ' + FONT_MATH, color: labCol, align: 'right', dx: -6 });
+}
+/* 站台上的有向区间：a 锚点 → b 动端（g′ < 0 时箭头自动调头） */
+function chainInterval(C, y, a, b, colA, hex) {
+  line3(C, [a, y, 0], [b, y, 0], { width: 4, color: colA + '0.9)' });
+  if (Math.abs(b - a) > 0.02) arrowAt(C, [b, y, 0], [a, y, 0], hex);
+  solidDot(C, [a, y, 0], 3, hex);
+  const s = proj(C, [b, y, 0]);
+  if (s) glowDot(s, 8, '#ffffff', colA + '0.9)');
 }
 
 const SCENES = {
@@ -408,7 +474,120 @@ const SCENES = {
     }
   },
 
-  /* ────── 三：偏微分 · 切平面 ────── */
+  /* ────── 三：链式法则 · 两次缩放 ────── */
+  chain: {
+    label: { zh: '链式法则 · 两次缩放', en: 'Chain rule · Two scalings' },
+    brand: { zh: '链式法则不是公式咒语，而是两次局部缩放的连乘：玫红小步 h 先被 g′(x₀) 缩放成紫色中间增量 du，再被 f′(u₀) 缩放成翠绿输出增量 dy——两个倍数一乘，正是橙色复合曲线的斜率 dy/dx。',
+             en: 'The chain rule is no incantation but two local scalings composed: the rose step h is scaled by g′(x₀) into the violet middle increment du, then by f′(u₀) into the emerald output dy — multiply the two factors and you have the slope dy/dx of the orange composite curve.' },
+    tips: { zh: '提示：切「三级映射 x·y」看小步 h 被拉伸两次；把 x₀ 拖过 g′ 变号处（sin(x²/2) 在 x₀ = 0，sin²x 在 x₀ = ±1.57）——紫色区间当场调头，负导数的复合从此不再神秘。读数区里 f′·g′ 与差商 [f(g(x₀+h))−f(g(x₀))]/h 正在两位小数上咬合，h 越小咬得越紧。',
+            en: 'Tip: in "Pipeline x·y" watch the little step h get stretched twice; drag x₀ across a sign flip of g′ (x₀ = 0 for sin(x²/2), x₀ = ±1.57 for sin²x) — the violet interval reverses on the spot, and composing negative derivatives stops being mysterious. In the readout, f′·g′ and the quotient [f(g(x₀+h))−f(g(x₀))]/h agree to two decimals — the smaller h, the tighter the lock.' },
+    views: {
+      iso:   { label: { zh: '立体', en: '3D' }, az: -0.5, el: 0.28, dist: 10.5, tx: 0, ty: -0.7, tz: 0 },
+      map:   { label: { zh: '三级映射 x·y', en: 'Pipeline x·y' }, az: 0.001, el: 0.02, dist: 9, tx: 0, ty: -0.7, tz: 0 },
+      curve: { label: { zh: '复合曲线 x·y', en: 'Composite x·y' }, az: 0.001, el: 0.02, dist: 6, tx: 0, ty: -2.5, tz: 0,
+               onSelect() { if (!state.showComp) { state.showComp = true; document.querySelectorAll('input[data-key="showComp"]').forEach(o => { o.checked = true; }); } } }
+    },
+    toggles: [
+      { key: 'showIntX',    label: { zh: '输入小步 <i>h</i>', en: 'Input step <i>h</i>' }, color: '#fb7185', checked: true },
+      { key: 'showIntU',    label: { zh: '中间增量 d<i>u</i> = <i>g</i>′·<i>h</i>', en: 'Middle d<i>u</i> = <i>g</i>′·<i>h</i>' }, color: '#a78bfa', checked: true },
+      { key: 'showIntY',    label: { zh: '输出增量 d<i>y</i> = <i>f</i>′·d<i>u</i>', en: 'Output d<i>y</i> = <i>f</i>′·d<i>u</i>' }, color: '#34d399', checked: true },
+      { key: 'showComp',    label: { zh: '复合曲线与切线', en: 'Composite & tangent' }, color: '#fb923c', checked: true },
+      { key: 'showThreads', label: { zh: '映射连线', en: 'Mapping threads' }, color: '#fbbf24', checked: true },
+      { key: 'chainSweep',  label: { zh: '时钟扫描 <i>x</i>₀', en: 'Clock sweep <i>x</i>₀' }, color: '#2dd4ea', checked: false }
+    ],
+    sampleWindow: () => 10,
+    draw(C) {
+      const P = chainPair();
+      const x0 = chainX0(), h = state.hStep;
+      const u0 = P.g(x0), gp = P.dg(x0), fp = P.df(u0);
+      const y0v = P.f(u0), k = fp * gp;
+      const yX = 2.1, yU = 0.9, yY = -0.3, yC = -2.5;
+      const wu0 = u0 + P.uOff, wu1 = wu0 + gp * h;
+      const wy0 = y0v + P.yOff, wy1 = wy0 + fp * gp * h;
+
+      /* 三级站台（x → u → y 流水线） */
+      chainStation(C, yX, 0, 'x', '#c4d2e6');
+      chainStation(C, yU, P.uOff, P.uLab, '#a78bfa');
+      chainStation(C, yY, P.yOff, P.yLab, '#34d399');
+
+      /* 映射连线（暗色引导虚线，端点对端点）+ 琥珀缩放倍数 */
+      if (state.showThreads) {
+        line3(C, [x0, yX, 0], [wu0, yU, 0], { width: 1.5, dash: [7, 7], color: VIO_A + '0.45)' });
+        line3(C, [x0 + h, yX, 0], [wu1, yU, 0], { width: 1.5, dash: [7, 7], color: VIO_A + '0.45)' });
+        line3(C, [wu0, yU, 0], [wy0, yY, 0], { width: 1.5, dash: [7, 7], color: EME_A + '0.45)' });
+        line3(C, [wu1, yU, 0], [wy1, yY, 0], { width: 1.5, dash: [7, 7], color: EME_A + '0.45)' });
+        label3(C, [(x0 + h / 2 + wu0 + gp * h / 2) / 2, (yX + yU) / 2, 0], '× g′(x₀) = ' + fmtS(gp), { font: 'italic 12px ' + FONT_MATH, color: '#fbbf24', align: 'left', dx: 10 });
+        label3(C, [(wu0 + gp * h / 2 + wy0 + fp * gp * h / 2) / 2, (yU + yY) / 2, 0], '× f′(u₀) = ' + fmtS(fp), { font: 'italic 12px ' + FONT_MATH, color: '#fbbf24', align: 'left', dx: 10 });
+      }
+
+      /* 复合曲线面板（橙）：y = f(g(x)) 与切线，斜率恰为 f′·g′ */
+      if (state.showComp) {
+        line3(C, [-2.8, yC, 0], [2.85, yC, 0], { width: 1.4, color: AXIS });
+        arrowAt(C, [2.85, yC, 0], [2.65, yC, 0], AXIS);
+        label3(C, [3.0, yC, 0], 'x', { font: 'italic 13px ' + FONT_MATH, color: '#c4d2e6', align: 'left', dx: 4 });
+        line3(C, [0, yC - 1.3, 0], [0, yC + 1.3, 0], { width: 1.4, color: AXIS });
+        const pts = [];
+        for (let i = 0; i <= 220; i++) { const x = -2.7 + 5.4 * i / 220; pts.push([x, yC + P.f(P.g(x)), 0]); }
+        strokePoly(C, pts, { width: 5.5, color: ORA_A + '0.13)' });
+        strokePoly(C, pts, { width: 2.2, color: ORA_A + '0.95)' });
+        label3(C, [-2.9, yC + P.f(P.g(-2.7)), 0], P.cLab, { font: 'italic 13px ' + FONT_MATH, color: '#fb923c', align: 'right', dx: -6 });
+        const Lt = 1.0;
+        line3(C, [x0 - Lt, yC + y0v - k * Lt, 0], [x0 + Lt, yC + y0v + k * Lt, 0], { width: 1.6, color: ORA_A + '0.55)' });
+        label3(C, [x0 + Lt, yC + y0v + k * Lt, 0], 'dy/dx = f′·g′', { font: 'italic 12px ' + FONT_MATH, color: '#fb923c', align: 'left', dx: 8 });
+        /* h 步长标尺（琥珀）与曲线上的两点 */
+        line3(C, [x0, yC - 1.42, 0], [x0 + h, yC - 1.42, 0], { width: 1.2, color: AMB_A + '0.7)' });
+        line3(C, [x0, yC - 1.48, 0], [x0, yC - 1.36, 0], { width: 1.2, color: AMB_A + '0.7)' });
+        line3(C, [x0 + h, yC - 1.48, 0], [x0 + h, yC - 1.36, 0], { width: 1.2, color: AMB_A + '0.7)' });
+        label3(C, [x0 + h / 2, yC - 1.62, 0], 'h', { font: 'italic 12px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+        const s2 = proj(C, [x0 + h, yC + P.f(P.g(x0 + h)), 0]);
+        if (s2) glowDot(s2, 6, '#ffffff', ORA_A + '0.75)');
+        const s1 = proj(C, [x0, yC + y0v, 0]);
+        if (s1) glowDot(s1, 9, '#ffffff', ORA_A + '0.9)');
+      }
+
+      /* 三段区间（玫红 → 紫 → 翠绿）：长度连乘可被看见 */
+      if (state.showIntX) {
+        chainInterval(C, yX, x0, x0 + h, ROSE_A, '#fb7185');
+        label3(C, [x0 + h / 2, yX + 0.24, 0], 'h', { font: 'italic 12px ' + FONT_MATH, color: '#fb7185', align: 'center' });
+      }
+      if (state.showIntU) {
+        chainInterval(C, yU, wu0, wu1, VIO_A, '#a78bfa');
+        label3(C, [wu0 + gp * h / 2, yU + 0.24, 0], 'du = g′·h', { font: 'italic 12px ' + FONT_MATH, color: '#a78bfa', align: 'center' });
+      }
+      if (state.showIntY) {
+        chainInterval(C, yY, wy0, wy1, EME_A, '#34d399');
+        label3(C, [wy0 + fp * gp * h / 2, yY + 0.24, 0], 'dy = f′·du', { font: 'italic 12px ' + FONT_MATH, color: '#34d399', align: 'center' });
+      }
+
+      /* 主点：输入站台上的 x₀ */
+      const sp = proj(C, [x0, yX, 0]);
+      if (sp) glowDot(sp, 11, '#ffffff', 'rgba(186,240,255,0.9)');
+    },
+    readout() {
+      const P = chainPair();
+      const x0 = chainX0(), h = state.hStep;
+      const u0 = P.g(x0), gp = P.dg(x0), fp = P.df(u0);
+      const k = fp * gp;
+      const ks = (P.f(P.g(x0 + h)) - P.f(u0)) / h;
+      let out = '<div>x₀ = <b>' + fmtS(x0) + '</b>&ensp;·&ensp;u₀ = g(x₀) = <b>' + fmtS(u0) + '</b></div>' +
+        '<div class="sinC">' + t({ zh: '输入小步', en: 'input step' }) + ' h = <b>' + fmt(h) + '</b></div>' +
+        '<div class="cosC">du/dx = g′(x₀) = <b>' + fmtS(gp, 4) + '</b></div>' +
+        '<div class="tanC">dy/du = f′(u₀) = <b>' + fmtS(fp, 4) + '</b></div>' +
+        '<div class="cotC">dy/dx = f′(u₀)·g′(x₀) = <b>' + fmtS(k, 4) + '</b></div>' +
+        '<div><span style="color:#fbbf24">[f(g(x₀+h)) − f(g(x₀))]/h = <b>' + fmtS(ks, 4) + '</b></span></div>' +
+        '<div class="dim">' + t({ zh: '差距', en: 'gap' }) + ' = ' + Math.abs(ks - k).toFixed(4) + '&ensp;·&ensp;h → 0 ' + t({ zh: '时差商 → 乘积', en: ': quotient → product' }) + '</div>';
+      out += formulaList({ zh: '本页生成的公式（缩放倍数的连乘）', en: 'Formulas this tab generates (composing scale factors)' }, [
+        "[f(g(x))]′ = f′(g(x))·g′(x)",
+        'dy/dx = (dy/du)·(du/dx)',
+        'du = g′(x)·dx · dy = f′(u)·du',
+        P.dLab,
+        t({ zh: '负 × 负 = 正：两次反向 = 同向', en: 'neg × neg = pos: two reversals restore direction' })
+      ]);
+      return out;
+    }
+  },
+
+  /* ────── 四：偏微分 · 切平面 ────── */
   partial: {
     label: { zh: '偏微分 · 切平面', en: 'Partial · Tangent plane' },
     brand: { zh: '偏导数没有新东西：固定 y 只动 x，曲面塌成一条曲线，∂f/∂x 就是普通切线的斜率。两根切线撑起一块翠绿切平面——全微分 dz = f_x·dx + f_y dy，二维的「以直代曲」。',
