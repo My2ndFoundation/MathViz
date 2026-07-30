@@ -50,6 +50,7 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [力、约束与自由体图 · Forces & Free-Body Diagrams](outputs/forces-free-body-diagrams-3d.html) | Isolate the body, draw only external forces, let the axes follow the constraint: incline decomposition, the normal force as a response, static friction capping at μR, and connected particles |
 | [随机变量、期望与方差 · Random Variables, E(X) & Var](outputs/random-variable-expectation-variance-3d.html) | Outcomes mapped to numbers, expectation as the balance point of probability mass, variance as weighted squared distance, and how aX+b moves μ and σ differently |
 | [数列与级数的本质 · Sequences & Series](outputs/sequences-series-essence-3d.html) | A sequence is a function on the integers; a series is the sequence of its accumulated terms — geometric tiling to a/(1−r), and the harmonic series proving terms→0 is not enough |
+| [基底与换坐标的本质 · Basis & Change of Coordinates](outputs/basis-change-coordinates-3d.html) | The same vector pinned in space while its coordinates rewrite under a skewed basis: B as the coordinates→world relay, and near-parallel bases making the numbers explode |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
