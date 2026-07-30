@@ -63,6 +63,7 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [向量场、散度与旋度 · Vector Fields, Divergence & Curl](outputs/vector-fields-divergence-curl-3d.html) | An arrow at every position, measured by two local instruments: a tracer ring inflating by e^(div·τ), a paddle wheel spinning at curl/2 with its right-hand-rule vector, and gradient fields born curl-free from a scalar surface |
 | [SVD、PCA 与降维 · SVD, PCA & Dimensionality Reduction](outputs/svd-pca-dimensionality-reduction-3d.html) | Every linear map as rotate → stretch → rotate: the unit circle riding the UΣVᵀ pipeline, rank collapsing as σ₂→0, PCA finding the widest direction, and reduction discarding exactly the dimension you cannot see |
 | [线积分、Green 定理与 Stokes 定理 · Line Integrals, Green's & Stokes'](outputs/line-integrals-green-stokes-3d.html) | Line integrals as a signed fence of F·T̂, Green's theorem as interior cells cancelling until only the rim survives, and Stokes' theorem bending the same picture over a soap-film surface |
+| [信息熵、惊奇度与编码 · Information Entropy, Surprise & Coding](outputs/information-entropy-coding-3d.html) | Surprise as −log₂p (+1 bit per halving), entropy as long-run average surprise peaking at the fair coin, and Huffman trees whose mean code length never beats the entropy line |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
