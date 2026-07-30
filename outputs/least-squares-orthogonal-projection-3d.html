@@ -1,0 +1,1275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="tool-version" content="1.0.0">
+<meta name="engine-version" content="1.0.0">
+<title>最小二乘与正交投影 · Least Squares & Orthogonal Projection</title>
+<!-- ============================================================
+  最小二乘与正交投影 · Least Squares & Orthogonal Projection
+  基于 math-viz-starter.html（engine 1.0.0），遵循 math-viz-design-system.md
+
+  核心顿悟：Ax = b 无解时，最小二乘不是"找个差不多的答案"，
+  而是把 b 正交投影到 A 的列空间——残差与整个列空间垂直，
+  写出来就是正规方程 AᵀA x̂ = Aᵀb。
+
+  版本记录（changelog，新→旧）：
+    1.0.0  2026-07-30  首个版本：向量投影 / 列空间最近点 / 直线拟合 / 正规方程 四场景（含双语）
+============================================================ -->
+<style>
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  --angle-amber:#fbbf24;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none}
+body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)}
+#scene{position:fixed;inset:0;display:block;touch-action:none;cursor:grab}
+#scene.dragging{cursor:grabbing}
+
+/* ---- 标题区 ---- */
+.brand{position:fixed;top:20px;left:24px;pointer-events:none;user-select:none;max-width:min(520px,42vw)}
+.brand .eyebrow{font-size:10px;letter-spacing:.22em;color:rgba(159,176,200,.72);margin-bottom:6px}
+.brand h1{margin:0;font-family:var(--font-math);font-weight:600;font-size:26px;letter-spacing:.08em;
+  color:#eef3fa;text-shadow:0 2px 20px rgba(45,212,234,.20)}
+.brand p{margin:7px 0 0;font-size:12.5px;line-height:1.65;color:rgba(159,176,200,.85)}
+
+/* ---- 页签 ---- */
+.tabs{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:5;
+  display:flex;gap:4px;padding:4px;border-radius:999px;
+  background:var(--panel-bg);border:1px solid var(--panel-line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
+.tab{border:1px solid transparent;background:transparent;color:#b8c6da;
+  font-size:12.5px;font-family:var(--font-cn);padding:6px 15px;border-radius:999px;cursor:pointer;
+  transition:color .15s,border-color .15s,background .15s}
+.tab:hover{color:#e8f2fb}
+.tab:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.tab.active{background:rgba(45,212,234,.13);border-color:rgba(45,212,234,.55);color:#9be8f7}
+
+/* ---- 底部提示 ---- */
+.hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);pointer-events:none;user-select:none;
+  font-size:11px;letter-spacing:.05em;color:rgba(159,176,200,.6);white-space:nowrap}
+
+/* ---- 控制面板 ---- */
+.panel{position:fixed;top:14px;right:14px;width:304px;max-height:calc(100vh - 28px);overflow-y:auto;
+  background:var(--panel-bg);border:1px solid var(--panel-line);border-radius:16px;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 18px 50px rgba(0,0,0,.45);user-select:none}
+.panel::-webkit-scrollbar{width:6px}
+.panel::-webkit-scrollbar-thumb{background:rgba(148,163,184,.25);border-radius:3px}
+.panel-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px 10px;
+  font-size:13px;font-weight:600;letter-spacing:.06em;color:#dbe6f5}
+.panel:not(.collapsed) .panel-head{border-bottom:1px solid var(--panel-line)}
+.ph-right{display:flex;align-items:center;gap:7px}
+.ver{font-family:var(--font-mono);font-size:10px;color:rgba(159,176,200,.55)}
+.lang{padding:3px 8px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:11px;cursor:pointer}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.fold{width:24px;height:24px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:14px;line-height:1;cursor:pointer}
+.fold:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.panel.collapsed .panel-body{display:none}
+.panel-body{padding:6px 14px 14px}
+
+/* 滑杆 */
+.ctl{margin:11px 0 3px}
+.ctl .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.ctl label{font-size:12px;color:#c6d2e4}
+.ctl label i{font-family:var(--font-math);font-style:italic;font-size:13px}
+.ctl .val{font-family:var(--font-mono);font-size:11.5px;color:#7dd3fc}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;cursor:pointer;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--trace-cyan);margin-top:-5px;border:2px solid #0b1220;box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-moz-range-thumb{width:11px;height:11px;border:2px solid #0b1220;border-radius:50%;
+  background:var(--trace-cyan);box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-offset:2px;border-radius:4px}
+
+/* 按钮 */
+.row{display:flex;gap:8px;margin:13px 0 4px}
+.btn{padding:6px 10px;border-radius:9px;border:1px solid rgba(148,163,184,.25);
+  background:rgba(30,41,59,.55);color:#d7e2f2;font-size:12px;font-family:var(--font-cn);cursor:pointer;
+  transition:border-color .15s,color .15s,background .15s}
+.btn:hover{border-color:rgba(45,212,234,.55)}
+.btn:focus-visible,.fold:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.btn.wide{flex:1}
+.btn.active{border-color:rgba(45,212,234,.8);background:rgba(45,212,234,.12);color:#9be8f7}
+.views{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 2px}
+.views .vlabel{font-size:11.5px;color:rgba(159,176,200,.8);margin-right:2px}
+.vbtn{padding:5px 9px;font-size:11.5px}
+
+/* 开关 */
+.toggles{display:flex;flex-wrap:wrap;gap:7px 12px;margin:12px 0 2px}
+.tg{display:flex;align-items:center;gap:6px;font-size:12px;color:#c6d2e4;cursor:pointer}
+.tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
+.tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
+
+/* 读数与提示 */
+.readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
+  font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
+.readout b{font-weight:600;color:#e8eef7}
+.readout .sinC b{color:var(--trace-rose)}
+.readout .cosC b{color:var(--trace-violet)}
+.readout .tanC b{color:var(--trace-emerald)}
+.readout .cotC b{color:var(--trace-orange)}
+.readout .dim{color:rgba(159,176,200,.6)}
+.tips{margin-top:11px;font-size:11px;line-height:1.65;color:rgba(159,176,200,.72)}
+
+@media (max-width:760px){
+  .brand{top:12px;left:14px;max-width:70vw}
+  .brand h1{font-size:20px}
+  .brand p{display:none}
+  .tabs{top:52px;left:14px;transform:none}
+  .panel{left:10px;right:10px;top:auto;bottom:10px;width:auto;max-height:62vh}
+  .hint{display:none}
+}
+</style>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+
+<div class="brand">
+  <div class="eyebrow">INTERACTIVE MATH · 交互式数学</div>
+  <h1>最小二乘与正交投影</h1>
+  <p id="brandDesc"></p>
+</div>
+
+<nav class="tabs" id="tabsNav"></nav>
+
+<aside class="panel" id="panel">
+  <div class="panel-head"><span id="panelTitle">参数与视角</span>
+    <span class="ph-right"><span class="ver" id="verBadge"></span><button class="lang" id="btnLang" title="切换语言 / Switch language">EN</button><button class="fold" id="btnFold" title="收起 / 展开">−</button></span></div>
+  <div class="panel-body">
+    <div id="paramsHost"></div>
+    <div class="row">
+      <button class="btn wide" id="btnPlay">⏸ 暂停</button>
+      <button class="btn" id="btnReset">↺ 重置</button>
+    </div>
+    <div id="togglesHost"></div>
+    <div id="viewsHost"></div>
+    <div class="readout" id="readout"></div>
+    <div class="tips" id="tips"></div>
+  </div>
+</aside>
+
+<div class="hint">拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签</div>
+
+<script>
+'use strict';
+/* ================= i18n 核心（引擎区） ================= */
+const LANG_KEY = 'mathviz-lang';
+function resolveLang(){
+  try{
+    const q = new URLSearchParams(location.search).get('lang');
+    if (q === 'zh' || q === 'en') return q;
+    const s = localStorage.getItem(LANG_KEY);
+    if (s === 'zh' || s === 'en') return s;
+  }catch(e){}
+  return (navigator.language || 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+let LANG = resolveLang();
+function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
+
+const STARTER_VERSION = '1.0.0';
+const VERSION = document.querySelector('meta[name="tool-version"]').content;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ⓪ 工具元信息 —— id 与双语标题                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const TOOL = {
+  id: 'least-squares-orthogonal-projection-3d',
+  title: { zh: '最小二乘与正交投影', en: 'Least Squares & Orthogonal Projection' },
+  h1:    { zh: '最小二乘与正交投影', en: 'Least Squares & Projection' }
+};
+
+/* 引擎 UI 文案（一般无需改动） */
+const UI = {
+  panelTitle: { zh: '参数与视角', en: 'Parameters & Views' },
+  pause:  { zh: '⏸ 暂停', en: '⏸ Pause' },
+  resume: { zh: '▶ 继续', en: '▶ Resume' },
+  reset:  { zh: '↺ 重置', en: '↺ Reset' },
+  views:  { zh: '视角', en: 'View' },
+  hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
+            en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
+};
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ① 参数声明 —— 自动生成滑杆                                ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const PARAMS = [
+  { key: 'bx',    label: { zh: '向量 <i>b</i> 的 <i>x</i> 分量', en: 'Vector <i>b</i> · <i>x</i>' }, min: -2,   max: 2,   step: 0.05, value: 1.2,   fmt: v => fmtS(v) },
+  { key: 'by',    label: { zh: '向量 <i>b</i> 的 <i>y</i> 分量', en: 'Vector <i>b</i> · <i>y</i>' }, min: -2,   max: 2,   step: 0.05, value: 1.5,   fmt: v => fmtS(v) },
+  { key: 'bz',    label: { zh: '向量 <i>b</i> 的 <i>z</i> 分量', en: 'Vector <i>b</i> · <i>z</i>' }, min: -2,   max: 2,   step: 0.05, value: 0.6,   fmt: v => fmtS(v) },
+  { key: 'm',     label: { zh: '直线斜率 <i>m</i>',   en: 'Slope <i>m</i>' },      min: -2,   max: 2,   step: 0.02, value: 0.10,  fmt: v => fmtS(v) },
+  { key: 'c',     label: { zh: '直线截距 <i>c</i>',   en: 'Intercept <i>c</i>' },  min: -1.5, max: 1.5, step: 0.02, value: -0.40, fmt: v => fmtS(v) },
+  { key: 'noise', label: { zh: '数据噪声',            en: 'Data noise' },          min: 0,    max: 0.8, step: 0.05, value: 0.25,  fmt: v => fmt(v) },
+  { key: 'omega', label: { zh: '演示转速 <i>ω</i>',   en: 'Demo spin <i>ω</i>' },  min: 0.2,  max: 3,   step: 0.05, value: 0.6,   fmt: v => fmt(v) + ' rad/s' }
+];
+
+/* ────── 场景级：最小二乘助手（引擎之上，引擎零改动） ────── */
+const ROSE = '#fb7185', VIOLET = '#a78bfa', EMERALD = '#34d399', ORANGE = '#fb923c';
+const ROSE_A = 'rgba(251,113,133,', VIO_A = 'rgba(167,139,250,', EME_A = 'rgba(52,211,153,',
+      ORG_A = 'rgba(251,146,60,', CYAN_A = 'rgba(45,212,234,';
+
+const add3 = (a, b) => [a[0]+b[0], a[1]+b[1], a[2]+b[2]];
+const mul3 = (a, s) => [a[0]*s, a[1]*s, a[2]*s];
+const len3 = a => Math.hypot(a[0], a[1], a[2]);
+
+/* b 向量（可选演示：绕 y 轴匀速旋转，θ 由共享时钟积分） */
+function bVec() {
+  const b = [state.bx, state.by, state.bz];
+  if (!state.spinB) return b;
+  const cs = Math.cos(state.theta), sn = Math.sin(state.theta);
+  return [b[0]*cs + b[2]*sn, b[1], -b[0]*sn + b[2]*cs];
+}
+
+/* 场景 1：直线模式的固定方向（位于 y=0 平面内） */
+const LINE_A = [1.5, 0, 0.55];
+/* 场景 2：固定 3×2 矩阵 A 的两列（列空间 = 一张倾斜平面） */
+const A1 = [1.5, 0.5, 0], A2 = [0, 0.4, 1.4];
+/* 场景 4：三个数据点 (xᵢ, yᵢ) —— 样本空间恰为 R³ */
+const PX = [-1, 0.3, 1.2], PY = [-0.5, 0.6, 1.4], ONES = [1, 1, 1];
+
+/* 解 2×2 正规方程 [g11 g12; g12 g22]·x = [r1; r2]（近奇异 → null） */
+function solve2(g11, g12, g22, r1, r2) {
+  const det = g11 * g22 - g12 * g12;
+  if (Math.abs(det) < 1e-9) return null;
+  return [(g22*r1 - g12*r2) / det, (g11*r2 - g12*r1) / det];
+}
+
+/* 场景 1：b 在子空间上的投影 */
+function projSub(b) {
+  let p;
+  if (state.lineMode) { const u = norm(LINE_A); p = mul3(u, dot3(b, u)); }
+  else p = [b[0], 0, b[2]];
+  return { p, r: sub(b, p) };
+}
+
+/* 场景 2：b → span(a₁, a₂)，x̂ = (AᵀA)⁻¹Aᵀb */
+function projCols(b) {
+  const x = solve2(dot3(A1, A1), dot3(A1, A2), dot3(A2, A2), dot3(A1, b), dot3(A2, b));
+  const p = add3(mul3(A1, x[0]), mul3(A2, x[1]));
+  return { x, p, r: sub(b, p) };
+}
+
+/* 场景 4：回归的样本空间投影，p = ĉ·1 + m̂·x */
+function projReg() {
+  const x = solve2(3, PX[0]+PX[1]+PX[2], dot3(PX, PX), PY[0]+PY[1]+PY[2], dot3(PX, PY));
+  const p = add3(mul3(ONES, x[0]), mul3(PX, x[1]));
+  return { c: x[0], m: x[1], p, r: sub(PY, p) };
+}
+
+/* 场景 3 数据集（确定性伪随机 × 噪声幅度；参数改变时重建，非历史） */
+const N_PTS = 9;
+const rnd = i => ((Math.sin(i * 127.1 + 31.7) * 43758.5453) % 1 + 1) % 1 * 2 - 1;
+let dataCache = { noise: null, pts: [] };
+function dataset() {
+  if (dataCache.noise === state.noise) return dataCache.pts;
+  const pts = [];
+  for (let i = 0; i < N_PTS; i++) {
+    const x = -1.6 + i * 3.2 / (N_PTS - 1);
+    pts.push([x, 0.55 * x + 0.15 + state.noise * rnd(i)]);
+  }
+  dataCache = { noise: state.noise, pts };
+  return pts;
+}
+function ssq(m, c, pts) { let s = 0; for (const q of pts) { const e = q[1] - m*q[0] - c; s += e*e; } return s; }
+function lsFit(pts) {
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (const q of pts) { sx += q[0]; sy += q[1]; sxx += q[0]*q[0]; sxy += q[0]*q[1]; }
+  const x = solve2(pts.length, sx, sxx, sy, sxy);
+  return { c: x[0], m: x[1] };
+}
+
+/* 带箭头向量 */
+function drawVec(C, from, to, color, width) {
+  line3(C, from, to, { width: width || 2, color });
+  const d = sub(to, from), L = len3(d);
+  if (L > 0.05) arrowAt(C, to, sub(to, mul3(d, 0.12 / L)), color);
+}
+
+/* 直角小方块（琥珀度量注记）：角点 p，两腿单位方向 u、v */
+function rightAngle(C, p, u, v, s) {
+  const q1 = add3(p, mul3(u, s)), q3 = add3(p, mul3(v, s));
+  strokePoly(C, [q1, add3(q1, mul3(v, s)), q3], { width: 1.4, color: 'rgba(251,191,36,0.9)' });
+}
+
+/* 由 u、v 张成的平面网格片（青色源几何），ext 为参数范围 */
+function drawSpanPlane(C, u, v, ext, name) {
+  const n = 4;
+  for (let i = -n; i <= n; i++) {
+    const k = i / n * ext, edge = Math.abs(i) === n;
+    const col = CYAN_A + (edge ? '0.35)' : '0.10)');
+    strokePoly(C, [add3(mul3(u, k), mul3(v, -ext)), add3(mul3(u, k), mul3(v, ext))], { width: edge ? 1.4 : 1, color: col });
+    strokePoly(C, [add3(mul3(v, k), mul3(u, -ext)), add3(mul3(v, k), mul3(u, ext))], { width: edge ? 1.4 : 1, color: col });
+  }
+  if (name) label3(C, add3(mul3(u, ext), mul3(v, -ext * 1.06)), name,
+    { font: 'italic 12px ' + FONT_MATH, color: CYAN_A + '0.85)', align: 'left' });
+}
+
+/* 空间第三轴 z（本工具中 z 是空间轴，非时间轴） */
+function drawZAxis(C, ez, name) {
+  line3(C, [0, 0, -ez], [0, 0, ez], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, 0, ez], [0, 0, ez - 0.2], AXIS);
+  label3(C, [0, 0, ez + 0.28], name || 'z', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+}
+
+/* 开关联动（视角 onSelect 用）：状态 + 复选框同步 */
+function setToggle(key, val) {
+  state[key] = val;
+  document.querySelectorAll('input[data-key="' + key + '"]').forEach(o => { o.checked = val; });
+}
+
+const f3 = v => '(' + fmtS(v[0]) + ', ' + fmtS(v[1]) + ', ' + fmtS(v[2]) + ')';
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ② 场景注册 —— 每个键就是一个页签                           ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const SCENES = {
+
+  /* ────── 场景 1：向量投影 ────── */
+  proj: {
+    label: { zh: '向量投影', en: 'Projection' },
+    brand: { zh: '把向量 b 垂直压到子空间上：落点 p 是子空间里离 b 最近的点，残差 r = b − p 与整个子空间垂直。拖动 b 的三个分量，或让 b 旋转起来观察。',
+             en: 'Drop the vector b perpendicularly onto a subspace: the foot p is the closest point in the subspace, and the residual r = b − p is perpendicular to all of it. Drag the components of b, or let it spin.' },
+    tips: { zh: '按 3 俯视：b 恰好落在 p 上——正交投影就是头顶灯光打下的影子；按 2 正视，平面塌成一条线、r 竖直挺立，直角一眼可见。读数区的 |b|² = |p|² + |r|² 就是勾股定理。',
+            en: 'Press 3 for the top view: b lands exactly on p — orthogonal projection is the shadow cast by an overhead light. Press 2 for the edge-on view: the plane collapses into a line and r stands upright, the right angle plain to see. In the readout, |b|² = |p|² + |r|² is Pythagoras.' },
+    views: {
+      iso:   { label: { zh: '立体', en: '3D' }, az: -0.85, el: 0.5, dist: 8, tx: 0, ty: 0, tz: 0 },
+      front: { label: { zh: '正视 · 平面成线', en: 'Edge-on' }, az: 0.001, el: 0.02, dist: 7 },
+      top:   { label: { zh: '俯视 · b 落在 p', en: 'Top: b lands on p' }, az: 0.001, el: 1.52, dist: 7.5 }
+    },
+    toggles: [
+      { key: 'showB',    label: { zh: '向量 b',          en: 'Vector b' },        color: '#fb7185', checked: true },
+      { key: 'showP',    label: { zh: '投影 p',          en: 'Projection p' },    color: '#a78bfa', checked: true },
+      { key: 'showR',    label: { zh: '残差 r = b − p',  en: 'Residual r' },      color: '#34d399', checked: true },
+      { key: 'lineMode', label: { zh: '投影到直线',       en: 'Onto a line' },     color: '#64748b', checked: false },
+      { key: 'spinB',    label: { zh: '演示 · b 旋转',    en: 'Demo: spin b' },    color: '#e2e8f0', checked: false }
+    ],
+    draw(C) {
+      const b = bVec();
+      const { p, r } = projSub(b);
+      if (state.lineMode) {
+        const u = norm(LINE_A);
+        strokePoly(C, [mul3(u, -2.2), mul3(u, 2.2)], { width: 6, color: CYAN_A + '0.13)' });
+        strokePoly(C, [mul3(u, -2.2), mul3(u, 2.2)], { width: 2, color: CYAN_A + '0.95)' });
+        label3(C, mul3(u, 2.45), t({ zh: '直线 span(a)', en: 'line span(a)' }),
+          { font: 'italic 12px ' + FONT_MATH, color: CYAN_A + '0.85)', align: 'center' });
+      } else {
+        drawSpanPlane(C, [1, 0, 0], [0, 0, 1], 1.8, t({ zh: '平面 · 子空间', en: 'plane (subspace)' }));
+      }
+      drawAxes(C, { ex: 2.1, ey: 2.1, yTicks: [1], xTicks: [1], tAxis: false });
+      drawZAxis(C, 2.1);
+      if (state.showP) {
+        drawVec(C, [0, 0, 0], p, VIO_A + '0.95)', 2);
+        const sp = proj(C, p);
+        if (sp) glowDot(sp, 9, '#ffffff', VIO_A + '0.9)');
+        label3(C, p, 'p', { font: 'italic 13px ' + FONT_MATH, color: VIOLET, dx: 8, dy: 14 });
+      }
+      if (state.showR) {
+        drawVec(C, p, b, EME_A + '0.9)', 2);
+        label3(C, add3(p, mul3(r, 0.5)), 'r = b − p', { font: 'italic 13px ' + FONT_MATH, color: EMERALD, dx: 10 });
+        if (state.showP && len3(p) > 0.1 && len3(r) > 0.1)
+          rightAngle(C, p, mul3(norm(p), -1), norm(r), 0.14);
+      }
+      if (state.showB) {
+        drawVec(C, [0, 0, 0], b, ROSE_A + '0.95)', 2.2);
+        const sb = proj(C, b);
+        if (sb) glowDot(sb, 11, '#ffffff', ROSE_A + '0.9)');
+        label3(C, b, 'b', { font: 'italic 14px ' + FONT_MATH, color: ROSE, dx: 10, dy: -10 });
+      }
+    },
+    readout() {
+      const b = bVec();
+      const { p, r } = projSub(b);
+      return readoutHead() +
+        '<div class="sinC">b = <b>' + f3(b) + '</b></div>' +
+        '<div class="cosC">p = <b>' + f3(p) + '</b></div>' +
+        '<div class="tanC">r = b − p = <b>' + f3(r) + '</b>&ensp;|r| = <b>' + fmt(len3(r)) + '</b></div>' +
+        '<div class="dim">|b|² = |p|² + |r|² : ' + fmt(dot3(b, b)) + ' = ' + fmt(dot3(p, p)) + ' + ' + fmt(dot3(r, r)) + '</div>';
+    }
+  },
+
+  /* ────── 场景 2：列空间中的最接近点 ────── */
+  cols: {
+    label: { zh: '列空间最近点', en: 'Column space' },
+    brand: { zh: 'Ax = b 无精确解时，b 根本不在 A 的列空间里。最小二乘取列空间中离 b 最近的点 Ax̂——即 b 的正交投影；残差同时垂直于每一根列向量：Aᵀ(b − Ax̂) = 0。',
+             en: 'When Ax = b has no exact solution, b is simply not in the column space of A. Least squares takes the closest point Ax̂ in the column space — the orthogonal projection of b; the residual is perpendicular to every column at once: Aᵀ(b − Ax̂) = 0.' },
+    tips: { zh: '按 3 沿法向看：b 塌到 Ax̂ 上——它就是平面里能达到的最近点；按 2 边视，列空间成一条线，r 与它垂直。打开「组合台阶」，看 x̂₁a₁ + x̂₂a₂ 如何一步步走到投影点。',
+            en: 'Press 3 to look along the normal: b collapses onto Ax̂ — the nearest point the plane can offer. Press 2 for the edge-on view: the column space becomes a line with r perpendicular to it. Turn on "combination steps" to watch x̂₁a₁ + x̂₂a₂ walk to the projection.' },
+    views: {
+      iso:    { label: { zh: '立体', en: '3D' }, az: -0.7, el: 0.35, dist: 8.5, tx: 0, ty: 0, tz: 0 },
+      edge:   { label: { zh: '边视 · 平面成线', en: 'Edge-on' }, az: 0.001, el: 0.278, dist: 7.5 },
+      alongN: { label: { zh: '沿法向 · b 落在 Ax̂', en: 'Along n' }, az: -2.279, el: 1.157, dist: 7.5 }
+    },
+    toggles: [
+      { key: 'showB',    label: { zh: '向量 b',                en: 'Vector b' },           color: '#fb7185', checked: true },
+      { key: 'showP',    label: { zh: '投影 p = Ax̂',           en: 'Projection Ax̂' },      color: '#a78bfa', checked: true },
+      { key: 'showR',    label: { zh: '残差 r',                en: 'Residual r' },         color: '#34d399', checked: true },
+      { key: 'showComb', label: { zh: '组合台阶 x̂₁a₁ + x̂₂a₂', en: 'Combination steps' },  color: '#fb923c', checked: true },
+      { key: 'spinB',    label: { zh: '演示 · b 旋转',          en: 'Demo: spin b' },       color: '#e2e8f0', checked: false }
+    ],
+    draw(C) {
+      const b = bVec();
+      const { x, p, r } = projCols(b);
+      drawSpanPlane(C, A1, A2, 1.25, t({ zh: '列空间 C(A)', en: 'column space C(A)' }));
+      drawAxes(C, { ex: 2.1, ey: 2.1, yTicks: [1], xTicks: [1], tAxis: false });
+      drawZAxis(C, 2.1);
+      drawVec(C, [0, 0, 0], A1, CYAN_A + '0.95)', 2);
+      drawVec(C, [0, 0, 0], A2, CYAN_A + '0.95)', 2);
+      label3(C, A1, 'a₁', { font: 'italic 13px ' + FONT_MATH, color: '#2dd4ea', dx: 10, dy: -8 });
+      label3(C, A2, 'a₂', { font: 'italic 13px ' + FONT_MATH, color: '#2dd4ea', dx: 10, dy: -8 });
+      if (state.showComb) {
+        const s1 = mul3(A1, x[0]);
+        drawVec(C, [0, 0, 0], s1, ORG_A + '0.85)', 1.6);
+        drawVec(C, s1, p, ORG_A + '0.85)', 1.6);
+        label3(C, mul3(s1, 0.55), 'x̂₁a₁', { font: 'italic 12px ' + FONT_MATH, color: ORANGE, dy: 14 });
+        label3(C, add3(s1, mul3(sub(p, s1), 0.5)), 'x̂₂a₂', { font: 'italic 12px ' + FONT_MATH, color: ORANGE, dy: 14 });
+      }
+      if (state.showP) {
+        line3(C, [0, 0, 0], p, { width: 1.3, dash: [6, 6], color: VIO_A + '0.6)' });
+        const sp = proj(C, p);
+        if (sp) glowDot(sp, 9, '#ffffff', VIO_A + '0.9)');
+        label3(C, p, 'p = Ax̂', { font: 'italic 13px ' + FONT_MATH, color: VIOLET, dx: 10, dy: 12 });
+      }
+      if (state.showR) {
+        drawVec(C, p, b, EME_A + '0.9)', 2);
+        label3(C, add3(p, mul3(r, 0.5)), 'r', { font: 'italic 13px ' + FONT_MATH, color: EMERALD, dx: 10 });
+        if (state.showP && len3(p) > 0.1 && len3(r) > 0.1)
+          rightAngle(C, p, mul3(norm(p), -1), norm(r), 0.14);
+        label3(C, add3(b, [0, 0.3, 0]), 'Aᵀ(b − Ax̂) = 0',
+          { font: 'italic 12px ' + FONT_MATH, color: '#fbbf24', align: 'center', dy: -10 });
+      }
+      if (state.showB) {
+        drawVec(C, [0, 0, 0], b, ROSE_A + '0.95)', 2.2);
+        const sb = proj(C, b);
+        if (sb) glowDot(sb, 11, '#ffffff', ROSE_A + '0.9)');
+        label3(C, b, 'b', { font: 'italic 14px ' + FONT_MATH, color: ROSE, dx: 10, dy: -10 });
+      }
+    },
+    readout() {
+      const b = bVec();
+      const { x, p, r } = projCols(b);
+      return readoutHead() +
+        '<div class="sinC">b = <b>' + f3(b) + '</b></div>' +
+        '<div class="cotC">x̂ = (AᵀA)⁻¹Aᵀb = <b>(' + fmtS(x[0]) + ', ' + fmtS(x[1]) + ')</b></div>' +
+        '<div class="cosC">p = Ax̂ = <b>' + f3(p) + '</b></div>' +
+        '<div class="tanC">Aᵀr = <b>(' + fmtS(dot3(A1, r)) + ', ' + fmtS(dot3(A2, r)) + ')</b>&ensp;|r| = <b>' + fmt(len3(r)) + '</b></div>' +
+        '<div class="dim">a₁ = (1.5, 0.5, 0) · a₂ = (0, 0.4, 1.4)</div>';
+    }
+  },
+
+  /* ────── 场景 3：直线拟合与误差碗 ────── */
+  fit: {
+    label: { zh: '直线拟合', en: 'Line fit' },
+    brand: { zh: '给一堆数据点配一条 y = mx + c：每个点的误差取竖直残差，平方求和得 SSE(m, c)——它是 (m, c) 平面上的一只抛物碗。拖动 m、c，看当前点沿碗面滑向碗底。',
+             en: 'Fit y = mx + c to scattered data: each point contributes a vertical residual, and the sum of squares SSE(m, c) is a paraboloid bowl over the (m, c) plane. Drag m and c and watch the current point slide down the bowl.' },
+    tips: { zh: '按 3 看误差碗：SSE 只有一个最低点，碗底 (m*, c*) 就是最小二乘解；按 4 俯视，碗塌成一圈圈椭圆等高线。注意：回归的残差是竖直距离，不是到直线的几何最短距离。',
+            en: 'Press 3 for the error bowl: SSE has a single lowest point, and the bottom (m*, c*) is the least-squares solution. Press 4 to look straight down — the bowl collapses into elliptical contours. Note: regression residuals are vertical distances, not the geometric shortest distance to the line.' },
+    views: {
+      iso:   { label: { zh: '立体', en: '3D' }, az: -0.75, el: 0.42, dist: 11, tx: 0, ty: 0, tz: 2.2 },
+      front: { label: { zh: '正视数据 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 6.8, tx: 0, ty: 0, tz: 0 },
+      bowl:  { label: { zh: '误差碗', en: 'Error bowl' }, az: -0.65, el: 0.3, dist: 9, tx: 0, ty: 0, tz: 4.2,
+               onSelect: () => setToggle('showSurface', true) },
+      top:   { label: { zh: '俯视等高线', en: 'Top: contours' }, az: 0.001, el: 1.52, dist: 8, tx: 0, ty: 0, tz: 4.2,
+               onSelect: () => setToggle('showSurface', true) }
+    },
+    toggles: [
+      { key: 'showLine',    label: { zh: '拟合直线 y = mx + c', en: 'Line y = mx + c' },  color: '#fb7185', checked: true },
+      { key: 'showBest',    label: { zh: '最优直线',            en: 'Best-fit line' },     color: '#a78bfa', checked: false },
+      { key: 'showRes',     label: { zh: '竖直残差',            en: 'Vertical residuals' }, color: '#34d399', checked: true },
+      { key: 'showSurface', label: { zh: '误差曲面 SSE',        en: 'SSE surface' },       color: '#fb923c', checked: true },
+      { key: 'showGrid',    label: { zh: '网格',                en: 'Grid' },              color: '#64748b', checked: true }
+    ],
+    draw(C) {
+      const pts = dataset(), best = lsFit(pts), m = state.m, c = state.c;
+      if (state.showGrid) drawGridXY(C, 2, 0.5);
+      drawAxes(C, { ex: 2.15, ey: 2.15, yTicks: [1], xTicks: [1], tAxis: false });
+      if (state.showRes) for (const q of pts)
+        line3(C, [q[0], q[1], 0], [q[0], m * q[0] + c, 0], { width: 1.5, dash: [7, 7], color: EME_A + '0.8)' });
+      if (state.showBest) {
+        strokePoly(C, [[-2, -2 * best.m + best.c, 0], [2, 2 * best.m + best.c, 0]],
+          { width: 1.6, dash: [5, 6], color: VIO_A + '0.85)' });
+        label3(C, [-2, -2 * best.m + best.c, 0], 'y = m*x + c*',
+          { font: 'italic 12px ' + FONT_MATH, color: VIOLET, dx: -8, align: 'right' });
+      }
+      if (state.showLine) {
+        strokePoly(C, [[-2, -2 * m + c, 0], [2, 2 * m + c, 0]], { width: 5.5, color: ROSE_A + '0.14)' });
+        strokePoly(C, [[-2, -2 * m + c, 0], [2, 2 * m + c, 0]], { width: 2.2, color: ROSE_A + '0.95)' });
+        label3(C, [2.05, 2 * m + c, 0], 'y = mx + c', { font: 'italic 13px ' + FONT_MATH, color: ROSE, dx: 6 });
+      }
+      for (const q of pts) solidDot(C, [q[0], q[1], 0], 3, 'rgba(226,232,240,0.92)');
+      if (state.showSurface) this.drawSSE(C, pts, best);
+    },
+    /* 误差碗：以 (m*, c*) 为中心的 SSE 线框曲面，架在 z = 4.2 一带 */
+    drawSSE(C, pts, best) {
+      const Z0 = 4.2, span = 1.1, sc = 1.5 / Math.max(0.2, ssq(best.m + span, best.c + span, pts) - ssq(best.m, best.c, pts));
+      const S0 = ssq(best.m, best.c, pts);
+      const P = (dm, dc) => [dm * 1.5, (ssq(best.m + dm, best.c + dc, pts) - S0) * sc, Z0 + dc * 1.5];
+      const n = 10;
+      for (let i = 0; i <= n; i++) {
+        const a = -span + 2 * span * i / n, row = [], col = [];
+        for (let j = 0; j <= n; j++) {
+          const w = -span + 2 * span * j / n;
+          row.push(P(a, w));
+          col.push(P(w, a));
+        }
+        strokePoly(C, row, { width: 1, color: ORG_A + '0.30)' });
+        strokePoly(C, col, { width: 1, color: ORG_A + '0.30)' });
+      }
+      label3(C, [0, 1.85, Z0], 'SSE(m, c)', { font: 'italic 13px ' + FONT_MATH, color: ORANGE, align: 'center' });
+      label3(C, [span * 1.5 + 0.3, 0, Z0], 'm', { font: 'italic 13px ' + FONT_MATH, color: AXIS, align: 'center' });
+      label3(C, [0, 0, Z0 + span * 1.5 + 0.35], 'c', { font: 'italic 13px ' + FONT_MATH, color: AXIS, align: 'center' });
+      const mn = P(0, 0);
+      solidDot(C, mn, 3, VIOLET);
+      label3(C, mn, '(m*, c*)', { font: 'italic 12px ' + FONT_MATH, color: VIOLET, dy: 16, align: 'center' });
+      const dm = clamp(state.m - best.m, -span, span), dc = clamp(state.c - best.c, -span, span);
+      const cur = P(dm, dc);
+      line3(C, cur, [cur[0], 0, cur[2]], { width: 1.5, dash: [7, 7], color: ORG_A + '0.6)' });
+      const sp = proj(C, cur);
+      if (sp) glowDot(sp, 9, '#ffffff', ORG_A + '0.9)');
+    },
+    readout() {
+      const pts = dataset(), best = lsFit(pts);
+      const S = ssq(state.m, state.c, pts), S0 = ssq(best.m, best.c, pts);
+      return '<div class="sinC">y = <b>' + fmtS(state.m) + '</b>·x ' + (state.c < 0 ? '−' : '+') + ' <b>' + fmt(Math.abs(state.c)) + '</b></div>' +
+        '<div class="cotC">SSE = Σ(yᵢ − mxᵢ − c)² = <b>' + fmt(S, 3) + '</b></div>' +
+        '<div class="cosC">m* = <b>' + fmtS(best.m) + '</b>&ensp;c* = <b>' + fmtS(best.c) + '</b>&ensp;SSE* = <b>' + fmt(S0, 3) + '</b></div>' +
+        '<div class="dim">' + t({ zh: 'N = 9 · 残差取竖直方向（回归约定）', en: 'N = 9 · residuals are vertical (regression convention)' }) + '</div>';
+    }
+  },
+
+  /* ────── 场景 4：正规方程 ────── */
+  normal: {
+    label: { zh: '正规方程', en: 'Normal equations' },
+    brand: { zh: '三个数据点，让样本空间恰好是 R³：b = (y₁, y₂, y₃) 是一个点，所有直线 c·1 + m·x 织成一张平面。拟合 = 把 b 投影到这张平面——三条竖直残差合成的 r 与平面垂直，展开即 AᵀA x̂ = Aᵀb。',
+             en: 'With three data points the sample space is exactly R³: b = (y₁, y₂, y₃) is a single point, and all lines c·1 + m·x weave a plane. Fitting = projecting b onto that plane — the three vertical residuals assemble into one vector r perpendicular to it, and writing that out gives AᵀA x̂ = Aᵀb.' },
+    tips: { zh: '按 2 边视：span(1, x) 塌成一条线，r 与它垂直——正规方程不是代数技巧，就是这一个直角。拖动 m、c，白色试探点 A(c, m) 在平面内游走，‖b − A(c, m)‖ 永远不小于 |r|。',
+            en: 'Press 2 for the edge-on view: span(1, x) collapses into a line with r perpendicular to it — the normal equations are not an algebraic trick, they are this one right angle. Drag m and c: the white trial point A(c, m) roams the plane, and ‖b − A(c, m)‖ never drops below |r|.' },
+    views: {
+      iso:    { label: { zh: '立体', en: '3D' }, az: -0.7, el: 0.35, dist: 8.5, tx: 0, ty: 0, tz: 0 },
+      edge:   { label: { zh: '边视 · 平面成线', en: 'Edge-on' }, az: 0.785, el: 0.6155, dist: 7.5 },
+      alongN: { label: { zh: '沿法向 · b 落在 p', en: 'Along n' }, az: -2.537, el: 0.947, dist: 7.5 }
+    },
+    toggles: [
+      { key: 'showB',     label: { zh: '向量 b = (y₁, y₂, y₃)', en: 'Vector b' },       color: '#fb7185', checked: true },
+      { key: 'showP',     label: { zh: '投影 p = A x̂',          en: 'Projection A x̂' }, color: '#a78bfa', checked: true },
+      { key: 'showR',     label: { zh: '残差 r',                en: 'Residual r' },     color: '#34d399', checked: true },
+      { key: 'showTrial', label: { zh: '试探点 A(c, m)',        en: 'Trial A(c, m)' },  color: '#e2e8f0', checked: true }
+    ],
+    draw(C) {
+      const { p, r } = projReg();
+      drawSpanPlane(C, ONES, PX, 1.0, 'span(1, x)');
+      /* 样本空间三轴：世界 x·y·z ≡ y₁·y₂·y₃ */
+      const dirs = [[[2.1, 0, 0], 'y₁'], [[0, 2.1, 0], 'y₂'], [[0, 0, 2.1], 'y₃']];
+      for (const [d, name] of dirs) {
+        line3(C, mul3(d, -1), d, { width: 1.4, color: AXIS });
+        arrowAt(C, d, mul3(d, 0.9), AXIS);
+        label3(C, mul3(d, 1.12), name, { font: 'italic 14px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+      }
+      drawVec(C, [0, 0, 0], ONES, CYAN_A + '0.95)', 2);
+      drawVec(C, [0, 0, 0], PX, CYAN_A + '0.95)', 2);
+      label3(C, ONES, '1', { font: 'italic 13px ' + FONT_MATH, color: '#2dd4ea', dx: 10, dy: -8 });
+      label3(C, PX, 'x', { font: 'italic 13px ' + FONT_MATH, color: '#2dd4ea', dx: 10, dy: -8 });
+      const trial = add3(mul3(ONES, state.c), mul3(PX, state.m));
+      if (state.showTrial) {
+        line3(C, trial, PY, { width: 1.3, dash: [4, 5], color: 'rgba(226,232,240,0.5)' });
+        solidDot(C, trial, 3, 'rgba(226,232,240,0.92)');
+        label3(C, trial, 'A(c, m)', { font: 'italic 12px ' + FONT_MATH, color: '#e2e8f0', dy: 16, align: 'center' });
+      }
+      if (state.showP) {
+        const sp = proj(C, p);
+        if (sp) glowDot(sp, 9, '#ffffff', VIO_A + '0.9)');
+        label3(C, p, 'p = A x̂', { font: 'italic 13px ' + FONT_MATH, color: VIOLET, dx: 10, dy: 12 });
+      }
+      if (state.showR) {
+        drawVec(C, p, PY, EME_A + '0.9)', 2);
+        label3(C, add3(p, mul3(r, 0.5)), 'r', { font: 'italic 13px ' + FONT_MATH, color: EMERALD, dx: 10 });
+        if (state.showP && len3(p) > 0.1 && len3(r) > 0.1)
+          rightAngle(C, p, mul3(norm(p), -1), norm(r), 0.14);
+        label3(C, add3(PY, [0, 0.32, 0]), 'AᵀA x̂ = Aᵀb',
+          { font: 'italic 12px ' + FONT_MATH, color: '#fbbf24', align: 'center', dy: -10 });
+      }
+      if (state.showB) {
+        drawVec(C, [0, 0, 0], PY, ROSE_A + '0.95)', 2.2);
+        const sb = proj(C, PY);
+        if (sb) glowDot(sb, 11, '#ffffff', ROSE_A + '0.9)');
+        label3(C, PY, 'b', { font: 'italic 14px ' + FONT_MATH, color: ROSE, dx: 10, dy: -10 });
+      }
+    },
+    readout() {
+      const { c: ch, m: mh, p, r } = projReg();
+      const trial = add3(mul3(ONES, state.c), mul3(PX, state.m));
+      const err = len3(sub(PY, trial));
+      return '<div class="sinC">b = <b>' + f3(PY) + '</b></div>' +
+        '<div class="cosC">x̂ = (ĉ, m̂) = <b>(' + fmtS(ch) + ', ' + fmtS(mh) + ')</b>&ensp;p = A x̂ = <b>' + f3(p) + '</b></div>' +
+        '<div class="tanC">r·1 = <b>' + fmtS(dot3(ONES, r)) + '</b>&ensp;r·x = <b>' + fmtS(dot3(PX, r)) + '</b>&ensp;|r| = <b>' + fmt(len3(r)) + '</b></div>' +
+        '<div>‖b − A(c, m)‖ = <b>' + fmt(err) + '</b> ≥ |r| = <b>' + fmt(len3(r)) + '</b></div>' +
+        '<div class="dim">' + t({ zh: '数据 (xᵢ, yᵢ)：(−1, −0.5) (0.3, 0.6) (1.2, 1.4)', en: 'data (xᵢ, yᵢ): (−1, −0.5) (0.3, 0.6) (1.2, 1.4)' }) + '</div>';
+    }
+  }
+};
+
+/* ================= 常量与状态（引擎区，以下一般无需改动） ================= */
+const TAU = Math.PI * 2;
+const WAVE_LEN = 8;      // t 轴的世界长度（可视窗口）
+const NEAR = 0.15;       // 近裁剪面
+
+const FONT_CN = 'ui-sans-serif,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif';
+const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
+
+const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
+const samples = [];
+let curTab = null;
+const RELABEL = [];
+const cams = {};
+let cam = null;
+let tween = null;
+const lastView = {};
+const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ③ 采样 —— 按你的工具需要扩展字段                           ║
+   ║  原则：记录"当时的真实值"，参数中途改变时历史不重算            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+function pushSample() {
+  const b = bVec();
+  samples.push({
+    t: state.t,
+    rnorm: len3(sub(b, projSub(b).p)),            /* 场景 1：当时真实的残差长度 */
+    sse: ssq(state.m, state.c, dataset())         /* 场景 3：当时真实的 SSE */
+  });
+}
+
+/* ================= 画布 ================= */
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = 1, FOCAL = 900, CX = 0, CY = 0, bgGrad = null;
+
+function resize() {
+  DPR = Math.min(2.5, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  CX = W / 2; CY = H / 2;
+  FOCAL = 1.2 * Math.min(H, W * 1.1);
+  bgGrad = ctx.createRadialGradient(W*0.5, H*0.3, 0, W*0.5, H*0.42, Math.max(W, H)*0.95);
+  bgGrad.addColorStop(0, '#0c1526');
+  bgGrad.addColorStop(1, '#05070d');
+}
+window.addEventListener('resize', resize);
+
+/* ================= 基础数学 ================= */
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const mod2pi = a => { a %= TAU; if (a < 0) a += TAU; return a; };
+const wrapPI = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
+const ease = k => k < 0.5 ? 4*k*k*k : 1 - Math.pow(-2*k + 2, 3) / 2;
+const fmt = (x, d = 2) => x.toFixed(d);
+const fmtS = (x, d = 2) => (x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
+
+const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+const dot3 = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+
+/* ================= 轨道相机与投影 ================= */
+function makeCam() {
+  const cp = Math.cos(cam.el), sp = Math.sin(cam.el);
+  const eye = [
+    cam.tx + cam.dist * cp * Math.sin(cam.az),
+    cam.ty + cam.dist * sp,
+    cam.tz + cam.dist * cp * Math.cos(cam.az)
+  ];
+  const f = norm(sub([cam.tx, cam.ty, cam.tz], eye));
+  const r = norm(cross(f, [0, 1, 0]));
+  const u = cross(r, f);
+  return { eye, f, r, u };
+}
+function camPt(C, p) {
+  const d = sub(p, C.eye);
+  return [dot3(d, C.r), dot3(d, C.u), dot3(d, C.f)];
+}
+function scr(c) { const s = FOCAL / c[2]; return [CX + c[0]*s, CY - c[1]*s]; }
+function proj(C, p) { const c = camPt(C, p); return c[2] < NEAR ? null : scr(c); }
+function clipNear(a, b) {
+  const t = (NEAR - a[2]) / (b[2] - a[2]);
+  return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, NEAR];
+}
+
+/* 折线路径（支持 null 断点 + 近平面裁剪）；返回 [首点, 末点] 屏幕坐标 */
+function polyPath(C, pts) {
+  if (pts.length < 2) return null;
+  let head = null, tail = null, contin = false, prev = null;
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    const P = pts[i];
+    if (P === null) { prev = null; contin = false; continue; }
+    const cur = camPt(C, P);
+    if (prev !== null) {
+      let a = prev, b = cur;
+      const av = a[2] >= NEAR, bv = b[2] >= NEAR;
+      if (av || bv) {
+        if (!av) a = clipNear(a, b);
+        if (!bv) b = clipNear(b, a);
+        const sA = scr(a), sB = scr(b);
+        if (!contin) ctx.moveTo(sA[0], sA[1]);
+        ctx.lineTo(sB[0], sB[1]);
+        if (!head) head = sA;
+        tail = sB;
+        contin = bv;
+      } else {
+        contin = false;
+      }
+    }
+    prev = cur;
+  }
+  return head ? [head, tail] : null;
+}
+
+function strokePoly(C, pts, o) {
+  const ht = polyPath(C, pts);
+  if (!ht) return;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = o.width || 2;
+  if (o.alpha != null) ctx.globalAlpha = o.alpha;
+  if (o.dash) ctx.setLineDash(o.dash);
+  if (o.fade) {
+    const h = ht[0], t = ht[1];
+    if (Math.hypot(t[0]-h[0], t[1]-h[1]) < 2) {
+      ctx.strokeStyle = o.fade[0];
+    } else {
+      const g = ctx.createLinearGradient(h[0], h[1], t[0], t[1]);
+      g.addColorStop(0, o.fade[0]);
+      g.addColorStop(1, o.fade[1]);
+      ctx.strokeStyle = g;
+    }
+  } else {
+    ctx.strokeStyle = o.color;
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+const line3 = (C, a, b, o) => strokePoly(C, [a, b], o);
+
+function glowDot(s, r, core, mid) {
+  const g = ctx.createRadialGradient(s[0], s[1], 0, s[0], s[1], r);
+  g.addColorStop(0, core);
+  g.addColorStop(0.35, mid);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+function solidDot(C, p, r, color) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+
+function label3(C, p, text, o) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.save();
+  ctx.font = o.font || ((o.size || 12) + 'px ' + FONT_CN);
+  ctx.fillStyle = o.color || '#c4d2e6';
+  ctx.textAlign = o.align || 'left';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(3,6,12,.85)';
+  ctx.shadowBlur = 4;
+  ctx.fillText(text, s[0] + (o.dx || 0), s[1] + (o.dy || 0));
+  ctx.restore();
+}
+
+function arrowAt(C, tip3, before3, color) {
+  const t = proj(C, tip3), b = proj(C, before3);
+  if (!t || !b) return;
+  const a = Math.atan2(t[1]-b[1], t[0]-b[0]);
+  const L = 9;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.4;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a-0.42), t[1]-L*Math.sin(a-0.42));
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a+0.42), t[1]-L*Math.sin(a+0.42));
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* ================= 常用场景部件 ================= */
+const AXIS = 'rgba(159,176,200,0.9)';
+const AXIS_DIM = 'rgba(159,176,200,0.5)';
+
+/* 坐标轴：o = { ex, ey, yTicks:[], xTicks:[], tAxis:bool, v(秒刻度间距的波速) } */
+function drawAxes(C, o) {
+  const ex = o.ex, ey = o.ey;
+  line3(C, [-ex, 0, 0], [ex, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [ex, 0, 0], [ex - 0.2, 0, 0], AXIS);
+  label3(C, [ex + 0.22, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  line3(C, [0, -ey, 0], [0, ey, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, ey, 0], [0, ey - 0.2, 0], AXIS);
+  label3(C, [0, ey + 0.18, 0], 'y', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  if (o.tAxis) {
+    line3(C, [0, 0, 0], [0, 0, WAVE_LEN + 0.5], { width: 1.4, color: AXIS });
+    arrowAt(C, [0, 0, WAVE_LEN + 0.5], [0, 0, WAVE_LEN + 0.3], AXIS);
+    label3(C, [0, 0, WAVE_LEN + 0.9], 't', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+    const v = o.v || 1;
+    const every = v < 0.8 ? 2 : 1;
+    for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+      line3(C, [0, -0.06, k*v], [0, 0.06, k*v], { width: 1.2, color: AXIS_DIM });
+      if (k % every === 0) {
+        label3(C, [0, -0.25, k*v], k + 's', { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+      }
+    }
+  }
+  for (const k of (o.yTicks || [])) {
+    for (const yv of [k, -k]) {
+      line3(C, [-0.05, yv, 0], [0.05, yv, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [-0.13, yv, 0], (yv < 0 ? '−' : '') + Math.abs(yv), { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+    }
+  }
+  for (const k of (o.xTicks || [])) {
+    for (const xv of [k, -k]) {
+      line3(C, [xv, -0.05, 0], [xv, 0.05, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [xv, -0.24, 0], (xv < 0 ? '−' : '') + Math.abs(xv), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+    }
+  }
+}
+
+/* z=0 平面方格网格（几何类场景） */
+function drawGridXY(C, g, step) {
+  const n = Math.round(g / step);
+  for (let i = -n; i <= n; i++) {
+    if (i === 0) continue;
+    const u = i * step;
+    line3(C, [u, -g, 0], [u, g, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+    line3(C, [-g, u, 0], [g, u, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+  }
+}
+
+/* y–t 时间平面网格（流式波形类场景）：o = { yMax, v } */
+function drawTimeGrid(C, o) {
+  const g = o.yMax, v = o.v;
+  for (let i = Math.round(-g*2); i <= Math.round(g*2); i++) {
+    if (i === 0) continue;
+    line3(C, [0, i/2, 0], [0, i/2, WAVE_LEN], { width: 1, color: 'rgba(148,163,184,0.10)' });
+  }
+  for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+    line3(C, [0, -g, k*v], [0, g, k*v], { width: 1, color: 'rgba(148,163,184,0.07)' });
+  }
+}
+
+/* 周期标尺（琥珀）：在平面 x=px、高度 yb 处，从 z=0 画到 z=T·v */
+function drawPeriodBracket(C, Tsec, v, px, yb, text) {
+  const zT = Tsec * v;
+  if (zT > WAVE_LEN + 0.01) return;
+  const amber = 'rgba(251,191,36,0.75)';
+  line3(C, [px, yb, 0], [px, yb, zT], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, 0], [px, yb + 0.06, 0], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, zT], [px, yb + 0.06, zT], { width: 1.2, color: amber });
+  label3(C, [px, yb - 0.2, zT/2], text, { size: 10.5, color: 'rgba(251,191,36,.9)', align: 'center' });
+}
+
+/* 单位圆（半径 A，位于 z=0 平面，青色源几何） */
+function drawCircle(C, A) {
+  const cpts = [];
+  for (let i = 0; i <= 72; i++) {
+    const a = i / 72 * TAU;
+    cpts.push([A * Math.cos(a), A * Math.sin(a), 0]);
+  }
+  strokePoly(C, cpts, { width: 6, color: 'rgba(45,212,234,0.13)' });
+  strokePoly(C, cpts, { width: 2, color: 'rgba(45,212,234,0.95)' });
+  for (let q = 0; q < 4; q++) {
+    const a = q * Math.PI / 2;
+    line3(C, [A*0.95*Math.cos(a), A*0.95*Math.sin(a), 0],
+             [A*1.06*Math.cos(a), A*1.06*Math.sin(a), 0],
+             { width: 1, color: 'rgba(45,212,234,0.5)' });
+  }
+  solidDot(C, [0, 0, 0], 2.2, 'rgba(159,176,200,0.9)');
+}
+
+/* 角度弧 θ（琥珀度量注记） */
+function drawAngleArc(C, th, A) {
+  const thm = mod2pi(th);
+  if (thm <= 0.03) return;
+  const r0 = Math.max(0.14, Math.min(0.34, 0.5 * A));
+  const n = Math.max(2, Math.ceil(thm / 0.06));
+  const apts = [];
+  for (let j = 0; j <= n; j++) {
+    const a = thm * j / n;
+    apts.push([r0 * Math.cos(a), r0 * Math.sin(a), 0]);
+  }
+  strokePoly(C, apts, { width: 1.6, color: 'rgba(251,191,36,0.9)' });
+  label3(C, [(r0 + 0.15) * Math.cos(thm/2), (r0 + 0.15) * Math.sin(thm/2), 0], 'θ',
+    { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+}
+
+/* 读数区固定首两行 */
+function readoutHead() {
+  const th = state.theta;
+  const deg = (mod2pi(th) * 180 / Math.PI).toFixed(0);
+  const lap = fmt(th / TAU);
+  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;θ = ωt = <b>' + fmt(th) + '</b> rad</div>' +
+         '<div class="dim">' + t({ zh: '≡ ' + deg + '°（第 ' + lap + ' 圈）', en: '≡ ' + deg + '° (turn ' + lap + ')' }) + '</div>';
+}
+
+/* ================= 主绘制与主循环 ================= */
+function draw() {
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+  const C = makeCam();
+  SCENES[curTab].draw(C);
+}
+
+function resetSim() {
+  state.t = 0;
+  state.theta = 0;
+  samples.length = 0;
+  pushSample();
+}
+
+let lastTs = performance.now(), lastRO = 0;
+function frame(ts) {
+  const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
+  lastTs = ts;
+
+  if (tween) {
+    const k = Math.min(1, (ts - tween.t0) / tween.dur);
+    const e = ease(k);
+    const f = tween.from, o = tween.to;
+    cam.az = f.az + wrapPI(o.az - f.az) * e;
+    cam.el = f.el + (o.el - f.el) * e;
+    cam.dist = f.dist + (o.dist - f.dist) * e;
+    cam.tx = f.tx + (o.tx - f.tx) * e;
+    cam.ty = f.ty + (o.ty - f.ty) * e;
+    cam.tz = f.tz + (o.tz - f.tz) * e;
+    if (k >= 1) tween = null;
+  }
+
+  if (state.running) {
+    state.t += dt;
+    state.theta += state.omega * dt;
+    pushSample();
+  }
+  const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
+  while (samples.length && samples[0].t < state.t - windowSec) samples.shift();
+
+  draw();
+  if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
+  requestAnimationFrame(frame);
+}
+
+const roEl = document.getElementById('readout');
+function updateReadout() { roEl.innerHTML = SCENES[curTab].readout(); }
+
+/* ================= UI 生成（由 ①② 声明驱动） ================= */
+function buildParams() {
+  const host = document.getElementById('paramsHost');
+  PARAMS.forEach(p => {
+    const wrap = document.createElement('div');
+    wrap.className = 'ctl';
+    wrap.innerHTML = '<div class="top"><label></label><span class="val"></span></div>';
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
+    const val = wrap.querySelector('.val');
+    const upd = () => {
+      const raw = parseFloat(input.value);
+      state[p.key] = p.map ? p.map(raw) : raw;
+      val.textContent = p.fmt(raw);
+    };
+    input.addEventListener('input', upd);
+    wrap.appendChild(input);
+    host.appendChild(wrap);
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+function buildToggles() {
+  const host = document.getElementById('togglesHost');
+  Object.keys(SCENES).forEach(id => {
+    const grp = document.createElement('div');
+    grp.className = 'toggles';
+    grp.dataset.tab = id;
+    SCENES[id].toggles.forEach(tg => {
+      if (!(tg.key in state)) state[tg.key] = tg.checked;
+      const lab = document.createElement('label');
+      lab.className = 'tg';
+      lab.innerHTML = '<input type="checkbox" data-key="' + tg.key + '"' + (state[tg.key] ? ' checked' : '') + '>' +
+        '<i class="dot" style="--c:' + tg.color + '"></i><span class="tgl"></span>';
+      const cb = lab.querySelector('input');
+      cb.addEventListener('change', () => {
+        state[tg.key] = cb.checked;
+        document.querySelectorAll('input[data-key="' + tg.key + '"]').forEach(o => { o.checked = cb.checked; });
+      });
+      const relabel = () => { lab.querySelector('.tgl').innerHTML = t(tg.label); };
+      RELABEL.push(relabel);
+      relabel();
+      grp.appendChild(lab);
+    });
+    host.appendChild(grp);
+  });
+}
+
+function buildViews() {
+  const host = document.getElementById('viewsHost');
+  Object.keys(SCENES).forEach(id => {
+    const row = document.createElement('div');
+    row.className = 'views';
+    row.dataset.tab = id;
+    const lab = document.createElement('span');
+    lab.className = 'vlabel';
+    row.appendChild(lab);
+    const labRelabel = () => { lab.textContent = t(UI.views); };
+    RELABEL.push(labRelabel);
+    labRelabel();
+    Object.keys(SCENES[id].views).forEach(name => {
+      const b = document.createElement('button');
+      b.className = 'btn vbtn';
+      b.dataset.view = name;
+      b.addEventListener('click', () => applyView(name));
+      row.appendChild(b);
+      const relabel = () => { b.textContent = t(SCENES[id].views[name].label); };
+      RELABEL.push(relabel);
+      relabel();
+    });
+    host.appendChild(row);
+  });
+}
+
+function buildTabs() {
+  const nav = document.getElementById('tabsNav');
+  Object.keys(SCENES).forEach(id => {
+    const b = document.createElement('button');
+    b.className = 'tab';
+    b.dataset.tab = id;
+    b.addEventListener('click', () => switchTab(id));
+    nav.appendChild(b);
+    const relabel = () => { b.textContent = t(SCENES[id].label); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+/* ================= 视角与页签 ================= */
+function refreshViewButtons() {
+  document.querySelectorAll('.vbtn').forEach(b => {
+    const row = b.closest('.views');
+    b.classList.toggle('active', row.dataset.tab === curTab && b.dataset.view === lastView[curTab]);
+  });
+}
+function viewDist(d) { return (W < 820 || W < H) ? d * 1.4 : d; }
+function applyView(name) {
+  const vw = SCENES[curTab].views[name];
+  if (!vw) return;
+  if (vw.onSelect) vw.onSelect();   /* 可选联动：如自动开启该视角对应的曲线开关 */
+  tween = {
+    from: { az: cam.az, el: cam.el, dist: cam.dist, tx: cam.tx, ty: cam.ty, tz: cam.tz },
+    to:   { az: vw.az, el: vw.el, dist: viewDist(vw.dist), tx: vw.tx || 0, ty: vw.ty || 0, tz: vw.tz || 0 },
+    t0: performance.now(),
+    dur: REDUCED ? 1 : 750
+  };
+  lastView[curTab] = name;
+  refreshViewButtons();
+}
+
+const brandDesc = document.getElementById('brandDesc');
+const tipsEl = document.getElementById('tips');
+function switchTab(id) {
+  if (id === curTab) return;
+  curTab = id;
+  tween = null;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+  document.querySelectorAll('.toggles[data-tab], .views[data-tab]').forEach(el => {
+    el.style.display = el.dataset.tab === id ? '' : 'none';
+  });
+  cam = cams[id];
+  brandDesc.textContent = t(SCENES[id].brand);
+  tipsEl.textContent = t(SCENES[id].tips);
+  refreshViewButtons();
+  updateReadout();
+}
+
+/* ================= 播放 / 重置 / 折叠 ================= */
+const btnPlay = document.getElementById('btnPlay');
+function togglePlay() {
+  state.running = !state.running;
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+}
+btnPlay.addEventListener('click', togglePlay);
+document.getElementById('btnReset').addEventListener('click', resetSim);
+
+const panel = document.getElementById('panel');
+const btnFold = document.getElementById('btnFold');
+btnFold.addEventListener('click', () => {
+  const c = panel.classList.toggle('collapsed');
+  btnFold.textContent = c ? '+' : '−';
+});
+if (window.innerWidth < 760) {
+  panel.classList.add('collapsed');
+  btnFold.textContent = '+';
+}
+
+/* ================= 语言切换 ================= */
+function applyLang() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.title = t(TOOL.title);
+  document.querySelector('.brand h1').textContent = t(TOOL.h1);
+  document.getElementById('panelTitle').textContent = t(UI.panelTitle);
+  document.querySelector('.hint').textContent = t(UI.hint);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+  document.getElementById('btnReset').textContent = t(UI.reset);
+  RELABEL.forEach(f => f());
+  brandDesc.textContent = t(SCENES[curTab].brand);
+  tipsEl.textContent = t(SCENES[curTab].tips);
+  updateReadout();
+}
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('lang', l);
+    history.replaceState(null, '', u);
+  } catch (e) {}
+  applyLang();
+}
+document.getElementById('btnLang').addEventListener('click', () => setLang(LANG === 'zh' ? 'en' : 'zh'));
+document.getElementById('verBadge').textContent = 'v' + VERSION;
+
+/* ================= 交互：旋转 / 平移 / 缩放 ================= */
+const pointers = new Map();
+let pinch = null;
+
+function pan(dx, dy) {
+  const C = makeCam();
+  const s = cam.dist / FOCAL;
+  cam.tx = clamp(cam.tx - C.r[0]*dx*s + C.u[0]*dy*s, -6, 6);
+  cam.ty = clamp(cam.ty - C.r[1]*dx*s + C.u[1]*dy*s, -5, 5);
+  cam.tz = clamp(cam.tz - C.r[2]*dx*s + C.u[2]*dy*s, -3, 11);
+}
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, btn: e.button });
+  tween = null;
+  lastView[curTab] = null;
+  refreshViewButtons();
+  if (pointers.size === 2) {
+    const vs = Array.from(pointers.values());
+    pinch = {
+      gap: Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y),
+      cx: (vs[0].x + vs[1].x) / 2,
+      cy: (vs[0].y + vs[1].y) / 2
+    };
+  }
+  canvas.classList.add('dragging');
+});
+
+canvas.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  p.x = e.clientX;
+  p.y = e.clientY;
+  if (pointers.size === 1) {
+    const panMode = e.shiftKey || (e.buttons & 2) || p.btn === 2 || p.btn === 1;
+    if (panMode) {
+      pan(dx, dy);
+    } else {
+      cam.az -= dx * 0.0055;
+      cam.el = clamp(cam.el + dy * 0.0055, -1.45, 1.53);
+    }
+  } else if (pointers.size === 2 && pinch) {
+    const vs = Array.from(pointers.values());
+    const gap = Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y);
+    const cx = (vs[0].x + vs[1].x) / 2, cy = (vs[0].y + vs[1].y) / 2;
+    if (gap > 1) cam.dist = clamp(cam.dist * pinch.gap / gap, 4.5, 60);
+    pan(cx - pinch.cx, cy - pinch.cy);
+    pinch = { gap: gap, cx: cx, cy: cy };
+  }
+});
+
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+  if (!pointers.size) canvas.classList.remove('dragging');
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  tween = null;
+  cam.dist = clamp(cam.dist * Math.exp(e.deltaY * 0.0012), 4.5, 60);
+}, { passive: false });
+
+canvas.addEventListener('dblclick', () => applyView(Object.keys(SCENES[curTab].views)[0]));
+
+window.addEventListener('keydown', e => {
+  const tg = e.target.tagName;
+  if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || tg === 'BUTTON') return;
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'r' || e.key === 'R') resetSim();
+  else if (e.key === 't' || e.key === 'T') {
+    const keys = Object.keys(SCENES);
+    switchTab(keys[(keys.indexOf(curTab) + 1) % keys.length]);
+  }
+  else if (e.key >= '1' && e.key <= '9') {
+    const names = Object.keys(SCENES[curTab].views);
+    const i = +e.key - 1;
+    if (i < names.length) applyView(names[i]);
+  }
+});
+
+/* ================= 启动 ================= */
+resize();
+buildTabs();
+buildParams();
+buildToggles();
+buildViews();
+Object.keys(SCENES).forEach(id => {
+  const first = Object.keys(SCENES[id].views)[0];
+  const v = SCENES[id].views[first];
+  cams[id] = { az: v.az, el: v.el, dist: viewDist(v.dist), tx: v.tx || 0, ty: v.ty || 0, tz: v.tz || 0 };
+  lastView[id] = first;
+});
+switchTab(Object.keys(SCENES)[0]);
+applyLang();
+resetSim();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
