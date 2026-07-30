@@ -56,6 +56,7 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [最小二乘与正交投影 · Least Squares & Orthogonal Projection](outputs/least-squares-orthogonal-projection-3d.html) | When Ax = b has no solution: b projected orthogonally onto the column space, residuals perpendicular to it, SSE as a paraboloid bowl, and the normal equations as the right angle at its bottom |
 | [证明的本质 · The Essence of Proof](outputs/proof-logic-induction-3d.html) | P→Q as set inclusion (contrapositive = the same picture), quantifier order on a truth grid, n²−n+41 dying to one counterexample, and induction as a wave toppling infinitely many dominoes |
 | [优化、凸性与梯度下降 · Optimisation & Gradient Descent](outputs/optimization-convexity-gradient-descent-3d.html) | Descent as repeated local steps: learning-rate regimes on a 1-D curve, zig-zag across a badly conditioned valley, local minima in a double well, and ∇f = λ∇g tangency on a constraint circle |
+| [算法复杂度与增长速度 · Algorithmic Complexity & Growth Rates](outputs/algorithmic-complexity-growth-3d.html) | Six growth orders racing (log-axis view turns 2ⁿ into a straight line), Big-O as c·g(n) covering f(n) beyond n₀, binary search as exactly log₂n halvings, and recurrences unrolled into trees |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
