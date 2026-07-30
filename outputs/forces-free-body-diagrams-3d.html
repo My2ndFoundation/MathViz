@@ -1,0 +1,1434 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="tool-version" content="1.0.0">
+<meta name="engine-version" content="1.0.0">
+<title>力、约束与自由体图</title>
+<!-- ============================================================
+  力、约束与自由体图 · Forces, Constraints & Free-Body Diagrams
+  设计规范：math-viz-design-system.md（令牌 / 组件 / 绘制语言 / 交互词汇）
+  引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
+
+  版本记录（changelog，新→旧）：
+    1.0.0  2026-07-30  首个版本：斜面自由体图（世界系/斜面系切换 + mg 分解）、
+                       支持力 R 的约束响应、静摩擦极限与 impending motion、
+                       连接粒子系统（张力 + 两张独立自由体图），含双语
+============================================================ -->
+<style>
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  --angle-amber:#fbbf24;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none}
+body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)}
+#scene{position:fixed;inset:0;display:block;touch-action:none;cursor:grab}
+#scene.dragging{cursor:grabbing}
+
+/* ---- 标题区 ---- */
+.brand{position:fixed;top:20px;left:24px;pointer-events:none;user-select:none;max-width:min(520px,42vw)}
+.brand .eyebrow{font-size:10px;letter-spacing:.22em;color:rgba(159,176,200,.72);margin-bottom:6px}
+.brand h1{margin:0;font-family:var(--font-math);font-weight:600;font-size:26px;letter-spacing:.08em;
+  color:#eef3fa;text-shadow:0 2px 20px rgba(45,212,234,.20)}
+.brand p{margin:7px 0 0;font-size:12.5px;line-height:1.65;color:rgba(159,176,200,.85)}
+
+/* ---- 页签 ---- */
+.tabs{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:5;
+  display:flex;gap:4px;padding:4px;border-radius:999px;
+  background:var(--panel-bg);border:1px solid var(--panel-line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
+.tab{border:1px solid transparent;background:transparent;color:#b8c6da;
+  font-size:12.5px;font-family:var(--font-cn);padding:6px 15px;border-radius:999px;cursor:pointer;
+  transition:color .15s,border-color .15s,background .15s}
+.tab:hover{color:#e8f2fb}
+.tab:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.tab.active{background:rgba(45,212,234,.13);border-color:rgba(45,212,234,.55);color:#9be8f7}
+
+/* ---- 底部提示 ---- */
+.hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);pointer-events:none;user-select:none;
+  font-size:11px;letter-spacing:.05em;color:rgba(159,176,200,.6);white-space:nowrap}
+
+/* ---- 控制面板 ---- */
+.panel{position:fixed;top:14px;right:14px;width:304px;max-height:calc(100vh - 28px);overflow-y:auto;
+  background:var(--panel-bg);border:1px solid var(--panel-line);border-radius:16px;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 18px 50px rgba(0,0,0,.45);user-select:none}
+.panel::-webkit-scrollbar{width:6px}
+.panel::-webkit-scrollbar-thumb{background:rgba(148,163,184,.25);border-radius:3px}
+.panel-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px 10px;
+  font-size:13px;font-weight:600;letter-spacing:.06em;color:#dbe6f5}
+.panel:not(.collapsed) .panel-head{border-bottom:1px solid var(--panel-line)}
+.ph-right{display:flex;align-items:center;gap:7px}
+.ver{font-family:var(--font-mono);font-size:10px;color:rgba(159,176,200,.55)}
+.lang{padding:3px 8px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:11px;cursor:pointer}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.fold{width:24px;height:24px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:14px;line-height:1;cursor:pointer}
+.fold:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.panel.collapsed .panel-body{display:none}
+.panel-body{padding:6px 14px 14px}
+
+/* 滑杆 */
+.ctl{margin:11px 0 3px}
+.ctl .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.ctl label{font-size:12px;color:#c6d2e4}
+.ctl label i{font-family:var(--font-math);font-style:italic;font-size:13px}
+.ctl .val{font-family:var(--font-mono);font-size:11.5px;color:#7dd3fc}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;cursor:pointer;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--trace-cyan);margin-top:-5px;border:2px solid #0b1220;box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-moz-range-thumb{width:11px;height:11px;border:2px solid #0b1220;border-radius:50%;
+  background:var(--trace-cyan);box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-offset:2px;border-radius:4px}
+
+/* 按钮 */
+.row{display:flex;gap:8px;margin:13px 0 4px}
+.btn{padding:6px 10px;border-radius:9px;border:1px solid rgba(148,163,184,.25);
+  background:rgba(30,41,59,.55);color:#d7e2f2;font-size:12px;font-family:var(--font-cn);cursor:pointer;
+  transition:border-color .15s,color .15s,background .15s}
+.btn:hover{border-color:rgba(45,212,234,.55)}
+.btn:focus-visible,.fold:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.btn.wide{flex:1}
+.btn.active{border-color:rgba(45,212,234,.8);background:rgba(45,212,234,.12);color:#9be8f7}
+.views{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 2px}
+.views .vlabel{font-size:11.5px;color:rgba(159,176,200,.8);margin-right:2px}
+.vbtn{padding:5px 9px;font-size:11.5px}
+
+/* 开关 */
+.toggles{display:flex;flex-wrap:wrap;gap:7px 12px;margin:12px 0 2px}
+.tg{display:flex;align-items:center;gap:6px;font-size:12px;color:#c6d2e4;cursor:pointer}
+.tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
+.tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
+
+/* 读数与提示 */
+.readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
+  font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
+.readout b{font-weight:600;color:#e8eef7}
+.readout .sinC b{color:var(--trace-rose)}
+.readout .cosC b{color:var(--trace-violet)}
+.readout .tanC b{color:var(--trace-emerald)}
+.readout .cotC b{color:var(--trace-orange)}
+.readout .dim{color:rgba(159,176,200,.6)}
+.tips{margin-top:11px;font-size:11px;line-height:1.65;color:rgba(159,176,200,.72)}
+
+@media (max-width:760px){
+  .brand{top:12px;left:14px;max-width:70vw}
+  .brand h1{font-size:20px}
+  .brand p{display:none}
+  .tabs{top:52px;left:14px;transform:none}
+  .panel{left:10px;right:10px;top:auto;bottom:10px;width:auto;max-height:62vh}
+  .hint{display:none}
+}
+</style>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+
+<div class="brand">
+  <div class="eyebrow">INTERACTIVE MATH · 交互式数学</div>
+  <h1>力 · 约束与自由体图</h1>
+  <p id="brandDesc"></p>
+</div>
+
+<nav class="tabs" id="tabsNav"></nav>
+
+<aside class="panel" id="panel">
+  <div class="panel-head"><span id="panelTitle">参数与视角</span>
+    <span class="ph-right"><span class="ver" id="verBadge"></span><button class="lang" id="btnLang" title="切换语言 / Switch language">EN</button><button class="fold" id="btnFold" title="收起 / 展开">−</button></span></div>
+  <div class="panel-body">
+    <div id="paramsHost"></div>
+    <div class="row">
+      <button class="btn wide" id="btnPlay">⏸ 暂停</button>
+      <button class="btn" id="btnReset">↺ 重置</button>
+    </div>
+    <div id="togglesHost"></div>
+    <div id="viewsHost"></div>
+    <div class="readout" id="readout"></div>
+    <div class="tips" id="tips"></div>
+  </div>
+</aside>
+
+<div class="hint">拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签</div>
+
+<script>
+'use strict';
+/* ================= i18n 核心（引擎区） ================= */
+const LANG_KEY = 'mathviz-lang';
+function resolveLang(){
+  try{
+    const q = new URLSearchParams(location.search).get('lang');
+    if (q === 'zh' || q === 'en') return q;
+    const s = localStorage.getItem(LANG_KEY);
+    if (s === 'zh' || s === 'en') return s;
+  }catch(e){}
+  return (navigator.language || 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+let LANG = resolveLang();
+function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
+
+const STARTER_VERSION = '1.0.0';
+const VERSION = document.querySelector('meta[name="tool-version"]').content;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ⓪ 工具元信息 —— id 与双语标题                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const TOOL = {
+  id: 'forces-free-body-diagrams-3d',
+  title: { zh: '力、约束与自由体图', en: 'Forces, Constraints & Free-Body Diagrams' },
+  h1:    { zh: '力 · 约束与自由体图', en: 'Forces · Free-Body Diagrams' }
+};
+
+/* 引擎 UI 文案（一般无需改动） */
+const UI = {
+  panelTitle: { zh: '参数与视角', en: 'Parameters & Views' },
+  pause:  { zh: '⏸ 暂停', en: '⏸ Pause' },
+  resume: { zh: '▶ 继续', en: '▶ Resume' },
+  reset:  { zh: '↺ 重置', en: '↺ Reset' },
+  views:  { zh: '视角', en: 'View' },
+  hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
+            en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
+};
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ① 参数声明 —— 自动生成滑杆                                ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const PARAMS = [
+  { key: 'm1',  label: { zh: '质量 <i>m₁</i>',                en: 'Mass <i>m₁</i>' },                min: 0.5, max: 3,   step: 0.05, value: 1.5, fmt: v => fmt(v) + ' kg' },
+  { key: 'm2',  label: { zh: '悬挂质量 <i>m₂</i>（页签 4）',   en: 'Hanging mass <i>m₂</i> (tab 4)' }, min: 0.2, max: 2.5, step: 0.05, value: 0.8, fmt: v => fmt(v) + ' kg' },
+  { key: 'inc', label: { zh: '斜面角 <i>θ</i>',               en: 'Incline angle <i>θ</i>' },         min: 0,   max: 60,  step: 1,    value: 28,  fmt: v => fmt(v, 0) + '°', map: v => v * Math.PI / 180 },
+  { key: 'P',   label: { zh: '外力 <i>P</i>（页签 1·3）',      en: 'Applied force <i>P</i> (tab 1·3)' }, min: 0, max: 25,  step: 0.25, value: 6,   fmt: v => fmt(v) + ' N' },
+  { key: 'beta',label: { zh: '外力角 <i>β</i>（相对表面）',    en: 'Force angle <i>β</i> (from surface)' }, min: -60, max: 60, step: 1, value: 0,  fmt: v => fmtS(v, 0) + '°', map: v => v * Math.PI / 180 },
+  { key: 'Q',   label: { zh: '竖直外力 <i>Q</i>（页签 2，+压 −拉）', en: 'Vertical force <i>Q</i> (tab 2, + press / − pull)' }, min: -15, max: 15, step: 0.25, value: 0, fmt: v => fmtS(v) + ' N' },
+  { key: 'mu',  label: { zh: '静摩擦系数 <i>μ</i>',           en: 'Static friction <i>μ</i>' },       min: 0,   max: 1,   step: 0.01, value: 0.45, fmt: v => fmt(v) },
+  { key: 'g',   label: { zh: '重力 <i>g</i>',                 en: 'Gravity <i>g</i>' },               min: 1.6, max: 20,  step: 0.1,  value: 9.8, fmt: v => fmt(v, 1) + ' m/s²' }
+];
+
+/* ---------- 场景级常量与辅助（只用引擎部件拼装，不触碰引擎） ---------- */
+const TSPD = 1.2;      // 时间轴展开速度（世界单位 / 秒）
+const SLOWMO = 0.55;   // 动力学慢放倍率（观察用；读数为真实值）
+const MUK = 0.8;       // 简化模型：动摩擦系数 μk = 0.8 μs（页签内明确标注）
+const KH = 0.08;       // 力历史曲线比例（世界单位 / N）
+const KV4 = 0.6;       // 页签 4 速度曲线比例（世界单位 / (m/s)）
+const HCLIP = 2.35;    // 力曲线高度裁剪
+const ROSE = '251,113,133', VIOLET = '167,139,250', EMER = '52,211,153', ORNG = '251,146,60';
+const C_ROSE = '#fb7185', C_VIOLET = '#a78bfa', C_EMER = '#34d399', C_ORNG = '#fb923c';
+const WHT = 'rgba(241,245,249,0.92)';
+
+function setToggle(key, on) {
+  state[key] = on;
+  document.querySelectorAll('input[data-key="' + key + '"]').forEach(o => { o.checked = on; });
+}
+function zOf(ts) { return (state.t - ts) * TSPD; }
+
+/* 可读力标：本场景最大力 → 0.95 世界单位；同帧内比例真实，读数显示真实牛顿值 */
+function fscale(maxF) { return 0.95 / Math.max(maxF, 6); }
+
+/* 力箭头：实线 + 箭头 + 末端标注（六处同源之一） */
+function forceArrow(C, from, dir, len, color, text, o) {
+  o = o || {};
+  if (len < 1e-4) return;
+  const tip = [from[0] + dir[0] * len, from[1] + dir[1] * len, from[2]];
+  line3(C, from, tip, { width: o.width || 2, alpha: o.alpha != null ? o.alpha : 0.95, color: color });
+  arrowAt(C, tip, from, color);
+  if (text) label3(C, [tip[0] + dir[0] * 0.18 + (o.dx || 0), tip[1] + dir[1] * 0.18 + (o.dy || 0), tip[2]],
+    text, { font: 'italic 12px ' + FONT_MATH, color: color, align: o.align || 'center' });
+}
+
+/* 方块轮廓（中心 c，半边 h，边方向 u/n 或经 mapPt 旋转） */
+function blockOutline(C, corners, alpha) {
+  strokePoly(C, corners.concat([corners[0]]), { width: 2, alpha: alpha != null ? alpha : 0.92, color: WHT });
+}
+
+/* 历史折线：由新到旧取样，跨"重新出发"边界处以 null 断开 */
+function histPts(map, kField) {
+  const pts = [];
+  let pk = null;
+  for (let i = samples.length - 1; i >= 0; i--) {
+    const sm = samples[i], z = zOf(sm.t);
+    if (z > WAVE_LEN + 0.3) break;
+    if (kField && pk !== null && sm[kField] !== pk) pts.push(null);
+    if (kField) pk = sm[kField];
+    pts.push(map(sm, z));
+  }
+  return pts;
+}
+
+/* 双描历史曲线：外层辉光 + 内核头亮尾隐渐变（§4.2 线型词汇） */
+function glowPoly(C, pts, rgb) {
+  strokePoly(C, pts, { width: 5.5, color: 'rgba(' + rgb + ',0.13)' });
+  strokePoly(C, pts, { width: 2.2, fade: ['rgba(' + rgb + ',1)', 'rgba(' + rgb + ',0.04)'] });
+}
+
+/* 定制坐标架：轴字母可换，t 轴按真实秒打刻度（仿 §4 轴词汇） */
+function drawFrame(C, o) {
+  line3(C, [-0.3, 0, 0], [o.ex, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [o.ex, 0, 0], [o.ex - 0.2, 0, 0], AXIS);
+  label3(C, [o.ex + 0.22, 0, 0], o.lx, { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  line3(C, [0, -0.3, 0], [0, o.ey, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, o.ey, 0], [0, o.ey - 0.2, 0], AXIS);
+  label3(C, [0, o.ey + 0.18, 0], o.ly, { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  if (o.tAxis) {
+    line3(C, [0, 0, 0], [0, 0, WAVE_LEN + 0.5], { width: 1.4, color: AXIS });
+    arrowAt(C, [0, 0, WAVE_LEN + 0.5], [0, 0, WAVE_LEN + 0.3], AXIS);
+    label3(C, [0, 0, WAVE_LEN + 0.9], 't', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+    for (let k = 1; k * TSPD <= WAVE_LEN + 1e-6; k++) {
+      line3(C, [0, -0.06, k * TSPD], [0, 0.06, k * TSPD], { width: 1.2, color: AXIS_DIM });
+      label3(C, [0, -0.25, k * TSPD], k + 's', { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+    }
+  }
+  for (const tk of (o.yT || [])) {
+    line3(C, [-0.05, tk[0], 0], [0.05, tk[0], 0], { width: 1.2, color: AXIS_DIM });
+    label3(C, [-0.13, tk[0], 0], tk[1], { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+  }
+}
+
+/* ---------- 力学模型（在 ③ pushSample 中步进，永远记录真实值） ---------- */
+/* 页签 1 · 斜面：沿面平衡 → 静摩擦响应 → 超过 μR 后滑动（μk = MUK·μ） */
+function inclineSolve() {
+  const m = state.m1, g = state.g, th = state.inc, b = state.beta, P = state.P, mu = state.mu;
+  const W = m * g;
+  const Ppar = P * Math.cos(b), Pperp = P * Math.sin(b);
+  let N = W * Math.cos(th) - Pperp;
+  const lift = N <= 0;
+  if (lift) N = 0;
+  const need = W * Math.sin(th) - Ppar;   /* 平衡所需摩擦（+ = 沿面向上） */
+  const cap = mu * N;
+  return { W: W, N: N, need: need, cap: cap, Ppar: Ppar, Pperp: Pperp, lift: lift };
+}
+function stepIncline(dt) {
+  const q = inclineSolve();
+  const m = state.m1;
+  const drive = -q.need;                  /* 合外力（不含摩擦，+ = 沿面向上） */
+  if (state.v1 === 0 && Math.abs(q.need) <= q.cap && !q.lift) {
+    state.a1 = 0;                          /* 静止：摩擦恰好抵消需求 */
+  } else {
+    const dir = state.v1 !== 0 ? Math.sign(state.v1) : Math.sign(drive);
+    state.a1 = (drive - dir * MUK * state.mu * q.N) / m;   /* 滑动：动摩擦 μk·N 反向 */
+    state.v1 += state.a1 * dt;
+    if (state.v1 !== 0 && Math.sign(state.v1) !== dir) state.v1 = 0; /* 动摩擦把它刹停 */
+  }
+  state.s1 += state.v1 * dt;
+  if (Math.abs(state.s1) > 1.35) { state.s1 = 0; state.v1 = 0; state.k1++; }
+}
+/* 页签 3 · 水平拉动：需求 D = P cosβ，容量 μN；超限后滑动 */
+function frictionSolve() {
+  const m = state.m1, g = state.g, b = state.beta, P = state.P, mu = state.mu;
+  const W = m * g;
+  let N = W - P * Math.sin(b);
+  const lift = N <= 0;
+  if (lift) N = 0;
+  const D = P * Math.cos(b);
+  const cap = mu * N;
+  return { W: W, N: N, D: D, cap: cap, lift: lift };
+}
+function stepFriction(dt) {
+  const q = frictionSolve();
+  const m = state.m1;
+  if (state.v3 === 0 && q.D <= q.cap && !q.lift) {
+    state.F3 = q.D; state.a3 = 0;          /* 静止：F = 需求 ≠ μR */
+  } else {
+    state.F3 = MUK * state.mu * q.N;       /* 滑动：F = μk·N */
+    state.a3 = (q.D - state.F3) / m;
+    state.v3 += state.a3 * dt;
+    if (state.v3 < 0) { state.v3 = 0; }
+  }
+  state.x3 += state.v3 * dt;
+  if (state.x3 > 2.1) { state.x3 = 0; state.v3 = 0; state.k3++; }
+}
+/* 页签 4 · 连接系统：m₁ 在桌面（摩擦 μ），轻绳过滑轮悬挂 m₂ */
+function connectedSolve() {
+  const m1 = state.m1, m2 = state.m2, g = state.g, mu = state.mu;
+  const drive = m2 * g, hold = mu * m1 * g;
+  if (state.v4 === 0 && drive <= hold) {
+    return { a: 0, T: m2 * g, F: drive, N: m1 * g, moving: false, hold: hold };
+  }
+  const Fk = MUK * mu * m1 * g;
+  const a = (drive - Fk) / (m1 + m2);       /* 运动中可为负（动摩擦减速） */
+  return { a: a, T: m2 * (g - a), F: Fk, N: m1 * g, moving: true, hold: hold };
+}
+function stepConnected(dt) {
+  const q = connectedSolve();
+  state.a4 = q.moving ? q.a : 0;
+  if (q.moving) {
+    state.v4 += q.a * dt;
+    if (state.v4 <= 0) state.v4 = 0;        /* 动摩擦把它刹停 */
+  }
+  state.p4 += state.v4 * dt;
+  if (state.p4 > 1.5) { state.p4 = 0; state.v4 = 0; state.k4++; }   /* m₂ 触地前重新出发 */
+}
+function initModels() {
+  state.omega = 0;                          /* 本工具不用相位钟；置 0 防引擎积分出 NaN */
+  state._pt = state.t;
+  state.s1 = 0; state.v1 = 0; state.a1 = 0; state.k1 = 0;
+  state.x3 = 0; state.v3 = 0; state.a3 = 0; state.F3 = 0; state.k3 = 0;
+  state.p4 = 0; state.v4 = 0; state.a4 = 0; state.k4 = 0;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ② 场景注册 —— 每个键就是一个页签                           ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const SCENES = {
+
+  /* ────── 场景一：斜面上的物体 —— 隔离它，只画外界给它的力 ────── */
+  incline: {
+    label: { zh: '斜面与分解', en: 'Incline' },
+    brand: { zh: '自由体图第一步：隔离物体，只保留外界施加的力——重力 mg、支持力 R、摩擦力 F、外力 P。按 3 切到斜面坐标系，mg 的分解三角与运动方向完全对齐。',
+             en: 'A free-body diagram starts by isolating the body and keeping only the external forces on it — weight mg, normal R, friction F, applied P. Press 3 for incline coordinates: the mg triangle lines up with the direction of motion.' },
+    tips: { zh: '顿悟点：坐标轴不必永远水平竖直。按 3 让坐标系贴着斜面——斜面变"地面"，mg 斜过来并拆成 mg·sinθ（沿面）与 mg·cosθ（压面），每个方向的方程一眼可列。把 P 拖到 0，看物体何时滑下。',
+            en: 'Epiphany: axes need not stay horizontal and vertical. Press 3 to lay them along the incline — the slope becomes the "floor", mg tilts and splits into mg·sinθ (along) and mg·cosθ (into the surface), and each direction\'s equation writes itself. Drag P to 0 and watch when it slips.' },
+    views: {
+      iso:   { label: { zh: '立体', en: '3D' }, az: -0.7, el: 0.32, dist: 8.5, tx: 0, ty: 0.4, tz: 0 },
+      world: { label: { zh: '世界系 x·y', en: 'World x·y' }, az: 0.001, el: 0.02, dist: 6.5, tx: 0, ty: 0.5, tz: 0,
+               onSelect: () => setToggle('frameInc', false) },
+      slope: { label: { zh: '斜面系 x·y', en: 'Incline x·y' }, az: 0.001, el: 0.02, dist: 6.5, tx: 0, ty: 0.5, tz: 0,
+               onSelect: () => { setToggle('frameInc', true); setToggle('showComp', true); } }
+    },
+    toggles: [
+      { key: 'show1W',   label: { zh: '重力 mg',        en: 'Weight mg' },        color: '#fb7185', checked: true },
+      { key: 'show1N',   label: { zh: '支持力 R',       en: 'Normal R' },         color: '#a78bfa', checked: true },
+      { key: 'show1F',   label: { zh: '摩擦力 F',       en: 'Friction F' },       color: '#34d399', checked: true },
+      { key: 'show1P',   label: { zh: '外力 P',         en: 'Applied P' },        color: '#fb923c', checked: true },
+      { key: 'showComp', label: { zh: 'mg 分解三角',    en: 'mg components' },    color: '#fbbf24', checked: true },
+      { key: 'frameInc', label: { zh: '斜面坐标系',     en: 'Incline frame' },    color: '#2dd4ea', checked: false },
+      { key: 'showGrid', label: { zh: '网格',           en: 'Grid' },             color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => WAVE_LEN / TSPD + 0.5,
+    draw(C) {
+      const th = state.inc, b = state.beta, q = inclineSolve();
+      const rot = state.frameInc;
+      const R2 = p => rot ? [p[0]*Math.cos(th) + p[1]*Math.sin(th), -p[0]*Math.sin(th) + p[1]*Math.cos(th), p[2]] : p;
+      const u = R2([Math.cos(th), Math.sin(th), 0]), n = R2([-Math.sin(th), Math.cos(th), 0]);
+      const dn = R2([0, -1, 0]);           /* 世界竖直向下（斜面系里会倾斜） */
+
+      if (state.showGrid) drawGridXY(C, 2, 0.5);
+
+      /* 青色源几何：斜面 + 水平参考虚线 + 角 θ（琥珀度量） */
+      strokePoly(C, [[-2.1*u[0], -2.1*u[1], 0], [2.1*u[0], 2.1*u[1], 0]], { width: 6, color: 'rgba(45,212,234,0.13)' });
+      strokePoly(C, [[-2.1*u[0], -2.1*u[1], 0], [2.1*u[0], 2.1*u[1], 0]], { width: 2, color: 'rgba(45,212,234,0.95)' });
+      const hz = R2([1, 0, 0]);
+      if (th > 0.02) {
+        line3(C, [-1.7*hz[0], -1.7*hz[1], 0], [1.7*hz[0], 1.7*hz[1], 0], { width: 1, dash: [5, 6], color: 'rgba(159,176,200,0.35)' });
+        const apts = [];
+        for (let j = 0; j <= 14; j++) { const a = th * j / 14; apts.push(R2([0.55*Math.cos(a), 0.55*Math.sin(a), 0])); }
+        strokePoly(C, apts, { width: 1.6, color: 'rgba(251,191,36,0.9)' });
+        const am = R2([0.78*Math.cos(th/2), 0.78*Math.sin(th/2), 0]);
+        label3(C, am, 'θ', { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+      }
+
+      /* 物体：贴面方块（中心 B），随模型滑动 */
+      const s = state.s1, hB = 0.26;
+      const B = [s*u[0] + hB*n[0], s*u[1] + hB*n[1], 0];
+      const cn = [];
+      for (const [du, dv] of [[-1,-1],[1,-1],[1,1],[-1,1]])
+        cn.push([B[0] + du*hB*u[0] + dv*hB*n[0], B[1] + du*hB*u[1] + dv*hB*n[1], 0]);
+      blockOutline(C, cn);
+
+      /* 力箭头（可读缩放：同帧比例真实；读数为真实牛顿值） */
+      const kf = fscale(Math.max(q.W, state.P, q.N));
+      const pd = [u[0]*Math.cos(b) + n[0]*Math.sin(b), u[1]*Math.cos(b) + n[1]*Math.sin(b), 0];
+      const fStat = state.v1 === 0 && Math.abs(q.need) <= q.cap && !q.lift;
+      const fVal = fStat ? q.need : -(state.v1 !== 0 ? Math.sign(state.v1) : Math.sign(-q.need)) * MUK * state.mu * q.N;
+      if (state.showComp && th > 0.02 && state.show1W) {
+        const G = [B[0] + dn[0]*kf*q.W, B[1] + dn[1]*kf*q.W, 0];
+        const M = [B[0] - u[0]*kf*q.W*Math.sin(th), B[1] - u[1]*kf*q.W*Math.sin(th), 0];
+        line3(C, B, M, { width: 1.5, dash: [7, 7], color: 'rgba(251,113,133,0.75)' });
+        line3(C, M, G, { width: 1.5, dash: [7, 7], color: 'rgba(251,113,133,0.75)' });
+        label3(C, [(B[0]+M[0])/2 - n[0]*0.16, (B[1]+M[1])/2 - n[1]*0.16, 0], 'mg·sinθ',
+          { font: 'italic 11px ' + FONT_MATH, color: 'rgba(251,113,133,0.85)', align: 'center' });
+        label3(C, [(M[0]+G[0])/2 - u[0]*0.34, (M[1]+G[1])/2 - u[1]*0.05, 0], 'mg·cosθ',
+          { font: 'italic 11px ' + FONT_MATH, color: 'rgba(251,113,133,0.85)', align: 'center' });
+      }
+      if (state.show1W) forceArrow(C, B, dn, kf*q.W, C_ROSE, 'mg');
+      if (state.show1N) forceArrow(C, B, n, kf*q.N, C_VIOLET, 'R');
+      if (state.show1F && Math.abs(fVal) > 0.05)
+        forceArrow(C, B, [u[0]*Math.sign(fVal), u[1]*Math.sign(fVal), 0], kf*Math.abs(fVal), C_EMER, 'F');
+      if (state.show1P && state.P > 0.05) forceArrow(C, B, pd, kf*state.P, C_ORNG, 'P');
+
+      /* 状态标注（琥珀）：临界 / 滑动 / 脱离 */
+      const crit = fStat && q.cap > 0.01 && Math.abs(q.need) >= 0.97 * q.cap;
+      if (q.lift) label3(C, [B[0], B[1] + 0.85, 0], t({ zh: '脱离表面（R = 0）', en: 'Lifts off (R = 0)' }),
+        { size: 11, color: 'rgba(251,191,36,.9)', align: 'center' });
+      else if (crit) label3(C, [B[0], B[1] + 0.85, 0], t({ zh: '临界 · 即将滑动', en: 'Impending motion' }),
+        { size: 11, color: 'rgba(251,191,36,.9)', align: 'center' });
+      const sp = proj(C, B);
+      if (sp) glowDot(sp, 15, '#ffffff', 'rgba(186,240,255,0.9)');
+      label3(C, R2([-1.9, 1.9, 0]), rot ? t({ zh: '斜面系：x 沿面 · y 垂面', en: 'Incline frame: x along · y normal' })
+                                        : t({ zh: '世界系：x 水平 · y 竖直', en: 'World frame: x horizontal · y vertical' }),
+        { size: 11, color: 'rgba(45,212,234,.75)', align: 'left' });
+    },
+    readout() {
+      if (state._pt == null) initModels();
+      const q = inclineSolve();
+      const fStat = state.v1 === 0 && Math.abs(q.need) <= q.cap && !q.lift;
+      const fVal = fStat ? q.need : -(state.v1 !== 0 ? Math.sign(state.v1) : Math.sign(-q.need)) * MUK * state.mu * q.N;
+      const st = q.lift ? { zh: '脱离表面', en: 'lifts off' }
+        : fStat ? (Math.abs(q.need) >= 0.97 * q.cap && q.cap > 0.01 ? { zh: '临界', en: 'impending' } : { zh: '静止', en: 'static' })
+        : (state.v1 >= 0 && (state.v1 > 0 ? state.v1 : -q.need) > 0 ? { zh: '沿面上滑', en: 'sliding up' } : { zh: '沿面下滑', en: 'sliding down' });
+      return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;' + t(st) + '</div>' +
+        '<div class="sinC">mg = <b>' + fmt(q.W) + '</b> N（sinθ: ' + fmt(q.W*Math.sin(state.inc)) + ' · cosθ: ' + fmt(q.W*Math.cos(state.inc)) + '）</div>' +
+        '<div class="cosC">R = mg·cosθ − P·sinβ = <b>' + fmt(q.N) + '</b> N</div>' +
+        '<div class="tanC">F = <b>' + fmtS(fVal) + '</b> N（|F| ≤ μR = ' + fmt(q.cap) + '）</div>' +
+        '<div class="cotC">P = <b>' + fmt(state.P) + '</b> N ∠β = ' + fmtS(state.beta*180/Math.PI, 0) + '°</div>' +
+        '<div class="dim">a = ' + fmtS(state.a1) + ' m/s²&ensp;·&ensp;' + t({ zh: '滑动时取 μk = 0.8μ', en: 'sliding uses μk = 0.8μ' }) + '</div>';
+    }
+  },
+
+  /* ────── 场景二：支持力 R —— 由约束决定，不必等于 mg ────── */
+  normal: {
+    label: { zh: '支持力 R', en: 'Normal force' },
+    brand: { zh: '支持力不是"天生等于 mg"，而是约束面为了不让物体穿过去所需要的响应力：R = (mg+Q)·cosθ。改变斜面角 θ 与竖直外力 Q，看 R 如何实时响应。',
+             en: 'The normal force is not "mg by definition" — it is whatever response the constraint surface needs so the body does not pass through: R = (mg+Q)·cosθ. Change the angle θ and the vertical force Q and watch R respond.' },
+    tips: { zh: '顿悟点：按 3 侧视 R·t——紫色的 R 曲线随你拖动 θ、Q、m 实时起伏，而琥珀参考线 mg 不动。只有 θ = 0 且 Q = 0 时两者才重合；把 Q 拉到足够负，R 触底为 0，物体脱离表面。',
+            en: 'Epiphany: press 3 for the R·t side view — the violet R curve rises and falls live as you drag θ, Q and m, while the amber mg reference stays put. They only coincide when θ = 0 and Q = 0; pull Q negative enough and R bottoms out at 0 — the body lifts off.' },
+    views: {
+      iso:   { label: { zh: '立体', en: '3D' }, az: -0.85, el: 0.3, dist: 10.5, tx: 0, ty: 0.5, tz: 2.4 },
+      front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 6.5, tx: 0, ty: 0.5, tz: 0 },
+      rt:    { label: { zh: '侧视 R·t', en: 'Side R·t' }, az: -Math.PI/2, el: 0.001, dist: 11.5, tx: 0, ty: 0.8, tz: 3.4,
+               onSelect: () => setToggle('showRH', true) }
+    },
+    toggles: [
+      { key: 'show2W',   label: { zh: '重力 mg',     en: 'Weight mg' },      color: '#fb7185', checked: true },
+      { key: 'show2N',   label: { zh: '支持力 R',    en: 'Normal R' },       color: '#a78bfa', checked: true },
+      { key: 'show2Q',   label: { zh: '竖直外力 Q',  en: 'Vertical Q' },     color: '#fb923c', checked: true },
+      { key: 'showRH',   label: { zh: 'R–t 响应曲线', en: 'R–t response' },   color: '#a78bfa', checked: true },
+      { key: 'showWref', label: { zh: 'mg 参考线',   en: 'mg reference' },   color: '#fbbf24', checked: true },
+      { key: 'showGrid', label: { zh: '网格',        en: 'Grid' },           color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => WAVE_LEN / TSPD + 0.5,
+    draw(C) {
+      const th = state.inc, W2 = state.m1 * state.g, Q = state.Q;
+      const N2 = Math.max(0, (W2 + Q) * Math.cos(th));
+      const lift = W2 + Q <= 0;
+      const u = [Math.cos(th), Math.sin(th), 0], n = [-Math.sin(th), Math.cos(th), 0];
+
+      if (state.showGrid) drawTimeGrid(C, { yMax: 2, v: TSPD });
+      /* mg 参考线（琥珀）与 R 历史曲线（紫，六处同源） */
+      if (state.showWref) {
+        const yw = Math.min(KH * W2, HCLIP);
+        line3(C, [0, yw, 0], [0, yw, WAVE_LEN], { width: 1, dash: [5, 6], color: 'rgba(251,191,36,0.6)' });
+        label3(C, [0, yw + 0.14, WAVE_LEN * 0.55], 'mg = ' + fmt(W2) + ' N',
+          { font: 'italic 11px ' + FONT_MATH, color: 'rgba(251,191,36,.9)', align: 'center' });
+      }
+      if (state.showRH && samples.length > 1)
+        glowPoly(C, histPts((sm, z) => [0, Math.min(KH * sm.R2, HCLIP), z]), VIOLET);
+      drawFrame(C, { ex: 2.1, ey: 2.5, lx: 'x', ly: 'R', tAxis: true,
+        yT: [[KH*10, '10'], [KH*20, '20']] });
+
+      /* 青色斜面 + 角 θ */
+      strokePoly(C, [[-1.9*u[0], -1.9*u[1], 0], [1.9*u[0], 1.9*u[1], 0]], { width: 6, color: 'rgba(45,212,234,0.13)' });
+      strokePoly(C, [[-1.9*u[0], -1.9*u[1], 0], [1.9*u[0], 1.9*u[1], 0]], { width: 2, color: 'rgba(45,212,234,0.95)' });
+      if (th > 0.02) {
+        const apts = [];
+        for (let j = 0; j <= 14; j++) { const a = th * j / 14; apts.push([0.55*Math.cos(a), 0.55*Math.sin(a), 0]); }
+        strokePoly(C, apts, { width: 1.6, color: 'rgba(251,191,36,0.9)' });
+        label3(C, [0.78*Math.cos(th/2), 0.78*Math.sin(th/2), 0], 'θ', { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+      }
+
+      /* 物体（脱离时浮起）与力箭头 */
+      const hB = 0.26, off = lift ? 0.42 : 0;
+      const B = [(hB + off) * n[0] + 0.9*u[0], (hB + off) * n[1] + 0.9*u[1], 0];
+      const cn = [];
+      for (const [du, dv] of [[-1,-1],[1,-1],[1,1],[-1,1]])
+        cn.push([B[0] + du*hB*u[0] + dv*hB*n[0], B[1] + du*hB*u[1] + dv*hB*n[1], 0]);
+      blockOutline(C, cn);
+      const kf = fscale(Math.max(W2, Math.abs(Q), N2));
+      if (state.show2W) forceArrow(C, B, [0, -1, 0], kf * W2, C_ROSE, 'mg');
+      if (state.show2N && N2 > 0.05) forceArrow(C, B, n, kf * N2, C_VIOLET, 'R');
+      if (state.show2Q && Math.abs(Q) > 0.05)
+        forceArrow(C, B, [0, Q > 0 ? -1 : 1, 0], kf * Math.abs(Q), C_ORNG, 'Q', { dx: 14 });
+      if (lift) label3(C, [B[0], B[1] + 0.8, 0], t({ zh: '脱离表面（R = 0）', en: 'Lifts off (R = 0)' }),
+        { size: 11, color: 'rgba(251,191,36,.9)', align: 'center' });
+      const sp = proj(C, B);
+      if (sp) glowDot(sp, 15, '#ffffff', 'rgba(186,240,255,0.9)');
+      if (state.showRH) {
+        const hp = proj(C, [0, Math.min(KH * N2, HCLIP), 0]);
+        if (hp) glowDot(hp, 9, '#ffffff', 'rgba(167,139,250,0.85)');
+        label3(C, [0, Math.min(KH * N2, HCLIP) + 0.3, 1.2], 'R = (mg+Q)·cosθ',
+          { font: 'italic 13px ' + FONT_MATH, color: '#a78bfa', align: 'left' });
+      }
+    },
+    readout() {
+      if (state._pt == null) initModels();
+      const th = state.inc, W2 = state.m1 * state.g, Q = state.Q;
+      const N2 = Math.max(0, (W2 + Q) * Math.cos(th));
+      const lift = W2 + Q <= 0;
+      return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;' +
+        t(lift ? { zh: '脱离表面', en: 'lifted off' } : { zh: '贴面静止', en: 'on the surface' }) + '</div>' +
+        '<div class="sinC">mg = <b>' + fmt(W2) + '</b> N</div>' +
+        '<div class="cotC">Q = <b>' + fmtS(Q) + '</b> N' + t({ zh: '（+压向 · −拉离）', en: ' (+ press · − pull)' }) + '</div>' +
+        '<div class="cosC">R = (mg+Q)·cosθ = <b>' + fmt(N2) + '</b> N</div>' +
+        '<div class="dim">' + t({ zh: 'R ⟂ 约束面；沿面方向由摩擦保持（见页签 3）', en: 'R ⟂ the surface; friction holds it along the surface (tab 3)' }) + '</div>';
+    }
+  },
+  /* ────── 场景三：静摩擦是"跟随者"，直到 μR 封顶 ────── */
+  friction: {
+    label: { zh: '静摩擦极限', en: 'Friction limit' },
+    brand: { zh: '静摩擦不是常数 μR，而是自动响应平衡需求的"跟随者"：需要多少给多少，直到封顶 |F| ≤ μR。拖动外力 P，看翠绿的 F 曲线贴着橙色需求走、在琥珀极限处断开滑动。',
+             en: 'Static friction is not the constant μR — it is a follower that supplies exactly what equilibrium demands, up to the cap |F| ≤ μR. Drag the applied force P and watch the emerald F curve track the orange demand, then break away at the amber limit.' },
+    tips: { zh: '顿悟点：按 3 侧视 F·t——静止时翠绿 F 与橙色需求 P·cosβ 完全重合（F ≠ μR！）；把 P 推过琥珀线 μR 的瞬间，F 跌落到动摩擦 μk·R，物体开始滑动。把 β 调正（向上提）还能看到 μR 本身被拉低。',
+            en: 'Epiphany: press 3 for the F·t side view — while static, the emerald F coincides exactly with the orange demand P·cosβ (F ≠ μR!). The instant P crosses the amber μR line, F drops to kinetic μk·R and the block slides. Tilt β upward and the cap μR itself gets pulled down.' },
+    views: {
+      iso:   { label: { zh: '立体', en: '3D' }, az: -0.85, el: 0.3, dist: 10.5, tx: 0.3, ty: 0.4, tz: 2.4 },
+      front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 6.5, tx: 0.6, ty: 0.4, tz: 0 },
+      ft:    { label: { zh: '侧视 F·t', en: 'Side F·t' }, az: -Math.PI/2, el: 0.001, dist: 11.5, tx: 0, ty: 0.7, tz: 3.4,
+               onSelect: () => { setToggle('showFH', true); setToggle('showDH', true); setToggle('showCap', true); } }
+    },
+    toggles: [
+      { key: 'showFH',   label: { zh: '摩擦 F 曲线',    en: 'Friction F curve' }, color: '#34d399', checked: true },
+      { key: 'showDH',   label: { zh: '需求 P·cosβ 曲线', en: 'Demand curve' },   color: '#fb923c', checked: true },
+      { key: 'showCap',  label: { zh: '极限 μR',        en: 'Limit μR' },         color: '#fbbf24', checked: true },
+      { key: 'showArr3', label: { zh: '力箭头',          en: 'Force arrows' },     color: '#e2e8f0', checked: true },
+      { key: 'showGrid', label: { zh: '网格',            en: 'Grid' },             color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => WAVE_LEN / TSPD + 0.5,
+    draw(C) {
+      const q = frictionSolve();
+      const statc = state.v3 === 0 && q.D <= q.cap && !q.lift;
+      const fLive = statc ? q.D : MUK * state.mu * q.N;
+      const crit = statc && q.cap > 0.01 && q.D >= 0.97 * q.cap;
+
+      if (state.showGrid) drawTimeGrid(C, { yMax: 2, v: TSPD });
+
+      /* 极限 μR（琥珀参考线）+ 需求（橙）与实际摩擦（翠）历史曲线 */
+      if (state.showCap && q.cap > 0.01) {
+        const yc = Math.min(KH * q.cap, HCLIP);
+        line3(C, [0, yc, 0], [0, yc, WAVE_LEN], { width: 1, dash: [5, 6], color: 'rgba(251,191,36,0.6)' });
+        label3(C, [0, yc + 0.15, WAVE_LEN * 0.55], 'μR = ' + fmt(q.cap) + ' N',
+          { font: 'italic 11px ' + FONT_MATH, color: 'rgba(251,191,36,.9)', align: 'center' });
+      }
+      if (state.showDH && samples.length > 1)
+        glowPoly(C, histPts((sm, z) => [0, Math.min(KH * sm.D3, HCLIP), z]), ORNG);
+      if (state.showFH && samples.length > 1)
+        glowPoly(C, histPts((sm, z) => [0, Math.min(KH * sm.F3, HCLIP), z]), EMER);
+      drawFrame(C, { ex: 2.6, ey: 2.5, lx: 'x', ly: 'F', tAxis: true,
+        yT: [[KH*10, '10'], [KH*20, '20']] });
+
+      /* 青色地面 + 滑动方块 + 力箭头 */
+      strokePoly(C, [[-0.5, 0, 0], [2.6, 0, 0]], { width: 6, color: 'rgba(45,212,234,0.10)' });
+      strokePoly(C, [[-0.5, 0, 0], [2.6, 0, 0]], { width: 2, color: 'rgba(45,212,234,0.8)' });
+      const hB = 0.26, B = [state.x3, hB, 0];
+      const cn = [];
+      for (const [du, dv] of [[-1,-1],[1,-1],[1,1],[-1,1]]) cn.push([B[0] + du*hB, B[1] + dv*hB, 0]);
+      blockOutline(C, cn);
+      if (state.showArr3) {
+        const kf = fscale(Math.max(q.W, state.P, q.N));
+        const b = state.beta;
+        forceArrow(C, B, [0, -1, 0], kf * q.W, C_ROSE, 'mg');
+        if (q.N > 0.05) forceArrow(C, B, [0, 1, 0], kf * q.N, C_VIOLET, 'R', { dx: -14 });
+        if (fLive > 0.05) forceArrow(C, B, [-1, 0, 0], kf * fLive, C_EMER, 'F');
+        if (state.P > 0.05) forceArrow(C, B, [Math.cos(b), Math.sin(b), 0], kf * state.P, C_ORNG, 'P');
+      }
+      if (q.lift) label3(C, [B[0], B[1] + 0.85, 0], t({ zh: '脱离表面（R = 0）', en: 'Lifts off (R = 0)' }),
+        { size: 11, color: 'rgba(251,191,36,.9)', align: 'center' });
+      else if (crit) label3(C, [B[0], B[1] + 0.85, 0], t({ zh: '临界 · 即将滑动', en: 'Impending motion' }),
+        { size: 11, color: 'rgba(251,191,36,.9)', align: 'center' });
+      else if (!statc) label3(C, [B[0], B[1] + 0.85, 0], t({ zh: '滑动中（F = μk·R）', en: 'Sliding (F = μk·R)' }),
+        { size: 11, color: 'rgba(159,176,200,.7)', align: 'center' });
+
+      /* 曲线头光点（六处同源） */
+      if (state.showFH) { const hf = proj(C, [0, Math.min(KH * fLive, HCLIP), 0]); if (hf) glowDot(hf, 9, '#ffffff', 'rgba(52,211,153,0.9)'); }
+      if (state.showDH) { const hd = proj(C, [0, Math.min(KH * q.D, HCLIP), 0]); if (hd) glowDot(hd, 9, '#ffffff', 'rgba(251,146,60,0.85)'); }
+      const sp = proj(C, B);
+      if (sp) glowDot(sp, 15, '#ffffff', 'rgba(186,240,255,0.9)');
+      if (state.showFH) label3(C, [0, Math.min(KH * fLive, HCLIP) - 0.32, 2.0], statc ? 'F = P·cosβ' : 'F = μk·R',
+        { font: 'italic 13px ' + FONT_MATH, color: '#34d399', align: 'left' });
+      if (state.showDH) label3(C, [0, Math.min(KH * q.D, HCLIP) + 0.3, 3.4], 'P·cosβ',
+        { font: 'italic 13px ' + FONT_MATH, color: '#fb923c', align: 'left' });
+    },
+    readout() {
+      if (state._pt == null) initModels();
+      const q = frictionSolve();
+      const statc = state.v3 === 0 && q.D <= q.cap && !q.lift;
+      const fLive = statc ? q.D : MUK * state.mu * q.N;
+      const st = q.lift ? { zh: '脱离表面', en: 'lifted off' }
+        : statc ? (q.D >= 0.97 * q.cap && q.cap > 0.01 ? { zh: '临界 · 即将滑动', en: 'impending motion' } : { zh: '静止', en: 'static' })
+        : { zh: '滑动中', en: 'sliding' };
+      return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;' + t(st) + '</div>' +
+        '<div class="cotC">' + t({ zh: '需求 ', en: 'demand ' }) + 'P·cosβ = <b>' + fmt(q.D) + '</b> N</div>' +
+        '<div class="tanC">F = <b>' + fmt(fLive) + '</b> N' +
+          t(statc ? { zh: '（= 需求，非 μR）', en: ' (= demand, not μR)' } : { zh: '（= μk·R）', en: ' (= μk·R)' }) + '</div>' +
+        '<div class="dim">' + t({ zh: '极限 ', en: 'limit ' }) + 'μR = ' + fmt(q.cap) + ' N&ensp;·&ensp;R = ' + fmt(q.N) + ' N</div>' +
+        '<div class="dim">v = ' + fmt(state.v3) + ' m/s&ensp;·&ensp;' + t({ zh: '模型：μk = 0.8μ', en: 'model: μk = 0.8μ' }) + '</div>';
+    }
+  },
+
+  /* ────── 场景四：连接系统 —— 一张图只画一个物体 ────── */
+  connected: {
+    label: { zh: '连接系统', en: 'Connected' },
+    brand: { zh: '桌面上的 m₁ 与悬挂的 m₂ 由轻绳经滑轮相连：绳的约束让两者共享同一个加速度 a，张力 T 是绳内的同一个力。按 2 正视——每个物体一张自由体图，绝不把两个物体的力混在一起。',
+             en: 'm₁ on a table and hanging m₂ are joined by a light string over a pulley: the string constraint makes them share one acceleration a, and the tension T is one and the same force in the rope. Press 2 — one free-body diagram per body, never mixing their forces.' },
+    tips: { zh: '顿悟点：T 既不是 m₂g 也不是 μm₁g——分开列两个方程：m₂g − T = m₂a 与 T − μm₁g = m₁a，相加消去 T 才得到 a。调 m₂ 让 m₂g ≤ μm₁g，系统静止，此时 T = m₂g。按 3 看 v–t 直线的斜率就是 a。',
+            en: 'Epiphany: T is neither m₂g nor μm₁g — write two separate equations: m₂g − T = m₂a and T − μm₁g = m₁a; adding them eliminates T and yields a. Lower m₂ until m₂g ≤ μm₁g and the system rests — then T = m₂g. Press 3: the slope of the v–t line is exactly a.' },
+    views: {
+      iso:   { label: { zh: '立体', en: '3D' }, az: -0.8, el: 0.3, dist: 11, tx: 0, ty: 0.6, tz: 2.2 },
+      front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 8, tx: 0, ty: 0.7, tz: 0,
+               onSelect: () => setToggle('showFBD', true) },
+      vt:    { label: { zh: '侧视 v·t', en: 'Side v·t' }, az: -Math.PI/2, el: 0.001, dist: 11.5, tx: 0, ty: 0.4, tz: 3.4,
+               onSelect: () => setToggle('showVel', true) }
+    },
+    toggles: [
+      { key: 'showT',   label: { zh: '张力 T',          en: 'Tension T' },   color: '#fb923c', checked: true },
+      { key: 'showFBD', label: { zh: '两张自由体图',     en: 'Two FBDs' },    color: '#e2e8f0', checked: true },
+      { key: 'showVel', label: { zh: 'v–t 速度曲线',     en: 'v–t curve' },   color: '#e2e8f0', checked: true },
+      { key: 'showGrid',label: { zh: '网格',             en: 'Grid' },        color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => WAVE_LEN / TSPD + 0.5,
+    draw(C) {
+      const q = connectedSolve();
+      const W1 = state.m1 * state.g, W2 = state.m2 * state.g;
+      if (state.showGrid) drawTimeGrid(C, { yMax: 1.5, v: TSPD });
+
+      /* v–t 曲线（白 · 运动主体）：斜率 = a */
+      if (state.showVel) {
+        line3(C, [0, 0, 0], [0, 0, WAVE_LEN + 0.4], { width: 1.4, color: AXIS });
+        arrowAt(C, [0, 0, WAVE_LEN + 0.4], [0, 0, WAVE_LEN + 0.2], AXIS);
+        label3(C, [0, 0, WAVE_LEN + 0.8], 't', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+        for (let k = 1; k * TSPD <= WAVE_LEN + 1e-6; k++)
+          line3(C, [0, -0.06, k * TSPD], [0, 0.06, k * TSPD], { width: 1.2, color: AXIS_DIM });
+        if (samples.length > 1)
+          strokePoly(C, histPts((sm, z) => [0, KV4 * sm.v4, z], 'k4'),
+            { width: 1.6, fade: ['rgba(226,232,240,0.85)', 'rgba(226,232,240,0)'] });
+        label3(C, [0, KV4 * state.v4 + 0.28, 1.6], t({ zh: 'v–t（斜率 = a）', en: 'v–t (slope = a)' }),
+          { size: 11, color: 'rgba(226,232,240,.8)', align: 'left' });
+      }
+
+      /* 青色源几何：桌面 + 滑轮 + 地面 */
+      strokePoly(C, [[-2.5, 0.8, 0], [0.68, 0.8, 0]], { width: 6, color: 'rgba(45,212,234,0.13)' });
+      strokePoly(C, [[-2.5, 0.8, 0], [0.68, 0.8, 0]], { width: 2, color: 'rgba(45,212,234,0.95)' });
+      line3(C, [0.68, 0.8, 0], [0.68, -1.4, 0], { width: 1.6, color: 'rgba(45,212,234,0.5)' });
+      line3(C, [-2.5, -1.4, 0], [2.3, -1.4, 0], { width: 1, dash: [5, 6], color: 'rgba(159,176,200,0.35)' });
+      const PC = [0.85, 0.82, 0], PR = 0.2;
+      const pp = [];
+      for (let i = 0; i <= 24; i++) { const a = i / 24 * TAU; pp.push([PC[0] + PR*Math.cos(a), PC[1] + PR*Math.sin(a), 0]); }
+      strokePoly(C, pp, { width: 2, color: 'rgba(45,212,234,0.9)' });
+      solidDot(C, PC, 2.2, 'rgba(159,176,200,0.9)');
+
+      /* 两个物体与绳（白 · 运动主体） */
+      const h1 = 0.22, h2 = 0.18;
+      const x1 = -1.5 + state.p4, y2 = 0.28 - state.p4;
+      const B1 = [x1, 0.8 + h1, 0], B2 = [1.05, y2, 0];
+      const c1 = [], c2 = [];
+      for (const [du, dv] of [[-1,-1],[1,-1],[1,1],[-1,1]]) {
+        c1.push([B1[0] + du*h1, B1[1] + dv*h1, 0]);
+        c2.push([B2[0] + du*h2, B2[1] + dv*h2, 0]);
+      }
+      line3(C, [x1 + h1, 0.8 + h1, 0], [PC[0], 0.8 + h1, 0], { width: 1.6, color: 'rgba(226,232,240,0.7)' });
+      line3(C, [PC[0] + PR, PC[1], 0], [1.05, y2 + h2, 0], { width: 1.6, color: 'rgba(226,232,240,0.7)' });
+      blockOutline(C, c1);
+      blockOutline(C, c2);
+      label3(C, [x1, 0.8 + 2*h1 + 0.16, 0], 'm₁', { font: 'italic 13px ' + FONT_MATH, color: '#e2e8f0', align: 'center' });
+      label3(C, [1.05 + h2 + 0.2, y2, 0], 'm₂', { font: 'italic 13px ' + FONT_MATH, color: '#e2e8f0', align: 'left' });
+      if (state.showT) {
+        label3(C, [(x1 + PC[0]) / 2, 0.8 + h1 + 0.18, 0], 'T = ' + fmt(q.T) + ' N',
+          { font: 'italic 12px ' + FONT_MATH, color: C_ORNG, align: 'center' });
+      }
+      const s1p = proj(C, B1); if (s1p) glowDot(s1p, 12, '#ffffff', 'rgba(186,240,255,0.9)');
+      const s2p = proj(C, B2); if (s2p) glowDot(s2p, 12, '#ffffff', 'rgba(186,240,255,0.9)');
+
+      /* 两张独立的自由体图（顿悟核心：一张图一个物体） */
+      if (state.showFBD) {
+        const kf = fscale(Math.max(W1, W2, q.T, q.N));
+        const F1 = [-1.55, 2.5, 0], F2 = [1.55, 2.5, 0];
+        const fb1 = [], fb2 = [];
+        for (const [du, dv] of [[-1,-1],[1,-1],[1,1],[-1,1]]) {
+          fb1.push([F1[0] + du*h1, F1[1] + dv*h1, 0]);
+          fb2.push([F2[0] + du*h2, F2[1] + dv*h2, 0]);
+        }
+        blockOutline(C, fb1, 0.7);
+        blockOutline(C, fb2, 0.7);
+        label3(C, [F1[0], F1[1] + 1.35, 0], t({ zh: '隔离 m₁', en: 'Isolate m₁' }), { size: 11, color: 'rgba(159,176,200,.8)', align: 'center' });
+        label3(C, [F2[0], F2[1] + 1.35, 0], t({ zh: '隔离 m₂', en: 'Isolate m₂' }), { size: 11, color: 'rgba(159,176,200,.8)', align: 'center' });
+        forceArrow(C, F1, [0, -1, 0], kf * W1, C_ROSE, 'm₁g');
+        forceArrow(C, F1, [0, 1, 0], kf * q.N, C_VIOLET, 'R', { dx: -16 });
+        if (state.showT) forceArrow(C, F1, [1, 0, 0], kf * q.T, C_ORNG, 'T');
+        if (q.F > 0.05) forceArrow(C, F1, [-1, 0, 0], kf * q.F, C_EMER, 'F');
+        forceArrow(C, F2, [0, -1, 0], kf * W2, C_ROSE, 'm₂g');
+        if (state.showT) forceArrow(C, F2, [0, 1, 0], kf * q.T, C_ORNG, 'T', { dx: 14 });
+      }
+    },
+    readout() {
+      if (state._pt == null) initModels();
+      const q = connectedSolve();
+      const W1 = state.m1 * state.g, W2 = state.m2 * state.g;
+      return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;' +
+        t(q.moving ? { zh: '共同加速中', en: 'accelerating together' } : { zh: '静止（m₂g ≤ μm₁g）', en: 'static (m₂g ≤ μm₁g)' }) + '</div>' +
+        '<div class="dim">' + t({ zh: '驱动 ', en: 'drive ' }) + 'm₂g = ' + fmt(W2) + ' N&ensp;·&ensp;' +
+          t({ zh: '静摩擦上限 ', en: 'static hold ' }) + 'μm₁g = ' + fmt(state.mu * W1) + ' N</div>' +
+        '<div>a = (m₂g − μk·m₁g)/(m₁+m₂) = <b>' + fmt(q.a) + '</b> m/s²</div>' +
+        '<div class="cotC">T = m₂(g − a) = <b>' + fmt(q.T) + '</b> N</div>' +
+        '<div class="tanC">F = <b>' + fmt(q.F) + '</b> N&ensp;<span class="dim">·&ensp;v = ' + fmt(state.v4) + ' m/s</span></div>' +
+        '<div class="dim">' + t({ zh: '滑动时 μk = 0.8μ；每个物体单独列方程', en: 'sliding uses μk = 0.8μ; one equation set per body' }) + '</div>';
+    }
+  }
+};
+/* ================= 常量与状态（引擎区，以下一般无需改动） ================= */
+const TAU = Math.PI * 2;
+const WAVE_LEN = 8;      // t 轴的世界长度（可视窗口）
+const NEAR = 0.15;       // 近裁剪面
+
+const FONT_CN = 'ui-sans-serif,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif';
+const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
+
+const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
+const samples = [];
+let curTab = null;
+const RELABEL = [];
+const cams = {};
+let cam = null;
+let tween = null;
+const lastView = {};
+const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ③ 采样 —— 每帧步进力学模型并记录"当时的真实值"              ║
+   ║  参数中途改变时历史不重算；滑出边界后自动重新出发             ║
+   ╚══════════════════════════════════════════════════════════╝ */
+function pushSample() {
+  if (state._pt == null || state.t < state._pt) initModels();
+  const dt = (state.t - state._pt) * SLOWMO;
+  state._pt = state.t;
+  if (dt > 0) { stepIncline(dt); stepFriction(dt); stepConnected(dt); }
+  const q3 = frictionSolve();
+  samples.push({
+    t: state.t,
+    R2: Math.max(0, (state.m1 * state.g + state.Q) * Math.cos(state.inc)),  /* 页签 2：支持力响应 */
+    D3: q3.D, F3: state.F3, k3: state.k3,                                   /* 页签 3：需求与实际摩擦 */
+    v4: state.v4, k4: state.k4                                              /* 页签 4：共同速度 */
+  });
+}
+
+/* ================= 画布 ================= */
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = 1, FOCAL = 900, CX = 0, CY = 0, bgGrad = null;
+
+function resize() {
+  DPR = Math.min(2.5, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  CX = W / 2; CY = H / 2;
+  FOCAL = 1.2 * Math.min(H, W * 1.1);
+  bgGrad = ctx.createRadialGradient(W*0.5, H*0.3, 0, W*0.5, H*0.42, Math.max(W, H)*0.95);
+  bgGrad.addColorStop(0, '#0c1526');
+  bgGrad.addColorStop(1, '#05070d');
+}
+window.addEventListener('resize', resize);
+
+/* ================= 基础数学 ================= */
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const mod2pi = a => { a %= TAU; if (a < 0) a += TAU; return a; };
+const wrapPI = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
+const ease = k => k < 0.5 ? 4*k*k*k : 1 - Math.pow(-2*k + 2, 3) / 2;
+const fmt = (x, d = 2) => x.toFixed(d);
+const fmtS = (x, d = 2) => (x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
+
+const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+const dot3 = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+
+/* ================= 轨道相机与投影 ================= */
+function makeCam() {
+  const cp = Math.cos(cam.el), sp = Math.sin(cam.el);
+  const eye = [
+    cam.tx + cam.dist * cp * Math.sin(cam.az),
+    cam.ty + cam.dist * sp,
+    cam.tz + cam.dist * cp * Math.cos(cam.az)
+  ];
+  const f = norm(sub([cam.tx, cam.ty, cam.tz], eye));
+  const r = norm(cross(f, [0, 1, 0]));
+  const u = cross(r, f);
+  return { eye, f, r, u };
+}
+function camPt(C, p) {
+  const d = sub(p, C.eye);
+  return [dot3(d, C.r), dot3(d, C.u), dot3(d, C.f)];
+}
+function scr(c) { const s = FOCAL / c[2]; return [CX + c[0]*s, CY - c[1]*s]; }
+function proj(C, p) { const c = camPt(C, p); return c[2] < NEAR ? null : scr(c); }
+function clipNear(a, b) {
+  const t = (NEAR - a[2]) / (b[2] - a[2]);
+  return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, NEAR];
+}
+
+/* 折线路径（支持 null 断点 + 近平面裁剪）；返回 [首点, 末点] 屏幕坐标 */
+function polyPath(C, pts) {
+  if (pts.length < 2) return null;
+  let head = null, tail = null, contin = false, prev = null;
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    const P = pts[i];
+    if (P === null) { prev = null; contin = false; continue; }
+    const cur = camPt(C, P);
+    if (prev !== null) {
+      let a = prev, b = cur;
+      const av = a[2] >= NEAR, bv = b[2] >= NEAR;
+      if (av || bv) {
+        if (!av) a = clipNear(a, b);
+        if (!bv) b = clipNear(b, a);
+        const sA = scr(a), sB = scr(b);
+        if (!contin) ctx.moveTo(sA[0], sA[1]);
+        ctx.lineTo(sB[0], sB[1]);
+        if (!head) head = sA;
+        tail = sB;
+        contin = bv;
+      } else {
+        contin = false;
+      }
+    }
+    prev = cur;
+  }
+  return head ? [head, tail] : null;
+}
+
+function strokePoly(C, pts, o) {
+  const ht = polyPath(C, pts);
+  if (!ht) return;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = o.width || 2;
+  if (o.alpha != null) ctx.globalAlpha = o.alpha;
+  if (o.dash) ctx.setLineDash(o.dash);
+  if (o.fade) {
+    const h = ht[0], t = ht[1];
+    if (Math.hypot(t[0]-h[0], t[1]-h[1]) < 2) {
+      ctx.strokeStyle = o.fade[0];
+    } else {
+      const g = ctx.createLinearGradient(h[0], h[1], t[0], t[1]);
+      g.addColorStop(0, o.fade[0]);
+      g.addColorStop(1, o.fade[1]);
+      ctx.strokeStyle = g;
+    }
+  } else {
+    ctx.strokeStyle = o.color;
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+const line3 = (C, a, b, o) => strokePoly(C, [a, b], o);
+
+function glowDot(s, r, core, mid) {
+  const g = ctx.createRadialGradient(s[0], s[1], 0, s[0], s[1], r);
+  g.addColorStop(0, core);
+  g.addColorStop(0.35, mid);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+function solidDot(C, p, r, color) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+
+function label3(C, p, text, o) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.save();
+  ctx.font = o.font || ((o.size || 12) + 'px ' + FONT_CN);
+  ctx.fillStyle = o.color || '#c4d2e6';
+  ctx.textAlign = o.align || 'left';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(3,6,12,.85)';
+  ctx.shadowBlur = 4;
+  ctx.fillText(text, s[0] + (o.dx || 0), s[1] + (o.dy || 0));
+  ctx.restore();
+}
+
+function arrowAt(C, tip3, before3, color) {
+  const t = proj(C, tip3), b = proj(C, before3);
+  if (!t || !b) return;
+  const a = Math.atan2(t[1]-b[1], t[0]-b[0]);
+  const L = 9;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.4;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a-0.42), t[1]-L*Math.sin(a-0.42));
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a+0.42), t[1]-L*Math.sin(a+0.42));
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* ================= 常用场景部件 ================= */
+const AXIS = 'rgba(159,176,200,0.9)';
+const AXIS_DIM = 'rgba(159,176,200,0.5)';
+
+/* 坐标轴：o = { ex, ey, yTicks:[], xTicks:[], tAxis:bool, v(秒刻度间距的波速) } */
+function drawAxes(C, o) {
+  const ex = o.ex, ey = o.ey;
+  line3(C, [-ex, 0, 0], [ex, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [ex, 0, 0], [ex - 0.2, 0, 0], AXIS);
+  label3(C, [ex + 0.22, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  line3(C, [0, -ey, 0], [0, ey, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, ey, 0], [0, ey - 0.2, 0], AXIS);
+  label3(C, [0, ey + 0.18, 0], 'y', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  if (o.tAxis) {
+    line3(C, [0, 0, 0], [0, 0, WAVE_LEN + 0.5], { width: 1.4, color: AXIS });
+    arrowAt(C, [0, 0, WAVE_LEN + 0.5], [0, 0, WAVE_LEN + 0.3], AXIS);
+    label3(C, [0, 0, WAVE_LEN + 0.9], 't', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+    const v = o.v || 1;
+    const every = v < 0.8 ? 2 : 1;
+    for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+      line3(C, [0, -0.06, k*v], [0, 0.06, k*v], { width: 1.2, color: AXIS_DIM });
+      if (k % every === 0) {
+        label3(C, [0, -0.25, k*v], k + 's', { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+      }
+    }
+  }
+  for (const k of (o.yTicks || [])) {
+    for (const yv of [k, -k]) {
+      line3(C, [-0.05, yv, 0], [0.05, yv, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [-0.13, yv, 0], (yv < 0 ? '−' : '') + Math.abs(yv), { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+    }
+  }
+  for (const k of (o.xTicks || [])) {
+    for (const xv of [k, -k]) {
+      line3(C, [xv, -0.05, 0], [xv, 0.05, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [xv, -0.24, 0], (xv < 0 ? '−' : '') + Math.abs(xv), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+    }
+  }
+}
+
+/* z=0 平面方格网格（几何类场景） */
+function drawGridXY(C, g, step) {
+  const n = Math.round(g / step);
+  for (let i = -n; i <= n; i++) {
+    if (i === 0) continue;
+    const u = i * step;
+    line3(C, [u, -g, 0], [u, g, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+    line3(C, [-g, u, 0], [g, u, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+  }
+}
+
+/* y–t 时间平面网格（流式波形类场景）：o = { yMax, v } */
+function drawTimeGrid(C, o) {
+  const g = o.yMax, v = o.v;
+  for (let i = Math.round(-g*2); i <= Math.round(g*2); i++) {
+    if (i === 0) continue;
+    line3(C, [0, i/2, 0], [0, i/2, WAVE_LEN], { width: 1, color: 'rgba(148,163,184,0.10)' });
+  }
+  for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+    line3(C, [0, -g, k*v], [0, g, k*v], { width: 1, color: 'rgba(148,163,184,0.07)' });
+  }
+}
+
+/* 周期标尺（琥珀）：在平面 x=px、高度 yb 处，从 z=0 画到 z=T·v */
+function drawPeriodBracket(C, Tsec, v, px, yb, text) {
+  const zT = Tsec * v;
+  if (zT > WAVE_LEN + 0.01) return;
+  const amber = 'rgba(251,191,36,0.75)';
+  line3(C, [px, yb, 0], [px, yb, zT], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, 0], [px, yb + 0.06, 0], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, zT], [px, yb + 0.06, zT], { width: 1.2, color: amber });
+  label3(C, [px, yb - 0.2, zT/2], text, { size: 10.5, color: 'rgba(251,191,36,.9)', align: 'center' });
+}
+
+/* 单位圆（半径 A，位于 z=0 平面，青色源几何） */
+function drawCircle(C, A) {
+  const cpts = [];
+  for (let i = 0; i <= 72; i++) {
+    const a = i / 72 * TAU;
+    cpts.push([A * Math.cos(a), A * Math.sin(a), 0]);
+  }
+  strokePoly(C, cpts, { width: 6, color: 'rgba(45,212,234,0.13)' });
+  strokePoly(C, cpts, { width: 2, color: 'rgba(45,212,234,0.95)' });
+  for (let q = 0; q < 4; q++) {
+    const a = q * Math.PI / 2;
+    line3(C, [A*0.95*Math.cos(a), A*0.95*Math.sin(a), 0],
+             [A*1.06*Math.cos(a), A*1.06*Math.sin(a), 0],
+             { width: 1, color: 'rgba(45,212,234,0.5)' });
+  }
+  solidDot(C, [0, 0, 0], 2.2, 'rgba(159,176,200,0.9)');
+}
+
+/* 角度弧 θ（琥珀度量注记） */
+function drawAngleArc(C, th, A) {
+  const thm = mod2pi(th);
+  if (thm <= 0.03) return;
+  const r0 = Math.max(0.14, Math.min(0.34, 0.5 * A));
+  const n = Math.max(2, Math.ceil(thm / 0.06));
+  const apts = [];
+  for (let j = 0; j <= n; j++) {
+    const a = thm * j / n;
+    apts.push([r0 * Math.cos(a), r0 * Math.sin(a), 0]);
+  }
+  strokePoly(C, apts, { width: 1.6, color: 'rgba(251,191,36,0.9)' });
+  label3(C, [(r0 + 0.15) * Math.cos(thm/2), (r0 + 0.15) * Math.sin(thm/2), 0], 'θ',
+    { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+}
+
+/* 读数区固定首两行 */
+function readoutHead() {
+  const th = state.theta;
+  const deg = (mod2pi(th) * 180 / Math.PI).toFixed(0);
+  const lap = fmt(th / TAU);
+  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;θ = ωt = <b>' + fmt(th) + '</b> rad</div>' +
+         '<div class="dim">' + t({ zh: '≡ ' + deg + '°（第 ' + lap + ' 圈）', en: '≡ ' + deg + '° (turn ' + lap + ')' }) + '</div>';
+}
+
+/* ================= 主绘制与主循环 ================= */
+function draw() {
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+  const C = makeCam();
+  SCENES[curTab].draw(C);
+}
+
+function resetSim() {
+  state.t = 0;
+  state.theta = 0;
+  samples.length = 0;
+  pushSample();
+}
+
+let lastTs = performance.now(), lastRO = 0;
+function frame(ts) {
+  const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
+  lastTs = ts;
+
+  if (tween) {
+    const k = Math.min(1, (ts - tween.t0) / tween.dur);
+    const e = ease(k);
+    const f = tween.from, o = tween.to;
+    cam.az = f.az + wrapPI(o.az - f.az) * e;
+    cam.el = f.el + (o.el - f.el) * e;
+    cam.dist = f.dist + (o.dist - f.dist) * e;
+    cam.tx = f.tx + (o.tx - f.tx) * e;
+    cam.ty = f.ty + (o.ty - f.ty) * e;
+    cam.tz = f.tz + (o.tz - f.tz) * e;
+    if (k >= 1) tween = null;
+  }
+
+  if (state.running) {
+    state.t += dt;
+    state.theta += state.omega * dt;
+    pushSample();
+  }
+  const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
+  while (samples.length && samples[0].t < state.t - windowSec) samples.shift();
+
+  draw();
+  if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
+  requestAnimationFrame(frame);
+}
+
+const roEl = document.getElementById('readout');
+function updateReadout() { roEl.innerHTML = SCENES[curTab].readout(); }
+
+/* ================= UI 生成（由 ①② 声明驱动） ================= */
+function buildParams() {
+  const host = document.getElementById('paramsHost');
+  PARAMS.forEach(p => {
+    const wrap = document.createElement('div');
+    wrap.className = 'ctl';
+    wrap.innerHTML = '<div class="top"><label></label><span class="val"></span></div>';
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
+    const val = wrap.querySelector('.val');
+    const upd = () => {
+      const raw = parseFloat(input.value);
+      state[p.key] = p.map ? p.map(raw) : raw;
+      val.textContent = p.fmt(raw);
+    };
+    input.addEventListener('input', upd);
+    wrap.appendChild(input);
+    host.appendChild(wrap);
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+function buildToggles() {
+  const host = document.getElementById('togglesHost');
+  Object.keys(SCENES).forEach(id => {
+    const grp = document.createElement('div');
+    grp.className = 'toggles';
+    grp.dataset.tab = id;
+    SCENES[id].toggles.forEach(tg => {
+      if (!(tg.key in state)) state[tg.key] = tg.checked;
+      const lab = document.createElement('label');
+      lab.className = 'tg';
+      lab.innerHTML = '<input type="checkbox" data-key="' + tg.key + '"' + (state[tg.key] ? ' checked' : '') + '>' +
+        '<i class="dot" style="--c:' + tg.color + '"></i><span class="tgl"></span>';
+      const cb = lab.querySelector('input');
+      cb.addEventListener('change', () => {
+        state[tg.key] = cb.checked;
+        document.querySelectorAll('input[data-key="' + tg.key + '"]').forEach(o => { o.checked = cb.checked; });
+      });
+      const relabel = () => { lab.querySelector('.tgl').innerHTML = t(tg.label); };
+      RELABEL.push(relabel);
+      relabel();
+      grp.appendChild(lab);
+    });
+    host.appendChild(grp);
+  });
+}
+
+function buildViews() {
+  const host = document.getElementById('viewsHost');
+  Object.keys(SCENES).forEach(id => {
+    const row = document.createElement('div');
+    row.className = 'views';
+    row.dataset.tab = id;
+    const lab = document.createElement('span');
+    lab.className = 'vlabel';
+    row.appendChild(lab);
+    const labRelabel = () => { lab.textContent = t(UI.views); };
+    RELABEL.push(labRelabel);
+    labRelabel();
+    Object.keys(SCENES[id].views).forEach(name => {
+      const b = document.createElement('button');
+      b.className = 'btn vbtn';
+      b.dataset.view = name;
+      b.addEventListener('click', () => applyView(name));
+      row.appendChild(b);
+      const relabel = () => { b.textContent = t(SCENES[id].views[name].label); };
+      RELABEL.push(relabel);
+      relabel();
+    });
+    host.appendChild(row);
+  });
+}
+
+function buildTabs() {
+  const nav = document.getElementById('tabsNav');
+  Object.keys(SCENES).forEach(id => {
+    const b = document.createElement('button');
+    b.className = 'tab';
+    b.dataset.tab = id;
+    b.addEventListener('click', () => switchTab(id));
+    nav.appendChild(b);
+    const relabel = () => { b.textContent = t(SCENES[id].label); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+/* ================= 视角与页签 ================= */
+function refreshViewButtons() {
+  document.querySelectorAll('.vbtn').forEach(b => {
+    const row = b.closest('.views');
+    b.classList.toggle('active', row.dataset.tab === curTab && b.dataset.view === lastView[curTab]);
+  });
+}
+function viewDist(d) { return (W < 820 || W < H) ? d * 1.4 : d; }
+function applyView(name) {
+  const vw = SCENES[curTab].views[name];
+  if (!vw) return;
+  if (vw.onSelect) vw.onSelect();   /* 可选联动：如自动开启该视角对应的曲线开关 */
+  tween = {
+    from: { az: cam.az, el: cam.el, dist: cam.dist, tx: cam.tx, ty: cam.ty, tz: cam.tz },
+    to:   { az: vw.az, el: vw.el, dist: viewDist(vw.dist), tx: vw.tx || 0, ty: vw.ty || 0, tz: vw.tz || 0 },
+    t0: performance.now(),
+    dur: REDUCED ? 1 : 750
+  };
+  lastView[curTab] = name;
+  refreshViewButtons();
+}
+
+const brandDesc = document.getElementById('brandDesc');
+const tipsEl = document.getElementById('tips');
+function switchTab(id) {
+  if (id === curTab) return;
+  curTab = id;
+  tween = null;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+  document.querySelectorAll('.toggles[data-tab], .views[data-tab]').forEach(el => {
+    el.style.display = el.dataset.tab === id ? '' : 'none';
+  });
+  cam = cams[id];
+  brandDesc.textContent = t(SCENES[id].brand);
+  tipsEl.textContent = t(SCENES[id].tips);
+  refreshViewButtons();
+  updateReadout();
+}
+
+/* ================= 播放 / 重置 / 折叠 ================= */
+const btnPlay = document.getElementById('btnPlay');
+function togglePlay() {
+  state.running = !state.running;
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+}
+btnPlay.addEventListener('click', togglePlay);
+document.getElementById('btnReset').addEventListener('click', resetSim);
+
+const panel = document.getElementById('panel');
+const btnFold = document.getElementById('btnFold');
+btnFold.addEventListener('click', () => {
+  const c = panel.classList.toggle('collapsed');
+  btnFold.textContent = c ? '+' : '−';
+});
+if (window.innerWidth < 760) {
+  panel.classList.add('collapsed');
+  btnFold.textContent = '+';
+}
+
+/* ================= 语言切换 ================= */
+function applyLang() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.title = t(TOOL.title);
+  document.querySelector('.brand h1').textContent = t(TOOL.h1);
+  document.getElementById('panelTitle').textContent = t(UI.panelTitle);
+  document.querySelector('.hint').textContent = t(UI.hint);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+  document.getElementById('btnReset').textContent = t(UI.reset);
+  RELABEL.forEach(f => f());
+  brandDesc.textContent = t(SCENES[curTab].brand);
+  tipsEl.textContent = t(SCENES[curTab].tips);
+  updateReadout();
+}
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('lang', l);
+    history.replaceState(null, '', u);
+  } catch (e) {}
+  applyLang();
+}
+document.getElementById('btnLang').addEventListener('click', () => setLang(LANG === 'zh' ? 'en' : 'zh'));
+document.getElementById('verBadge').textContent = 'v' + VERSION;
+
+/* ================= 交互：旋转 / 平移 / 缩放 ================= */
+const pointers = new Map();
+let pinch = null;
+
+function pan(dx, dy) {
+  const C = makeCam();
+  const s = cam.dist / FOCAL;
+  cam.tx = clamp(cam.tx - C.r[0]*dx*s + C.u[0]*dy*s, -6, 6);
+  cam.ty = clamp(cam.ty - C.r[1]*dx*s + C.u[1]*dy*s, -5, 5);
+  cam.tz = clamp(cam.tz - C.r[2]*dx*s + C.u[2]*dy*s, -3, 11);
+}
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, btn: e.button });
+  tween = null;
+  lastView[curTab] = null;
+  refreshViewButtons();
+  if (pointers.size === 2) {
+    const vs = Array.from(pointers.values());
+    pinch = {
+      gap: Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y),
+      cx: (vs[0].x + vs[1].x) / 2,
+      cy: (vs[0].y + vs[1].y) / 2
+    };
+  }
+  canvas.classList.add('dragging');
+});
+
+canvas.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  p.x = e.clientX;
+  p.y = e.clientY;
+  if (pointers.size === 1) {
+    const panMode = e.shiftKey || (e.buttons & 2) || p.btn === 2 || p.btn === 1;
+    if (panMode) {
+      pan(dx, dy);
+    } else {
+      cam.az -= dx * 0.0055;
+      cam.el = clamp(cam.el + dy * 0.0055, -1.45, 1.53);
+    }
+  } else if (pointers.size === 2 && pinch) {
+    const vs = Array.from(pointers.values());
+    const gap = Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y);
+    const cx = (vs[0].x + vs[1].x) / 2, cy = (vs[0].y + vs[1].y) / 2;
+    if (gap > 1) cam.dist = clamp(cam.dist * pinch.gap / gap, 4.5, 60);
+    pan(cx - pinch.cx, cy - pinch.cy);
+    pinch = { gap: gap, cx: cx, cy: cy };
+  }
+});
+
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+  if (!pointers.size) canvas.classList.remove('dragging');
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  tween = null;
+  cam.dist = clamp(cam.dist * Math.exp(e.deltaY * 0.0012), 4.5, 60);
+}, { passive: false });
+
+canvas.addEventListener('dblclick', () => applyView(Object.keys(SCENES[curTab].views)[0]));
+
+window.addEventListener('keydown', e => {
+  const tg = e.target.tagName;
+  if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || tg === 'BUTTON') return;
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'r' || e.key === 'R') resetSim();
+  else if (e.key === 't' || e.key === 'T') {
+    const keys = Object.keys(SCENES);
+    switchTab(keys[(keys.indexOf(curTab) + 1) % keys.length]);
+  }
+  else if (e.key >= '1' && e.key <= '9') {
+    const names = Object.keys(SCENES[curTab].views);
+    const i = +e.key - 1;
+    if (i < names.length) applyView(names[i]);
+  }
+});
+
+/* ================= 启动 ================= */
+resize();
+buildTabs();
+buildParams();
+buildToggles();
+buildViews();
+Object.keys(SCENES).forEach(id => {
+  const first = Object.keys(SCENES[id].views)[0];
+  const v = SCENES[id].views[first];
+  cams[id] = { az: v.az, el: v.el, dist: viewDist(v.dist), tx: v.tx || 0, ty: v.ty || 0, tz: v.tz || 0 };
+  lastView[id] = first;
+});
+switchTab(Object.keys(SCENES)[0]);
+applyLang();
+resetSim();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

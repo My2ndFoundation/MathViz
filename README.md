@@ -47,6 +47,7 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [函数的本质 · Functions, Maps & Inverses](outputs/function-mapping-transformations-3d.html) | A function as a mapping web that collapses into its graph face-on: input vs output transformations, composition as a relay, and inverses as a 3D page-turn about y = x |
 | [二项式定理 · Pascal 三角形与概率 · The Binomial Theorem](outputs/binomial-pascal-probability-3d.html) | One C(n,k), four faces: expansion coefficient, Pascal node, left-right path count, and binomial probability weight — counting becoming the bell curve's ancestor |
 | [力矩、平衡与质心 · Moments, Equilibrium & Centre of Mass](outputs/torque-equilibrium-centre-mass-3d.html) | Moments set by perpendicular distance, balance as two moment traces coinciding, plumb lines crossing at the centre of mass, and toppling when gravity's line leaves the base |
+| [力、约束与自由体图 · Forces & Free-Body Diagrams](outputs/forces-free-body-diagrams-3d.html) | Isolate the body, draw only external forces, let the axes follow the constraint: incline decomposition, the normal force as a response, static friction capping at μR, and connected particles |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
