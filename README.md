@@ -59,6 +59,7 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [算法复杂度与增长速度 · Algorithmic Complexity & Growth Rates](outputs/algorithmic-complexity-growth-3d.html) | Six growth orders racing (log-axis view turns 2ⁿ into a straight line), Big-O as c·g(n) covering f(n) beyond n₀, binary search as exactly log₂n halvings, and recurrences unrolled into trees |
 | [图论与网络算法 · Graph Theory & Network Algorithms](outputs/graph-theory-network-algorithms-3d.html) | Algorithms as growing a known region with an invariant: BFS wavefronts rising layer by layer, Dijkstra making height equal shortest distance, and Kruskal's tide rejecting cycle-closing edges |
 | [Markov 链与稳定分布 · Markov Chains & Stationary Distributions](outputs/markov-chains-stationary-distribution-3d.html) | A transition matrix redistributing probability mass until nothing moves: πP = π as the eigenvalue-1 eigenvector, simplex trajectories converging, and ergodic vs periodic vs absorbing fates |
+| [组合计数与生成函数 · Combinatorics & Generating Functions](outputs/combinatorics-generating-functions-3d.html) | Sequences encoded as polynomial coefficients: the counting rules behind ×, sliding-strip convolution as coefficient multiplication, and Fibonacci folding into F(x) = x/(1−x−x²) |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
