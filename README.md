@@ -41,6 +41,7 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [e 的本质 · The Essence of e](outputs/e-essence-3d.html) | Six roads to 2.71828…: compound limit, self-derivative, growing at its own height, unit area under 1/x, the statistical 1/e, and Euler's formula bending growth into rotation |
 | [π 的本质 · The Essence of π](outputs/pi-essence-3d.html) | Five roads to 3.14159…: a wheel unrolled flat, Archimedes' polygon squeeze, the pizza jigsaw becoming πr², deterministic darts and needles voting, and the Leibniz series biting down |
 | [φ 的本质 · The Essence of φ](outputs/phi-essence-3d.html) | Five roads to 1.61803…: the self-similar golden cut, Fibonacci tiling, the all-1s continued fraction making φ the most irrational number, sunflower phyllotaxis at 137.5°, and the pentagram's endless φ's |
+| [i 的本质 · The Essence of i](outputs/i-essence-3d.html) | i as the quarter turn: two right angles make a U-turn, Cardano's cubic detour through √(−121), roots hiding off the paper, the conjugate mirror twin, and i unmasked as a rotation matrix |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
