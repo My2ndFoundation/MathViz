@@ -39,6 +39,7 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [递推、迭代与稳定性 · Recurrence & Iteration](outputs/recurrence-iteration-dynamics-3d.html) | The cobweb machine: staircases converge, spirals alternate, escapes diverge — and Newton–Raphson is the same machine with tangent lines |
 | [能量、势能与相图 · Energy & Phase Portrait](outputs/energy-phase-portrait-3d.html) | Phase-portrait orbits as level sets of E = ½mv² + V(x): turning points, wells, and the separatrix between bound and escape |
 | [e 的本质 · The Essence of e](outputs/e-essence-3d.html) | Six roads to 2.71828…: compound limit, self-derivative, growing at its own height, unit area under 1/x, the statistical 1/e, and Euler's formula bending growth into rotation |
+| [π 的本质 · The Essence of π](outputs/pi-essence-3d.html) | Five roads to 3.14159…: a wheel unrolled flat, Archimedes' polygon squeeze, the pizza jigsaw becoming πr², deterministic darts and needles voting, and the Leibniz series biting down |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
