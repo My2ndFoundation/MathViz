@@ -45,6 +45,7 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [条件概率与贝叶斯更新 · Conditional Probability & Bayes](outputs/conditional-probability-bayes-3d.html) | Conditioning as delete-and-renormalize: the area model, path-multiplying tree diagrams, Bayes inversion in natural frequencies, and independent vs mutually exclusive untangled |
 | [指数与对数的本质 · Exponentials & Logarithms](outputs/exponential-logarithm-essence-3d.html) | Equal input steps become equal multiples; logs count the multiplications back — mirror inverses across y = x, multiplication turned into addition, doubling time and half-life |
 | [函数的本质 · Functions, Maps & Inverses](outputs/function-mapping-transformations-3d.html) | A function as a mapping web that collapses into its graph face-on: input vs output transformations, composition as a relay, and inverses as a 3D page-turn about y = x |
+| [二项式定理 · Pascal 三角形与概率 · The Binomial Theorem](outputs/binomial-pascal-probability-3d.html) | One C(n,k), four faces: expansion coefficient, Pascal node, left-right path count, and binomial probability weight — counting becoming the bell curve's ancestor |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
