@@ -54,6 +54,7 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [线性方程组、秩与零空间 · Linear Systems, Rank & Null Spaces](outputs/linear-systems-rank-nullspace-3d.html) | Solving as intersecting constraints: walls collapsing to a point, three planes acting out four fates, columns painting the column space, and det→0 squashing an input line to a dot |
 | [模运算、最大公约数与同余 · Modular Arithmetic, GCD & CRT](outputs/modular-arithmetic-euclid-crt-3d.html) | The integer line rolled into a helix of period m, multiplication as a shuffle that needs coprimality, Euclid cutting squares down to the gcd, and the CRT diagonal filling the residue lattice |
 | [最小二乘与正交投影 · Least Squares & Orthogonal Projection](outputs/least-squares-orthogonal-projection-3d.html) | When Ax = b has no solution: b projected orthogonally onto the column space, residuals perpendicular to it, SSE as a paraboloid bowl, and the normal equations as the right angle at its bottom |
+| [证明的本质 · The Essence of Proof](outputs/proof-logic-induction-3d.html) | P→Q as set inclusion (contrapositive = the same picture), quantifier order on a truth grid, n²−n+41 dying to one counterexample, and induction as a wave toppling infinitely many dominoes |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
