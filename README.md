@@ -52,6 +52,7 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [数列与级数的本质 · Sequences & Series](outputs/sequences-series-essence-3d.html) | A sequence is a function on the integers; a series is the sequence of its accumulated terms — geometric tiling to a/(1−r), and the harmonic series proving terms→0 is not enough |
 | [基底与换坐标的本质 · Basis & Change of Coordinates](outputs/basis-change-coordinates-3d.html) | The same vector pinned in space while its coordinates rewrite under a skewed basis: B as the coordinates→world relay, and near-parallel bases making the numbers explode |
 | [线性方程组、秩与零空间 · Linear Systems, Rank & Null Spaces](outputs/linear-systems-rank-nullspace-3d.html) | Solving as intersecting constraints: walls collapsing to a point, three planes acting out four fates, columns painting the column space, and det→0 squashing an input line to a dot |
+| [模运算、最大公约数与同余 · Modular Arithmetic, GCD & CRT](outputs/modular-arithmetic-euclid-crt-3d.html) | The integer line rolled into a helix of period m, multiplication as a shuffle that needs coprimality, Euclid cutting squares down to the gcd, and the CRT diagonal filling the residue lattice |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 

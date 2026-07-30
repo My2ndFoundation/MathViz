@@ -1,0 +1,1418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="tool-version" content="1.0.0">
+<meta name="engine-version" content="1.0.0">
+<title>模运算、最大公约数与同余 · Modular Arithmetic & Congruence</title>
+<!-- ============================================================
+  模运算、最大公约数与同余 · 交互式数学可视化
+  基于 math-viz-starter.html v1.0.0 制作
+  设计规范：math-viz-design-system.md（令牌 / 组件 / 绘制语言 / 交互词汇）
+
+  核心顿悟：模运算把无限整数轴按周期 m 卷成一个圆；
+  同余就是「落在圆上同一位置」。欧几里得算法不断切掉
+  不影响公约数的整倍数，中国剩余定理把两个周期条件
+  重新组合成一个更长的周期。
+
+  四个页签共享同一只步进时钟（n = ⌊θ⌋，同一台机器、不同的测量）：
+    模圆螺旋 —— 整数轴卷成螺旋，每圈恰好 m 个整数
+                顿悟视角：「正视 模圆」同余整数塌缩成同一个点
+    加法与乘法 —— 圆上 +s 转圈、×c 洗牌
+                顿悟视角：「正视 x·y」gcd(c,m)=1 ⇔ 完全排列
+    欧几里得 —— a×b 矩形反复切正方形，最小方块边长 = gcd
+                顿悟视角：「正视 x·y」gcd(a,b)=gcd(b, a mod b) 的几何
+    中国剩余 —— 列 = x mod m、行 = x mod n 的剩余格点
+                顿悟视角：「正视 格点」互质时对角线恰好填满全表
+
+  采样原则：螺旋走点记录“当时”的真实坐标；参数中途改变
+  只影响未来轨迹，历史绝不重算；重置（R）清空重新爬升。
+
+  版本记录（changelog，新→旧）：
+    1.0.0  2026-07-30  首个版本：模圆螺旋 / 加法与乘法 / 欧几里得 / 中国剩余 四页签
+============================================================ -->
+<style>
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  --angle-amber:#fbbf24;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none}
+body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)}
+#scene{position:fixed;inset:0;display:block;touch-action:none;cursor:grab}
+#scene.dragging{cursor:grabbing}
+
+/* ---- 标题区 ---- */
+.brand{position:fixed;top:20px;left:24px;pointer-events:none;user-select:none;max-width:min(520px,42vw)}
+.brand .eyebrow{font-size:10px;letter-spacing:.22em;color:rgba(159,176,200,.72);margin-bottom:6px}
+.brand h1{margin:0;font-family:var(--font-math);font-weight:600;font-size:26px;letter-spacing:.08em;
+  color:#eef3fa;text-shadow:0 2px 20px rgba(45,212,234,.20)}
+.brand p{margin:7px 0 0;font-size:12.5px;line-height:1.65;color:rgba(159,176,200,.85)}
+
+/* ---- 页签 ---- */
+.tabs{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:5;
+  display:flex;gap:4px;padding:4px;border-radius:999px;
+  background:var(--panel-bg);border:1px solid var(--panel-line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
+.tab{border:1px solid transparent;background:transparent;color:#b8c6da;
+  font-size:12.5px;font-family:var(--font-cn);padding:6px 15px;border-radius:999px;cursor:pointer;
+  transition:color .15s,border-color .15s,background .15s}
+.tab:hover{color:#e8f2fb}
+.tab:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.tab.active{background:rgba(45,212,234,.13);border-color:rgba(45,212,234,.55);color:#9be8f7}
+
+/* ---- 底部提示 ---- */
+.hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);pointer-events:none;user-select:none;
+  font-size:11px;letter-spacing:.05em;color:rgba(159,176,200,.6);white-space:nowrap}
+
+/* ---- 控制面板 ---- */
+.panel{position:fixed;top:14px;right:14px;width:304px;max-height:calc(100vh - 28px);overflow-y:auto;
+  background:var(--panel-bg);border:1px solid var(--panel-line);border-radius:16px;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 18px 50px rgba(0,0,0,.45);user-select:none}
+.panel::-webkit-scrollbar{width:6px}
+.panel::-webkit-scrollbar-thumb{background:rgba(148,163,184,.25);border-radius:3px}
+.panel-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px 10px;
+  font-size:13px;font-weight:600;letter-spacing:.06em;color:#dbe6f5}
+.panel:not(.collapsed) .panel-head{border-bottom:1px solid var(--panel-line)}
+.ph-right{display:flex;align-items:center;gap:7px}
+.ver{font-family:var(--font-mono);font-size:10px;color:rgba(159,176,200,.55)}
+.lang{padding:3px 8px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:11px;cursor:pointer}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.fold{width:24px;height:24px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:14px;line-height:1;cursor:pointer}
+.fold:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.panel.collapsed .panel-body{display:none}
+.panel-body{padding:6px 14px 14px}
+
+/* 滑杆 */
+.ctl{margin:11px 0 3px}
+.ctl .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.ctl label{font-size:12px;color:#c6d2e4}
+.ctl label i{font-family:var(--font-math);font-style:italic;font-size:13px}
+.ctl .val{font-family:var(--font-mono);font-size:11.5px;color:#7dd3fc}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;cursor:pointer;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--trace-cyan);margin-top:-5px;border:2px solid #0b1220;box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-moz-range-thumb{width:11px;height:11px;border:2px solid #0b1220;border-radius:50%;
+  background:var(--trace-cyan);box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-offset:2px;border-radius:4px}
+
+/* 按钮 */
+.row{display:flex;gap:8px;margin:13px 0 4px}
+.btn{padding:6px 10px;border-radius:9px;border:1px solid rgba(148,163,184,.25);
+  background:rgba(30,41,59,.55);color:#d7e2f2;font-size:12px;font-family:var(--font-cn);cursor:pointer;
+  transition:border-color .15s,color .15s,background .15s}
+.btn:hover{border-color:rgba(45,212,234,.55)}
+.btn:focus-visible,.fold:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.btn.wide{flex:1}
+.btn.active{border-color:rgba(45,212,234,.8);background:rgba(45,212,234,.12);color:#9be8f7}
+.views{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 2px}
+.views .vlabel{font-size:11.5px;color:rgba(159,176,200,.8);margin-right:2px}
+.vbtn{padding:5px 9px;font-size:11.5px}
+
+/* 开关 */
+.toggles{display:flex;flex-wrap:wrap;gap:7px 12px;margin:12px 0 2px}
+.tg{display:flex;align-items:center;gap:6px;font-size:12px;color:#c6d2e4;cursor:pointer}
+.tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
+.tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
+
+/* 读数与提示 */
+.readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
+  font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
+.readout b{font-weight:600;color:#e8eef7}
+.readout .sinC b{color:var(--trace-rose)}
+.readout .cosC b{color:var(--trace-violet)}
+.readout .tanC b{color:var(--trace-emerald)}
+.readout .cotC b{color:var(--trace-orange)}
+.readout .dim{color:rgba(159,176,200,.6)}
+.tips{margin-top:11px;font-size:11px;line-height:1.65;color:rgba(159,176,200,.72)}
+
+@media (max-width:760px){
+  .brand{top:12px;left:14px;max-width:70vw}
+  .brand h1{font-size:20px}
+  .brand p{display:none}
+  .tabs{top:52px;left:14px;transform:none}
+  .panel{left:10px;right:10px;top:auto;bottom:10px;width:auto;max-height:62vh}
+  .hint{display:none}
+}
+</style>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+
+<div class="brand">
+  <div class="eyebrow">INTERACTIVE MATH · 交互式数学</div>
+  <h1>模运算与同余</h1>
+  <p id="brandDesc"></p>
+</div>
+
+<nav class="tabs" id="tabsNav"></nav>
+
+<aside class="panel" id="panel">
+  <div class="panel-head"><span id="panelTitle">参数与视角</span>
+    <span class="ph-right"><span class="ver" id="verBadge"></span><button class="lang" id="btnLang" title="切换语言 / Switch language">EN</button><button class="fold" id="btnFold" title="收起 / 展开">−</button></span></div>
+  <div class="panel-body">
+    <div id="paramsHost"></div>
+    <div class="row">
+      <button class="btn wide" id="btnPlay">⏸ 暂停</button>
+      <button class="btn" id="btnReset">↺ 重置</button>
+    </div>
+    <div id="togglesHost"></div>
+    <div id="viewsHost"></div>
+    <div class="readout" id="readout"></div>
+    <div class="tips" id="tips"></div>
+  </div>
+</aside>
+
+<div class="hint">拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签</div>
+
+<script>
+'use strict';
+/* ================= i18n 核心（引擎区） ================= */
+const LANG_KEY = 'mathviz-lang';
+function resolveLang(){
+  try{
+    const q = new URLSearchParams(location.search).get('lang');
+    if (q === 'zh' || q === 'en') return q;
+    const s = localStorage.getItem(LANG_KEY);
+    if (s === 'zh' || s === 'en') return s;
+  }catch(e){}
+  return (navigator.language || 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+let LANG = resolveLang();
+function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
+
+const STARTER_VERSION = '1.0.0';
+const VERSION = document.querySelector('meta[name="tool-version"]').content;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ⓪ 工具元信息 —— id 与双语标题                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const TOOL = {
+  id: 'modular-arithmetic-euclid-crt-3d',
+  title: { zh: '模运算、最大公约数与同余', en: 'Modular Arithmetic, GCD & Congruence' },
+  h1:    { zh: '模运算与同余', en: 'Modular Arithmetic & Congruence' }
+};
+
+/* 引擎 UI 文案（一般无需改动） */
+const UI = {
+  panelTitle: { zh: '参数与视角', en: 'Parameters & Views' },
+  pause:  { zh: '⏸ 暂停', en: '⏸ Pause' },
+  resume: { zh: '▶ 继续', en: '▶ Resume' },
+  reset:  { zh: '↺ 重置', en: '↺ Reset' },
+  views:  { zh: '视角', en: 'View' },
+  hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
+            en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
+};
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ① 参数声明 —— 自动生成滑杆                                ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const PARAMS = [
+  { key: 'm',     label: { zh: '模数 <i>m</i>',                     en: 'Modulus <i>m</i>' },                      min: 2,   max: 12, step: 1,    value: 6,  fmt: v => v.toFixed(0) },
+  { key: 'a',     label: { zh: '整数 <i>a</i>',                     en: 'Integer <i>a</i>' },                      min: 0,   max: 47, step: 1,    value: 8,  fmt: v => v.toFixed(0) },
+  { key: 's',     label: { zh: '加数 <i>s</i>',                     en: 'Addend <i>s</i>' },                       min: 1,   max: 11, step: 1,    value: 5,  fmt: v => '+' + v.toFixed(0) },
+  { key: 'c',     label: { zh: '乘数 <i>c</i>',                     en: 'Multiplier <i>c</i>' },                   min: 0,   max: 11, step: 1,    value: 5,  fmt: v => '×' + v.toFixed(0) },
+  { key: 'eA',    label: { zh: '矩形长边 <i>a</i>',                 en: 'Rectangle side <i>a</i>' },               min: 4,   max: 60, step: 1,    value: 24, fmt: v => v.toFixed(0) },
+  { key: 'eB',    label: { zh: '矩形短边 <i>b</i>',                 en: 'Rectangle side <i>b</i>' },               min: 4,   max: 60, step: 1,    value: 9,  fmt: v => v.toFixed(0) },
+  { key: 'n2',    label: { zh: '第二模数 <i>n</i>',                 en: 'Second modulus <i>n</i>' },               min: 2,   max: 12, step: 1,    value: 5,  fmt: v => v.toFixed(0) },
+  { key: 'r1',    label: { zh: '目标余数 <i>r</i>₁ (mod <i>m</i>)', en: 'Target residue <i>r</i>₁ (mod <i>m</i>)' }, min: 0, max: 11, step: 1,    value: 2,  fmt: v => v.toFixed(0) },
+  { key: 'r2',    label: { zh: '目标余数 <i>r</i>₂ (mod <i>n</i>)', en: 'Target residue <i>r</i>₂ (mod <i>n</i>)' }, min: 0, max: 11, step: 1,    value: 3,  fmt: v => v.toFixed(0) },
+  { key: 'omega', label: { zh: '步进速度 <i>ω</i>',                 en: 'Step speed <i>ω</i>' },                   min: 0.2, max: 4,  step: 0.05, value: 1.2, fmt: v => fmt(v) + t({ zh: ' 步/s', en: ' steps/s' }) }
+];
+
+/* 每个滑杆归属的页签（未列出者在所有页签显示）——场景级 UI 辅助（不改引擎函数）：
+   一个独立的 rAF 轮询在页签切换时更新 .ctl 行显隐，与 PARAMS 顺序一一对应。 */
+const PARAM_TABS = {
+  m:  ['spiral', 'modops', 'crt'],
+  a:  ['spiral'],
+  s:  ['modops'],
+  c:  ['modops'],
+  eA: ['euclid'],
+  eB: ['euclid'],
+  n2: ['crt'],
+  r1: ['crt'],
+  r2: ['crt']
+};
+let _paramSyncTab = null;
+function syncParamRows() {
+  if (curTab === _paramSyncTab) return;
+  const host = document.getElementById('paramsHost');
+  if (!host || host.children.length < PARAMS.length) return;
+  _paramSyncTab = curTab;
+  PARAMS.forEach((p, i) => {
+    const row = host.children[i];
+    if (!row) return;
+    const tabs = PARAM_TABS[p.key];
+    row.style.display = (!tabs || tabs.indexOf(curTab) !== -1) ? '' : 'none';
+  });
+}
+/* 首帧后启动（此时引擎已完成同步初始化，curTab 已就绪，避免 TDZ） */
+requestAnimationFrame(function _paramSyncLoop() { syncParamRows(); requestAnimationFrame(_paramSyncLoop); });
+
+/* ────── 场景级：数论与绘图助手（引擎之上，引擎零改动） ────── */
+const ROSE_A = 'rgba(251,113,133,';
+const VIO_A  = 'rgba(167,139,250,';
+const EME_A  = 'rgba(52,211,153,';
+const ORG_A  = 'rgba(251,146,60,';
+const CYAN_A = 'rgba(45,212,234,';
+const AMB_A  = 'rgba(251,191,36,';
+const WHT_A  = 'rgba(226,232,240,';
+
+const mCur = () => Math.max(2, Math.round(state.m));
+const nCur = () => Math.max(2, Math.round(state.n2));
+const STEPn = () => Math.floor(state.theta);          /* 共享步进时钟：θ 每积累 1 rad = 走 1 步 */
+const modP = (x, mm) => { x %= mm; if (x < 0) x += mm; return x; };
+function gcd2(x, y) {
+  x = Math.abs(Math.round(x)); y = Math.abs(Math.round(y));
+  while (y) { const r = x % y; x = y; y = r; }
+  return x || 1;
+}
+/* 扩展欧几里得：返回 [g, u, v]，满足 a·u + b·v = g */
+function egcd(a, b) {
+  if (b === 0) return [a, 1, 0];
+  const r = egcd(b, a % b);
+  return [r[0], r[2], r[1] - Math.floor(a / b) * r[2]];
+}
+/* CRT 求解 x ≡ r1 (mod m)、x ≡ r2 (mod n)：
+   有解 ⇔ g = gcd(m,n) 整除 (r2 − r1)；有解时解 mod lcm 唯一 */
+function crtSolve(m, r1, n, r2) {
+  const e = egcd(m, n), g = e[0], l = m / g * n;
+  if (modP(r2 - r1, g) !== 0) return { ok: false, g: g, l: l };
+  const x = modP(r1 + m * modP(((r2 - r1) / g) * e[1], n / g), l);
+  return { ok: true, g: g, l: l, x: x };
+}
+/* 欧几里得铺砖：a×b 矩形反复切去短边正方形，返回方块与除法链 */
+function euclidSquares(a, b) {
+  const sq = [], chain = [];
+  let x = 0, y = 0, w = a, h = b, step = 0;
+  while (w > 0 && h > 0 && step < 200) {
+    if (w >= h) {
+      const q = Math.floor(w / h);
+      chain.push([w, h, q, w % h]);
+      for (let i = 0; i < q; i++) sq.push({ x: x + i * h, y: y, s: h, step: step });
+      x += q * h; w -= q * h;
+    } else {
+      const q = Math.floor(h / w);
+      chain.push([h, w, q, h % w]);
+      for (let i = 0; i < q; i++) sq.push({ x: x, y: y + i * w, s: w, step: step });
+      y += q * w; h -= q * w;
+    }
+    step++;
+  }
+  return { sq: sq, chain: chain, g: gcd2(a, b) };
+}
+
+/* 螺旋常量：半径 / 总高 / 圈数（每圈恰好 m 个整数） */
+const HELIX_R = 1.6, HELIX_H = 5.0, HELIX_TURNS = 4;
+const helixSpan = () => HELIX_TURNS * mCur();
+function helixPos(k) {
+  const m = mCur();
+  return [HELIX_R * Math.cos(TAU * k / m), HELIX_R * Math.sin(TAU * k / m), k * (HELIX_H / helixSpan())];
+}
+/* 模圆节点：半径 R 的圆上第 i / m 个位置 */
+function circleNode(m, i, R) {
+  const a2 = TAU * i / m;
+  return [R * Math.cos(a2), R * Math.sin(a2), 0];
+}
+/* 投影填充四边形（任一顶点越过近裁剪面则整体放弃） */
+function fillQuad(C, pts, color) {
+  const s = [];
+  for (const p of pts) { const q = proj(C, p); if (!q) return; s.push(q); }
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(s[0][0], s[0][1]);
+  for (let i = 1; i < s.length; i++) ctx.lineTo(s[i][0], s[i][1]);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ② 场景注册 —— 每个键就是一个页签                           ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const SCENES = {
+
+  /* ────── 一：模圆螺旋 —— 整数轴卷成圆 ────── */
+  spiral: {
+    label: { zh: '模圆螺旋', en: 'Mod-circle spiral' },
+    brand: { zh: '把无限长的整数轴按周期 m 卷成一根螺旋：每上升一圈恰好经过 m 个整数，所有除以 m 余数相同的整数排成一根竖直的柱子。拖动 m 与 a，拖拽画布旋转观察。',
+             en: 'Roll the infinite integer line into a helix with period m: each turn passes exactly m integers, and all integers with the same remainder mod m stack into one vertical column. Drag m and a, and rotate the canvas to explore.' },
+    tips: { zh: '提示：切「正视 模圆」沿螺旋轴望去——整根螺旋塌成一个圆，玫红柱子塌成一个点。a ≡ b (mod m) 就是「落在圆上同一位置」，而竖直相邻两点相差恰好 m：这就是 m | (a − b)。',
+            en: 'Tip: switch to "Front mod circle" and sight down the axis — the whole helix collapses into a circle and the rose column into a single point. a ≡ b (mod m) just means "landing at the same spot", and vertical neighbours differ by exactly m: that is m | (a − b).' },
+    views: {
+      iso:   { label: { zh: '立体',       en: '3D' },               az: -0.85,       el: 0.30,  dist: 12.5, tx: 0, ty: 0.4, tz: 2.2 },
+      front: { label: { zh: '正视 模圆',  en: 'Front mod circle' }, az: 0.001,       el: 0.02,  dist: 8.0,  tx: 0, ty: 0,   tz: 2.0 },
+      side:  { label: { zh: '侧视 爬升',  en: 'Side climb' },       az: -Math.PI/2,  el: 0.001, dist: 11.0, tx: 0, ty: 0,   tz: 2.5 }
+    },
+    toggles: [
+      { key: 'showClass',  label: { zh: '同余类 a + km', en: 'Residue class a + km' }, color: '#fb7185', checked: true },
+      { key: 'showTrail',  label: { zh: '爬升轨迹',      en: 'Climb trail' },          color: '#a78bfa', checked: true },
+      { key: 'showLabels', label: { zh: '数值标注',      en: 'Number labels' },        color: '#2dd4ea', checked: true },
+      { key: 'showGrid',   label: { zh: '网格',          en: 'Grid' },                 color: '#64748b', checked: false }
+    ],
+    sampleWindow: () => 6 / Math.max(0.2, state.omega) + 0.5,
+    draw(C) {
+      const m = mCur(), span = helixSpan(), dz = HELIX_H / span;
+      if (state.showGrid) drawGridXY(C, 2, 1);
+
+      /* 螺旋轴（= 卷起来的整数轴方向） */
+      line3(C, [0, 0, -0.4], [0, 0, HELIX_H + 0.9], { width: 1.4, color: AXIS });
+      arrowAt(C, [0, 0, HELIX_H + 0.9], [0, 0, HELIX_H + 0.7], AXIS);
+      label3(C, [0, 0.3, HELIX_H + 1.2], t({ zh: '整数 ↑', en: 'integers ↑' }),
+        { size: 10.5, color: 'rgba(159,176,200,.7)', align: 'center' });
+
+      /* 底部模圆（青色源几何）与剩余类刻度 */
+      drawCircle(C, HELIX_R);
+      if (state.showLabels) {
+        for (let i = 0; i < m; i++) {
+          label3(C, circleNode(m, i, HELIX_R * 1.24), '' + i,
+            { size: 10.5, color: CYAN_A + '0.85)', align: 'center' });
+        }
+      }
+
+      /* 整数螺旋（白色轨迹语义） */
+      const pts = [];
+      for (let k = 0; k <= span; k += 0.25) pts.push(helixPos(k));
+      strokePoly(C, pts, { width: 1.6, color: WHT_A + '0.35)' });
+      for (let k = 0; k <= span; k++) solidDot(C, helixPos(k), 2.2, 'rgba(159,176,200,0.85)');
+      if (state.showLabels) {
+        for (let k = 0; k <= span; k++) {
+          if (k < m || k % m === 0) {
+            const p = helixPos(k);
+            label3(C, [p[0] * 1.14, p[1] * 1.14, p[2]], '' + k,
+              { size: 10, color: 'rgba(159,176,200,.6)', align: 'center', dy: -8 });
+          }
+        }
+      }
+
+      /* 同余类柱子（玫红）：a, a+m, a+2m, … 全部同一角度 */
+      if (state.showClass) {
+        const aE = modP(Math.round(state.a), m);
+        const bx = HELIX_R * Math.cos(TAU * aE / m), by = HELIX_R * Math.sin(TAU * aE / m);
+        line3(C, [bx, by, aE * dz], [bx, by, (aE + (HELIX_TURNS - 1) * m) * dz],
+          { width: 1.5, dash: [6, 6], color: ROSE_A + '0.7)' });
+        for (let j = 0; j < HELIX_TURNS; j++) {
+          const k = aE + j * m;
+          if (k > span) break;
+          const sp = proj(C, [bx, by, k * dz]);
+          if (sp) glowDot(sp, 9, '#ffffff', ROSE_A + '0.9)');
+          label3(C, [bx, by, k * dz], '' + k, { size: 10, color: '#fb7185', dx: 12 });
+        }
+        /* 相邻两点的差 = m（琥珀度量） */
+        const z1 = aE * dz, z2 = (aE + m) * dz;
+        line3(C, [bx * 1.14, by * 1.14, z1], [bx * 1.14, by * 1.14, z2], { width: 1.2, color: AMB_A + '0.75)' });
+        line3(C, [bx * 1.10, by * 1.10, z1], [bx * 1.18, by * 1.18, z1], { width: 1.2, color: AMB_A + '0.75)' });
+        line3(C, [bx * 1.10, by * 1.10, z2], [bx * 1.18, by * 1.18, z2], { width: 1.2, color: AMB_A + '0.75)' });
+        label3(C, [bx * 1.3, by * 1.3, (z1 + z2) / 2], t({ zh: '差 = m', en: 'gap = m' }),
+          { size: 10.5, color: '#fbbf24', dx: 6 });
+      }
+
+      /* 爬升轨迹（紫，来自历史采样——记录的是当时的真实坐标） */
+      if (state.showTrail && samples.length > 1) {
+        const tp = [];
+        let prevZ = null;
+        for (let i = samples.length - 1; i >= 0; i--) {
+          const q = samples[i];
+          if (prevZ !== null && Math.abs(q.hz - prevZ) > 1.0) tp.push(null);   /* 螺旋回卷处断线 */
+          tp.push([q.hx, q.hy, q.hz]);
+          prevZ = q.hz;
+        }
+        strokePoly(C, tp, { width: 5.5, color: VIO_A + '0.13)' });
+        strokePoly(C, tp, { width: 2.2, fade: [VIO_A + '1)', VIO_A + '0.04)'] });
+      }
+
+      /* 走点：沿螺旋匀速爬升的“正在数数的点” */
+      const sPos = state.theta % span;
+      const wp = helixPos(sPos);
+      line3(C, wp, [wp[0], wp[1], 0], { width: 1.5, dash: [7, 7], color: VIO_A + '0.8)' });
+      const fs = proj(C, [wp[0], wp[1], 0]);
+      if (fs) glowDot(fs, 9, '#ffffff', VIO_A + '0.85)');
+      const sp2 = proj(C, wp);
+      if (sp2) glowDot(sp2, 15, '#ffffff', 'rgba(186,240,255,0.9)');
+
+      label3(C, [-3.4, 2.35, 0], 'a ≡ b (mod m)  ⇔  m | (a − b)',
+        { font: 'italic 13px ' + FONT_MATH, color: '#fb7185', align: 'left' });
+    },
+    readout() {
+      const m = mCur(), aI = Math.round(state.a), aE = modP(aI, m);
+      const k = Math.floor(state.theta % helixSpan());
+      return '<div>' + t({ zh: '步数', en: 'step' }) + ' n = <b>' + STEPn() + '</b>&ensp;·&ensp;m = <b>' + m + '</b></div>' +
+        '<div class="sinC">a = ' + aI + ' ≡ <b>' + aE + '</b> (mod ' + m + ')</div>' +
+        '<div class="cosC">' + t({ zh: '走点', en: 'walker' }) + ' k = ' + k + ' ≡ <b>' + modP(k, m) + '</b> (mod ' + m + ')</div>' +
+        '<div class="dim">' + t({ zh: '同余类', en: 'class' }) + ' {…, ' + aE + ', ' + (aE + m) + ', ' + (aE + 2 * m) + ', …} = ' + aE + ' + ' + m + 'k</div>';
+    }
+  },
+
+  /* ────── 二：模加法与模乘法 —— 转圈与洗牌 ────── */
+  modops: {
+    label: { zh: '加法与乘法', en: 'Add & multiply' },
+    brand: { zh: '模加法是在圆上转圈：每步 +s，走 m/gcd(s,m) 步回到起点。模乘法 ×c 把每个剩余类送往新位置：gcd(c,m)=1 时是一次完全排列，否则整个圆塌进 gcd 的倍数。',
+             en: 'Modular addition walks the circle: stepping +s returns to the start after m/gcd(s,m) steps. Multiplication ×c sends every residue to a new seat: with gcd(c,m)=1 it is a perfect shuffle; otherwise the whole circle collapses onto multiples of the gcd.' },
+    tips: { zh: '提示：把 c 调到与 m 互质（如 m=6, c=5），紫色箭头构成一次完美洗牌、翠绿像集布满整圈；调成公因数（m=6, c=3），像集只剩 {0, 3}。×c 可逆 ⇔ gcd(c,m)=1——这正是模逆元存在的条件。',
+            en: 'Tip: set c coprime to m (say m=6, c=5) and the violet arrows form a perfect shuffle with the emerald image filling the circle; set c=3 and the image shrinks to {0, 3}. ×c is invertible ⇔ gcd(c,m)=1 — exactly the condition for a modular inverse to exist.' },
+    views: {
+      iso:   { label: { zh: '立体',     en: '3D' },        az: -0.55, el: 0.35, dist: 9.5, tx: 0, ty: 0, tz: 0 },
+      front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 7.0, tx: 0, ty: 0, tz: 0 }
+    },
+    toggles: [
+      { key: 'showAdd',   label: { zh: '加法轨道 +s',  en: 'Addition orbit +s' },       color: '#fb7185', checked: true },
+      { key: 'showMul',   label: { zh: '乘法映射 ×c',  en: 'Multiplication map ×c' },   color: '#a78bfa', checked: true },
+      { key: 'showImage', label: { zh: '像集合',       en: 'Image set' },               color: '#34d399', checked: true },
+      { key: 'showGrid',  label: { zh: '网格',         en: 'Grid' },                    color: '#64748b', checked: false }
+    ],
+    sampleWindow: () => 10,
+    draw(C) {
+      const m = mCur(), sv = Math.round(state.s), cv = Math.round(state.c);
+      const R = 2;
+      if (state.showGrid) drawGridXY(C, 2.5, 0.5);
+
+      /* 模圆与剩余类节点（青色源几何） */
+      drawCircle(C, R);
+      for (let i = 0; i < m; i++) {
+        solidDot(C, circleNode(m, i, R), 3, CYAN_A + '0.9)');
+        label3(C, circleNode(m, i, R * 1.16), '' + i, { size: 11, color: CYAN_A + '0.9)', align: 'center' });
+      }
+
+      /* 乘法映射 ×c：violet 弦箭头 x → c·x (mod m)（结构线层） */
+      if (state.showMul) {
+        for (let x = 0; x < m; x++) {
+          const yv = modP(cv * x, m);
+          if (yv === x) {
+            /* 不动点：小圆环标记 */
+            const p = circleNode(m, x, R * 0.9);
+            solidDot(C, p, 2.2, VIO_A + '0.8)');
+            continue;
+          }
+          const pa = circleNode(m, x, R * 0.94), pb = circleNode(m, yv, R * 0.94);
+          const mid = [(pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2, 0];
+          line3(C, pa, pb, { width: 1.6, alpha: 0.5, color: VIO_A + '1)' });
+          arrowAt(C, pb, mid, VIO_A + '0.75)');
+        }
+        label3(C, [-R - 1.6, R * 0.75, 0], 'x → c·x (mod m)',
+          { font: 'italic 13px ' + FONT_MATH, color: '#a78bfa', align: 'left' });
+      }
+
+      /* 像集合（翠绿）：×c 能到达的剩余类 = gcd(c,m) 的倍数 */
+      if (state.showImage) {
+        const g = gcd2(cv === 0 ? m : cv, m);
+        for (let i = 0; i < m; i += g) {
+          const sp = proj(C, circleNode(m, i, R));
+          if (sp) glowDot(sp, 8, '#ffffff', EME_A + '0.85)');
+        }
+      }
+
+      /* 加法轨道 +s（玫红）：从 0 出发按共享时钟逐步前进 */
+      if (state.showAdd) {
+        const g = gcd2(sv, m), Lo = m / g;
+        const prog = Math.min(STEPn() % (Lo + 2), Lo);   /* 走完停两拍再重播 */
+        const pts = [];
+        for (let j = 0; j <= prog; j++) pts.push(circleNode(m, modP(j * sv, m), R));
+        if (pts.length > 1) {
+          strokePoly(C, pts, { width: 5.5, color: ROSE_A + '0.13)' });
+          strokePoly(C, pts, { width: 2.2, color: ROSE_A + '0.9)' });
+        }
+        const head = pts[pts.length - 1];
+        const sp = proj(C, head);
+        if (sp) glowDot(sp, 15, '#ffffff', 'rgba(186,240,255,0.9)');
+        label3(C, [-R - 1.6, R * 1.05, 0], '0 → +s → +2s → …',
+          { font: 'italic 13px ' + FONT_MATH, color: '#fb7185', align: 'left' });
+      }
+    },
+    readout() {
+      const m = mCur(), sv = Math.round(state.s), cv = Math.round(state.c);
+      const gs = gcd2(sv, m), gc = gcd2(cv === 0 ? m : cv, m);
+      let inv = '';
+      if (cv > 0 && gc === 1) {
+        inv = ' · c⁻¹ = ' + modP(egcd(cv, m)[1], m);
+      }
+      return '<div>' + t({ zh: '步数', en: 'step' }) + ' n = <b>' + STEPn() + '</b>&ensp;·&ensp;m = <b>' + m + '</b></div>' +
+        '<div class="sinC">+' + sv + ' : gcd(' + sv + ',' + m + ') = ' + gs + ' · ' + t({ zh: '轨道长', en: 'orbit' }) + ' <b>' + (m / gs) + '</b></div>' +
+        '<div class="cosC">×' + cv + ' : gcd(' + cv + ',' + m + ') = ' + gc + inv + '</div>' +
+        '<div class="tanC">' + t({ zh: '像集合大小', en: 'image size' }) + ' <b>' + (m / gc) + '</b> / ' + m +
+          (gc === 1 ? t({ zh: '（完全排列）', en: ' (full permutation)' }) : t({ zh: '（塌缩到 gcd 的倍数）', en: ' (collapses onto gcd multiples)' })) + '</div>' +
+        '<div class="dim">' + t({ zh: '×c 可逆 ⇔ gcd(c,m) = 1', en: '×c invertible ⇔ gcd(c,m) = 1' }) + '</div>';
+    }
+  },
+
+  /* ────── 三：欧几里得算法 —— 切正方形 ────── */
+  euclid: {
+    label: { zh: '欧几里得', en: 'Euclid' },
+    brand: { zh: '欧几里得算法就是不断切正方形：从 a×b 的矩形里每次切掉边长为短边的正方形，对剩下的小矩形重复同样操作——最后铺满的最小正方形，边长就是 gcd(a,b)。',
+             en: 'The Euclidean algorithm is square-cutting: from an a×b rectangle keep slicing off squares whose side is the short edge, then repeat on the leftover strip — the side of the smallest squares that finish the tiling is gcd(a,b).' },
+    tips: { zh: '提示：正视铺砖，读出 gcd(a,b) = gcd(b, a mod b) 的几何意义——切掉整倍数不改变「能同时量尽两边的最大刻度」。把 a、b 调成相邻 Fibonacci 数（如 55 和 34），步数最多：这是算法最慢的输入。',
+            en: 'Tip: face the tiling and read gcd(a,b) = gcd(b, a mod b) geometrically — removing whole multiples never changes the largest ruler that measures both sides. Set a, b to consecutive Fibonacci numbers (55 and 34) for the most steps: the algorithm\'s worst case.' },
+    views: {
+      iso:   { label: { zh: '立体',     en: '3D' },        az: -0.5,  el: 0.4,  dist: 10.5, tx: 0, ty: 0.2, tz: 0 },
+      front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 8.0,  tx: 0, ty: 0.2, tz: 0 }
+    },
+    toggles: [
+      { key: 'showTiling', label: { zh: '切割方块',     en: 'Cut squares' },     color: '#fb7185', checked: true },
+      { key: 'showGcd',    label: { zh: 'gcd 正方形',   en: 'gcd squares' },     color: '#34d399', checked: true },
+      { key: 'showSides',  label: { zh: '边长标注',     en: 'Side labels' },     color: '#2dd4ea', checked: true },
+      { key: 'showAnim',   label: { zh: '逐步动画',     en: 'Step animation' },  color: '#fbbf24', checked: true },
+      { key: 'showGrid',   label: { zh: '网格',         en: 'Grid' },            color: '#64748b', checked: false }
+    ],
+    sampleWindow: () => 10,
+    draw(C) {
+      const A = Math.round(state.eA), B = Math.round(state.eB);
+      const res = euclidSquares(A, B);
+      const u = 6.4 / Math.max(A, B);
+      const w = A * u, h = B * u, x0 = -w / 2, y0 = -h / 2 + 0.2;
+      if (state.showGrid) drawGridXY(C, 4, 1);
+
+      const lastStep = res.sq[res.sq.length - 1].step;
+      const nsq = res.sq.length;
+      const reveal = state.showAnim ? Math.min(STEPn() % (nsq + 3) + 1, nsq) : nsq;
+
+      /* 外框：a×b 矩形（青色源几何） */
+      strokePoly(C, [[x0, y0, 0], [x0 + w, y0, 0], [x0 + w, y0 + h, 0], [x0, y0 + h, 0], [x0, y0, 0]],
+        { width: 2, color: CYAN_A + '0.9)' });
+
+      /* 逐块切割：步序奇偶 玫红/紫 交替，最后一步 = gcd 正方形（翠绿） */
+      if (state.showTiling) {
+        for (let i = 0; i < reveal; i++) {
+          const q = res.sq[i];
+          const isG = q.step === lastStep;
+          if (isG && !state.showGcd) continue;
+          const col = isG ? EME_A : (q.step % 2 === 0 ? ROSE_A : VIO_A);
+          const qx = x0 + q.x * u, qy = y0 + q.y * u, qs = q.s * u;
+          fillQuad(C, [[qx, qy, 0], [qx + qs, qy, 0], [qx + qs, qy + qs, 0], [qx, qy + qs, 0]],
+            col + (isG ? '0.22)' : '0.13)'));
+          strokePoly(C, [[qx, qy, 0], [qx + qs, qy, 0], [qx + qs, qy + qs, 0], [qx, qy + qs, 0], [qx, qy, 0]],
+            { width: 1.3, color: col + '0.8)' });
+          if (state.showSides && qs > 0.5) {
+            label3(C, [qx + qs / 2, qy + qs / 2, 0], '' + q.s,
+              { font: 'italic 11px ' + FONT_MATH, color: isG ? '#34d399' : WHT_A + '0.75)', align: 'center' });
+          }
+        }
+        /* 当前除法步骤（琥珀度量注记） */
+        const curStep = reveal > 0 ? res.sq[Math.min(reveal, nsq) - 1].step : 0;
+        const ch = res.chain[curStep];
+        if (ch) {
+          label3(C, [0, y0 - 0.45, 0], ch[0] + ' = ' + ch[2] + '·' + ch[1] + ' + ' + ch[3],
+            { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+        }
+      }
+
+      /* 边长量尺（琥珀） */
+      if (state.showSides) {
+        label3(C, [x0 - 0.3, y0 + h / 2, 0], 'b = ' + B, { font: 'italic 12px ' + FONT_MATH, color: '#fbbf24', align: 'right' });
+        label3(C, [0, y0 + h + 0.3, 0], 'a = ' + A, { font: 'italic 12px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+      }
+
+      label3(C, [0, y0 + h + 0.85, 0], 'gcd(a, b) = gcd(b, a mod b)',
+        { font: 'italic 13px ' + FONT_MATH, color: '#fb7185', align: 'center' });
+      label3(C, [x0 + w + 0.35, y0 + 0.25, 0], 'gcd = ' + res.g,
+        { font: 'italic 13px ' + FONT_MATH, color: '#34d399', align: 'left' });
+    },
+    readout() {
+      const A = Math.round(state.eA), B = Math.round(state.eB);
+      const res = euclidSquares(A, B);
+      let rows = '';
+      const shown = Math.min(res.chain.length, 5);
+      for (let i = 0; i < shown; i++) {
+        const ch = res.chain[i];
+        rows += '<div class="' + (i % 2 === 0 ? 'sinC' : 'cosC') + '">' + ch[0] + ' = ' + ch[2] + '·' + ch[1] + ' + <b>' + ch[3] + '</b></div>';
+      }
+      if (res.chain.length > shown) rows += '<div class="dim">… ' + (res.chain.length - shown) + ' ' + t({ zh: '步省略', en: 'more steps' }) + '</div>';
+      return '<div>' + t({ zh: '除法链', en: 'division chain' }) + ' · ' + res.chain.length + ' ' + t({ zh: '步', en: 'steps' }) + '</div>' +
+        rows +
+        '<div class="tanC">gcd(' + A + ', ' + B + ') = <b>' + res.g + '</b></div>' +
+        '<div class="dim">' + t({ zh: '余数为 0 时，最后的除数就是 gcd', en: 'when the remainder hits 0, the last divisor is the gcd' }) + '</div>';
+    }
+  },
+
+  /* ────── 四：中国剩余定理 —— 两个周期条件的合成 ────── */
+  crt: {
+    label: { zh: '中国剩余', en: 'CRT' },
+    brand: { zh: '一个整数被两个模数同时观察：x mod m 是列、x mod n 是行。整数逐一落进格子，走出一条对角线。m、n 互质时它恰好遍历全部 mn 个格子——任意余数组合都有唯一解 (mod mn)，这就是中国剩余定理。',
+             en: 'One integer watched through two moduli: x mod m is its column, x mod n its row. Integers land cell by cell along a diagonal. When m and n are coprime it visits all mn cells exactly once — every residue pair has a unique solution mod mn: the Chinese Remainder Theorem.' },
+    tips: { zh: '提示：正视格点——互质时（m=6, n=5）对角线填满整张表；把 n 调成 4（gcd=2），只有满足 r₁ ≡ r₂ (mod 2) 的格子会被访问，其余目标永远无解。有解时，解每 lcm(m,n) 重复一次。',
+            en: 'Tip: face the lattice — with coprime moduli (m=6, n=5) the diagonal fills the whole table; set n to 4 (gcd=2) and only cells with r₁ ≡ r₂ (mod 2) are ever visited, so other targets have no solution at all. When a solution exists it repeats every lcm(m,n).' },
+    views: {
+      iso:   { label: { zh: '立体',       en: '3D' },           az: -0.7,       el: 0.35,  dist: 12.0, tx: 0, ty: 0.3, tz: 2.2 },
+      front: { label: { zh: '正视 格点',  en: 'Front lattice' }, az: 0.001,      el: 0.02,  dist: 8.0,  tx: 0, ty: 0,   tz: 0 },
+      side:  { label: { zh: '侧视 爬升',  en: 'Side climb' },    az: -Math.PI/2, el: 0.001, dist: 11.5, tx: 0, ty: 0,   tz: 2.5 }
+    },
+    toggles: [
+      { key: 'showCond1', label: { zh: '条件 x ≡ r₁ (mod m)', en: 'x ≡ r₁ (mod m)' },   color: '#fb7185', checked: true },
+      { key: 'showCond2', label: { zh: '条件 x ≡ r₂ (mod n)', en: 'x ≡ r₂ (mod n)' },   color: '#a78bfa', checked: true },
+      { key: 'showSol',   label: { zh: '解 · 每 lcm 重复',     en: 'Solution · every lcm' }, color: '#34d399', checked: true },
+      { key: 'showStair', label: { zh: '整数阶梯',             en: 'Integer staircase' },     color: '#2dd4ea', checked: true },
+      { key: 'showGrid',  label: { zh: '网格',                 en: 'Grid' },                  color: '#64748b', checked: false }
+    ],
+    sampleWindow: () => 10,
+    draw(C) {
+      const m = mCur(), n = nCur();
+      const r1e = modP(Math.round(state.r1), m), r2e = modP(Math.round(state.r2), n);
+      const sol = crtSolve(m, r1e, n, r2e);
+      const L = sol.l;
+      const cs = Math.min(0.7, 4.6 / Math.max(m, n));
+      const x0 = -m * cs / 2, y0 = -n * cs / 2;
+      const dzc = Math.min(0.35, 6.0 / L);
+      const cell = k => [x0 + (modP(k, m) + 0.5) * cs, y0 + (modP(k, n) + 0.5) * cs];
+      if (state.showGrid) drawGridXY(C, 3, 1);
+
+      /* 剩余格点（骨架网格 + 行列编号） */
+      for (let i = 0; i <= m; i++) line3(C, [x0 + i * cs, y0, 0], [x0 + i * cs, y0 + n * cs, 0], { width: 1, color: 'rgba(148,163,184,0.22)' });
+      for (let j = 0; j <= n; j++) line3(C, [x0, y0 + j * cs, 0], [x0 + m * cs, y0 + j * cs, 0], { width: 1, color: 'rgba(148,163,184,0.22)' });
+      for (let i = 0; i < m; i++) label3(C, [x0 + (i + 0.5) * cs, y0 - 0.22, 0], '' + i, { size: 10, color: 'rgba(159,176,200,.65)', align: 'center' });
+      for (let j = 0; j < n; j++) label3(C, [x0 - 0.2, y0 + (j + 0.5) * cs, 0], '' + j, { size: 10, color: 'rgba(159,176,200,.65)', align: 'right' });
+      label3(C, [0, y0 - 0.55, 0], t({ zh: '列 = x mod m', en: 'column = x mod m' }), { size: 10.5, color: 'rgba(159,176,200,.75)', align: 'center' });
+      label3(C, [x0 - 0.75, 0, 0], t({ zh: '行 = x mod n', en: 'row = x mod n' }), { size: 10.5, color: 'rgba(159,176,200,.75)', align: 'center' });
+
+      /* 条件带：r₁ 列（玫红）与 r₂ 行（紫） */
+      if (state.showCond1) {
+        fillQuad(C, [[x0 + r1e * cs, y0, 0], [x0 + (r1e + 1) * cs, y0, 0], [x0 + (r1e + 1) * cs, y0 + n * cs, 0], [x0 + r1e * cs, y0 + n * cs, 0]], ROSE_A + '0.10)');
+        line3(C, [x0 + r1e * cs, y0, 0], [x0 + r1e * cs, y0 + n * cs, 0], { width: 1.5, color: ROSE_A + '0.6)' });
+        line3(C, [x0 + (r1e + 1) * cs, y0, 0], [x0 + (r1e + 1) * cs, y0 + n * cs, 0], { width: 1.5, color: ROSE_A + '0.6)' });
+        label3(C, [x0 + (r1e + 0.5) * cs, y0 + n * cs + 0.25, 0], 'x ≡ ' + r1e + ' (mod ' + m + ')',
+          { font: 'italic 12px ' + FONT_MATH, color: '#fb7185', align: 'center' });
+      }
+      if (state.showCond2) {
+        fillQuad(C, [[x0, y0 + r2e * cs, 0], [x0 + m * cs, y0 + r2e * cs, 0], [x0 + m * cs, y0 + (r2e + 1) * cs, 0], [x0, y0 + (r2e + 1) * cs, 0]], VIO_A + '0.10)');
+        line3(C, [x0, y0 + r2e * cs, 0], [x0 + m * cs, y0 + r2e * cs, 0], { width: 1.5, color: VIO_A + '0.6)' });
+        line3(C, [x0, y0 + (r2e + 1) * cs, 0], [x0 + m * cs, y0 + (r2e + 1) * cs, 0], { width: 1.5, color: VIO_A + '0.6)' });
+        label3(C, [x0 + m * cs + 0.25, y0 + (r2e + 0.5) * cs, 0], 'x ≡ ' + r2e + ' (mod ' + n + ')',
+          { font: 'italic 12px ' + FONT_MATH, color: '#a78bfa', align: 'left' });
+      }
+      /* 交叉格（琥珀虚线框） */
+      if (state.showCond1 && state.showCond2) {
+        const cxq = x0 + r1e * cs, cyq = y0 + r2e * cs;
+        strokePoly(C, [[cxq, cyq, 0], [cxq + cs, cyq, 0], [cxq + cs, cyq + cs, 0], [cxq, cyq + cs, 0], [cxq, cyq, 0]],
+          { width: 1.4, dash: [4, 5], color: AMB_A + '0.9)' });
+      }
+
+      /* 整数阶梯：k = 0 … lcm−1，落点 (k mod m, k mod n)，沿 z 逐层升高 */
+      if (state.showStair) {
+        const pts = [];
+        for (let k = 0; k < L; k++) {
+          const c2 = cell(k);
+          if (k > 0) {
+            const p2 = cell(k - 1);
+            if (Math.abs(c2[0] - p2[0]) > 1.5 * cs || Math.abs(c2[1] - p2[1]) > 1.5 * cs) pts.push(null);  /* 回卷跳跃断线 */
+          }
+          pts.push([c2[0], c2[1], k * dzc]);
+        }
+        strokePoly(C, pts, { width: 1.6, color: WHT_A + '0.30)' });
+        for (let k = 0; k < L; k++) {
+          const c2 = cell(k);
+          solidDot(C, [c2[0], c2[1], k * dzc], 2.2, 'rgba(159,176,200,0.85)');
+          solidDot(C, [c2[0], c2[1], 0], 2, CYAN_A + '0.55)');   /* 投到底面的“被访问”标记 */
+        }
+      }
+
+      /* 解（翠绿）：存在时高亮阶梯点与底面格 */
+      if (state.showSol && sol.ok) {
+        const c2 = cell(sol.x);
+        const sp0 = proj(C, [c2[0], c2[1], 0]);
+        if (sp0) glowDot(sp0, 10, '#ffffff', EME_A + '0.9)');
+        const sp1 = proj(C, [c2[0], c2[1], sol.x * dzc]);
+        if (sp1) glowDot(sp1, 10, '#ffffff', EME_A + '0.9)');
+        line3(C, [c2[0], c2[1], 0], [c2[0], c2[1], sol.x * dzc], { width: 1.5, dash: [7, 7], color: EME_A + '0.75)' });
+        label3(C, [c2[0], c2[1], sol.x * dzc], 'x = ' + sol.x, { font: 'italic 12px ' + FONT_MATH, color: '#34d399', dx: 12 });
+      }
+      if (state.showSol && !sol.ok) {
+        label3(C, [0, y0 - 0.95, 0], t({ zh: '无解：gcd(m,n) ∤ (r₁ − r₂)', en: 'No solution: gcd(m,n) ∤ (r₁ − r₂)' }),
+          { size: 12, color: '#fbbf24', align: 'center' });
+      }
+
+      /* 走点：当前整数沿阶梯逐格落下 */
+      const wk = STEPn() % L;
+      const wc = cell(wk);
+      const spw = proj(C, [wc[0], wc[1], wk * dzc]);
+      if (spw) glowDot(spw, 15, '#ffffff', 'rgba(186,240,255,0.9)');
+      line3(C, [wc[0], wc[1], wk * dzc], [wc[0], wc[1], 0], { width: 1.5, dash: [7, 7], color: AMB_A + '0.7)' });
+
+      label3(C, [0, y0 + n * cs + 0.8, 0], 'x mod m · x mod n',
+        { font: 'italic 13px ' + FONT_MATH, color: WHT_A + '0.8)', align: 'center' });
+    },
+    readout() {
+      const m = mCur(), n = nCur();
+      const r1e = modP(Math.round(state.r1), m), r2e = modP(Math.round(state.r2), n);
+      const sol = crtSolve(m, r1e, n, r2e);
+      const wk = STEPn() % sol.l;
+      let out = '<div>m = <b>' + m + '</b> · n = <b>' + n + '</b> · gcd = ' + sol.g + ' · lcm = ' + sol.l + '</div>' +
+        '<div class="sinC">x ≡ <b>' + r1e + '</b> (mod ' + m + ')</div>' +
+        '<div class="cosC">x ≡ <b>' + r2e + '</b> (mod ' + n + ')</div>';
+      if (sol.ok) {
+        out += '<div class="tanC">' + t({ zh: '解', en: 'solution' }) + ' x ≡ <b>' + sol.x + '</b> (mod ' + sol.l + ')</div>' +
+          (sol.g === 1
+            ? '<div class="dim">' + t({ zh: '互质 ⇒ 任意余数组合都有唯一解 (mod mn)', en: 'coprime ⇒ every residue pair has a unique solution (mod mn)' }) + '</div>'
+            : '<div class="dim">' + t({ zh: '非互质：仅当 r₁ ≡ r₂ (mod ' + sol.g + ') 才有解，解 mod lcm 唯一', en: 'not coprime: solvable only when r₁ ≡ r₂ (mod ' + sol.g + '), then unique mod lcm' }) + '</div>');
+      } else {
+        out += '<div><span style="color:#fbbf24">' + t({ zh: '无解：' + r1e + ' − ' + r2e + ' 不是 gcd = ' + sol.g + ' 的倍数', en: 'no solution: ' + r1e + ' − ' + r2e + ' is not a multiple of gcd = ' + sol.g }) + '</span></div>' +
+          '<div class="dim">' + t({ zh: '需要 r₁ ≡ r₂ (mod gcd(m,n))', en: 'requires r₁ ≡ r₂ (mod gcd(m,n))' }) + '</div>';
+      }
+      out += '<div class="dim">' + t({ zh: '走点', en: 'walker' }) + ' k = ' + wk + ' → (' + modP(wk, m) + ', ' + modP(wk, n) + ')</div>';
+      return out;
+    }
+  }
+};
+
+/* ================= 常量与状态（引擎区，以下一般无需改动） ================= */
+const TAU = Math.PI * 2;
+const WAVE_LEN = 8;      // t 轴的世界长度（可视窗口）
+const NEAR = 0.15;       // 近裁剪面
+
+const FONT_CN = 'ui-sans-serif,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif';
+const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
+
+const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
+const samples = [];
+let curTab = null;
+const RELABEL = [];
+const cams = {};
+let cam = null;
+let tween = null;
+const lastView = {};
+const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ③ 采样 —— 按你的工具需要扩展字段                           ║
+   ║  原则：记录"当时的真实值"，参数中途改变时历史不重算            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+function pushSample() {
+  /* 螺旋走点：记录“当时”的真实螺旋坐标（m 中途改变时历史不重算） */
+  const span = HELIX_TURNS * mCur();
+  const p = helixPos(state.theta % span);
+  samples.push({ t: state.t, hx: p[0], hy: p[1], hz: p[2] });
+}
+
+/* ================= 画布 ================= */
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = 1, FOCAL = 900, CX = 0, CY = 0, bgGrad = null;
+
+function resize() {
+  DPR = Math.min(2.5, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  CX = W / 2; CY = H / 2;
+  FOCAL = 1.2 * Math.min(H, W * 1.1);
+  bgGrad = ctx.createRadialGradient(W*0.5, H*0.3, 0, W*0.5, H*0.42, Math.max(W, H)*0.95);
+  bgGrad.addColorStop(0, '#0c1526');
+  bgGrad.addColorStop(1, '#05070d');
+}
+window.addEventListener('resize', resize);
+
+/* ================= 基础数学 ================= */
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const mod2pi = a => { a %= TAU; if (a < 0) a += TAU; return a; };
+const wrapPI = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
+const ease = k => k < 0.5 ? 4*k*k*k : 1 - Math.pow(-2*k + 2, 3) / 2;
+const fmt = (x, d = 2) => x.toFixed(d);
+const fmtS = (x, d = 2) => (x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
+
+const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+const dot3 = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+
+/* ================= 轨道相机与投影 ================= */
+function makeCam() {
+  const cp = Math.cos(cam.el), sp = Math.sin(cam.el);
+  const eye = [
+    cam.tx + cam.dist * cp * Math.sin(cam.az),
+    cam.ty + cam.dist * sp,
+    cam.tz + cam.dist * cp * Math.cos(cam.az)
+  ];
+  const f = norm(sub([cam.tx, cam.ty, cam.tz], eye));
+  const r = norm(cross(f, [0, 1, 0]));
+  const u = cross(r, f);
+  return { eye, f, r, u };
+}
+function camPt(C, p) {
+  const d = sub(p, C.eye);
+  return [dot3(d, C.r), dot3(d, C.u), dot3(d, C.f)];
+}
+function scr(c) { const s = FOCAL / c[2]; return [CX + c[0]*s, CY - c[1]*s]; }
+function proj(C, p) { const c = camPt(C, p); return c[2] < NEAR ? null : scr(c); }
+function clipNear(a, b) {
+  const t = (NEAR - a[2]) / (b[2] - a[2]);
+  return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, NEAR];
+}
+
+/* 折线路径（支持 null 断点 + 近平面裁剪）；返回 [首点, 末点] 屏幕坐标 */
+function polyPath(C, pts) {
+  if (pts.length < 2) return null;
+  let head = null, tail = null, contin = false, prev = null;
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    const P = pts[i];
+    if (P === null) { prev = null; contin = false; continue; }
+    const cur = camPt(C, P);
+    if (prev !== null) {
+      let a = prev, b = cur;
+      const av = a[2] >= NEAR, bv = b[2] >= NEAR;
+      if (av || bv) {
+        if (!av) a = clipNear(a, b);
+        if (!bv) b = clipNear(b, a);
+        const sA = scr(a), sB = scr(b);
+        if (!contin) ctx.moveTo(sA[0], sA[1]);
+        ctx.lineTo(sB[0], sB[1]);
+        if (!head) head = sA;
+        tail = sB;
+        contin = bv;
+      } else {
+        contin = false;
+      }
+    }
+    prev = cur;
+  }
+  return head ? [head, tail] : null;
+}
+
+function strokePoly(C, pts, o) {
+  const ht = polyPath(C, pts);
+  if (!ht) return;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = o.width || 2;
+  if (o.alpha != null) ctx.globalAlpha = o.alpha;
+  if (o.dash) ctx.setLineDash(o.dash);
+  if (o.fade) {
+    const h = ht[0], t = ht[1];
+    if (Math.hypot(t[0]-h[0], t[1]-h[1]) < 2) {
+      ctx.strokeStyle = o.fade[0];
+    } else {
+      const g = ctx.createLinearGradient(h[0], h[1], t[0], t[1]);
+      g.addColorStop(0, o.fade[0]);
+      g.addColorStop(1, o.fade[1]);
+      ctx.strokeStyle = g;
+    }
+  } else {
+    ctx.strokeStyle = o.color;
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+const line3 = (C, a, b, o) => strokePoly(C, [a, b], o);
+
+function glowDot(s, r, core, mid) {
+  const g = ctx.createRadialGradient(s[0], s[1], 0, s[0], s[1], r);
+  g.addColorStop(0, core);
+  g.addColorStop(0.35, mid);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+function solidDot(C, p, r, color) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+
+function label3(C, p, text, o) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.save();
+  ctx.font = o.font || ((o.size || 12) + 'px ' + FONT_CN);
+  ctx.fillStyle = o.color || '#c4d2e6';
+  ctx.textAlign = o.align || 'left';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(3,6,12,.85)';
+  ctx.shadowBlur = 4;
+  ctx.fillText(text, s[0] + (o.dx || 0), s[1] + (o.dy || 0));
+  ctx.restore();
+}
+
+function arrowAt(C, tip3, before3, color) {
+  const t = proj(C, tip3), b = proj(C, before3);
+  if (!t || !b) return;
+  const a = Math.atan2(t[1]-b[1], t[0]-b[0]);
+  const L = 9;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.4;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a-0.42), t[1]-L*Math.sin(a-0.42));
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a+0.42), t[1]-L*Math.sin(a+0.42));
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* ================= 常用场景部件 ================= */
+const AXIS = 'rgba(159,176,200,0.9)';
+const AXIS_DIM = 'rgba(159,176,200,0.5)';
+
+/* 坐标轴：o = { ex, ey, yTicks:[], xTicks:[], tAxis:bool, v(秒刻度间距的波速) } */
+function drawAxes(C, o) {
+  const ex = o.ex, ey = o.ey;
+  line3(C, [-ex, 0, 0], [ex, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [ex, 0, 0], [ex - 0.2, 0, 0], AXIS);
+  label3(C, [ex + 0.22, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  line3(C, [0, -ey, 0], [0, ey, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, ey, 0], [0, ey - 0.2, 0], AXIS);
+  label3(C, [0, ey + 0.18, 0], 'y', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  if (o.tAxis) {
+    line3(C, [0, 0, 0], [0, 0, WAVE_LEN + 0.5], { width: 1.4, color: AXIS });
+    arrowAt(C, [0, 0, WAVE_LEN + 0.5], [0, 0, WAVE_LEN + 0.3], AXIS);
+    label3(C, [0, 0, WAVE_LEN + 0.9], 't', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+    const v = o.v || 1;
+    const every = v < 0.8 ? 2 : 1;
+    for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+      line3(C, [0, -0.06, k*v], [0, 0.06, k*v], { width: 1.2, color: AXIS_DIM });
+      if (k % every === 0) {
+        label3(C, [0, -0.25, k*v], k + 's', { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+      }
+    }
+  }
+  for (const k of (o.yTicks || [])) {
+    for (const yv of [k, -k]) {
+      line3(C, [-0.05, yv, 0], [0.05, yv, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [-0.13, yv, 0], (yv < 0 ? '−' : '') + Math.abs(yv), { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+    }
+  }
+  for (const k of (o.xTicks || [])) {
+    for (const xv of [k, -k]) {
+      line3(C, [xv, -0.05, 0], [xv, 0.05, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [xv, -0.24, 0], (xv < 0 ? '−' : '') + Math.abs(xv), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+    }
+  }
+}
+
+/* z=0 平面方格网格（几何类场景） */
+function drawGridXY(C, g, step) {
+  const n = Math.round(g / step);
+  for (let i = -n; i <= n; i++) {
+    if (i === 0) continue;
+    const u = i * step;
+    line3(C, [u, -g, 0], [u, g, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+    line3(C, [-g, u, 0], [g, u, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+  }
+}
+
+/* y–t 时间平面网格（流式波形类场景）：o = { yMax, v } */
+function drawTimeGrid(C, o) {
+  const g = o.yMax, v = o.v;
+  for (let i = Math.round(-g*2); i <= Math.round(g*2); i++) {
+    if (i === 0) continue;
+    line3(C, [0, i/2, 0], [0, i/2, WAVE_LEN], { width: 1, color: 'rgba(148,163,184,0.10)' });
+  }
+  for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+    line3(C, [0, -g, k*v], [0, g, k*v], { width: 1, color: 'rgba(148,163,184,0.07)' });
+  }
+}
+
+/* 周期标尺（琥珀）：在平面 x=px、高度 yb 处，从 z=0 画到 z=T·v */
+function drawPeriodBracket(C, Tsec, v, px, yb, text) {
+  const zT = Tsec * v;
+  if (zT > WAVE_LEN + 0.01) return;
+  const amber = 'rgba(251,191,36,0.75)';
+  line3(C, [px, yb, 0], [px, yb, zT], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, 0], [px, yb + 0.06, 0], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, zT], [px, yb + 0.06, zT], { width: 1.2, color: amber });
+  label3(C, [px, yb - 0.2, zT/2], text, { size: 10.5, color: 'rgba(251,191,36,.9)', align: 'center' });
+}
+
+/* 单位圆（半径 A，位于 z=0 平面，青色源几何） */
+function drawCircle(C, A) {
+  const cpts = [];
+  for (let i = 0; i <= 72; i++) {
+    const a = i / 72 * TAU;
+    cpts.push([A * Math.cos(a), A * Math.sin(a), 0]);
+  }
+  strokePoly(C, cpts, { width: 6, color: 'rgba(45,212,234,0.13)' });
+  strokePoly(C, cpts, { width: 2, color: 'rgba(45,212,234,0.95)' });
+  for (let q = 0; q < 4; q++) {
+    const a = q * Math.PI / 2;
+    line3(C, [A*0.95*Math.cos(a), A*0.95*Math.sin(a), 0],
+             [A*1.06*Math.cos(a), A*1.06*Math.sin(a), 0],
+             { width: 1, color: 'rgba(45,212,234,0.5)' });
+  }
+  solidDot(C, [0, 0, 0], 2.2, 'rgba(159,176,200,0.9)');
+}
+
+/* 角度弧 θ（琥珀度量注记） */
+function drawAngleArc(C, th, A) {
+  const thm = mod2pi(th);
+  if (thm <= 0.03) return;
+  const r0 = Math.max(0.14, Math.min(0.34, 0.5 * A));
+  const n = Math.max(2, Math.ceil(thm / 0.06));
+  const apts = [];
+  for (let j = 0; j <= n; j++) {
+    const a = thm * j / n;
+    apts.push([r0 * Math.cos(a), r0 * Math.sin(a), 0]);
+  }
+  strokePoly(C, apts, { width: 1.6, color: 'rgba(251,191,36,0.9)' });
+  label3(C, [(r0 + 0.15) * Math.cos(thm/2), (r0 + 0.15) * Math.sin(thm/2), 0], 'θ',
+    { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+}
+
+/* 读数区固定首两行 */
+function readoutHead() {
+  const th = state.theta;
+  const deg = (mod2pi(th) * 180 / Math.PI).toFixed(0);
+  const lap = fmt(th / TAU);
+  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;θ = ωt = <b>' + fmt(th) + '</b> rad</div>' +
+         '<div class="dim">' + t({ zh: '≡ ' + deg + '°（第 ' + lap + ' 圈）', en: '≡ ' + deg + '° (turn ' + lap + ')' }) + '</div>';
+}
+
+/* ================= 主绘制与主循环 ================= */
+function draw() {
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+  const C = makeCam();
+  SCENES[curTab].draw(C);
+}
+
+function resetSim() {
+  state.t = 0;
+  state.theta = 0;
+  samples.length = 0;
+  pushSample();
+}
+
+let lastTs = performance.now(), lastRO = 0;
+function frame(ts) {
+  const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
+  lastTs = ts;
+
+  if (tween) {
+    const k = Math.min(1, (ts - tween.t0) / tween.dur);
+    const e = ease(k);
+    const f = tween.from, o = tween.to;
+    cam.az = f.az + wrapPI(o.az - f.az) * e;
+    cam.el = f.el + (o.el - f.el) * e;
+    cam.dist = f.dist + (o.dist - f.dist) * e;
+    cam.tx = f.tx + (o.tx - f.tx) * e;
+    cam.ty = f.ty + (o.ty - f.ty) * e;
+    cam.tz = f.tz + (o.tz - f.tz) * e;
+    if (k >= 1) tween = null;
+  }
+
+  if (state.running) {
+    state.t += dt;
+    state.theta += state.omega * dt;
+    pushSample();
+  }
+  const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
+  while (samples.length && samples[0].t < state.t - windowSec) samples.shift();
+
+  draw();
+  if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
+  requestAnimationFrame(frame);
+}
+
+const roEl = document.getElementById('readout');
+function updateReadout() { roEl.innerHTML = SCENES[curTab].readout(); }
+
+/* ================= UI 生成（由 ①② 声明驱动） ================= */
+function buildParams() {
+  const host = document.getElementById('paramsHost');
+  PARAMS.forEach(p => {
+    const wrap = document.createElement('div');
+    wrap.className = 'ctl';
+    wrap.innerHTML = '<div class="top"><label></label><span class="val"></span></div>';
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
+    const val = wrap.querySelector('.val');
+    const upd = () => {
+      const raw = parseFloat(input.value);
+      state[p.key] = p.map ? p.map(raw) : raw;
+      val.textContent = p.fmt(raw);
+    };
+    input.addEventListener('input', upd);
+    wrap.appendChild(input);
+    host.appendChild(wrap);
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+function buildToggles() {
+  const host = document.getElementById('togglesHost');
+  Object.keys(SCENES).forEach(id => {
+    const grp = document.createElement('div');
+    grp.className = 'toggles';
+    grp.dataset.tab = id;
+    SCENES[id].toggles.forEach(tg => {
+      if (!(tg.key in state)) state[tg.key] = tg.checked;
+      const lab = document.createElement('label');
+      lab.className = 'tg';
+      lab.innerHTML = '<input type="checkbox" data-key="' + tg.key + '"' + (state[tg.key] ? ' checked' : '') + '>' +
+        '<i class="dot" style="--c:' + tg.color + '"></i><span class="tgl"></span>';
+      const cb = lab.querySelector('input');
+      cb.addEventListener('change', () => {
+        state[tg.key] = cb.checked;
+        document.querySelectorAll('input[data-key="' + tg.key + '"]').forEach(o => { o.checked = cb.checked; });
+      });
+      const relabel = () => { lab.querySelector('.tgl').innerHTML = t(tg.label); };
+      RELABEL.push(relabel);
+      relabel();
+      grp.appendChild(lab);
+    });
+    host.appendChild(grp);
+  });
+}
+
+function buildViews() {
+  const host = document.getElementById('viewsHost');
+  Object.keys(SCENES).forEach(id => {
+    const row = document.createElement('div');
+    row.className = 'views';
+    row.dataset.tab = id;
+    const lab = document.createElement('span');
+    lab.className = 'vlabel';
+    row.appendChild(lab);
+    const labRelabel = () => { lab.textContent = t(UI.views); };
+    RELABEL.push(labRelabel);
+    labRelabel();
+    Object.keys(SCENES[id].views).forEach(name => {
+      const b = document.createElement('button');
+      b.className = 'btn vbtn';
+      b.dataset.view = name;
+      b.addEventListener('click', () => applyView(name));
+      row.appendChild(b);
+      const relabel = () => { b.textContent = t(SCENES[id].views[name].label); };
+      RELABEL.push(relabel);
+      relabel();
+    });
+    host.appendChild(row);
+  });
+}
+
+function buildTabs() {
+  const nav = document.getElementById('tabsNav');
+  Object.keys(SCENES).forEach(id => {
+    const b = document.createElement('button');
+    b.className = 'tab';
+    b.dataset.tab = id;
+    b.addEventListener('click', () => switchTab(id));
+    nav.appendChild(b);
+    const relabel = () => { b.textContent = t(SCENES[id].label); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+/* ================= 视角与页签 ================= */
+function refreshViewButtons() {
+  document.querySelectorAll('.vbtn').forEach(b => {
+    const row = b.closest('.views');
+    b.classList.toggle('active', row.dataset.tab === curTab && b.dataset.view === lastView[curTab]);
+  });
+}
+function viewDist(d) { return (W < 820 || W < H) ? d * 1.4 : d; }
+function applyView(name) {
+  const vw = SCENES[curTab].views[name];
+  if (!vw) return;
+  if (vw.onSelect) vw.onSelect();   /* 可选联动：如自动开启该视角对应的曲线开关 */
+  tween = {
+    from: { az: cam.az, el: cam.el, dist: cam.dist, tx: cam.tx, ty: cam.ty, tz: cam.tz },
+    to:   { az: vw.az, el: vw.el, dist: viewDist(vw.dist), tx: vw.tx || 0, ty: vw.ty || 0, tz: vw.tz || 0 },
+    t0: performance.now(),
+    dur: REDUCED ? 1 : 750
+  };
+  lastView[curTab] = name;
+  refreshViewButtons();
+}
+
+const brandDesc = document.getElementById('brandDesc');
+const tipsEl = document.getElementById('tips');
+function switchTab(id) {
+  if (id === curTab) return;
+  curTab = id;
+  tween = null;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+  document.querySelectorAll('.toggles[data-tab], .views[data-tab]').forEach(el => {
+    el.style.display = el.dataset.tab === id ? '' : 'none';
+  });
+  cam = cams[id];
+  brandDesc.textContent = t(SCENES[id].brand);
+  tipsEl.textContent = t(SCENES[id].tips);
+  refreshViewButtons();
+  updateReadout();
+}
+
+/* ================= 播放 / 重置 / 折叠 ================= */
+const btnPlay = document.getElementById('btnPlay');
+function togglePlay() {
+  state.running = !state.running;
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+}
+btnPlay.addEventListener('click', togglePlay);
+document.getElementById('btnReset').addEventListener('click', resetSim);
+
+const panel = document.getElementById('panel');
+const btnFold = document.getElementById('btnFold');
+btnFold.addEventListener('click', () => {
+  const c = panel.classList.toggle('collapsed');
+  btnFold.textContent = c ? '+' : '−';
+});
+if (window.innerWidth < 760) {
+  panel.classList.add('collapsed');
+  btnFold.textContent = '+';
+}
+
+/* ================= 语言切换 ================= */
+function applyLang() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.title = t(TOOL.title);
+  document.querySelector('.brand h1').textContent = t(TOOL.h1);
+  document.getElementById('panelTitle').textContent = t(UI.panelTitle);
+  document.querySelector('.hint').textContent = t(UI.hint);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+  document.getElementById('btnReset').textContent = t(UI.reset);
+  RELABEL.forEach(f => f());
+  brandDesc.textContent = t(SCENES[curTab].brand);
+  tipsEl.textContent = t(SCENES[curTab].tips);
+  updateReadout();
+}
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('lang', l);
+    history.replaceState(null, '', u);
+  } catch (e) {}
+  applyLang();
+}
+document.getElementById('btnLang').addEventListener('click', () => setLang(LANG === 'zh' ? 'en' : 'zh'));
+document.getElementById('verBadge').textContent = 'v' + VERSION;
+
+/* ================= 交互：旋转 / 平移 / 缩放 ================= */
+const pointers = new Map();
+let pinch = null;
+
+function pan(dx, dy) {
+  const C = makeCam();
+  const s = cam.dist / FOCAL;
+  cam.tx = clamp(cam.tx - C.r[0]*dx*s + C.u[0]*dy*s, -6, 6);
+  cam.ty = clamp(cam.ty - C.r[1]*dx*s + C.u[1]*dy*s, -5, 5);
+  cam.tz = clamp(cam.tz - C.r[2]*dx*s + C.u[2]*dy*s, -3, 11);
+}
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, btn: e.button });
+  tween = null;
+  lastView[curTab] = null;
+  refreshViewButtons();
+  if (pointers.size === 2) {
+    const vs = Array.from(pointers.values());
+    pinch = {
+      gap: Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y),
+      cx: (vs[0].x + vs[1].x) / 2,
+      cy: (vs[0].y + vs[1].y) / 2
+    };
+  }
+  canvas.classList.add('dragging');
+});
+
+canvas.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  p.x = e.clientX;
+  p.y = e.clientY;
+  if (pointers.size === 1) {
+    const panMode = e.shiftKey || (e.buttons & 2) || p.btn === 2 || p.btn === 1;
+    if (panMode) {
+      pan(dx, dy);
+    } else {
+      cam.az -= dx * 0.0055;
+      cam.el = clamp(cam.el + dy * 0.0055, -1.45, 1.53);
+    }
+  } else if (pointers.size === 2 && pinch) {
+    const vs = Array.from(pointers.values());
+    const gap = Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y);
+    const cx = (vs[0].x + vs[1].x) / 2, cy = (vs[0].y + vs[1].y) / 2;
+    if (gap > 1) cam.dist = clamp(cam.dist * pinch.gap / gap, 4.5, 60);
+    pan(cx - pinch.cx, cy - pinch.cy);
+    pinch = { gap: gap, cx: cx, cy: cy };
+  }
+});
+
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+  if (!pointers.size) canvas.classList.remove('dragging');
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  tween = null;
+  cam.dist = clamp(cam.dist * Math.exp(e.deltaY * 0.0012), 4.5, 60);
+}, { passive: false });
+
+canvas.addEventListener('dblclick', () => applyView(Object.keys(SCENES[curTab].views)[0]));
+
+window.addEventListener('keydown', e => {
+  const tg = e.target.tagName;
+  if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || tg === 'BUTTON') return;
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'r' || e.key === 'R') resetSim();
+  else if (e.key === 't' || e.key === 'T') {
+    const keys = Object.keys(SCENES);
+    switchTab(keys[(keys.indexOf(curTab) + 1) % keys.length]);
+  }
+  else if (e.key >= '1' && e.key <= '9') {
+    const names = Object.keys(SCENES[curTab].views);
+    const i = +e.key - 1;
+    if (i < names.length) applyView(names[i]);
+  }
+});
+
+/* ================= 启动 ================= */
+resize();
+buildTabs();
+buildParams();
+buildToggles();
+buildViews();
+Object.keys(SCENES).forEach(id => {
+  const first = Object.keys(SCENES[id].views)[0];
+  const v = SCENES[id].views[first];
+  cams[id] = { az: v.az, el: v.el, dist: viewDist(v.dist), tx: v.tx || 0, ty: v.ty || 0, tz: v.tz || 0 };
+  lastView[id] = first;
+});
+switchTab(Object.keys(SCENES)[0]);
+applyLang();
+resetSim();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
