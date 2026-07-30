@@ -55,6 +55,7 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [模运算、最大公约数与同余 · Modular Arithmetic, GCD & CRT](outputs/modular-arithmetic-euclid-crt-3d.html) | The integer line rolled into a helix of period m, multiplication as a shuffle that needs coprimality, Euclid cutting squares down to the gcd, and the CRT diagonal filling the residue lattice |
 | [最小二乘与正交投影 · Least Squares & Orthogonal Projection](outputs/least-squares-orthogonal-projection-3d.html) | When Ax = b has no solution: b projected orthogonally onto the column space, residuals perpendicular to it, SSE as a paraboloid bowl, and the normal equations as the right angle at its bottom |
 | [证明的本质 · The Essence of Proof](outputs/proof-logic-induction-3d.html) | P→Q as set inclusion (contrapositive = the same picture), quantifier order on a truth grid, n²−n+41 dying to one counterexample, and induction as a wave toppling infinitely many dominoes |
+| [优化、凸性与梯度下降 · Optimisation & Gradient Descent](outputs/optimization-convexity-gradient-descent-3d.html) | Descent as repeated local steps: learning-rate regimes on a 1-D curve, zig-zag across a badly conditioned valley, local minima in a double well, and ∇f = λ∇g tangency on a constraint circle |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
