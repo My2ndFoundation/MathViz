@@ -48,6 +48,7 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [二项式定理 · Pascal 三角形与概率 · The Binomial Theorem](outputs/binomial-pascal-probability-3d.html) | One C(n,k), four faces: expansion coefficient, Pascal node, left-right path count, and binomial probability weight — counting becoming the bell curve's ancestor |
 | [力矩、平衡与质心 · Moments, Equilibrium & Centre of Mass](outputs/torque-equilibrium-centre-mass-3d.html) | Moments set by perpendicular distance, balance as two moment traces coinciding, plumb lines crossing at the centre of mass, and toppling when gravity's line leaves the base |
 | [力、约束与自由体图 · Forces & Free-Body Diagrams](outputs/forces-free-body-diagrams-3d.html) | Isolate the body, draw only external forces, let the axes follow the constraint: incline decomposition, the normal force as a response, static friction capping at μR, and connected particles |
+| [随机变量、期望与方差 · Random Variables, E(X) & Var](outputs/random-variable-expectation-variance-3d.html) | Outcomes mapped to numbers, expectation as the balance point of probability mass, variance as weighted squared distance, and how aX+b moves μ and σ differently |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
