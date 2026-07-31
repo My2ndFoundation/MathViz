@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.1">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.0.0">
 <title>π 的本质 · The Essence of π</title>
 <!-- ============================================================
@@ -22,6 +22,7 @@
   Basel π²/6 一行读数）。
 
   版本记录（changelog，新→旧）：
+    1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-13  首发：展开一圈 / 阿基米德夹逼 / 圆面积拼图 / 概率里的 π / 级数与 π 五场景
 ============================================================ -->
@@ -241,14 +242,19 @@ const PARAMS = [
     min: 0.1, max: 1.6, step: 0.05, value: 0.5, fmt: v => fmt(v) + ' rad/s' },
   { key: 'wr',    label: { zh: '车轮半径 <i>r</i>', en: 'Wheel radius <i>r</i>' },
     min: 0.5, max: 1.2, step: 0.01, value: 1, fmt: v => fmt(v) },
+  /* state.archN 存的是阶梯的级数 k（滑杆刻度本身），边数 n = 3·2^k 由 archSides() 现算。
+     不设 map：这一页真正的自由度就是「翻倍了几次」，时间驱动沿 k 匀速走，六级停留等长；
+     若把 2^k 烘进 state 再线性驱动，一半时间会耗在 n = 96 上，而 n = 3 的三角形一闪即逝。
+     没有 map 也就不需要 invMap，滑杆回显与画面、读数天然同源。 */
   { key: 'archN', label: { zh: '边数 <i>n</i> = 3·2<sup><i>k</i></sup>', en: 'Sides <i>n</i> = 3·2<sup><i>k</i></sup>' },
-    min: 0, max: 5, step: 1, value: 1, fmt: v => 'n = ' + (3 * Math.pow(2, v)).toFixed(0), map: v => 3 * Math.pow(2, v) },
+    min: 0, max: 5, step: 1, value: 1, fmt: v => 'n = ' + (3 * Math.pow(2, v)).toFixed(0) },
   { key: 'secN',  label: { zh: '扇形数 <i>n</i>', en: 'Sectors <i>n</i>' },
     min: 4, max: 64, step: 2, value: 12, fmt: v => 'n = ' + v.toFixed(0) },
   { key: 'morph', label: { zh: '重排进度 <i>m</i>', en: 'Rearrange <i>m</i>' },
     min: 0, max: 1, step: 0.01, value: 0, fmt: v => fmt(v) },
+  /* 同 archN：state.probN 存指数 k，样本上限 N = 2^k 由 probCap() 现算（理由见上） */
   { key: 'probN', label: { zh: '样本数 <i>N</i> = 2<sup><i>k</i></sup>', en: 'Samples <i>N</i> = 2<sup><i>k</i></sup>' },
-    min: 4, max: 11, step: 1, value: 9, fmt: v => 'N = ' + Math.pow(2, v).toFixed(0), map: v => Math.pow(2, v) },
+    min: 4, max: 11, step: 1, value: 9, fmt: v => 'N = ' + Math.pow(2, v).toFixed(0) },
   { key: 'terms', label: { zh: '项数 <i>k</i>', en: 'Terms <i>k</i>' },
     min: 1, max: 200, step: 1, value: 12, fmt: v => 'k = ' + v.toFixed(0) }
 ];
@@ -312,6 +318,10 @@ let _lastPushT = 0, probT = 0;   /* probT：概率页的确定性揭示时钟 */
 
 /* —— ② 阿基米德夹逼：n = 3·2^k 的阶梯 —— */
 const ARCH_NS = [3, 6, 12, 24, 48, 96];
+/* 由级数 k（= state.archN，可能是驱动出的连续值）取边数 n = 3·2^k。
+   四舍五入是必须的：滑杆 step = 1，画面、读数与滑杆回显都经这里取值才同源；
+   而且 archPoly 按 i ≤ n 收顶点，小数边数会画出一个缺口多边形。 */
+const archSides = () => 3 * Math.pow(2, Math.round(state.archN));
 const ARCH_LS = 0.82;            /* 半周长量尺的世界缩放：π ↦ 2.58 */
 function archPoly(n, r, z) {     /* 正 n 边形（第一个顶点在角 π/2−π/n，使一条边水平朝下） */
   const pts = [];
@@ -354,6 +364,8 @@ function halton(i, b) {
   while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); }
   return r;
 }
+/* 与 archSides 同理：由指数 k（= state.probN）取样本上限 N = 2^k，四舍五入到滑杆刻度。 */
+const probCap = () => Math.pow(2, Math.round(state.probN));
 const DARTS = [];                /* [u, v, inside]，单位正方形 */
 const NEEDLES = [];              /* [cx, cy, ang, cross]，线距 = 针长 = 1（π ≈ 2N/交叉数） */
 const PROB_MAX = 2048;
@@ -520,6 +532,12 @@ const SCENES = {
   arch: {
     label: { zh: '阿基米德夹逼', en: "Archimedes' squeeze" },
     params: ['archN'],
+    /* 顿悟点就是「边数越多越贴着圆」：让阶梯级数 k 自己从 0 爬到 5，
+       边数便沿 3 → 6 → 12 → 24 → 48 → 96 翻倍走一遍阿基米德的原始阶梯。
+       值域 = archN 的完整 [0, 5]（state 存的就是 k，见 PARAMS 的注释）；
+       5 跳回 0 会突变，故 linear（往返）。10 秒：六级各约 0.8 秒，
+       够读「缺口」那五位小数一档档缩小。 */
+    drive: { key: 'archN', from: 0, to: 5, period: 10, kind: 'linear' },
     brand: { zh: '单位圆夹在内接与外切正多边形之间：半周长 n·sin(π/n) < π < n·tan(π/n)。n 沿 3 → 6 → 12 → 24 → 48 → 96 翻倍——正是阿基米德的原始阶梯。拖动 n 看两把钳口合拢。',
              en: 'The unit circle sits between inscribed and circumscribed regular polygons: half-perimeters give n·sin(π/n) < π < n·tan(π/n). n doubles along 3 → 6 → 12 → 24 → 48 → 96 — Archimedes\' own ladder. Drag n and watch the pincers close.' },
     tips: { zh: '按 2 正视 x·y：n = 96 时两只多边形几乎贴着圆。再按 3 侧视走廊：每层的玫红/紫色量尺一层层收拢到琥珀 π 轨道——阿基米德由此写下 3 10/71 < π < 3 1/7。',
@@ -537,7 +555,7 @@ const SCENES = {
       { key: 'showGrid', label: { zh: '网格',        en: 'Grid' },          color: '#64748b', checked: true }
     ],
     draw(C) {
-      const n = state.archN;
+      const n = archSides();                       /* 吸附到 3·2^k 的阶梯，见 archSides */
       const lo = n * Math.sin(PI / n), hi = n * Math.tan(PI / n);
       const BX = -2.6, BY = -1.85;                  /* 量尺基线 */
       if (state.showGrid) drawGridXY(C, 1.5, 0.5);
@@ -597,7 +615,7 @@ const SCENES = {
       }
     },
     readout() {
-      const n = state.archN;
+      const n = archSides();                       /* 与 draw、滑杆回显同源，三处读数才一致 */
       const lo = n * Math.sin(PI / n), hi = n * Math.tan(PI / n);
       return '<div>n = <b>' + n.toFixed(0) + '</b></div>' +
         '<div class="sinC">n·sin(π/n) = <b>' + lo.toFixed(5) + '</b></div>' +
@@ -613,6 +631,11 @@ const SCENES = {
   area: {
     label: { zh: '圆面积拼图', en: 'Area jigsaw' },
     params: ['secN', 'morph'],
+    /* tips 的顿悟点是「m 拖到 1，披萨真的变成 π×1 的矩形」——驱动重排进度 m，
+       扇形族一次次飞去又飞回。值域取 morph 的完整 [0, 1]；1 跳回 0 是硬跳变，
+       故 linear（往返），往返本身正是 tips 说的「飞去又飞回」。扇形数 n 留给用户，
+       因为它是「拼图有多细」的另一维，不该被时间抢走。 */
+    drive: { key: 'morph', from: 0, to: 1, period: 8, kind: 'linear' },
     brand: { zh: '把单位圆切成 n 个扇形，一上一下交错重排成一条「近似矩形」的条带：底边是半个周长 π，高是半径 1。n 越大条带越直——πr² 不是新公式，是圆周长换了个姿势。',
              en: 'Cut the unit circle into n sectors and rearrange them alternately up and down into a near-rectangular strip: the base is half the circumference, π, and the height is the radius, 1. The larger n, the straighter the strip — πr² is not a new formula, it is the circumference standing up.' },
     tips: { zh: '把 n 拖到 64、重排进度 m 拖到 1，再按 2 正视 x·y——披萨真的变成了 π×1 的矩形，面积 = π·1 = πr²。打开「自动演示」看扇形一次次飞去又飞回。',
@@ -691,6 +714,12 @@ const SCENES = {
   prob: {
     label: { zh: '概率里的 π', en: 'π in probability' },
     params: ['probN'],
+    /* 揭示时钟 probT 只跑一次就到顶，之后画面定格；驱动样本上限的指数 k 让
+       「数位一位位锁定」可以反复看见，且 N = 2^k 每一档停留等长。
+       值域 = probN 的完整 [4, 11]，即 N 从 16 到 2048（低于 16 时两个估计都还是
+       噪声，正好是滑杆下限）。11 跳回 4 会突变，故 linear（往返）。
+       12 秒：读四位小数的收敛比看形状慢。 */
+    drive: { key: 'probN', from: 4, to: 11, period: 12, kind: 'linear' },
     brand: { zh: '两个与圆「无关」的实验：往正方形里确定性地撒点，数落在四分之一圆内的比例 ×4；往平行线上抛针（线距 = 针长），数跨线比例——两个估计都爬向 π。样本随时钟逐个揭示。',
              en: 'Two experiments that "know nothing about circles": scatter deterministic points in a square and count the fraction inside the quarter circle ×4; drop needles on parallel lines (spacing = needle length) and count the crossings — both estimates crawl toward π. Samples are revealed one by one on the clock.' },
     tips: { zh: '按 2 正视 x·y，看两个估计的数位一位位锁定：3 → 3.1 → 3.14……点与针对圆一无所知，π 却自己浮现。序列是确定性的低差异序列——按 R 重播，结果分毫不差。',
@@ -705,7 +734,7 @@ const SCENES = {
       { key: 'showGrid',   label: { zh: '网格',      en: 'Grid' },                 color: '#64748b', checked: true }
     ],
     draw(C) {
-      const nShow = Math.max(1, Math.min(state.probN, Math.floor(probT * 80)));
+      const nShow = Math.max(1, Math.min(probCap(), Math.floor(probT * 80)));
       const cnt = probCounts(nShow);
       if (state.showGrid) gridRect(C, -3.7, 3.7, -1.5, 1.5, 0.5);
 
@@ -753,11 +782,11 @@ const SCENES = {
       }
     },
     readout() {
-      const nShow = Math.max(1, Math.min(state.probN, Math.floor(probT * 80)));
+      const nShow = Math.max(1, Math.min(probCap(), Math.floor(probT * 80)));
       const cnt = probCounts(nShow);
       const est1 = 4 * cnt.inD / nShow;
       const est2 = cnt.cr ? 2 * nShow / cnt.cr : Infinity;
-      return '<div>N = <b>' + nShow + '</b> / ' + state.probN + '</div>' +
+      return '<div>N = <b>' + nShow + '</b> / ' + probCap() + '</div>' +
         '<div class="sinC">4 · ' + t({ zh: '圆内', en: 'inside' }) + '/N = <b>' + est1.toFixed(4) + '</b></div>' +
         '<div class="cosC">2N/' + t({ zh: '交叉', en: 'crossings' }) + ' = <b>' + (isFinite(est2) ? est2.toFixed(4) : '∞') + '</b></div>' +
         '<div class="ambC">π = <b>3.1416</b>&ensp;·&ensp;Δ = ' + (isFinite(est2) ? fmt(Math.abs(est1 - PI), 3) + ' / ' + fmt(Math.abs(est2 - PI), 3) : fmt(Math.abs(est1 - PI), 3)) + '</div>' +
@@ -769,6 +798,11 @@ const SCENES = {
   series: {
     label: { zh: '级数与 π', en: 'Series' },
     params: ['terms'],
+    /* tips 要人「把 k 拖到 200 看收敛有多慢」——那正该由时间来演。驱动项数 k，
+       阶梯一节节长出去、包络一点点收拢到 π 轨道。值域 = terms 的完整 [1, 200]
+       （LEIB/BASEL 预生成到 200）；200 跳回 1 会突变，故 linear（往返）。
+       12 秒：这一页的主题就是「慢」，走太快反而把结论抹掉了。 */
+    drive: { key: 'terms', from: 1, to: 200, period: 12, kind: 'linear' },
     brand: { zh: '莱布尼茨级数 4(1 − 1/3 + 1/5 − 1/7 + …)：部分和沿 k 轴一上一下振荡，两条包络把它夹向琥珀色的 π 轨道。S∞/4 = arctan 1 恰是四分之一圆的圆心角——级数与几何在 45° 相遇。',
              en: 'The Leibniz series 4(1 − 1/3 + 1/5 − 1/7 + …): partial sums oscillate over and under along the k axis while two envelopes squeeze them onto the amber π rail. S∞/4 = arctan 1 is exactly the quarter-circle angle — series and geometry meet at 45°.' },
     tips: { zh: '按 2 侧视：振荡阶梯塌成一条正好停在 π 高度的水平线。把 k 拖到 200 看收敛有多慢——每一项只把误差缩小到约 1/k，这份「慢」本身就是信息；翠绿的 Basel 估计 √(6·Σ1/n²) 是通往同一个 π 的另一条路。',
@@ -785,7 +819,7 @@ const SCENES = {
       { key: 'showGrid',  label: { zh: '网格',       en: 'Grid' },           color: '#64748b', checked: true }
     ],
     draw(C) {
-      const kmax = state.terms;
+      const kmax = Math.round(state.terms);        /* 取整：LEIB/BASEL 按整数下标取值，小数会取到 undefined */
       const zk = k => k / kmax * SER_ZL;
       const yk = k => LEIB[k] * SER_YS;
       const hit = Math.abs(LEIB[kmax] - PI) < 0.01;
@@ -863,7 +897,7 @@ const SCENES = {
       }
     },
     readout() {
-      const kmax = state.terms;
+      const kmax = Math.round(state.terms);        /* 取整：LEIB/BASEL 按整数下标取值，小数会取到 undefined */
       const sk = LEIB[kmax];
       return '<div>k = <b>' + kmax + '</b></div>' +
         '<div class="sinC">S<sub>k</sub> = <b>' + sk.toFixed(5) + '</b></div>' +
