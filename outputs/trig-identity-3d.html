@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.1">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.0.0">
 <title>三角恒等式的本质 · 一张圆生成整本公式表</title>
 <!-- ============================================================
@@ -13,6 +13,7 @@
   引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
 
   版本记录（changelog，新→旧）：
+    1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-12  首个版本（含双语）
 ============================================================ -->
@@ -225,7 +226,8 @@ const UI = {
    ╚══════════════════════════════════════════════════════════╝ */
 const OP_NAMES = ['−α', 'π−α', 'π+α', '2π−α', 'π/2−α', 'π/2+α'];
 const PARAMS = [
-  { key: 'alpha', label: { zh: '角 <i>α</i>', en: 'Angle <i>α</i>' },       min: 0,  max: 360, step: 1,    value: 35,  fmt: v => v.toFixed(0) + '°', map: v => v * Math.PI / 180 },
+  /* α 被页签一、二的 drive 驱动，故必须配 invMap 把弧度反算回滑杆的角度刻度（规范 §8） */
+  { key: 'alpha', label: { zh: '角 <i>α</i>', en: 'Angle <i>α</i>' },       min: 0,  max: 360, step: 1,    value: 35,  fmt: v => v.toFixed(0) + '°', map: v => v * Math.PI / 180, invMap: v => v * 180 / Math.PI },
   { key: 'beta',  label: { zh: '角 <i>β</i>', en: 'Angle <i>β</i>' },       min: 0,  max: 180, step: 1,    value: 25,  fmt: v => v.toFixed(0) + '°', map: v => v * Math.PI / 180 },
   { key: 'op',    label: { zh: '诱导操作', en: 'Reduction op' },             min: 0,  max: 5,   step: 1,    value: 1,   fmt: v => OP_NAMES[Math.round(v)] },
   { key: 'a',     label: { zh: '系数 <i>a</i>（sin）', en: 'Coeff <i>a</i> (sin)' }, min: -2, max: 2, step: 0.05, value: 1.2, fmt: v => fmtS(v) },
@@ -299,6 +301,15 @@ const SCENES = {
   rot: {
     label: { zh: '旋转 · 和角', en: 'Rotation · Sum' },
     params: ['alpha', 'beta'],
+    /* brand：「和角公式……只是『转过 α 再转 β』」。驱动 α 就是让第一次旋转真的转起来：
+       β 这一步（紫 cosβ + 翠绿 sinβ）始终挂在 e^(iα) 上被一起带着走，
+       而 tips 说的两根投影色条 cosαcosβ 与 −sinαsinβ 随象限连续改变长短与正负，
+       首尾相接却永远等于玫红的 cos(α+β) —— 公式的不变性在运动中才叫不变性。
+       值域取满量程 [0°, 360°]，写成 state 单位（map 之后的弧度）。
+       α 绕满一圈首尾天然重合（探针把 α 误判为"无效"，正因为 0° 与 360° 画面完全相同），
+       故 kind: 'circular'（默认 loop），转回起点不跳变。周期 10 s：一圈 10 秒，
+       慢到能逐段读出色条的符号翻转。 */
+    drive: { key: 'alpha', from: 0, to: 2 * Math.PI, period: 10, kind: 'circular' },
     brand: { zh: '和角公式是万公式之母，而它只是「转过 α 再转 β」：紫色的 cosβ 步与翠绿的 sinβ 步在圆上拼出 α+β 的落点——倍角、积化和差、和差化积全是它的代数变奏。',
              en: 'The angle-sum formula mothers the whole handbook, and it is nothing but "rotate by α, then by β": a violet cos β step and an emerald sin β step land exactly on α+β — double angles, product-to-sum and sum-to-product are all its algebraic remixes.' },
     tips: { zh: '提示：切「正视 复平面」打开「投影分解」——x 轴下方两根色条 cosαcosβ 与 −sinαsinβ 首尾相接，接出来的正是玫红的 cos(α+β)：公式的每一项都是一段看得见的线段。把 β 拖到等于 α，读数区自动亮出二倍角。',
@@ -380,6 +391,14 @@ const SCENES = {
   sym: {
     label: { zh: '对称 · 诱导', en: 'Symmetry · Reduce' },
     params: ['alpha', 'op'],
+    /* 本页的口诀是「奇变偶不变，符号看象限」——「看象限」意味着结论随 α 所在象限而变，
+       所以该动的是 α：在固定的一种诱导操作下让 α 绕圈，紫色像点沿它自己的镜像轨道同步走，
+       坐标的互换与符号翻转在每次跨越象限时同时发生，口诀的后半句就此变成可见的规律。
+       不驱动 op：它是 6 个离散的诱导操作（预设选择器），驱动它只会让画面每隔一会儿跳一下，
+       不是动画；op 留给用户自己挑，挑定之后由 α 演示该操作在四个象限里的表现。
+       值域取满量程 [0°, 360°]（state 单位为弧度）。绕满一圈首尾重合 → circular / loop。
+       周期 10 s：与页签一同速，切页签时节奏一致。 */
+    drive: { key: 'alpha', from: 0, to: 2 * Math.PI, period: 10, kind: 'circular' },
     brand: { zh: '整套诱导公式只是镜子与旋转：−α 照 x 轴、π−α 照 y 轴、π/2−α 照对角线……坐标怎么互换、符号怎么变，看一眼像点就知道——「奇变偶不变，符号看象限」的几何真身。',
              en: 'All reduction formulas are just mirrors and turns: −α reflects in the x-axis, π−α in the y-axis, π/2−α in the diagonal… how coordinates swap and signs flip is read straight off the image point — the geometry behind the mnemonic.' },
     tips: { zh: '提示：拖「诱导操作」滑杆遍历六种变换，盯着紫色像点的坐标与玫红原点的关系；打开「切线与割线」——tan 真的画在切线上、sec 真的是割线，1+tan²=sec² 就是那个直角三角形的勾股定理。',
