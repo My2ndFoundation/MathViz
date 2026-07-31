@@ -1,0 +1,1725 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="tool-version" content="1.0.0">
+<meta name="engine-version" content="1.0.0">
+<title>霍夫曼编码 · 从文本到比特 · Huffman Coding</title>
+<!-- ============================================================
+  霍夫曼编码 · 从文本到比特 · Huffman Coding: From Text to Bits
+  基于 math-viz-starter.html（STARTER_VERSION 1.0.0）
+  设计规范：math-viz-design-system.md（令牌 / 组件 / 绘制语言 / 交互词汇）
+
+  核心顿悟：出现得越频繁的字符，码字越短；而「没有任何码字是另一个
+  码字的前缀」这一条，让整条比特流不需要任何分隔符就能被唯一还原。
+
+  z 轴语义（按场景）：词频页 = 真实时间（历史沿 t 轴流出，最新贴 z=0）；
+  建树页 = 合并步数；编码页 = 比特位置。三者都由同一个时钟驱动
+  （state.theta = 已走的「拍」数），可调速、可暂停。
+
+  版本记录（changelog，新→旧）：
+    1.0.0  2026-07-31  首个版本：词频统计 / 建树 / 编码表 / 逐字编码 四场景（含双语、可输入文本）
+============================================================ -->
+<style>
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  --angle-amber:#fbbf24;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none}
+body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)}
+#scene{position:fixed;inset:0;display:block;touch-action:none;cursor:grab}
+#scene.dragging{cursor:grabbing}
+
+/* ---- 标题区 ---- */
+.brand{position:fixed;top:20px;left:24px;pointer-events:none;user-select:none;max-width:min(520px,42vw)}
+.brand .eyebrow{font-size:10px;letter-spacing:.22em;color:rgba(159,176,200,.72);margin-bottom:6px}
+.brand h1{margin:0;font-family:var(--font-math);font-weight:600;font-size:26px;letter-spacing:.08em;
+  color:#eef3fa;text-shadow:0 2px 20px rgba(45,212,234,.20)}
+.brand p{margin:7px 0 0;font-size:12.5px;line-height:1.65;color:rgba(159,176,200,.85)}
+
+/* ---- 页签 ---- */
+.tabs{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:5;
+  display:flex;gap:4px;padding:4px;border-radius:999px;
+  background:var(--panel-bg);border:1px solid var(--panel-line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
+.tab{border:1px solid transparent;background:transparent;color:#b8c6da;
+  font-size:12.5px;font-family:var(--font-cn);padding:6px 15px;border-radius:999px;cursor:pointer;
+  transition:color .15s,border-color .15s,background .15s}
+.tab:hover{color:#e8f2fb}
+.tab:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.tab.active{background:rgba(45,212,234,.13);border-color:rgba(45,212,234,.55);color:#9be8f7}
+
+/* ---- 底部提示 ---- */
+.hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);pointer-events:none;user-select:none;
+  font-size:11px;letter-spacing:.05em;color:rgba(159,176,200,.6);white-space:nowrap}
+
+/* ---- 控制面板 ---- */
+.panel{position:fixed;top:14px;right:14px;width:304px;max-height:calc(100vh - 28px);overflow-y:auto;
+  background:var(--panel-bg);border:1px solid var(--panel-line);border-radius:16px;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 18px 50px rgba(0,0,0,.45);user-select:none}
+.panel::-webkit-scrollbar{width:6px}
+.panel::-webkit-scrollbar-thumb{background:rgba(148,163,184,.25);border-radius:3px}
+.panel-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px 10px;
+  font-size:13px;font-weight:600;letter-spacing:.06em;color:#dbe6f5}
+.panel:not(.collapsed) .panel-head{border-bottom:1px solid var(--panel-line)}
+.ph-right{display:flex;align-items:center;gap:7px}
+.ver{font-family:var(--font-mono);font-size:10px;color:rgba(159,176,200,.55)}
+.lang{padding:3px 8px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:11px;cursor:pointer}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.fold{width:24px;height:24px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:14px;line-height:1;cursor:pointer}
+.fold:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.panel.collapsed .panel-body{display:none}
+.panel-body{padding:6px 14px 14px}
+
+/* 滑杆 */
+.ctl{margin:11px 0 3px}
+.ctl .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.ctl label{font-size:12px;color:#c6d2e4}
+.ctl label i{font-family:var(--font-math);font-style:italic;font-size:13px}
+.ctl .val{font-family:var(--font-mono);font-size:11.5px;color:#7dd3fc}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;cursor:pointer;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--trace-cyan);margin-top:-5px;border:2px solid #0b1220;box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-moz-range-thumb{width:11px;height:11px;border:2px solid #0b1220;border-radius:50%;
+  background:var(--trace-cyan);box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-offset:2px;border-radius:4px}
+
+/* 按钮 */
+.row{display:flex;gap:8px;margin:13px 0 4px}
+.btn{padding:6px 10px;border-radius:9px;border:1px solid rgba(148,163,184,.25);
+  background:rgba(30,41,59,.55);color:#d7e2f2;font-size:12px;font-family:var(--font-cn);cursor:pointer;
+  transition:border-color .15s,color .15s,background .15s}
+.btn:hover{border-color:rgba(45,212,234,.55)}
+.btn:focus-visible,.fold:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.btn.wide{flex:1}
+.btn.active{border-color:rgba(45,212,234,.8);background:rgba(45,212,234,.12);color:#9be8f7}
+.views{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 2px}
+.views .vlabel{font-size:11.5px;color:rgba(159,176,200,.8);margin-right:2px}
+.vbtn{padding:5px 9px;font-size:11.5px}
+
+/* 开关 */
+.toggles{display:flex;flex-wrap:wrap;gap:7px 12px;margin:12px 0 2px}
+.tg{display:flex;align-items:center;gap:6px;font-size:12px;color:#c6d2e4;cursor:pointer}
+.tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
+.tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
+
+/* 读数与提示 */
+.readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
+  font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
+.readout b{font-weight:600;color:#e8eef7}
+.readout .sinC b{color:var(--trace-rose)}
+.readout .cosC b{color:var(--trace-violet)}
+.readout .tanC b{color:var(--trace-emerald)}
+.readout .cotC b{color:var(--trace-orange)}
+.readout .dim{color:rgba(159,176,200,.6)}
+.tips{margin-top:11px;font-size:11px;line-height:1.65;color:rgba(159,176,200,.72)}
+
+@media (max-width:760px){
+  .brand{top:12px;left:14px;max-width:70vw}
+  .brand h1{font-size:20px}
+  .brand p{display:none}
+  .tabs{top:52px;left:14px;transform:none}
+  .panel{left:10px;right:10px;top:auto;bottom:10px;width:auto;max-height:62vh}
+  .hint{display:none}
+}
+
+/* ---- 场景级：编码文本输入行（复用面板既有令牌，不引入新的视觉语言） ---- */
+.txtrow{margin:11px 0 3px}
+.txtrow .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px}
+.txtrow label{font-size:12px;color:#c6d2e4}
+.txtrow .val{font-family:var(--font-mono);font-size:11.5px;color:#7dd3fc}
+#txtIn{display:block;width:100%;resize:none;padding:6px 8px;border-radius:9px;
+  border:1px solid var(--panel-line);background:rgba(30,41,59,.55);color:#d7e2f2;
+  font-family:var(--font-mono);font-size:11.5px;line-height:1.55}
+#txtIn:hover{border-color:rgba(45,212,234,.4)}
+#txtIn:focus{outline:2px solid rgba(45,212,234,.7);outline-offset:1px;border-color:rgba(45,212,234,.55)}
+.presets{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:7px 0 2px}
+.presets .plabel{font-size:11.5px;color:rgba(159,176,200,.8);margin-right:2px}
+.txtnote{margin-top:5px;font-size:11px;line-height:1.55;color:rgba(251,191,36,.85)}
+.txtnote:empty{display:none}
+</style>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+
+<div class="brand">
+  <div class="eyebrow">INTERACTIVE MATH · 交互式数学</div>
+  <h1>霍夫曼编码 · 从文本到比特</h1>
+  <p id="brandDesc"></p>
+</div>
+
+<nav class="tabs" id="tabsNav"></nav>
+
+<aside class="panel" id="panel">
+  <div class="panel-head"><span id="panelTitle">参数与视角</span>
+    <span class="ph-right"><span class="ver" id="verBadge"></span><button class="lang" id="btnLang" title="切换语言 / Switch language">EN</button><button class="fold" id="btnFold" title="收起 / 展开">−</button></span></div>
+  <div class="panel-body">
+    <div id="paramsHost"></div>
+    <div class="row">
+      <button class="btn wide" id="btnPlay">⏸ 暂停</button>
+      <button class="btn" id="btnReset">↺ 重置</button>
+    </div>
+    <div id="togglesHost"></div>
+    <div id="viewsHost"></div>
+    <div class="readout" id="readout"></div>
+    <div class="tips" id="tips"></div>
+  </div>
+</aside>
+
+<div class="hint">拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签</div>
+
+<script>
+'use strict';
+/* ================= i18n 核心（引擎区） ================= */
+const LANG_KEY = 'mathviz-lang';
+function resolveLang(){
+  try{
+    const q = new URLSearchParams(location.search).get('lang');
+    if (q === 'zh' || q === 'en') return q;
+    const s = localStorage.getItem(LANG_KEY);
+    if (s === 'zh' || s === 'en') return s;
+  }catch(e){}
+  return (navigator.language || 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+let LANG = resolveLang();
+function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
+
+const STARTER_VERSION = '1.0.0';
+const VERSION = document.querySelector('meta[name="tool-version"]').content;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ⓪ 工具元信息 —— id 与双语标题                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const TOOL = {
+  id: 'huffman-coding-text-3d',
+  title: { zh: '霍夫曼编码 · 从文本到比特', en: 'Huffman Coding · From Text to Bits' },
+  h1:    { zh: '霍夫曼编码 · 从文本到比特', en: 'Huffman Coding · Text to Bits' }
+};
+
+/* 引擎 UI 文案（一般无需改动） */
+const UI = {
+  panelTitle: { zh: '参数与视角', en: 'Parameters & Views' },
+  pause:  { zh: '⏸ 暂停', en: '⏸ Pause' },
+  resume: { zh: '▶ 继续', en: '▶ Resume' },
+  reset:  { zh: '↺ 重置', en: '↺ Reset' },
+  views:  { zh: '视角', en: 'View' },
+  hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
+            en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
+};
+
+/* ================= 场景级常量（工具区；引擎区零改动） ================= */
+const ROSE = '#fb7185', VIOLET = '#a78bfa', EMERALD = '#34d399', ORANGE = '#fb923c',
+      CYAN = '#2dd4ea', AMBER = '#fbbf24', BRIGHT = '#e2e8f0';
+const ROSE_A = 'rgba(251,113,133,', VIO_A = 'rgba(167,139,250,', EME_A = 'rgba(52,211,153,',
+      ORA_A = 'rgba(251,146,60,', CYA_A = 'rgba(45,212,234,', AMB_A = 'rgba(251,191,36,',
+      BRI_A = 'rgba(226,232,240,';
+const FONT_MONO = 'ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace';  /* 比特与码字用等宽 */
+
+const TEXT_CAP = 200;        /* 文本长度上限（超出截断并提示） */
+const Z_V = 0.55;            /* 词频页：历史沿 t 轴流出的速度（世界单位/s） */
+const Z_HIST = 4.2;          /* 词频页：可见历史的 z 跨度（短于 WAVE_LEN，正视时才不会朝观察者张开） */
+const Z_STEP_SPAN = 5;       /* 建树页：全部合并步占用的 z 跨度 */
+const Z_BIT_SPAN = 4.6;      /* 编码表页：码长柱的 z 跨度上限 */
+const LX = 2.05;             /* 叶节点横向半宽 */
+const log2 = x => Math.log(x) / Math.LN2;
+
+/* 语义配色（全工具统一，按启用顺序 rose → violet → emerald → orange）：
+   rose=频率族（次数 cᵢ / 概率 pᵢ / 理想码长 −log₂pᵢ） · violet=码字族（ℓᵢ / 比特流）
+   emerald=解码 · orange=定长基线 · cyan=树结构（源几何） · amber=度量与步骤注记 */
+
+/* 预设文本：覆盖英文、中文（CJK）、单字符退化、字符种类超限四种情况 */
+const PRESETS = [
+  { label: { zh: '莎翁',   en: 'Bard' },   text: 'to be or not to be' },
+  { label: { zh: '中文',   en: '中文' },   text: '道可道非常道 名可名非常名' },
+  { label: { zh: '单字符', en: 'Single' }, text: 'aaaaaaaa' },
+  { label: { zh: '长句',   en: 'Long' },   text: 'the quick brown fox jumps over the lazy dog' }
+];
+const DEFAULT_TEXT = PRESETS[0].text;
+/* 待编码文本的唯一真源（DOM 只是它的一个视图） */
+const TEXT_STATE = { raw: DEFAULT_TEXT };
+
+/* 不可见字符 → 可见字形 */
+function glyph(ch){
+  if (ch === ' ') return '␣';
+  if (ch === '\n') return '⏎';
+  if (ch === '\t') return '⇥';
+  const c = ch.codePointAt(0);
+  if (c < 32 || c === 127) return '·';
+  return ch;
+}
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const gl  = ch => esc(glyph(ch));                 /* 读数区（HTML）用 */
+
+/* ================= 编码流水线：文本 → 频率 → 树 → 码表 → 比特流 ================= */
+/* 全流程确定性：平局按「计数小 → 首次出现早 → 建立序号小」，同一段文本永远得到同一棵树 */
+function buildPipeline(raw, capRaw){
+  const P = { fallback: false, truncated: false, capped: false, dropped: 0, coverage: 1, distinct: 0 };
+  let s = String(raw == null ? '' : raw).replace(/\r\n?/g, '\n');
+  if (s.trim() === '') { s = DEFAULT_TEXT; P.fallback = true; }      /* 空 / 纯空白 → 回退示例文本 */
+  let arr = Array.from(s);                                           /* 按码点切分，兼容代理对与 CJK */
+  if (arr.length > TEXT_CAP) { arr = arr.slice(0, TEXT_CAP); P.truncated = true; }
+  P.text = arr.join('');
+
+  /* 词频统计（order = 首次出现次序，用于确定性平局） */
+  const counts = new Map(), order = new Map();
+  for (const ch of arr) {
+    if (!counts.has(ch)) { counts.set(ch, 0); order.set(ch, order.size); }
+    counts.set(ch, counts.get(ch) + 1);
+  }
+  P.distinct = counts.size;
+  let chars = Array.from(counts.keys()).sort((a, b) => counts.get(b) - counts.get(a) || order.get(a) - order.get(b));
+
+  /* 字符表上限：只保留最高频的 N 种，其余字符不参与编码（明确告知，绝不静默截断） */
+  const cap = clamp(Math.round(capRaw || 14), 2, 16);
+  P.cap = cap;
+  if (chars.length > cap) {
+    const kept = chars.slice(0, cap);
+    let keptN = 0;
+    kept.forEach(c => { keptN += counts.get(c); });
+    P.capped = true; P.dropped = chars.length - cap; P.coverage = keptN / arr.length;
+    chars = kept;
+  }
+  const keep = new Set(chars);
+  P.work = arr.filter(ch => keep.has(ch));        /* 真正参与编码的「工作文本」 */
+  P.n = P.work.length;
+  P.chars = chars;                                /* 按计数降序 = 词频页柱子的槽位次序 */
+  P.slot = new Map(); chars.forEach((ch, i) => P.slot.set(ch, i));
+  P.counts = counts; P.order = order;
+  P.m = chars.length;
+  P.maxCount = chars.reduce((a, ch) => Math.max(a, counts.get(ch)), 1);
+
+  /* Huffman：反复取出权重最小的两个节点合并（确定性平局） */
+  let id = 0;
+  const leaves = chars.map(ch => ({ w: counts.get(ch), ch: ch, kids: null, ord: order.get(ch), id: id++, hgt: 0, step: -1 }));
+  P.leavesArr = leaves;
+  let pool = leaves.slice();
+  const merges = [];
+  while (pool.length > 1) {
+    pool.sort((a, b) => a.w - b.w || a.ord - b.ord || a.id - b.id);
+    const a = pool.shift(), b = pool.shift();
+    const par = { w: a.w + b.w, ch: null, kids: [a, b], ord: Math.min(a.ord, b.ord), id: id++,
+                  hgt: Math.max(a.hgt, b.hgt) + 1, step: merges.length };
+    merges.push({ a: a, b: b, parent: par, step: merges.length });
+    pool.push(par);
+  }
+  const root = pool[0];
+  P.root = root; P.merges = merges;
+
+  /* 叶子按中序排列 → 固定横坐标，树的边永不交叉 */
+  const leafOrder = [];
+  (function io(n){ if (!n.kids) { leafOrder.push(n.ch); return; } io(n.kids[0]); io(n.kids[1]); })(root);
+  P.leafOrder = leafOrder;
+  P.leafX = new Map();
+  leafOrder.forEach((ch, i) => P.leafX.set(ch, leafOrder.length === 1 ? 0 : -LX + 2 * LX * i / (leafOrder.length - 1)));
+
+  /* 码字 / 深度 / 子树中心（m = 1 时按约定给 1 bit 码字「0」，绝不产生零长码字） */
+  P.codes = new Map(); P.lens = new Map();
+  (function walk(n, d, c){
+    n.depth = d;
+    if (!n.kids) {
+      const code = (d === 0) ? '0' : c;
+      n.cx = P.leafX.get(n.ch); n.leafN = 1;
+      P.codes.set(n.ch, code); P.lens.set(n.ch, code.length);
+      return;
+    }
+    walk(n.kids[0], d + 1, c + '0');
+    walk(n.kids[1], d + 1, c + '1');
+    n.cx = (n.kids[0].cx * n.kids[0].leafN + n.kids[1].cx * n.kids[1].leafN) / (n.kids[0].leafN + n.kids[1].leafN);
+    n.leafN = n.kids[0].leafN + n.kids[1].leafN;
+  })(root, 0, '');
+  P.maxDepth = chars.reduce((a, ch) => Math.max(a, P.lens.get(ch)), 1);
+
+  /* 比特流与前缀累计 */
+  P.cum = new Array(P.n + 1); P.cum[0] = 0;
+  P.bits = []; P.bitOwner = [];
+  for (let j = 0; j < P.n; j++) {
+    const c = P.codes.get(P.work[j]);
+    P.cum[j + 1] = P.cum[j] + c.length;
+    for (let b = 0; b < c.length; b++) { P.bits.push(c.charCodeAt(b) === 49 ? 1 : 0); P.bitOwner.push(j); }
+  }
+
+  /* 度量：熵 H、平均码长 L̄、定长基线 */
+  P.H = 0; P.Lbar = 0;
+  chars.forEach(ch => {
+    const p = counts.get(ch) / P.n;
+    if (p > 0) { P.H -= p * log2(p); P.Lbar += p * P.lens.get(ch); }
+  });
+  P.fixedW = Math.max(1, Math.ceil(log2(P.m)));         /* m = 1 时仍为 1 bit，不会出现 0 */
+  P.fixCodes = new Map();
+  chars.forEach((ch, i) => {
+    let s2 = '';
+    for (let k = P.fixedW - 1; k >= 0; k--) s2 += ((i >> k) & 1);
+    P.fixCodes.set(ch, s2);
+  });
+  P.huffBits = P.cum[P.n];
+  P.fixedBits = P.fixedW * P.n;
+  P.asciiBits = 8 * P.n;
+  return P;
+}
+
+/* 流水线缓存：文本或字符表上限一变就整体重算（这是一次有意的重置，历史随之清空） */
+let _pipe = { key: '\u0000init' };
+function pipeKey(){ return TEXT_STATE.raw + '\u0000' + Math.round(state.capN || 14); }
+function PIPE(){
+  const k = pipeKey();
+  if (_pipe.key !== k) { _pipe = buildPipeline(TEXT_STATE.raw, Math.round(state.capN || 14)); _pipe.key = k; }
+  return _pipe;
+}
+
+/* 沿比特流解码：从根走，遇叶输出字符并回到根（前缀码可即时解码，无需任何分隔符） */
+function decodeBits(P, upto){
+  const out = [];
+  if (P.m === 1) { for (let i = 0; i < upto; i++) out.push(P.root.ch); return { chars: out, pend: '', node: P.root }; }
+  let n = P.root, pend = '';
+  for (let i = 0; i < upto; i++) {
+    const b = P.bits[i];
+    n = n.kids[b]; pend += b;
+    if (!n.kids) { out.push(n.ch); n = P.root; pend = ''; }
+  }
+  return { chars: out, pend: pend, node: n };
+}
+
+/* 共享时钟 → 各场景的「拍」：词频/编码页 1 拍 = 1 个字符，建树页 1 拍 = 1 次合并 */
+const scanIdx  = P => clamp(Math.floor(state.theta), 0, P.n);
+const mergeIdx = P => clamp(Math.floor(state.theta), 0, Math.max(0, P.m - 1));
+const stepFrac = () => clamp(state.theta - Math.floor(state.theta), 0, 1);
+/* 扫描到第 idx 个字符时各字符的真实计数 */
+function scanCounts(P, idx){
+  const c = new Map();
+  P.chars.forEach(ch => c.set(ch, 0));
+  for (let j = 0; j < idx; j++) c.set(P.work[j], c.get(P.work[j]) + 1);
+  return c;
+}
+
+/* ================= 场景级绘图助手（引擎之上，引擎零改动） ================= */
+/* 带箭头与自定义标签的坐标轴段 */
+function axisSeg(C, a, b, lab, opt){
+  opt = opt || {};
+  line3(C, a, b, { width: 1.4, color: AXIS });
+  const d = norm(sub(b, a));
+  arrowAt(C, b, [b[0] - 0.2 * d[0], b[1] - 0.2 * d[1], b[2] - 0.2 * d[2]], AXIS);
+  if (lab) label3(C, [b[0] + 0.26 * d[0], b[1] + 0.26 * d[1], b[2] + 0.36 * d[2]], lab,
+    { font: opt.font || ('italic 15px ' + FONT_MATH), size: opt.size, color: opt.color || '#c4d2e6', align: 'center' });
+}
+/* 双描粗线段（柱状读数）：外层辉光 + 内核实色 */
+function bar3(C, a, b, base, alpha){
+  line3(C, a, b, { width: 6, alpha: 0.26, color: base + '1)' });
+  line3(C, a, b, { width: 3, color: base + (alpha == null ? 0.9 : alpha) + ')' });
+}
+/* 琥珀 z 轴标尺（度量注记） */
+function zRuler(C, x0, y0, zmax, scale, every, unit){
+  const amber = AMB_A + '0.55)';
+  line3(C, [x0, y0, 0], [x0, y0, zmax], { width: 1.2, color: amber });
+  for (let k = every; k * scale <= zmax + 1e-6; k += every) {
+    line3(C, [x0, y0 - 0.07, k * scale], [x0, y0 + 0.07, k * scale], { width: 1.2, color: amber });
+    label3(C, [x0, y0 - 0.26, k * scale], String(k), { size: 10, color: AMB_A + '0.8)', align: 'center' });
+  }
+  label3(C, [x0, y0 + 0.34, zmax], t(unit), { size: 10.5, color: AMB_A + '0.9)', align: 'center' });
+}
+/* 虚线圆环（下一步提示） */
+function ring(C, p, r, color){
+  const pts = [];
+  for (let j = 0; j <= 28; j++) { const a = j / 28 * TAU; pts.push([p[0] + r * Math.cos(a), p[1] + r * Math.sin(a), p[2]]); }
+  strokePoly(C, pts, { width: 1.2, dash: [4, 5], color: color });
+}
+/* 视角联动开启开关时同步复选框 */
+function syncToggle(key){
+  document.querySelectorAll('input[data-key="' + key + '"]').forEach(o => { o.checked = !!state[key]; });
+}
+/* 读数区首两行（进度 + 速度 / 运行态） */
+function stepHead(P, cur, max, unit){
+  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;' + t(unit) + ' <b>' + cur + '</b> / ' + max +
+    (cur >= max ? '&ensp;·&ensp;' + t({ zh: '完成（按 R 重放）', en: 'done (R to replay)' }) : '') + '</div>' +
+    '<div class="dim">v = ' + fmt(state.omega, 1) + t({ zh: ' 步/s', en: ' steps/s' }) + '&ensp;·&ensp;' +
+    (state.running ? t({ zh: '运行中', en: 'running' }) : t({ zh: '已暂停', en: 'paused' })) + '</div>';
+}
+/* 输入相关的提醒（空输入 / 截断 / 字符表超限 / 单字符退化） */
+function noticeLines(P){
+  let s = '';
+  if (P.fallback) s += '<div class="dim">' + t({ zh: '输入为空，已回退到示例文本', en: 'input empty — fell back to the sample text' }) + '</div>';
+  if (P.truncated) s += '<div class="dim">' + t({ zh: '文本超过 ' + TEXT_CAP + ' 字符，只取前 ' + TEXT_CAP + ' 个',
+                                                  en: 'text longer than ' + TEXT_CAP + ' chars — first ' + TEXT_CAP + ' kept' }) + '</div>';
+  if (P.capped) s += '<div class="dim">' + t({
+      zh: '字符种类 ' + P.distinct + ' > N = ' + P.cap + '：只保留最高频的 ' + P.cap + ' 种（覆盖 ' + (P.coverage * 100).toFixed(1) + '%），其余不参与编码',
+      en: P.distinct + ' distinct chars > N = ' + P.cap + ': keeping the ' + P.cap + ' most frequent (' + (P.coverage * 100).toFixed(1) + '% coverage); the rest are excluded' }) + '</div>';
+  if (P.m === 1) s += '<div class="dim">' + t({ zh: '只有一种字符：按约定给 1 bit 码字「0」', en: 'only one distinct char: by convention it gets the 1-bit codeword "0"' }) + '</div>';
+  return s;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ① 参数声明 —— 自动生成滑杆                                ║
+   ║  key: state 中的键 · label: 支持 <i>数学符号</i>            ║
+   ║  fmt: 格式化"滑杆原始值"用于显示 · map(可选): 原始值→状态值   ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const PARAMS = [
+  { key: 'omega', label: { zh: '编码速度 <i>v</i>', en: 'Encoding speed <i>v</i>' }, min: 0.2, max: 8, step: 0.1, value: 1.5,
+    fmt: v => fmt(v, 1) + t({ zh: ' 步/s', en: ' steps/s' }) },
+  { key: 'capN',  label: { zh: '字符表上限 <i>N</i>', en: 'Alphabet cap <i>N</i>' },  min: 4,   max: 16, step: 1, value: 14,
+    map: v => Math.round(v), fmt: v => Math.round(v) + t({ zh: ' 种', en: ' symbols' }) },
+  { key: 'symSel', label: { zh: '选中字符 <i>i</i>', en: 'Selected symbol <i>i</i>' }, min: 0, max: 15, step: 1, value: 0,
+    map: v => Math.round(v),
+    fmt: v => { const P = PIPE(), i = clamp(Math.round(v), 0, P.m - 1), ch = P.leafOrder[i];
+                return '「' + glyph(ch) + '」 ' + P.codes.get(ch); } }
+];
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ② 场景注册 —— 每个键就是一个页签                           ║
+   ║  必填：label / brand / tips / views(首项即"立体"，双击回正)  ║
+   ║        toggles(曲线按 rose→violet→emerald→orange 取色)     ║
+   ║        draw(C) / readout()                                ║
+   ║  可选：sampleWindow() 历史滑窗秒数 · views[x].onSelect 联动 ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const WINDOW_SEC = () => Z_HIST / Z_V + 0.6;
+
+const SCENES = {
+
+  /* ────── ① 词频统计：文本 → 一排柱子 ────── */
+  freq: {
+    label: { zh: '词频统计', en: 'Frequencies' },
+    brand: { zh: '编码器读不懂文本的意思，它只数数：每个字符出现了多少次。频率是霍夫曼编码唯一的输入。字符沿 t 轴流走，频次柱在原地长高——拖拽画布旋转观察。',
+             en: 'The encoder never reads meaning — it only counts how often each character occurs. Frequency is the sole input to Huffman coding. Characters stream away along the t axis while the count bars grow in place — drag the canvas to rotate.' },
+    tips: { zh: '提示：按 2 键正视 字符·次数——语义、语序、内容全部消失了，只剩一排高低不同的柱子，霍夫曼从这一刻起只认这排柱子。中途调快速度 v，已经流出去的字符仍保持它们当时的真实间距。',
+            en: 'Tip: press 2 for the front symbol·count view — meaning, word order, and content are all gone, leaving only a row of bars; from here on Huffman sees nothing else. Raise the speed v mid-run and the characters already streamed out keep the true spacing they had.' },
+    views: {
+      iso:    { label: { zh: '立体', en: '3D' }, az: -0.85, el: 0.32, dist: 9.5, tx: 0, ty: 0.5, tz: 1.5 },
+      /* 正视：相机站在 t 轴末端之外（tz + dist > Z_HIST + 0.45），避免近平面掠射拉丝 */
+      front:  { label: { zh: '正视 字符·次数', en: 'Front symbol·count' }, az: 0.001, el: 0.02, dist: 7.2, tx: 0, ty: 1, tz: 1.2 },
+      stream: { label: { zh: '俯视 字符·t', en: 'Top symbol·t' }, az: -Math.PI / 2, el: 1.52, dist: 9, tx: 0, ty: 0, tz: 2.1,
+                onSelect(){ state.showStream = true; syncToggle('showStream'); } }
+    },
+    toggles: [
+      { key: 'showBars',   label: { zh: '频次柱 cᵢ', en: 'Count bars cᵢ' },  color: ROSE,      checked: true },
+      { key: 'showStream', label: { zh: '文本流',     en: 'Text stream' },    color: BRIGHT,    checked: true },
+      { key: 'showGrid',   label: { zh: '网格',       en: 'Grid' },           color: '#64748b', checked: true }
+    ],
+    sampleWindow: WINDOW_SEC,
+    draw(C){
+      const P = PIPE(), idx = scanIdx(P);
+      const cs = scanCounts(P, idx);
+      const CS = 1.9 / P.maxCount;                       /* 次数 → 世界高度 */
+      const sx = i => (P.m === 1 ? 0 : -LX + 2 * LX * i / (P.m - 1));
+
+      if (state.showGrid) drawGridXY(C, 2.2, 0.55);
+      axisSeg(C, [-2.35, 0, 0], [2.4, 0, 0], t({ zh: '字符', en: 'symbol' }), { font: '11px ' + FONT_CN });
+      axisSeg(C, [-2.25, 0, 0], [-2.25, 2.15, 0], 'c');
+      axisSeg(C, [-2.25, 0, 0], [-2.25, 0, Z_HIST + 0.45], 't');
+      for (let k = 1; k * Z_V <= Z_HIST + 1e-6; k++) {
+        line3(C, [-2.25, -0.06, k * Z_V], [-2.25, 0.06, k * Z_V], { width: 1.2, color: AXIS_DIM });
+        if (k % 2 === 0) label3(C, [-2.25, -0.25, k * Z_V], k + 's', { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+      }
+      const tickEvery = Math.max(1, Math.ceil(P.maxCount / 6));
+      for (let k = tickEvery; k <= P.maxCount; k += tickEvery) {
+        line3(C, [-2.3, k * CS, 0], [-2.2, k * CS, 0], { width: 1.2, color: AXIS_DIM });
+        label3(C, [-2.38, k * CS, 0], '' + k, { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+      }
+
+      /* 文本流：每个字符记录的是它被扫到的真实时刻，改速度不重算历史 */
+      if (state.showStream) {
+        const dense = samples.length;
+        for (let i = 0; i < dense; i++) {
+          const s = samples[i];
+          if (s.ch == null) continue;
+          const z = (state.t - s.t) * Z_V;
+          if (z > Z_HIST) continue;
+          const a = 0.85 * (1 - z / Z_HIST);
+          label3(C, [sx(P.slot.get(s.ch)), 0.13, z], glyph(s.ch),
+            { size: 11, color: BRI_A + a.toFixed(3) + ')', align: 'center' });
+        }
+      }
+
+      /* 频次柱：虚线是本段文本的最终高度（参考），实心是已扫到的真实计数 */
+      if (state.showBars) {
+        P.chars.forEach((ch, i) => {
+          const x = sx(i), full = P.counts.get(ch) * CS, cur = cs.get(ch) * CS;
+          line3(C, [x, 0, 0], [x, full, 0], { width: 1, dash: [5, 6], color: ROSE_A + '0.3)' });
+          line3(C, [x - 0.07, full, 0], [x + 0.07, full, 0], { width: 1, color: ROSE_A + '0.3)' });
+          if (cur > 0.001) bar3(C, [x, 0, 0], [x, cur, 0], ROSE_A, 0.9);
+          label3(C, [x, -0.22, 0], glyph(ch), { size: 11.5, color: 'rgba(159,176,200,.9)', align: 'center' });
+          if (cs.get(ch) > 0) label3(C, [x, cur + 0.16, 0], '' + cs.get(ch),
+            { font: '10px ' + FONT_MONO, color: ROSE_A + '0.9)', align: 'center' });
+        });
+      }
+
+      /* 当前字符（主运动点 + 投影虚线 + 曲线头光点：六处同源） */
+      if (idx > 0 && idx <= P.n) {
+        const ch = P.work[idx - 1], x = sx(P.slot.get(ch)), cur = cs.get(ch) * CS;
+        line3(C, [x, 0.13, 0], [x, cur, 0], { width: 1.5, dash: [7, 7], color: ROSE_A + '0.8)' });
+        const top = proj(C, [x, cur, 0]);
+        if (top) glowDot(top, 10, '#ffffff', ROSE_A + '0.9)');
+        const sp = proj(C, [x, 0.13, 0]);
+        if (sp) glowDot(sp, 15, '#ffffff', 'rgba(186,240,255,0.9)');
+      }
+      label3(C, [0, 2.35, 0], 'pᵢ = cᵢ / n', { font: 'italic 13px ' + FONT_MATH, color: ROSE, align: 'center' });
+      label3(C, [2.05, 2.1, 0], 'n = ' + P.n + ' · m = ' + P.m, { size: 11, color: 'rgba(159,176,200,.7)', align: 'right' });
+    },
+    readout(){
+      const P = PIPE(), idx = scanIdx(P), cs = scanCounts(P, idx);
+      const ch = idx > 0 ? P.work[idx - 1] : null;
+      let rows = '';
+      P.chars.forEach(cc => {
+        const c = P.counts.get(cc), p = c / P.n;
+        rows += '<div class="sinC"' + (cc === ch ? ' style="color:#e8eef7"' : '') + '>「' + gl(cc) + '」&ensp;' +
+          t({ zh: '已数 ', en: 'seen ' }) + '<b>' + cs.get(cc) + '</b> / ' + c +
+          '&ensp;·&ensp;pᵢ = ' + fmt(p, 3) + '</div>';
+      });
+      return stepHead(P, idx, P.n, { zh: '第', en: 'char' }) +
+        '<div class="sinC">' + t({ zh: '当前字符 ', en: 'current char ' }) + '「' + (ch == null ? '—' : gl(ch)) + '」' +
+          (ch == null ? '' : '&ensp;→&ensp;' + t({ zh: '第 ', en: 'occurrence #' }) + '<b>' + cs.get(ch) + '</b>' + t({ zh: ' 次出现', en: '' })) + '</div>' +
+        rows +
+        '<div class="dim">' + t({ zh: '文本长度 n = ', en: 'text length n = ' }) + P.n +
+          '&ensp;·&ensp;' + t({ zh: '字符表 m = ', en: 'alphabet m = ' }) + P.m + '</div>' +
+        noticeLines(P) +
+        '<div class="dim">' + t({ zh: '含义已被丢弃，只剩这张频率表', en: 'meaning is discarded — only this frequency table survives' }) + '</div>';
+    }
+  },
+
+  /* ────── ② 建树：每一拍合并两个最小节点 ────── */
+  build: {
+    label: { zh: '建树', en: 'Build the tree' },
+    brand: { zh: '每一拍取出权重最小的两个节点，合并成一个新节点，权重相加——重复 m−1 次，树就长成了。这里的 z 轴是合并步数，不是时间。',
+             en: 'Each tick takes the two lightest nodes and merges them into a new one whose weight is their sum — repeat m−1 times and the tree is grown. Here the z axis is the merge step, not time.' },
+    tips: { zh: '提示：按 2 键侧视 层级·步——越早被合并的（也就是越罕见的）字符，头顶叠的祖先越多，最终在树里沉得越深，码字也就越长。面板逐条列出了每一步到底合并了谁和谁。',
+            en: 'Tip: press 2 for the side level·step view — the earlier a character is merged (i.e. the rarer it is), the more ancestors pile above it, so it sinks deepest in the tree and gets the longest codeword. The panel logs exactly which two nodes each step merged.' },
+    views: {
+      iso:   { label: { zh: '立体', en: '3D' }, az: -0.9, el: 0.3, dist: 11, tx: 0, ty: 0.7, tz: 1.9 },
+      side:  { label: { zh: '侧视 层级·步', en: 'Side level·step' }, az: -Math.PI / 2, el: 0.001, dist: 10.5, tx: 0, ty: 0.9, tz: 2.4 },
+      /* 正视：相机退到合并步之外，让 z 只留下轻微透视，树回到经典二维形状 */
+      front: { label: { zh: '正视 树 x·y', en: 'Front tree x·y' }, az: 0.001, el: 0.02, dist: 10.5, tx: 0, ty: 0.8, tz: 2.6 }
+    },
+    toggles: [
+      { key: 'showTree', label: { zh: '合并树',     en: 'Merge tree' },   color: CYAN,      checked: true },
+      { key: 'showW',    label: { zh: '权重标签',   en: 'Weight labels' }, color: ROSE,      checked: true },
+      { key: 'showNext', label: { zh: '下一步提示', en: 'Next-step hint' }, color: AMBER,     checked: true },
+      { key: 'showGrid', label: { zh: '网格',       en: 'Grid' },          color: '#64748b', checked: true }
+    ],
+    sampleWindow: WINDOW_SEC,
+    draw(C){
+      const P = PIPE(), k = mergeIdx(P), fr = stepFrac();
+      const maxH = Math.max(1, P.root.hgt);
+      const HS = Math.min(0.52, 2.6 / maxH);
+      const ZS = Math.min(0.6, Z_STEP_SPAN / Math.max(1, P.m - 1));   /* 合并步的 z 跨度封顶，正视时透视才温和 */
+      const pos = n => [n.cx, n.hgt * HS, n.step < 0 ? 0 : (n.step + 1) * ZS];
+
+      if (state.showGrid) drawGridXY(C, 2.3, 0.55);
+      axisSeg(C, [-2.35, 0, 0], [2.4, 0, 0], t({ zh: '字符', en: 'symbol' }), { font: '11px ' + FONT_CN });
+      axisSeg(C, [-2.25, 0, 0], [-2.25, maxH * HS + 0.5, 0], t({ zh: '层级', en: 'level' }), { font: '11px ' + FONT_CN });
+      zRuler(C, -2.25, 0, Math.max(1, P.m - 1) * ZS + 0.2, ZS, 1, { zh: '合并步 s', en: 'merge step s' });
+
+      if (state.showTree) {
+        /* 已完成的合并：边 + 0/1 标签 + 新节点 */
+        for (let s = 0; s < k; s++) {
+          const mg = P.merges[s], q = pos(mg.parent);
+          [mg.a, mg.b].forEach((kid, j) => {
+            const qk = pos(kid);
+            line3(C, q, qk, { width: 1.6, color: CYA_A + '0.7)' });
+            label3(C, [(q[0] + qk[0]) / 2 + (j === 0 ? -0.09 : 0.09), (q[1] + qk[1]) / 2 + 0.05, (q[2] + qk[2]) / 2],
+              j === 0 ? '0' : '1', { font: '10px ' + FONT_MONO, color: 'rgba(159,176,200,.85)', align: j === 0 ? 'right' : 'left' });
+          });
+          solidDot(C, q, 3, CYA_A + '0.95)');
+          if (state.showW) label3(C, [q[0], q[1] + 0.19, q[2]], '' + mg.parent.w,
+            { font: '10px ' + FONT_MONO, color: ROSE_A + '0.9)', align: 'center' });
+        }
+        /* 叶子（源几何：青） */
+        P.leafOrder.forEach(ch => {
+          const x = P.leafX.get(ch);
+          const sp = proj(C, [x, 0, 0]);
+          if (sp) glowDot(sp, 8, '#ffffff', CYA_A + '0.85)');
+          label3(C, [x, -0.24, 0], glyph(ch), { size: 11.5, color: 'rgba(159,176,200,.9)', align: 'center' });
+          if (state.showW) label3(C, [x, 0.19, 0], '' + P.counts.get(ch),
+            { font: '10px ' + FONT_MONO, color: ROSE_A + '0.9)', align: 'center' });
+        });
+      }
+
+      /* 下一步：两个最小节点（琥珀圈）+ 正在生长的合并连线 */
+      if (state.showNext && k < P.m - 1) {
+        const mg = P.merges[k], q = pos(mg.parent);
+        [mg.a, mg.b].forEach(nd => {
+          const qk = pos(nd);
+          ring(C, qk, 0.2, AMB_A + '0.85)');
+          line3(C, qk, [qk[0] + (q[0] - qk[0]) * fr, qk[1] + (q[1] - qk[1]) * fr, qk[2] + (q[2] - qk[2]) * fr],
+            { width: 1.4, dash: [4, 5], color: AMB_A + '0.75)' });
+        });
+        label3(C, [0, maxH * HS + 0.72, 0],
+          t({ zh: '下一步：合并最小的两个 ', en: 'next: merge the two smallest ' }) +
+          nodeName(mg.a) + ' + ' + nodeName(mg.b) + ' = ' + mg.parent.w,
+          { size: 11, color: AMB_A + '0.9)', align: 'center' });
+      } else if (P.m > 1) {
+        const q = pos(P.root);
+        const sp = proj(C, q);
+        if (sp) glowDot(sp, 12, '#ffffff', CYA_A + '0.9)');
+        label3(C, [q[0], q[1] + 0.42, q[2]], t({ zh: '根 = ' + P.root.w + '（全部字符）', en: 'root = ' + P.root.w + ' (all chars)' }),
+          { size: 11, color: CYA_A + '0.9)', align: 'center' });
+      }
+      label3(C, [0, maxH * HS + 1.05, 0], t({ zh: '每步合并两个最小权重 → 权重相加', en: 'each step merges the two smallest weights → sum them' }),
+        { size: 11, color: 'rgba(159,176,200,.6)', align: 'center' });
+    },
+    readout(){
+      const P = PIPE(), k = mergeIdx(P), total = Math.max(0, P.m - 1);
+      const pool = poolAt(P, k);
+      let log = '';
+      for (let s = 0; s < k; s++) {
+        const mg = P.merges[s];
+        log += '<div class="cosC"' + (s === k - 1 ? '' : ' style="opacity:.72"') + '>' + (s + 1) + '. ' +
+          nodeHTML(mg.a) + ' + ' + nodeHTML(mg.b) + ' → <b>' + mg.parent.w + '</b></div>';
+      }
+      let nxt = '';
+      if (k < total) {
+        const mg = P.merges[k];
+        nxt = '<div style="color:rgba(251,191,36,.9)">' + t({ zh: '下一步：', en: 'next: ' }) +
+          nodeHTML(mg.a) + ' + ' + nodeHTML(mg.b) + ' → ' + mg.parent.w + '</div>';
+      }
+      return stepHead(P, k, total, { zh: '合并步', en: 'merge step' }) +
+        (total === 0 ? '<div class="dim">' + t({ zh: '只有一种字符，无需任何合并', en: 'only one distinct char — no merge needed' }) + '</div>' : '') +
+        nxt + log +
+        '<div class="dim">' + t({ zh: '池中剩 ', en: 'pool holds ' }) + pool.length + t({ zh: ' 个节点：', en: ' nodes: ' }) +
+          pool.map(n => n.w).join(' · ') + '</div>' +
+        noticeLines(P);
+    }
+  },
+
+  /* ────── ③ 编码表：从根到叶读出码字 ────── */
+  codes: {
+    label: { zh: '编码表', en: 'Code table' },
+    brand: { zh: '从根往下走：左边记 0、右边记 1，走到叶子就读出该字符的码字。码字只长在叶子上——所以没有任何码字是另一个码字的前缀。',
+             en: 'Walk down from the root: left writes 0, right writes 1, and the leaf you land on spells that character’s codeword. Codewords live only on leaves — which is exactly why no codeword is a prefix of another.' },
+    tips: { zh: '提示：按 2 键正视 码树——高频字符挂得浅、码字就短，实际码长 ℓᵢ 紧贴理想值 −log₂pᵢ（按 3 俯视比较两排柱）。至于熵为何是下界，见《信息熵、惊奇度与编码》。',
+            en: 'Tip: press 2 for the front tree view — frequent characters hang shallow, so their codewords are short, and the actual length ℓᵢ hugs the ideal −log₂pᵢ (press 3, top view, to compare the two bar rows). For why entropy is the lower bound, see "Information Entropy, Surprise & Coding".' },
+    views: {
+      iso:   { label: { zh: '立体', en: '3D' }, az: -0.8, el: 0.3, dist: 11.5, tx: 0, ty: -0.1, tz: 2.2 },
+      front: { label: { zh: '正视 码树', en: 'Front tree' }, az: 0.001, el: 0.02, dist: 8.4, tx: 0, ty: 0.2, tz: 0 },
+      top:   { label: { zh: '俯视 码长 x·t', en: 'Top length x·t' }, az: -Math.PI / 2, el: 1.52, dist: 11.5, tx: 0, ty: -1.4, tz: 2.3,
+               onSelect(){ state.showIdeal = true; state.showLen = true; syncToggle('showIdeal'); syncToggle('showLen'); } }
+    },
+    toggles: [
+      { key: 'showCodeTree', label: { zh: '码树',              en: 'Code tree' },          color: CYAN,      checked: true },
+      { key: 'showIdeal',    label: { zh: '理想码长 −log₂pᵢ',  en: 'Ideal −log₂pᵢ' },      color: ROSE,      checked: true },
+      { key: 'showLen',      label: { zh: '实际码长 ℓᵢ',       en: 'Actual ℓᵢ' },          color: VIOLET,    checked: true },
+      { key: 'showPath',     label: { zh: '选中字符的路径',    en: 'Selected path' },      color: VIOLET,    checked: true },
+      { key: 'showGrid',     label: { zh: '网格',              en: 'Grid' },               color: '#64748b', checked: true }
+    ],
+    sampleWindow: WINDOW_SEC,
+    draw(C){
+      const P = PIPE();
+      const DS = Math.min(0.5, 2.8 / P.maxDepth);
+      /* 码长柱沿 +t 伸出：跨度封顶，正视时才不会朝观察者张开 */
+      const yTop = 1.7, yB = -1.95;
+      const ZB = Math.min(0.42, Z_BIT_SPAN / Math.max(3, P.maxDepth + 1));
+      const zEnd = (P.maxDepth + 1.4) * ZB;
+      const npos = n => [n.cx, yTop - n.depth * DS, 0];
+      const sel = clamp(Math.round(state.symSel), 0, P.m - 1);
+      const selCh = P.leafOrder[sel];
+
+      if (state.showGrid) drawGridXY(C, 2.3, 0.55);
+
+      if (state.showCodeTree) {
+        (function edges(n){
+          if (!n.kids) return;
+          const q = npos(n);
+          n.kids.forEach((kid, j) => {
+            const qk = npos(kid);
+            line3(C, q, qk, { width: 1.6, color: CYA_A + '0.7)' });
+            label3(C, [(q[0] + qk[0]) / 2 + (j === 0 ? -0.09 : 0.09), (q[1] + qk[1]) / 2, 0], j === 0 ? '0' : '1',
+              { font: '10px ' + FONT_MONO, color: 'rgba(159,176,200,.85)', align: j === 0 ? 'right' : 'left' });
+            edges(kid);
+          });
+          solidDot(C, q, 3, CYA_A + '0.95)');
+          ring(C, q, 0.09, CYA_A + '0.45)');
+        })(P.root);
+
+        P.leafOrder.forEach(ch => {
+          const q = npos(nodeOf(P, ch));
+          const sp = proj(C, q);
+          if (sp) glowDot(sp, ch === selCh ? 12 : 8, '#ffffff', CYA_A + '0.85)');
+          label3(C, [q[0], q[1] - 0.2, 0], glyph(ch), { size: 11.5, color: 'rgba(159,176,200,.95)', align: 'center' });
+          label3(C, [q[0], q[1] - 0.4, 0], P.codes.get(ch),
+            { font: '10.5px ' + FONT_MONO, color: ch === selCh ? VIOLET : VIO_A + '0.6)', align: 'center' });
+        });
+        label3(C, [P.root.cx, yTop + 0.3, 0], t({ zh: '根', en: 'root' }), { size: 11, color: CYA_A + '0.85)', align: 'center' });
+      }
+
+      /* 选中字符：根 → 叶的那条路径就是它的码字 */
+      if (state.showPath && P.m > 1) {
+        let n = P.root, acc = '';
+        const code = P.codes.get(selCh);
+        for (let i = 0; i < code.length; i++) {
+          const b = code.charCodeAt(i) === 49 ? 1 : 0;
+          const kid = n.kids[b];
+          line3(C, npos(n), npos(kid), { width: 3.2, color: VIO_A + '0.9)' });
+          acc += b;
+          n = kid;
+        }
+        label3(C, [npos(n)[0], npos(n)[1] - 0.62, 0], '「' + glyph(selCh) + '」 = ' + acc,
+          { font: '11px ' + FONT_MONO, color: VIOLET, align: 'center' });
+      }
+
+      /* 码长对比：理想 −log₂pᵢ（玫红） vs 实际 ℓᵢ（紫），沿 t 轴伸出 */
+      line3(C, [-2.3, yB, 0], [2.35, yB, 0], { width: 1.4, color: AXIS });
+      axisSeg(C, [-2.25, yB, 0], [-2.25, yB, zEnd], 'bit', { font: '11px ' + FONT_CN });
+      for (let b = 1; b * ZB <= zEnd; b++) {
+        line3(C, [-2.3, yB, b * ZB], [-2.2, yB, b * ZB], { width: 1.2, color: AXIS_DIM });
+        if (b % 2 === 0) label3(C, [-2.42, yB, b * ZB], '' + b, { size: 9.5, color: 'rgba(159,176,200,.6)', align: 'center' });
+      }
+      P.leafOrder.forEach(ch => {
+        const x = P.leafX.get(ch);
+        label3(C, [x, yB - 0.22, 0], glyph(ch), { size: 10.5, color: 'rgba(159,176,200,.75)', align: 'center' });
+        if (state.showIdeal) {
+          const ideal = Math.min(-log2(P.counts.get(ch) / P.n), P.maxDepth + 1);
+          bar3(C, [x - 0.06, yB, 0], [x - 0.06, yB, ideal * ZB], ROSE_A, 0.9);
+        }
+        if (state.showLen) {
+          bar3(C, [x + 0.06, yB, 0], [x + 0.06, yB, P.lens.get(ch) * ZB], VIO_A, ch === selCh ? 1 : 0.9);
+        }
+      });
+      /* 度量注记（琥珀）：熵 H 与平均码长 L̄ */
+      line3(C, [-2.25, yB, P.H * ZB], [2.3, yB, P.H * ZB], { width: 1, dash: [5, 6], color: AMB_A + '0.85)' });
+      label3(C, [2.36, yB, P.H * ZB], 'H = ' + fmt(P.H), { font: 'italic 11px ' + FONT_MATH, color: AMBER, align: 'left' });
+      line3(C, [-2.25, yB, P.Lbar * ZB], [2.3, yB, P.Lbar * ZB], { width: 1, dash: [5, 6], color: VIO_A + '0.85)' });
+      label3(C, [2.36, yB, P.Lbar * ZB], 'L̄ = ' + fmt(P.Lbar), { font: 'italic 11px ' + FONT_MATH, color: VIOLET, align: 'left', dy: -11 });
+
+      if (state.showIdeal) label3(C, [-2.2, yB + 0.3, zEnd * 0.34], 'ℓᵢ ≈ −log₂ pᵢ', { font: 'italic 11px ' + FONT_MATH, color: ROSE, align: 'left' });
+      if (state.showLen) label3(C, [-2.2, yB + 0.3, zEnd * 0.62], 'L̄ = Σpᵢℓᵢ', { font: 'italic 11px ' + FONT_MATH, color: VIOLET, align: 'left' });
+      label3(C, [0, yTop + 0.72, 0], t({ zh: '码字只在叶子上 → 谁也不是谁的前缀', en: 'codewords live only on leaves → none is a prefix of another' }),
+        { size: 11, color: AMB_A + '0.85)', align: 'center' });
+    },
+    readout(){
+      const P = PIPE();
+      const sel = clamp(Math.round(state.symSel), 0, P.m - 1), selCh = P.leafOrder[sel];
+      let rows = '';
+      P.leafOrder.forEach((ch, i) => {
+        const c = P.counts.get(ch), p = c / P.n, code = P.codes.get(ch);
+        const on = (ch === selCh);
+        rows += '<div class="cosC"' + (on ? '' : ' style="opacity:.75"') + '>' + (on ? '▸' : '&ensp;') + '「' + gl(ch) + '」' +
+          '&ensp;c=' + c + '&ensp;p=' + fmt(p, 3) + '&ensp;ℓ=<b>' + P.lens.get(ch) + '</b>' +
+          '&ensp;<span class="dim">(−log₂p = ' + fmt(-log2(p)) + ')</span>&ensp;<b>' + code + '</b></div>';
+      });
+      let kraft = 0;
+      P.leafOrder.forEach(ch => { kraft += Math.pow(2, -P.lens.get(ch)); });
+      return '<div>' + t({ zh: '码表：', en: 'code table: ' }) + '<b>' + P.m + '</b>' + t({ zh: ' 个字符 · 文本 n = ', en: ' symbols · text n = ' }) + P.n + '</div>' +
+        '<div class="dim">' + t({ zh: '选中 i = ', en: 'selected i = ' }) + sel + t({ zh: '（滑杆可改）', en: ' (use the slider)' }) + '</div>' +
+        rows +
+        '<div class="cosC">L̄ = Σpᵢℓᵢ = <b>' + fmt(P.Lbar) + '</b> bit/' + t({ zh: '字符', en: 'char' }) + '</div>' +
+        '<div>H = <b>' + fmt(P.H) + '</b> bit&ensp;·&ensp;' + t({ zh: '冗余 ', en: 'redundancy ' }) + 'L̄ − H = <b>' + fmt(Math.max(0, P.Lbar - P.H)) + '</b></div>' +
+        '<div class="dim">' + t({ zh: '香农界 H ≤ L̄ < H + 1 成立；Σ2^−ℓᵢ = ', en: 'Shannon bound H ≤ L̄ < H + 1 holds; Σ2^−ℓᵢ = ' }) + fmt(kraft, 3) +
+          t({ zh: '（= 1 即树已填满）', en: ' (= 1 means the tree is full)' }) + '</div>' +
+        noticeLines(P);
+    }
+  },
+
+  /* ────── ④ 逐字编码：码流像方波一样流出 ────── */
+  encode: {
+    label: { zh: '逐字编码', en: 'Encode & decode' },
+    brand: { zh: '按码表把文本逐字换成比特，码流像示波器上的方波一样流出。下面那条定长基线用同样的方式编码同一段文本——它越跑越长。',
+             en: 'The code table turns the text into bits one character at a time, and the stream unrolls like a square wave on an oscilloscope. Below it, a fixed-length baseline encodes the same text — and keeps running longer.' },
+    tips: { zh: '提示：按 2 键侧视 码流——紫色方波里每个字符占据的宽度就是它的代价，高频字符只占窄窄一格；关掉「码字分组」，所有分隔标记消失，绿色解码行依然一字不差——前缀码不需要任何分隔符。',
+            en: 'Tip: press 2 for the side bitstream view — the width each character occupies in the violet square wave is exactly its cost, and frequent characters take only a sliver; switch off "codeword groups" and every separator marker vanishes, yet the green decoded row still recovers the text exactly — a prefix code needs no separators at all.' },
+    views: {
+      iso:   { label: { zh: '立体', en: '3D' }, az: -0.95, el: 0.3, dist: 12, tx: 0, ty: 0, tz: 3.2 },
+      side:  { label: { zh: '侧视 码流 y·t', en: 'Side bitstream y·t' }, az: -Math.PI / 2, el: 0.001, dist: 11.5, tx: 0, ty: 0.1, tz: 4.2 },
+      near:  { label: { zh: '近观 码字', en: 'Close-up' }, az: -Math.PI / 2, el: 0.001, dist: 5.2, tx: 0, ty: 0.4, tz: 1.3 }
+    },
+    toggles: [
+      { key: 'showTape',  label: { zh: 'Huffman 码流', en: 'Huffman bitstream' }, color: VIOLET,    checked: true },
+      { key: 'showGroup', label: { zh: '码字分组',      en: 'Codeword groups' },  color: AMBER,     checked: true },
+      { key: 'showDec',   label: { zh: '解码回放',      en: 'Decode playback' },  color: EMERALD,   checked: true },
+      { key: 'showBase',  label: { zh: '定长基线',      en: 'Fixed-length baseline' }, color: ORANGE, checked: true },
+      { key: 'showGrid',  label: { zh: '网格',          en: 'Grid' },             color: '#64748b', checked: true }
+    ],
+    sampleWindow: WINDOW_SEC,
+    draw(C){
+      const P = PIPE(), idx = scanIdx(P);
+      const ZB = WAVE_LEN / Math.max(16, P.huffBits);     /* 比特 → 世界长度（Huffman 全长恰好铺满 t 轴） */
+      const bitsDone = P.cum[idx];
+      const A = 0.2, yH = 0.62, yF = -0.78, yA = -1.42;
+
+      if (state.showGrid) drawTimeGrid(C, { yMax: 1.7, v: WAVE_LEN / 8 });
+      axisSeg(C, [0, yH, 0], [0, yH, WAVE_LEN + 0.5], t({ zh: '比特位置', en: 'bit position' }), { font: '11px ' + FONT_CN });
+
+      /* Huffman 码流：方波（高=1、低=0） */
+      if (state.showTape && bitsDone > 0) {
+        const pts = [];
+        for (let i = 0; i < bitsDone; i++) {
+          const y = yH + (P.bits[i] ? A : -A);
+          pts.push([0, y, i * ZB], [0, y, (i + 1) * ZB]);
+        }
+        strokePoly(C, pts, { width: 5.5, color: VIO_A + '0.13)' });
+        strokePoly(C, pts, { width: 2.2, color: VIO_A + '0.95)' });
+        if (ZB > 0.13) {
+          for (let i = 0; i < bitsDone; i++)
+            label3(C, [0, yH + (P.bits[i] ? A + 0.16 : -A - 0.16), (i + 0.5) * ZB], P.bits[i] ? '1' : '0',
+              { font: '10px ' + FONT_MONO, color: VIO_A + '0.85)', align: 'center' });
+        }
+      }
+      label3(C, [0, yH + 0.52, -0.35], 'Huffman', { font: 'italic 12px ' + FONT_MATH, color: VIOLET, align: 'right' });
+
+      /* 码字分组（琥珀度量）与原文字符：过密时按步长抽稀，避免糊成一片 */
+      const gW = ZB * P.Lbar;                              /* 每个字符的平均世界宽度 */
+      const gStep = Math.max(1, Math.ceil(0.16 / Math.max(1e-6, gW)));
+      const gTick = gW > 0.05;
+      for (let j = 0; j < idx; j++) {
+        const z0 = P.cum[j] * ZB, z1 = P.cum[j + 1] * ZB;
+        if (state.showGroup && gTick) line3(C, [0, yH - A - 0.1, z0], [0, yH + A + 0.1, z0], { width: 1, color: AMB_A + '0.55)' });
+        if (j % gStep === 0)
+          label3(C, [0, yH + 0.78, (z0 + z1) / 2], glyph(P.work[j]), { size: 11, color: BRI_A + '0.85)', align: 'center' });
+      }
+      if (state.showGroup && gTick && idx > 0)
+        line3(C, [0, yH - A - 0.1, bitsDone * ZB], [0, yH + A + 0.1, bitsDone * ZB], { width: 1, color: AMB_A + '0.55)' });
+
+      /* 解码回放：沿比特流从根往下走，遇叶输出（绿） */
+      if (state.showDec && idx > 0) {
+        const dec = decodeBits(P, bitsDone);
+        for (let j = 0; j < dec.chars.length; j++) {
+          if (j % gStep !== 0) continue;
+          const z0 = P.cum[j] * ZB, z1 = P.cum[j + 1] * ZB;
+          label3(C, [0, yH - 0.66, (z0 + z1) / 2], glyph(dec.chars[j]), { size: 11, color: EME_A + '0.9)', align: 'center' });
+        }
+        label3(C, [0, yH - 0.66, -0.35], t({ zh: '解码', en: 'decoded' }), { size: 11, color: EMERALD, align: 'right' });
+      }
+
+      /* 定长基线：同一段文本，每字符固定 ⌈log₂m⌉ bit —— 明显更长 */
+      if (state.showBase) {
+        const fb = idx * P.fixedW, zCap = WAVE_LEN + 1.8;
+        const pts = [];
+        for (let j = 0; j < idx; j++) {
+          const fc = P.fixCodes.get(P.work[j]);
+          for (let b = 0; b < P.fixedW; b++) {
+            const i = j * P.fixedW + b;
+            if (i * ZB > zCap) break;
+            const y = yF + (fc.charCodeAt(b) === 49 ? A : -A);
+            pts.push([0, y, i * ZB], [0, y, (i + 1) * ZB]);
+          }
+          if (P.cum[j] >= 0 && j * P.fixedW * ZB > zCap) break;
+        }
+        if (pts.length) {
+          strokePoly(C, pts, { width: 5.5, color: ORA_A + '0.13)' });
+          strokePoly(C, pts, { width: 2.2, color: ORA_A + '0.95)' });
+        }
+        if (fb * ZB > zCap) arrowAt(C, [0, yF, zCap + 0.25], [0, yF, zCap + 0.05], ORA_A + '0.8)');
+        label3(C, [0, yF + 0.5, -0.35], t({ zh: '定长 ', en: 'fixed ' }) + P.fixedW + ' bit', { size: 11, color: ORANGE, align: 'right' });
+        /* 8-bit 参照：太长，画到裁剪处并标注倍数 */
+        const az = Math.min(idx * 8 * ZB, WAVE_LEN + 1.8);
+        line3(C, [0, yA, 0], [0, yA, az], { width: 2, color: BRI_A + '0.45)' });
+        if (idx * 8 * ZB > WAVE_LEN + 1.8) arrowAt(C, [0, yA, az], [0, yA, az - 0.2], BRI_A + '0.6)');
+        label3(C, [0, yA - 0.26, Math.min(az, WAVE_LEN) * 0.5], '8-bit ASCII · ' +
+          (P.huffBits > 0 ? fmt(P.asciiBits / Math.max(1, P.huffBits), 1) : '—') + '×',
+          { size: 10.5, color: BRI_A + '0.6)', align: 'center' });
+        /* 节省了多少（琥珀度量） */
+        if (idx > 0) {
+          const zh0 = bitsDone * ZB, zf0 = Math.min(fb * ZB, zCap);
+          line3(C, [0, yF - 0.5, zh0], [0, yF - 0.5, zf0], { width: 1.2, color: AMB_A + '0.8)' });
+          line3(C, [0, yF - 0.56, zh0], [0, yF - 0.44, zh0], { width: 1.2, color: AMB_A + '0.8)' });
+          line3(C, [0, yF - 0.56, zf0], [0, yF - 0.44, zf0], { width: 1.2, color: AMB_A + '0.8)' });
+          label3(C, [0, yF - 0.72, (zh0 + zf0) / 2], t({ zh: '省 ', en: 'saved ' }) + (fb - bitsDone) + ' bit',
+            { size: 10.5, color: AMB_A + '0.9)', align: 'center' });
+        }
+      }
+
+      /* 码流头（主运动点）+ 当前字符投影虚线 */
+      if (idx > 0) {
+        const zh0 = bitsDone * ZB;
+        const sp = proj(C, [0, yH, zh0]);
+        if (sp) glowDot(sp, 15, '#ffffff', 'rgba(186,240,255,0.9)');
+        line3(C, [0, yH, zh0], [0, yH + 0.62, zh0], { width: 1.5, dash: [7, 7], color: VIO_A + '0.8)' });
+        const hd = proj(C, [0, yH + 0.62, zh0]);
+        if (hd) glowDot(hd, 9, '#ffffff', VIO_A + '0.9)');
+      }
+      label3(C, [0, 1.85, 0.2], t({ zh: '一串比特，没有分隔符', en: 'one run of bits, no separators' }),
+        { size: 11, color: 'rgba(159,176,200,.6)', align: 'left' });
+    },
+    readout(){
+      const P = PIPE(), idx = scanIdx(P);
+      const bitsDone = P.cum[idx];
+      const ch = idx > 0 ? P.work[idx - 1] : null;
+      const code = ch == null ? '' : P.codes.get(ch);
+      const fb = idx * P.fixedW, ab = idx * 8;
+      const dec = decodeBits(P, bitsDone);
+      const ok = dec.chars.length === idx && dec.chars.join('') === P.work.slice(0, idx).join('');
+      const avg = idx > 0 ? bitsDone / idx : 0;
+      return stepHead(P, idx, P.n, { zh: '第', en: 'char' }) +
+        '<div class="cosC">' + t({ zh: '本步：', en: 'this step: ' }) + '「' + (ch == null ? '—' : gl(ch)) + '」 → ' +
+          (ch == null ? '—' : '<b>' + code + '</b>&ensp;(' + code.length + ' bit)') + '</div>' +
+        '<div class="cosC">' + t({ zh: 'Huffman 累计 ', en: 'Huffman total ' }) + '<b>' + bitsDone + '</b> bit&ensp;·&ensp;' +
+          t({ zh: '均 ', en: 'avg ' }) + fmt(avg) + ' bit/' + t({ zh: '字符', en: 'char' }) + '</div>' +
+        '<div class="cotC">' + t({ zh: '定长 ⌈log₂m⌉ = ', en: 'fixed ⌈log₂m⌉ = ' }) + P.fixedW + ' bit → <b>' + fb + '</b> bit' +
+          '&ensp;·&ensp;8-bit → ' + ab + ' bit</div>' +
+        '<div>' + t({ zh: '压缩比（对定长）', en: 'ratio vs fixed' }) + ' = <b>' + (fb > 0 ? (100 * bitsDone / fb).toFixed(1) : '—') + '%</b>' +
+          '&ensp;·&ensp;' + t({ zh: '对 8-bit', en: 'vs 8-bit' }) + ' = ' + (ab > 0 ? (100 * bitsDone / ab).toFixed(1) : '—') + '%</div>' +
+        '<div class="tanC">' + t({ zh: '解码：已还原 ', en: 'decoded: ' }) + '<b>' + dec.chars.length + '</b>' +
+          t({ zh: ' 个字符，', en: ' chars, ' }) + (ok ? t({ zh: '与原文一致 ✓', en: 'matches the source ✓' }) : t({ zh: '游标在码字中间', en: 'cursor mid-codeword' })) +
+          (dec.pend ? '&ensp;<span class="dim">' + t({ zh: '待定 ', en: 'pending ' }) + dec.pend + '</span>' : '') + '</div>' +
+        '<div class="dim">L̄ = ' + fmt(P.Lbar) + ' · H = ' + fmt(P.H) + ' · ' +
+          t({ zh: '界 H ≤ L̄ < H+1', en: 'bound H ≤ L̄ < H+1' }) + '</div>' +
+        noticeLines(P);
+    }
+  }
+};
+
+/* 合并池：完成 k 步后仍活着的节点（按权重排序，用于「下一步」与读数） */
+function poolAt(P, k){
+  const alive = new Set(P.leavesArr);
+  for (let s = 0; s < k; s++) { alive.delete(P.merges[s].a); alive.delete(P.merges[s].b); alive.add(P.merges[s].parent); }
+  return Array.from(alive).sort((a, b) => a.w - b.w || a.ord - b.ord || a.id - b.id);
+}
+function nodeOf(P, ch){ return P.leavesArr[P.slot.get(ch)]; }
+function nodeName(n){ return n.ch != null ? '「' + glyph(n.ch) + '」' + n.w : '[' + n.w + ']'; }
+function nodeHTML(n){ return n.ch != null ? '「' + gl(n.ch) + '」' + n.w : '[' + n.w + ']'; }
+
+/* ================= 常量与状态（引擎区，以下一般无需改动） ================= */
+const TAU = Math.PI * 2;
+const WAVE_LEN = 8;      // t 轴的世界长度（可视窗口）
+const NEAR = 0.15;       // 近裁剪面
+
+const FONT_CN = 'ui-sans-serif,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif';
+const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
+
+const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
+const samples = [];
+let curTab = null;
+const RELABEL = [];
+const cams = {};
+let cam = null;
+let tween = null;
+const lastView = {};
+const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ③ 采样 —— 按你的工具需要扩展字段                           ║
+   ║  原则：记录"当时的真实值"，参数中途改变时历史不重算            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+let scanPrev = 0;
+function pushSample() {
+  const P = PIPE();
+  if (!samples.length) scanPrev = 0;                       /* 重置后从头开始扫描 */
+  const idx = clamp(Math.floor(state.theta), 0, P.n);
+  let ch = null;
+  if (idx > scanPrev) { ch = P.work[idx - 1]; scanPrev = idx; }
+  samples.push({
+    t: state.t,          /* 该字符被扫到的真实时刻——改速度后历史间距不重算 */
+    idx: idx,
+    ch: ch,              /* 本帧新扫到的字符（否则为 null） */
+    bits: P.cum[idx]     /* 当时已发出的比特数 */
+  });
+}
+
+/* ================= 画布 ================= */
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = 1, FOCAL = 900, CX = 0, CY = 0, bgGrad = null;
+
+function resize() {
+  DPR = Math.min(2.5, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  CX = W / 2; CY = H / 2;
+  FOCAL = 1.2 * Math.min(H, W * 1.1);
+  bgGrad = ctx.createRadialGradient(W*0.5, H*0.3, 0, W*0.5, H*0.42, Math.max(W, H)*0.95);
+  bgGrad.addColorStop(0, '#0c1526');
+  bgGrad.addColorStop(1, '#05070d');
+}
+window.addEventListener('resize', resize);
+
+/* ================= 基础数学 ================= */
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const mod2pi = a => { a %= TAU; if (a < 0) a += TAU; return a; };
+const wrapPI = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
+const ease = k => k < 0.5 ? 4*k*k*k : 1 - Math.pow(-2*k + 2, 3) / 2;
+const fmt = (x, d = 2) => x.toFixed(d);
+const fmtS = (x, d = 2) => (x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
+
+const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+const dot3 = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+
+/* ================= 轨道相机与投影 ================= */
+function makeCam() {
+  const cp = Math.cos(cam.el), sp = Math.sin(cam.el);
+  const eye = [
+    cam.tx + cam.dist * cp * Math.sin(cam.az),
+    cam.ty + cam.dist * sp,
+    cam.tz + cam.dist * cp * Math.cos(cam.az)
+  ];
+  const f = norm(sub([cam.tx, cam.ty, cam.tz], eye));
+  const r = norm(cross(f, [0, 1, 0]));
+  const u = cross(r, f);
+  return { eye, f, r, u };
+}
+function camPt(C, p) {
+  const d = sub(p, C.eye);
+  return [dot3(d, C.r), dot3(d, C.u), dot3(d, C.f)];
+}
+function scr(c) { const s = FOCAL / c[2]; return [CX + c[0]*s, CY - c[1]*s]; }
+function proj(C, p) { const c = camPt(C, p); return c[2] < NEAR ? null : scr(c); }
+function clipNear(a, b) {
+  const t = (NEAR - a[2]) / (b[2] - a[2]);
+  return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, NEAR];
+}
+
+/* 折线路径（支持 null 断点 + 近平面裁剪）；返回 [首点, 末点] 屏幕坐标 */
+function polyPath(C, pts) {
+  if (pts.length < 2) return null;
+  let head = null, tail = null, contin = false, prev = null;
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    const P = pts[i];
+    if (P === null) { prev = null; contin = false; continue; }
+    const cur = camPt(C, P);
+    if (prev !== null) {
+      let a = prev, b = cur;
+      const av = a[2] >= NEAR, bv = b[2] >= NEAR;
+      if (av || bv) {
+        if (!av) a = clipNear(a, b);
+        if (!bv) b = clipNear(b, a);
+        const sA = scr(a), sB = scr(b);
+        if (!contin) ctx.moveTo(sA[0], sA[1]);
+        ctx.lineTo(sB[0], sB[1]);
+        if (!head) head = sA;
+        tail = sB;
+        contin = bv;
+      } else {
+        contin = false;
+      }
+    }
+    prev = cur;
+  }
+  return head ? [head, tail] : null;
+}
+
+function strokePoly(C, pts, o) {
+  const ht = polyPath(C, pts);
+  if (!ht) return;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = o.width || 2;
+  if (o.alpha != null) ctx.globalAlpha = o.alpha;
+  if (o.dash) ctx.setLineDash(o.dash);
+  if (o.fade) {
+    const h = ht[0], t = ht[1];
+    if (Math.hypot(t[0]-h[0], t[1]-h[1]) < 2) {
+      ctx.strokeStyle = o.fade[0];
+    } else {
+      const g = ctx.createLinearGradient(h[0], h[1], t[0], t[1]);
+      g.addColorStop(0, o.fade[0]);
+      g.addColorStop(1, o.fade[1]);
+      ctx.strokeStyle = g;
+    }
+  } else {
+    ctx.strokeStyle = o.color;
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+const line3 = (C, a, b, o) => strokePoly(C, [a, b], o);
+
+function glowDot(s, r, core, mid) {
+  const g = ctx.createRadialGradient(s[0], s[1], 0, s[0], s[1], r);
+  g.addColorStop(0, core);
+  g.addColorStop(0.35, mid);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+function solidDot(C, p, r, color) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+
+function label3(C, p, text, o) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.save();
+  ctx.font = o.font || ((o.size || 12) + 'px ' + FONT_CN);
+  ctx.fillStyle = o.color || '#c4d2e6';
+  ctx.textAlign = o.align || 'left';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(3,6,12,.85)';
+  ctx.shadowBlur = 4;
+  ctx.fillText(text, s[0] + (o.dx || 0), s[1] + (o.dy || 0));
+  ctx.restore();
+}
+
+function arrowAt(C, tip3, before3, color) {
+  const t = proj(C, tip3), b = proj(C, before3);
+  if (!t || !b) return;
+  const a = Math.atan2(t[1]-b[1], t[0]-b[0]);
+  const L = 9;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.4;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a-0.42), t[1]-L*Math.sin(a-0.42));
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a+0.42), t[1]-L*Math.sin(a+0.42));
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* ================= 常用场景部件 ================= */
+const AXIS = 'rgba(159,176,200,0.9)';
+const AXIS_DIM = 'rgba(159,176,200,0.5)';
+
+/* 坐标轴：o = { ex, ey, yTicks:[], xTicks:[], tAxis:bool, v(秒刻度间距的波速) } */
+function drawAxes(C, o) {
+  const ex = o.ex, ey = o.ey;
+  line3(C, [-ex, 0, 0], [ex, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [ex, 0, 0], [ex - 0.2, 0, 0], AXIS);
+  label3(C, [ex + 0.22, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  line3(C, [0, -ey, 0], [0, ey, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, ey, 0], [0, ey - 0.2, 0], AXIS);
+  label3(C, [0, ey + 0.18, 0], 'y', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  if (o.tAxis) {
+    line3(C, [0, 0, 0], [0, 0, WAVE_LEN + 0.5], { width: 1.4, color: AXIS });
+    arrowAt(C, [0, 0, WAVE_LEN + 0.5], [0, 0, WAVE_LEN + 0.3], AXIS);
+    label3(C, [0, 0, WAVE_LEN + 0.9], 't', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+    const v = o.v || 1;
+    const every = v < 0.8 ? 2 : 1;
+    for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+      line3(C, [0, -0.06, k*v], [0, 0.06, k*v], { width: 1.2, color: AXIS_DIM });
+      if (k % every === 0) {
+        label3(C, [0, -0.25, k*v], k + 's', { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+      }
+    }
+  }
+  for (const k of (o.yTicks || [])) {
+    for (const yv of [k, -k]) {
+      line3(C, [-0.05, yv, 0], [0.05, yv, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [-0.13, yv, 0], (yv < 0 ? '−' : '') + Math.abs(yv), { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+    }
+  }
+  for (const k of (o.xTicks || [])) {
+    for (const xv of [k, -k]) {
+      line3(C, [xv, -0.05, 0], [xv, 0.05, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [xv, -0.24, 0], (xv < 0 ? '−' : '') + Math.abs(xv), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+    }
+  }
+}
+
+/* z=0 平面方格网格（几何类场景） */
+function drawGridXY(C, g, step) {
+  const n = Math.round(g / step);
+  for (let i = -n; i <= n; i++) {
+    if (i === 0) continue;
+    const u = i * step;
+    line3(C, [u, -g, 0], [u, g, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+    line3(C, [-g, u, 0], [g, u, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+  }
+}
+
+/* y–t 时间平面网格（流式波形类场景）：o = { yMax, v } */
+function drawTimeGrid(C, o) {
+  const g = o.yMax, v = o.v;
+  for (let i = Math.round(-g*2); i <= Math.round(g*2); i++) {
+    if (i === 0) continue;
+    line3(C, [0, i/2, 0], [0, i/2, WAVE_LEN], { width: 1, color: 'rgba(148,163,184,0.10)' });
+  }
+  for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+    line3(C, [0, -g, k*v], [0, g, k*v], { width: 1, color: 'rgba(148,163,184,0.07)' });
+  }
+}
+
+/* 周期标尺（琥珀）：在平面 x=px、高度 yb 处，从 z=0 画到 z=T·v */
+function drawPeriodBracket(C, Tsec, v, px, yb, text) {
+  const zT = Tsec * v;
+  if (zT > WAVE_LEN + 0.01) return;
+  const amber = 'rgba(251,191,36,0.75)';
+  line3(C, [px, yb, 0], [px, yb, zT], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, 0], [px, yb + 0.06, 0], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, zT], [px, yb + 0.06, zT], { width: 1.2, color: amber });
+  label3(C, [px, yb - 0.2, zT/2], text, { size: 10.5, color: 'rgba(251,191,36,.9)', align: 'center' });
+}
+
+/* 单位圆（半径 A，位于 z=0 平面，青色源几何） */
+function drawCircle(C, A) {
+  const cpts = [];
+  for (let i = 0; i <= 72; i++) {
+    const a = i / 72 * TAU;
+    cpts.push([A * Math.cos(a), A * Math.sin(a), 0]);
+  }
+  strokePoly(C, cpts, { width: 6, color: 'rgba(45,212,234,0.13)' });
+  strokePoly(C, cpts, { width: 2, color: 'rgba(45,212,234,0.95)' });
+  for (let q = 0; q < 4; q++) {
+    const a = q * Math.PI / 2;
+    line3(C, [A*0.95*Math.cos(a), A*0.95*Math.sin(a), 0],
+             [A*1.06*Math.cos(a), A*1.06*Math.sin(a), 0],
+             { width: 1, color: 'rgba(45,212,234,0.5)' });
+  }
+  solidDot(C, [0, 0, 0], 2.2, 'rgba(159,176,200,0.9)');
+}
+
+/* 角度弧 θ（琥珀度量注记） */
+function drawAngleArc(C, th, A) {
+  const thm = mod2pi(th);
+  if (thm <= 0.03) return;
+  const r0 = Math.max(0.14, Math.min(0.34, 0.5 * A));
+  const n = Math.max(2, Math.ceil(thm / 0.06));
+  const apts = [];
+  for (let j = 0; j <= n; j++) {
+    const a = thm * j / n;
+    apts.push([r0 * Math.cos(a), r0 * Math.sin(a), 0]);
+  }
+  strokePoly(C, apts, { width: 1.6, color: 'rgba(251,191,36,0.9)' });
+  label3(C, [(r0 + 0.15) * Math.cos(thm/2), (r0 + 0.15) * Math.sin(thm/2), 0], 'θ',
+    { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+}
+
+/* 读数区固定首两行 */
+function readoutHead() {
+  const th = state.theta;
+  const deg = (mod2pi(th) * 180 / Math.PI).toFixed(0);
+  const lap = fmt(th / TAU);
+  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;θ = ωt = <b>' + fmt(th) + '</b> rad</div>' +
+         '<div class="dim">' + t({ zh: '≡ ' + deg + '°（第 ' + lap + ' 圈）', en: '≡ ' + deg + '° (turn ' + lap + ')' }) + '</div>';
+}
+
+/* ================= 主绘制与主循环 ================= */
+function draw() {
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+  const C = makeCam();
+  SCENES[curTab].draw(C);
+}
+
+function resetSim() {
+  state.t = 0;
+  state.theta = 0;
+  samples.length = 0;
+  pushSample();
+}
+
+let lastTs = performance.now(), lastRO = 0;
+function frame(ts) {
+  const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
+  lastTs = ts;
+
+  if (tween) {
+    const k = Math.min(1, (ts - tween.t0) / tween.dur);
+    const e = ease(k);
+    const f = tween.from, o = tween.to;
+    cam.az = f.az + wrapPI(o.az - f.az) * e;
+    cam.el = f.el + (o.el - f.el) * e;
+    cam.dist = f.dist + (o.dist - f.dist) * e;
+    cam.tx = f.tx + (o.tx - f.tx) * e;
+    cam.ty = f.ty + (o.ty - f.ty) * e;
+    cam.tz = f.tz + (o.tz - f.tz) * e;
+    if (k >= 1) tween = null;
+  }
+
+  if (state.running) {
+    state.t += dt;
+    state.theta += state.omega * dt;
+    pushSample();
+  }
+  const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
+  while (samples.length && samples[0].t < state.t - windowSec) samples.shift();
+
+  draw();
+  if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
+  requestAnimationFrame(frame);
+}
+
+const roEl = document.getElementById('readout');
+function updateReadout() { roEl.innerHTML = SCENES[curTab].readout(); }
+
+/* ================= UI 生成（由 ①② 声明驱动） ================= */
+function buildParams() {
+  const host = document.getElementById('paramsHost');
+  PARAMS.forEach(p => {
+    const wrap = document.createElement('div');
+    wrap.className = 'ctl';
+    wrap.innerHTML = '<div class="top"><label></label><span class="val"></span></div>';
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
+    const val = wrap.querySelector('.val');
+    const upd = () => {
+      const raw = parseFloat(input.value);
+      state[p.key] = p.map ? p.map(raw) : raw;
+      val.textContent = p.fmt(raw);
+    };
+    input.addEventListener('input', upd);
+    wrap.appendChild(input);
+    host.appendChild(wrap);
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+function buildToggles() {
+  const host = document.getElementById('togglesHost');
+  Object.keys(SCENES).forEach(id => {
+    const grp = document.createElement('div');
+    grp.className = 'toggles';
+    grp.dataset.tab = id;
+    SCENES[id].toggles.forEach(tg => {
+      if (!(tg.key in state)) state[tg.key] = tg.checked;
+      const lab = document.createElement('label');
+      lab.className = 'tg';
+      lab.innerHTML = '<input type="checkbox" data-key="' + tg.key + '"' + (state[tg.key] ? ' checked' : '') + '>' +
+        '<i class="dot" style="--c:' + tg.color + '"></i><span class="tgl"></span>';
+      const cb = lab.querySelector('input');
+      cb.addEventListener('change', () => {
+        state[tg.key] = cb.checked;
+        document.querySelectorAll('input[data-key="' + tg.key + '"]').forEach(o => { o.checked = cb.checked; });
+      });
+      const relabel = () => { lab.querySelector('.tgl').innerHTML = t(tg.label); };
+      RELABEL.push(relabel);
+      relabel();
+      grp.appendChild(lab);
+    });
+    host.appendChild(grp);
+  });
+}
+
+function buildViews() {
+  const host = document.getElementById('viewsHost');
+  Object.keys(SCENES).forEach(id => {
+    const row = document.createElement('div');
+    row.className = 'views';
+    row.dataset.tab = id;
+    const lab = document.createElement('span');
+    lab.className = 'vlabel';
+    row.appendChild(lab);
+    const labRelabel = () => { lab.textContent = t(UI.views); };
+    RELABEL.push(labRelabel);
+    labRelabel();
+    Object.keys(SCENES[id].views).forEach(name => {
+      const b = document.createElement('button');
+      b.className = 'btn vbtn';
+      b.dataset.view = name;
+      b.addEventListener('click', () => applyView(name));
+      row.appendChild(b);
+      const relabel = () => { b.textContent = t(SCENES[id].views[name].label); };
+      RELABEL.push(relabel);
+      relabel();
+    });
+    host.appendChild(row);
+  });
+}
+
+function buildTabs() {
+  const nav = document.getElementById('tabsNav');
+  Object.keys(SCENES).forEach(id => {
+    const b = document.createElement('button');
+    b.className = 'tab';
+    b.dataset.tab = id;
+    b.addEventListener('click', () => switchTab(id));
+    nav.appendChild(b);
+    const relabel = () => { b.textContent = t(SCENES[id].label); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+/* ================= 视角与页签 ================= */
+function refreshViewButtons() {
+  document.querySelectorAll('.vbtn').forEach(b => {
+    const row = b.closest('.views');
+    b.classList.toggle('active', row.dataset.tab === curTab && b.dataset.view === lastView[curTab]);
+  });
+}
+function viewDist(d) { return (W < 820 || W < H) ? d * 1.4 : d; }
+function applyView(name) {
+  const vw = SCENES[curTab].views[name];
+  if (!vw) return;
+  if (vw.onSelect) vw.onSelect();   /* 可选联动：如自动开启该视角对应的曲线开关 */
+  tween = {
+    from: { az: cam.az, el: cam.el, dist: cam.dist, tx: cam.tx, ty: cam.ty, tz: cam.tz },
+    to:   { az: vw.az, el: vw.el, dist: viewDist(vw.dist), tx: vw.tx || 0, ty: vw.ty || 0, tz: vw.tz || 0 },
+    t0: performance.now(),
+    dur: REDUCED ? 1 : 750
+  };
+  lastView[curTab] = name;
+  refreshViewButtons();
+}
+
+const brandDesc = document.getElementById('brandDesc');
+const tipsEl = document.getElementById('tips');
+function switchTab(id) {
+  if (id === curTab) return;
+  curTab = id;
+  tween = null;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+  document.querySelectorAll('.toggles[data-tab], .views[data-tab]').forEach(el => {
+    el.style.display = el.dataset.tab === id ? '' : 'none';
+  });
+  cam = cams[id];
+  brandDesc.textContent = t(SCENES[id].brand);
+  tipsEl.textContent = t(SCENES[id].tips);
+  refreshViewButtons();
+  updateReadout();
+}
+
+/* ================= 播放 / 重置 / 折叠 ================= */
+const btnPlay = document.getElementById('btnPlay');
+function togglePlay() {
+  state.running = !state.running;
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+}
+btnPlay.addEventListener('click', togglePlay);
+document.getElementById('btnReset').addEventListener('click', resetSim);
+
+const panel = document.getElementById('panel');
+const btnFold = document.getElementById('btnFold');
+btnFold.addEventListener('click', () => {
+  const c = panel.classList.toggle('collapsed');
+  btnFold.textContent = c ? '+' : '−';
+});
+if (window.innerWidth < 760) {
+  panel.classList.add('collapsed');
+  btnFold.textContent = '+';
+}
+
+/* ================= 语言切换 ================= */
+function applyLang() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.title = t(TOOL.title);
+  document.querySelector('.brand h1').textContent = t(TOOL.h1);
+  document.getElementById('panelTitle').textContent = t(UI.panelTitle);
+  document.querySelector('.hint').textContent = t(UI.hint);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+  document.getElementById('btnReset').textContent = t(UI.reset);
+  RELABEL.forEach(f => f());
+  brandDesc.textContent = t(SCENES[curTab].brand);
+  tipsEl.textContent = t(SCENES[curTab].tips);
+  updateReadout();
+}
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('lang', l);
+    history.replaceState(null, '', u);
+  } catch (e) {}
+  applyLang();
+}
+document.getElementById('btnLang').addEventListener('click', () => setLang(LANG === 'zh' ? 'en' : 'zh'));
+document.getElementById('verBadge').textContent = 'v' + VERSION;
+
+/* ================= 交互：旋转 / 平移 / 缩放 ================= */
+const pointers = new Map();
+let pinch = null;
+
+function pan(dx, dy) {
+  const C = makeCam();
+  const s = cam.dist / FOCAL;
+  cam.tx = clamp(cam.tx - C.r[0]*dx*s + C.u[0]*dy*s, -6, 6);
+  cam.ty = clamp(cam.ty - C.r[1]*dx*s + C.u[1]*dy*s, -5, 5);
+  cam.tz = clamp(cam.tz - C.r[2]*dx*s + C.u[2]*dy*s, -3, 11);
+}
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, btn: e.button });
+  tween = null;
+  lastView[curTab] = null;
+  refreshViewButtons();
+  if (pointers.size === 2) {
+    const vs = Array.from(pointers.values());
+    pinch = {
+      gap: Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y),
+      cx: (vs[0].x + vs[1].x) / 2,
+      cy: (vs[0].y + vs[1].y) / 2
+    };
+  }
+  canvas.classList.add('dragging');
+});
+
+canvas.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  p.x = e.clientX;
+  p.y = e.clientY;
+  if (pointers.size === 1) {
+    const panMode = e.shiftKey || (e.buttons & 2) || p.btn === 2 || p.btn === 1;
+    if (panMode) {
+      pan(dx, dy);
+    } else {
+      cam.az -= dx * 0.0055;
+      cam.el = clamp(cam.el + dy * 0.0055, -1.45, 1.53);
+    }
+  } else if (pointers.size === 2 && pinch) {
+    const vs = Array.from(pointers.values());
+    const gap = Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y);
+    const cx = (vs[0].x + vs[1].x) / 2, cy = (vs[0].y + vs[1].y) / 2;
+    if (gap > 1) cam.dist = clamp(cam.dist * pinch.gap / gap, 4.5, 60);
+    pan(cx - pinch.cx, cy - pinch.cy);
+    pinch = { gap: gap, cx: cx, cy: cy };
+  }
+});
+
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+  if (!pointers.size) canvas.classList.remove('dragging');
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  tween = null;
+  cam.dist = clamp(cam.dist * Math.exp(e.deltaY * 0.0012), 4.5, 60);
+}, { passive: false });
+
+canvas.addEventListener('dblclick', () => applyView(Object.keys(SCENES[curTab].views)[0]));
+
+window.addEventListener('keydown', e => {
+  const tg = e.target.tagName;
+  if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || tg === 'BUTTON') return;
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'r' || e.key === 'R') resetSim();
+  else if (e.key === 't' || e.key === 'T') {
+    const keys = Object.keys(SCENES);
+    switchTab(keys[(keys.indexOf(curTab) + 1) % keys.length]);
+  }
+  else if (e.key >= '1' && e.key <= '9') {
+    const names = Object.keys(SCENES[curTab].views);
+    const i = +e.key - 1;
+    if (i < names.length) applyView(names[i]);
+  }
+});
+
+/* ================= 启动 ================= */
+resize();
+buildTabs();
+buildParams();
+buildToggles();
+buildViews();
+Object.keys(SCENES).forEach(id => {
+  const first = Object.keys(SCENES[id].views)[0];
+  const v = SCENES[id].views[first];
+  cams[id] = { az: v.az, el: v.el, dist: viewDist(v.dist), tx: v.tx || 0, ty: v.ty || 0, tz: v.tz || 0 };
+  lastView[id] = first;
+});
+switchTab(Object.keys(SCENES)[0]);
+applyLang();
+resetSim();
+requestAnimationFrame(frame);
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  场景级 UI 扩展：待编码文本输入行                            ║
+   ║  引擎只会从 PARAMS 生成滑杆，因此这一行文本输入完全建在场景层： ║
+   ║  在 #paramsHost 之前插入 DOM、自己接线，引擎代码零改动。       ║
+   ║  放在启动之后是为了 RELABEL / state / resetSim 均已就绪。     ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const TXT = {
+  label:  { zh: '待编码文本', en: 'Text to encode' },
+  ph:     { zh: '在此输入任意文字，编码流程会立即从头重跑', en: 'Type anything — the whole pipeline reruns from the start' },
+  preset: { zh: '示例', en: 'Samples' }
+};
+(function initTextRow(){
+  const host = document.getElementById('paramsHost');
+  host.insertAdjacentHTML('beforebegin',
+    '<div class="txtrow">' +
+      '<div class="top"><label id="txtLabel" for="txtIn"></label><span class="val" id="txtCount"></span></div>' +
+      '<textarea id="txtIn" rows="2" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>' +
+      '<div class="presets" id="txtPresets"><span class="plabel" id="txtPlabel"></span></div>' +
+      '<div class="txtnote" id="txtNote"></div>' +
+    '</div>');
+
+  const ta = document.getElementById('txtIn');
+  const elLabel = document.getElementById('txtLabel');
+  const elCount = document.getElementById('txtCount');
+  const elNote = document.getElementById('txtNote');
+  const elPl = document.getElementById('txtPlabel');
+  const presetHost = document.getElementById('txtPresets');
+  ta.value = TEXT_STATE.raw;
+
+  const btns = PRESETS.map((ps, i) => {
+    const b = document.createElement('button');
+    b.className = 'btn vbtn';
+    b.addEventListener('click', () => { TEXT_STATE.raw = ps.text; ta.value = ps.text; refreshBtns(); });
+    presetHost.appendChild(b);
+    return b;
+  });
+  function refreshBtns(){
+    btns.forEach((b, i) => b.classList.toggle('active', PRESETS[i].text === TEXT_STATE.raw));
+  }
+
+  /* 输入即改写唯一真源；重算与重置交给下面的守望者统一处理 */
+  ta.addEventListener('input', () => { TEXT_STATE.raw = ta.value; refreshBtns(); });
+  /* 输入框获焦时不让按键泄漏到全局快捷键（空格=暂停、数字=视角） */
+  ['keydown', 'keyup', 'keypress'].forEach(ev => ta.addEventListener(ev, e => e.stopPropagation()));
+
+  function relabel(){
+    elLabel.textContent = t(TXT.label);
+    ta.placeholder = t(TXT.ph);
+    elPl.textContent = t(TXT.preset);
+    btns.forEach((b, i) => { b.textContent = t(PRESETS[i].label); });
+    syncTextUI();
+  }
+  function syncTextUI(){
+    const P = PIPE();
+    elCount.textContent = Array.from(TEXT_STATE.raw).length + ' / ' + TEXT_CAP;
+    const n = [];
+    if (P.fallback) n.push(t({ zh: '输入为空，已回退到示例文本。', en: 'Input empty — fell back to the sample text.' }));
+    if (P.truncated) n.push(t({ zh: '超过 ' + TEXT_CAP + ' 字符，只取前 ' + TEXT_CAP + ' 个。',
+                                en: 'Longer than ' + TEXT_CAP + ' chars — only the first ' + TEXT_CAP + ' are used.' }));
+    if (P.capped) n.push(t({ zh: '字符种类 ' + P.distinct + ' > N = ' + P.cap + '，只保留最高频的 ' + P.cap + ' 种（覆盖 ' + (P.coverage * 100).toFixed(1) + '%）。',
+                             en: P.distinct + ' distinct chars > N = ' + P.cap + ' — keeping the ' + P.cap + ' most frequent (' + (P.coverage * 100).toFixed(1) + '% coverage).' }));
+    if (P.m === 1) n.push(t({ zh: '只有一种字符：按约定给 1 bit 码字「0」。', en: 'Only one distinct char: by convention it gets the 1-bit codeword "0".' }));
+    elNote.textContent = n.join(' ');
+  }
+
+  /* 守望者：文本或 N 一变 → 重算流水线 + 清空历史从头重跑（有意的重置） */
+  let seen = null;
+  function watch(){
+    const k = pipeKey();
+    if (k !== seen) {
+      seen = k;
+      PIPE();
+      resetSim();
+      syncTextUI();
+      /* 刷新滑杆读数（「选中字符」的显示依赖新码表） */
+      document.querySelectorAll('#paramsHost input[type=range]').forEach(r => r.dispatchEvent(new Event('input')));
+      updateReadout();
+    }
+    requestAnimationFrame(watch);
+  }
+  RELABEL.push(relabel);
+  relabel();
+  refreshBtns();
+  requestAnimationFrame(watch);
+})();
+</script>
+</body>
+</html>
