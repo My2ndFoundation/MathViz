@@ -18,24 +18,37 @@
 
 改用**运行时探针**：驱动每个工具的 `draw()`，把每个滑块推到量程两端，对比画布像素哈希；再让引擎时钟前进 0.5 秒，对比画面是否变化。方法先在 `weierstrass-essence-3d` 上做真值校验，结论与用户独立观察逐字吻合（`chord` 只有 `xAng` 有效且静止 / `rational` 只有 `tSlope` 有效且静止 / `subst` 有动画）。
 
-样本 27 个工具 / 97 个页签：
+全量扫描 49 个工具 / 184 个页签（`outputs/` 共 51 个，2 个未能探测，见下）：
 
 | 指标 | 实测 |
 |---|---|
-| 滑块展示总次数 | 642 |
-| **其中对当前页签完全无效** | **333（51%）** |
-| 一个滑块都不起作用的页签 | 9（9%） |
-| **无时间驱动（静止）的页签** | **34（35%）** |
+| 滑块展示总次数 | 1240 |
+| **其中对当前页签完全无效** | **638（51%）** |
+| 一个滑块都不起作用的页签 | 11（5%） |
+| **无时间驱动（静止）的页签** | **72（39%）** |
+| 全部页签都静止的工具 | 4 |
 
-最严重的样本：
+最严重的十个页签：
 
 ```
-complex-mult-3d   demoivre   16 个滑块 → 有效 0
-i-essence-3d      matrix     12 个滑块 → 有效 0   静止
-cartesian-polar   jac         7 个滑块 → 有效 0
-gaussian-essence  clt         9 个滑块 → 有效 1   静止
-weierstrass       chord       3 个滑块 → 有效 1   静止
+complex-mult-3d      demoivre   16 个滑块 → 有效  0
+complex-mult-3d      roots      16 → 3   静止
+complex-mult-3d      loci       16 → 4
+i-essence-3d         matrix     12 → 0   静止
+complex-mult-3d      helix      16 → 5
+i-essence-3d         cubic      12 → 1
+i-essence-3d         turn       12 → 2
+i-essence-3d         roots      12 → 2   静止
+i-essence-3d         conj       12 → 3   静止
+gaussian-essence-3d  clt         9 → 1   静止
 ```
+
+**全部页签都静止的 4 个工具**（阶段 3 的最高优先级）：
+`combinatorics-generating-functions-3d`、`least-squares-orthogonal-projection-3d`、`limit-essence-3d`、`sequences-series-essence-3d`。这四个目前完全是静态插图，录制功能对它们毫无意义。
+
+**2 个未能探测的工具**，迁移时需人工处理：
+- `trig-essence-3d-new` —— 非声明式遗留实现（`engine-version: pre-declarative`），无 `SCENES`，本设计不适用。
+- `huffman-coding-text-3d` —— 探针在 `switchTab` 处抛 `dataset` 空指针，说明其页签结构与引擎约定不同，需单独排查。
 
 ## 根因
 
@@ -292,7 +305,10 @@ starter 的 SCENES 注释块同步更新，把 `params` / `drive` 写进"必填�
 用审计工具生成初稿，人工复核后按批提交。每个工具是 patch 版本号 + changelog 一行。风险低，改动机械。
 
 **阶段 3 —— `drive` 逐个补全**
-约 34 个静止页签，每个都要人工判断"什么量应该随时间走、值域多少、circular 还是 linear"。这是真正的工作量，也是最需要数学判断的部分，不能批量生成。按工具分批，每批一个 PR。
+
+**72 个静止页签**，每个都要人工判断"什么量应该随时间走、值域多少、circular 还是 linear"。这是真正的工作量，也是最需要数学判断的部分，不能批量生成。按工具分批，每批一个 PR。
+
+优先级建议：先做那 4 个全静止的工具（`combinatorics-generating-functions-3d` / `least-squares-orthogonal-projection-3d` / `limit-essence-3d` / `sequences-series-essence-3d`），它们目前完全没有动画，收益最直接；再按静止页签数从多到少推进。
 
 ## H. 验收
 
