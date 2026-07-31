@@ -328,7 +328,7 @@ tips：**一段话只讲一个顿悟点**，并指向具体操作（某视角 / 
 3. 在 `SCENES` 注册场景：`label`（页签名）、`brand`、`tips`、`views`（首项 iso）、`toggles`（曲线开关按启用顺序取色）、`params`（本页签真正读取的滑块 key 数组）、`drive`（时间驱动声明，无则显式 `null`）、`draw(C)`、`readout()`；
 4. 按需扩展 `pushSample` 的采样字段（原则：记录当时真实值）；
 5. 用引擎部件拼场景：`drawAxes / drawGridXY / drawTimeGrid / drawPeriodBracket / drawCircle / drawAngleArc / strokePoly / line3 / glowDot / label3`；
-6. 自查清单：□ 曲线六处同源 □ 有顿悟视角 □ tips 只讲一件事 □ 暂停时相机仍可动 □ 参数中途可调且历史不重算 □ 移动端折叠正常 □ 每个场景声明 params，且与该场景实际读取的 state 键一致（含经模块级辅助函数间接读取的） □ 每个场景声明 drive，或显式 drive: null 并注释理由（静态对照场景合法，但须是有意识的选择） □ 被 drive 驱动的参数若带 map，必须同时提供 invMap（否则滑块无法回显驱动值） □ drive 的 [from, to] 必须落在该参数映射后的 [min, max] 之内（越界会被滑杆钳住，下一次 upd() 又把钳过的值写回 state） □ 引擎的行为查询不只认样式类：querySelectorAll 限定结构容器（如 .views .vbtn）或改用 data-* 属性 □ `node --check` 通过 □ 双语：全部文案为 `{zh,en}` 对象并经 `t()`；`?lang=en` 直达、切换按钮、记忆、`<html lang>`/`document.title` 跟随均正常（§9）□ 版本：meta 两枚 + 头注释 changelog + 面板角标齐备；已登记 `tools.json` 并同步 `index.html` 内嵌 TOOLS 与 README 工具表（§10）
+6. 自查清单：□ 曲线六处同源 □ 有顿悟视角 □ tips 只讲一件事 □ 暂停时相机仍可动 □ 参数中途可调且历史不重算 □ 移动端折叠正常 □ 每个场景声明 params，且与该场景实际读取的 state 键一致（含经模块级辅助函数间接读取的） □ 没有静止页签：每个页签要么由引擎时钟驱动、要么声明 drive，要么显式写 drive: null 并注释理由（静态对照场景合法，但须是有意识的选择） □ 被 drive 驱动的参数若带 map，必须同时提供 invMap（否则滑块无法回显驱动值） □ drive 的 [from, to] 必须落在该参数映射后的 [min, max] 之内（越界会被滑杆钳住，下一次 upd() 又把钳过的值写回 state） □ 引擎的行为查询不只认样式类：querySelectorAll 限定结构容器（如 .views .vbtn）或改用 data-* 属性 □ `node --check` 通过 □ 双语：全部文案为 `{zh,en}` 对象并经 `t()`；`?lang=en` 直达、切换按钮、记忆、`<html lang>`/`document.title` 跟随均正常（§9）□ 版本：meta 两枚 + 头注释 changelog + 面板角标齐备；已登记 `tools.json` 并同步 `index.html` 内嵌 TOOLS 与 README 工具表（§10）
 
 ### 给 Claude Code 的任务简报模板
 

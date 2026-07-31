@@ -1,0 +1,283 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""把「场景时间驱动」引擎从 starter 逐字移植进 outputs/*.html。
+
+真源是 design-system/math-viz-starter.html —— 本脚本不内联任何引擎代码，
+所有片段都在运行时从 starter 里按标记切出来，避免手抄产生第 52 份变体。
+
+设计要点：
+  * 幂等：每处改动都有一个 probe 字符串，已存在就跳过；重复运行零改动。
+  * 失败要响：锚点命中数 != 1 就报错并整文件跳过（不做部分写入、不模糊匹配）。
+  * cartesian-polar-coordinate-3d 用 paramRefs / ref.cfg 而非 paramWraps / e.p，
+    脚本按该文件的实际登记表改写 syncParamSlider，不并列引入第二套登记表。
+
+用法：
+    python3 scripts/port_drive_engine.py            # 落地
+    python3 scripts/port_drive_engine.py --check    # 只检查，未落地则 exit 1
+"""
+
+import os
+import re
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STARTER = os.path.join(ROOT, 'design-system', 'math-viz-starter.html')
+OUTPUTS = os.path.join(ROOT, 'outputs')
+
+# engine-version: pre-declarative，没有 SCENES，不在本次移植范围内
+EXCLUDE = {'trig-essence-3d-new.html'}
+
+
+# ---------------------------------------------------------------- starter 抽取
+
+def _lines(path):
+    with open(path, encoding='utf-8') as fh:
+        return fh.read().split('\n')
+
+
+def _one(lines, pred, what):
+    hits = [i for i, l in enumerate(lines) if pred(l)]
+    if len(hits) != 1:
+        raise SystemExit('starter 抽取失败：%s 命中 %d 次' % (what, len(hits)))
+    return hits[0]
+
+
+def _slice_until_blank(lines, start):
+    end = start
+    while end < len(lines) and lines[end].strip() != '':
+        end += 1
+    return lines[start:end]
+
+
+def _slice_until_prefix(lines, start, stop_prefix):
+    end = start
+    while end < len(lines) and not lines[end].startswith(stop_prefix):
+        end += 1
+    while end > start and lines[end - 1].strip() == '':
+        end -= 1
+    return lines[start:end]
+
+
+def extract_starter():
+    L = _lines(STARTER)
+    g = {}
+
+    # ① CSS：.drive / .dmode 规则
+    i = _one(L, lambda l: l == '/* 驱动控制行 */', 'CSS 驱动控制行')
+    g['css'] = _slice_until_blank(L, i)
+
+    # ② DOM 容器
+    i = _one(L, lambda l: 'id="driveHost"' in l, '#driveHost 容器')
+    g['dom'] = [L[i]]
+
+    # ③ UI 字典的三条双语文案
+    i = _one(L, lambda l: l.startswith('  autoPlay: {'), 'UI.autoPlay')
+    g['ui'] = L[i:i + 3]
+    assert g['ui'][1].startswith('  pingpong:') and g['ui'][2].startswith('  loop:'), g['ui']
+
+    # ④ 四张按页签的表
+    i = _one(L, lambda l: l.startswith('const autoPlay = {};'), 'autoPlay 表')
+    g['tables'] = L[i:i + 4]
+    assert g['tables'][3].startswith('const driveOffAt = {};'), g['tables']
+
+    # ⑤ 引擎函数：driveClock → syncParamSlider，跳过 syncParamVisibility（工具里已有），
+    #    再接 setAutoPlayFor → buildDrive
+    i = _one(L, lambda l: l.startswith('/* 驱动时钟：引擎时钟减去'), 'driveClock 注释')
+    part1 = _slice_until_prefix(L, i, '/* 按当前页签的 params 显隐滑块。')
+    i = _one(L, lambda l: l.startswith('/* 开关自动播放的唯一入口'), 'setAutoPlayFor 注释')
+    part2 = _slice_until_prefix(L, i, '/* ================= UI 生成')
+    g['funcs'] = (['/* ================= 场景时间驱动（引擎区） ================= */']
+                  + part1 + [''] + part2)
+
+    # ⑥ frame() 里的驱动求值与滑块同步
+    i = _one(L, lambda l: l == '    applyDrive();', 'frame 内 applyDrive')
+    g['frame'] = L[i:i + 3]
+    assert 'syncParamSlider(dv.key)' in g['frame'][2], g['frame']
+
+    # ⑦ resetSim() 里对 driveOff / driveOffAt 的归零
+    i = _one(L, lambda l: l.startswith('  /* 驱动时钟的偏移一并归零'), 'resetSim 归零注释')
+    g['reset'] = L[i:i + 3]
+    assert 'Object.keys(driveOff)' in g['reset'][2], g['reset']
+
+    # ⑧ buildParams() 里「拖动被驱动滑块则关闭自动播放」的监听
+    i = _one(L, lambda l: l.startswith('    /* 用户伸手拖被驱动的滑块'), 'buildParams 接管监听')
+    end = i
+    while L[end] != '    });':
+        end += 1
+    g['takeover'] = L[i:end + 1]
+
+    return g
+
+
+# ---------------------------------------------------------------- 单文件移植
+
+class Miss(Exception):
+    pass
+
+
+def _idx(lines, pred, what):
+    hits = [i for i, l in enumerate(lines) if pred(l)]
+    if len(hits) != 1:
+        raise Miss('%s：锚点命中 %d 次（期望 1）' % (what, len(hits)))
+    return hits[0]
+
+
+def port(lines, g):
+    """返回 (新行列表, 已应用的改动名列表)。锚点缺失抛 Miss。"""
+    lines = list(lines)
+    done = []
+
+    def already(probe):
+        return any(probe in l for l in lines)
+
+    def insert_before(anchor_pred, what, payload):
+        i = _idx(lines, anchor_pred, what)
+        lines[i:i] = payload
+
+    def insert_after(anchor_pred, what, payload):
+        i = _idx(lines, anchor_pred, what)
+        lines[i + 1:i + 1] = payload
+
+    # 该文件用哪张滑块登记表
+    if any(l.startswith('const paramWraps = {};') for l in lines):
+        reg, cfg = 'paramWraps', 'p'
+        reg_decl = lambda l: l.startswith('const paramWraps = {};')
+        reg_line = lambda l: l == '    paramWraps[p.key] = { wrap, input, val, p };'
+    elif any(l.startswith('const paramRefs = {};') for l in lines):
+        reg, cfg = 'paramRefs', 'cfg'
+        reg_decl = lambda l: l.startswith('const paramRefs = {};')
+        reg_line = lambda l: l == '    paramRefs[p.key] = ref;'
+    else:
+        raise Miss('既没有 paramWraps 也没有 paramRefs 登记表')
+
+    # ① CSS
+    if not already('.drive .dmode .btn{'):
+        insert_before(lambda l: l == '/* 读数与提示 */', 'CSS 读数与提示',
+                      g['css'] + [''])
+        done.append('css')
+
+    # ② DOM 容器（放在播放/重置行之后、togglesHost 之前，与 starter 同序）
+    if not already('id="driveHost"'):
+        insert_before(lambda l: l == '    <div id="togglesHost"></div>',
+                      'DOM togglesHost', g['dom'])
+        done.append('dom')
+
+    # ③ UI 三条双语文案
+    if not already('  autoPlay: {'):
+        insert_after(lambda l: l == "  views:  { zh: '视角', en: 'View' },",
+                     'UI.views', g['ui'])
+        done.append('ui')
+
+    # ④ 四张按页签的表
+    if not already('const driveOffAt = {};'):
+        insert_after(reg_decl, '%s 声明' % reg, g['tables'])
+        done.append('tables')
+
+    # ⑤ 引擎函数
+    if not already('function buildDrive() {'):
+        funcs = g['funcs']
+        if reg != 'paramWraps':
+            funcs = [l.replace('const e = paramWraps[key];', 'const e = %s[key];' % reg)
+                      .replace('e.p.', 'e.%s.' % cfg) for l in funcs]
+        insert_before(lambda l: l == 'function switchTab(id) {', 'switchTab 定义',
+                      funcs + [''])
+        done.append('funcs')
+
+    # ⑥ frame()：在 if (state.running) 块内的 pushSample() 之前求值并同步滑块
+    if not already('syncParamSlider(dv.key)'):
+        starts = [i for i, l in enumerate(lines) if l == '  if (state.running) {']
+        cands = []
+        for s in starts:
+            e = s
+            while e < len(lines) and lines[e] != '  }':
+                e += 1
+            body = lines[s:e]
+            if '    pushSample();' in body:
+                cands.append(s + body.index('    pushSample();'))
+        if len(cands) != 1:
+            raise Miss('frame() 内含 pushSample() 的 state.running 块命中 %d 次' % len(cands))
+        lines[cands[0]:cands[0]] = g['frame']
+        done.append('frame')
+
+    # ⑦ switchTab()：驱动控制行随页签显隐
+    old = "  document.querySelectorAll('.toggles[data-tab], .views[data-tab]').forEach(el => {"
+    new = "  document.querySelectorAll('.toggles[data-tab], .views[data-tab], .drive[data-tab]').forEach(el => {"
+    if not already('.drive[data-tab]'):
+        i = _idx(lines, lambda l: l == old, 'switchTab 显隐选择器')
+        lines[i] = new
+        done.append('switchtab')
+
+    # ⑧ resetSim()：驱动时钟偏移归零
+    if not already('Object.keys(driveOff).forEach'):
+        s = _idx(lines, lambda l: l == 'function resetSim() {', 'resetSim 定义')
+        e = s
+        while e < len(lines) and lines[e] != '}':
+            e += 1
+        body = lines[s:e]
+        if body.count('  samples.length = 0;') != 1:
+            raise Miss('resetSim() 内 samples.length = 0 命中 %d 次'
+                       % body.count('  samples.length = 0;'))
+        at = s + body.index('  samples.length = 0;')
+        lines[at:at] = g['reset']
+        done.append('reset')
+
+    # ⑨ buildParams()：拖动被驱动的滑块即接管
+    if not already('autoPlay[curTab]) setAutoPlay(false)'):
+        insert_after(reg_line, '%s[p.key] 登记' % reg, g['takeover'])
+        done.append('takeover')
+
+    # ⑩ 启动序列
+    if 'buildDrive();' not in lines:
+        insert_after(lambda l: l == 'buildParams();', '启动序列 buildParams()',
+                     ['buildDrive();'])
+        done.append('startup')
+
+    return lines, done
+
+
+def main():
+    check = '--check' in sys.argv
+    g = extract_starter()
+
+    files = sorted(f for f in os.listdir(OUTPUTS)
+                   if f.endswith('.html') and f not in EXCLUDE)
+    changed, skipped, untouched = [], [], []
+
+    for name in files:
+        path = os.path.join(OUTPUTS, name)
+        with open(path, encoding='utf-8') as fh:
+            src = fh.read()
+        try:
+            new_lines, done = port(src.split('\n'), g)
+        except Miss as err:
+            skipped.append((name, str(err)))
+            continue
+        out = '\n'.join(new_lines)
+        if out == src:
+            untouched.append(name)
+        elif check:
+            changed.append((name, done))
+        else:
+            with open(path, 'w', encoding='utf-8') as fh:
+                fh.write(out)
+            changed.append((name, done))
+
+    for name, done in changed:
+        print('%-8s %-52s %s' % ('CHECK' if check else 'PORT', name, ','.join(done)))
+    for name in untouched:
+        print('%-8s %s' % ('OK', name))
+    for name, err in skipped:
+        print('SKIP     %-52s %s' % (name, err))
+
+    print('\n合计 %d 个文件：改动 %d · 已就位 %d · 跳过 %d'
+          % (len(files), len(changed), len(untouched), len(skipped)))
+    if skipped:
+        print('跳过清单：' + ', '.join(n for n, _ in skipped))
+    if check and (changed or skipped):
+        sys.exit(1)
+    if skipped:
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
