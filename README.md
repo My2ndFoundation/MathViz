@@ -61,6 +61,7 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [Markov 链与稳定分布 · Markov Chains & Stationary Distributions](outputs/markov-chains-stationary-distribution-3d.html) | A transition matrix redistributing probability mass until nothing moves: πP = π as the eigenvalue-1 eigenvector, simplex trajectories converging, and ergodic vs periodic vs absorbing fates |
 | [组合计数与生成函数 · Combinatorics & Generating Functions](outputs/combinatorics-generating-functions-3d.html) | Sequences encoded as polynomial coefficients: the counting rules behind ×, sliding-strip convolution as coefficient multiplication, and Fibonacci folding into F(x) = x/(1−x−x²) |
 | [向量场、散度与旋度 · Vector Fields, Divergence & Curl](outputs/vector-fields-divergence-curl-3d.html) | An arrow at every position, measured by two local instruments: a tracer ring inflating by e^(div·τ), a paddle wheel spinning at curl/2 with its right-hand-rule vector, and gradient fields born curl-free from a scalar surface |
+| [SVD、PCA 与降维 · SVD, PCA & Dimensionality Reduction](outputs/svd-pca-dimensionality-reduction-3d.html) | Every linear map as rotate → stretch → rotate: the unit circle riding the UΣVᵀ pipeline, rank collapsing as σ₂→0, PCA finding the widest direction, and reduction discarding exactly the dimension you cannot see |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
