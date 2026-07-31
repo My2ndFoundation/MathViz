@@ -146,12 +146,24 @@ function driveValue(d, t) {
 
 在 `frame()` 里，`state.t` 推进之后、`draw()` 之前：
 
+求值本身封装成**工具顶层函数** `applyDrive()`，只写 `state`、不碰 DOM：
+
 ```js
-const sc = SCENES[curTab];
-if (sc.drive && autoPlay[curTab]) {
+/* 把当前场景的驱动量按引擎时钟求值写回 state。只动数据，不动 UI ——
+   录制器的离线渲染也要调它（见 §D），那条路径上没有面板可同步。 */
+function applyDrive() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return;
   state[sc.drive.key] = driveValue(sc.drive, state.t);
-  syncParamSlider(sc.drive.key);      // 滑块位置与读数跟随，用户看得见"谁在动"
 }
+```
+
+`frame()` 里在 `state.t` 推进之后、`draw()` 之前调用，并额外同步滑块 UI：
+
+```js
+applyDrive();
+const d = SCENES[curTab].drive;
+if (d && autoPlay[curTab]) syncParamSlider(d.key);   // 滑块位置与读数跟随，用户看得见"谁在动"
 ```
 
 `syncParamSlider` 复用 `buildParams()` 已经建好的 DOM 记账（`paramWraps` 同时存 `.ctl` 容器、`input` 元素与该参数的 `fmt`），把驱动出的值反算回滑块的原始刻度并回显：
@@ -188,12 +200,60 @@ function syncParamSlider(key) {
 
 **这条是本次修复优先级被提高的原因**：目前 35% 的页签录出来是一张静止图，刚上线的录制功能在这些页签上等于废的。修复后它们自动获得可录制的动画。
 
-一处必须同步改动：录制器的**无缝循环**目前把时长吸附到 `2π / |ω|` 的整数倍（`REC.Source.snapDuration`）。当前场景存在 `drive` 时，真正的循环周期是 `drive.period`，不是 `2π/ω`。吸附基准必须改为：
+录制的两种驱动必须**原样沿用用户在面板上设定的驱动状态**——自动播放开关与 `loop`/`pingpong` 模式选择，都以录制开始那一刻的当前页签设定为准，录制器不引入任何自己的默认值。
+
+### D1. 离线定长渲染必须显式调用 `applyDrive()`
+
+**这是最容易漏掉、且漏掉就前功尽弃的一处。** `REC.Source.offline` 不走工具的 `frame()`，它自己手动推进时钟再直接绘制：
+
+```js
+h.state.t += dt;
+h.state.theta += h.state.omega * dt;
+if (h.pushSample) h.pushSample();
+h.draw();                       // ← 中间没有任何驱动求值
+```
+
+若驱动求值只写在 `frame()` 里，离线录制就会整段绕过它，被驱动的参数一帧不动——修完 `drive` 之后录出来**仍然是静止图**。
+
+因此：
+
+1. 工具顶层导出 `applyDrive()`（§B 已定义，只写 `state` 不碰 DOM）。
+2. `REC.Bridge` 的 handle 增加 `applyDrive` 字段，取法与现有字段一致（`contentWindow.eval`），取不到时为 `null`。
+3. `REC.Source.offline` 的每帧步进改为：
+
+```js
+h.state.t += dt;
+h.state.theta += omega * dt;
+if (h.applyDrive) h.applyDrive();      // ← 新增：沿用当前页签的驱动设定
+if (h.pushSample) h.pushSample();
+h.draw();
+```
+
+`applyDrive()` 内部自己检查 `autoPlay[curTab]`，所以**用户关掉自动播放时，录制自然录下定格的手动值**——这正是"沿用用户设定"的正确含义，不需要录制器再做判断。同理 `loop`/`pingpong` 的选择也从同一份 per-tab 状态读取，自动继承。
+
+**实时录制不需要改**：它被动跟随工具自己的 rAF，`frame()` 正常执行，驱动照常生效。
+
+**向后兼容**：未声明 `drive` 的工具没有 `applyDrive`，`h.applyDrive` 为 `null`，跳过即可。
+
+### D2. 无缝循环的吸附基准
+
+录制器的**无缝循环**目前把时长吸附到 `2π / |ω|` 的整数倍（`REC.Source.snapDuration`）。当前场景存在 `drive` 且自动播放开着时，真正的循环周期是 `drive.period`，不是 `2π/ω`。吸附基准必须改为：
 
 - 场景有 `drive` 且自动播放开着 → 吸附到 `drive.period` 的整数倍
-- 否则 → 维持现有的 `2π / |ω|`
+- 否则（无 `drive`，或用户关掉了自动播放）→ 维持现有的 `2π / |ω|`
 
 `period` 定义为"完整一轮"（loop 绕一圈 / pingpong 往返一次），所以两种模式下吸附规则一致，不需要分支。
+
+判定所需的信息（当前场景是否有 `drive`、其 `period`、自动播放是否开着）同样经 `REC.Bridge` 取得；为此 handle 再增加一个 `driveInfo()` 字段，由工具顶层导出：
+
+```js
+/* 供录制器判断无缝循环的吸附基准；无驱动或未启用时返回 null */
+function driveInfo() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return null;
+  return { key: sc.drive.key, period: sc.drive.period, mode: driveMode[curTab] };
+}
+```
 
 ## E. 开发规范
 
@@ -223,7 +283,10 @@ starter 的 SCENES 注释块同步更新，把 `params` / `drive` 写进"必填�
 分三阶段，每阶段独立可合并：
 
 **阶段 1 —— 引擎与规范**（不改任何工具）
-设计文档 → starter 引擎实现 `params` / `drive` / 交互 → §8 清单 → 审计工具 → 录制器 `snapDuration` 适配。验收：starter 自身演示 `params` 与两种 `drive` 模式；49 个工具行为零变化。
+
+设计文档 → starter 引擎实现 `params` / `drive` / `applyDrive` / `driveInfo` / 交互 → §8 清单 → 审计工具 → **录制器适配**（`app.html`：`REC.Bridge` handle 增加 `applyDrive` 与 `driveInfo`，`REC.Source.offline` 每帧调用 `applyDrive`，`snapDuration` 改吸附基准）。
+
+注意阶段 1 横跨两个文件族：`design-system/` 与 `app.html`。录制器那半边的改动**必须与引擎同批落地**——否则 starter 里做好了 `drive`，用离线录制却依然录出静止图。验收：starter 自身演示 `params` 与两种 `drive` 模式并能正确录制；49 个工具行为零变化。
 
 **阶段 2 —— `params` 批量迁移**
 用审计工具生成初稿，人工复核后按批提交。每个工具是 patch 版本号 + changelog 一行。风险低，改动机械。
@@ -246,7 +309,15 @@ awk '/<script>/{f=1;next}/<\/script>/{f=0}f' FILE.html | node --check /dev/stdin
 - 拖动被驱动滑块后自动播放关闭，松手不被覆盖
 - 每个页签独立记住自己的自动播放与模式选择
 - 暂停时驱动停止，恢复后不跳变
-- 录制一段带 `drive` 的场景，无缝循环时长吸附到 `drive.period` 的整数倍
 - 未声明 `params` / `drive` 的场景行为与改动前完全一致（向后兼容）
+
+录制器沿用驱动设定（§D），必须**逐条实录验证**，不接受"看代码应该没问题"：
+
+- 带 `drive` 的场景用**离线定长**录一段 → 导出的视频里被驱动的参数确实在动。这是 §D1 的核心证据，漏掉 `applyDrive()` 时此项必然失败而其余项可能全过。
+- 同一场景分别用 `loop` 与 `pingpong` 各录一段 → 两段视频内容不同（证明模式被继承，而非用了某个固定默认）
+- **关掉自动播放**后录一段 → 视频是定格画面（证明"沿用用户设定"包含"用户选择不动"这一情形）
+- 开着自动播放、勾选无缝循环 → 录制时长吸附到 `drive.period` 的整数倍；关掉自动播放后同样操作 → 吸附回 `2π / |ω|`
+- **实时录制**同一场景 → 驱动照常生效（走 `frame()`，不需要额外改动，但要验证没有被 §D1 的改动破坏）
+- 未声明 `drive` 的旧工具录制行为与改动前完全一致（`h.applyDrive` 为 null 的跳过路径）
 
 阶段 2 / 3 每个工具：审计工具显示"展示滑块数 = 有效滑块数"，且无静止页签（除非显式 `drive: null`）。
