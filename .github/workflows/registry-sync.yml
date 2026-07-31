@@ -1,0 +1,31 @@
+name: registry sync
+
+# 兜底：即使有人没执行 `git config core.hooksPath .githooks`，
+# 注册表镜像不同步也进不了 main。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tools.json 是合法 JSON
+        run: python3 -c "import json; json.load(open('tools.json')); print('tools.json OK')"
+
+      - name: 注册表镜像与 tools.json 同步
+        run: python3 scripts/sync_registry.py --check
+
+      - name: 内联脚本语法门（app.html / index.html / 全部工具）
+        run: |
+          fail=0
+          for f in app.html index.html outputs/*.html; do
+            if ! awk '/<script>/{f=1;next}/<\/script>/{f=0}f' "$f" | node --check /dev/stdin 2>/dev/null; then
+              echo "::error file=$f::内联脚本语法检查未通过"
+              fail=1
+            fi
+          done
+          exit $fail
