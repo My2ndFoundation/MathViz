@@ -10,8 +10,26 @@ A collection of **single-file, zero-dependency HTML math/physics visualization t
 - `design-system/math-viz-starter.html` — the canonical starting template. Contains all design tokens + the full engine + a declarative config layer. **Copy this to make a new tool.**
 - `outputs/*.html` — finished tools built on the engine.
 - `tools.json` — the registry of record for every published tool (id, bilingual copy, semver `version`, `engine`, `changelog`); `index.html` embeds a mirrored `TOOLS` array, and both are updated together whenever a tool is published or upgraded.
-- `app.html` — the navigation shell: a collapsible sidebar plus a main content area that loads a tool in an **iframe** (iframe, not injection: every tool is a whole page with its own top-level `state`/`cam`, full-screen canvas and keyboard shortcuts, so two of them in one document would collide). It reads `tools.json` at runtime when served, and falls back to its own embedded minimal list (id / file / cat / accent / title / kicker) when opened from `file://` — **keep that fallback list in sync when publishing a tool**, or the tool goes missing from the offline sidebar only. Tools themselves are never modified and stay independently openable.
+- `app.html` — the navigation shell: a collapsible sidebar plus a main content area that loads a tool in an **iframe** (iframe, not injection: every tool is a whole page with its own top-level `state`/`cam`, full-screen canvas and keyboard shortcuts, so two of them in one document would collide). It reads `tools.json` at runtime when served, and falls back to its own embedded minimal list (id / file / cat / accent / title / kicker) when opened from `file://`. That fallback list is **generated, not hand-maintained** — see below. Tools themselves are never modified and stay independently openable.
 - `archive/` — retired tools that are no longer registered or linked from the landing page (e.g. `trig-essence-3d.html`, the original hand-written tool the design system was extracted from).
+- `scripts/sync_registry.py` — propagates `tools.json` into its mirrors (see below).
+
+## Registry sync is automated
+
+`tools.json` is the single source of truth; `scripts/sync_registry.py` propagates it:
+
+- **`app.html`** is rewritten automatically between the `/* >>> GENERATED:TOOLS */` … `/* <<< GENERATED:TOOLS */` markers. Never edit that block by hand.
+- **`index.html`** is only *checked* (id / file / cat / accent against `tools.json`), because its `TOOLS` entries carry hand-written `desc`/`tag` copy that a generator shouldn't invent. If the check fails, write the entry yourself.
+
+Three layers keep it honest, so "remember to mirror it" is never a step:
+
+```bash
+python3 scripts/sync_registry.py          # rewrite app.html, report index.html gaps
+python3 scripts/sync_registry.py --check  # verify only; exit 1 if out of sync
+```
+
+- `.githooks/pre-commit` runs it on any commit touching `tools.json` / `app.html` / `index.html`, re-stages a regenerated `app.html`, and blocks the commit if `index.html` still lags. Enable once per clone: `git config core.hooksPath .githooks` (bypass with `--no-verify`).
+- `.github/workflows/registry-sync.yml` re-runs `--check` on every push and PR, plus the `node --check` syntax gate over `app.html`, `index.html` and every tool — so a clone without the hook configured still can't merge drift.
 
 ## Commands
 
