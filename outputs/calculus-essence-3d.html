@@ -226,28 +226,6 @@ const PARAMS = [
     fmt: v => t({ zh: ['√x 喇叭', '正弦鼓'][Math.round(v)], en: ['√x horn', 'sine drum'][Math.round(v)] }) }
 ];
 
-/* 每个滑杆归属的页签（未列出者在所有页签显示）——用于按页签隐藏无关滑杆。
-   这是场景级 UI 辅助（不改引擎函数）：一个独立的 rAF 轮询在页签切换时更新 .ctl 行的显隐，
-   与 PARAMS 顺序一一对应（paramsHost 的第 i 个子节点即 PARAMS[i]）。 */
-const PARAM_TABS = {
-  fam: ['rev']
-};
-let _paramSyncTab = null;
-function syncParamRows() {
-  if (curTab === _paramSyncTab) return;
-  const host = document.getElementById('paramsHost');
-  if (!host || host.children.length < PARAMS.length) return;
-  _paramSyncTab = curTab;
-  PARAMS.forEach((p, i) => {
-    const row = host.children[i];
-    if (!row) return;
-    const tabs = PARAM_TABS[p.key];
-    row.style.display = (!tabs || tabs.indexOf(curTab) !== -1) ? '' : 'none';
-  });
-}
-/* 首帧后启动（此时引擎已完成同步初始化，curTab 已就绪，避免 TDZ） */
-requestAnimationFrame(function _paramSyncLoop() { syncParamRows(); requestAnimationFrame(_paramSyncLoop); });
-
 /* ╔══════════════════════════════════════════════════════════╗
    ║  ② 场景注册 —— 每个键就是一个页签                           ║
    ║  必填：label / brand / tips / views(首项即"立体"，双击回正)  ║
@@ -707,6 +685,7 @@ const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
 const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
 const samples = [];
 let curTab = null;
+const paramWraps = {};   // key -> { wrap, input, val, p }
 const RELABEL = [];
 const cams = {};
 let cam = null;
@@ -1117,6 +1096,7 @@ function buildParams() {
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
+    paramWraps[p.key] = { wrap, input, val, p };
     const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
     RELABEL.push(relabel);
     relabel();
@@ -1213,6 +1193,15 @@ function applyView(name) {
 
 const brandDesc = document.getElementById('brandDesc');
 const tipsEl = document.getElementById('tips');
+/* 按当前页签的 params 显隐滑块。省略 params = 全部显示（向后兼容）。
+   不复制 DOM：滑块值是跨页签共享的 state，复制会引入多份 DOM 的同步问题。 */
+function syncParamVisibility() {
+  const list = SCENES[curTab] && SCENES[curTab].params;
+  Object.keys(paramWraps).forEach(k => {
+    paramWraps[k].wrap.style.display = (!list || list.indexOf(k) >= 0) ? '' : 'none';
+  });
+}
+
 function switchTab(id) {
   if (id === curTab) return;
   curTab = id;
@@ -1224,6 +1213,7 @@ function switchTab(id) {
   cam = cams[id];
   brandDesc.textContent = t(SCENES[id].brand);
   tipsEl.textContent = t(SCENES[id].tips);
+  syncParamVisibility();
   refreshViewButtons();
   updateReadout();
 }
