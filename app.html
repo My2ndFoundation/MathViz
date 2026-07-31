@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="数学可视化 · 工具导航框架 —— 侧边栏索引 + 主内容区，工具本身仍是可单独打开的单文件页面。">
+<meta name="shell-version" content="1.0.0">
+<title>数学可视化 · 工具导航</title>
+<!--
+  MathViz 导航外壳 (app shell)
+  ------------------------------------------------------------------
+  为什么是 iframe：每个工具都是一份完整的整页应用——顶层 const state / cam、
+  全屏 canvas、自己的键盘快捷键与 document.title。把两份这样的 HTML 注入同一个
+  文档会直接撞名并互相抢事件；iframe 天然隔离，工具文件一行都不用改，
+  「每个页面仍可单独打开」这条约束自动成立。
+
+  工具清单：优先 fetch('tools.json')（联网/本地服务器时永远最新），
+  失败时回落到下面内嵌的精简副本（file:// 直接打开时用），
+  与 index.html 内嵌 TOOLS 的做法一致 —— 见 CLAUDE.md「注册」一节。
+-->
+<style>
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  --angle-amber:#fbbf24;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+  --sb-w:268px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;overflow:hidden}
+body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn);
+  -webkit-font-smoothing:antialiased}
+
+.shell{display:flex;height:100vh;height:100dvh;width:100%}
+
+/* ---- 侧边栏 ---- */
+.sidebar{flex:0 0 var(--sb-w);width:var(--sb-w);height:100%;display:flex;flex-direction:column;
+  background:linear-gradient(180deg,#0a1120,#070b14);border-right:1px solid var(--panel-line);
+  transition:margin-left .22s cubic-bezier(.4,0,.2,1);z-index:20}
+.shell.hid .sidebar{margin-left:calc(-1 * var(--sb-w))}
+
+.sb-head{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:16px 14px 12px;border-bottom:1px solid var(--panel-line)}
+.brand{display:block;text-decoration:none;color:inherit}
+.brand .eyebrow{font-size:9.5px;letter-spacing:.2em;color:rgba(159,176,200,.62);text-transform:uppercase}
+.brand .name{margin-top:3px;font-family:var(--font-math);font-weight:600;font-size:17px;
+  letter-spacing:.04em;color:#eef3fa}
+.brand:hover .name{color:#bfefff}
+
+.iconbtn{flex:none;width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;
+  background:rgba(13,20,36,.6);border:1px solid var(--panel-line);border-radius:8px;
+  color:rgba(159,176,200,.85);font-family:var(--font-mono);font-size:12px;line-height:1;cursor:pointer;
+  transition:border-color .15s,color .15s}
+.iconbtn:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.iconbtn:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:2px}
+
+.sb-search{padding:11px 12px 8px}
+.sb-search input{width:100%;background:rgba(5,7,13,.66);border:1px solid var(--panel-line);
+  border-radius:9px;padding:7px 10px;color:var(--ui-bright);font-family:var(--font-cn);font-size:12.5px;
+  outline:none;transition:border-color .15s}
+.sb-search input::placeholder{color:rgba(159,176,200,.45)}
+.sb-search input:focus{border-color:rgba(45,212,234,.5)}
+
+.sb-list{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:2px 8px 14px;
+  scrollbar-width:thin;scrollbar-color:rgba(148,163,184,.28) transparent}
+.sb-list::-webkit-scrollbar{width:8px}
+.sb-list::-webkit-scrollbar-thumb{background:rgba(148,163,184,.24);border-radius:8px}
+
+.grp{margin:13px 6px 5px;font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;
+  color:rgba(155,232,247,.62)}
+.item{display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+  padding:7px 9px;margin:1px 0;border:1px solid transparent;border-radius:9px;
+  background:transparent;color:rgba(226,232,240,.82);font-family:var(--font-cn);font-size:12.5px;
+  line-height:1.35;cursor:pointer;transition:background .13s,border-color .13s,color .13s}
+.item:hover{background:rgba(45,212,234,.07);border-color:rgba(148,163,184,.2);color:#eaf1fb}
+.item:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:-2px}
+.item .dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--c,var(--ui-slate));
+  box-shadow:0 0 8px var(--c,var(--ui-slate))}
+.item .tx{flex:1;min-width:0}
+.item.on{background:rgba(45,212,234,.12);border-color:rgba(45,212,234,.42);color:#fff}
+.item.on .tx{font-weight:600}
+.item.home{margin-bottom:2px}
+.item.home .dot{background:transparent;border:1.5px dashed rgba(159,176,200,.55);box-shadow:none;
+  width:9px;height:9px}
+.empty{padding:14px 10px;font-size:12px;color:rgba(159,176,200,.55)}
+
+.sb-foot{display:flex;align-items:center;gap:8px;padding:10px 12px;
+  border-top:1px solid var(--panel-line);font-size:11.5px}
+.sb-foot .sp{flex:1}
+.sb-foot a,.sb-foot button{font-family:var(--font-mono);font-size:11px;letter-spacing:.04em;
+  color:rgba(159,176,200,.8);background:rgba(13,20,36,.6);border:1px solid var(--panel-line);
+  border-radius:7px;padding:5px 9px;cursor:pointer;text-decoration:none;
+  transition:border-color .15s,color .15s}
+.sb-foot a:hover,.sb-foot button:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.sb-foot a:focus-visible,.sb-foot button:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:2px}
+
+/* ---- 主内容区 ---- */
+.stage{position:relative;flex:1;min-width:0;height:100%;background:var(--bg-deep)}
+#frame{display:block;width:100%;height:100%;border:0;background:var(--bg-deep)}
+
+/* 侧栏收起时贴在左缘的唤出把手：所有工具在这个位置都是空白 */
+.edge{position:fixed;left:0;top:50%;transform:translateY(-50%);z-index:30;
+  width:20px;height:74px;display:none;align-items:center;justify-content:center;
+  background:rgba(13,20,36,.86);border:1px solid var(--panel-line);border-left:0;
+  border-radius:0 10px 10px 0;color:rgba(159,176,200,.9);font-family:var(--font-mono);font-size:11px;
+  cursor:pointer;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  transition:background .15s,color .15s,border-color .15s}
+.edge:hover{background:rgba(20,30,52,.94);color:#bfefff;border-color:rgba(45,212,234,.5)}
+.edge:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:2px}
+.shell.hid .edge{display:flex}
+
+.scrim{position:fixed;inset:0;z-index:15;background:rgba(3,6,12,.55);
+  backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);display:none}
+
+/* ---- 移动端：侧栏变成覆盖式抽屉 ---- */
+@media (max-width:760px){
+  .sidebar{position:fixed;left:0;top:0;bottom:0;box-shadow:0 0 44px rgba(0,0,0,.6)}
+  .shell.hid .sidebar{margin-left:calc(-1 * var(--sb-w) - 8px)}
+  .shell:not(.hid) .scrim{display:block}
+  .edge{height:64px}
+}
+</style>
+</head>
+<body>
+
+<div class="shell hid" id="shell">
+  <aside class="sidebar" id="sidebar" aria-label="工具导航">
+    <div class="sb-head">
+      <a class="brand" id="brandLink" href="index.html" title="返回画廊 / Back to gallery">
+        <div class="eyebrow">Interactive Math</div>
+        <div class="name" id="brandName">数学可视化</div>
+      </a>
+      <button class="iconbtn" id="btnHide" title="收起侧栏 / Hide sidebar (Ctrl+B)">❮</button>
+    </div>
+    <div class="sb-search"><input id="q" type="search" autocomplete="off" spellcheck="false"></div>
+    <nav class="sb-list" id="navList"></nav>
+    <div class="sb-foot">
+      <button id="btnLang" title="切换语言 / Switch language">EN</button>
+      <span class="sp"></span>
+      <a id="btnAlone" href="index.html" target="_blank" rel="noopener" title="在新标签页单独打开当前工具">↗</a>
+      <a href="https://github.com/My2ndFoundation/MathViz" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </aside>
+
+  <div class="scrim" id="scrim"></div>
+  <button class="edge" id="btnShow" title="展开侧栏 / Show sidebar (Ctrl+B)">❯</button>
+
+  <main class="stage">
+    <iframe id="frame" title="工具内容" allow="fullscreen"></iframe>
+  </main>
+</div>
+
+<script>
+'use strict';
+
+/* ================= 工具清单（内嵌精简副本，file:// 直接打开时的回落） ================= */
+var TOOLS = [
+  {
+    "id": "trig-essence-3d-new",
+    "file": "outputs/trig-essence-3d-new.html",
+    "cat": "trig",
+    "accent": "emerald",
+    "title": {
+      "zh": "单位圆 · 正弦 · 正切",
+      "en": "Unit Circle · Sine · Tangent"
+    },
+    "kicker": {
+      "zh": "三角函数",
+      "en": "Trigonometry"
+    }
+  },
+  {
+    "id": "fourier-essence-3d",
+    "file": "outputs/fourier-essence-3d.html",
+    "cat": "sig",
+    "accent": "violet",
+    "title": {
+      "zh": "傅立叶变换的本质",
+      "en": "The Essence of the Fourier Transform"
+    },
+    "kicker": {
+      "zh": "傅立叶",
+      "en": "Fourier"
+    }
+  },
+  {
+    "id": "complex-mult-3d",
+    "file": "outputs/complex-mult-3d.html",
+    "cat": "alg",
+    "accent": "orange",
+    "title": {
+      "zh": "复数乘法的本质",
+      "en": "The Essence of Complex Multiplication"
+    },
+    "kicker": {
+      "zh": "复数",
+      "en": "Complex"
+    }
+  },
+  {
+    "id": "cartesian-polar-coordinate-3d",
+    "file": "outputs/cartesian-polar-coordinate-3d.html",
+    "cat": "geom",
+    "accent": "cyan",
+    "title": {
+      "zh": "直角坐标 × 极坐标",
+      "en": "Cartesian × Polar"
+    },
+    "kicker": {
+      "zh": "坐标系",
+      "en": "Coordinates"
+    }
+  },
+  {
+    "id": "conic-essence-3d",
+    "file": "outputs/conic-essence-3d.html",
+    "cat": "geom",
+    "accent": "rose",
+    "title": {
+      "zh": "圆锥曲线的本质",
+      "en": "The Essence of Conic Sections"
+    },
+    "kicker": {
+      "zh": "圆锥曲线",
+      "en": "Conic Sections"
+    }
+  },
+  {
+    "id": "kelly-essence-3d",
+    "file": "outputs/kelly-essence-3d.html",
+    "cat": "prob",
+    "accent": "emerald",
+    "title": {
+      "zh": "凯利公式的本质",
+      "en": "The Kelly Criterion"
+    },
+    "kicker": {
+      "zh": "概率与决策",
+      "en": "Probability & Decisions"
+    }
+  },
+  {
+    "id": "derivative-essence-3d",
+    "file": "outputs/derivative-essence-3d.html",
+    "cat": "calc",
+    "accent": "orange",
+    "title": {
+      "zh": "导数与微分的本质",
+      "en": "The Essence of Derivatives"
+    },
+    "kicker": {
+      "zh": "微积分",
+      "en": "Calculus"
+    }
+  },
+  {
+    "id": "trig-identity-3d",
+    "file": "outputs/trig-identity-3d.html",
+    "cat": "trig",
+    "accent": "rose",
+    "title": {
+      "zh": "三角恒等式的本质",
+      "en": "The Essence of Trig Identities"
+    },
+    "kicker": {
+      "zh": "三角恒等式",
+      "en": "Trig Identities"
+    }
+  },
+  {
+    "id": "weierstrass-essence-3d",
+    "file": "outputs/weierstrass-essence-3d.html",
+    "cat": "trig",
+    "accent": "emerald",
+    "title": {
+      "zh": "万能代换的本质",
+      "en": "The Weierstrass Substitution"
+    },
+    "kicker": {
+      "zh": "三角代换",
+      "en": "Substitution"
+    }
+  },
+  {
+    "id": "inverse-trig-essence-3d",
+    "file": "outputs/inverse-trig-essence-3d.html",
+    "cat": "trig",
+    "accent": "rose",
+    "title": {
+      "zh": "反三角函数的本质",
+      "en": "The Essence of Inverse Trig"
+    },
+    "kicker": {
+      "zh": "反三角",
+      "en": "Inverse Trig"
+    }
+  },
+  {
+    "id": "limit-essence-3d",
+    "file": "outputs/limit-essence-3d.html",
+    "cat": "calc",
+    "accent": "emerald",
+    "title": {
+      "zh": "极限的本质",
+      "en": "The Essence of Limits"
+    },
+    "kicker": {
+      "zh": "数学分析",
+      "en": "Analysis"
+    }
+  },
+  {
+    "id": "dft-essence-3d",
+    "file": "outputs/dft-essence-3d.html",
+    "cat": "sig",
+    "accent": "violet",
+    "title": {
+      "zh": "离散傅里叶变换",
+      "en": "The Discrete Fourier Transform"
+    },
+    "kicker": {
+      "zh": "信号处理",
+      "en": "Signal Processing"
+    }
+  },
+  {
+    "id": "linear-essence-3d",
+    "file": "outputs/linear-essence-3d.html",
+    "cat": "alg",
+    "accent": "cyan",
+    "title": {
+      "zh": "线性代数的本质",
+      "en": "The Essence of Linear Algebra"
+    },
+    "kicker": {
+      "zh": "线性代数",
+      "en": "Linear Algebra"
+    }
+  },
+  {
+    "id": "gaussian-essence-3d",
+    "file": "outputs/gaussian-essence-3d.html",
+    "cat": "prob",
+    "accent": "orange",
+    "title": {
+      "zh": "高斯分布的本质",
+      "en": "The Essence of the Gaussian"
+    },
+    "kicker": {
+      "zh": "概率",
+      "en": "Probability"
+    }
+  },
+  {
+    "id": "calculus-essence-3d",
+    "file": "outputs/calculus-essence-3d.html",
+    "cat": "calc",
+    "accent": "rose",
+    "title": {
+      "zh": "微积分的本质 · 从一重到三重",
+      "en": "The Essence of Calculus · Single to Triple"
+    },
+    "kicker": {
+      "zh": "微积分",
+      "en": "Calculus"
+    }
+  },
+  {
+    "id": "taylor-essence-3d",
+    "file": "outputs/taylor-essence-3d.html",
+    "cat": "calc",
+    "accent": "violet",
+    "title": {
+      "zh": "泰勒展开的本质",
+      "en": "The Essence of Taylor Expansion"
+    },
+    "kicker": {
+      "zh": "微积分",
+      "en": "Calculus"
+    }
+  },
+  {
+    "id": "parametric-curves-3d",
+    "file": "outputs/parametric-curves-3d.html",
+    "cat": "geom",
+    "accent": "violet",
+    "title": {
+      "zh": "参数方程的本质",
+      "en": "Parametric Curves as Shadows of Motion"
+    },
+    "kicker": {
+      "zh": "参数方程",
+      "en": "Parametric Curves"
+    }
+  },
+  {
+    "id": "lines-planes-3d",
+    "file": "outputs/lines-planes-3d.html",
+    "cat": "geom",
+    "accent": "cyan",
+    "title": {
+      "zh": "三维直线与平面的本质",
+      "en": "Lines, Planes & Skew Geometry"
+    },
+    "kicker": {
+      "zh": "空间几何",
+      "en": "3D Geometry"
+    }
+  },
+  {
+    "id": "hyperbolic-functions-3d",
+    "file": "outputs/hyperbolic-functions-3d.html",
+    "cat": "trig",
+    "accent": "emerald",
+    "title": {
+      "zh": "双曲函数的本质",
+      "en": "The Essence of Hyperbolic Functions"
+    },
+    "kicker": {
+      "zh": "双曲函数",
+      "en": "Hyperbolic Functions"
+    }
+  },
+  {
+    "id": "differential-equations-phase-space-3d",
+    "file": "outputs/differential-equations-phase-space-3d.html",
+    "cat": "dyn",
+    "accent": "orange",
+    "title": {
+      "zh": "微分方程与相空间",
+      "en": "Differential Equations as Flow"
+    },
+    "kicker": {
+      "zh": "微分方程",
+      "en": "Differential Equations"
+    }
+  },
+  {
+    "id": "gradient-contours-surface-3d",
+    "file": "outputs/gradient-contours-surface-3d.html",
+    "cat": "calc",
+    "accent": "emerald",
+    "title": {
+      "zh": "曲面、等高线、梯度和切平面",
+      "en": "Surface, Contours & Gradient"
+    },
+    "kicker": {
+      "zh": "多元微分",
+      "en": "Multivariable Calculus"
+    }
+  },
+  {
+    "id": "kinematics-projectile-3d",
+    "file": "outputs/kinematics-projectile-3d.html",
+    "cat": "mech",
+    "accent": "rose",
+    "title": {
+      "zh": "运动学：一个运动，多张图像",
+      "en": "Kinematics: One Motion, Many Graphs"
+    },
+    "kicker": {
+      "zh": "运动学",
+      "en": "Kinematics"
+    }
+  },
+  {
+    "id": "recurrence-iteration-dynamics-3d",
+    "file": "outputs/recurrence-iteration-dynamics-3d.html",
+    "cat": "dyn",
+    "accent": "violet",
+    "title": {
+      "zh": "递推、迭代与稳定性",
+      "en": "Recurrence & Iterative Dynamics"
+    },
+    "kicker": {
+      "zh": "离散动力系统",
+      "en": "Discrete Dynamics"
+    }
+  },
+  {
+    "id": "energy-phase-portrait-3d",
+    "file": "outputs/energy-phase-portrait-3d.html",
+    "cat": "mech",
+    "accent": "cyan",
+    "title": {
+      "zh": "能量、势能与相图",
+      "en": "Energy Landscape & Phase Portrait"
+    },
+    "kicker": {
+      "zh": "力学",
+      "en": "Mechanics"
+    }
+  },
+  {
+    "id": "e-essence-3d",
+    "file": "outputs/e-essence-3d.html",
+    "cat": "calc",
+    "accent": "emerald",
+    "title": {
+      "zh": "e 的本质",
+      "en": "The Essence of e"
+    },
+    "kicker": {
+      "zh": "自然常数",
+      "en": "Euler's Number"
+    }
+  },
+  {
+    "id": "pi-essence-3d",
+    "file": "outputs/pi-essence-3d.html",
+    "cat": "geom",
+    "accent": "rose",
+    "title": {
+      "zh": "π 的本质",
+      "en": "The Essence of π"
+    },
+    "kicker": {
+      "zh": "圆周率",
+      "en": "Pi"
+    }
+  },
+  {
+    "id": "phi-essence-3d",
+    "file": "outputs/phi-essence-3d.html",
+    "cat": "geom",
+    "accent": "orange",
+    "title": {
+      "zh": "φ 的本质",
+      "en": "The Essence of φ"
+    },
+    "kicker": {
+      "zh": "黄金比例",
+      "en": "Golden Ratio"
+    }
+  },
+  {
+    "id": "i-essence-3d",
+    "file": "outputs/i-essence-3d.html",
+    "cat": "alg",
+    "accent": "violet",
+    "title": {
+      "zh": "i 的本质",
+      "en": "The Essence of i"
+    },
+    "kicker": {
+      "zh": "虚数单位",
+      "en": "Imaginary Unit"
+    }
+  },
+  {
+    "id": "conditional-probability-bayes-3d",
+    "file": "outputs/conditional-probability-bayes-3d.html",
+    "cat": "prob",
+    "accent": "emerald",
+    "title": {
+      "zh": "条件概率与贝叶斯更新",
+      "en": "Conditional Probability & Bayesian Updating"
+    },
+    "kicker": {
+      "zh": "条件概率",
+      "en": "Conditional Probability"
+    }
+  },
+  {
+    "id": "exponential-logarithm-essence-3d",
+    "file": "outputs/exponential-logarithm-essence-3d.html",
+    "cat": "func",
+    "accent": "rose",
+    "title": {
+      "zh": "指数与对数的本质",
+      "en": "The Essence of Exponentials & Logarithms"
+    },
+    "kicker": {
+      "zh": "指数与对数",
+      "en": "Exp & Log"
+    }
+  },
+  {
+    "id": "function-mapping-transformations-3d",
+    "file": "outputs/function-mapping-transformations-3d.html",
+    "cat": "func",
+    "accent": "rose",
+    "title": {
+      "zh": "函数的本质 · 映射、变换与逆",
+      "en": "The Essence of Functions · Maps, Transformations & Inverses"
+    },
+    "kicker": {
+      "zh": "函数",
+      "en": "Functions"
+    }
+  },
+  {
+    "id": "binomial-pascal-probability-3d",
+    "file": "outputs/binomial-pascal-probability-3d.html",
+    "cat": "prob",
+    "accent": "rose",
+    "title": {
+      "zh": "二项式定理 · Pascal 三角形与概率",
+      "en": "The Binomial Theorem · Pascal's Triangle & Probability"
+    },
+    "kicker": {
+      "zh": "组合与概率",
+      "en": "Combinatorics"
+    }
+  },
+  {
+    "id": "torque-equilibrium-centre-mass-3d",
+    "file": "outputs/torque-equilibrium-centre-mass-3d.html",
+    "cat": "mech",
+    "accent": "emerald",
+    "title": {
+      "zh": "力矩、平衡与质心",
+      "en": "Moments, Equilibrium & Centre of Mass"
+    },
+    "kicker": {
+      "zh": "静力学",
+      "en": "Statics"
+    }
+  },
+  {
+    "id": "forces-free-body-diagrams-3d",
+    "file": "outputs/forces-free-body-diagrams-3d.html",
+    "cat": "mech",
+    "accent": "emerald",
+    "title": {
+      "zh": "力、约束与自由体图",
+      "en": "Forces, Constraints & Free-Body Diagrams"
+    },
+    "kicker": {
+      "zh": "力学",
+      "en": "Mechanics"
+    }
+  },
+  {
+    "id": "random-variable-expectation-variance-3d",
+    "file": "outputs/random-variable-expectation-variance-3d.html",
+    "cat": "prob",
+    "accent": "rose",
+    "title": {
+      "zh": "随机变量、期望与方差",
+      "en": "Random Variables · Expectation & Variance"
+    },
+    "kicker": {
+      "zh": "概率",
+      "en": "Probability"
+    }
+  },
+  {
+    "id": "sequences-series-essence-3d",
+    "file": "outputs/sequences-series-essence-3d.html",
+    "cat": "func",
+    "accent": "rose",
+    "title": {
+      "zh": "数列与级数的本质",
+      "en": "The Essence of Sequences & Series"
+    },
+    "kicker": {
+      "zh": "数列与级数",
+      "en": "Sequences & Series"
+    }
+  },
+  {
+    "id": "basis-change-coordinates-3d",
+    "file": "outputs/basis-change-coordinates-3d.html",
+    "cat": "alg",
+    "accent": "violet",
+    "title": {
+      "zh": "基底与换坐标的本质",
+      "en": "The Essence of Basis & Change of Coordinates"
+    },
+    "kicker": {
+      "zh": "基底与坐标",
+      "en": "Basis & Coordinates"
+    }
+  },
+  {
+    "id": "linear-systems-rank-nullspace-3d",
+    "file": "outputs/linear-systems-rank-nullspace-3d.html",
+    "cat": "alg",
+    "accent": "emerald",
+    "title": {
+      "zh": "线性方程组、秩与零空间",
+      "en": "Linear Systems, Rank & Null Spaces"
+    },
+    "kicker": {
+      "zh": "线性方程组",
+      "en": "Linear Systems"
+    }
+  },
+  {
+    "id": "modular-arithmetic-euclid-crt-3d",
+    "file": "outputs/modular-arithmetic-euclid-crt-3d.html",
+    "cat": "disc",
+    "accent": "violet",
+    "title": {
+      "zh": "模运算、最大公约数与同余",
+      "en": "Modular Arithmetic, GCD & Congruence"
+    },
+    "kicker": {
+      "zh": "数论",
+      "en": "Number Theory"
+    }
+  },
+  {
+    "id": "least-squares-orthogonal-projection-3d",
+    "file": "outputs/least-squares-orthogonal-projection-3d.html",
+    "cat": "alg",
+    "accent": "emerald",
+    "title": {
+      "zh": "最小二乘与正交投影",
+      "en": "Least Squares & Orthogonal Projection"
+    },
+    "kicker": {
+      "zh": "线性代数",
+      "en": "Linear Algebra"
+    }
+  },
+  {
+    "id": "proof-logic-induction-3d",
+    "file": "outputs/proof-logic-induction-3d.html",
+    "cat": "disc",
+    "accent": "violet",
+    "title": {
+      "zh": "证明的本质 · 量词、反例与归纳",
+      "en": "The Essence of Proof · Quantifiers, Counterexamples & Induction"
+    },
+    "kicker": {
+      "zh": "证明与逻辑",
+      "en": "Proof & Logic"
+    }
+  },
+  {
+    "id": "optimization-convexity-gradient-descent-3d",
+    "file": "outputs/optimization-convexity-gradient-descent-3d.html",
+    "cat": "calc",
+    "accent": "rose",
+    "title": {
+      "zh": "优化、凸性与梯度下降",
+      "en": "Optimisation, Convexity & Gradient Descent"
+    },
+    "kicker": {
+      "zh": "优化",
+      "en": "Optimisation"
+    }
+  },
+  {
+    "id": "algorithmic-complexity-growth-3d",
+    "file": "outputs/algorithmic-complexity-growth-3d.html",
+    "cat": "disc",
+    "accent": "orange",
+    "title": {
+      "zh": "算法复杂度与增长速度",
+      "en": "Algorithmic Complexity & Growth Rates"
+    },
+    "kicker": {
+      "zh": "算法与增长阶",
+      "en": "Algorithms & Growth"
+    }
+  },
+  {
+    "id": "graph-theory-network-algorithms-3d",
+    "file": "outputs/graph-theory-network-algorithms-3d.html",
+    "cat": "disc",
+    "accent": "cyan",
+    "title": {
+      "zh": "图论与网络算法",
+      "en": "Graph Theory & Network Algorithms"
+    },
+    "kicker": {
+      "zh": "图论与算法",
+      "en": "Graphs & Algorithms"
+    }
+  },
+  {
+    "id": "markov-chains-stationary-distribution-3d",
+    "file": "outputs/markov-chains-stationary-distribution-3d.html",
+    "cat": "prob",
+    "accent": "violet",
+    "title": {
+      "zh": "Markov 链与稳定分布",
+      "en": "Markov Chains & Stationary Distributions"
+    },
+    "kicker": {
+      "zh": "随机过程",
+      "en": "Stochastic Processes"
+    }
+  },
+  {
+    "id": "combinatorics-generating-functions-3d",
+    "file": "outputs/combinatorics-generating-functions-3d.html",
+    "cat": "disc",
+    "accent": "rose",
+    "title": {
+      "zh": "组合计数与生成函数",
+      "en": "Combinatorics & Generating Functions"
+    },
+    "kicker": {
+      "zh": "组合数学",
+      "en": "Combinatorics"
+    }
+  },
+  {
+    "id": "vector-fields-divergence-curl-3d",
+    "file": "outputs/vector-fields-divergence-curl-3d.html",
+    "cat": "calc",
+    "accent": "emerald",
+    "title": {
+      "zh": "向量场、散度与旋度",
+      "en": "Vector Fields, Divergence & Curl"
+    },
+    "kicker": {
+      "zh": "向量分析",
+      "en": "Vector Analysis"
+    }
+  },
+  {
+    "id": "svd-pca-dimensionality-reduction-3d",
+    "file": "outputs/svd-pca-dimensionality-reduction-3d.html",
+    "cat": "alg",
+    "accent": "rose",
+    "title": {
+      "zh": "SVD、PCA 与降维",
+      "en": "SVD, PCA & Dimensionality Reduction"
+    },
+    "kicker": {
+      "zh": "线性代数",
+      "en": "Linear Algebra"
+    }
+  },
+  {
+    "id": "line-integrals-green-stokes-3d",
+    "file": "outputs/line-integrals-green-stokes-3d.html",
+    "cat": "calc",
+    "accent": "emerald",
+    "title": {
+      "zh": "线积分、Green 定理与 Stokes 定理",
+      "en": "Line Integrals, Green's Theorem & Stokes' Theorem"
+    },
+    "kicker": {
+      "zh": "向量微积分",
+      "en": "Vector calculus"
+    }
+  },
+  {
+    "id": "information-entropy-coding-3d",
+    "file": "outputs/information-entropy-coding-3d.html",
+    "cat": "prob",
+    "accent": "rose",
+    "title": {
+      "zh": "信息熵、惊奇度与编码",
+      "en": "Information Entropy, Surprise & Coding"
+    },
+    "kicker": {
+      "zh": "信息论",
+      "en": "Information Theory"
+    }
+  },
+  {
+    "id": "huffman-coding-text-3d",
+    "file": "outputs/huffman-coding-text-3d.html",
+    "cat": "disc",
+    "accent": "emerald",
+    "title": {
+      "zh": "霍夫曼编码 · 从文本到比特",
+      "en": "Huffman Coding · From Text to Bits"
+    },
+    "kicker": {
+      "zh": "编码与压缩",
+      "en": "Coding & Compression"
+    }
+  }
+];
+
+/* 数学板块：与 index.html 的 CATS 同序 */
+var CATS = [
+  { key: 'trig', label: { zh: '三角与双曲函数', en: 'Trig & Hyperbolic Functions' } },
+  { key: 'geom', label: { zh: '几何与坐标', en: 'Geometry & Coordinates' } },
+  { key: 'func', label: { zh: '函数、数列与代数', en: 'Functions, Sequences & Algebra' } },
+  { key: 'alg',  label: { zh: '复数与线性代数', en: 'Complex Numbers & Linear Algebra' } },
+  { key: 'calc', label: { zh: '微积分与分析', en: 'Calculus & Analysis' } },
+  { key: 'dyn',  label: { zh: '微分方程与动力系统', en: 'Differential Equations & Dynamics' } },
+  { key: 'mech', label: { zh: '力学', en: 'Mechanics' } },
+  { key: 'prob', label: { zh: '概率与统计', en: 'Probability & Statistics' } },
+  { key: 'disc', label: { zh: '证明、离散数学与算法', en: 'Proof, Discrete Mathematics & Algorithms' } },
+  { key: 'sig',  label: { zh: '信号处理', en: 'Signal Processing' } }
+];
+
+/* ================= i18n（与工具页共用同一个 localStorage 键） ================= */
+var LANG_KEY = 'mathviz-lang';
+var NAV_KEY = 'mathviz-nav';
+function resolveLang(){
+  try{
+    var q = new URLSearchParams(location.search).get('lang');
+    if (q === 'zh' || q === 'en') return q;
+    var s = localStorage.getItem(LANG_KEY);
+    if (s === 'zh' || s === 'en') return s;
+  }catch(e){}
+  return (navigator.language || 'zh').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en';
+}
+function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
+var LANG = resolveLang();
+
+var L = {
+  title:   { zh: '数学可视化 · 工具导航', en: 'MathViz · Tool Navigator' },
+  brand:   { zh: '数学可视化', en: 'MathViz' },
+  search:  { zh: '搜索工具…', en: 'Search tools…' },
+  home:    { zh: '全部工具 · 画廊', en: 'All tools · Gallery' },
+  none:    { zh: '没有匹配的工具', en: 'No matching tools' },
+  alone:   { zh: '单独打开当前工具', en: 'Open current tool standalone' },
+  hide:    { zh: '收起侧栏', en: 'Hide sidebar' },
+  show:    { zh: '展开侧栏', en: 'Show sidebar' }
+};
+
+/* ================= 状态 ================= */
+var shell = document.getElementById('shell');
+var frame = document.getElementById('frame');
+var navList = document.getElementById('navList');
+var qBox = document.getElementById('q');
+var curId = null;      // 当前工具 id；null = 画廊首页
+var syncing = false;   // 防止 iframe 回同步与主动导航互相打架
+
+function byId(id){ for (var i = 0; i < TOOLS.length; i++) if (TOOLS[i].id === id) return TOOLS[i]; return null; }
+function fileOf(id){ var d = byId(id); return d ? d.file : null; }
+
+/* 由 iframe 的真实地址反查工具（用户在画廊内点击卡片时也能同步高亮） */
+function idFromPath(path){
+  if (!path) return null;
+  var f = path.split('/').pop();
+  for (var i = 0; i < TOOLS.length; i++){
+    if (TOOLS[i].file.split('/').pop() === f) return TOOLS[i].id;
+  }
+  return null;
+}
+
+/* ================= 侧栏渲染 ================= */
+function renderNav(){
+  var kw = (qBox.value || '').trim().toLowerCase();
+  var html = '';
+
+  var homeOn = curId === null ? ' on' : '';
+  html += '<button class="item home' + homeOn + '" data-id="">' +
+          '<span class="dot"></span><span class="tx">' + t(L.home) + '</span></button>';
+
+  var hits = 0;
+  for (var c = 0; c < CATS.length; c++){
+    var cat = CATS[c];
+    var items = [];
+    for (var i = 0; i < TOOLS.length; i++){
+      var d = TOOLS[i];
+      if (d.cat !== cat.key) continue;
+      if (kw){
+        var hay = (t(d.title) + ' ' + d.title.zh + ' ' + d.title.en + ' ' +
+                   d.kicker.zh + ' ' + d.kicker.en + ' ' + d.id).toLowerCase();
+        if (hay.indexOf(kw) < 0) continue;
+      }
+      items.push(d);
+    }
+    if (!items.length) continue;
+    hits += items.length;
+    html += '<div class="grp">' + esc(t(cat.label)) + '</div>';
+    for (var j = 0; j < items.length; j++){
+      var it = items[j];
+      html += '<button class="item' + (it.id === curId ? ' on' : '') + '" data-id="' + esc(it.id) + '"' +
+              ' style="--c:var(--trace-' + esc(it.accent) + ')" title="' + esc(t(it.title)) + '">' +
+              '<span class="dot"></span><span class="tx">' + esc(t(it.title)) + '</span></button>';
+    }
+  }
+  if (!hits && kw) html += '<div class="empty">' + t(L.none) + '</div>';
+  navList.innerHTML = html;
+}
+
+function esc(s){
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function renderChrome(){
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.getElementById('brandName').textContent = t(L.brand);
+  qBox.placeholder = t(L.search);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+  document.getElementById('btnAlone').title = t(L.alone);
+  document.getElementById('btnHide').title = t(L.hide) + ' (Ctrl+B)';
+  document.getElementById('btnShow').title = t(L.show) + ' (Ctrl+B)';
+  document.getElementById('brandLink').href = 'index.html?lang=' + LANG;
+  var d = curId ? byId(curId) : null;
+  document.title = d ? t(d.title) + ' · MathViz' : t(L.title);
+  document.getElementById('btnAlone').href = d ? d.file + '?lang=' + LANG : 'index.html?lang=' + LANG;
+}
+
+/* ================= 导航 ================= */
+function srcFor(id){
+  var f = id ? fileOf(id) : 'index.html';
+  return f ? f + '?lang=' + LANG : 'index.html?lang=' + LANG;
+}
+
+/* 换页面用 location.replace 而不是赋值 frame.src：
+   赋值 src 会往「联合会话历史」里塞一条 iframe 记录，和外壳自己的 pushState
+   交错在一起，后退键就会出现「地址与侧栏都退了、画面还停在上一个工具」的错位。
+   replace 不产生历史记录，历史就完全由外壳掌握。跨源（file://）时回落到 src。 */
+function setFrame(url){
+  try{
+    if (frame.contentWindow){ frame.contentWindow.location.replace(url); return; }
+  }catch(e){}
+  frame.src = url;
+}
+
+function go(id, push){
+  if (id && !byId(id)) id = null;
+  curId = id || null;
+  syncing = true;
+  setFrame(srcFor(curId));
+  renderNav();
+  renderChrome();
+  if (push !== false){
+    try{
+      var u = new URL(location.href);
+      if (curId) u.searchParams.set('tool', curId); else u.searchParams.delete('tool');
+      u.searchParams.set('lang', LANG);
+      history.pushState({ tool: curId }, '', u);
+    }catch(e){}
+  }
+  if (window.innerWidth <= 760) setSidebar(false);
+}
+
+/* ================= 侧栏显隐 ================= */
+function setSidebar(open, remember){
+  shell.classList.toggle('hid', !open);
+  if (remember !== false){
+    try{ localStorage.setItem(NAV_KEY, open ? 'open' : 'hid'); }catch(e){}
+  }
+}
+function toggleSidebar(){ setSidebar(shell.classList.contains('hid')); }
+
+/* ================= 事件 ================= */
+navList.addEventListener('click', function(e){
+  var b = e.target.closest ? e.target.closest('.item') : null;
+  if (!b) return;
+  go(b.getAttribute('data-id') || null);
+});
+qBox.addEventListener('input', renderNav);
+qBox.addEventListener('keydown', function(e){
+  if (e.key === 'Escape'){ qBox.value = ''; renderNav(); qBox.blur(); }
+  e.stopPropagation();
+});
+document.getElementById('btnHide').addEventListener('click', function(){ setSidebar(false); });
+document.getElementById('btnShow').addEventListener('click', function(){ setSidebar(true); });
+document.getElementById('scrim').addEventListener('click', function(){ setSidebar(false); });
+document.getElementById('btnLang').addEventListener('click', function(){
+  LANG = LANG === 'zh' ? 'en' : 'zh';
+  try{ localStorage.setItem(LANG_KEY, LANG); }catch(e){}
+  try{
+    var u = new URL(location.href); u.searchParams.set('lang', LANG); history.replaceState(history.state, '', u);
+  }catch(e){}
+  syncing = true;
+  setFrame(srcFor(curId));   // 让工具页按新语言重载
+  renderNav(); renderChrome();
+});
+
+window.addEventListener('popstate', function(e){
+  var id = null;
+  try{ id = new URLSearchParams(location.search).get('tool'); }catch(e2){}
+  go(id, false);
+});
+
+/* 快捷键：Ctrl/Cmd+B 或 [ —— 都避开工具自己的 空格 / 1–9 / T / R */
+function isTyping(el){
+  if (!el) return false;
+  var tag = (el.tagName || '').toUpperCase();
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+function hotkey(e){
+  if (isTyping(e.target)) return;
+  var mod = e.ctrlKey || e.metaKey;
+  if ((mod && (e.key === 'b' || e.key === 'B')) || (!mod && !e.altKey && e.key === '[')){
+    e.preventDefault();
+    toggleSidebar();
+  }
+}
+document.addEventListener('keydown', hotkey);
+
+/* iframe 载入后：把快捷键也挂到工具文档上（同源才行），并回同步高亮与地址栏 */
+frame.addEventListener('load', function(){
+  var doc = null;
+  try{ doc = frame.contentDocument; }catch(e){}
+  if (doc){
+    try{ doc.addEventListener('keydown', hotkey); }catch(e){}
+    try{
+      var id = idFromPath(frame.contentWindow.location.pathname);
+      if (!syncing && id !== curId){          // 用户在画廊里点了卡片
+        curId = id; renderNav(); renderChrome();
+        try{
+          var u = new URL(location.href);
+          if (curId) u.searchParams.set('tool', curId); else u.searchParams.delete('tool');
+          history.replaceState({ tool: curId }, '', u);
+        }catch(e){}
+      }
+    }catch(e){}
+  }
+  syncing = false;
+});
+
+/* ================= 启动 ================= */
+function boot(){
+  renderNav(); renderChrome();
+  var id = null;
+  try{ id = new URLSearchParams(location.search).get('tool'); }catch(e){}
+  if (id && !byId(id)) id = null;
+  curId = id;
+  syncing = true;
+  setFrame(srcFor(curId));
+  renderNav(); renderChrome();
+  try{ history.replaceState({ tool: curId }, '', location.href); }catch(e){}
+
+  var pref = null;
+  try{ pref = localStorage.getItem(NAV_KEY); }catch(e){}
+  var wide = window.innerWidth > 760;
+  setSidebar(pref ? pref === 'open' : wide, false);
+}
+
+/* 工具清单优先取 tools.json（有服务器时永远最新）；取不到就用内嵌副本 */
+(function(){
+  var done = false;
+  function start(){ if (!done){ done = true; boot(); } }
+  try{
+    fetch('tools.json', { cache: 'no-cache' }).then(function(r){
+      return r.ok ? r.json() : null;
+    }).then(function(j){
+      if (j && j.tools && j.tools.length){
+        TOOLS = j.tools.map(function(d){
+          return { id: d.id, file: d.file, cat: d.category, accent: d.accent, title: d.title, kicker: d.kicker };
+        });
+      }
+      start();
+    })['catch'](start);
+  }catch(e){ start(); }
+  setTimeout(start, 1200);   // file:// 或离线时的兜底
+})();
+</script>
+</body>
+</html>

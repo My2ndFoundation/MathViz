@@ -10,6 +10,12 @@ Every tool follows one aesthetic — a **dark "oscilloscope / astronomical instr
 
 Each tool is a **single, zero-dependency `.html` file** — open it and it runs. No install, no server, no build. Works offline, hands off to a student, embeds in an `<iframe>`.
 
+## Browsing
+
+- **[`app.html`](app.html)** — the navigation shell: a collapsible sidebar of every tool (grouped by subject, with search) beside a main area that loads the selected tool. Deep-links as `app.html?tool=<id>`, remembers whether the sidebar was open, and toggles it with `Ctrl`/`Cmd`+`B` or `[` — even while you are interacting with the tool. Each entry also has an "open standalone" escape hatch.
+- **[`index.html`](index.html)** — the card gallery. It doubles as the shell's home view.
+- **`outputs/*.html`** — every tool remains independently openable with no shell, exactly as before. The shell embeds them in an `<iframe>` and does not modify them.
+
 ## Tools
 
 | Tool | Concept |
