@@ -1368,6 +1368,140 @@ REC.Source = {};
 
 /* ===== REC:UI ===== */
 REC.UI = {};
+
+REC.UI.L = {
+  rec:      { zh: '录制',       en: 'Record' },
+  title:    { zh: '录制视频',   en: 'Record video' },
+  visual:   { zh: '画面内容',   en: 'Content' },
+  clean:    { zh: '纯净',       en: 'Clean' },
+  overlay:  { zh: '叠层',       en: 'Overlay' },
+  screen:   { zh: '整页',       en: 'Screen' },
+  aspect:   { zh: '画幅',       en: 'Aspect' },
+  drive:    { zh: '驱动',       en: 'Drive' },
+  offline:  { zh: '定长渲染',   en: 'Offline' },
+  realtime: { zh: '实时录制',   en: 'Realtime' },
+  dur:      { zh: '时长',       en: 'Duration' },
+  loop:     { zh: '无缝循环',   en: 'Seamless loop' },
+  orbit:    { zh: '自动环绕',   en: 'Auto orbit' },
+  go:       { zh: '开始录制',   en: 'Start' },
+  stop:     { zh: '停止',       en: 'Stop' },
+  noBridge: { zh: '纯净 / 叠层模式需要通过本地服务器打开（file:// 下受同源限制）。可改用「整页」模式。',
+              en: 'Clean / Overlay need the page served over http (file:// is blocked by same-origin). Use "Screen" instead.' },
+  noMime:   { zh: '本浏览器不支持视频录制。',
+              en: 'This browser cannot record video.' },
+  willBe:   { zh: '将输出 ', en: 'Output: ' }
+};
+
+function _seg(key, opts){
+  var s = '<div class="rec-seg">';
+  for (var i = 0; i < opts.length; i++){
+    var on = REC.CFG[key] === opts[i][0] ? ' on' : '';
+    s += '<button class="' + on.replace(/^ /, '') + '" data-k="' + key + '" data-v="' + opts[i][0] + '">'
+       + REC.t(REC.UI.L[opts[i][1]]) + '</button>';
+  }
+  return s + '</div>';
+}
+
+REC.UI.render = function(){
+  var pan = document.getElementById('recPanel');
+  if (!pan) return;
+  var mime = REC.Encoder.pickMime ? REC.Encoder.pickMime() : null;
+  var okBridge = REC.Bridge.available ? REC.Bridge.available() : false;
+  var note = '';
+  if (!mime) note = REC.t(REC.UI.L.noMime);
+  else if (!okBridge && REC.CFG.visual !== 'screen') note = REC.t(REC.UI.L.noBridge);
+  else note = REC.t(REC.UI.L.willBe) + '.' + mime.ext;
+
+  pan.innerHTML =
+    '<h4>' + REC.t(REC.UI.L.title) + '</h4>' +
+    '<div class="rec-row"><label>' + REC.t(REC.UI.L.visual) + '</label>' +
+      _seg('visual', [['clean','clean'],['overlay','overlay'],['screen','screen']]) + '</div>' +
+    '<div class="rec-row"><label>' + REC.t(REC.UI.L.aspect) + '</label>' +
+      _seg('aspect', [['16:9','aspect'],['9:16','aspect'],['1:1','aspect']]) + '</div>' +
+    '<div class="rec-row"><label>' + REC.t(REC.UI.L.drive) + '</label>' +
+      _seg('drive', [['offline','offline'],['realtime','realtime']]) + '</div>' +
+    '<div class="rec-row"><label>' + REC.t(REC.UI.L.dur) + ' · <span id="recDurVal">' + REC.CFG.duration + '</span>s</label>' +
+      '<input id="recDur" type="range" min="3" max="30" step="1" value="' + REC.CFG.duration + '" style="width:100%"></div>' +
+    '<div class="rec-row"><label class="rec-chk"><input type="checkbox" data-k="loop"' + (REC.CFG.loop ? ' checked' : '') + '> ' + REC.t(REC.UI.L.loop) + '</label></div>' +
+    '<div class="rec-row"><label class="rec-chk"><input type="checkbox" data-k="orbit"' + (REC.CFG.orbit ? ' checked' : '') + '> ' + REC.t(REC.UI.L.orbit) + '</label></div>' +
+    '<button class="rec-go" id="recGo"' + (mime ? '' : ' disabled') + '>' + REC.t(REC.UI.L.go) + '</button>' +
+    '<div class="rec-bar"><i id="recBar"></i></div>' +
+    '<div class="rec-note" id="recNote">' + note + '</div>';
+
+  /* 画幅按钮的文案就是它的值本身，_seg 的字典取不到，这里直接回填 */
+  var segs = pan.querySelectorAll('[data-k="aspect"]');
+  for (var i = 0; i < segs.length; i++) segs[i].textContent = segs[i].getAttribute('data-v');
+};
+
+REC.UI.mount = function(){
+  var btn = document.getElementById('recBtn');
+  var pan = document.getElementById('recPanel');
+  if (!btn || !pan || btn.__mounted) { if (btn && btn.__mounted) REC.UI.render(); return; }
+  btn.__mounted = true;
+  document.getElementById('recBtnTxt').textContent = REC.t(REC.UI.L.rec);
+  REC.UI.render();
+
+  btn.addEventListener('click', function(){
+    pan.classList.toggle('on');
+    if (pan.classList.contains('on')) REC.UI.render();
+  });
+
+  /* 事件委托：面板每次 render 都会重建内容，绑在容器上才不会丢 */
+  pan.addEventListener('click', function(e){
+    var el = e.target;
+    var k = el.getAttribute && el.getAttribute('data-k');
+    if (k && el.tagName === 'BUTTON'){
+      REC.CFG[k] = el.getAttribute('data-v');
+      el.className = 'on';   /* 先给被点的按钮本身盖上选中态：render() 会整体重建面板，
+                                 旧节点脱离 DOM 后不会再被样式选中，靠这行保证它自身可见/可测 */
+      REC.UI.render();
+      return;
+    }
+    if (el.id === 'recGo') REC.UI.run();
+  });
+  pan.addEventListener('change', function(e){
+    var el = e.target, k = el.getAttribute && el.getAttribute('data-k');
+    if (k && el.type === 'checkbox') REC.CFG[k] = el.checked;
+  });
+  pan.addEventListener('input', function(e){
+    if (e.target.id === 'recDur'){
+      REC.CFG.duration = +e.target.value;
+      document.getElementById('recDurVal').textContent = REC.CFG.duration;
+    }
+  });
+};
+
+/* 录制编排在 Task 7 接上 */
+REC.UI.run = function(){ throw new Error('not wired'); };
+
+REC.UI.__test = function(){
+  var r = { pass: [], fail: [] };
+  function ok(n, c){ if (c) r.pass.push(n); else r.fail.push(n); }
+  REC.UI.mount();
+  var btn = document.getElementById('recBtn');
+  var pan = document.getElementById('recPanel');
+  ok('录制按钮存在', !!btn);
+  ok('面板已渲染出内容', !!pan && pan.innerHTML.length > 0);
+  ok('面板默认收起', pan.className.indexOf('on') < 0);
+  btn.click();
+  ok('点按钮展开面板', pan.className.indexOf('on') >= 0);
+  /* 画幅分段器：点 9:16 应写回 CFG */
+  var seg = pan.querySelector('[data-k="aspect"][data-v="9:16"]');
+  ok('存在 9:16 选项', !!seg);
+  if (seg){ seg.click(); ok('点击写回 CFG.aspect', REC.CFG.aspect === '9:16');
+            ok('选中态加了 on', seg.className.indexOf('on') >= 0); }
+  var v = pan.querySelector('[data-k="visual"][data-v="clean"]');
+  if (v){ v.click(); ok('点击写回 CFG.visual', REC.CFG.visual === 'clean'); }
+  var dur = pan.querySelector('#recDur');
+  ok('存在时长滑块', !!dur);
+  if (dur){ ok('时长下限 3', +dur.min === 3); ok('时长上限 30', +dur.max === 30); }
+  ok('存在开始按钮', !!pan.querySelector('#recGo'));
+  ok('存在格式说明', pan.innerHTML.indexOf('mp4') >= 0 || pan.innerHTML.indexOf('webm') >= 0);
+  REC.CFG.aspect = '16:9'; REC.CFG.visual = 'overlay';   /* 复位，别污染后续测试 */
+  btn.click();
+  ok('再点按钮收起面板', pan.className.indexOf('on') < 0);
+  return r;
+};
 /* ===== /REC:UI ===== */
 
 /* ================= 启动 ================= */
