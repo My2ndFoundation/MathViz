@@ -231,6 +231,8 @@ const TAU = Math.PI * 2;
    ║  ① 参数声明 —— 自动生成滑杆                                ║
    ║  key: state 中的键 · label: 支持 <i>数学符号</i>            ║
    ║  fmt: 格式化"滑杆原始值"用于显示 · map(可选): 原始值→状态值   ║
+   ║  invMap: 状态值→原始值。声明了 map 就必须给，否则被 drive     ║
+   ║          驱动时滑块回显会错位（规范 §8 硬约束）               ║
    ╚══════════════════════════════════════════════════════════╝ */
 const PARAMS = [
   { key: 'omega',     label: { zh: '角速度 <i>ω</i>', en: 'Angular speed <i>ω</i>' }, min: 0.2, max: 4,   step: 0.05, value: 1,   fmt: v => fmt(v) + ' rad/s' },
@@ -242,6 +244,8 @@ const PARAMS = [
 /* ╔══════════════════════════════════════════════════════════╗
    ║  ② 场景注册 —— 每个键就是一个页签                           ║
    ║  必填：label / brand / tips / views(首项即"立体"，双击回正)  ║
+   ║        params(本页签真正读取的滑块 key 数组，决定面板显隐)    ║
+   ║        drive(随时间自走的量；静态页签写 drive: null 并注释)   ║
    ║        toggles(曲线按 rose→violet→emerald→orange 取色)     ║
    ║        draw(C) / readout()                                ║
    ║  可选：sampleWindow() 历史滑窗秒数 · views[x].onSelect 联动 ║
@@ -734,7 +738,11 @@ const driveOffAt = {};   // tabId -> 本次关停的起点（引擎时钟读数�
 /* 驱动时钟：引擎时钟减去「自动播放关掉的那些时间」。关停期间它不走，
    所以重新打开时驱动量从原地续上，不跳变。求值仍是纯函数——只是把
    自变量从 state.t 换成这个校正过的时钟，不做增量积分：既不累积浮点
-   漂移，录制器按固定 dt 离线重放也能复现同一串值（偏移在一次渲染内是常量）。 */
+   漂移，录制器按固定 dt 离线重放也能复现同一串值（偏移在一次渲染内是常量）。
+   已知语义：偏移只扣「自动播放关停」的时长，不扣「页签没被选中」的时长——
+   离开某页签 10 秒再切回来，它的驱动量会跳到 10 秒后的位置。这与「暂停只冻结
+   模拟、相机照走」是同一族约定（时钟是全局的，页签只是不同的观测口），
+   如需改成每页签独立时钟，得连录制器的离线重放一起改，不要只改这里。 */
 function driveClock(id) { return state.t - (driveOff[id] || 0); }
 
 /* 驱动求值：驱动时钟（见 driveClock）的纯函数，不做增量积分 —— 不累积
@@ -761,14 +769,26 @@ function driveInfo() {
   return { key: sc.drive.key, period: sc.drive.period, mode: driveMode[curTab] };
 }
 
+const warnedNoInvMap = {};   // key -> 已就「有 map 没 invMap」告警过
+
 /* 把驱动出的值反算回滑块刻度并回显。带 map 的参数必须提供 invMap，
    否则只能退回显示映射后的值（规范 §8 已把 invMap 列为硬约束）。 */
 function syncParamSlider(key) {
   const e = paramWraps[key];
   if (!e) return;
+  /* 本函数每帧都被调用，所以每个 key 只喊一次，别把控制台刷爆 */
+  if (e.p.map && !e.p.invMap && !warnedNoInvMap[key]) {
+    warnedNoInvMap[key] = true;
+    console.warn('[math-viz] 参数 "' + key + '" 声明了 map 却没有 invMap：' +
+                 '驱动值会被当作滑杆原始值写进量程，回显与 state 会错位（规范 §8）。');
+  }
   const raw = (e.p.map && e.p.invMap) ? e.p.invMap(state[key]) : state[key];
+  /* 先写进 input，再读回来显示：range 带 step，写进去的值会被吸附到刻度上。
+     若直接显示 raw，读数与滑杆句柄就会对不上；更要命的是下一次 upd()
+     （语言切换 / 用户拖动都会触发）读的是吸附后的 input.value，会把这点
+     差值永久写回 state —— 暂停时 frame() 不再跑 applyDrive()，再也修不回来。 */
   e.input.value = raw;
-  e.val.textContent = e.p.fmt(raw);
+  e.val.textContent = e.p.fmt(parseFloat(e.input.value));
 }
 
 /* 按当前页签的 params 显隐滑块。省略 params = 全部显示（向后兼容）。
@@ -843,10 +863,13 @@ function buildParams() {
     input.type = 'range';
     input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
     const val = wrap.querySelector('.val');
+    /* render 只回显滑杆当前刻度；upd 才是「用户动了滑杆」的语义（写 state）。
+       两者分开，语言切换就不会顺手把读数写回 state —— 见下方 relabel 注释。 */
+    const render = () => { val.textContent = p.fmt(parseFloat(input.value)); };
     const upd = () => {
       const raw = parseFloat(input.value);
       state[p.key] = p.map ? p.map(raw) : raw;
-      val.textContent = p.fmt(raw);
+      render();
     };
     input.addEventListener('input', upd);
     wrap.appendChild(input);
@@ -858,7 +881,11 @@ function buildParams() {
       const d = SCENES[curTab] && SCENES[curTab].drive;
       if (d && d.key === p.key && autoPlay[curTab]) setAutoPlay(false);
     });
-    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
+    upd();                       // 建面板时用默认刻度初始化 state
+    /* 语言切换只重排文案（fmt 里可能带 t()），绝不能顺手调 upd() 把滑杆刻度
+       写回 state：被 drive 驱动的参数，其 state 值比滑杆 step 精细得多，写回去
+       等于把它永久量化一次；暂停时 frame() 不再跑 applyDrive()，再也修不回来。 */
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); render(); };
     RELABEL.push(relabel);
     relabel();
   });

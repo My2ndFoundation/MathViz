@@ -258,10 +258,14 @@ h.draw();
 
 录制器的**无缝循环**目前把时长吸附到 `2π / |ω|` 的整数倍（`REC.Source.snapDuration`）。当前场景存在 `drive` 且自动播放开着时，真正的循环周期是 `drive.period`，不是 `2π/ω`。吸附基准必须改为：
 
-- 场景有 `drive` 且自动播放开着 → 吸附到 `drive.period` 的整数倍
+- 场景有 `drive` 且自动播放开着 → 吸附到 `n · drive.period` 的整数倍
 - 否则（无 `drive`，或用户关掉了自动播放）→ 维持现有的 `2π / |ω|`
 
 `period` 定义为"完整一轮"（loop 绕一圈 / pingpong 往返一次），所以两种模式下吸附规则一致，不需要分支。
+
+**为什么是 `n · drive.period` 而不是 `drive.period`**：有驱动的画面里同时跑着两个独立周期——驱动量按 `drive.period` 走，而 `state.theta` 仍以 `ω` 自行积分，历史曲线与圆几何都跟着相位。只按 `drive.period` 吸附，相位那一路会在首尾留下断口（starter 的 `lissa`：ω=1、period=8，8 s 结束时 `theta` = 8 rad，离 `2π` 差 1.72 rad）。因此取**最小的整数 `n`（搜索 `n = 1…20`）使 `n · drive.period` 同时也落在相位周期 `2π/|ω|` 的整数倍上**（容差随倍数放大，`|k − round(k)| < 1e-6·max(1, k)`），用 `n · drive.period` 作吸附单元。`ω` 为 0 或缺失时没有相位周期要调和，`n = 1`。
+
+两个周期不可通约（`n ≤ 20` 内无解，如上面的 `lissa`：`8/(2π) = 4/π` 无理）时，退回按单个 `drive.period` 吸附，并在录制面板给一条双语提示，说明循环处可能有接缝、可关掉自动播放规避——不能默默输出一个号称无缝的片段。对应实现：`REC.Source.driveMultiple()` 求 `n`（不可通约返回 0）、`REC.Source.loopSeam()` 供面板判定、`REC.UI.L.loopSeam` 是提示文案。
 
 判定所需的信息（当前场景是否有 `drive`、其 `period`、自动播放是否开着）同样经 `REC.Bridge` 取得；为此 handle 再增加一个 `driveInfo()` 字段，由工具顶层导出：
 
@@ -278,16 +282,17 @@ function driveInfo() {
 
 按仓库"文档先行"纪律，落地顺序固定：先改 `design-system/math-viz-design-system.md`，再改 `math-viz-starter.html`，最后才是各工具。
 
-§8 新建工具自检清单新增四条硬约束：
+§8 新建工具自检清单新增五条硬约束：
 
 1. **每个场景必须声明 `params`**，且必须与该场景实际读取的 `state` 键一致——包括经由模块级辅助函数间接读取的。
 2. **每个场景必须声明 `drive`，或显式写 `drive: null` 并注释理由**。静态对照类场景是合法的（例如纯粹展示一个不随时间变化的结构），但必须是有意识的选择，不能是遗漏。
 3. **被 `drive` 驱动的参数若带 `map`，必须同时提供 `invMap`**，否则滑块无法回显驱动值。
-4. **引擎的行为查询不得只认样式类**，必须限定到结构容器（`.views .vbtn`）或改用 `data-*` 属性。
+4. **`drive` 的 `[from, to]` 必须落在该参数映射后的 `[min, max]` 之内**，越界的值会被滑杆钳住，下一次 `upd()` 又把钳过的值写回 `state`。
+5. **引擎的行为查询不得只认样式类**，必须限定到结构容器（`.views .vbtn`）或改用 `data-*` 属性。
 
 starter 的 SCENES 注释块同步更新，把 `params` / `drive` 写进"必填字段"一行。
 
-### 第 4 条的由来
+### 第 5 条的由来
 
 这条不是预防性的洁癖，是刚刚踩过的坑。`refreshViewButtons()` 原本这样遍历：
 
