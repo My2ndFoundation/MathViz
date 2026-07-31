@@ -1251,6 +1251,8 @@ REC.Bridge.get = function(){
     resize:     _peek(win, 'typeof resize     === "function" ? resize     : null'),
     pushSample: _peek(win, 'typeof pushSample === "function" ? pushSample : null'),
     applyView:  _peek(win, 'typeof applyView  === "function" ? applyView  : null'),
+    applyDrive: _peek(win, 'typeof applyDrive === "function" ? applyDrive : null'),
+    driveInfo:  _peek(win, 'typeof driveInfo  === "function" ? driveInfo  : null'),
     toolId: curId
   };
   if (!h.state || !h.cam || !h.draw) return null;   /* 老工具可能不合规，直接判不可用 */
@@ -1330,6 +1332,8 @@ REC.Bridge.__test = function(){
   alien.doc = docSaved; alien.toolId = '__not-a-tool__';
   REC.Bridge.restore(alien);
   ok('restore 拒绝异工具的快照', Math.abs(h.state.theta - t0) < 1e-9);
+  ok('handle 暴露 applyDrive 字段', 'applyDrive' in h);
+  ok('handle 暴露 driveInfo 字段', 'driveInfo' in h);
   return r;
 };
 /* ===== /REC:BRIDGE ===== */
@@ -1676,6 +1680,25 @@ REC.Source.__test = function(){
     };
   });
   r.pass.push('端到端离线渲染已发起（结果见 REC.Source.__lastProbe）');
+  /* 无驱动时吸附基准仍是 2π/ω；有驱动时改用 n·drive.period（见规范 §D2） */
+  ok('无驱动时按 2π/ω 吸附',
+     Math.abs(REC.Source.snapDuration(8, 1, null) - 6.283185307179586) < 1e-6);
+  ok('有驱动时按 drive.period 吸附',
+     REC.Source.snapDuration(8, 1, { period: 3 }) === 6);
+  ok('有驱动且不足一个周期时补一整轮',
+     REC.Source.snapDuration(2, 1, { period: 5 }) === 5);
+  /* 两周期可通约时，吸附单元必须是 n·drive.period：period=π、ω=1 → n=2 → 2π */
+  ok('可通约时取最小 n 使相位也闭合', REC.Source.driveMultiple(Math.PI, 1) === 2);
+  ok('可通约时按 n·drive.period 吸附',
+     Math.abs(REC.Source.snapDuration(8, 1, { period: Math.PI }) - 6.283185307179586) < 1e-6);
+  ok('ω 为 0 时无相位周期要调和，n = 1', REC.Source.driveMultiple(3, 0) === 1);
+  /* 8/(2π) = 4/π 是无理数：starter 的 lissa 就是这种不可通约的情形 */
+  ok('不可通约时 n 搜不到（返回 0）', REC.Source.driveMultiple(8, 1) === 0);
+  ok('不可通约时退回单个 drive.period', REC.Source.snapDuration(8, 1, { period: 8 }) === 8);
+  ok('不可通约时面板要给接缝提示', REC.Source.loopSeam(1, { period: 8 }) === true);
+  ok('可通约时不给接缝提示', REC.Source.loopSeam(1, { period: Math.PI }) === false);
+  ok('ω 为 0 时不谈相位闭合，也不提示', REC.Source.loopSeam(0, { period: 8 }) === false);
+  ok('无驱动时不提示接缝', REC.Source.loopSeam(1, null) === false);
   return r;
 };
 
@@ -1687,13 +1710,42 @@ REC.Source.omegaOf = function(h){
   return (typeof w === 'number' && isFinite(w)) ? w : 0;
 };
 
-/* 无缝循环：把时长吸到动画周期 2π/ω 的整数倍。ω=0（静态场景）时不吸。 */
-REC.Source.snapDuration = function(sec, omega){
-  if (!omega) return sec;
-  var period = 2 * Math.PI / Math.abs(omega);
-  var n = Math.floor(sec / period);
-  if (n < 1) n = 1;
-  return n * period;
+/* 有驱动时，画面里其实有两个独立的周期：驱动量按 drive.period 走，而
+   state.theta 仍以 ω 自行积分（历史曲线、圆几何都跟着它）。只按 drive.period
+   吸附，相位那一路就会在首尾留下断口。所以找最小的整数 n（n ≤ NMAX），
+   使 n·drive.period 同时也是相位周期 2π/|ω| 的整数倍，用 n·period 做吸附单元。
+   两个周期不可通约时返回 0，调用方退回单个 drive.period 并由面板出提示。 */
+REC.Source.LOOP_NMAX = 20;
+REC.Source.driveMultiple = function(period, omega){
+  if (!(period > 0) || !omega) return 1;          /* 没有相位周期要调和，n = 1 */
+  var pt = 2 * Math.PI / Math.abs(omega);
+  for (var n = 1; n <= REC.Source.LOOP_NMAX; n++){
+    var k = n * period / pt;
+    /* 容差随 k 放大：k 大时浮点绝对误差本就更大，用固定绝对容差会漏判 */
+    if (Math.abs(k - Math.round(k)) < 1e-6 * Math.max(1, k) && Math.round(k) >= 1) return n;
+  }
+  return 0;
+};
+
+/* 面板判定：开了无缝循环、场景又有驱动，但两个周期不可通约——导出的片段
+   相位一定对不上首尾。这时必须当场告诉用户，别让他录完了才发现有接缝。 */
+REC.Source.loopSeam = function(omega, di){
+  return !!(di && di.period > 0 && omega && REC.Source.driveMultiple(di.period, omega) === 0);
+};
+
+/* 无缝循环要求整数个周期。周期取谁：场景有驱动且自动播放开着时，
+   循环单元是 n·drive.period（n 见 driveMultiple）；否则仍是相位周期 2π/|ω|。 */
+REC.Source.snapDuration = function(sec, omega, di){
+  var period;
+  if (di && di.period > 0){
+    var n = REC.Source.driveMultiple(di.period, omega);
+    period = di.period * (n > 0 ? n : 1);         /* 不可通约就退回单个驱动周期 */
+  }
+  else if (omega) period = 2 * Math.PI / Math.abs(omega);
+  else return sec;
+  var m = Math.floor(sec / period);
+  if (m < 1) m = 1;
+  return m * period;
 };
 
 REC.Source.offline = function(h, o, cfg, onProgress){
@@ -1729,6 +1781,7 @@ REC.Source.offline = function(h, o, cfg, onProgress){
       /* 1. 推进仿真（固定步长，与真实帧率无关） */
       h.state.t += dt;
       h.state.theta += omega * dt;
+      if (h.applyDrive) h.applyDrive();     /* 沿用当前页签的驱动设定；无驱动的旧工具跳过 */
       if (h.pushSample) h.pushSample();
 
       /* 2. 运镜 */
@@ -1806,7 +1859,9 @@ REC.UI.L = {
   loopUp:   { zh: '无缝循环需要整数个动画周期，时长已补到一个完整周期。关掉它即可严格按设定时长录。',
               en: 'Seamless loop needs whole animation cycles, so the clip was extended to one full cycle. Turn it off to record exactly the set duration.' },
   loopDown: { zh: '无缝循环需要整数个动画周期，时长已收到最近的整数倍。',
-              en: 'Seamless loop needs whole animation cycles, so the clip was trimmed to the nearest whole multiple.' }
+              en: 'Seamless loop needs whole animation cycles, so the clip was trimmed to the nearest whole multiple.' },
+  loopSeam: { zh: '本页签的驱动周期与相位周期不可通约，两者无法同时闭合：循环处可能看到接缝。可关掉自动播放，或改用不带驱动的页签。',
+              en: 'This tab’s drive period and phase period are incommensurable, so they cannot both close at once: the loop point may show a seam. Turn auto-play off, or use a tab without a drive.' }
 };
 
 function _seg(key, opts){
@@ -1822,13 +1877,24 @@ function _seg(key, opts){
 /* 无缝循环要求整数个动画周期，所以时长会被吸附；不足一个周期时向上补成完整周期
    —— 在 ω=0.5 的工具上，设 8s 实际录出 12.57s。面板必须当场把这个有效时长说出来，
    否则用户要等录完看文件才发现对不上。只有「离线定长」才谈得上时长，其余模式原样返回。 */
-REC.UI.effDur = function(){
-  var req = REC.CFG.duration;
-  if (!REC.CFG.loop || REC.CFG.drive !== 'offline' || REC.CFG.visual === 'screen') return req;
-  if (!REC.Bridge.get || !REC.Source.omegaOf || !REC.Source.snapDuration) return req;
+/* 有效时长与接缝提示共用的前置条件：只有「离线定长 + 无缝循环 + 非整页」才谈得上吸附 */
+REC.UI._loopCtx = function(){
+  if (!REC.CFG.loop || REC.CFG.drive !== 'offline' || REC.CFG.visual === 'screen') return null;
+  if (!REC.Bridge.get || !REC.Source.omegaOf || !REC.Source.snapDuration) return null;
   var h = REC.Bridge.get();
-  if (!h) return req;
-  return REC.Source.snapDuration(req, REC.Source.omegaOf(h));
+  if (!h) return null;
+  return { omega: REC.Source.omegaOf(h), di: h.driveInfo ? h.driveInfo() : null };
+};
+
+REC.UI.effDur = function(){
+  var c = REC.UI._loopCtx();
+  return c ? REC.Source.snapDuration(REC.CFG.duration, c.omega, c.di) : REC.CFG.duration;
+};
+
+/* 驱动周期与相位周期不可通约时，吸附只能顾一头，面板要如实说出来 */
+REC.UI.seam = function(){
+  var c = REC.UI._loopCtx();
+  return !!(c && REC.Source.loopSeam && REC.Source.loopSeam(c.omega, c.di));
 };
 
 REC.UI.durText = function(){
@@ -1857,6 +1923,8 @@ REC.UI.render = function(){
     var effD = REC.UI.effDur();
     if (effD - REC.CFG.duration > 0.05)      note += '<br>' + REC.t(REC.UI.L.loopUp);
     else if (REC.CFG.duration - effD > 0.05) note += '<br>' + REC.t(REC.UI.L.loopDown);
+    /* 吸附只顾住了驱动周期、相位那一路必然留口子——照实说，别让用户以为无缝 */
+    if (REC.UI.seam()) note += '<br>' + REC.t(REC.UI.L.loopSeam);
   }
 
   pan.innerHTML =
@@ -2022,8 +2090,9 @@ REC.UI.run = function(){
   var ctxObj = REC.Compositor.begin(h, cfg);
   if (!ctxObj){ if (note) note.textContent = REC.t(REC.UI.L.noBridge); return; }
 
+  var dInfo = h.driveInfo ? h.driveInfo() : null;
   var dur = cfg.duration;
-  if (cfg.loop) dur = REC.Source.snapDuration(dur, REC.Source.omegaOf(h));
+  if (cfg.loop) dur = REC.Source.snapDuration(dur, REC.Source.omegaOf(h), dInfo);
 
   /* 画幅、时长、工具 id 都在开录这一刻定格：收尾时再去读 REC.CFG / curId，
      用户中途改了设置或换了工具，文件名就会撒谎。 */

@@ -296,7 +296,9 @@ tips：**一段话只讲一个顿悟点**，并指向具体操作（某视角 / 
 
 | 约定 | 内容 |
 |---|---|
-| 单一运动源 | 全部页签共享同一份 `state`（参数）与 `samples`（历史）——强调"同一个运动、不同的测量"；相机与显示开关才按页签区分 |
+| 单一运动源 | 全部页签共享同一份 `state`（参数）与 `samples`（历史）——强调"同一个运动、不同的测量"。共享的是**值**：滑块的可见性由 `params` 按页签决定，但值本身跨页签连续，切回来不会丢。相机与显示开关按页签区分 |
+| 场景作用域参数 | 场景用 `params: ['key', …]` 声明本页签真正读取的滑块；`switchTab` 按此显隐。省略 = 显示全部（向后兼容）。实测 67% 的滑块展示对当前页签无效，这是修正手段 |
+| 时间驱动 | 场景用 `drive: { key, from, to, period, kind, mode? }` 声明随时间走的量。求值是引擎时钟的纯函数（不做增量积分），封装为顶层 `applyDrive()`，`frame()` 与录制器离线渲染各自调用。`kind: 'circular'` 默认 `loop`，`'linear'` 默认 `pingpong`，用户可运行时切换 |
 | 相位连续 | `theta += ω·dt` 累积积分；改 ω 不断相位；φ 作用于显示层 `th = theta + phi` |
 | 采样 | 每帧 push `{t, …真实值}`；按当前波速滑窗剔除（`windowSec = WAVE_LEN/波速 + 0.5`）；重置后立即补一枚初始样本 |
 | 暂停语义 | 暂停只冻结模拟；渲染、相机、参数滑杆全部照常（当前点用实时参数显示） |
@@ -323,10 +325,10 @@ tips：**一段话只讲一个顿悟点**，并指向具体操作（某视角 / 
 
 1. 复制模板，填写 ⓪ `TOOL`（id 与双语标题，运行时驱动 `<title>`/`<h1>`）；
 2. 在 `PARAMS` 数组声明滑杆（key / label / 范围 / 格式化 / 可选映射函数）；
-3. 在 `SCENES` 注册场景：`label`（页签名）、`brand`、`tips`、`views`（首项 iso）、`toggles`（曲线开关按启用顺序取色）、`draw(C)`、`readout()`；
+3. 在 `SCENES` 注册场景：`label`（页签名）、`brand`、`tips`、`views`（首项 iso）、`toggles`（曲线开关按启用顺序取色）、`params`（本页签真正读取的滑块 key 数组）、`drive`（时间驱动声明，无则显式 `null`）、`draw(C)`、`readout()`；
 4. 按需扩展 `pushSample` 的采样字段（原则：记录当时真实值）；
 5. 用引擎部件拼场景：`drawAxes / drawGridXY / drawTimeGrid / drawPeriodBracket / drawCircle / drawAngleArc / strokePoly / line3 / glowDot / label3`；
-6. 自查清单：□ 曲线六处同源 □ 有顿悟视角 □ tips 只讲一件事 □ 暂停时相机仍可动 □ 参数中途可调且历史不重算 □ 移动端折叠正常 □ `node --check` 通过 □ 双语：全部文案为 `{zh,en}` 对象并经 `t()`；`?lang=en` 直达、切换按钮、记忆、`<html lang>`/`document.title` 跟随均正常（§9）□ 版本：meta 两枚 + 头注释 changelog + 面板角标齐备；已登记 `tools.json` 并同步 `index.html` 内嵌 TOOLS 与 README 工具表（§10）
+6. 自查清单：□ 曲线六处同源 □ 有顿悟视角 □ tips 只讲一件事 □ 暂停时相机仍可动 □ 参数中途可调且历史不重算 □ 移动端折叠正常 □ 每个场景声明 params，且与该场景实际读取的 state 键一致（含经模块级辅助函数间接读取的） □ 每个场景声明 drive，或显式 drive: null 并注释理由（静态对照场景合法，但须是有意识的选择） □ 被 drive 驱动的参数若带 map，必须同时提供 invMap（否则滑块无法回显驱动值） □ drive 的 [from, to] 必须落在该参数映射后的 [min, max] 之内（越界会被滑杆钳住，下一次 upd() 又把钳过的值写回 state） □ 引擎的行为查询不只认样式类：querySelectorAll 限定结构容器（如 .views .vbtn）或改用 data-* 属性 □ `node --check` 通过 □ 双语：全部文案为 `{zh,en}` 对象并经 `t()`；`?lang=en` 直达、切换按钮、记忆、`<html lang>`/`document.title` 跟随均正常（§9）□ 版本：meta 两枚 + 头注释 changelog + 面板角标齐备；已登记 `tools.json` 并同步 `index.html` 内嵌 TOOLS 与 README 工具表（§10）
 
 ### 给 Claude Code 的任务简报模板
 
@@ -338,6 +340,7 @@ tips：**一段话只讲一个顿悟点**，并指向具体操作（某视角 / 
 数学内容：〔核心关系式、要演示的定理/性质〕
 参数（PARAMS）：〔例：离心率 e ∈ (0,3)、焦准距 p〕
 场景（SCENES 页签）：〔每页签：名称、要画什么、顿悟视角是什么〕
+每页签的驱动：〔哪个参数随时间走、值域、circular（角度类，默认 loop）还是 linear（坐标轴类，默认 pingpong）；确实该静止的写「无」并说明理由〕
 曲线配色：按 rose → violet → emerald → orange 顺序启用
 特殊处理：〔奇点/渐近线/无界值？参照第 6 节裁剪与断开约定〕
 验收：node --check 通过；符合第 8 节自查清单。

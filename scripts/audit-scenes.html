@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>场景审计 · Scene Audit</title>
+<style>
+body{margin:0;padding:20px;background:#05070d;color:#dbe6f5;
+  font-family:ui-sans-serif,-apple-system,"PingFang SC",sans-serif;font-size:13px}
+h1{font-size:18px;margin:0 0 4px}
+.note{color:#7d8ca6;font-size:12px;line-height:1.7;margin:0 0 16px;max-width:70em}
+.note b{color:#ffd7e3}
+button{padding:7px 14px;border-radius:8px;cursor:pointer;
+  border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.04);color:#dbe6f5}
+#bar{margin:12px 0;color:#7d8ca6}
+table{border-collapse:collapse;width:100%;margin-top:12px}
+th,td{text-align:left;padding:5px 9px;border-bottom:1px solid rgba(255,255,255,.08);vertical-align:top}
+th{color:#7d8ca6;font-weight:600;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase}
+.bad{color:#ff5a8a;font-weight:600}
+.warn{color:#ffa653}
+.ok{color:#37d9a0}
+code{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#a68bff}
+iframe{position:fixed;left:-9999px;top:0;width:1200px;height:700px;border:0}
+</style>
+</head>
+<body>
+<h1>场景审计 · Scene Audit</h1>
+<p class="note">
+逐个载入 <code>outputs/</code> 下的工具，对每个页签：把每个滑块推到量程两端比对画布像素，
+判断它对当前页签<b>是否真的有效</b>；再让引擎时钟前进 0.5 秒，判断该页签<b>有没有时间驱动</b>。<br>
+<b>局限</b>：只能测「改了有没有反应」，测不出「作者本意」。某个滑块本该有效但实现漏读了，这里会报它无效。
+生成的 <code>params</code> 初稿必须人工复核后再用。<br>
+<b>判据</b>：页签一旦声明 <code>params</code>，「展示/有效」按声明数算，通过与否看<b>声明差集</b>——
+<b>漏声明</b>（实测有效却没写进 <code>params</code>，滑块被面板藏起来，最危险）标红，
+<b>多声明</b>（写了却无效，面板白占一格）标橙，差集为空才算迁移到位。<br>
+必须通过本地服务器打开（<code>python3 -m http.server 8777</code>），<code>file://</code> 下受同源限制无法探测。
+</p>
+<button id="go">开始审计</button>
+<div id="bar"></div>
+<table id="out"><thead><tr>
+<th>工具</th><th>页签</th><th>滑块 展示/有效</th><th>声明差集</th><th>驱动</th><th>已声明 params</th><th>实测 params 初稿</th>
+</tr></thead><tbody></tbody></table>
+<iframe id="fr"></iframe>
+<script>
+'use strict';
+var fr = document.getElementById('fr');
+var bar = document.getElementById('bar');
+var tbody = document.querySelector('#out tbody');
+
+/* 缩到 80×45 再取像素做 FNV-1a 哈希：够灵敏，又不至于每帧读全画布 */
+function makeHash(){
+  var pc = document.createElement('canvas'); pc.width = 80; pc.height = 45;
+  var px = pc.getContext('2d', { willReadFrequently: true });
+  return function(cv){
+    /* 先在源画布（隐藏 iframe 里的 canvas）上强制同步一次像素读取，
+       逼 GPU 合成结果落盘到 CPU 侧再 drawImage；不这样做，读到的常是
+       上一帧的陈旧画面（双缓冲/合成延迟），会把"没变"误判成"变了"，
+       即滑块被错误地判定为有效——这行不是多余代码，删掉会引入假阳性。 */
+    cv.getContext('2d').getImageData(0, 0, 1, 1);
+    px.clearRect(0,0,80,45); px.drawImage(cv, 0, 0, 80, 45);
+    var d = px.getImageData(0,0,80,45).data, h = 2166136261;
+    for (var i = 0; i < d.length; i += 7){ h ^= d[i]; h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  };
+}
+var hash = makeHash();
+
+function load(url){
+  return new Promise(function(res){
+    var done = false;
+    function on(){ if (done) return; done = true; fr.removeEventListener('load', on); setTimeout(res, 300); }
+    fr.addEventListener('load', on);
+    fr.src = url;
+    setTimeout(function(){ if (!done){ done = true; res(); } }, 6000);
+  });
+}
+
+function probe(){
+  var w = fr.contentWindow;
+  function ev(e){ try { return w.eval(e); } catch(x){ return undefined; } }
+  var SCENES = ev('typeof SCENES !== "undefined" ? SCENES : null');
+  var PARAMS = ev('typeof PARAMS !== "undefined" ? PARAMS : null');
+  var state  = ev('typeof state  !== "undefined" ? state  : null');
+  var cv     = ev('typeof canvas !== "undefined" ? canvas : null');
+  var draw   = ev('typeof draw === "function" ? draw : null');
+  var swt    = ev('typeof switchTab === "function" ? switchTab : null');
+  var push   = ev('typeof pushSample === "function" ? pushSample : null');
+  if (!SCENES || !PARAMS || !state || !cv || !draw || !swt) return null;
+  var res = {};
+  Object.keys(SCENES).forEach(function(sk){
+    try { swt(sk); } catch(e){}
+    draw();
+    /* 刚切页签时画布合成管线还没喂饱：即便 hash() 里已经在源画布强制
+       flush，头一两次读到的仍可能是切页签前的旧帧，会把"其实没变"
+       误判成"参数/时间一动画面就变"（假阳性）。这里空转两轮「画 + 读」
+       把管线喂饱，后面的测量才可信——删掉这两行，读数会跟着抖动。 */
+    draw(); hash(cv);
+    draw(); hash(cv);
+    draw();
+    var t0 = state.t, th0 = state.theta;
+    var h0 = hash(cv);
+    for (var i = 0; i < 30; i++){
+      state.t += 1/60; state.theta += (state.omega || 1) * (1/60);
+      if (push) try { push(); } catch(e){}
+    }
+    draw();
+    var anim = hash(cv) !== h0;
+    state.t = t0; state.theta = th0; draw();
+    var live = [];
+    PARAMS.forEach(function(p){
+      var old = state[p.key];
+      var lo = p.map ? p.map(p.min) : p.min, hi = p.map ? p.map(p.max) : p.max;
+      state[p.key] = lo; draw(); var a = hash(cv);
+      state[p.key] = hi; draw(); var b = hash(cv);
+      state[p.key] = old; draw();
+      if (a !== b) live.push(p.key);
+    });
+    /* 真正的判据是「声明集」与「实测有效集」的差，不是跟全局 PARAMS 比：
+       页签声明了 params 之后，面板显示的就只有 declared 这几根滑块，拿
+       PARAMS.length 当分母的话，迁移得再完美读数也永远是红的。
+       over  = 声明了却无效（多声明：面板上白占一格）
+       under = 实测有效却没声明（漏声明：滑块对本页签有用，面板却把它藏了，
+               这一类更危险——用户根本看不到那个旋钮） */
+    var declared = SCENES[sk].params || null;
+    var over = [], under = [];
+    if (declared){
+      declared.forEach(function(k){ if (live.indexOf(k) < 0) over.push(k); });
+      live.forEach(function(k){ if (declared.indexOf(k) < 0) under.push(k); });
+    }
+    /* shown = 面板实际会显示的滑块数；liveShown = 其中真正有效的 */
+    var shown = declared ? declared.length : PARAMS.length;
+    var liveShown = declared ? (declared.length - over.length) : live.length;
+    res[sk] = { live: live, anim: anim, total: PARAMS.length,
+                shown: shown, liveShown: liveShown,
+                declared: declared, over: over, under: under,
+                drive: SCENES[sk].drive ? (SCENES[sk].drive.key + '/' + (SCENES[sk].drive.kind || '?')) : null };
+  });
+  return res;
+}
+
+function row(tool, tab, r){
+  var tr = document.createElement('tr');
+  var cls, diff;
+  if (r.declared){
+    /* 漏声明（under）比多声明（over）严重：前者是功能被藏起来，后者只是白占位 */
+    cls = r.under.length ? 'bad' : (r.over.length ? 'warn' : 'ok');
+    var parts = [];
+    if (r.under.length) parts.push('<span class="bad">漏声明 +' + r.under.join(' +') + '</span>');
+    if (r.over.length)  parts.push('<span class="warn">多声明 −' + r.over.join(' −') + '</span>');
+    diff = parts.length ? parts.join(' · ') : '<span class="ok">一致</span>';
+  } else {
+    /* 没声明 params 的页签：面板显示全部滑块，无从谈漏声明，仍按死滑块数示警 */
+    cls = r.live.length === 0 ? 'bad' : (r.live.length < r.total ? 'warn' : 'ok');
+    diff = '<span class="bad">未声明 params</span>';
+  }
+  var declared = r.declared ? r.declared.join(', ') : '<span class="bad">未声明</span>';
+  var drive = r.drive ? '<span class="ok">' + r.drive + '</span>'
+                      : (r.anim ? '<span class="warn">未声明（有动画）</span>'
+                                : '<span class="bad">无 · 静止</span>');
+  tr.innerHTML = '<td>' + tool + '</td><td>' + tab + '</td>' +
+    '<td class="' + cls + '">' + r.shown + ' / ' + r.liveShown + '</td>' +
+    '<td>' + diff + '</td>' +
+    '<td>' + drive + '</td>' +
+    '<td><code>' + declared + '</code></td>' +
+    '<td><code>' + (r.live.length ? "['" + r.live.join("', '") + "']" : '[]') + '</code></td>';
+  tbody.appendChild(tr);
+}
+
+document.getElementById('go').addEventListener('click', function(){
+  this.disabled = true;
+  tbody.innerHTML = '';
+  fetch('../tools.json', { cache: 'no-cache' }).then(function(r){ return r.json(); }).then(function(j){
+    var list = j.tools.slice();
+    var i = 0, statTabs = 0, statStatic = 0, statShown = 0, statLive = 0, statUnder = 0;
+    (function next(){
+      if (i >= list.length){
+        /* 无效率的分母是「面板真会显示的滑块数」，不是全局 PARAMS ——
+           迁移到位的页签应当把这个数压到 0，指标才和 phase 2 的验收口径一致 */
+        bar.innerHTML = '完成：' + statTabs + ' 个页签 · 展示滑块 ' + statShown +
+          ' 根，其中无效 ' + (statShown - statLive) + ' 根（' +
+          Math.round(100 * (statShown - statLive) / Math.max(1, statShown)) + '%）· 漏声明页签 ' +
+          statUnder + ' 个 · 静止页签 ' + statStatic + ' 个';
+        return;
+      }
+      var d = list[i++];
+      bar.textContent = '审计中 ' + i + '/' + list.length + '：' + d.id;
+      load('../' + d.file).then(function(){
+        var res = null;
+        try { res = probe(); } catch(e){ res = null; }
+        if (!res){
+          var tr = document.createElement('tr');
+          tr.innerHTML = '<td>' + d.id + '</td><td colspan="6" class="bad">探测失败（非声明式实现，或页签结构与引擎约定不同）</td>';
+          tbody.appendChild(tr);
+        } else {
+          Object.keys(res).forEach(function(sk){
+            statTabs++; statShown += res[sk].shown; statLive += res[sk].liveShown;
+            if (res[sk].under && res[sk].under.length) statUnder++;
+            if (!res[sk].anim && !res[sk].drive) statStatic++;
+            row(d.id, sk, res[sk]);
+          });
+        }
+        next();
+      });
+    })();
+  });
+});
+</script>
+</body>
+</html>
