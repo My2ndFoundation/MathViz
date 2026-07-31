@@ -13,7 +13,9 @@
   引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
 
   版本记录（changelog，新→旧）：
-    1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
+    1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换；
+                       顺带修正「编码合并步骤 k」滑杆回显——原先未按符号数 m 夹取，
+                       m = 5 时把 k 拖到 6 会出现「滑杆标 6、读数标 4」的同符号两值
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-31  首个版本：惊奇度 / 二元熵 / 多结果分布 / 编码树 四场景（含双语）
                        Initial release: surprise / binary entropy / multi-outcome distribution / coding tree — four scenes, bilingual
@@ -334,7 +336,10 @@ const PARAMS = [
   { key: 'mSym',     label: { zh: '符号数 <i>m</i>',       en: 'Symbol count <i>m</i>' },       min: 2,   max: 8, step: 1,     value: 5,    map: v => Math.round(v), fmt: v => '' + Math.round(v) },
   { key: 'skew',     label: { zh: '分布偏斜 <i>s</i>',     en: 'Distribution skew <i>s</i>' },  min: 0,   max: 1, step: 0.01,  value: 0.45, fmt: v => fmt(v) },
   { key: 'emitRate', label: { zh: '符号源速率',            en: 'Source rate' },                 min: 0.5, max: 8, step: 0.5,   value: 2,    fmt: v => fmt(v, 1) + t({ zh: ' 符号/s', en: ' sym/s' }) },
-  { key: 'codeStep', label: { zh: '编码合并步骤 <i>k</i>', en: 'Coding merge step <i>k</i>' },  min: 0,   max: 7, step: 1,     value: 7,    map: v => Math.round(v), invMap: v => v, fmt: v => '' + Math.round(v) }
+  /* fmt 必须与 draw / readout 里的 k = clamp(round(codeStep), 0, m−1) 同一个夹取：
+     滑杆量程固定到 7（= m 取最大值 8 时的合并次数），而实际步数上限随符号数 m 走。
+     不夹取的话，m = 5 时把 k 拖到 6 会出现「滑杆标 6、读数标 4」——同一个符号两个值。 */
+  { key: 'codeStep', label: { zh: '编码合并步骤 <i>k</i>', en: 'Coding merge step <i>k</i>' },  min: 0,   max: 7, step: 1,     value: 7,    map: v => Math.round(v), invMap: v => v, fmt: v => '' + clamp(Math.round(v), 0, Math.round(state.mSym) - 1) }
 ];
 
 /* ╔══════════════════════════════════════════════════════════╗
@@ -678,8 +683,11 @@ const SCENES = {
     label: { zh: '编码树', en: 'Coding tree' },
     params: ['mSym', 'skew', 'codeStep'],
     /* tips 就是一句驱动说明："拖动「编码合并步骤 k」从零重演建树"——k 是本页自变量。
-       取满 [0, 7]（k 的上界随符号数 m 走，m < 8 时 draw 里的 clamp 会让尾段停在建好的整棵树上，
-       正好是一次"看完整棵树"的停顿，不是死区错误）。
+       取满 [0, 7]：7 = 符号数 m 取上限 8 时的合并次数。m 更小时尾段会停在建好的整棵树上
+       （默认 m = 5 时约占上行程的 3/7），这是一次"看完整棵树"的停顿——但它成立的前提是
+       上面那条 fmt 的夹取，否则滑杆会标出一个读数区并不认的 k。
+       不把 to 写死成 4 的理由：4 只对默认的 m = 5 成立，m 取 6/7/8 时整棵树将永远建不完，
+       那等于把一处回显缺陷换成一处功能缺陷。
        从 7 跳回 0 整棵树会瞬间拆光 ⇒ linear（往返 = 建树再拆树）；每步一次合并，8 s 跟得上。
        codeStep 带 map: Math.round，按 §8 硬约束补了 invMap（Math.round 的滑杆刻度即自身，故取恒等）。 */
     drive: { key: 'codeStep', from: 0, to: 7, period: 8, kind: 'linear' },
