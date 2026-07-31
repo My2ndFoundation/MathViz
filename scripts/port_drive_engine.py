@@ -106,7 +106,61 @@ def extract_starter():
         end += 1
     g['takeover'] = L[i:end + 1]
 
+    # ⑨ buildParams() 的 render / upd 拆分（starter 的注释写明这是为 drive 而做的：
+    #    被 drive 驱动的参数其 state 值比滑杆 step 精细得多，语言切换若调 upd()
+    #    就会把它永久量化一次）
+    i = _one(L, lambda l: l.startswith('    /* render 只回显滑杆当前刻度；'), 'render 拆分注释')
+    end = i
+    while L[end] != '    };':
+        end += 1
+    g['render'] = L[i:end + 1]
+
+    # ⑩ 初始化 upd() + relabel 只调 render()
+    i = _one(L, lambda l: l.startswith('    upd();'), 'buildParams 初始化 upd()')
+    end = i
+    while not L[end].startswith('    const relabel = () =>'):
+        end += 1
+    g['relabel'] = L[i:end + 1]
+
     return g
+
+
+# ------------------------------------------------- cartesian-polar 的等价改写
+# starter 的 render/upd 用 paramWraps 的自由变量 p；该文件用 paramRefs 的
+# ref.cfg（configParam() 会整体换掉 ref.cfg），故逐行做等价映射。映射表里的
+# 每个源行都必须在 starter 抽出的块里出现，否则报错——starter 改了就会当场炸，
+# 不会悄悄漏改。
+REF_RENDER = {
+    '    const render = () => { val.textContent = p.fmt(parseFloat(input.value)); };':
+        '    ref.render = () => { val.textContent = ref.cfg.fmt(parseFloat(input.value)); };',
+    '    const upd = () => {':
+        '    ref.upd = () => {',
+    '      state[p.key] = p.map ? p.map(raw) : raw;':
+        '      state[p.key] = ref.cfg.map ? ref.cfg.map(raw) : raw;',
+    '      render();':
+        '      ref.render();',
+}
+REF_RELABEL = {
+    '    const relabel = () => { wrap.querySelector(\'label\').innerHTML = t(p.label); render(); };':
+        '    ref.relabel = () => { ref.labelEl.innerHTML = t(ref.cfg.label); ref.render(); };',
+}
+
+
+def _remap(block, table, drop_prefix=None):
+    seen = set()
+    out = []
+    for l in block:
+        if drop_prefix and l.startswith(drop_prefix):
+            continue
+        if l in table:
+            seen.add(l)
+            out.append(table[l])
+        else:
+            out.append(l)
+    missing = set(table) - seen
+    if missing:
+        raise SystemExit('cartesian-polar 等价改写失败，starter 里找不到这些行：%r' % sorted(missing))
+    return out
 
 
 # ---------------------------------------------------------------- 单文件移植
@@ -137,6 +191,14 @@ def port(lines, g):
     def insert_after(anchor_pred, what, payload):
         i = _idx(lines, anchor_pred, what)
         lines[i + 1:i + 1] = payload
+
+    def replace_block(old, what, payload):
+        """把唯一一段连续的字面量行替换成 payload。命中数 != 1 即 Miss。"""
+        hits = [i for i in range(len(lines) - len(old) + 1)
+                if lines[i:i + len(old)] == old]
+        if len(hits) != 1:
+            raise Miss('%s：待替换块命中 %d 次（期望 1）' % (what, len(hits)))
+        lines[hits[0]:hits[0] + len(old)] = payload
 
     # 该文件用哪张滑块登记表
     if any(l.startswith('const paramWraps = {};') for l in lines):
@@ -231,6 +293,42 @@ def port(lines, g):
         insert_after(lambda l: l == 'buildParams();', '启动序列 buildParams()',
                      ['buildDrive();'])
         done.append('startup')
+
+    # ⑪ buildParams()：把 upd 拆成 render（只回显刻度）/ upd（写 state）
+    #    这是驱动机制的一部分：不拆，语言切换就会把滑杆 step 刻度写回 state，
+    #    把被 drive 驱动的参数永久量化一次（starter 的两段注释写明了理由）。
+    if not already('render 只回显滑杆当前刻度'):
+        if reg == 'paramWraps':
+            old = ['    const upd = () => {',
+                   '      const raw = parseFloat(input.value);',
+                   '      state[p.key] = p.map ? p.map(raw) : raw;',
+                   '      val.textContent = p.fmt(raw);',
+                   '    };']
+            new = g['render']
+        else:
+            old = ['    ref.upd = () => {',
+                   '      const raw = parseFloat(input.value);',
+                   '      state[p.key] = ref.cfg.map ? ref.cfg.map(raw) : raw;',
+                   '      val.textContent = ref.cfg.fmt(raw);',
+                   '    };']
+            new = _remap(g['render'], REF_RENDER)
+        replace_block(old, 'buildParams 的 upd 闭包', new)
+        done.append('render')
+
+    # ⑫ relabel 只调 render()；49 个文件原本靠 relabel() 里的 upd() 初始化 state，
+    #    所以要把 starter 那句显式的 upd() 一并带上，初始化不能丢。
+    if not already('语言切换只重排文案'):
+        if reg == 'paramWraps':
+            old = ["    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };"]
+            new = g['relabel']
+        else:
+            # 该文件的 relabel 本来就不调 upd()（末尾另有 ref.upd() 初始化 state），
+            # 没有「语言切换写回 state」的病；这里只补 render()，让 fmt 里的 t()
+            # 能随语言重渲染，与 starter 语义对齐。故丢掉那句初始化 upd()。
+            old = ["    ref.relabel = () => { ref.labelEl.innerHTML = t(ref.cfg.label); };"]
+            new = _remap(g['relabel'], REF_RELABEL, drop_prefix='    upd();')
+        replace_block(old, 'buildParams 的 relabel', new)
+        done.append('relabel')
 
     return lines, done
 
