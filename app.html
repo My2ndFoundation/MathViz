@@ -1364,6 +1364,125 @@ REC.Compositor = {};
 
 /* ===== REC:SOURCE ===== */
 REC.Source = {};
+REC.Source.__test = function(){
+  var r = { pass: [], fail: [] };
+  function ok(n, c){ if (c) r.pass.push(n); else r.fail.push(n); }
+  var h = REC.Bridge.get();
+  if (!h){ r.fail.push('需要先载入一个工具（Bridge 不可用）'); return r; }
+  ok('offline 是函数', typeof REC.Source.offline === 'function');
+  ok('realtime 是函数', typeof REC.Source.realtime === 'function');
+  ok('snapDuration 是函数', typeof REC.Source.snapDuration === 'function');
+  /* 无缝循环吸附：omega=1 时周期 2π≈6.283，8s 应吸附到 2 个周期 12.566…
+     取「不超过原时长的最大整数倍，至少 1 个周期」 */
+  ok('时长吸附到周期整数倍', Math.abs(REC.Source.snapDuration(8, 1) - 6.283185307179586) < 1e-6);
+  ok('吸附不足一个周期时给一个整周期', Math.abs(REC.Source.snapDuration(3, 1) - 6.283185307179586) < 1e-6);
+  ok('omega 为 0 时原样返回', REC.Source.snapDuration(8, 0) === 8);
+
+  /* 端到端：跑一段 0.5s 的离线渲染，帧数必须精确，且现场被还原 */
+  var snap = REC.Bridge.snapshot();
+  var o = REC.Compositor.begin(h, { visual: 'clean', aspect: '1:1' });
+  var s = REC.Source.offline(h, o, { duration: 0.5, loop: false, orbit: false, viewTo: '' }, null);
+  ok('offline 返回 stream', !!(s && s.stream && s.stream.getVideoTracks().length === 1));
+  s.done.then(function(res){
+    REC.Compositor.end(o);
+    REC.Bridge.restore(snap);
+    REC.Source.__lastProbe = {
+      frames: res.frames,
+      framesOk: res.frames === Math.round(0.5 * REC.FPS),
+      restored: Math.abs(h.state.theta - snap.state.theta) < 1e-9,
+      runningRestored: h.state.running === snap.state.running
+    };
+  });
+  r.pass.push('端到端离线渲染已发起（结果见 REC.Source.__lastProbe）');
+  return r;
+};
+
+/* 无缝循环：把时长吸到动画周期 2π/ω 的整数倍。ω=0（静态场景）时不吸。 */
+REC.Source.snapDuration = function(sec, omega){
+  if (!omega) return sec;
+  var period = 2 * Math.PI / Math.abs(omega);
+  var n = Math.floor(sec / period);
+  if (n < 1) n = 1;
+  return n * period;
+};
+
+REC.Source.offline = function(h, o, cfg, onProgress){
+  var total = Math.max(1, Math.round(cfg.duration * REC.FPS));
+  var dt = 1 / REC.FPS;
+  var stream = o.canvas.captureStream(0);         /* 0 = 只接受手动 requestFrame */
+  var track = stream.getVideoTracks()[0];
+  var cancelled = false;
+
+  /* 接管驱动：停掉工具自己的积分，本函数按固定步长推进 */
+  var wasRunning = h.state.running;
+  h.state.running = false;
+
+  /* 运镜的起止镜位。引擎的 tween 走真实时钟，离线模式必须自己插值。 */
+  var cam0 = { az: h.cam.az, el: h.cam.el, dist: h.cam.dist,
+               tx: h.cam.tx, ty: h.cam.ty, tz: h.cam.tz };
+  var camTo = null;
+  if (cfg.viewTo && h.SCENES && h.curTab){
+    var sc = h.SCENES[h.curTab];
+    var v = sc && sc.views && sc.views[cfg.viewTo];
+    if (v) camTo = v.cam || v;
+  }
+  function ease(k){ return k < 0.5 ? 2*k*k : 1 - Math.pow(-2*k + 2, 2) / 2; }
+
+  var done = new Promise(function(resolve){
+    var i = 0;
+    function step(){
+      if (cancelled){ h.state.running = wasRunning; resolve({ frames: i, cancelled: true }); return; }
+      if (i >= total){ h.state.running = wasRunning; resolve({ frames: i, cancelled: false }); return; }
+      var k = i / total;
+
+      /* 1. 推进仿真（固定步长，与真实帧率无关） */
+      h.state.t += dt;
+      h.state.theta += h.state.omega * dt;
+      if (h.pushSample) h.pushSample();
+
+      /* 2. 运镜 */
+      if (cfg.orbit) h.cam.az = cam0.az + 2 * Math.PI * k;
+      if (camTo){
+        var e = ease(Math.min(1, k / 0.6));       /* 前 60% 完成过渡，留时间看结果 */
+        var f;
+        for (f in cam0) if (typeof camTo[f] === 'number') h.cam[f] = cam0[f] + (camTo[f] - cam0[f]) * e;
+      }
+
+      /* 3. 绘制 + 合成 + 交帧 */
+      h.draw();
+      REC.Compositor.frame(o, h, { i: i, total: total, t: i * dt });
+      if (track.requestFrame) track.requestFrame();
+      else if (stream.requestFrame) stream.requestFrame();
+
+      i++;
+      if (onProgress) onProgress(i / total);
+      requestAnimationFrame(step);               /* 让出主线程，编码器才有机会消费 */
+    }
+    requestAnimationFrame(step);
+  });
+
+  return { stream: stream, done: done, cancel: function(){ cancelled = true; } };
+};
+
+/* 实时录制：被动跟随工具自己的 rAF，能录下手动拖拽旋转、切 tab、拖滑块的全过程 */
+REC.Source.realtime = function(h, o, cfg){
+  var stream = o.canvas.captureStream(REC.FPS);
+  var timer = null;
+  if (o.mode === 'overlay'){
+    /* overlay 模式的离屏画布不会自己更新，得自己按帧刷 */
+    var i = 0;
+    var tick = function(){
+      REC.Compositor.frame(o, h, { i: i, total: 0, t: i / REC.FPS });
+      i++;
+      timer = requestAnimationFrame(tick);
+    };
+    timer = requestAnimationFrame(tick);
+  }
+  return {
+    stream: stream,
+    stop: function(){ if (timer) cancelAnimationFrame(timer); timer = null; }
+  };
+};
 /* ===== /REC:SOURCE ===== */
 
 /* ===== REC:UI ===== */
