@@ -131,6 +131,42 @@ body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)
   .shell:not(.hid) .scrim{display:block}
   .edge{height:64px}
 }
+
+/* ===== 录制器 ===== */
+.rec-btn{position:absolute;right:16px;bottom:16px;z-index:40;
+  display:flex;align-items:center;gap:7px;
+  padding:9px 14px;border-radius:999px;cursor:pointer;
+  border:1px solid rgba(255,255,255,.14);
+  background:rgba(10,16,28,.82);backdrop-filter:blur(8px);
+  color:#dbe6f5;font-size:13px;letter-spacing:.02em}
+.rec-btn:hover{border-color:rgba(255,255,255,.28)}
+.rec-btn[disabled]{opacity:.4;cursor:not-allowed}
+.rec-btn .dot{width:9px;height:9px;border-radius:50%;background:#ff5a8a}
+.rec-panel{position:absolute;right:16px;bottom:62px;z-index:41;width:274px;
+  padding:14px;border-radius:14px;display:none;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(8,13,24,.94);backdrop-filter:blur(12px);
+  color:#dbe6f5;font-size:12.5px}
+.rec-panel.on{display:block}
+.rec-panel h4{margin:0 0 10px;font-size:12px;letter-spacing:.14em;
+  text-transform:uppercase;color:#7d8ca6;font-weight:600}
+.rec-row{margin-bottom:11px}
+.rec-row > label{display:block;margin-bottom:5px;color:#93a3bd;font-size:11.5px}
+.rec-seg{display:flex;gap:5px}
+.rec-seg button{flex:1;padding:6px 0;border-radius:7px;cursor:pointer;font-size:11.5px;
+  border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);color:#93a3bd}
+.rec-seg button.on{border-color:#ff5a8a;color:#ffd7e3;background:rgba(255,90,138,.14)}
+.rec-chk{display:flex;align-items:center;gap:7px;color:#93a3bd;cursor:pointer}
+.rec-go{width:100%;padding:9px 0;margin-top:3px;border-radius:9px;cursor:pointer;
+  border:1px solid rgba(255,90,138,.5);background:rgba(255,90,138,.16);color:#ffd7e3}
+.rec-go[disabled]{opacity:.45;cursor:not-allowed}
+.rec-note{margin-top:9px;color:#6f7f99;font-size:11px;line-height:1.5}
+.rec-bar{height:3px;margin-top:9px;border-radius:2px;background:rgba(255,255,255,.09);overflow:hidden}
+.rec-bar i{display:block;height:100%;width:0;background:#ff5a8a;transition:width .1s linear}
+/* 录制期间：iframe 脱离 flex 布局，按目标画幅定尺寸再缩放预览 */
+.stage.rec-live{overflow:hidden;position:relative}
+.stage.rec-live > iframe{position:absolute;left:50%;top:50%;
+  transform-origin:50% 50%;border:0}
 </style>
 </head>
 <body>
@@ -159,6 +195,8 @@ body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)
 
   <main class="stage">
     <iframe id="frame" title="工具内容" allow="fullscreen"></iframe>
+    <button class="rec-btn" id="recBtn" title="录制视频 / Record video"><span class="dot"></span><span id="recBtnTxt">录制</span></button>
+    <div class="rec-panel" id="recPanel"></div>
   </main>
 </div>
 
@@ -1001,6 +1039,12 @@ function renderChrome(){
   var d = curId ? byId(curId) : null;
   document.title = d ? t(d.title) + ' · MathViz' : t(L.title);
   document.getElementById('btnAlone').href = d ? d.file + '?lang=' + LANG : 'index.html?lang=' + LANG;
+  /* 录制器的文案也归 renderChrome 管：本仓库的约定是语言开关即时生效，不许等到刷新 */
+  if (window.REC && REC.UI && REC.UI.render){
+    var rbt = document.getElementById('recBtnTxt');
+    if (rbt) rbt.textContent = REC.t(REC.UI.L.rec);
+    REC.UI.render();
+  }
 }
 
 /* ================= 导航 ================= */
@@ -1021,6 +1065,7 @@ function setFrame(url){
 }
 
 function go(id, push){
+  REC.abort();
   if (id && !byId(id)) id = null;
   curId = id || null;
   syncing = true;
@@ -1062,6 +1107,9 @@ document.getElementById('btnHide').addEventListener('click', function(){ setSide
 document.getElementById('btnShow').addEventListener('click', function(){ setSidebar(true); });
 document.getElementById('scrim').addEventListener('click', function(){ setSidebar(false); });
 document.getElementById('btnLang').addEventListener('click', function(){
+  /* 切语言会重载 iframe，工具实例整个换掉：录制现场必须先丢弃，
+     否则离线循环会继续驱动一个已被卸载的文档，收尾时还会把旧快照写进新实例。 */
+  REC.abort();
   LANG = LANG === 'zh' ? 'en' : 'zh';
   try{ localStorage.setItem(LANG_KEY, LANG); }catch(e){}
   try{
@@ -1096,6 +1144,7 @@ document.addEventListener('keydown', hotkey);
 
 /* iframe 载入后：把快捷键也挂到工具文档上（同源才行），并回同步高亮与地址栏 */
 frame.addEventListener('load', function(){
+  REC.Bridge.invalidate();
   var doc = null;
   try{ doc = frame.contentDocument; }catch(e){}
   if (doc){
@@ -1115,6 +1164,861 @@ frame.addEventListener('load', function(){
   syncing = false;
 });
 
+/* ================= 录制器 ================= */
+var REC = {};
+
+REC.CFG = {
+  visual: 'overlay', aspect: '16:9', drive: 'offline',
+  duration: 8, loop: true, orbit: false, viewTo: ''
+};
+REC.SIZES = { '16:9': [1920,1080], '9:16': [1080,1920], '1:1': [1080,1080] };
+REC.FPS = 60;
+/* 兜底色序：与设计系统的曲线色序（rose → violet → emerald → orange）逐字一致。
+   只在某个 toggle 自己没声明 color 时才用得上 —— 原则 3「一条曲线一个颜色」要求
+   叠层图例必须复用工具真正画曲线用的那个色值，而不是另起一套近似色。 */
+REC.COLORS = ['#fb7185','#a78bfa','#34d399','#fb923c'];
+
+/* 双语取词：与外壳其余部分一致，读全局 LANG */
+REC.t = function(o){ return (o && o[LANG]) || (o && o.zh) || ''; };
+
+/* 汇总各单元自检。跑法：起服务器后在控制台执行 REC.selftest() */
+REC.selftest = function(){
+  var units = ['Bridge','Encoder','Compositor','Source','UI'];
+  var out = { pass: [], fail: [] };
+  for (var i = 0; i < units.length; i++){
+    var u = units[i], m = REC[u] && REC[u].__test;
+    if (typeof m !== 'function'){ out.fail.push(u + ': 未实现 __test()'); continue; }
+    var r;
+    try{ r = m(); }catch(e){ out.fail.push(u + ': __test() 抛错 ' + e); continue; }
+    for (var a = 0; a < r.pass.length; a++) out.pass.push(u + ' · ' + r.pass[a]);
+    for (var b = 0; b < r.fail.length; b++) out.fail.push(u + ' · ' + r.fail[b]);
+  }
+  return out;
+};
+
+/* ===== REC:BRIDGE ===== */
+REC.Bridge = {};
+var _bridgeCache = null;
+
+/* 工具里的顶层 const 不挂 window，只能靠全局 eval 穿透 script scope。
+   跨源（file:// 打开）时 contentWindow.eval 会抛错，这里统一吞掉并回落 null。 */
+function _peek(win, expr){
+  try{ return win.eval(expr); }catch(e){ return undefined; }
+}
+
+REC.Bridge.get = function(){
+  if (_bridgeCache && _bridgeCache.win === frame.contentWindow) return _bridgeCache;
+  _bridgeCache = null;
+  if (!curId) return null;                       /* 画廊首页没有工具可录 */
+  var win = null, doc = null;
+  try{ win = frame.contentWindow; doc = frame.contentDocument; }catch(e){ return null; }
+  if (!win || !doc) return null;
+  var cv = _peek(win, 'typeof canvas !== "undefined" ? canvas : null');
+  if (!cv || cv.tagName !== 'CANVAS') return null;
+  var h = {
+    win: win, doc: doc, canvas: cv,
+    state:   _peek(win, 'typeof state   !== "undefined" ? state   : null'),
+    cam:     _peek(win, 'typeof cam     !== "undefined" ? cam     : null'),
+    SCENES:  _peek(win, 'typeof SCENES  !== "undefined" ? SCENES  : null'),
+    curTab:  _peek(win, 'typeof curTab  !== "undefined" ? curTab  : null'),
+    samples: _peek(win, 'typeof samples !== "undefined" ? samples : null'),
+    draw:       _peek(win, 'typeof draw       === "function" ? draw       : null'),
+    resize:     _peek(win, 'typeof resize     === "function" ? resize     : null'),
+    pushSample: _peek(win, 'typeof pushSample === "function" ? pushSample : null'),
+    applyView:  _peek(win, 'typeof applyView  === "function" ? applyView  : null'),
+    toolId: curId
+  };
+  if (!h.state || !h.cam || !h.draw) return null;   /* 老工具可能不合规，直接判不可用 */
+  _bridgeCache = h;
+  return h;
+};
+
+REC.Bridge.available = function(){ return !!REC.Bridge.get(); };
+REC.Bridge.invalidate = function(){ _bridgeCache = null; };
+
+/* 离线渲染会真实推进 state 与 samples，必须能无条件还原现场 */
+REC.Bridge.snapshot = function(){
+  var h = REC.Bridge.get();
+  if (!h) return null;
+  var st = {}, k;
+  for (k in h.state) if (Object.prototype.hasOwnProperty.call(h.state, k)) st[k] = h.state[k];
+  var cm = {};
+  for (k in h.cam) if (Object.prototype.hasOwnProperty.call(h.cam, k)) cm[k] = h.cam[k];
+  /* 带上来源身份。注意别拿 win 做身份：iframe 同源跳转后 contentWindow（WindowProxy）
+     是同一个对象，重载前后全等，判不出新旧实例。document 和工具的 state 对象才会真的换新，
+     而 restore 要写的正是 state 这个对象本身，用它做身份最贴切。 */
+  return { state: st, cam: cm, samples: h.samples ? h.samples.slice() : null, curTab: h.curTab,
+           doc: h.doc, stateRef: h.state, camRef: h.cam, toolId: h.toolId };
+};
+
+REC.Bridge.restore = function(snap){
+  var h = REC.Bridge.get();
+  if (!h || !snap) return;
+  /* 快照只对它来源的那个工具实例有效。中途换了工具、或切语言导致 iframe 重载之后，
+     把旧快照写进新实例等于凭空篡改新工具的 state/cam，这里直接拒绝。 */
+  if (snap.stateRef && snap.stateRef !== h.state) return;
+  if (snap.doc && snap.doc !== h.doc) return;
+  if (snap.toolId && snap.toolId !== h.toolId) return;
+  var k;
+  for (k in snap.state) if (Object.prototype.hasOwnProperty.call(snap.state, k)) h.state[k] = snap.state[k];
+  for (k in snap.cam)   if (Object.prototype.hasOwnProperty.call(snap.cam, k))   h.cam[k]   = snap.cam[k];
+  if (snap.samples && h.samples){
+    h.samples.length = 0;
+    for (var i = 0; i < snap.samples.length; i++) h.samples.push(snap.samples[i]);
+  }
+};
+
+REC.Bridge.__test = function(){
+  var r = { pass: [], fail: [] };
+  function ok(n, c){ if (c) r.pass.push(n); else r.fail.push(n); }
+  var h = REC.Bridge.get();
+  ok('available() 与 get() 结论一致', REC.Bridge.available() === !!h);
+  if (!h){ r.fail.push('拿不到 handle（是否用 file:// 打开、或当前停在画廊首页？）'); return r; }
+  ok('canvas 是 canvas 元素', h.canvas && h.canvas.tagName === 'CANVAS');
+  ok('canvas 有尺寸', h.canvas.width > 0 && h.canvas.height > 0);
+  ok('state 是对象且含 theta', h.state && typeof h.state.theta === 'number');
+  ok('cam 是对象且含 az', h.cam && typeof h.cam.az === 'number');
+  ok('draw 是函数', typeof h.draw === 'function');
+  ok('resize 是函数', typeof h.resize === 'function');
+  ok('pushSample 是函数', typeof h.pushSample === 'function');
+  ok('samples 是数组', Object.prototype.toString.call(h.samples) === '[object Array]');
+  ok('toolId 非空', !!h.toolId);
+  /* 快照 / 还原必须真正复原被改动的字段 */
+  var snap = REC.Bridge.snapshot();
+  var t0 = h.state.theta, az0 = h.cam.az, n0 = h.samples.length;
+  h.state.theta = t0 + 12.5; h.cam.az = az0 + 1.25; h.samples.length = 0;
+  REC.Bridge.restore(snap);
+  ok('restore 复原 state.theta', Math.abs(h.state.theta - t0) < 1e-9);
+  ok('restore 复原 cam.az', Math.abs(h.cam.az - az0) < 1e-9);
+  ok('restore 复原 samples 长度', h.samples.length === n0);
+  /* 快照带来源身份：换了工具 / 切语言重载之后的旧快照必须被拒绝。
+     分别验证三道闸：state 对象换新、document 换新、工具换人。 */
+  var alien = REC.Bridge.snapshot();
+  alien.state.theta = t0 + 99;
+  var refSaved = alien.stateRef, docSaved = alien.doc;
+  alien.stateRef = {};
+  REC.Bridge.restore(alien);
+  ok('restore 拒绝异 state 实例的快照', Math.abs(h.state.theta - t0) < 1e-9);
+  alien.stateRef = refSaved; alien.doc = document;      /* 换个 document 冒充重载后的实例 */
+  REC.Bridge.restore(alien);
+  ok('restore 拒绝异 document 的快照', Math.abs(h.state.theta - t0) < 1e-9);
+  alien.doc = docSaved; alien.toolId = '__not-a-tool__';
+  REC.Bridge.restore(alien);
+  ok('restore 拒绝异工具的快照', Math.abs(h.state.theta - t0) < 1e-9);
+  return r;
+};
+/* ===== /REC:BRIDGE ===== */
+
+/* ===== REC:ENCODER ===== */
+REC.Encoder = {};
+
+/* 优先级：能出 mp4 就出 mp4（Chrome/Edge/Safari 都行），Firefox 落 webm */
+REC.Encoder.MIMES = [
+  { mime: 'video/mp4;codecs=avc1',  ext: 'mp4'  },
+  { mime: 'video/mp4',              ext: 'mp4'  },
+  { mime: 'video/webm;codecs=vp9',  ext: 'webm' },
+  { mime: 'video/webm',             ext: 'webm' }
+];
+
+REC.Encoder.pickMime = function(){
+  if (!window.MediaRecorder) return null;
+  for (var i = 0; i < REC.Encoder.MIMES.length; i++){
+    var m = REC.Encoder.MIMES[i];
+    try{ if (MediaRecorder.isTypeSupported(m.mime)) return m; }catch(e){}
+  }
+  return null;
+};
+
+REC.Encoder.start = function(stream, mime){
+  var chunks = [];
+  var opt = { mimeType: mime };
+  /* 1080p60 的线条动画，12Mbps 足够干净又不至于让文件大到没法分享 */
+  opt.videoBitsPerSecond = 12000000;
+  var rec = new MediaRecorder(stream, opt);
+  rec.ondataavailable = function(e){ if (e.data && e.data.size) chunks.push(e.data); };
+  rec.start(100);        /* 100ms 一个 chunk，避免长录制时内存里堆一整块 */
+  return { rec: rec, chunks: chunks, mime: mime, stream: stream };
+};
+
+REC.Encoder.stop = function(ses){
+  return new Promise(function(resolve, reject){
+    if (!ses || !ses.rec) { reject(new Error('no session')); return; }
+    ses.rec.onerror = function(e){ reject(e && e.error ? e.error : new Error('recorder error')); };
+    ses.rec.onstop = function(){
+      try{
+        var tr = ses.stream.getTracks();
+        for (var i = 0; i < tr.length; i++) tr[i].stop();
+      }catch(e){}
+      resolve(new Blob(ses.chunks, { type: ses.mime }));
+    };
+    if (ses.rec.state !== 'inactive') ses.rec.stop(); else ses.rec.onstop();
+  });
+};
+
+REC.Encoder.download = function(blob, filename){
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+};
+
+REC.Encoder.__test = function(){
+  var r = { pass: [], fail: [] };
+  function ok(n, c){ if (c) r.pass.push(n); else r.fail.push(n); }
+  var p = REC.Encoder.pickMime();
+  ok('pickMime 返回结果', !!p);
+  if (!p){ r.fail.push('本浏览器没有任何可用 mime'); return r; }
+  ok('mime 可被 MediaRecorder 接受', MediaRecorder.isTypeSupported(p.mime));
+  ok('ext 是 mp4 或 webm', p.ext === 'mp4' || p.ext === 'webm');
+  ok('ext 与 mime 容器一致', p.mime.indexOf('mp4') >= 0 ? p.ext === 'mp4' : p.ext === 'webm');
+  /* 端到端：拿一张离屏 canvas 真录 200ms，必须产出非空 Blob */
+  var cv = document.createElement('canvas');
+  cv.width = 64; cv.height = 64;
+  var c2 = cv.getContext('2d');
+  c2.fillStyle = '#ff5a8a'; c2.fillRect(0, 0, 64, 64);
+  var st = cv.captureStream(30);
+  var ses = REC.Encoder.start(st, p.mime);
+  ok('start 返回 session', !!(ses && ses.rec));
+  r.pass.push('端到端录制已异步发起（结果见控制台 REC.Encoder.__lastProbe）');
+  /* 立即 stop 会在 0 帧时截断出 0 字节 Blob（已实测确认），
+     所以真的等满 200ms 再收尾，让这条自检名副其实 */
+  setTimeout(function(){
+    REC.Encoder.stop(ses).then(function(b){
+      REC.Encoder.__lastProbe = { size: b.size, type: b.type, ok: b.size > 0 };
+    })['catch'](function(e){ REC.Encoder.__lastProbe = { error: String(e) }; });
+  }, 200);
+  return r;
+};
+/* ===== /REC:ENCODER ===== */
+
+/* ===== REC:COMPOSITOR ===== */
+REC.Compositor = {};
+REC.Compositor.__test = function(){
+  var r = { pass: [], fail: [] };
+  function ok(n, c){ if (c) r.pass.push(n); else r.fail.push(n); }
+  var h = REC.Bridge.get();
+  if (!h){ r.fail.push('需要先载入一个工具（Bridge 不可用）'); return r; }
+  var cfgs = [
+    { visual: 'clean',   aspect: '16:9' },
+    { visual: 'overlay', aspect: '9:16' },
+    { visual: 'overlay', aspect: '1:1'  }
+  ];
+  for (var i = 0; i < cfgs.length; i++){
+    var c = cfgs[i], tag = c.visual + '/' + c.aspect;
+    var want = REC.SIZES[c.aspect];
+    var o = REC.Compositor.begin(h, c);
+    if (!o){ r.fail.push(tag + ': begin 返回 null'); continue; }
+    ok(tag + ' 输出宽度正确', o.w === want[0]);
+    ok(tag + ' 输出高度正确', o.h === want[1]);
+    ok(tag + ' 尺寸为偶数（H.264 要求）', o.w % 2 === 0 && o.h % 2 === 0);
+    ok(tag + ' canvas backing store 匹配', o.canvas.width === want[0] && o.canvas.height === want[1]);
+    ok(tag + ' 工具 canvas 已按画幅重算', h.canvas.width === want[0] && h.canvas.height === want[1]);
+    try{ REC.Compositor.frame(o, h, { i: 0, total: 60, t: 0 }); r.pass.push(tag + ' frame() 不抛错'); }
+    catch(e){ r.fail.push(tag + ' frame() 抛错 ' + e); }
+    REC.Compositor.end(o);
+  }
+  ok('end() 后 iframe 内联尺寸已清空', frame.style.width === '');
+  ok('end() 后 stage 已摘掉 rec-live', document.querySelector('.stage').className.indexOf('rec-live') < 0);
+
+  /* readout() 常见字段分隔符 &ensp;（约 50 个工具在用），以及 &thinsp; / &lt; / &gt;，
+     必须走 frame() 同一条解码路径，解码后不能残留任何字面 & */
+  var decoded = _decodeReadoutLines('s&ensp;·&ensp;θ&thinsp;=&thinsp;&lt;12&gt;&nbsp;&minus;').join('\n');
+  ok('readout 实体解码（&ensp; 等）不残留字面 &', decoded.indexOf('&') < 0);
+  ok('readout 实体解码结果非空', decoded.replace(/\s+/g, '').length > 0);
+  return r;
+};
+
+/* 工具内部就是这么算 DPR 的（math-viz-starter.html:379），必须一致，
+   否则 backing store 对不上目标像素尺寸。 */
+function _toolDpr(win){ return Math.min(2.5, win.devicePixelRatio || 1); }
+
+/* readout() 返回的是 HTML（&ensp; / &thinsp; / &lt; / &gt; / &minus; / &nbsp; 等实体都可能出现，
+   outputs/*.html 里约 50 个工具用 &ensp; 做字段分隔符）。手工枚举实体清单容易漏，
+   干脆把换行标签换成 \n 后交给浏览器自己的 HTML 解析器解一次，读 textContent 拿到全解码的纯文本。
+   DOMParser 解析 'text/html' 是惰性的：不执行脚本、不加载资源，这里安全，也不用碰任何真实节点的 innerHTML。 */
+function _decodeReadoutLines(txt){
+  var html = String(txt).replace(/<br\s*\/?>/gi, '\n').replace(/<\/(div|p|tr)>/gi, '\n');
+  var doc = new DOMParser().parseFromString(html, 'text/html');
+  return (doc.body.textContent || '').split('\n');
+}
+
+/* 图例文案里的 <i>…</i> 包着数学符号（如「谐波 <i>ω</i>」）。原则 4 要求数学符号
+   一律衬线斜体，与读数区同字体；其余文字保持无衬线。分段量宽后从 x 起依次画出。 */
+function _drawRichLabel(c, txt, x, y, base){
+  var sans = Math.round(base) + 'px ui-sans-serif, -apple-system, "PingFang SC", sans-serif';
+  var math = 'italic ' + Math.round(base * 1.05) + 'px Georgia, "Songti SC", serif';
+  var parts = String(txt).split(/(<i>[\s\S]*?<\/i>)/);
+  for (var i = 0; i < parts.length; i++){
+    if (!parts[i]) continue;
+    c.font = parts[i].indexOf('<i>') === 0 ? math : sans;
+    var s = parts[i].replace(/<[^>]+>/g, '');
+    if (!s) continue;
+    c.fillText(s, x, y);
+    x += c.measureText(s).width;
+  }
+}
+
+/* 录制现场是否已在进行中：begin() 不可重入，否则第二次 begin() 会把
+   「录制态」样式当成「原始态」存进 _prev，end() 就再也恢复不回真正的原始现场了。 */
+var _compActive = null;
+
+REC.Compositor.begin = function(h, cfg){
+  if (_compActive) return null;              /* 已有一场录制在进行，拒绝重入 */
+  var size = REC.SIZES[cfg.aspect];
+  if (!h || !size) return null;
+  var w = size[0], hh = size[1];
+  var stage = document.querySelector('.stage');
+  var dpr = _toolDpr(h.win);
+
+  /* 记住现场，end() 时逐字还原 */
+  var prev = {
+    fw: frame.style.width, fh: frame.style.height,
+    ftr: frame.style.transform, fml: frame.style.marginLeft, fmt: frame.style.marginTop
+  };
+
+  /* 关键：改 iframe 的 CSS 尺寸 → iframe 内 window.innerWidth 变 → 工具 resize() 重算构图 */
+  stage.classList.add('rec-live');
+  frame.style.width  = (w / dpr) + 'px';
+  frame.style.height = (hh / dpr) + 'px';
+  /* 缩回视口内做预览；居中靠负 margin，避免 transform 影响 offset 计算。
+     stage 尺寸测不到（clientWidth/clientHeight 为 0）或算出 NaN/非正数时，
+     一律回落到 1，避免 scale(0) 把 iframe 缩没或 scale(NaN) 整个失效。 */
+  var sc = Math.min(stage.clientWidth / (w / dpr), stage.clientHeight / (hh / dpr), 1);
+  if (!isFinite(sc) || sc <= 0) sc = 1;
+  frame.style.marginLeft = (-(w / dpr) / 2) + 'px';
+  frame.style.marginTop  = (-(hh / dpr) / 2) + 'px';
+  frame.style.transform  = 'scale(' + sc + ')';
+
+  /* 工具的 resize 监听是异步的，这里直接同步调一次，保证本函数返回时尺寸已生效 */
+  if (h.resize) { try{ h.resize(); }catch(e){} }
+  if (h.draw)   { try{ h.draw();   }catch(e){} }
+
+  var o = { w: w, h: hh, mode: (cfg.visual === 'overlay' ? 'overlay' : 'clean'),
+            canvas: null, _prev: prev, _stage: stage };
+  if (o.mode === 'overlay'){
+    var cv = document.createElement('canvas');
+    cv.width = w; cv.height = hh;
+    o.canvas = cv; o.ctx = cv.getContext('2d');
+  } else {
+    o.canvas = h.canvas;
+  }
+  _compActive = o;
+  return o;
+};
+
+/* 每帧调用。clean 模式什么都不用做（captureStream 直接盯着工具 canvas）。 */
+REC.Compositor.frame = function(o, h, info){
+  if (!o || o.mode !== 'overlay') return;
+  var c = o.ctx, w = o.w, hh = o.h;
+  c.clearRect(0, 0, w, hh);
+  c.drawImage(h.canvas, 0, 0, w, hh);
+
+  var vert = hh > w;
+  var pad = Math.round(w * 0.033);
+  var base = Math.round(w * 0.0125);           /* 字号基准，随画幅缩放 */
+  var sc = h.SCENES && h.curTab ? h.SCENES[h.curTab] : null;
+  var d = byId(h.toolId);
+
+  /* 标题：左上（竖屏时下移，给顶部留呼吸） */
+  var ty = vert ? Math.round(hh * 0.055) : pad;
+  if (d){
+    c.save();
+    c.textBaseline = 'top';
+    c.fillStyle = '#7d8ca6';
+    c.font = '600 ' + Math.round(base * 0.82) + 'px ui-sans-serif, -apple-system, "PingFang SC", sans-serif';
+    c.fillText(String(REC.t(d.kicker) || '').toUpperCase(), pad, ty);
+    c.fillStyle = '#dbe6f5';
+    c.font = '600 ' + Math.round(base * 1.5) + 'px ui-sans-serif, -apple-system, "PingFang SC", sans-serif';
+    c.fillText(REC.t(d.title) || '', pad, ty + Math.round(base * 1.25));
+    c.restore();
+  }
+
+  /* 图例：左下。色点取 toggle 自己声明的 color —— 工具就是用这个色值画曲线的，
+     原则 3 要求同一条曲线在图例点与曲线体上完全同色；只有工具没声明时才回落到 REC.COLORS。 */
+  if (sc && sc.toggles){
+    c.save();
+    c.textBaseline = 'middle';
+    var y = hh - pad, n = 0;
+    for (var k = 0; k < sc.toggles.length; k++){
+      var tg = sc.toggles[k];
+      if (!h.state[tg.key]) continue;                     /* 只画已开启的曲线 */
+      var col = tg.color || REC.COLORS[n % REC.COLORS.length];
+      c.fillStyle = col;
+      c.beginPath(); c.arc(pad + base * 0.4, y, base * 0.4, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#93a3bd';
+      _drawRichLabel(c, REC.t(tg.label) || tg.key, pad + base * 1.3, y, base);
+      y -= base * 1.9; n++;
+    }
+    c.restore();
+  }
+
+  /* 读数：右上。工具的 readout() 返回 HTML，这里剥标签取纯文本，逐行画。 */
+  if (sc && sc.readout){
+    var txt = '';
+    try{ txt = String(sc.readout()); }catch(e){ txt = ''; }
+    var lines = _decodeReadoutLines(txt);
+    c.save();
+    c.textAlign = 'right';
+    c.textBaseline = 'top';
+    c.font = 'italic ' + Math.round(base * 1.05) + 'px Georgia, "Songti SC", serif';
+    c.fillStyle = '#dbe6f5';
+    var ry = ty;
+    for (var i = 0; i < lines.length; i++){
+      var ln = lines[i].replace(/\s+/g, ' ').trim();
+      if (!ln) continue;
+      c.fillText(ln, w - pad, ry);
+      ry += base * 1.6;
+      if (ry > hh * 0.5) break;                          /* 读数再长也不许压到画面中部 */
+    }
+    c.restore();
+  }
+};
+
+REC.Compositor.end = function(o){
+  if (!o) return;
+  frame.style.width      = o._prev.fw;
+  frame.style.height     = o._prev.fh;
+  frame.style.transform  = o._prev.ftr;
+  frame.style.marginLeft = o._prev.fml;
+  frame.style.marginTop  = o._prev.fmt;
+  o._stage.classList.remove('rec-live');
+  if (_compActive === o) _compActive = null;    /* 解除重入锁，允许下一场录制 */
+  var h = REC.Bridge.get();
+  if (h){ try{ h.resize(); h.draw(); }catch(e){} }
+};
+/* ===== /REC:COMPOSITOR ===== */
+
+/* ===== REC:SOURCE ===== */
+REC.Source = {};
+REC.Source.__test = function(){
+  var r = { pass: [], fail: [] };
+  function ok(n, c){ if (c) r.pass.push(n); else r.fail.push(n); }
+  var h = REC.Bridge.get();
+  if (!h){ r.fail.push('需要先载入一个工具（Bridge 不可用）'); return r; }
+  ok('offline 是函数', typeof REC.Source.offline === 'function');
+  ok('realtime 是函数', typeof REC.Source.realtime === 'function');
+  ok('snapDuration 是函数', typeof REC.Source.snapDuration === 'function');
+  /* 无缝循环吸附：omega=1 时周期 2π≈6.283，8s 应吸附到 2 个周期 12.566…
+     取「不超过原时长的最大整数倍，至少 1 个周期」 */
+  ok('时长吸附到周期整数倍', Math.abs(REC.Source.snapDuration(8, 1) - 6.283185307179586) < 1e-6);
+  ok('吸附不足一个周期时给一个整周期', Math.abs(REC.Source.snapDuration(3, 1) - 6.283185307179586) < 1e-6);
+  ok('omega 为 0 时原样返回', REC.Source.snapDuration(8, 0) === 8);
+  /* 工具没声明 omega 时必须按 0 处理，否则离线推进会整段 NaN */
+  ok('omegaOf 对缺失 omega 给 0', REC.Source.omegaOf({ state: { theta: 0 } }) === 0);
+  ok('omegaOf 对 NaN omega 给 0', REC.Source.omegaOf({ state: { omega: NaN } }) === 0);
+  ok('缺失 omega 时时长不被吸附', REC.Source.snapDuration(8, REC.Source.omegaOf({ state: {} })) === 8);
+
+  /* 端到端：跑一段 0.5s 的离线渲染，帧数必须精确，且现场被还原 */
+  var snap = REC.Bridge.snapshot();
+  var o = REC.Compositor.begin(h, { visual: 'clean', aspect: '1:1' });
+  var s = REC.Source.offline(h, o, { duration: 0.5, loop: false, orbit: false, viewTo: '' }, null);
+  ok('offline 返回 stream', !!(s && s.stream && s.stream.getVideoTracks().length === 1));
+  s.done.then(function(res){
+    REC.Compositor.end(o);
+    REC.Bridge.restore(snap);
+    REC.Source.__lastProbe = {
+      frames: res.frames,
+      framesOk: res.frames === Math.round(0.5 * REC.FPS),
+      restored: Math.abs(h.state.theta - snap.state.theta) < 1e-9,
+      runningRestored: h.state.running === snap.state.running
+    };
+  });
+  r.pass.push('端到端离线渲染已发起（结果见 REC.Source.__lastProbe）');
+  return r;
+};
+
+/* 工具的 state 未必声明 omega —— 例如 outputs/cartesian-polar-coordinate-3d.html 的
+   state 只有 {running, t, theta, kPhase}。缺省一律按 0 处理，否则 theta += undefined*dt
+   会从第一帧起变成 NaN，录出来是一段静默的空白视频，全程不报错。 */
+REC.Source.omegaOf = function(h){
+  var w = h && h.state ? h.state.omega : 0;
+  return (typeof w === 'number' && isFinite(w)) ? w : 0;
+};
+
+/* 无缝循环：把时长吸到动画周期 2π/ω 的整数倍。ω=0（静态场景）时不吸。 */
+REC.Source.snapDuration = function(sec, omega){
+  if (!omega) return sec;
+  var period = 2 * Math.PI / Math.abs(omega);
+  var n = Math.floor(sec / period);
+  if (n < 1) n = 1;
+  return n * period;
+};
+
+REC.Source.offline = function(h, o, cfg, onProgress){
+  var total = Math.max(1, Math.round(cfg.duration * REC.FPS));
+  var dt = 1 / REC.FPS;
+  var stream = o.canvas.captureStream(0);         /* 0 = 只接受手动 requestFrame */
+  var track = stream.getVideoTracks()[0];
+  var cancelled = false;
+  var omega = REC.Source.omegaOf(h);              /* 工具没有 omega 时按 0，见 omegaOf 注释 */
+
+  /* 接管驱动：停掉工具自己的积分，本函数按固定步长推进 */
+  var wasRunning = h.state.running;
+  h.state.running = false;
+
+  /* 运镜的起止镜位。引擎的 tween 走真实时钟，离线模式必须自己插值。 */
+  var cam0 = { az: h.cam.az, el: h.cam.el, dist: h.cam.dist,
+               tx: h.cam.tx, ty: h.cam.ty, tz: h.cam.tz };
+  var camTo = null;
+  if (cfg.viewTo && h.SCENES && h.curTab){
+    var sc = h.SCENES[h.curTab];
+    var v = sc && sc.views && sc.views[cfg.viewTo];
+    if (v) camTo = v.cam || v;
+  }
+  function ease(k){ return k < 0.5 ? 2*k*k : 1 - Math.pow(-2*k + 2, 2) / 2; }
+
+  var done = new Promise(function(resolve){
+    var i = 0;
+    function step(){
+      if (cancelled){ h.state.running = wasRunning; resolve({ frames: i, cancelled: true }); return; }
+      if (i >= total){ h.state.running = wasRunning; resolve({ frames: i, cancelled: false }); return; }
+      var k = i / total;
+
+      /* 1. 推进仿真（固定步长，与真实帧率无关） */
+      h.state.t += dt;
+      h.state.theta += omega * dt;
+      if (h.pushSample) h.pushSample();
+
+      /* 2. 运镜 */
+      if (cfg.orbit) h.cam.az = cam0.az + 2 * Math.PI * k;
+      if (camTo){
+        var e = ease(Math.min(1, k / 0.6));       /* 前 60% 完成过渡，留时间看结果 */
+        var f;
+        for (f in cam0) if (typeof camTo[f] === 'number') h.cam[f] = cam0[f] + (camTo[f] - cam0[f]) * e;
+      }
+
+      /* 3. 绘制 + 合成 + 交帧 */
+      h.draw();
+      REC.Compositor.frame(o, h, { i: i, total: total, t: i * dt });
+      if (track.requestFrame) track.requestFrame();
+      else if (stream.requestFrame) stream.requestFrame();
+
+      i++;
+      if (onProgress) onProgress(i / total);
+      requestAnimationFrame(step);               /* 让出主线程，编码器才有机会消费 */
+    }
+    requestAnimationFrame(step);
+  });
+
+  return { stream: stream, done: done, cancel: function(){ cancelled = true; } };
+};
+
+/* 实时录制：被动跟随工具自己的 rAF，能录下手动拖拽旋转、切 tab、拖滑块的全过程 */
+REC.Source.realtime = function(h, o, cfg){
+  var stream = o.canvas.captureStream(REC.FPS);
+  var timer = null;
+  if (o.mode === 'overlay'){
+    /* overlay 模式的离屏画布不会自己更新，得自己按帧刷 */
+    var i = 0;
+    var tick = function(){
+      REC.Compositor.frame(o, h, { i: i, total: 0, t: i / REC.FPS });
+      i++;
+      timer = requestAnimationFrame(tick);
+    };
+    timer = requestAnimationFrame(tick);
+  }
+  return {
+    stream: stream,
+    stop: function(){ if (timer) cancelAnimationFrame(timer); timer = null; }
+  };
+};
+/* ===== /REC:SOURCE ===== */
+
+/* ===== REC:UI ===== */
+REC.UI = {};
+
+REC.UI.L = {
+  rec:      { zh: '录制',       en: 'Record' },
+  title:    { zh: '录制视频',   en: 'Record video' },
+  visual:   { zh: '画面内容',   en: 'Content' },
+  clean:    { zh: '纯净',       en: 'Clean' },
+  overlay:  { zh: '叠层',       en: 'Overlay' },
+  screen:   { zh: '整页',       en: 'Screen' },
+  aspect:   { zh: '画幅',       en: 'Aspect' },
+  drive:    { zh: '驱动',       en: 'Drive' },
+  offline:  { zh: '定长渲染',   en: 'Offline' },
+  realtime: { zh: '实时录制',   en: 'Realtime' },
+  dur:      { zh: '时长',       en: 'Duration' },
+  loop:     { zh: '无缝循环',   en: 'Seamless loop' },
+  orbit:    { zh: '自动环绕',   en: 'Auto orbit' },
+  go:       { zh: '开始录制',   en: 'Start' },
+  stop:     { zh: '停止',       en: 'Stop' },
+  noBridge: { zh: '纯净 / 叠层模式需要通过本地服务器打开（file:// 下受同源限制）。可改用「整页」模式。',
+              en: 'Clean / Overlay need the page served over http (file:// is blocked by same-origin). Use "Screen" instead.' },
+  noMime:   { zh: '本浏览器不支持视频录制。',
+              en: 'This browser cannot record video.' },
+  willBe:   { zh: '将输出 ', en: 'Output: ' }
+};
+
+function _seg(key, opts){
+  var s = '<div class="rec-seg">';
+  for (var i = 0; i < opts.length; i++){
+    var on = REC.CFG[key] === opts[i][0] ? ' on' : '';
+    s += '<button class="' + on.replace(/^ /, '') + '" data-k="' + key + '" data-v="' + opts[i][0] + '">'
+       + REC.t(REC.UI.L[opts[i][1]]) + '</button>';
+  }
+  return s + '</div>';
+}
+
+REC.UI.render = function(){
+  var pan = document.getElementById('recPanel');
+  if (!pan) return;
+  var mime = REC.Encoder.pickMime ? REC.Encoder.pickMime() : null;
+  var okBridge = REC.Bridge.available ? REC.Bridge.available() : false;
+  var note = '';
+  if (!mime) note = REC.t(REC.UI.L.noMime);
+  else if (!okBridge && REC.CFG.visual !== 'screen') note = REC.t(REC.UI.L.noBridge);
+  else note = REC.t(REC.UI.L.willBe) + '.' + mime.ext;
+
+  pan.innerHTML =
+    '<h4>' + REC.t(REC.UI.L.title) + '</h4>' +
+    '<div class="rec-row"><label>' + REC.t(REC.UI.L.visual) + '</label>' +
+      _seg('visual', [['clean','clean'],['overlay','overlay'],['screen','screen']]) + '</div>' +
+    '<div class="rec-row"><label>' + REC.t(REC.UI.L.aspect) + '</label>' +
+      _seg('aspect', [['16:9','aspect'],['9:16','aspect'],['1:1','aspect']]) + '</div>' +
+    '<div class="rec-row"><label>' + REC.t(REC.UI.L.drive) + '</label>' +
+      _seg('drive', [['offline','offline'],['realtime','realtime']]) + '</div>' +
+    '<div class="rec-row"><label>' + REC.t(REC.UI.L.dur) + ' · <span id="recDurVal">' + REC.CFG.duration + '</span>s</label>' +
+      '<input id="recDur" type="range" min="3" max="30" step="1" value="' + REC.CFG.duration + '" style="width:100%"></div>' +
+    '<div class="rec-row"><label class="rec-chk"><input type="checkbox" data-k="loop"' + (REC.CFG.loop ? ' checked' : '') + '> ' + REC.t(REC.UI.L.loop) + '</label></div>' +
+    '<div class="rec-row"><label class="rec-chk"><input type="checkbox" data-k="orbit"' + (REC.CFG.orbit ? ' checked' : '') + '> ' + REC.t(REC.UI.L.orbit) + '</label></div>' +
+    '<button class="rec-go" id="recGo"' + (mime ? '' : ' disabled') + '>' + REC.t(REC.UI.L.go) + '</button>' +
+    '<div class="rec-bar"><i id="recBar"></i></div>' +
+    '<div class="rec-note" id="recNote">' + note + '</div>';
+
+  /* 画幅按钮的文案就是它的值本身，_seg 的字典取不到，这里直接回填 */
+  var segs = pan.querySelectorAll('[data-k="aspect"]');
+  for (var i = 0; i < segs.length; i++) segs[i].textContent = segs[i].getAttribute('data-v');
+};
+
+REC.UI.mount = function(){
+  var btn = document.getElementById('recBtn');
+  var pan = document.getElementById('recPanel');
+  if (!btn || !pan || btn.__mounted) { if (btn && btn.__mounted) REC.UI.render(); return; }
+  btn.__mounted = true;
+  document.getElementById('recBtnTxt').textContent = REC.t(REC.UI.L.rec);
+  REC.UI.render();
+
+  btn.addEventListener('click', function(){
+    pan.classList.toggle('on');
+    if (pan.classList.contains('on')) REC.UI.render();
+  });
+
+  /* 事件委托：面板每次 render 都会重建内容，绑在容器上才不会丢 */
+  pan.addEventListener('click', function(e){
+    var el = e.target;
+    var k = el.getAttribute && el.getAttribute('data-k');
+    if (k && el.tagName === 'BUTTON'){
+      REC.CFG[k] = el.getAttribute('data-v');
+      el.className = 'on';   /* 先给被点的按钮本身盖上选中态：render() 会整体重建面板，
+                                 旧节点脱离 DOM 后不会再被样式选中，靠这行保证它自身可见/可测 */
+      REC.UI.render();
+      return;
+    }
+    if (el.id === 'recGo') REC.UI.run();
+  });
+  pan.addEventListener('change', function(e){
+    var el = e.target, k = el.getAttribute && el.getAttribute('data-k');
+    if (k && el.type === 'checkbox') REC.CFG[k] = el.checked;
+  });
+  pan.addEventListener('input', function(e){
+    if (e.target.id === 'recDur'){
+      REC.CFG.duration = +e.target.value;
+      document.getElementById('recDurVal').textContent = REC.CFG.duration;
+    }
+  });
+};
+
+REC.busy = null;      /* 录制中的现场；同时充当会话身份，见 _finish 的校验 */
+
+/* 面板回到「可以开始录制」的样子 */
+function _recReset(){
+  var go = document.getElementById('recGo');
+  if (go){ go.disabled = false; go.textContent = REC.t(REC.UI.L.go); }
+  var bar = document.getElementById('recBar');
+  if (bar) bar.style.width = '0';
+}
+
+function _stopStream(st){
+  if (!st || !st.getTracks) return;
+  var tr = st.getTracks();
+  for (var i = 0; i < tr.length; i++){ try{ tr[i].stop(); }catch(e){} }
+}
+
+/* 文件名里的时长：写真实录到的秒数，不是滑块上的设定值 */
+function _fmtSecs(s){
+  var v = Math.round(s * 10) / 10;
+  return (v === Math.round(v)) ? String(Math.round(v)) : String(v);
+}
+
+/* 「中断」：把录制丢掉。切工具、切语言、关页面走这条路——产物一律不要。 */
+REC.abort = function(){
+  var b = REC.busy;
+  if (!b) return;
+  REC.busy = null;          /* 先摘掉身份，在途的 done/ended 回调就会被 _finish 挡在门外 */
+  try{ if (b.src && b.src.cancel) b.src.cancel(); }catch(e){}
+  try{ if (b.src && b.src.stop)   b.src.stop();   }catch(e){}
+  /* 停编码器只为释放它和它持有的轨道，Blob 直接丢弃 */
+  try{ if (b.ses) REC.Encoder.stop(b.ses)['catch'](function(){}); }catch(e){}
+  try{ if (b.stream) _stopStream(b.stream); }catch(e){}
+  try{ if (b.ctxObj) REC.Compositor.end(b.ctxObj); }catch(e){}
+  try{ if (b.snap) REC.Bridge.restore(b.snap); }catch(e){}
+  _recReset();
+};
+
+/* 「停止」：用户在面板上主动收尾。与 abort 是两种意图——这条路必须出片并下载。
+   实时 / 整页录制没有预定时长，全靠它结束。 */
+REC.stop = function(b){
+  b = b || REC.busy;
+  if (!b || REC.busy !== b) return;
+  /* 还停在选窗口对话框上（没有编码器可停），只能按丢弃处理 */
+  if (b.pending || !b.ses){ REC.abort(); return; }
+  _finish(b);
+};
+
+REC.UI.run = function(){
+  if (REC.busy){ REC.stop(); return; }
+  var mime = REC.Encoder.pickMime();
+  var note = document.getElementById('recNote');
+  if (!mime){ if (note) note.textContent = REC.t(REC.UI.L.noMime); return; }
+
+  var go = document.getElementById('recGo');
+  var bar = document.getElementById('recBar');
+  var cfg = REC.CFG;
+
+  /* 模式 3：屏幕录制，不经 Bridge / Compositor，因此 file:// 下也能用 */
+  if (cfg.visual === 'screen'){
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia){
+      if (note) note.textContent = REC.t(REC.UI.L.noMime);
+      return;
+    }
+    /* 身份要在 await 选窗口对话框「之前」就立起来：否则对话框开着时再点一次按钮，
+       会再发一次 getDisplayMedia，第一条流没人引用也没人 stop，浏览器就一直共享屏幕。 */
+    var bs = { pending: true, ses: null, src: null, ctxObj: null, snap: null, stream: null,
+               mime: mime, dur: null, aspect: cfg.aspect, toolId: curId, startedAt: Date.now() };
+    REC.busy = bs;
+    go.textContent = REC.t(REC.UI.L.stop);
+    navigator.mediaDevices.getDisplayMedia({ video: { frameRate: REC.FPS }, audio: false })
+      .then(function(st){
+        /* 等对话框期间已被中断（切工具 / 又点了一次停止）：这条流成了孤儿，必须立刻关掉 */
+        if (REC.busy !== bs){ _stopStream(st); return; }
+        bs.pending = false;
+        bs.stream = st;
+        bs.startedAt = Date.now();
+        bs.ses = REC.Encoder.start(st, mime.mime);
+        /* 用户在浏览器的共享条上点「停止共享」也要收尾 */
+        st.getVideoTracks()[0].addEventListener('ended', function(){ REC.stop(bs); });
+      })['catch'](function(){
+        if (REC.busy === bs){ REC.busy = null; _recReset(); }
+        if (note) note.textContent = REC.t(REC.UI.L.noMime);
+      });
+    return;
+  }
+
+  var h = REC.Bridge.get();
+  if (!h){ if (note) note.textContent = REC.t(REC.UI.L.noBridge); return; }
+
+  var snap = REC.Bridge.snapshot();
+  var ctxObj = REC.Compositor.begin(h, cfg);
+  if (!ctxObj){ if (note) note.textContent = REC.t(REC.UI.L.noBridge); return; }
+
+  var dur = cfg.duration;
+  if (cfg.loop) dur = REC.Source.snapDuration(dur, REC.Source.omegaOf(h));
+
+  /* 画幅、时长、工具 id 都在开录这一刻定格：收尾时再去读 REC.CFG / curId，
+     用户中途改了设置或换了工具，文件名就会撒谎。 */
+  if (cfg.drive === 'realtime'){
+    var src = REC.Source.realtime(h, ctxObj, cfg);
+    var ses = REC.Encoder.start(src.stream, mime.mime);
+    /* 实时录制没有预定时长，dur 留空，收尾时按实际经过的墙钟时间算 */
+    REC.busy = { pending: false, ses: ses, src: src, ctxObj: ctxObj, snap: snap, stream: src.stream,
+                 mime: mime, dur: null, aspect: cfg.aspect, toolId: curId, startedAt: Date.now() };
+    go.textContent = REC.t(REC.UI.L.stop);
+    return;                       /* 由用户再点一次「停止」触发 REC.stop → _finish */
+  }
+
+  var src2 = REC.Source.offline(h, ctxObj, {
+    duration: dur, loop: cfg.loop, orbit: cfg.orbit, viewTo: cfg.viewTo
+  }, function(k){ if (bar) bar.style.width = Math.round(k * 100) + '%'; });
+
+  var ses2 = REC.Encoder.start(src2.stream, mime.mime);
+  var b2 = { pending: false, ses: ses2, src: src2, ctxObj: ctxObj, snap: snap, stream: src2.stream,
+             mime: mime, dur: dur, aspect: cfg.aspect, toolId: curId, startedAt: Date.now() };
+  REC.busy = b2;
+  go.disabled = true;
+  src2.done.then(function(res){
+    /* done 在「跑满」和「被取消」两种情况下都会 resolve。被取消时现场已由 abort()
+       收拾干净，这里再走 _finish 就会下载一段截断的半成品。 */
+    if (res && res.cancelled) return;
+    _finish(b2);
+  });
+};
+
+function _finish(b){
+  /* 身份校验：这场录制已经不是当前现场了（被中断，或已被别的会话接管）就什么都不做。
+     abort() 会先把 REC.busy 摘掉，在途的回调全靠这一行挡住。 */
+  if (!b || REC.busy !== b || !b.ses) return;
+  REC.busy = null;
+  /* 先停驱动，免得收尾期间还在往流里塞帧 */
+  try{ if (b.src && b.src.stop)   b.src.stop();   }catch(e){}
+  try{ if (b.src && b.src.cancel) b.src.cancel(); }catch(e){}
+  REC.Encoder.stop(b.ses).then(function(blob){
+    if (!blob || !blob.size) return;               /* 0 字节就别塞给用户了 */
+    var secs = (b.dur != null) ? b.dur : (Date.now() - b.startedAt) / 1000;
+    var name = (b.toolId || 'mathviz') + '-' + String(b.aspect).replace(':', 'x')
+             + '-' + _fmtSecs(secs) + 's.' + b.mime.ext;
+    REC.Encoder.download(blob, name);
+  })['catch'](function(){})['finally'](function(){
+    if (b.ctxObj) REC.Compositor.end(b.ctxObj);
+    if (b.snap)   REC.Bridge.restore(b.snap);
+    _recReset();
+  });
+}
+
+REC.UI.__test = function(){
+  var r = { pass: [], fail: [] };
+  function ok(n, c){ if (c) r.pass.push(n); else r.fail.push(n); }
+  REC.UI.mount();
+  var btn = document.getElementById('recBtn');
+  var pan = document.getElementById('recPanel');
+  ok('录制按钮存在', !!btn);
+  ok('面板已渲染出内容', !!pan && pan.innerHTML.length > 0);
+  ok('面板默认收起', pan.className.indexOf('on') < 0);
+  btn.click();
+  ok('点按钮展开面板', pan.className.indexOf('on') >= 0);
+  /* 画幅分段器：点 9:16 应写回 CFG */
+  var seg = pan.querySelector('[data-k="aspect"][data-v="9:16"]');
+  ok('存在 9:16 选项', !!seg);
+  if (seg){ seg.click(); ok('点击写回 CFG.aspect', REC.CFG.aspect === '9:16');
+            ok('选中态加了 on', seg.className.indexOf('on') >= 0); }
+  var v = pan.querySelector('[data-k="visual"][data-v="clean"]');
+  if (v){ v.click(); ok('点击写回 CFG.visual', REC.CFG.visual === 'clean'); }
+  var dur = pan.querySelector('#recDur');
+  ok('存在时长滑块', !!dur);
+  if (dur){ ok('时长下限 3', +dur.min === 3); ok('时长上限 30', +dur.max === 30); }
+  ok('存在开始按钮', !!pan.querySelector('#recGo'));
+  ok('存在格式说明', pan.innerHTML.indexOf('mp4') >= 0 || pan.innerHTML.indexOf('webm') >= 0);
+  REC.CFG.aspect = '16:9'; REC.CFG.visual = 'overlay';   /* 复位，别污染后续测试 */
+  btn.click();
+  ok('再点按钮收起面板', pan.className.indexOf('on') < 0);
+  ok('run 已接线（不再抛 not wired）', (function(){
+    try{ REC.UI.run.toString().indexOf('not wired'); }catch(e){ return false; }
+    return REC.UI.run.toString().indexOf('not wired') < 0;
+  })());
+  ok('abort 是函数', typeof REC.abort === 'function');
+  /* 「停止」与「中断」是两条独立的路：面板上的停止必须出片，abort 才是丢弃 */
+  ok('stop 是函数', typeof REC.stop === 'function');
+  ok('stop 与 abort 不是同一个函数', REC.stop !== REC.abort);
+  ok('run 空转时点停止不抛错', (function(){
+    try{ REC.stop(); return true; }catch(e){ return false; }
+  })());
+  return r;
+};
+/* ===== /REC:UI ===== */
+
 /* ================= 启动 ================= */
 function boot(){
   renderNav(); renderChrome();
@@ -1131,7 +2035,10 @@ function boot(){
   try{ pref = localStorage.getItem(NAV_KEY); }catch(e){}
   var wide = window.innerWidth > 760;
   setSidebar(pref ? pref === 'open' : wide, false);
+  if (REC.UI.mount) REC.UI.mount();
 }
+
+window.addEventListener('beforeunload', function(){ REC.abort(); });
 
 /* 工具清单优先取 tools.json（有服务器时永远最新）；取不到就用内嵌副本 */
 (function(){
