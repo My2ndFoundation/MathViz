@@ -257,6 +257,15 @@ const PARAMS = [
     min: 0.2, max: 2, step: 0.05, value: 0.6, fmt: v => fmt(v) + ' rad/s' }
 ];
 
+/* 整数下标守卫 —— 本文件四个页签的滑块（cutDepth / fibK / fracK / starLev）虽然
+   step 都是 1，却被当作数组下标与缓存键使用（FN[k]、PHI_CONV[k−1]、_cutCache[k]）。
+   自动播放把它们变成了连续量：applyDrive() 做的是纯线性插值、**不取整**，
+   syncParamSlider() 只回写 input.value、**不回写 state**，于是 state.fracK 会是 5.3，
+   PHI_CONV[4.3] === undefined，紧接着读 .err 就抛 TypeError；而 frame() 没有 try/catch，
+   异常会打断 requestAnimationFrame 链 —— 整个工具的渲染永久冻结。
+   所以凡是把这些量当下标/键用的地方，一律先经本函数取整并钳进合法区间。 */
+const idx = (v, lo, hi) => Math.min(hi, Math.max(lo, Math.round(v)));
+
 /* ── φ 的本质：场景级常量与小部件（均在 SCENES 之上，引擎零改动） ──
    颜色语义：rose = 第一主曲线（旋转正方形 / 拼图方块 / φ 误差 / 21 螺旋族 / 五角星）
              violet = 第二曲线（黄金螺线 / π 对照 / 34 螺旋族 / 内嵌递归）
@@ -466,7 +475,7 @@ const SCENES = {
     draw(C) {
       const a = state.zoomDemo ? (cutA % HPI) : 0;
       const zf = Math.pow(PHI, a / HPI);
-      const depth = state.cutDepth;
+      const depth = idx(state.cutDepth, 1, 10);   /* 取整：cutSquares 拿它当 _cutCache 的键，浮点键会无上界地涨 */
       if (state.showGrid) drawGridXY(C, 2, 0.5);
 
       /* 旋转正方形（玫红族）：level −2…depth，外层两级只为缩放演示补边 */
@@ -572,7 +581,7 @@ const SCENES = {
       { key: 'showGrid',    label: { zh: '网格',     en: 'Grid' },           color: '#64748b', checked: true }
     ],
     draw(C) {
-      const K = state.fibK, nT = Math.min(K, 8);
+      const K = idx(state.fibK, 2, 20), nT = Math.min(K, 8);   /* 取整：下面要索引 FN[K] / FN[K−1] */
       if (state.showGrid) gridRect(C, -2.6, 2.6, -1.6, 1.6, 0.5);
 
       /* 拼图方块（玫红族，标以斐波那契数） */
@@ -643,7 +652,7 @@ const SCENES = {
       }
     },
     readout() {
-      const K = state.fibK, rK = FN[K] / FN[K - 1];
+      const K = idx(state.fibK, 2, 20), rK = FN[K] / FN[K - 1];   /* 取整：否则读数印出 NaN */
       return '<div>k = <b>' + K + '</b>&ensp;·&ensp;F(k) = <b>' + FN[K - 1] + '</b> · F(k+1) = <b>' + FN[K] + '</b></div>' +
         '<div class="tanC">F(k+1)/F(k) = <b>' + rK.toFixed(6) + '</b></div>' +
         '<div class="ambC">|F(k+1)/F(k) − φ| = <b>' + Math.abs(rK - PHI).toFixed(6) + '</b></div>' +
@@ -681,7 +690,7 @@ const SCENES = {
       { key: 'showGrid',   label: { zh: '网格',                en: 'Grid' },           color: '#64748b', checked: true }
     ],
     draw(C) {
-      const kc = state.fracK;
+      const kc = idx(state.fracK, 1, PHI_CONV.length);   /* 取整：PHI_CONV[kc−1] 若 undefined，下面读 .err 直接抛异常 */
       if (state.showGrid) gridRect(C, 0, 6, 0, 4.1, 0.52);
       axes2(C, {
         x0: -0.3, x1: 6.3, y0: -0.2, y1: 4.35, xlab: 'k', ylab: '',
@@ -733,7 +742,7 @@ const SCENES = {
       }
     },
     readout() {
-      const kc = state.fracK, cc = PHI_CONV[kc - 1];
+      const kc = idx(state.fracK, 1, PHI_CONV.length), cc = PHI_CONV[kc - 1];   /* 取整：同 draw() */
       const pc = PI_CONV[Math.min(kc, PI_CONV.length) - 1];
       const ex = e => e.toExponential(2).replace('-', '−');
       return '<div>φ = 1+1/(1+1/(1+1/(1+…)))</div>' +
@@ -749,6 +758,19 @@ const SCENES = {
   sun: {
     label: { zh: '向日葵叶序', en: 'Phyllotaxis' },
     params: ['speed', 'sunN', 'alphaDeg'],
+    /* tips 逐字给出了驱动量与动作：「把 α 缓缓扫过 137.508°：辐条融化成双螺旋，琥珀光环亮起。
+       试试有理陷阱 135°（3/8 圈）和 137.143°（8/21 圈）——立刻辐条化。」
+       本页默认是静止的：growSun 默认关闭（shown = N，种子一次画满），
+       唯一的动源是 near（|α−137.508| < 0.05）为真时那圈琥珀光环的呼吸
+       0.6+0.3·sin(state.t·6) —— 与本文件 frac 页同一个模式：走 state.t 的纯装饰脉动，
+       不是引擎相位 theta 驱动的演进，故本页确属静止页签。
+       值域 135°…140°，**不取满量程 120…150**：黄金角的命中窗口只有 ±0.05°，
+       在 30° 的全量程上只占 0.33%，一个周期里光环只闪十几毫秒，顿悟点等于看不见；
+       收进 5° 后，两个有理陷阱（135° 的 3/8、137.143° 的 8/21）与黄金角 137.508°
+       全都落在区间内，辐条→双螺旋→辐条的完整过程占满整段行程。
+       两端画面差别大、跳回会突变 → linear（pingpong 折返，来回各演一次）。
+       周期 12 s：tips 要求「缓缓」扫过，单程 6 s / 5°，慢到能看清融化与重新辐条化。 */
+    drive: { key: 'alphaDeg', from: 135, to: 140, period: 12, kind: 'linear' },
     brand: { zh: '第 k 粒种子落在 (r, θ) = (√k, k·α)。发散角 α 若是有理转角，种子排成辐条、留下缝隙；唯有黄金角 2π(1−1/φ) ≈ 137.508° 让种子均匀填满花盘，织出 21 与 34 两族反向螺旋——相邻的斐波那契数。',
              en: 'Seed k lands at (r, θ) = (√k, k·α). A rational divergence angle α locks the seeds into spokes with gaps; only the golden angle 2π(1−1/φ) ≈ 137.508° packs them uniformly, weaving 21 and 34 counter-rotating spiral families — consecutive Fibonacci numbers.' },
     tips: { zh: '按 2 俯视花盘，把 α 缓缓扫过 137.508°：辐条融化成双螺旋，琥珀光环亮起。试试有理陷阱 135°（3/8 圈）和 137.143°（8/21 圈）——立刻辐条化。因为 φ 最难被分数逼近（页签 3），黄金角永远不会走回老路——这是数论开出的花。',
@@ -858,7 +880,8 @@ const SCENES = {
 
       /* 内嵌递归（紫）：每层 1/φ²、转 36° */
       if (state.showInner) {
-        for (let l = 1; l <= state.starLev; l++) {
+        /* 取整：层数只作循环上界，浮点不会崩，但取整后层数与滑杆读数才始终一致 */
+        for (let l = 1, lev = idx(state.starLev, 0, 4); l <= lev; l++) {
           const W2 = pentV(STAR_R / Math.pow(PHI, 2 * l), l * PI / 5);
           const al = Math.max(0.2, 0.65 - l * 0.12);
           strokePoly(C, W2.concat([W2[0]]), { width: 1.6, color: hexA(C_VIO, al) });
