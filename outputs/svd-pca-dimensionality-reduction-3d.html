@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.0.1">
 <meta name="engine-version" content="1.0.0">
 <title>SVD、PCA 与降维 · SVD, PCA & Dimensionality Reduction</title>
 <!-- ============================================================
@@ -16,6 +16,7 @@
   降维丢掉的，恰好是你沿主成分方向看不见的那一维。
 
   版本记录（changelog，新→旧）：
+    1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-31  首个版本：SVD 三幕 / 奇异值与秩 / PCA 点云 / 降维与重建 四场景（含双语）
 ============================================================ -->
 <style>
@@ -378,6 +379,7 @@ const SCENES = {
   /* ────── 场景 1：SVD 三幕分解 ────── */
   svd: {
     label: { zh: 'SVD 三幕', en: 'SVD three acts' },
+    params: ['thV', 'sig1', 'sig2', 'thU', 'omega'],
     brand: { zh: '任何 2×2 线性变换都可分解为三幕：Vᵀ 先旋转到自然输入方向，Σ 沿正交轴独立伸缩，U 再旋转到输出方向。单位圆沿流水线依次经过三幕，探针点全程同行。拖动 θᵥ、σ、θᵤ 塑造每一幕。',
              en: 'Every 2×2 linear map factors into three acts: Vᵀ rotates to the natural input directions, Σ stretches independently along orthogonal axes, and U rotates into the output directions. The unit circle rides the pipeline through all three acts, with a probe point along for the trip. Drag θᵥ, σ and θᵤ to shape each act.' },
     tips: { zh: '按 2 正视：旋转不改变形状——圆仍是圆；伸缩只沿坐标轴拉开——得到正椭圆；末幕旋转只是把它摆到输出方向。三幕叠在一起，就是 A = UΣVᵀ。',
@@ -487,6 +489,7 @@ const SCENES = {
   /* ────── 场景 2：奇异值与秩 ────── */
   sigma: {
     label: { zh: '奇异值与秩', en: 'Singular values & rank' },
+    params: ['thV', 'sig1', 'sig2', 'thU', 'omega'],
     brand: { zh: '奇异值 σ₁、σ₂ 是像椭圆的两条半轴：它们决定变换把面积放大多少（|det A| = σ₁σ₂），也决定矩阵离降秩有多近。拖动 σ₂ 走向 0，看整张平面被压成一条线。',
              en: 'The singular values σ₁ and σ₂ are the semi-axes of the image ellipse: they set how the map scales area (|det A| = σ₁σ₂) and how close the matrix is to losing rank. Drag σ₂ toward 0 and watch the whole plane get crushed onto a line.' },
     tips: { zh: '按 2 正视并把 σ₂ 拖到 0：椭圆退化为线段——矩阵降为秩 1，条件数 σ₁/σ₂ 冲向 ∞。中途改 σ，白色轨迹保持旧椭圆的真实轨迹——历史不重算。',
@@ -561,6 +564,7 @@ const SCENES = {
   /* ────── 场景 3：PCA 点云 ────── */
   pca: {
     label: { zh: 'PCA 点云', en: 'PCA cloud' },
+    params: ['rho', 'spread'],
     brand: { zh: 'PCA 在数据里寻找变化最大的正交方向：第一主成分 PC₁ 指向散布最宽处，PC₂ 与之垂直。拖动相关系数 ρ 与散布度，看协方差椭圆与主成分如何跟随点云转动。',
              en: 'PCA looks for the orthogonal directions of greatest variation in the data: the first principal component PC₁ points where the cloud spreads widest, and PC₂ is perpendicular to it. Drag the correlation ρ and the spread, and watch the covariance ellipse and the components follow the cloud.' },
     tips: { zh: '按 3 沿 PC₂ 方向看：整团点云塌缩成 PC₁ 上的一维分布——这正是「保留最大方差的投影」。方向由数据自己给出，不由坐标轴决定。',
@@ -639,6 +643,7 @@ const SCENES = {
   /* ────── 场景 4：降维与重建误差 ────── */
   recon: {
     label: { zh: '降维与重建', en: 'Reduction & error' },
+    params: ['rho', 'spread', 'krank'],
     brand: { zh: '降维就是只保留前 k 个主成分：把每个点投影到 PC₁ 再抬回原空间，丢掉的只是它在 PC₂ 上的坐标。每条翠绿残差线是一个点付出的代价，总重建误差恰等于被丢弃方向的方差 (N−1)λ₂。',
              en: 'Dimensionality reduction keeps only the first k components: project each point onto PC₁ and lift it back — all that is lost is its coordinate along PC₂. Each green residual line is the price one point pays, and the total reconstruction error equals the discarded variance (N−1)λ₂.' },
     tips: { zh: '按 3 沿 PC₂ 方向看：rank-1 重建点与原始点完全重合——被丢掉的恰好是你此刻看不见的方向。把保留秩 k 拖到 2，残差归零，重建变回恒等。',
@@ -712,6 +717,7 @@ const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
 const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
 const samples = [];
 let curTab = null;
+const paramWraps = {};   // key -> { wrap, input, val, p }
 const RELABEL = [];
 const cams = {};
 let cam = null;
@@ -1081,6 +1087,7 @@ function buildParams() {
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
+    paramWraps[p.key] = { wrap, input, val, p };
     const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
     RELABEL.push(relabel);
     relabel();
@@ -1177,6 +1184,15 @@ function applyView(name) {
 
 const brandDesc = document.getElementById('brandDesc');
 const tipsEl = document.getElementById('tips');
+/* 按当前页签的 params 显隐滑块。省略 params = 全部显示（向后兼容）。
+   不复制 DOM：滑块值是跨页签共享的 state，复制会引入多份 DOM 的同步问题。 */
+function syncParamVisibility() {
+  const list = SCENES[curTab] && SCENES[curTab].params;
+  Object.keys(paramWraps).forEach(k => {
+    paramWraps[k].wrap.style.display = (!list || list.indexOf(k) >= 0) ? '' : 'none';
+  });
+}
+
 function switchTab(id) {
   if (id === curTab) return;
   curTab = id;
@@ -1188,6 +1204,7 @@ function switchTab(id) {
   cam = cams[id];
   brandDesc.textContent = t(SCENES[id].brand);
   tipsEl.textContent = t(SCENES[id].tips);
+  syncParamVisibility();
   refreshViewButtons();
   updateReadout();
 }

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.0.1">
 <meta name="engine-version" content="1.0.0">
 <title>离散傅里叶变换 · 换一套坐标看信号</title>
 <!-- ============================================================
@@ -13,6 +13,7 @@
   引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
 
   版本记录（changelog，新→旧）：
+    1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-12  首个版本（含双语）
 ============================================================ -->
 <style>
@@ -370,6 +371,7 @@ const SCENES = {
   /* ────── 一：采样与频谱 ────── */
   dft: {
     label: { zh: '采样与频谱', en: 'Samples & spectrum' },
+    params: ['f2', 'noise', 'N', 'm', 'omega'],
     brand: { zh: '连续信号被采成 N 根梳齿，DFT 把它们换到另一套坐标：沿 k 轴排开的频谱走廊。每根紫柱是一个频率格——信号在这套基下的坐标。',
              en: 'A continuous signal is combed into N samples, and the DFT rewrites them in another coordinate system: a corridor of frequency bins along k. Each violet column is one bin — the signal’s coordinate on that basis.' },
     tips: { zh: '提示：切「侧视 频谱 k」——同一个信号，转个角度就从波形变成频谱：两根亮柱正好立在 k=2 与 k=f₂ 上。只有 N/2 个独立格子，因为 X_{N−k} = X_k*（实信号的共轭对称）。',
@@ -400,6 +402,7 @@ const SCENES = {
   /* ────── 二：逆变换 · 完美重建 ────── */
   idft: {
     label: { zh: '逆变换 · 重建', en: 'Inverse · Rebuild' },
+    params: ['f2', 'noise', 'N', 'm', 'omega'],
     brand: { zh: '逆变换把频率格一个个加回来：xₙ = (1/N)ΣX_k e^(+2πikn/N)。拖满频域上限 m，翠绿曲线与每一个采样点完全重合——DFT 不丢任何信息，连噪声都原样还给你。',
              en: 'The inverse transform adds the bins back one by one: xₙ = (1/N)ΣX_k e^(+2πikn/N). Push the cap m to the top and the emerald curve passes through every sample exactly — the DFT loses nothing, it even hands your noise back.' },
     tips: { zh: '提示：切「正视 重建」把 m 从 0 慢慢拖到 N/2——先长出均值，再长出 k=2 的大浪，再长出 f₂ 的细纹，最后连噪声毛刺都长回来，RMS 误差归零：频域是同一信号的另一套坐标，不是近似。',
@@ -434,6 +437,7 @@ const SCENES = {
   /* ────── 三：滤波 · 频域手术 ────── */
   filter: {
     label: { zh: '滤波 · 频域手术', en: 'Filter · Surgery' },
+    params: ['f2', 'noise', 'N', 'm', 'omega'],
     brand: { zh: '噪声散布在所有频率格上，而信号只住在几个格子里。把频域上限 m 压到信号带宽附近——格子外的噪声连同柱子一起熄灭，翠绿曲线平滑地穿回毛刺之间。',
              en: 'Noise spreads across every bin, but the signal lives in just a few. Pull the cap m down to the signal’s bandwidth — the noise outside dies with its bins, and the emerald curve glides smoothly back through the fuzz.' },
     tips: { zh: '提示：先把噪声拉到 0.5，再切「正视 滤波」把 m 压到 f₂ 附近——翠绿滤波信号贴着青色干净参考走，「与干净信号偏差」在 m ≈ f₂ 处最小：再多留格子是在保噪声，再少留是在砍信号。',
@@ -476,6 +480,7 @@ const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
 const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
 const samples = [];
 let curTab = null;
+const paramWraps = {};   // key -> { wrap, input, val, p }
 const RELABEL = [];
 const cams = {};
 let cam = null;
@@ -847,6 +852,7 @@ function buildParams() {
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
+    paramWraps[p.key] = { wrap, input, val, p };
     const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
     RELABEL.push(relabel);
     relabel();
@@ -943,6 +949,15 @@ function applyView(name) {
 
 const brandDesc = document.getElementById('brandDesc');
 const tipsEl = document.getElementById('tips');
+/* 按当前页签的 params 显隐滑块。省略 params = 全部显示（向后兼容）。
+   不复制 DOM：滑块值是跨页签共享的 state，复制会引入多份 DOM 的同步问题。 */
+function syncParamVisibility() {
+  const list = SCENES[curTab] && SCENES[curTab].params;
+  Object.keys(paramWraps).forEach(k => {
+    paramWraps[k].wrap.style.display = (!list || list.indexOf(k) >= 0) ? '' : 'none';
+  });
+}
+
 function switchTab(id) {
   if (id === curTab) return;
   curTab = id;
@@ -954,6 +969,7 @@ function switchTab(id) {
   cam = cams[id];
   brandDesc.textContent = t(SCENES[id].brand);
   tipsEl.textContent = t(SCENES[id].tips);
+  syncParamVisibility();
   refreshViewButtons();
   updateReadout();
 }

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.0.1">
 <meta name="engine-version" content="1.0.0">
 <title>递推、迭代与稳定性 · Recurrence & Iteration</title>
 <!-- ============================================================
@@ -27,6 +27,7 @@
   未来的步骤，历史轨迹绝不重算；重置（R）以 x₀ 重新播种。
 
   版本记录（changelog，新→旧）：
+    1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-12  首个版本：蛛网图 / 三维序列 / 牛顿迭代三页签
 ============================================================ -->
 <style>
@@ -434,6 +435,7 @@ const SCENES = {
   /* ────── 页签 1：蛛网图 —— 迭代机的运转轨迹 ────── */
   cobweb: {
     label: { zh: '蛛网图', en: 'Cobweb' },
+    params: ['family', 'a', 'b', 'r', 'x0', 'omega'],
     brand: { zh: '递推 xₙ₊₁ = f(xₙ) 不是给出数列，而是一台把输出送回输入的机器。竖线撞向曲线取值、横线滑回对角线换座——蛛网图就是机器运转的轨迹。切换函数家族、拖动 a 或 r 观察收敛与发散。',
              en: 'A recurrence xₙ₊₁ = f(xₙ) does not hand you the sequence — it defines a machine that feeds output back into input. Vertical to the curve, horizontal to the diagonal: the cobweb is the machine running. Switch families and drag a or r to watch it converge or escape.' },
     tips: { zh: '提示：不动点处 |f′| < 1 时蛛网被吸进去（0 < a < 1 单调爬近，−1 < a < 0 螺旋交替），|f′| > 1 被甩出去；逻辑家族把 r 推过 3，蛛网收敛成一个方框——2 周期诞生。按 2「正视蛛网」看得最清。',
@@ -524,6 +526,7 @@ const SCENES = {
   /* ────── 页签 2：三维序列 —— 数列抬进 (xₙ, xₙ₊₁, n) 空间 ────── */
   lift: {
     label: { zh: '三维序列', en: '3D sequence' },
+    params: ['family', 'a', 'b', 'r', 'x0', 'omega'],
     brand: { zh: '把数列抬进三维：第 n 步是空间中一点 (xₙ, xₙ₊₁, n)，整个序列成为一条空间折线。它在底面上的影子是蛛网轨道，在侧面上的影子是时间序列——同一条折线，两种读法。',
              en: 'Lift the sequence into 3D: step n is the point (xₙ, xₙ₊₁, n), so the whole sequence becomes a space polyline. Its shadow on the floor is the cobweb orbit; its side shadow is the time series — one polyline, two readings.' },
     tips: { zh: '提示：按 2「正视 xₙ·xₙ₊₁」——所有点瞬间塌缩到曲线 y = f(x) 上，因为 xₙ₊₁ 本来就是 f(xₙ)：每个序列点都活在函数上。按 3 侧视，同一条折线又变回时间序列。',
@@ -601,6 +604,7 @@ const SCENES = {
   /* ────── 页签 3：牛顿迭代 —— 求根也是同一台机器 ────── */
   newton: {
     label: { zh: '牛顿迭代', en: 'Newton' },
+    params: ['x0', 'omega', 'gsel'],
     brand: { zh: '牛顿法只是另一台迭代机：f(x) = x − g(x)/g′(x)。每一步在 (xₙ, g(xₙ)) 作切线、滑到与 x 轴的交点，就得到 xₙ₊₁；在根附近误差按平方缩小。',
              en: 'Newton’s method is just another iteration machine: f(x) = x − g(x)/g′(x). Each step draws the tangent at (xₙ, g(xₙ)) and slides to where it hits the x-axis — that is xₙ₊₁. Near a root the error shrinks quadratically.' },
     tips: { zh: '提示：盯住读数区的误差——每一步大约是前一步的平方（二次收敛）。按 3「迭代机 f」：切线步骤原来就是同一张蛛网图，只是这台 f 在根处斜率为 0，把蛛网吸得飞快。',
@@ -713,6 +717,7 @@ const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
 const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
 const samples = [];
 let curTab = null;
+const paramWraps = {};   // key -> { wrap, input, val, p }
 const RELABEL = [];
 const cams = {};
 let cam = null;
@@ -1092,6 +1097,7 @@ function buildParams() {
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
+    paramWraps[p.key] = { wrap, input, val, p };
     const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
     RELABEL.push(relabel);
     relabel();
@@ -1188,6 +1194,15 @@ function applyView(name) {
 
 const brandDesc = document.getElementById('brandDesc');
 const tipsEl = document.getElementById('tips');
+/* 按当前页签的 params 显隐滑块。省略 params = 全部显示（向后兼容）。
+   不复制 DOM：滑块值是跨页签共享的 state，复制会引入多份 DOM 的同步问题。 */
+function syncParamVisibility() {
+  const list = SCENES[curTab] && SCENES[curTab].params;
+  Object.keys(paramWraps).forEach(k => {
+    paramWraps[k].wrap.style.display = (!list || list.indexOf(k) >= 0) ? '' : 'none';
+  });
+}
+
 function switchTab(id) {
   if (id === curTab) return;
   curTab = id;
@@ -1199,6 +1214,7 @@ function switchTab(id) {
   cam = cams[id];
   brandDesc.textContent = t(SCENES[id].brand);
   tipsEl.textContent = t(SCENES[id].tips);
+  syncParamVisibility();
   refreshViewButtons();
   updateReadout();
 }

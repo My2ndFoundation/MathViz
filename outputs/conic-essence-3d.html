@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.0.1">
 <meta name="engine-version" content="1.0.0">
 <title>圆锥曲线的本质 · 统一定义 / Conic Sections</title>
 <!-- ============================================================
@@ -18,6 +18,7 @@
   引擎区（相机 / 投影 / 绘制部件 / 交互 / 主循环）一般无需改动。
 
   版本记录（新→旧）：
+    1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-11  首个版本（含双语）
 ============================================================ -->
 <style>
@@ -631,6 +632,7 @@ const SCENES = {
   /* ────── 页 1：圆锥截面 ────── */
   cone: {
     label: { zh: '圆锥截面', en: 'Conic section' },
+    params: ['e'],
     brand: { zh: '一把刀切一个圆锥：刀面与轴的夹角 β 大于半顶角 α = 45° 时切出椭圆，等于 α 时切出抛物线，小于 α 时切出双曲线。拖动 e，同一把刀连续地改变姿态。',
              en: 'Slice a cone with a plane: when the angle β between the plane and the axis is greater than the half-angle α = 45°, the cut is an ellipse; equal to α, a parabola; less than α, a hyperbola. Drag e and watch the same blade tilt continuously.' },
     tips: { zh: '提示：按「侧视 β∠α」（键 2）——圆锥塌成一个 V，切面塌成一条线，于是 β 与 α 可以直接目测比较。切面与青色虚线（∥ 母线）重合的那一刻，正是抛物线 e = 1。',
@@ -699,6 +701,8 @@ const SCENES = {
   /* ────── 页 2：焦点与准线 ────── */
   focus: {
     label: { zh: '焦点与准线', en: 'Focus & directrix' },
+    /* ω 经引擎时钟（state.theta += state.omega·dt）驱动 P 的扫掠与彗尾，场景体内不出现 state.omega —— 勿据 grep 判定无用而删 */
+    params: ['e', 'omega'],
     brand: { zh: '同一条曲线的第二种说法：到焦点 F 的距离与到准线的距离之比恒为 e。P 沿曲线运动时，紫色的 |PF| 与翠绿的准线距离同涨同落，比值纹丝不动。',
              en: 'A second way to say the same curve: the ratio of the distance to focus F over the distance to the directrix is always e. As P moves along the curve, the violet |PF| and the emerald directrix distance rise and fall together — the ratio never budges.' },
     tips: { zh: '提示：按「正视 焦点·准线」（键 2）看最干净的二维画面——无论 P 跑到哪里，|PF| ÷ d 始终等于 e，这就是圆锥曲线的统一定义。e < 1 时曲线闭合成椭圆，e ≥ 1 时它再也回不来了；远端若超出裁剪范围，读数会标注「已裁剪」。',
@@ -832,6 +836,7 @@ const SCENES = {
   /* ────── 页 3：丹德林球 ────── */
   dandelin: {
     label: { zh: '丹德林球', en: 'Dandelin spheres' },
+    params: ['e'],
     brand: { zh: '在圆锥里塞进两个球，让它们同时内切于圆锥、又恰好顶住切面。两个切点，正是第 2 页里那两个焦点——两种定义在此合为一体。',
              en: 'Tuck two spheres inside the cone so each is tangent to the cone and just touches the cutting plane. The two points of tangency are exactly the two foci from page 2 — the two definitions merge into one here.' },
     tips: { zh: '提示：按「正对切面看焦」（键 2）——两个青色光点就是球与切面的切点，也就是截线的两个焦点，与第 2 页的 F 同色同物。把 e 推过 0.8 再推向 1：外侧的球被越挤越远，直到抛物线时退到无穷远，所以抛物线只剩一个焦点。',
@@ -935,6 +940,7 @@ const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
 const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
 const samples = [];
 let curTab = null;
+const paramWraps = {};   // key -> { wrap, input, val, p }
 const RELABEL = [];
 const cams = {};
 let cam = null;
@@ -1307,6 +1313,7 @@ function buildParams() {
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
+    paramWraps[p.key] = { wrap, input, val, p };
     const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
     RELABEL.push(relabel);
     relabel();
@@ -1403,6 +1410,15 @@ function applyView(name) {
 
 const brandDesc = document.getElementById('brandDesc');
 const tipsEl = document.getElementById('tips');
+/* 按当前页签的 params 显隐滑块。省略 params = 全部显示（向后兼容）。
+   不复制 DOM：滑块值是跨页签共享的 state，复制会引入多份 DOM 的同步问题。 */
+function syncParamVisibility() {
+  const list = SCENES[curTab] && SCENES[curTab].params;
+  Object.keys(paramWraps).forEach(k => {
+    paramWraps[k].wrap.style.display = (!list || list.indexOf(k) >= 0) ? '' : 'none';
+  });
+}
+
 function switchTab(id) {
   if (id === curTab) return;
   curTab = id;
@@ -1414,6 +1430,7 @@ function switchTab(id) {
   cam = cams[id];
   brandDesc.textContent = t(SCENES[id].brand);
   tipsEl.textContent = t(SCENES[id].tips);
+  syncParamVisibility();
   refreshViewButtons();
   updateReadout();
 }

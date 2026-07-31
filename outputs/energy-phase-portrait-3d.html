@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.0.1">
 <meta name="engine-version" content="1.0.0">
 <title>能量、势能与相图 · 交互式可视化</title>
 <!-- ============================================================
@@ -21,6 +21,7 @@
     ③ pushSample  —— 每帧 RK4 积分 x″ = −V′(x)/m − γx′ 并记录 (t, x, v, E, V) 真实值
 
   版本记录（changelog，新→旧）：
+    1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-12  首个版本：势能景观 / 能量曲面 (x,v,E) / 相图等能线 三场景，
                        四种势能族（谐振子 / 单摆 / 双阱 / 势垒），可选阻尼演示能量泄漏
 ============================================================ -->
@@ -451,6 +452,7 @@ const SCENES = {
   /* ────── 页签一：势能景观 —— 山谷、能量线与转折点 ────── */
   land: {
     label: { zh: '势能景观', en: 'Landscape' },
+    params: ['pot', 'x0', 'v0', 'm', 'gamma', 'waveSpeed'],
     brand: { zh: '把 V(x) 看作一座山谷：总能量 E = ½mv² + V(x) 是一条水平线，动能是 E 线与山坡之间的落差。小球恰好在 E = V(x) 处耗尽动能，掉头返回。',
              en: 'Think of V(x) as a valley: total energy E = ½mv² + V(x) is a horizontal line, and kinetic energy is the gap between that line and the hillside. The ball spends its last bit of kinetic energy exactly where E = V(x), then turns back.' },
     tips: { zh: '提示：切到「正视 x·E」——小球永远在 E 线与势能曲线的两个交点（琥珀色转折点）之间往返，那正是 K = E − V ≥ 0 的全部区域。把阻尼 γ 调大，看 E 线缓缓下沉。',
@@ -538,6 +540,7 @@ const SCENES = {
   /* ────── 页签二：能量曲面 —— 轨迹被钉在等高线上 ────── */
   surface: {
     label: { zh: '能量曲面', en: 'Energy surface' },
+    params: ['pot', 'x0', 'v0', 'm', 'gamma', 'waveSpeed'],
     brand: { zh: '把总能量画成相平面 (x, v) 上方的曲面 E(x, v) = ½mv² + V(x)。能量守恒意味着轨迹被钉在这张曲面的一条水平等高线上——它哪儿也去不了。',
              en: 'Plot total energy as a surface E(x, v) = ½mv² + V(x) above the phase plane. Conservation pins the trajectory onto one horizontal contour of this surface — it can go nowhere else.' },
     tips: { zh: '提示：切到「俯视 x·v」，曲面塌缩成相平面——等高线的影子就是相图轨道。运动不是任意的，它只能沿能量允许的几何轨道行进。调大 γ，看轨迹沿曲面盘旋滑落。',
@@ -633,6 +636,7 @@ const SCENES = {
   /* ────── 页签三：相图 —— 等能线族就是轨道族 ────── */
   phase: {
     label: { zh: '相图', en: 'Phase portrait' },
+    params: ['pot', 'x0', 'v0', 'm', 'gamma', 'waveSpeed'],
     brand: { zh: '相平面 (x, v) 上，每一条等能线 ½mv² + V(x) = E 就是一条可能的轨道。用 x₀ 与 v₀ 选定能量，小球便沿对应的等能线运行。',
              en: 'In the phase plane (x, v), every level set ½mv² + V(x) = E is a possible orbit. Pick the energy with x₀ and v₀, and the ball runs along the matching level curve.' },
     tips: { zh: '提示：切「正视 x·v」，选「单摆」或「双阱」势——橙色分界线（separatrix）把束缚轨道与越过轨道分成两个世界，把 E 调到分界线两侧各看一次。',
@@ -721,6 +725,7 @@ const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
 const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
 const samples = [];
 let curTab = null;
+const paramWraps = {};   // key -> { wrap, input, val, p }
 const RELABEL = [];
 const cams = {};
 let cam = null;
@@ -1133,6 +1138,7 @@ function buildParams() {
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
+    paramWraps[p.key] = { wrap, input, val, p };
     const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
     RELABEL.push(relabel);
     relabel();
@@ -1229,6 +1235,15 @@ function applyView(name) {
 
 const brandDesc = document.getElementById('brandDesc');
 const tipsEl = document.getElementById('tips');
+/* 按当前页签的 params 显隐滑块。省略 params = 全部显示（向后兼容）。
+   不复制 DOM：滑块值是跨页签共享的 state，复制会引入多份 DOM 的同步问题。 */
+function syncParamVisibility() {
+  const list = SCENES[curTab] && SCENES[curTab].params;
+  Object.keys(paramWraps).forEach(k => {
+    paramWraps[k].wrap.style.display = (!list || list.indexOf(k) >= 0) ? '' : 'none';
+  });
+}
+
 function switchTab(id) {
   if (id === curTab) return;
   curTab = id;
@@ -1240,6 +1255,7 @@ function switchTab(id) {
   cam = cams[id];
   brandDesc.textContent = t(SCENES[id].brand);
   tipsEl.textContent = t(SCENES[id].tips);
+  syncParamVisibility();
   refreshViewButtons();
   updateReadout();
 }

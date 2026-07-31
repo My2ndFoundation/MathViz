@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.0.1">
 <meta name="engine-version" content="1.0.0">
 <title>曲面、等高线、梯度和切平面 · Surface, Contours & Gradient</title>
 <!-- ============================================================
@@ -13,6 +13,7 @@
   引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
 
   版本记录（changelog，新→旧）：
+    1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-12  首个版本（含双语，三场景：曲面与切片 / 梯度与方向导数 / 切平面）
 ============================================================ -->
 <style>
@@ -419,6 +420,7 @@ const SCENES = {
   /* ────── 曲面与切片：水平面切曲面，截口即等高线 ────── */
   slice: {
     label: { zh: '曲面与切片', en: 'Surface & slices' },
+    params: ['surf', 'omega', 'cSlice'],
     brand: { zh: '把曲面 z = f(x,y) 用水平面 z = c 切开，截口投到地面就是等高线 f(x,y) = c；让 c 扫过整个高度，地面便长出整张等高线图。拖拽旋转，或按 2 俯视。',
              en: 'Slice the surface z = f(x,y) with a horizontal plane z = c: the cut, projected to the floor, is the contour f(x,y) = c. Sweep c through every height and the whole contour map grows on the floor. Drag to rotate, or press 2 for the top view.' },
     tips: { zh: '顿悟点：按 2「等高线 x·y」俯视——三维曲面塌缩成一张纯粹的等高线图，每条线都只是水平面切出的截口。等高线密的地方，坡最陡。',
@@ -476,6 +478,7 @@ const SCENES = {
   /* ────── 梯度与方向导数：∇f ⊥ 等高线，Dᵤf = ∇f·u ────── */
   grad: {
     label: { zh: '梯度与方向导数', en: 'Gradient & Dᵤf' },
+    params: ['surf', 'omega', 'px', 'py'],
     brand: { zh: '在点 (x₀,y₀) 处，梯度 ∇f = (∂f/∂x, ∂f/∂y) 指向上升最快的方向；方向导数 Dᵤf = ∇f·u 是沿任意方向 u 的坡度。u 正随时钟旋转，俯视可见 ∇f 恒与等高线垂直。',
              en: 'At (x₀, y₀) the gradient ∇f = (∂f/∂x, ∂f/∂y) points in the direction of steepest ascent; the directional derivative Dᵤf = ∇f·u is the slope along any direction u. As u rotates with the clock, the top view shows ∇f always perpendicular to the contours.' },
     tips: { zh: '顿悟点：按 2 俯视——绿色 ∇f 箭头永远垂直于脚下的玫红等高线；u 转到与 ∇f 同向时 Dᵤf 最大 = |∇f|，垂直时 Dᵤf = 0。把曲面族换成「双峰」，再把点移到原点，可见鞍点处 ∇f = 0。',
@@ -555,6 +558,7 @@ const SCENES = {
   /* ────── 切平面：一点处的最佳线性近似 ────── */
   tan: {
     label: { zh: '切平面', en: 'Tangent plane' },
+    params: ['surf', 'omega', 'px', 'py'],
     brand: { zh: '切平面 z = f₀ + ∇f·Δr 是曲面在一点处的最佳线性近似——移动 (x₀,y₀)，这块平面就贴着山坡滑动。按 2 侧视，看它与曲面恰好相吻。',
              en: 'The tangent plane z = f₀ + ∇f·Δr is the best linear approximation of the surface at a point — move (x₀, y₀) and the plane slides along the hills. Press 2 for the side view to see it kiss the surface.' },
     tips: { zh: '顿悟点：按 2「切平面 x·f」侧视，切平面恰好吻住曲面一点——这就是「可微」的全部含义：局部看，曲面就是一块平面。',
@@ -634,6 +638,7 @@ const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
 const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
 const samples = [];
 let curTab = null;
+const paramWraps = {};   // key -> { wrap, input, val, p }
 const RELABEL = [];
 const cams = {};
 let cam = null;
@@ -1006,6 +1011,7 @@ function buildParams() {
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
+    paramWraps[p.key] = { wrap, input, val, p };
     const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
     RELABEL.push(relabel);
     relabel();
@@ -1102,6 +1108,15 @@ function applyView(name) {
 
 const brandDesc = document.getElementById('brandDesc');
 const tipsEl = document.getElementById('tips');
+/* 按当前页签的 params 显隐滑块。省略 params = 全部显示（向后兼容）。
+   不复制 DOM：滑块值是跨页签共享的 state，复制会引入多份 DOM 的同步问题。 */
+function syncParamVisibility() {
+  const list = SCENES[curTab] && SCENES[curTab].params;
+  Object.keys(paramWraps).forEach(k => {
+    paramWraps[k].wrap.style.display = (!list || list.indexOf(k) >= 0) ? '' : 'none';
+  });
+}
+
 function switchTab(id) {
   if (id === curTab) return;
   curTab = id;
@@ -1113,6 +1128,7 @@ function switchTab(id) {
   cam = cams[id];
   brandDesc.textContent = t(SCENES[id].brand);
   tipsEl.textContent = t(SCENES[id].tips);
+  syncParamVisibility();
   refreshViewButtons();
   updateReadout();
 }

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.0.1">
 <meta name="engine-version" content="1.0.0">
 <title>参数方程的本质 · Parametric Curves as Shadows of Motion</title>
 <!-- ============================================================
@@ -16,6 +16,7 @@
   引擎区（相机 / 投影 / 绘制部件 / 交互 / 主循环）与 starter 完全一致（零改动）。
 
   版本记录（changelog，新→旧）：
+    1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-12  首版：参数方程三视角——轨迹 x·y / 分量 x·t·y·t / 3D 提升 r(t)=(x,y,t)；
                         支持圆·摆线·利萨茹三族，含速度 r′、加速度 r″ 与参数速率 ω
 ============================================================ -->
@@ -334,6 +335,7 @@ const SCENES = {
   /* ────── ① 轨迹 x·y：参数曲线本身 + 运动点 + 速度/加速度向量 ────── */
   trace: {
     label: { zh: '轨迹 x·y', en: 'Trace x·y' },
+    params: ['family', 'la', 'lb', 'omega', 'amp', 'waveSpeed'],
     brand: { zh: '一个点按 (x(t), y(t)) 运动，它划出的路径就是参数曲线。绿箭是速度 r′、橙箭是加速度 r″。拖拽旋转，按 2 正视 x·y 平面。',
              en: 'One point moves by (x(t), y(t)); the path it sweeps is the parametric curve. Green is the velocity r′, orange the acceleration r″. Drag to rotate, press 2 to face the x·y plane.' },
     tips: { zh: '顿悟：参数方程不是两条函数，而是一个运动点的两组坐标记录。速度 r′ 永远沿轨迹相切，加速度 r″ 指向弯道内侧——按 2 正视 x·y 看得最清。',
@@ -374,6 +376,7 @@ const SCENES = {
   /* ────── ② 分量 x·t / y·t：两组坐标记录沿时间轴摊开 ────── */
   comp: {
     label: { zh: '分量 x·t / y·t', en: 'Components x·t / y·t' },
+    params: ['family', 'la', 'lb', 'omega', 'amp', 'waveSpeed'],
     brand: { zh: '同一个运动点，把 x 坐标与 y 坐标分别对时间 t 展开，就得到两张分量图 x=f(t) 与 y=g(t)。按 3 俯视看 x·t、按 4 侧视看 y·t。',
              en: 'Take the same moving point and unroll its x and y coordinates against time t: you get two component graphs x=f(t) and y=g(t). Press 3 (top) for x·t, 4 (side) for y·t.' },
     tips: { zh: '顿悟：两张分量图不是各自独立的函数，而是同一个点的两组坐标记录沿时间轴摊开——俯视/侧视时各自显形为一条清晰曲线。',
@@ -413,6 +416,7 @@ const SCENES = {
   /* ────── ③ 3D 提升 r(t)=(x,y,t)：一条空间曲线，三面影子 ────── */
   lift: {
     label: { zh: '3D 提升 r(t)', en: '3D lift r(t)' },
+    params: ['family', 'la', 'lb', 'omega', 'amp', 'waveSpeed'],
     brand: { zh: '把参数曲线抬进三维：r(t)=(x(t), y(t), t) 是一条空间曲线，它在三个坐标面上的影子分别是 x=f(t)、y=g(t) 与原来的参数曲线 x·y。',
              en: 'Lift the curve into 3D: r(t)=(x(t), y(t), t) is a space curve whose three shadows are x=f(t), y=g(t), and the original parametric curve x·y.' },
     tips: { zh: '顿悟：一条空间曲线，三面影子。按 4 正视 x·y——时间轴被看没了，影子正是参数曲线；按 2/3 则分别显出两张分量图。',
@@ -469,6 +473,7 @@ const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
 const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
 const samples = [];
 let curTab = null;
+const paramWraps = {};   // key -> { wrap, input, val, p }
 const RELABEL = [];
 const cams = {};
 let cam = null;
@@ -834,6 +839,7 @@ function buildParams() {
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
+    paramWraps[p.key] = { wrap, input, val, p };
     const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
     RELABEL.push(relabel);
     relabel();
@@ -930,6 +936,15 @@ function applyView(name) {
 
 const brandDesc = document.getElementById('brandDesc');
 const tipsEl = document.getElementById('tips');
+/* 按当前页签的 params 显隐滑块。省略 params = 全部显示（向后兼容）。
+   不复制 DOM：滑块值是跨页签共享的 state，复制会引入多份 DOM 的同步问题。 */
+function syncParamVisibility() {
+  const list = SCENES[curTab] && SCENES[curTab].params;
+  Object.keys(paramWraps).forEach(k => {
+    paramWraps[k].wrap.style.display = (!list || list.indexOf(k) >= 0) ? '' : 'none';
+  });
+}
+
 function switchTab(id) {
   if (id === curTab) return;
   curTab = id;
@@ -941,6 +956,7 @@ function switchTab(id) {
   cam = cams[id];
   brandDesc.textContent = t(SCENES[id].brand);
   tipsEl.textContent = t(SCENES[id].tips);
+  syncParamVisibility();
   refreshViewButtons();
   updateReadout();
 }

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.0.1">
 <meta name="engine-version" content="1.0.0">
 <title>三角恒等式的本质 · 一张圆生成整本公式表</title>
 <!-- ============================================================
@@ -13,6 +13,7 @@
   引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
 
   版本记录（changelog，新→旧）：
+    1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-12  首个版本（含双语）
 ============================================================ -->
 <style>
@@ -288,6 +289,7 @@ const SCENES = {
   /* ────── 一：旋转 · 和角公式 ────── */
   rot: {
     label: { zh: '旋转 · 和角', en: 'Rotation · Sum' },
+    params: ['alpha', 'beta'],
     brand: { zh: '和角公式是万公式之母，而它只是「转过 α 再转 β」：紫色的 cosβ 步与翠绿的 sinβ 步在圆上拼出 α+β 的落点——倍角、积化和差、和差化积全是它的代数变奏。',
              en: 'The angle-sum formula mothers the whole handbook, and it is nothing but "rotate by α, then by β": a violet cos β step and an emerald sin β step land exactly on α+β — double angles, product-to-sum and sum-to-product are all its algebraic remixes.' },
     tips: { zh: '提示：切「正视 复平面」打开「投影分解」——x 轴下方两根色条 cosαcosβ 与 −sinαsinβ 首尾相接，接出来的正是玫红的 cos(α+β)：公式的每一项都是一段看得见的线段。把 β 拖到等于 α，读数区自动亮出二倍角。',
@@ -368,6 +370,7 @@ const SCENES = {
   /* ────── 二：对称 · 诱导与基本关系 ────── */
   sym: {
     label: { zh: '对称 · 诱导', en: 'Symmetry · Reduce' },
+    params: ['alpha', 'op'],
     brand: { zh: '整套诱导公式只是镜子与旋转：−α 照 x 轴、π−α 照 y 轴、π/2−α 照对角线……坐标怎么互换、符号怎么变，看一眼像点就知道——「奇变偶不变，符号看象限」的几何真身。',
              en: 'All reduction formulas are just mirrors and turns: −α reflects in the x-axis, π−α in the y-axis, π/2−α in the diagonal… how coordinates swap and signs flip is read straight off the image point — the geometry behind the mnemonic.' },
     tips: { zh: '提示：拖「诱导操作」滑杆遍历六种变换，盯着紫色像点的坐标与玫红原点的关系；打开「切线与割线」——tan 真的画在切线上、sec 真的是割线，1+tan²=sec² 就是那个直角三角形的勾股定理。',
@@ -454,6 +457,8 @@ const SCENES = {
   /* ────── 三：合成 · 辅助角 ────── */
   aux: {
     label: { zh: '合成 · 辅助角', en: 'Combine · Aux angle' },
+    /* ω 经引擎时钟（state.theta += state.omega·dt）驱动波形推进与 samples 历史，场景体内不出现 state.omega —— 勿据 grep 判定无用而删 */
+    params: ['a', 'b', 'omega'],
     brand: { zh: 'a·sin x 与 b·cos x 相加，永远还是一条正弦波：振幅 R = √(a²+b²)、相位 φ 就是琥珀向量 (a, b) 的长度与角度——辅助角公式是向量合成的影子。',
              en: 'Add a·sin x and b·cos x and you always get a single sinusoid: the amplitude R = √(a²+b²) and phase φ are the length and angle of the amber vector (a, b) — the auxiliary-angle formula is vector addition in disguise.' },
     tips: { zh: '提示：切「侧视 y·t」看翠绿和波——无论 a、b 怎么拖，它都是一条标准正弦，峰值恰好 R；再切「正视 相量」看琥珀向量转动：和波的每一刻都是这根向量的投影。',
@@ -537,6 +542,7 @@ const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
 const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
 const samples = [];
 let curTab = null;
+const paramWraps = {};   // key -> { wrap, input, val, p }
 const RELABEL = [];
 const cams = {};
 let cam = null;
@@ -904,6 +910,7 @@ function buildParams() {
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
+    paramWraps[p.key] = { wrap, input, val, p };
     const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
     RELABEL.push(relabel);
     relabel();
@@ -1000,6 +1007,15 @@ function applyView(name) {
 
 const brandDesc = document.getElementById('brandDesc');
 const tipsEl = document.getElementById('tips');
+/* 按当前页签的 params 显隐滑块。省略 params = 全部显示（向后兼容）。
+   不复制 DOM：滑块值是跨页签共享的 state，复制会引入多份 DOM 的同步问题。 */
+function syncParamVisibility() {
+  const list = SCENES[curTab] && SCENES[curTab].params;
+  Object.keys(paramWraps).forEach(k => {
+    paramWraps[k].wrap.style.display = (!list || list.indexOf(k) >= 0) ? '' : 'none';
+  });
+}
+
 function switchTab(id) {
   if (id === curTab) return;
   curTab = id;
@@ -1011,6 +1027,7 @@ function switchTab(id) {
   cam = cams[id];
   brandDesc.textContent = t(SCENES[id].brand);
   tipsEl.textContent = t(SCENES[id].tips);
+  syncParamVisibility();
   refreshViewButtons();
   updateReadout();
 }
