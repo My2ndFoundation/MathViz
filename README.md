@@ -60,6 +60,7 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [图论与网络算法 · Graph Theory & Network Algorithms](outputs/graph-theory-network-algorithms-3d.html) | Algorithms as growing a known region with an invariant: BFS wavefronts rising layer by layer, Dijkstra making height equal shortest distance, and Kruskal's tide rejecting cycle-closing edges |
 | [Markov 链与稳定分布 · Markov Chains & Stationary Distributions](outputs/markov-chains-stationary-distribution-3d.html) | A transition matrix redistributing probability mass until nothing moves: πP = π as the eigenvalue-1 eigenvector, simplex trajectories converging, and ergodic vs periodic vs absorbing fates |
 | [组合计数与生成函数 · Combinatorics & Generating Functions](outputs/combinatorics-generating-functions-3d.html) | Sequences encoded as polynomial coefficients: the counting rules behind ×, sliding-strip convolution as coefficient multiplication, and Fibonacci folding into F(x) = x/(1−x−x²) |
+| [向量场、散度与旋度 · Vector Fields, Divergence & Curl](outputs/vector-fields-divergence-curl-3d.html) | An arrow at every position, measured by two local instruments: a tracer ring inflating by e^(div·τ), a paddle wheel spinning at curl/2 with its right-hand-rule vector, and gradient fields born curl-free from a scalar surface |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
