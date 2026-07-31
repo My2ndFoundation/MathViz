@@ -1168,10 +1168,34 @@ frame.addEventListener('load', function(){
 var REC = {};
 
 REC.CFG = {
-  visual: 'overlay', aspect: '16:9', drive: 'offline',
+  visual: 'overlay', aspect: '16:9', res: '1080p', drive: 'offline',
   duration: 8, loop: true, orbit: false, viewTo: ''
 };
-REC.SIZES = { '16:9': [1920,1080], '9:16': [1080,1920], '1:1': [1080,1080] };
+/* 画幅只管比例，分辨率单独一档 —— 两者相乘才是输出像素尺寸。
+   REC.RES 的值是**短边**像素：16:9 取 1080 即 1920×1080，取 2160 即 3840×2160；
+   9:16 同样按短边算，所以竖屏 4K 是 2160×3840。 */
+REC.RATIOS = { '16:9': [16,9], '9:16': [9,16], '1:1': [1,1] };
+REC.RES = { '1080p': 1080, '2K': 1440, '4K': 2160 };
+
+/* 输出像素尺寸。H.264 要求宽高为偶数，这里统一向下取偶。 */
+REC.sizeOf = function(aspect, res){
+  var ra = REC.RATIOS[aspect];
+  var short = REC.RES[res] || REC.RES['1080p'];
+  if (!ra) return null;
+  var w, h;
+  if (ra[0] >= ra[1]) { h = short; w = Math.round(short * ra[0] / ra[1]); }
+  else                { w = short; h = Math.round(short * ra[1] / ra[0]); }
+  return [w - (w % 2), h - (h % 2)];
+};
+
+/* 码率随像素数线性缩放，基准是 1080p60 线条动画的 12Mbps。
+   4K 因此拿到 48Mbps —— 沿用 12Mbps 会让四倍像素糊成块状。 */
+REC.bitrateFor = function(w, h){
+  var b = Math.round(12000000 * (w * h) / (1920 * 1080));
+  if (b < 8000000) b = 8000000;
+  if (b > 60000000) b = 60000000;
+  return b;
+};
 REC.FPS = 60;
 /* 兜底色序：与设计系统的曲线色序（rose → violet → emerald → orange）逐字一致。
    只在某个 toggle 自己没声明 color 时才用得上 —— 原则 3「一条曲线一个颜色」要求
@@ -1329,11 +1353,11 @@ REC.Encoder.pickMime = function(){
   return null;
 };
 
-REC.Encoder.start = function(stream, mime){
+REC.Encoder.start = function(stream, mime, bits){
   var chunks = [];
   var opt = { mimeType: mime };
-  /* 1080p60 的线条动画，12Mbps 足够干净又不至于让文件大到没法分享 */
-  opt.videoBitsPerSecond = 12000000;
+  /* 码率由调用方按输出像素数算（REC.bitrateFor）；没给就退回 1080p60 的 12Mbps */
+  opt.videoBitsPerSecond = bits || 12000000;
   var rec = new MediaRecorder(stream, opt);
   rec.ondataavailable = function(e){ if (e.data && e.data.size) chunks.push(e.data); };
   rec.start(100);        /* 100ms 一个 chunk，避免长录制时内存里堆一整块 */
@@ -1401,14 +1425,15 @@ REC.Compositor.__test = function(){
   function ok(n, c){ if (c) r.pass.push(n); else r.fail.push(n); }
   var h = REC.Bridge.get();
   if (!h){ r.fail.push('需要先载入一个工具（Bridge 不可用）'); return r; }
+  /* 三种画幅各配一档分辨率，顺带把 1080p / 2K / 4K 都走一遍 */
   var cfgs = [
-    { visual: 'clean',   aspect: '16:9' },
-    { visual: 'overlay', aspect: '9:16' },
-    { visual: 'overlay', aspect: '1:1'  }
+    { visual: 'clean',   aspect: '16:9', res: '1080p' },
+    { visual: 'overlay', aspect: '9:16', res: '2K'    },
+    { visual: 'overlay', aspect: '1:1',  res: '4K'    }
   ];
   for (var i = 0; i < cfgs.length; i++){
-    var c = cfgs[i], tag = c.visual + '/' + c.aspect;
-    var want = REC.SIZES[c.aspect];
+    var c = cfgs[i], tag = c.visual + '/' + c.aspect + '/' + c.res;
+    var want = REC.sizeOf(c.aspect, c.res);
     var o = REC.Compositor.begin(h, c);
     if (!o){ r.fail.push(tag + ': begin 返回 null'); continue; }
     ok(tag + ' 输出宽度正确', o.w === want[0]);
@@ -1422,6 +1447,29 @@ REC.Compositor.__test = function(){
   }
   ok('end() 后 iframe 内联尺寸已清空', frame.style.width === '');
   ok('end() 后 stage 已摘掉 rec-live', document.querySelector('.stage').className.indexOf('rec-live') < 0);
+
+  /* 分辨率换算：短边即 REC.RES 的值，横屏长边在宽、竖屏长边在高 */
+  ok('16:9 1080p = 1920×1080', String(REC.sizeOf('16:9','1080p')) === '1920,1080');
+  ok('16:9 2K    = 2560×1440', String(REC.sizeOf('16:9','2K'))    === '2560,1440');
+  ok('16:9 4K    = 3840×2160', String(REC.sizeOf('16:9','4K'))    === '3840,2160');
+  ok('9:16 4K    = 2160×3840', String(REC.sizeOf('9:16','4K'))    === '2160,3840');
+  ok('1:1  4K    = 2160×2160', String(REC.sizeOf('1:1','4K'))     === '2160,2160');
+  ok('未知分辨率退回 1080p', String(REC.sizeOf('16:9','8K')) === '1920,1080');
+  ok('未知画幅返回 null', REC.sizeOf('3:2','4K') === null);
+  var allEven = true, aks = ['16:9','9:16','1:1'], rks = ['1080p','2K','4K'];
+  for (var a = 0; a < aks.length; a++) for (var b = 0; b < rks.length; b++){
+    var s = REC.sizeOf(aks[a], rks[b]);
+    if (s[0] % 2 || s[1] % 2) allEven = false;
+  }
+  ok('所有组合宽高均为偶数（H.264 要求）', allEven);
+
+  /* 码率随像素数缩放：4K 是 1080p 的四倍像素，码率也该是四倍 */
+  ok('1080p 码率 = 12Mbps', REC.bitrateFor(1920,1080) === 12000000);
+  ok('4K 码率 = 48Mbps',    REC.bitrateFor(3840,2160) === 48000000);
+  ok('2K 码率介于两者之间',
+     REC.bitrateFor(2560,1440) > 12000000 && REC.bitrateFor(2560,1440) < 48000000);
+  ok('码率有下限（极小尺寸不塌到 0）', REC.bitrateFor(64,64) >= 8000000);
+  ok('码率有上限（极大尺寸不失控）', REC.bitrateFor(15360,8640) <= 60000000);
 
   /* readout() 常见字段分隔符 &ensp;（约 50 个工具在用），以及 &thinsp; / &lt; / &gt;，
      必须走 frame() 同一条解码路径，解码后不能残留任何字面 & */
@@ -1467,7 +1515,7 @@ var _compActive = null;
 
 REC.Compositor.begin = function(h, cfg){
   if (_compActive) return null;              /* 已有一场录制在进行，拒绝重入 */
-  var size = REC.SIZES[cfg.aspect];
+  var size = REC.sizeOf(cfg.aspect, cfg.res);
   if (!h || !size) return null;
   var w = size[0], hh = size[1];
   var stage = document.querySelector('.stage');
@@ -1738,6 +1786,7 @@ REC.UI.L = {
   overlay:  { zh: '叠层',       en: 'Overlay' },
   screen:   { zh: '整页',       en: 'Screen' },
   aspect:   { zh: '画幅',       en: 'Aspect' },
+  res:      { zh: '分辨率',     en: 'Resolution' },
   drive:    { zh: '驱动',       en: 'Drive' },
   offline:  { zh: '定长渲染',   en: 'Offline' },
   realtime: { zh: '实时录制',   en: 'Realtime' },
@@ -1750,7 +1799,9 @@ REC.UI.L = {
               en: 'Clean / Overlay need the page served over http (file:// is blocked by same-origin). Use "Screen" instead.' },
   noMime:   { zh: '本浏览器不支持视频录制。',
               en: 'This browser cannot record video.' },
-  willBe:   { zh: '将输出 ', en: 'Output: ' }
+  willBe:   { zh: '将输出 ', en: 'Output: ' },
+  heavy:    { zh: '　4K 编码较重，长片段可能丢帧。',
+              en: '　4K encoding is heavy; long clips may drop frames.' }
 };
 
 function _seg(key, opts){
@@ -1769,9 +1820,17 @@ REC.UI.render = function(){
   var mime = REC.Encoder.pickMime ? REC.Encoder.pickMime() : null;
   var okBridge = REC.Bridge.available ? REC.Bridge.available() : false;
   var note = '';
+  var px = REC.sizeOf(REC.CFG.aspect, REC.CFG.res);
   if (!mime) note = REC.t(REC.UI.L.noMime);
   else if (!okBridge && REC.CFG.visual !== 'screen') note = REC.t(REC.UI.L.noBridge);
-  else note = REC.t(REC.UI.L.willBe) + '.' + mime.ext;
+  else {
+    /* 「整页」录的是标签页本身，尺寸由窗口决定，报画幅/分辨率会骗人 */
+    note = REC.t(REC.UI.L.willBe) + '.' + mime.ext;
+    if (REC.CFG.visual !== 'screen' && px){
+      note += '　' + px[0] + '×' + px[1];
+      if (REC.CFG.res === '4K') note += REC.t(REC.UI.L.heavy);
+    }
+  }
 
   pan.innerHTML =
     '<h4>' + REC.t(REC.UI.L.title) + '</h4>' +
@@ -1779,6 +1838,8 @@ REC.UI.render = function(){
       _seg('visual', [['clean','clean'],['overlay','overlay'],['screen','screen']]) + '</div>' +
     '<div class="rec-row"><label>' + REC.t(REC.UI.L.aspect) + '</label>' +
       _seg('aspect', [['16:9','aspect'],['9:16','aspect'],['1:1','aspect']]) + '</div>' +
+    '<div class="rec-row"><label>' + REC.t(REC.UI.L.res) + '</label>' +
+      _seg('res', [['1080p','res'],['2K','res'],['4K','res']]) + '</div>' +
     '<div class="rec-row"><label>' + REC.t(REC.UI.L.drive) + '</label>' +
       _seg('drive', [['offline','offline'],['realtime','realtime']]) + '</div>' +
     '<div class="rec-row"><label>' + REC.t(REC.UI.L.dur) + ' · <span id="recDurVal">' + REC.CFG.duration + '</span>s</label>' +
@@ -1789,8 +1850,8 @@ REC.UI.render = function(){
     '<div class="rec-bar"><i id="recBar"></i></div>' +
     '<div class="rec-note" id="recNote">' + note + '</div>';
 
-  /* 画幅按钮的文案就是它的值本身，_seg 的字典取不到，这里直接回填 */
-  var segs = pan.querySelectorAll('[data-k="aspect"]');
+  /* 画幅与分辨率按钮的文案就是它的值本身，_seg 的字典取不到，这里直接回填 */
+  var segs = pan.querySelectorAll('[data-k="aspect"],[data-k="res"]');
   for (var i = 0; i < segs.length; i++) segs[i].textContent = segs[i].getAttribute('data-v');
 };
 
@@ -1898,7 +1959,7 @@ REC.UI.run = function(){
     /* 身份要在 await 选窗口对话框「之前」就立起来：否则对话框开着时再点一次按钮，
        会再发一次 getDisplayMedia，第一条流没人引用也没人 stop，浏览器就一直共享屏幕。 */
     var bs = { pending: true, ses: null, src: null, ctxObj: null, snap: null, stream: null,
-               mime: mime, dur: null, aspect: cfg.aspect, toolId: curId, startedAt: Date.now() };
+               mime: mime, dur: null, aspect: cfg.aspect, res: null, toolId: curId, startedAt: Date.now() };
     REC.busy = bs;
     go.textContent = REC.t(REC.UI.L.stop);
     navigator.mediaDevices.getDisplayMedia({ video: { frameRate: REC.FPS }, audio: false })
@@ -1908,7 +1969,11 @@ REC.UI.run = function(){
         bs.pending = false;
         bs.stream = st;
         bs.startedAt = Date.now();
-        bs.ses = REC.Encoder.start(st, mime.mime);
+        /* 整页模式的尺寸由用户选的窗口决定，不由面板决定 —— 码率照实际拿到的分辨率算 */
+        var tset = st.getVideoTracks()[0].getSettings ? st.getVideoTracks()[0].getSettings() : null;
+        var sw = (tset && tset.width) || 1920, sh = (tset && tset.height) || 1080;
+        bs.res = sh + 'p';
+        bs.ses = REC.Encoder.start(st, mime.mime, REC.bitrateFor(sw, sh));
         /* 用户在浏览器的共享条上点「停止共享」也要收尾 */
         st.getVideoTracks()[0].addEventListener('ended', function(){ REC.stop(bs); });
       })['catch'](function(){
@@ -1932,10 +1997,10 @@ REC.UI.run = function(){
      用户中途改了设置或换了工具，文件名就会撒谎。 */
   if (cfg.drive === 'realtime'){
     var src = REC.Source.realtime(h, ctxObj, cfg);
-    var ses = REC.Encoder.start(src.stream, mime.mime);
+    var ses = REC.Encoder.start(src.stream, mime.mime, REC.bitrateFor(ctxObj.w, ctxObj.h));
     /* 实时录制没有预定时长，dur 留空，收尾时按实际经过的墙钟时间算 */
     REC.busy = { pending: false, ses: ses, src: src, ctxObj: ctxObj, snap: snap, stream: src.stream,
-                 mime: mime, dur: null, aspect: cfg.aspect, toolId: curId, startedAt: Date.now() };
+                 mime: mime, dur: null, aspect: cfg.aspect, res: cfg.res, toolId: curId, startedAt: Date.now() };
     go.textContent = REC.t(REC.UI.L.stop);
     return;                       /* 由用户再点一次「停止」触发 REC.stop → _finish */
   }
@@ -1944,9 +2009,9 @@ REC.UI.run = function(){
     duration: dur, loop: cfg.loop, orbit: cfg.orbit, viewTo: cfg.viewTo
   }, function(k){ if (bar) bar.style.width = Math.round(k * 100) + '%'; });
 
-  var ses2 = REC.Encoder.start(src2.stream, mime.mime);
+  var ses2 = REC.Encoder.start(src2.stream, mime.mime, REC.bitrateFor(ctxObj.w, ctxObj.h));
   var b2 = { pending: false, ses: ses2, src: src2, ctxObj: ctxObj, snap: snap, stream: src2.stream,
-             mime: mime, dur: dur, aspect: cfg.aspect, toolId: curId, startedAt: Date.now() };
+             mime: mime, dur: dur, aspect: cfg.aspect, res: cfg.res, toolId: curId, startedAt: Date.now() };
   REC.busy = b2;
   go.disabled = true;
   src2.done.then(function(res){
@@ -1969,6 +2034,7 @@ function _finish(b){
     if (!blob || !blob.size) return;               /* 0 字节就别塞给用户了 */
     var secs = (b.dur != null) ? b.dur : (Date.now() - b.startedAt) / 1000;
     var name = (b.toolId || 'mathviz') + '-' + String(b.aspect).replace(':', 'x')
+             + (b.res ? '-' + b.res : '')
              + '-' + _fmtSecs(secs) + 's.' + b.mime.ext;
     REC.Encoder.download(blob, name);
   })['catch'](function(){})['finally'](function(){
@@ -1994,6 +2060,20 @@ REC.UI.__test = function(){
   ok('存在 9:16 选项', !!seg);
   if (seg){ seg.click(); ok('点击写回 CFG.aspect', REC.CFG.aspect === '9:16');
             ok('选中态加了 on', seg.className.indexOf('on') >= 0); }
+  /* 分辨率分段器：三档都要在，点 4K 应写回 CFG 并让说明里出现真实像素尺寸 */
+  var r1080 = pan.querySelector('[data-k="res"][data-v="1080p"]');
+  var r2k   = pan.querySelector('[data-k="res"][data-v="2K"]');
+  var r4k   = pan.querySelector('[data-k="res"][data-v="4K"]');
+  ok('分辨率三档齐全', !!r1080 && !!r2k && !!r4k);
+  ok('分辨率按钮文案是值本身', !!r4k && r4k.textContent === '4K');
+  if (r4k){
+    r4k.click();
+    ok('点击写回 CFG.res', REC.CFG.res === '4K');
+    var n4 = pan.querySelector('#recNote');
+    /* 此刻 aspect 已被上面点成 9:16，竖屏 4K 应是 2160×3840 */
+    ok('说明里报出真实像素尺寸', !!n4 && n4.textContent.indexOf('2160×3840') >= 0);
+    ok('4K 给出编码较重的提示', !!n4 && n4.textContent.indexOf('4K') >= 0);
+  }
   var v = pan.querySelector('[data-k="visual"][data-v="clean"]');
   if (v){ v.click(); ok('点击写回 CFG.visual', REC.CFG.visual === 'clean'); }
   var dur = pan.querySelector('#recDur');
@@ -2001,7 +2081,7 @@ REC.UI.__test = function(){
   if (dur){ ok('时长下限 3', +dur.min === 3); ok('时长上限 30', +dur.max === 30); }
   ok('存在开始按钮', !!pan.querySelector('#recGo'));
   ok('存在格式说明', pan.innerHTML.indexOf('mp4') >= 0 || pan.innerHTML.indexOf('webm') >= 0);
-  REC.CFG.aspect = '16:9'; REC.CFG.visual = 'overlay';   /* 复位，别污染后续测试 */
+  REC.CFG.aspect = '16:9'; REC.CFG.visual = 'overlay'; REC.CFG.res = '1080p';   /* 复位，别污染后续测试 */
   btn.click();
   ok('再点按钮收起面板', pan.className.indexOf('on') < 0);
   ok('run 已接线（不再抛 not wired）', (function(){
