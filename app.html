@@ -1251,6 +1251,8 @@ REC.Bridge.get = function(){
     resize:     _peek(win, 'typeof resize     === "function" ? resize     : null'),
     pushSample: _peek(win, 'typeof pushSample === "function" ? pushSample : null'),
     applyView:  _peek(win, 'typeof applyView  === "function" ? applyView  : null'),
+    applyDrive: _peek(win, 'typeof applyDrive === "function" ? applyDrive : null'),
+    driveInfo:  _peek(win, 'typeof driveInfo  === "function" ? driveInfo  : null'),
     toolId: curId
   };
   if (!h.state || !h.cam || !h.draw) return null;   /* 老工具可能不合规，直接判不可用 */
@@ -1330,6 +1332,8 @@ REC.Bridge.__test = function(){
   alien.doc = docSaved; alien.toolId = '__not-a-tool__';
   REC.Bridge.restore(alien);
   ok('restore 拒绝异工具的快照', Math.abs(h.state.theta - t0) < 1e-9);
+  ok('handle 暴露 applyDrive 字段', 'applyDrive' in h);
+  ok('handle 暴露 driveInfo 字段', 'driveInfo' in h);
   return r;
 };
 /* ===== /REC:BRIDGE ===== */
@@ -1676,6 +1680,13 @@ REC.Source.__test = function(){
     };
   });
   r.pass.push('端到端离线渲染已发起（结果见 REC.Source.__lastProbe）');
+  /* 无驱动时吸附基准仍是 2π/ω；有驱动时改用 drive.period（见规范 §D2） */
+  ok('无驱动时按 2π/ω 吸附',
+     Math.abs(REC.Source.snapDuration(8, 1, null) - 6.283185307179586) < 1e-6);
+  ok('有驱动时按 drive.period 吸附',
+     REC.Source.snapDuration(8, 1, { period: 3 }) === 6);
+  ok('有驱动且不足一个周期时补一整轮',
+     REC.Source.snapDuration(2, 1, { period: 5 }) === 5);
   return r;
 };
 
@@ -1687,10 +1698,13 @@ REC.Source.omegaOf = function(h){
   return (typeof w === 'number' && isFinite(w)) ? w : 0;
 };
 
-/* 无缝循环：把时长吸到动画周期 2π/ω 的整数倍。ω=0（静态场景）时不吸。 */
-REC.Source.snapDuration = function(sec, omega){
-  if (!omega) return sec;
-  var period = 2 * Math.PI / Math.abs(omega);
+/* 无缝循环要求整数个周期。周期取谁：场景有驱动且自动播放开着时，
+   真正的循环周期是 drive.period；否则仍是相位周期 2π/|ω|。 */
+REC.Source.snapDuration = function(sec, omega, di){
+  var period;
+  if (di && di.period > 0) period = di.period;
+  else if (omega) period = 2 * Math.PI / Math.abs(omega);
+  else return sec;
   var n = Math.floor(sec / period);
   if (n < 1) n = 1;
   return n * period;
@@ -1729,6 +1743,7 @@ REC.Source.offline = function(h, o, cfg, onProgress){
       /* 1. 推进仿真（固定步长，与真实帧率无关） */
       h.state.t += dt;
       h.state.theta += omega * dt;
+      if (h.applyDrive) h.applyDrive();     /* 沿用当前页签的驱动设定；无驱动的旧工具跳过 */
       if (h.pushSample) h.pushSample();
 
       /* 2. 运镜 */
@@ -1828,7 +1843,8 @@ REC.UI.effDur = function(){
   if (!REC.Bridge.get || !REC.Source.omegaOf || !REC.Source.snapDuration) return req;
   var h = REC.Bridge.get();
   if (!h) return req;
-  return REC.Source.snapDuration(req, REC.Source.omegaOf(h));
+  var di = h.driveInfo ? h.driveInfo() : null;
+  return REC.Source.snapDuration(req, REC.Source.omegaOf(h), di);
 };
 
 REC.UI.durText = function(){
@@ -2022,8 +2038,9 @@ REC.UI.run = function(){
   var ctxObj = REC.Compositor.begin(h, cfg);
   if (!ctxObj){ if (note) note.textContent = REC.t(REC.UI.L.noBridge); return; }
 
+  var dInfo = h.driveInfo ? h.driveInfo() : null;
   var dur = cfg.duration;
-  if (cfg.loop) dur = REC.Source.snapDuration(dur, REC.Source.omegaOf(h));
+  if (cfg.loop) dur = REC.Source.snapDuration(dur, REC.Source.omegaOf(h), dInfo);
 
   /* 画幅、时长、工具 id 都在开录这一刻定格：收尾时再去读 REC.CFG / curId，
      用户中途改了设置或换了工具，文件名就会撒谎。 */
