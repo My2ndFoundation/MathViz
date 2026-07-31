@@ -1218,12 +1218,28 @@ REC.Compositor.__test = function(){
   }
   ok('end() 后 iframe 内联尺寸已清空', frame.style.width === '');
   ok('end() 后 stage 已摘掉 rec-live', document.querySelector('.stage').className.indexOf('rec-live') < 0);
+
+  /* readout() 常见字段分隔符 &ensp;（约 50 个工具在用），以及 &thinsp; / &lt; / &gt;，
+     必须走 frame() 同一条解码路径，解码后不能残留任何字面 & */
+  var decoded = _decodeReadoutLines('s&ensp;·&ensp;θ&thinsp;=&thinsp;&lt;12&gt;&nbsp;&minus;').join('\n');
+  ok('readout 实体解码（&ensp; 等）不残留字面 &', decoded.indexOf('&') < 0);
+  ok('readout 实体解码结果非空', decoded.replace(/\s+/g, '').length > 0);
   return r;
 };
 
 /* 工具内部就是这么算 DPR 的（math-viz-starter.html:379），必须一致，
    否则 backing store 对不上目标像素尺寸。 */
 function _toolDpr(win){ return Math.min(2.5, win.devicePixelRatio || 1); }
+
+/* readout() 返回的是 HTML（&ensp; / &thinsp; / &lt; / &gt; / &minus; / &nbsp; 等实体都可能出现，
+   outputs/*.html 里约 50 个工具用 &ensp; 做字段分隔符）。手工枚举实体清单容易漏，
+   干脆把换行标签换成 \n 后交给浏览器自己的 HTML 解析器解一次，读 textContent 拿到全解码的纯文本。
+   DOMParser 解析 'text/html' 是惰性的：不执行脚本、不加载资源，这里安全，也不用碰任何真实节点的 innerHTML。 */
+function _decodeReadoutLines(txt){
+  var html = String(txt).replace(/<br\s*\/?>/gi, '\n').replace(/<\/(div|p|tr)>/gi, '\n');
+  var doc = new DOMParser().parseFromString(html, 'text/html');
+  return (doc.body.textContent || '').split('\n');
+}
 
 REC.Compositor.begin = function(h, cfg){
   var size = REC.SIZES[cfg.aspect];
@@ -1314,10 +1330,7 @@ REC.Compositor.frame = function(o, h, info){
   if (sc && sc.readout){
     var txt = '';
     try{ txt = String(sc.readout()); }catch(e){ txt = ''; }
-    var lines = txt.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(div|p|tr)>/gi, '\n')
-                   .replace(/<[^>]+>/g, ' ').replace(/&minus;/g, '−')
-                   .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
-                   .split('\n');
+    var lines = _decodeReadoutLines(txt);
     c.save();
     c.textAlign = 'right';
     c.textBaseline = 'top';
