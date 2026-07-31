@@ -772,3 +772,155 @@ git commit -m "feat(registry): 阶段 2 的 50 个工具版本登记与镜像同
 - **版本按 patch 递增**。滑块的行为没有变化——它们在那些页签上本来就不起作用；变的只是不再摆出无效控件。没有能力增减，属误导性呈现的修复。若判断应为 minor，改动仅限每个 HTML 的 meta 一处与 Task 7 的脚本，成本很低。
 - **`tools.json` 集中到 Task 7**。它是单个 JSON 数组，六个批次并行改不同条目必然文本冲突；集中处理换来六个批次真正的零冲突并行。代价是分支中途 HTML 与 `tools.json` 的版本号短暂不一致，无门禁会因此失败（`sync_registry.py` 不校验版本号）。
 - **`trig-essence-3d-new` 完全排除**。`engine-version: pre-declarative`，没有 `SCENES`，本机制不适用；它保持 51 个工具中的一员但不参与迁移。
+
+---
+
+## Task 8: 引擎增量集中落地与手写变通退役（计划修订后新增）
+
+> **本任务是计划修订的产物。** 原计划假定阶段 1 的 `params` 机制已在工具中就位——实际不然：51 个已发布工具各自携带一份**旧引擎的副本**，`syncParamVisibility()` 只存在于 `design-system/math-viz-starter.html`。因此 Task 1–6 声明的 `params` 目前是**没有消费方的字段**。本任务补上机制。
+
+**执行顺序**：Task 1–6 → **Task 8** → Task 7（注册表登记）。Task 7 必须最后做。
+
+**Files:**
+- Modify: 全部 50 个 `outputs/*.html`（`trig-essence-3d-new` 除外）
+- Modify: `.gitignore`
+- Delete from tracking: `.superpowers/sdd/2026-07-31-scene-scoped-params-phase2/task-3-report.md`
+
+**Interfaces:**
+- Consumes: Task 1–6 写入的 `SCENES[*].params` 声明；`design-system/math-viz-starter.html` 中的引擎实现（真源）
+- Produces: 50 个工具中可运行的 `params` 机制。Task 7 依赖本任务不改动任何 `<meta name="tool-version">`（版本号已由 Task 1–6 定稿）
+
+### 为什么必须原子完成
+
+13 个工具带有作者手写的 `PARAM_TABS` + rAF 变通。若先落引擎、后退役变通，中间态是**两套机制同时运行**：作者的 rAF 循环每帧改写 `row.style.display`，会持续覆盖 `syncParamVisibility()` 在切页签时的一次性设置。所以引擎落地与变通退役必须在同一次改动里完成。
+
+### 引擎增量的内容
+
+以 `design-system/math-viz-starter.html` 为真源，三处：
+
+1. `const paramWraps = {};` — 与其他模块级声明并列
+2. `buildParams()` 中，`host.appendChild(wrap);` 之后登记：`paramWraps[p.key] = { wrap, input, val, p };`
+3. `syncParamVisibility()` 函数本身，以及 `switchTab()` 中对它的调用（在 `refreshViewButtons();` 之前）
+
+**只移植 `params` 可见性所需的部分。不要移植 `drive` / `applyDrive` / `driveInfo` / `driveValue` / `syncParamSlider` / `buildDrive` / 驱动 UI / 驱动时钟偏移——那些属于阶段 3。**
+
+- [ ] **Step 1: 先测量现状，建立 RED 基线**
+
+```bash
+echo "含 syncParamVisibility 的工具数（预期 0）:"; grep -l "syncParamVisibility" outputs/*.html 2>/dev/null | wc -l
+echo "含 PARAM_TABS 的工具数（预期 13）:"; grep -l "PARAM_TABS" outputs/*.html | wc -l
+echo "含 params: 声明的工具数（预期 50）:"; grep -l "^    params: \[" outputs/*.html | wc -l
+```
+
+三个数字都记进报告。它们是本任务前后对照的基准。
+
+- [ ] **Step 2: 从 starter 抽取引擎增量的准确文本**
+
+不要凭记忆写。从真源读出这三段的**逐字文本**：
+
+```bash
+grep -n "const paramWraps" design-system/math-viz-starter.html
+sed -n '/^function syncParamVisibility/,/^}/p' design-system/math-viz-starter.html
+grep -n "paramWraps\[p.key\]" design-system/math-viz-starter.html
+grep -n "syncParamVisibility();" design-system/math-viz-starter.html
+```
+
+starter 用 `const`/`let`/箭头函数，工具也一样，可以直接搬。
+
+- [ ] **Step 3: 写一个幂等的移植脚本**
+
+手工改 50 个文件必然产生漂移——那正是这个仓库最初出问题的方式（引擎靠复制粘贴扩散）。**必须写脚本**，并且必须幂等：批次 3 的 9 个文件曾被移植过又回退，脚本要能正确处理"已有"和"没有"两种情形。
+
+脚本要处理的已知障碍：
+
+- **`cartesian-polar-coordinate-3d` 已有 `paramRefs` 结构**。检查它是什么、是否与 `paramWraps` 冲突。若它已经是等价的登记表，复用它而不是并列引入第二份；若不等价，保留它并让 `paramWraps` 独立。**在报告里说明你怎么处理的。**
+- 各工具的 `buildParams()` / `switchTab()` 文本可能有细微差异（不同时期从 starter 复制）。脚本要基于稳定锚点定位，命中失败时**报错并跳过该文件**，不要模糊匹配硬塞。
+
+- [ ] **Step 4: 退役 13 个工具的 `PARAM_TABS` + rAF**
+
+13 个工具是：`binomial-pascal-probability-3d`、`calculus-essence-3d`、`combinatorics-generating-functions-3d`、`complex-mult-3d`、`derivative-essence-3d`、`exponential-logarithm-essence-3d`、`gaussian-essence-3d`、`e-essence-3d`、`i-essence-3d`、`phi-essence-3d`、`pi-essence-3d`、`modular-arithmetic-euclid-crt-3d`、`random-variable-expectation-variance-3d`。
+
+**退役之前，先用作者的表回补 `params`。** 作者的 `PARAM_TABS` 是「参数 → 页签列表」，与 `params` 的「页签 → 参数列表」互为逆映射。求逆后与 Task 1–6 声明的 `params` 取并集：
+
+```
+最终 params = 已声明的 ∪ 求逆得到的
+```
+
+**作者的表是作者意图的直接陈述，是探针与源码 grep 都看不见的第三个独立信号。** 已知的证据：
+
+- 批次 3 对四个工具做的源码核对（在读表之前完成）与作者表**21 个页签、39 个键位、零分歧**——两个独立方法完全一致
+- 但像素探针漏掉了那 39 个键中的 8 个，还把 `i-essence/matrix` 读成零有效参数
+- 批次 2 在 `gaussian-essence-3d` 上声明得**比作者表更窄**（`bell`/`clt`/`drops`），这是漏声明，必须回补
+
+逐工具在报告里列出：作者表求逆的结果、已声明的、以及并集。**任何一处并集大于已声明的，都要单独标出**——那是被回补的漏声明。
+
+回补完成后，删除 `const PARAM_TABS = {…}`、`syncParamRows()` 函数、以及那个常驻的 `requestAnimationFrame(function _paramSyncLoop(){…})` 循环。顺带说明：那个循环是每帧写 DOM 的常驻开销，退役它也是性能改善。
+
+- [ ] **Step 5: 仓库卫生**
+
+`.superpowers/` 是 SDD 的临时工作区，按设计应当 git-ignored，但当前不在 `.gitignore` 里，导致一份任务报告被误提交。
+
+在 `.gitignore` 末尾追加：
+
+```
+# SDD 临时工作区（任务简报、报告、审查包）
+.superpowers/
+```
+
+并把误提交的文件移出跟踪（保留磁盘上的文件）：
+
+```bash
+git rm --cached .superpowers/sdd/2026-07-31-scene-scoped-params-phase2/task-3-report.md
+```
+
+- [ ] **Step 6: 语法门禁全量**
+
+```bash
+fail=0
+for f in outputs/*.html; do
+  awk '/<script>/{f=1;next}/<\/script>/{f=0}f' "$f" | node --check /dev/stdin || { echo "FAIL $f"; fail=1; }
+done
+[ $fail -eq 0 ] && echo "51 个工具全部通过"
+```
+
+- [ ] **Step 7: 结构验收**
+
+```bash
+echo "含 syncParamVisibility（预期 50）:"; grep -l "syncParamVisibility" outputs/*.html | wc -l
+echo "含 PARAM_TABS（预期 0）:"; grep -l "PARAM_TABS" outputs/*.html | wc -l
+echo "含 _paramSyncLoop（预期 0）:"; grep -l "_paramSyncLoop" outputs/*.html | wc -l
+echo "版本号未被本任务改动（预期无输出）:"; git diff main -- outputs/ | grep "^[-+].*tool-version"
+```
+
+最后一条尤其重要：版本号由 Task 1–6 定稿，本任务**不得改动任何 `<meta name="tool-version">`**，否则 Task 7 的脚本会漏掉或重复登记。
+
+- [ ] **Step 8: 浏览器验收——现在 `declared === shown` 必须成立**
+
+起服务器（`python3 -m http.server 8811`，Bash `run_in_background: true`），自建浏览器标签页。对**至少 12 个工具**逐个执行（必须覆盖全部 13 个曾有 `PARAM_TABS` 的工具中的至少 6 个）：
+
+```js
+Object.keys(SCENES).map(k => {
+  switchTab(k);
+  const shown = [...document.querySelectorAll('#paramsHost .ctl')]
+    .filter(e => e.style.display !== 'none').length;
+  return { tab: k, declared: SCENES[k].params.length, shown, ok: SCENES[k].params.length === shown };
+})
+```
+
+每个页签必须 `ok: true`。**这是本任务的核心证据**——Task 1–6 期间这条断言无法通过，现在必须通过。
+
+再对其中三个工具确认切页签往返后滑块值不丢：
+
+```js
+switchTab(Object.keys(SCENES)[0]);
+const before = JSON.stringify(state);
+Object.keys(SCENES).forEach(k => switchTab(k));
+switchTab(Object.keys(SCENES)[0]);
+JSON.stringify(state) === before   // 期望 true
+```
+
+- [ ] **Step 9: 提交**
+
+```bash
+git add -A && git commit -m "feat(tools): 引擎 params 机制集中落地 50 个工具，退役 13 处手写变通"
+```
