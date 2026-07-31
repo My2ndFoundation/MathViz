@@ -247,6 +247,30 @@ const PARAMS = [
     min: 0.2, max: 2, step: 0.05, value: 0.6, fmt: v => fmt(v) + ' rad/s' }
 ];
 
+/* 每个滑杆归属的页签（未列出者在所有页签显示；空数组 = 永不显示）——
+   场景级 UI 辅助（不改引擎函数）：一个独立的 rAF 轮询在页签切换时更新
+   .ctl 行的显隐，与 PARAMS 顺序一一对应（paramsHost 第 i 个子节点即
+   PARAMS[i]；沿用 e-essence-3d / pi-essence-3d 的模式）。 */
+const PARAM_TABS = {
+  cutDepth: ['cut'], speed: ['cut', 'sun'], fibK: ['fib'], fracK: ['frac'],
+  sunN: ['sun'], alphaDeg: ['sun'], starLev: ['star'], omega: []
+};
+let _paramSyncTab = null;
+function syncParamRows() {
+  if (curTab === _paramSyncTab) return;
+  const host = document.getElementById('paramsHost');
+  if (!host || host.children.length < PARAMS.length) return;
+  _paramSyncTab = curTab;
+  PARAMS.forEach((p, i) => {
+    const row = host.children[i];
+    if (!row) return;
+    const tabs = PARAM_TABS[p.key];
+    row.style.display = (!tabs || tabs.indexOf(curTab) !== -1) ? '' : 'none';
+  });
+}
+/* 首帧后启动（此时引擎已完成同步初始化，curTab 已就绪，避免 TDZ） */
+requestAnimationFrame(function _paramSyncLoop() { syncParamRows(); requestAnimationFrame(_paramSyncLoop); });
+
 /* ── φ 的本质：场景级常量与小部件（均在 SCENES 之上，引擎零改动） ──
    颜色语义：rose = 第一主曲线（旋转正方形 / 拼图方块 / φ 误差 / 21 螺旋族 / 五角星）
              violet = 第二曲线（黄金螺线 / π 对照 / 34 螺旋族 / 内嵌递归）
@@ -1258,7 +1282,6 @@ const roEl = document.getElementById('readout');
 function updateReadout() { roEl.innerHTML = SCENES[curTab].readout(); }
 
 /* ================= UI 生成（由 ①② 声明驱动） ================= */
-const paramWraps = {};   // key -> { wrap, input, val, p }
 function buildParams() {
   const host = document.getElementById('paramsHost');
   PARAMS.forEach(p => {
@@ -1277,19 +1300,9 @@ function buildParams() {
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
-    paramWraps[p.key] = { wrap, input, val, p };
     const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
     RELABEL.push(relabel);
     relabel();
-  });
-}
-
-/* 按当前页签的 params 显隐滑块。省略 params = 全部显示（向后兼容）。
-   不复制 DOM：滑块值是跨页签共享的 state，复制会引入多份 DOM 的同步问题。 */
-function syncParamVisibility() {
-  const list = SCENES[curTab] && SCENES[curTab].params;
-  Object.keys(paramWraps).forEach(k => {
-    paramWraps[k].wrap.style.display = (!list || list.indexOf(k) >= 0) ? '' : 'none';
   });
 }
 
@@ -1394,7 +1407,6 @@ function switchTab(id) {
   cam = cams[id];
   brandDesc.textContent = t(SCENES[id].brand);
   tipsEl.textContent = t(SCENES[id].tips);
-  syncParamVisibility();
   refreshViewButtons();
   updateReadout();
 }

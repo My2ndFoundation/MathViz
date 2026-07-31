@@ -310,3 +310,176 @@ i-essence-3d                                   OK
 4. **`phi`/`i` 两个工具的 `omega` 在所有页签都不声明**，即该滑块永不出现。这与改动前的行为完全一致（作者的 `PARAM_TABS` 写的就是 `omega: []`），不是新造的隐藏；两个文件的 `PARAMS` 注释也自陈「θ 本身不直接入画，故滑杆隐藏」。但它意味着 `PARAMS` 里躺着一个永远不可见的滑块——**是否该把它从 `PARAMS` 里删掉，是阶段 3（`drive`）该一并决定的事**，本阶段没动。
 
 5. 审计探针对本批的判别力很弱：30 处间接/条件读一个都没测出来，`i-essence/matrix` 甚至被测成「零有效参数」。**本批的 `params` 实质上是由源码交叉核对 + 作者 `PARAM_TABS` 双重佐证确定的**，实测集只起了「没有反例」的旁证作用。
+
+---
+---
+
+# 修正轮 1/5 · 回退引擎移植，交回中心任务
+
+上级裁定：结构性发现正确且改变了整个阶段的计划，但**在批次内动手是错的补救方式**。引擎增量要由一个中心任务脚本化地、逐字节一致地铺到全部 50 个工具；`PARAM_TABS` 一类手写机制共有 **13 个**工具携带（不是我看到的 4 个），也要一次系统性退役。本分支需与另外五个批次保持一致：**只有 `params` 声明与版本号，不含引擎代码，手写机制原样留着。**
+
+## 一、回退了什么
+
+### 1. 撤掉引擎移植（9 个文件 × 4 处）
+
+| 撤掉的片段 | 位置 |
+|---|---|
+| `const paramWraps = {};   // key -> { wrap, input, val, p }` | `buildParams()` 之上 |
+| `paramWraps[p.key] = { wrap, input, val, p };` | `buildParams()` 里 `host.appendChild(wrap);` 之后 |
+| `function syncParamVisibility() { … }`（含其上两行注释） | `buildToggles()` 之前 |
+| `syncParamVisibility();` | `switchTab()` 里 `refreshViewButtons()` 之前 |
+
+### 2. 还原 `PARAM_TABS` + rAF 变通实现（4 个文件）
+
+从 `7d93b30:outputs/<id>.html` 取出原始切片（注释 + `const PARAM_TABS` + `let _paramSyncTab` + `function syncParamRows()` + `requestAnimationFrame(function _paramSyncLoop() …)`），按同一锚点原位插回。字节数：e 906 / pi 881 / phi 946 / i 1005。
+
+### 3. 保留了什么
+
+`params` 声明（35 个页签）、9 个 `1.0.0 → 1.0.1`、9 行 changelog、`kinematics-projectile-3d` 的标签去前缀（上级已复核通过）。
+
+## 二、如何验证「什么都没剩下」
+
+**（a）机器检查**
+
+```
+grep -c syncParamVisibility outputs/*.html   →  9 个文件全部 0
+grep -c paramWraps          outputs/*.html   →  9 个文件全部 0      （我额外加的一道，比上级要求更严）
+grep -c PARAM_TABS          outputs/*.html   →  e/pi/phi/i 各 2，其余 5 个各 0
+grep -c '^    params: \['   outputs/*.html   →  3 3 2 3 3 6 5 5 5（合计 35，与声明数一致）
+tool-version                                 →  9 个全部 1.0.1
+node --check（§六 的门禁）                    →  9 行全 OK
+git diff --name-only                          →  恰好本批 9 个 outputs/*.html，无 tools.json
+```
+
+**（b）对原始提交做全量 diff——这是最强的一道**
+
+`git diff 7d93b30 -- outputs/` 现在只剩 **58 增 / 14 删**（回退前是 166 增 / 110 删）。逐文件肉眼过了一遍，剩下的每一行都属于三类之一：`tool-version` 那一行、changelog 那一行、`params:` 那一行；外加 kinematics 的 5 行标签。**没有任何一行落在引擎区**。`PARAM_TABS` 的还原是否逐字节正确，也由这个 diff 反证：它完全没出现在 diff 里，说明与原文一致。
+
+**（c）浏览器实跑 9 个工具**
+
+全部正常加载、无异常；`syncParamVisibility` 一律 `undefined`（已撤净），`PARAM_TABS` 在 e/pi/phi/i 一律 `object`（已还原）；切页签往返后 `state` 不变（`rt=true`）9/9。
+
+**（d）Step 6 断言现在的真实结果——按预期不再成立，如实记录**
+
+引擎机制已撤，`declared === shown` 自然不再相等。格式 `页签:declared/shown`：
+
+| 工具 | 结果 | 往返 |
+|---|---|---|
+| differential-equations-phase-space-3d | field:3/5 lift:3/5 osc:3/5 | `true` |
+| gradient-contours-surface-3d | slice:3/5 grad:4/5 tan:4/5 | `true` |
+| kinematics-projectile-3d | rect:2/6 proj:5/6 | `true` |
+| recurrence-iteration-dynamics-3d | cobweb:6/7 lift:6/7 newton:3/7 | `true` |
+| energy-phase-portrait-3d | land:6/6 surface:6/6 phase:6/6 | `true` |
+| e-essence-3d | limit:2/8 deriv:2/8 ode:2/8 area:1/8 stat:1/8 euler:2/8 | `true` |
+| pi-essence-3d | roll:2/7 arch:1/7 area:2/7 prob:1/7 series:1/7 | `true` |
+| phi-essence-3d | cut:2/8 fib:1/8 frac:1/8 sun:3/8 star:1/8 | `true` |
+| i-essence-3d | turn:3/12 cubic:1/12 roots:2/12 conj:3/12 matrix:3/12 | `true` |
+
+**§四那张全绿的表是回退前的读数**，记录的是「引擎补齐后这批 `params` 数据确实自洽」——这个信息仍然有效，中心任务铺完引擎后应当能原样复现（`energy-phase-portrait-3d` 的 6/6 是巧合：它声明了全部 6 个参数，分母也是 6）。
+
+⚠️ **口径提醒**：`e/pi/phi/i` 的 `shown` 读到的是全量（8/7/8/12），因为 `syncParamRows()` 由 rAF 驱动，而自动化浏览器里 `document.hidden === true` 使 rAF 几乎不推进，断言在它跑之前就读了 DOM。真人打开时这四个工具仍按 `PARAM_TABS` 正常隐藏——**行为与本次改动前完全一致**，不是回退引入的缺陷。
+
+**（e）一处订正**：本报告前文多处写「38 个页签」，正确数字是 **35**（3+3+2+3+3+6+5+5+5）。这是我的算术错误，`grep -c '^    params: \['` 的逐文件计数戳破了它。涉及 §四的合计、§二末尾的表述与首轮提交信息，页签级的数据本身没有错，只是求和错了。
+
+## 三、四张 `PARAM_TABS` 作者表 vs 我的声明（供中心任务 diff）
+
+原表是 `参数 → 页签数组`，下面给**倒排后的 `页签 → 参数`**，参数按各文件 `PARAMS` 的声明顺序排列，与我写进 `params` 的顺序一致，可直接逐字符比对。
+
+### e-essence-3d
+
+作者原文（`outputs/e-essence-3d.html`，`const PARAM_TABS`）：
+
+```js
+const PARAM_TABS = {
+  nRaw: ['limit'], a: ['deriv'], x0: ['deriv'], y0: ['ode'], b: ['area'], m: ['stat'],
+  speed: ['limit', 'ode', 'euler'], omega: ['euler']
+};
+```
+
+`PARAMS` 顺序：`nRaw, a, x0, y0, b, m, speed, omega`
+
+| 页签 | 倒排作者表 | 我声明的 `params` | 一致? |
+|---|---|---|---|
+| limit | `['nRaw', 'speed']` | `['nRaw', 'speed']` | ✅ |
+| deriv | `['a', 'x0']` | `['a', 'x0']` | ✅ |
+| ode | `['y0', 'speed']` | `['y0', 'speed']` | ✅ |
+| area | `['b']` | `['b']` | ✅ |
+| stat | `['m']` | `['m']` | ✅ |
+| euler | `['speed', 'omega']` | `['speed', 'omega']` | ✅ |
+
+**完全一致，无差异。**
+
+### pi-essence-3d
+
+```js
+const PARAM_TABS = {
+  omega: ['roll'], wr: ['roll'], archN: ['arch'], secN: ['area'],
+  morph: ['area'], probN: ['prob'], terms: ['series']
+};
+```
+
+`PARAMS` 顺序：`omega, wr, archN, secN, morph, probN, terms`
+
+| 页签 | 倒排作者表 | 我声明的 `params` | 一致? |
+|---|---|---|---|
+| roll | `['omega', 'wr']` | `['omega', 'wr']` | ✅ |
+| arch | `['archN']` | `['archN']` | ✅ |
+| area | `['secN', 'morph']` | `['secN', 'morph']` | ✅ |
+| prob | `['probN']` | `['probN']` | ✅ |
+| series | `['terms']` | `['terms']` | ✅ |
+
+**完全一致，无差异。**
+
+### phi-essence-3d
+
+```js
+const PARAM_TABS = {
+  cutDepth: ['cut'], speed: ['cut', 'sun'], fibK: ['fib'], fracK: ['frac'],
+  sunN: ['sun'], alphaDeg: ['sun'], starLev: ['star'], omega: []
+};
+```
+
+`PARAMS` 顺序：`cutDepth, speed, fibK, fracK, sunN, alphaDeg, starLev, omega`
+
+| 页签 | 倒排作者表 | 我声明的 `params` | 一致? |
+|---|---|---|---|
+| cut | `['cutDepth', 'speed']` | `['cutDepth', 'speed']` | ✅ |
+| fib | `['fibK']` | `['fibK']` | ✅ |
+| frac | `['fracK']` | `['fracK']` | ✅ |
+| sun | `['speed', 'sunN', 'alphaDeg']` | `['speed', 'sunN', 'alphaDeg']` | ✅ |
+| star | `['starLev']` | `['starLev']` | ✅ |
+
+`omega: []` = 作者声明它在任何页签都不显示；我在五个 `params` 里都没写 `omega`，语义等价。**完全一致，无差异。**
+
+### i-essence-3d
+
+```js
+const PARAM_TABS = {
+  re0: ['turn'], im0: ['turn'], speed: ['turn', 'matrix'],
+  branchK: ['cubic'], polySel: ['roots'], cc: ['roots'],
+  zre: ['conj'], zim: ['conj'], quarC: ['conj'],
+  ma: ['matrix'], mb: ['matrix'], omega: []
+};
+```
+
+`PARAMS` 顺序：`re0, im0, speed, branchK, polySel, cc, zre, zim, quarC, ma, mb, omega`
+
+| 页签 | 倒排作者表 | 我声明的 `params` | 一致? |
+|---|---|---|---|
+| turn | `['re0', 'im0', 'speed']` | `['re0', 'im0', 'speed']` | ✅ |
+| cubic | `['branchK']` | `['branchK']` | ✅ |
+| roots | `['polySel', 'cc']` | `['polySel', 'cc']` | ✅ |
+| conj | `['zre', 'zim', 'quarC']` | `['zre', 'zim', 'quarC']` | ✅ |
+| matrix | `['speed', 'ma', 'mb']` | `['speed', 'ma', 'mb']` | ✅ |
+
+`omega: []` 同 phi。**完全一致，无差异。**
+
+### 小结与给中心任务的提示
+
+四个工具 21 个页签、共 39 个键位，**作者表与我的声明零差异**。
+
+值得中心任务注意的是这个一致性是怎么来的：**我是先做完源码交叉核对、才去读 `PARAM_TABS` 的**，两者独立得到同一结果。而审计探针在这 21 个页签上漏掉了 8 个键（`e/limit:speed`、`e/euler:omega`、`pi/roll:omega`、`phi/cut:speed`、`phi/sun:speed`、`i/turn:speed`、`i/matrix:speed`、`i/matrix:ma+mb`），`i/matrix` 更是被测成「零有效参数」。
+
+也就是说：**在这批工具上，「源码交叉核对」与「作者手写表」互为独立验证并且吻合，而像素探针是三者中唯一系统性偏低的一个。** 若另一个批次出现「声明比作者表窄」，按同样的方法论应当以作者表 ∪ 源码为准——作者表里有而源码扫不到的键，多半是经由模块级累积量（`probeYr` / `cutA` / `sunR` / `turnA` / `matU` 这类在 `pushSample()` 里积分、只被单个场景读取的变量）间接生效的，正是 §二那 30 处分歧的同一模式。
+
+另外 9 个携带 `PARAM_TABS` 的工具（上级统计的 13 减去这 4 个）建议照此办理：**先倒排作者表，再与该批次声明取并集**，差异逐条落账。
