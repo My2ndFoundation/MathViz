@@ -272,13 +272,31 @@ function driveInfo() {
 
 按仓库"文档先行"纪律，落地顺序固定：先改 `design-system/math-viz-design-system.md`，再改 `math-viz-starter.html`，最后才是各工具。
 
-§8 新建工具自检清单新增两条硬约束：
+§8 新建工具自检清单新增四条硬约束：
 
 1. **每个场景必须声明 `params`**，且必须与该场景实际读取的 `state` 键一致——包括经由模块级辅助函数间接读取的。
 2. **每个场景必须声明 `drive`，或显式写 `drive: null` 并注释理由**。静态对照类场景是合法的（例如纯粹展示一个不随时间变化的结构），但必须是有意识的选择，不能是遗漏。
 3. **被 `drive` 驱动的参数若带 `map`，必须同时提供 `invMap`**，否则滑块无法回显驱动值。
+4. **引擎的行为查询不得只认样式类**，必须限定到结构容器（`.views .vbtn`）或改用 `data-*` 属性。
 
 starter 的 SCENES 注释块同步更新，把 `params` / `drive` 写进"必填字段"一行。
+
+### 第 4 条的由来
+
+这条不是预防性的洁癖，是刚刚踩过的坑。`refreshViewButtons()` 原本这样遍历：
+
+```js
+document.querySelectorAll('.vbtn').forEach(b => {
+  const row = b.closest('.views');
+  b.classList.toggle('active', row.dataset.tab === curTab && …);   // row 为 null → 抛
+});
+```
+
+`.vbtn` 只是个样式类。`huffman-coding-text-3d` 的"文本预设"按钮为复用外观也挂了它，却位于 `#txtPresets` 而非 `.views` 内，于是 `closest('.views')` 返回 `null` 当场抛错。那 4 个孤儿按钮在 DOM 里恰好排在最前，函数第一次迭代就中断——**该工具的视角按钮从未高亮过**，而且因为 `switchTab` 里它排在倒数第二行、被吞掉的 `updateReadout()` 又会被主循环在 120ms 内自愈，这个缺陷一直没被发现。
+
+同样的未限定写法存在于**全部 51 个文件**（所有工具 + starter），只是其余 48 个没有孤儿 `.vbtn` 才没发病。修复已单独落地（见 `fix/view-button-selector-scope`），只改引擎真源与唯一发病的工具。
+
+教训是可推广的：**样式类归样式，行为查询必须锚定结构或语义属性**。工具作者复用一个 class 只是想要那个外观，他没有义务知道引擎在拿它做行为判定。
 
 ## F. 审计工具
 
