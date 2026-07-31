@@ -131,6 +131,42 @@ body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)
   .shell:not(.hid) .scrim{display:block}
   .edge{height:64px}
 }
+
+/* ===== 录制器 ===== */
+.rec-btn{position:absolute;right:16px;bottom:16px;z-index:40;
+  display:flex;align-items:center;gap:7px;
+  padding:9px 14px;border-radius:999px;cursor:pointer;
+  border:1px solid rgba(255,255,255,.14);
+  background:rgba(10,16,28,.82);backdrop-filter:blur(8px);
+  color:#dbe6f5;font-size:13px;letter-spacing:.02em}
+.rec-btn:hover{border-color:rgba(255,255,255,.28)}
+.rec-btn[disabled]{opacity:.4;cursor:not-allowed}
+.rec-btn .dot{width:9px;height:9px;border-radius:50%;background:#ff5a8a}
+.rec-panel{position:absolute;right:16px;bottom:62px;z-index:41;width:274px;
+  padding:14px;border-radius:14px;display:none;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(8,13,24,.94);backdrop-filter:blur(12px);
+  color:#dbe6f5;font-size:12.5px}
+.rec-panel.on{display:block}
+.rec-panel h4{margin:0 0 10px;font-size:12px;letter-spacing:.14em;
+  text-transform:uppercase;color:#7d8ca6;font-weight:600}
+.rec-row{margin-bottom:11px}
+.rec-row > label{display:block;margin-bottom:5px;color:#93a3bd;font-size:11.5px}
+.rec-seg{display:flex;gap:5px}
+.rec-seg button{flex:1;padding:6px 0;border-radius:7px;cursor:pointer;font-size:11.5px;
+  border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);color:#93a3bd}
+.rec-seg button.on{border-color:#ff5a8a;color:#ffd7e3;background:rgba(255,90,138,.14)}
+.rec-chk{display:flex;align-items:center;gap:7px;color:#93a3bd;cursor:pointer}
+.rec-go{width:100%;padding:9px 0;margin-top:3px;border-radius:9px;cursor:pointer;
+  border:1px solid rgba(255,90,138,.5);background:rgba(255,90,138,.16);color:#ffd7e3}
+.rec-go[disabled]{opacity:.45;cursor:not-allowed}
+.rec-note{margin-top:9px;color:#6f7f99;font-size:11px;line-height:1.5}
+.rec-bar{height:3px;margin-top:9px;border-radius:2px;background:rgba(255,255,255,.09);overflow:hidden}
+.rec-bar i{display:block;height:100%;width:0;background:#ff5a8a;transition:width .1s linear}
+/* 录制期间：iframe 脱离 flex 布局，按目标画幅定尺寸再缩放预览 */
+.stage.rec-live{overflow:hidden;position:relative}
+.stage.rec-live > iframe{position:absolute;left:50%;top:50%;
+  transform-origin:50% 50%;border:0}
 </style>
 </head>
 <body>
@@ -159,6 +195,8 @@ body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)
 
   <main class="stage">
     <iframe id="frame" title="工具内容" allow="fullscreen"></iframe>
+    <button class="rec-btn" id="recBtn" title="录制视频 / Record video"><span class="dot"></span><span id="recBtnTxt">录制</span></button>
+    <div class="rec-panel" id="recPanel"></div>
   </main>
 </div>
 
@@ -1115,6 +1153,55 @@ frame.addEventListener('load', function(){
   syncing = false;
 });
 
+/* ================= 录制器 ================= */
+var REC = {};
+
+REC.CFG = {
+  visual: 'overlay', aspect: '16:9', drive: 'offline',
+  duration: 8, loop: true, orbit: false, viewTo: ''
+};
+REC.SIZES = { '16:9': [1920,1080], '9:16': [1080,1920], '1:1': [1080,1080] };
+REC.FPS = 60;
+REC.COLORS = ['#ff5a8a','#a68bff','#37d9a0','#ffa653'];
+
+/* 双语取词：与外壳其余部分一致，读全局 LANG */
+REC.t = function(o){ return (o && o[LANG]) || (o && o.zh) || ''; };
+
+/* 汇总各单元自检。跑法：起服务器后在控制台执行 REC.selftest() */
+REC.selftest = function(){
+  var units = ['Bridge','Encoder','Compositor','Source','UI'];
+  var out = { pass: [], fail: [] };
+  for (var i = 0; i < units.length; i++){
+    var u = units[i], m = REC[u] && REC[u].__test;
+    if (typeof m !== 'function'){ out.fail.push(u + ': 未实现 __test()'); continue; }
+    var r;
+    try{ r = m(); }catch(e){ out.fail.push(u + ': __test() 抛错 ' + e); continue; }
+    for (var a = 0; a < r.pass.length; a++) out.pass.push(u + ' · ' + r.pass[a]);
+    for (var b = 0; b < r.fail.length; b++) out.fail.push(u + ' · ' + r.fail[b]);
+  }
+  return out;
+};
+
+/* ===== REC:BRIDGE ===== */
+REC.Bridge = {};
+/* ===== /REC:BRIDGE ===== */
+
+/* ===== REC:ENCODER ===== */
+REC.Encoder = {};
+/* ===== /REC:ENCODER ===== */
+
+/* ===== REC:COMPOSITOR ===== */
+REC.Compositor = {};
+/* ===== /REC:COMPOSITOR ===== */
+
+/* ===== REC:SOURCE ===== */
+REC.Source = {};
+/* ===== /REC:SOURCE ===== */
+
+/* ===== REC:UI ===== */
+REC.UI = {};
+/* ===== /REC:UI ===== */
+
 /* ================= 启动 ================= */
 function boot(){
   renderNav(); renderChrome();
@@ -1131,6 +1218,7 @@ function boot(){
   try{ pref = localStorage.getItem(NAV_KEY); }catch(e){}
   var wide = window.innerWidth > 760;
   setSidebar(pref ? pref === 'open' : wide, false);
+  if (REC.UI.mount) REC.UI.mount();
 }
 
 /* 工具清单优先取 tools.json（有服务器时永远最新）；取不到就用内嵌副本 */
