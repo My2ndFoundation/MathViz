@@ -146,7 +146,11 @@ chord: {
 
 ### 求值
 
-驱动是**引擎时钟的纯函数**，不做增量积分：
+驱动是**页签驱动时钟的纯函数**，不做增量积分。驱动时钟 = 引擎时钟减去该页签自动播放的累计关停时长：
+
+```js
+function driveClock(id) { return state.t - driveOff[id]; }   // driveOff[id] 见 §C
+```
 
 ```js
 function driveValue(d, t) {
@@ -157,7 +161,7 @@ function driveValue(d, t) {
 }
 ```
 
-纯函数有三个好处：不累积浮点漂移；暂停/恢复不产生跳变；**录制器的离线定长渲染直接可用**（它按固定 `dt` 推进 `state.t`，驱动值自然跟着走）。
+关停期间驱动时钟不走，所以重新打开自动播放时驱动量从原地续上，**不跳变**——这正是引入偏移而不是直接用 `state.t` 的原因。之所以仍坚持纯函数、没有改成增量积分：一来不累积浮点漂移，二来**录制器的离线定长渲染直接可用**（它按固定 `dt` 推进 `state.t`，偏移在一次渲染内是常量，同一段时间必然复现同一串驱动值）。空格暂停时 `state.t` 本就不前进，恢复同样不跳变。
 
 在 `frame()` 里，`state.t` 推进之后、`draw()` 之前：
 
@@ -169,7 +173,7 @@ function driveValue(d, t) {
 function applyDrive() {
   const sc = SCENES[curTab];
   if (!sc || !sc.drive || !autoPlay[curTab]) return;
-  state[sc.drive.key] = driveValue(sc.drive, state.t);
+  state[sc.drive.key] = driveValue(sc.drive, driveClock(curTab));
 }
 ```
 
@@ -205,11 +209,11 @@ function syncParamSlider(key) {
 [✓] 自动播放        (○ 往返  ● 循环)
 ```
 
-- **自动播放**：默认开。关掉后 `state[key]` 停在当前值，滑块恢复完全手动。
+- **自动播放**：默认开。关掉后 `state[key]` 停在当前值，滑块恢复完全手动；**重新打开时从停下的地方接着走，不跳变**——关掉的那一刻记下 `driveOffAt[tab] = state.t`，重新打开时 `driveOff[tab] += state.t - driveOffAt[tab]`，于是 §B 的驱动时钟恰好停摆了同样长的时间。
 - **模式切换**：`往返 / 循环` 二选一，初值取 `kind` 的默认，用户可随时改。**同一页签两种都支持**。
 - **拖动被驱动的滑块 ⇒ 自动播放自动关闭**。用户"伸手接管"是明确意图，不该被下一帧覆盖掉。这也是 §4 第五原则"暂停只冻结仿真"的自然延伸。
 
-状态由引擎按页签保存（`autoPlay[tabId]` / `driveMode[tabId]`），与 `cams[tabId]` 同构——每个页签记住自己的选择。
+状态由引擎按页签保存（`autoPlay[tabId]` / `driveMode[tabId]` / `driveOff[tabId]` / `driveOffAt[tabId]`），与 `cams[tabId]` 同构——每个页签记住自己的选择与自己的驱动时钟。
 
 ## D. 与录制器的交互
 
