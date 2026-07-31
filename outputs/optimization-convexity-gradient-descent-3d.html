@@ -15,6 +15,8 @@
   版本记录（changelog，新→旧）：
     1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
                        驱动接管时下降轨道改为整条重播，轨迹始终对应当前参数
+                       学习率 η 滑块补进「损失曲面 / 凸与非凸」两页（两页都在用 η）
+                       关掉自动播放时轨道随读数的 n 一起收回，不再多画出几十步
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-30  首个版本（含双语，四场景：一维下降 / 损失曲面 / 凸与非凸 / 约束优化）
 ============================================================ -->
@@ -313,6 +315,14 @@ function nNow() {
   return Math.min(Math.floor(state.theta), ORBIT_MAX);
 }
 
+/* 把四条轨道裁到 n 步（只缩不增）。用途见 pushSample()：读数报出的 n 与画面上
+   真正画出的步数必须同源，而画面取的是 orb*.length − 1。 */
+function trimOrbits(n) {
+  const len = Math.max(1, n + 1);
+  if (len >= orb1.length) return;
+  orb1.length = len; orbA.length = len; orbB1.length = len; orbB2.length = len;
+}
+
 /* 驱动模式下判断「该重播了没有」的参数指纹：只要有一个入参动了就整条重算 */
 function orbSig() {
   return state.eta + '|' + state.lam + '|' + state.startX + '|' + state.startY +
@@ -506,7 +516,13 @@ function capNote() {
     : '';
 }
 function divergedLabel(C, y) {
-  label3(C, [0, y, 0], t({ zh: '发散 → ±∞ · 减小 η 后按 R', en: 'diverged → ±∞ · lower η, press R' }),
+  /* 两种语义给的是两条不同的出路，标签得跟着改口（与 roHead 同一原则）：
+     驱动接管时轨迹每帧按当前参数整条重播，η 一小下一帧就重新算出有限轨迹，
+     发散不再是死局；手动模式下轨道只追加，发散那一步已经写进历史，
+     必须按 R 才会从 x₀ 重播。三个页签都能就地调 η（见各页 params）。 */
+  label3(C, [0, y, 0], t(driveInfo()
+    ? { zh: '发散 → ±∞ · 减小 η 即刻重播（无需按 R）', en: 'diverged → ±∞ · lower η and it replays at once (no R)' }
+    : { zh: '发散 → ±∞ · 减小 η 后按 R', en: 'diverged → ±∞ · lower η, press R' }),
     { font: 'italic 14px ' + FONT_MATH, color: ROSE, align: 'center' });
 }
 
@@ -636,7 +652,13 @@ const SCENES = {
   /* ────── 二维损失曲面：凸谷地、等高线与 zig-zag ────── */
   valley: {
     label: { zh: '损失曲面', en: 'Loss surface' },
-    params: ['lam', 'startX', 'startY', 'omega'],
+    /* η 必须在场：本页的下降路径由 gdStep2 逐步读 state.eta 算出，读数印着 η 与
+       η* = 2/(0.35λ)，tips 更是直说「把 λ 调到 8、η 调到 0.6 再按 R」——它是本页
+       正在教的量，却在阶段 2 的 params 收窄里被漏掉了。η 又是全局共享的：一维页
+       默认自动播放，几秒后就把它推到任意值（实测离开时 η ≈ 1.55），本页此前
+       连一根滑块都没有，用户无从拉回。补进来即可就地调回，且不会关掉 λ 的
+       自动播放（引擎只在「拖的正是被驱动的那根滑块」时才接管）。 */
+    params: ['lam', 'eta', 'startX', 'startY', 'omega'],
     /* brand 与 tips 都把条件数 λ 摆在第一位：「λ 拉大后它变成狭长谷地」
        「把 λ 调到 8、η 调到 0.6 再按 R，路径先在谷壁间剧烈抖动、再沿谷底缓慢爬行」
        ——自变量就是 λ，不是迭代步数。
@@ -716,7 +738,12 @@ const SCENES = {
   /* ────── 凸与非凸：局部最小值依赖初始点 ────── */
   convex: {
     label: { zh: '凸与非凸', en: 'Convex vs non-convex' },
-    params: ['surfSel', 'startX', 'startY', 'omega'],
+    /* 同 valley：两条路径都由 gdStep2 读 state.eta 推进，η 却不在本页 params 里。
+       一维页自动播放把 η 推高后（实测离开时 ≈ 1.55），双井井底 x = ±√1.5 处
+       f″ = 0.6668·(3x²−1.5) = 2.0，稳定上界 η* = 2/f″ ≈ 1.0，井底就不再是吸引子：
+       η = 1.55 时路径落进一个周期 4 的循环 x ≈ 0.15 → 0.38 → 0.91 → 1.54（实测），
+       始终停不到 1.2247 上，「落进哪个井底」这个顿悟点被冲淡；补上滑块即可就地调回。 */
+    params: ['surfSel', 'eta', 'startX', 'startY', 'omega'],
     /* 本页的顿悟点是「局部最小值依赖初始点」——tips：「A、B 两球滚进不同的井底
        （换预设或起点后按 R）」。自变量就是**起点**，取 x₀。
        正是重播语义让这一页第一次名副其实：旧的只追加语义下，拖 x₀ 不按 R 根本
@@ -898,6 +925,13 @@ const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion:
 function pushSample() {
   if (state.theta === 0) { reseedOrbits(); lastOrbSig = null; }
   const n = nNow();
+  /* 「驱动 → 手动」的反向过渡（关掉自动播放，或伸手拖被驱动的那根滑块——
+     引擎会当场关掉自动播放）：nNow() 立刻退回 ⌊ωt⌋，可重播留下的长轨道
+     不会自己变短，于是读数报 n = 5 而画面画着 60 步，要等 ⌊ωt⌋ 涨过
+     ORBIT_SHOW 才自愈（valley/convex 约 50 秒）。每帧把轨道裁到 n（只缩不增），
+     读数与画面重新同源。裁完之后只追加：手动模式「记录当时的真实值、
+     参数中途改变不重算旧步」的语义从这一帧起完整成立，未被破坏。 */
+  trimOrbits(n);
   const S = SURF3[Math.round(state.surfSel)];
   /* 驱动接管且入参变了 → 丢掉旧轨迹，用当前参数从 x₀ 重播，
      避免画出一条与读数不同源的陈旧轨迹 */
