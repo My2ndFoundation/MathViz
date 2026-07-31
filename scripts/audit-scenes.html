@@ -48,6 +48,11 @@ function makeHash(){
   var pc = document.createElement('canvas'); pc.width = 80; pc.height = 45;
   var px = pc.getContext('2d', { willReadFrequently: true });
   return function(cv){
+    /* 先在源画布（隐藏 iframe 里的 canvas）上强制同步一次像素读取，
+       逼 GPU 合成结果落盘到 CPU 侧再 drawImage；不这样做，读到的常是
+       上一帧的陈旧画面（双缓冲/合成延迟），会把"没变"误判成"变了"，
+       即滑块被错误地判定为有效——这行不是多余代码，删掉会引入假阳性。 */
+    cv.getContext('2d').getImageData(0, 0, 1, 1);
     px.clearRect(0,0,80,45); px.drawImage(cv, 0, 0, 80, 45);
     var d = px.getImageData(0,0,80,45).data, h = 2166136261;
     for (var i = 0; i < d.length; i += 7){ h ^= d[i]; h = Math.imul(h, 16777619); }
@@ -80,6 +85,13 @@ function probe(){
   var res = {};
   Object.keys(SCENES).forEach(function(sk){
     try { swt(sk); } catch(e){}
+    draw();
+    /* 刚切页签时画布合成管线还没喂饱：即便 hash() 里已经在源画布强制
+       flush，头一两次读到的仍可能是切页签前的旧帧，会把"其实没变"
+       误判成"参数/时间一动画面就变"（假阳性）。这里空转两轮「画 + 读」
+       把管线喂饱，后面的测量才可信——删掉这两行，读数会跟着抖动。 */
+    draw(); hash(cv);
+    draw(); hash(cv);
     draw();
     var t0 = state.t, th0 = state.theta;
     var h0 = hash(cv);
