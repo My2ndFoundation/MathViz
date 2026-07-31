@@ -1188,6 +1188,87 @@ REC.Bridge = {};
 
 /* ===== REC:ENCODER ===== */
 REC.Encoder = {};
+
+/* 优先级：能出 mp4 就出 mp4（Chrome/Edge/Safari 都行），Firefox 落 webm */
+REC.Encoder.MIMES = [
+  { mime: 'video/mp4;codecs=avc1',  ext: 'mp4'  },
+  { mime: 'video/mp4',              ext: 'mp4'  },
+  { mime: 'video/webm;codecs=vp9',  ext: 'webm' },
+  { mime: 'video/webm',             ext: 'webm' }
+];
+
+REC.Encoder.pickMime = function(){
+  if (!window.MediaRecorder) return null;
+  for (var i = 0; i < REC.Encoder.MIMES.length; i++){
+    var m = REC.Encoder.MIMES[i];
+    try{ if (MediaRecorder.isTypeSupported(m.mime)) return m; }catch(e){}
+  }
+  return null;
+};
+
+REC.Encoder.start = function(stream, mime){
+  var chunks = [];
+  var opt = { mimeType: mime };
+  /* 1080p60 的线条动画，12Mbps 足够干净又不至于让文件大到没法分享 */
+  opt.videoBitsPerSecond = 12000000;
+  var rec = new MediaRecorder(stream, opt);
+  rec.ondataavailable = function(e){ if (e.data && e.data.size) chunks.push(e.data); };
+  rec.start(100);        /* 100ms 一个 chunk，避免长录制时内存里堆一整块 */
+  return { rec: rec, chunks: chunks, mime: mime, stream: stream };
+};
+
+REC.Encoder.stop = function(ses){
+  return new Promise(function(resolve, reject){
+    if (!ses || !ses.rec) { reject(new Error('no session')); return; }
+    ses.rec.onerror = function(e){ reject(e && e.error ? e.error : new Error('recorder error')); };
+    ses.rec.onstop = function(){
+      try{
+        var tr = ses.stream.getTracks();
+        for (var i = 0; i < tr.length; i++) tr[i].stop();
+      }catch(e){}
+      resolve(new Blob(ses.chunks, { type: ses.mime }));
+    };
+    if (ses.rec.state !== 'inactive') ses.rec.stop(); else ses.rec.onstop();
+  });
+};
+
+REC.Encoder.download = function(blob, filename){
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+};
+
+REC.Encoder.__test = function(){
+  var r = { pass: [], fail: [] };
+  function ok(n, c){ if (c) r.pass.push(n); else r.fail.push(n); }
+  var p = REC.Encoder.pickMime();
+  ok('pickMime 返回结果', !!p);
+  if (!p){ r.fail.push('本浏览器没有任何可用 mime'); return r; }
+  ok('mime 可被 MediaRecorder 接受', MediaRecorder.isTypeSupported(p.mime));
+  ok('ext 是 mp4 或 webm', p.ext === 'mp4' || p.ext === 'webm');
+  ok('ext 与 mime 容器一致', p.mime.indexOf('mp4') >= 0 ? p.ext === 'mp4' : p.ext === 'webm');
+  /* 端到端：拿一张离屏 canvas 真录 200ms，必须产出非空 Blob */
+  var cv = document.createElement('canvas');
+  cv.width = 64; cv.height = 64;
+  var c2 = cv.getContext('2d');
+  c2.fillStyle = '#ff5a8a'; c2.fillRect(0, 0, 64, 64);
+  var st = cv.captureStream(30);
+  var ses = REC.Encoder.start(st, p.mime);
+  ok('start 返回 session', !!(ses && ses.rec));
+  r.pass.push('端到端录制已异步发起（结果见控制台 REC.Encoder.__lastProbe）');
+  /* 立即 stop 会在 0 帧时截断出 0 字节 Blob（已实测确认），
+     所以真的等满 200ms 再收尾，让这条自检名副其实 */
+  setTimeout(function(){
+    REC.Encoder.stop(ses).then(function(b){
+      REC.Encoder.__lastProbe = { size: b.size, type: b.type, ok: b.size > 0 };
+    })['catch'](function(e){ REC.Encoder.__lastProbe = { error: String(e) }; });
+  }, 200);
+  return r;
+};
 /* ===== /REC:ENCODER ===== */
 
 /* ===== REC:COMPOSITOR ===== */
