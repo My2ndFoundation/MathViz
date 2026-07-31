@@ -124,6 +124,11 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 .tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
 .tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
 
+/* 驱动控制行 */
+.drive{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0 2px}
+.drive .dmode{display:flex;gap:4px;margin-left:auto}
+.drive .dmode .btn{padding:4px 8px;font-size:11px}
+
 /* 读数与提示 */
 .readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
   font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
@@ -166,6 +171,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       <button class="btn wide" id="btnPlay">⏸ 暂停</button>
       <button class="btn" id="btnReset">↺ 重置</button>
     </div>
+    <div id="driveHost"></div>
     <div id="togglesHost"></div>
     <div id="viewsHost"></div>
     <div class="readout" id="readout"></div>
@@ -210,9 +216,16 @@ const UI = {
   resume: { zh: '▶ 继续', en: '▶ Resume' },
   reset:  { zh: '↺ 重置', en: '↺ Reset' },
   views:  { zh: '视角', en: 'View' },
+  autoPlay: { zh: '自动播放', en: 'Auto-play' },
+  pingpong: { zh: '往返',     en: 'Ping-pong' },
+  loop:     { zh: '循环',     en: 'Loop' },
   hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
             en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
 };
+
+/* TAU 提到 PARAMS/SCENES 之前声明：SCENES.lissa.drive 在对象字面量里直接引用它
+   （非惰性函数体内），若仍留在原「常量与状态」区（SCENES 之后）会触发 TDZ 报错。 */
+const TAU = Math.PI * 2;
 
 /* ╔══════════════════════════════════════════════════════════╗
    ║  ① 参数声明 —— 自动生成滑杆                                ║
@@ -222,7 +235,7 @@ const UI = {
 const PARAMS = [
   { key: 'omega',     label: { zh: '角速度 <i>ω</i>', en: 'Angular speed <i>ω</i>' }, min: 0.2, max: 4,   step: 0.05, value: 1,   fmt: v => fmt(v) + ' rad/s' },
   { key: 'amp',       label: { zh: '振幅 <i>A</i>',   en: 'Amplitude <i>A</i>' },     min: 0.2, max: 1.5, step: 0.05, value: 1,   fmt: v => fmt(v) },
-  { key: 'phi',       label: { zh: '初相位 <i>φ</i>', en: 'Initial phase <i>φ</i>' }, min: 0,   max: 2,   step: 0.05, value: 0,   fmt: v => fmt(v) + ' π', map: v => v * Math.PI },
+  { key: 'phi',       label: { zh: '初相位 <i>φ</i>', en: 'Initial phase <i>φ</i>' }, min: 0,   max: 2,   step: 0.05, value: 0,   fmt: v => fmt(v) + ' π', map: v => v * Math.PI, invMap: v => v / Math.PI },
   { key: 'waveSpeed', label: { zh: '波形展开速度',     en: 'Wave unroll speed' },      min: 0.5, max: 2.5, step: 0.05, value: 1.2, fmt: v => fmt(v) + t({ zh: ' 单位/s', en: ' units/s' }) }
 ];
 
@@ -238,6 +251,9 @@ const SCENES = {
   /* ────── 示例场景：利萨茹图形（演示模板全部约定） ────── */
   lissa: {
     label: { zh: '利萨茹图形', en: 'Lissajous figure' },
+    params: ['omega', 'amp', 'phi', 'waveSpeed'],
+    /* 相位是角度量：绕满一圈首尾天然相接，故 kind: 'circular' → 默认 loop */
+    drive: { key: 'phi', from: 0, to: TAU, period: 8, kind: 'circular' },
     brand: { zh: '两个方向相互垂直、频率成 3:2 的简谐振动叠加，轨迹便是利萨茹图形。拖动 φ 改变姿态，拖拽画布旋转观察。',
              en: 'Two perpendicular simple harmonic oscillations with a 3:2 frequency ratio combine to trace a Lissajous figure. Drag φ to change its shape, and drag the canvas to rotate the view.' },
     tips: { zh: '提示：x 与 y 是两只互相垂直的「弹簧」，频率比决定花形、初相位 φ 决定姿态。本场景演示了模板的全部约定——曲线配色、投影虚线、读数区与视角预设。',
@@ -299,6 +315,9 @@ const SCENES = {
   /* ────── 空白骨架：复制本对象并改名，即是你的新场景 ────── */
   blank: {
     label: { zh: '新场景模板', en: 'Blank scene' },
+    params: ['omega', 'waveSpeed'],
+    /* 角速度是标量区间：单向回绕会跳变，故 kind: 'linear' → 默认 pingpong */
+    drive: { key: 'omega', from: 0.2, to: 4, period: 6, kind: 'linear' },
     brand: { zh: '这是一个空白场景骨架：引擎、坐标轴、网格与主循环已就绪，在 draw(C) 中开始绘制你的数学对象。',
              en: 'This is a blank scene skeleton: the engine, axes, grid, and main loop are ready — start drawing your math object in draw(C).' },
     tips: { zh: '提示：复制 SCENES 中任一场景对象并改名即可开出新页签；在 PARAMS 声明滑杆、在 toggles 声明开关（曲线按 rose→violet→emerald→orange 取色），其余交给引擎。',
@@ -340,7 +359,6 @@ const SCENES = {
 };
 
 /* ================= 常量与状态（引擎区，以下一般无需改动） ================= */
-const TAU = Math.PI * 2;
 const WAVE_LEN = 8;      // t 轴的世界长度（可视窗口）
 const NEAR = 0.15;       // 近裁剪面
 
@@ -687,6 +705,9 @@ function frame(ts) {
   if (state.running) {
     state.t += dt;
     state.theta += state.omega * dt;
+    applyDrive();
+    const dv = SCENES[curTab].drive;
+    if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
     pushSample();
   }
   const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
@@ -699,6 +720,94 @@ function frame(ts) {
 
 const roEl = document.getElementById('readout');
 function updateReadout() { roEl.innerHTML = SCENES[curTab].readout(); }
+
+/* ================= 场景作用域参数与时间驱动 ================= */
+const paramWraps = {};   // key -> { wrap, input, val, p }
+const autoPlay = {};     // tabId -> 是否自动播放
+const driveMode = {};    // tabId -> 'loop' | 'pingpong'
+
+/* 驱动求值：引擎时钟的纯函数，不做增量积分 —— 不累积浮点漂移，
+   暂停恢复不跳变，且录制器按固定 dt 推进 state.t 时可直接复用。 */
+function driveValue(d, tt, mode) {
+  const m = mode || d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+  const u = ((tt / d.period) % 1 + 1) % 1;              // 负时间也落在 [0,1)
+  const s = (m === 'loop') ? u : (u < 0.5 ? 2 * u : 2 - 2 * u);
+  return d.from + (d.to - d.from) * s;
+}
+
+/* 把当前场景的驱动量按引擎时钟写回 state。只动数据、不碰 DOM ——
+   录制器的离线渲染也调它，那条路径上没有面板可同步（见规范 §D1）。 */
+function applyDrive() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return;
+  state[sc.drive.key] = driveValue(sc.drive, state.t, driveMode[curTab]);
+}
+
+/* 供录制器判断无缝循环的吸附基准；无驱动或用户关掉自动播放时返回 null */
+function driveInfo() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return null;
+  return { key: sc.drive.key, period: sc.drive.period, mode: driveMode[curTab] };
+}
+
+/* 把驱动出的值反算回滑块刻度并回显。带 map 的参数必须提供 invMap，
+   否则只能退回显示映射后的值（规范 §8 已把 invMap 列为硬约束）。 */
+function syncParamSlider(key) {
+  const e = paramWraps[key];
+  if (!e) return;
+  const raw = (e.p.map && e.p.invMap) ? e.p.invMap(state[key]) : state[key];
+  e.input.value = raw;
+  e.val.textContent = e.p.fmt(raw);
+}
+
+/* 按当前页签的 params 显隐滑块。省略 params = 全部显示（向后兼容）。
+   不复制 DOM：滑块值是跨页签共享的 state，复制会引入多份 DOM 的同步问题。 */
+function syncParamVisibility() {
+  const list = SCENES[curTab] && SCENES[curTab].params;
+  Object.keys(paramWraps).forEach(k => {
+    paramWraps[k].wrap.style.display = (!list || list.indexOf(k) >= 0) ? '' : 'none';
+  });
+}
+
+function setAutoPlay(on) { autoPlay[curTab] = on; refreshDriveRow(curTab); }
+
+function refreshDriveRow(id) {
+  const row = document.querySelector('.drive[data-tab="' + id + '"]');
+  if (!row) return;
+  row.querySelector('input').checked = !!autoPlay[id];
+  row.querySelectorAll('[data-mode]').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === driveMode[id]);
+  });
+}
+
+function buildDrive() {
+  const host = document.getElementById('driveHost');
+  Object.keys(SCENES).forEach(id => {
+    const d = SCENES[id].drive;
+    if (!d) return;
+    autoPlay[id] = true;
+    driveMode[id] = d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+    const row = document.createElement('div');
+    row.className = 'drive';
+    row.dataset.tab = id;
+    row.innerHTML = '<label class="tg"><input type="checkbox" checked><span class="autoL"></span></label>' +
+      '<span class="dmode"><button class="btn" data-mode="pingpong"></button>' +
+      '<button class="btn" data-mode="loop"></button></span>';
+    row.querySelector('input').addEventListener('change', e => { autoPlay[id] = e.target.checked; });
+    row.querySelectorAll('[data-mode]').forEach(b => {
+      b.addEventListener('click', () => { driveMode[id] = b.dataset.mode; refreshDriveRow(id); });
+    });
+    host.appendChild(row);
+    const relabel = () => {
+      row.querySelector('.autoL').textContent = t(UI.autoPlay);
+      row.querySelector('[data-mode="pingpong"]').textContent = t(UI.pingpong);
+      row.querySelector('[data-mode="loop"]').textContent = t(UI.loop);
+    };
+    RELABEL.push(relabel);
+    relabel();
+    refreshDriveRow(id);
+  });
+}
 
 /* ================= UI 生成（由 ①② 声明驱动） ================= */
 function buildParams() {
@@ -719,6 +828,13 @@ function buildParams() {
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
+    paramWraps[p.key] = { wrap, input, val, p };
+    /* 用户伸手拖被驱动的滑块 = 明确要接管，自动播放当场关闭，
+       否则下一帧就会被驱动值覆盖回去。这是与「暂停只冻结模拟」一致的语义。 */
+    input.addEventListener('input', () => {
+      const d = SCENES[curTab] && SCENES[curTab].drive;
+      if (d && d.key === p.key && autoPlay[curTab]) setAutoPlay(false);
+    });
     const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
     RELABEL.push(relabel);
     relabel();
@@ -823,12 +939,13 @@ function switchTab(id) {
   curTab = id;
   tween = null;
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
-  document.querySelectorAll('.toggles[data-tab], .views[data-tab]').forEach(el => {
+  document.querySelectorAll('.toggles[data-tab], .views[data-tab], .drive[data-tab]').forEach(el => {
     el.style.display = el.dataset.tab === id ? '' : 'none';
   });
   cam = cams[id];
   brandDesc.textContent = t(SCENES[id].brand);
   tipsEl.textContent = t(SCENES[id].tips);
+  syncParamVisibility();
   refreshViewButtons();
   updateReadout();
 }
@@ -971,6 +1088,7 @@ window.addEventListener('keydown', e => {
 resize();
 buildTabs();
 buildParams();
+buildDrive();
 buildToggles();
 buildViews();
 Object.keys(SCENES).forEach(id => {
