@@ -1039,6 +1039,12 @@ function renderChrome(){
   var d = curId ? byId(curId) : null;
   document.title = d ? t(d.title) + ' · MathViz' : t(L.title);
   document.getElementById('btnAlone').href = d ? d.file + '?lang=' + LANG : 'index.html?lang=' + LANG;
+  /* 录制器的文案也归 renderChrome 管：本仓库的约定是语言开关即时生效，不许等到刷新 */
+  if (window.REC && REC.UI && REC.UI.render){
+    var rbt = document.getElementById('recBtnTxt');
+    if (rbt) rbt.textContent = REC.t(REC.UI.L.rec);
+    REC.UI.render();
+  }
 }
 
 /* ================= 导航 ================= */
@@ -1101,6 +1107,9 @@ document.getElementById('btnHide').addEventListener('click', function(){ setSide
 document.getElementById('btnShow').addEventListener('click', function(){ setSidebar(true); });
 document.getElementById('scrim').addEventListener('click', function(){ setSidebar(false); });
 document.getElementById('btnLang').addEventListener('click', function(){
+  /* 切语言会重载 iframe，工具实例整个换掉：录制现场必须先丢弃，
+     否则离线循环会继续驱动一个已被卸载的文档，收尾时还会把旧快照写进新实例。 */
+  REC.abort();
   LANG = LANG === 'zh' ? 'en' : 'zh';
   try{ localStorage.setItem(LANG_KEY, LANG); }catch(e){}
   try{
@@ -1164,7 +1173,10 @@ REC.CFG = {
 };
 REC.SIZES = { '16:9': [1920,1080], '9:16': [1080,1920], '1:1': [1080,1080] };
 REC.FPS = 60;
-REC.COLORS = ['#ff5a8a','#a68bff','#37d9a0','#ffa653'];
+/* 兜底色序：与设计系统的曲线色序（rose → violet → emerald → orange）逐字一致。
+   只在某个 toggle 自己没声明 color 时才用得上 —— 原则 3「一条曲线一个颜色」要求
+   叠层图例必须复用工具真正画曲线用的那个色值，而不是另起一套近似色。 */
+REC.COLORS = ['#fb7185','#a78bfa','#34d399','#fb923c'];
 
 /* 双语取词：与外壳其余部分一致，读全局 LANG */
 REC.t = function(o){ return (o && o[LANG]) || (o && o.zh) || ''; };
@@ -1232,12 +1244,21 @@ REC.Bridge.snapshot = function(){
   for (k in h.state) if (Object.prototype.hasOwnProperty.call(h.state, k)) st[k] = h.state[k];
   var cm = {};
   for (k in h.cam) if (Object.prototype.hasOwnProperty.call(h.cam, k)) cm[k] = h.cam[k];
-  return { state: st, cam: cm, samples: h.samples ? h.samples.slice() : null, curTab: h.curTab };
+  /* 带上来源身份。注意别拿 win 做身份：iframe 同源跳转后 contentWindow（WindowProxy）
+     是同一个对象，重载前后全等，判不出新旧实例。document 和工具的 state 对象才会真的换新，
+     而 restore 要写的正是 state 这个对象本身，用它做身份最贴切。 */
+  return { state: st, cam: cm, samples: h.samples ? h.samples.slice() : null, curTab: h.curTab,
+           doc: h.doc, stateRef: h.state, camRef: h.cam, toolId: h.toolId };
 };
 
 REC.Bridge.restore = function(snap){
   var h = REC.Bridge.get();
   if (!h || !snap) return;
+  /* 快照只对它来源的那个工具实例有效。中途换了工具、或切语言导致 iframe 重载之后，
+     把旧快照写进新实例等于凭空篡改新工具的 state/cam，这里直接拒绝。 */
+  if (snap.stateRef && snap.stateRef !== h.state) return;
+  if (snap.doc && snap.doc !== h.doc) return;
+  if (snap.toolId && snap.toolId !== h.toolId) return;
   var k;
   for (k in snap.state) if (Object.prototype.hasOwnProperty.call(snap.state, k)) h.state[k] = snap.state[k];
   for (k in snap.cam)   if (Object.prototype.hasOwnProperty.call(snap.cam, k))   h.cam[k]   = snap.cam[k];
@@ -1270,6 +1291,20 @@ REC.Bridge.__test = function(){
   ok('restore 复原 state.theta', Math.abs(h.state.theta - t0) < 1e-9);
   ok('restore 复原 cam.az', Math.abs(h.cam.az - az0) < 1e-9);
   ok('restore 复原 samples 长度', h.samples.length === n0);
+  /* 快照带来源身份：换了工具 / 切语言重载之后的旧快照必须被拒绝。
+     分别验证三道闸：state 对象换新、document 换新、工具换人。 */
+  var alien = REC.Bridge.snapshot();
+  alien.state.theta = t0 + 99;
+  var refSaved = alien.stateRef, docSaved = alien.doc;
+  alien.stateRef = {};
+  REC.Bridge.restore(alien);
+  ok('restore 拒绝异 state 实例的快照', Math.abs(h.state.theta - t0) < 1e-9);
+  alien.stateRef = refSaved; alien.doc = document;      /* 换个 document 冒充重载后的实例 */
+  REC.Bridge.restore(alien);
+  ok('restore 拒绝异 document 的快照', Math.abs(h.state.theta - t0) < 1e-9);
+  alien.doc = docSaved; alien.toolId = '__not-a-tool__';
+  REC.Bridge.restore(alien);
+  ok('restore 拒绝异工具的快照', Math.abs(h.state.theta - t0) < 1e-9);
   return r;
 };
 /* ===== /REC:BRIDGE ===== */
@@ -1410,6 +1445,22 @@ function _decodeReadoutLines(txt){
   return (doc.body.textContent || '').split('\n');
 }
 
+/* 图例文案里的 <i>…</i> 包着数学符号（如「谐波 <i>ω</i>」）。原则 4 要求数学符号
+   一律衬线斜体，与读数区同字体；其余文字保持无衬线。分段量宽后从 x 起依次画出。 */
+function _drawRichLabel(c, txt, x, y, base){
+  var sans = Math.round(base) + 'px ui-sans-serif, -apple-system, "PingFang SC", sans-serif';
+  var math = 'italic ' + Math.round(base * 1.05) + 'px Georgia, "Songti SC", serif';
+  var parts = String(txt).split(/(<i>[\s\S]*?<\/i>)/);
+  for (var i = 0; i < parts.length; i++){
+    if (!parts[i]) continue;
+    c.font = parts[i].indexOf('<i>') === 0 ? math : sans;
+    var s = parts[i].replace(/<[^>]+>/g, '');
+    if (!s) continue;
+    c.fillText(s, x, y);
+    x += c.measureText(s).width;
+  }
+}
+
 /* 录制现场是否已在进行中：begin() 不可重入，否则第二次 begin() 会把
    「录制态」样式当成「原始态」存进 _prev，end() 就再也恢复不回真正的原始现场了。 */
 var _compActive = null;
@@ -1485,20 +1536,20 @@ REC.Compositor.frame = function(o, h, info){
     c.restore();
   }
 
-  /* 图例：左下，固定色序 rose → violet → emerald → orange */
+  /* 图例：左下。色点取 toggle 自己声明的 color —— 工具就是用这个色值画曲线的，
+     原则 3 要求同一条曲线在图例点与曲线体上完全同色；只有工具没声明时才回落到 REC.COLORS。 */
   if (sc && sc.toggles){
     c.save();
     c.textBaseline = 'middle';
-    c.font = Math.round(base) + 'px ui-sans-serif, -apple-system, "PingFang SC", sans-serif';
     var y = hh - pad, n = 0;
     for (var k = 0; k < sc.toggles.length; k++){
       var tg = sc.toggles[k];
       if (!h.state[tg.key]) continue;                     /* 只画已开启的曲线 */
-      var col = REC.COLORS[n % REC.COLORS.length];
+      var col = tg.color || REC.COLORS[n % REC.COLORS.length];
       c.fillStyle = col;
       c.beginPath(); c.arc(pad + base * 0.4, y, base * 0.4, 0, Math.PI * 2); c.fill();
       c.fillStyle = '#93a3bd';
-      c.fillText(String(REC.t(tg.label) || tg.key).replace(/<[^>]+>/g, ''), pad + base * 1.3, y);
+      _drawRichLabel(c, REC.t(tg.label) || tg.key, pad + base * 1.3, y, base);
       y -= base * 1.9; n++;
     }
     c.restore();
@@ -1555,6 +1606,10 @@ REC.Source.__test = function(){
   ok('时长吸附到周期整数倍', Math.abs(REC.Source.snapDuration(8, 1) - 6.283185307179586) < 1e-6);
   ok('吸附不足一个周期时给一个整周期', Math.abs(REC.Source.snapDuration(3, 1) - 6.283185307179586) < 1e-6);
   ok('omega 为 0 时原样返回', REC.Source.snapDuration(8, 0) === 8);
+  /* 工具没声明 omega 时必须按 0 处理，否则离线推进会整段 NaN */
+  ok('omegaOf 对缺失 omega 给 0', REC.Source.omegaOf({ state: { theta: 0 } }) === 0);
+  ok('omegaOf 对 NaN omega 给 0', REC.Source.omegaOf({ state: { omega: NaN } }) === 0);
+  ok('缺失 omega 时时长不被吸附', REC.Source.snapDuration(8, REC.Source.omegaOf({ state: {} })) === 8);
 
   /* 端到端：跑一段 0.5s 的离线渲染，帧数必须精确，且现场被还原 */
   var snap = REC.Bridge.snapshot();
@@ -1575,6 +1630,14 @@ REC.Source.__test = function(){
   return r;
 };
 
+/* 工具的 state 未必声明 omega —— 例如 outputs/cartesian-polar-coordinate-3d.html 的
+   state 只有 {running, t, theta, kPhase}。缺省一律按 0 处理，否则 theta += undefined*dt
+   会从第一帧起变成 NaN，录出来是一段静默的空白视频，全程不报错。 */
+REC.Source.omegaOf = function(h){
+  var w = h && h.state ? h.state.omega : 0;
+  return (typeof w === 'number' && isFinite(w)) ? w : 0;
+};
+
 /* 无缝循环：把时长吸到动画周期 2π/ω 的整数倍。ω=0（静态场景）时不吸。 */
 REC.Source.snapDuration = function(sec, omega){
   if (!omega) return sec;
@@ -1590,6 +1653,7 @@ REC.Source.offline = function(h, o, cfg, onProgress){
   var stream = o.canvas.captureStream(0);         /* 0 = 只接受手动 requestFrame */
   var track = stream.getVideoTracks()[0];
   var cancelled = false;
+  var omega = REC.Source.omegaOf(h);              /* 工具没有 omega 时按 0，见 omegaOf 注释 */
 
   /* 接管驱动：停掉工具自己的积分，本函数按固定步长推进 */
   var wasRunning = h.state.running;
@@ -1615,7 +1679,7 @@ REC.Source.offline = function(h, o, cfg, onProgress){
 
       /* 1. 推进仿真（固定步长，与真实帧率无关） */
       h.state.t += dt;
-      h.state.theta += h.state.omega * dt;
+      h.state.theta += omega * dt;
       if (h.pushSample) h.pushSample();
 
       /* 2. 运镜 */
@@ -1768,25 +1832,55 @@ REC.UI.mount = function(){
   });
 };
 
-REC.busy = null;      /* 录制中的现场，供 abort 用 */
+REC.busy = null;      /* 录制中的现场；同时充当会话身份，见 _finish 的校验 */
 
-REC.abort = function(){
-  var b = REC.busy;
-  if (!b) return;
-  REC.busy = null;
-  try{ if (b.src && b.src.cancel) b.src.cancel(); }catch(e){}
-  try{ if (b.src && b.src.stop)   b.src.stop();   }catch(e){}
-  try{ if (b.ses) REC.Encoder.stop(b.ses); }catch(e){}
-  try{ if (b.ctxObj) REC.Compositor.end(b.ctxObj); }catch(e){}
-  try{ if (b.snap) REC.Bridge.restore(b.snap); }catch(e){}
+/* 面板回到「可以开始录制」的样子 */
+function _recReset(){
   var go = document.getElementById('recGo');
   if (go){ go.disabled = false; go.textContent = REC.t(REC.UI.L.go); }
   var bar = document.getElementById('recBar');
   if (bar) bar.style.width = '0';
+}
+
+function _stopStream(st){
+  if (!st || !st.getTracks) return;
+  var tr = st.getTracks();
+  for (var i = 0; i < tr.length; i++){ try{ tr[i].stop(); }catch(e){} }
+}
+
+/* 文件名里的时长：写真实录到的秒数，不是滑块上的设定值 */
+function _fmtSecs(s){
+  var v = Math.round(s * 10) / 10;
+  return (v === Math.round(v)) ? String(Math.round(v)) : String(v);
+}
+
+/* 「中断」：把录制丢掉。切工具、切语言、关页面走这条路——产物一律不要。 */
+REC.abort = function(){
+  var b = REC.busy;
+  if (!b) return;
+  REC.busy = null;          /* 先摘掉身份，在途的 done/ended 回调就会被 _finish 挡在门外 */
+  try{ if (b.src && b.src.cancel) b.src.cancel(); }catch(e){}
+  try{ if (b.src && b.src.stop)   b.src.stop();   }catch(e){}
+  /* 停编码器只为释放它和它持有的轨道，Blob 直接丢弃 */
+  try{ if (b.ses) REC.Encoder.stop(b.ses)['catch'](function(){}); }catch(e){}
+  try{ if (b.stream) _stopStream(b.stream); }catch(e){}
+  try{ if (b.ctxObj) REC.Compositor.end(b.ctxObj); }catch(e){}
+  try{ if (b.snap) REC.Bridge.restore(b.snap); }catch(e){}
+  _recReset();
+};
+
+/* 「停止」：用户在面板上主动收尾。与 abort 是两种意图——这条路必须出片并下载。
+   实时 / 整页录制没有预定时长，全靠它结束。 */
+REC.stop = function(b){
+  b = b || REC.busy;
+  if (!b || REC.busy !== b) return;
+  /* 还停在选窗口对话框上（没有编码器可停），只能按丢弃处理 */
+  if (b.pending || !b.ses){ REC.abort(); return; }
+  _finish(b);
 };
 
 REC.UI.run = function(){
-  if (REC.busy){ REC.abort(); return; }
+  if (REC.busy){ REC.stop(); return; }
   var mime = REC.Encoder.pickMime();
   var note = document.getElementById('recNote');
   if (!mime){ if (note) note.textContent = REC.t(REC.UI.L.noMime); return; }
@@ -1801,14 +1895,26 @@ REC.UI.run = function(){
       if (note) note.textContent = REC.t(REC.UI.L.noMime);
       return;
     }
+    /* 身份要在 await 选窗口对话框「之前」就立起来：否则对话框开着时再点一次按钮，
+       会再发一次 getDisplayMedia，第一条流没人引用也没人 stop，浏览器就一直共享屏幕。 */
+    var bs = { pending: true, ses: null, src: null, ctxObj: null, snap: null, stream: null,
+               mime: mime, dur: null, aspect: cfg.aspect, toolId: curId, startedAt: Date.now() };
+    REC.busy = bs;
+    go.textContent = REC.t(REC.UI.L.stop);
     navigator.mediaDevices.getDisplayMedia({ video: { frameRate: REC.FPS }, audio: false })
       .then(function(st){
-        var ses = REC.Encoder.start(st, mime.mime);
-        REC.busy = { ses: ses, src: null, ctxObj: null, snap: null };
-        go.textContent = REC.t(REC.UI.L.stop);
+        /* 等对话框期间已被中断（切工具 / 又点了一次停止）：这条流成了孤儿，必须立刻关掉 */
+        if (REC.busy !== bs){ _stopStream(st); return; }
+        bs.pending = false;
+        bs.stream = st;
+        bs.startedAt = Date.now();
+        bs.ses = REC.Encoder.start(st, mime.mime);
         /* 用户在浏览器的共享条上点「停止共享」也要收尾 */
-        st.getVideoTracks()[0].addEventListener('ended', function(){ _finish(ses, mime); });
-      })['catch'](function(){ if (note) note.textContent = REC.t(REC.UI.L.noMime); });
+        st.getVideoTracks()[0].addEventListener('ended', function(){ REC.stop(bs); });
+      })['catch'](function(){
+        if (REC.busy === bs){ REC.busy = null; _recReset(); }
+        if (note) note.textContent = REC.t(REC.UI.L.noMime);
+      });
     return;
   }
 
@@ -1820,14 +1926,18 @@ REC.UI.run = function(){
   if (!ctxObj){ if (note) note.textContent = REC.t(REC.UI.L.noBridge); return; }
 
   var dur = cfg.duration;
-  if (cfg.loop) dur = REC.Source.snapDuration(dur, h.state.omega);
+  if (cfg.loop) dur = REC.Source.snapDuration(dur, REC.Source.omegaOf(h));
 
+  /* 画幅、时长、工具 id 都在开录这一刻定格：收尾时再去读 REC.CFG / curId，
+     用户中途改了设置或换了工具，文件名就会撒谎。 */
   if (cfg.drive === 'realtime'){
     var src = REC.Source.realtime(h, ctxObj, cfg);
     var ses = REC.Encoder.start(src.stream, mime.mime);
-    REC.busy = { ses: ses, src: src, ctxObj: ctxObj, snap: snap };
+    /* 实时录制没有预定时长，dur 留空，收尾时按实际经过的墙钟时间算 */
+    REC.busy = { pending: false, ses: ses, src: src, ctxObj: ctxObj, snap: snap, stream: src.stream,
+                 mime: mime, dur: null, aspect: cfg.aspect, toolId: curId, startedAt: Date.now() };
     go.textContent = REC.t(REC.UI.L.stop);
-    return;                       /* 由用户再点一次「停止」触发 _finish */
+    return;                       /* 由用户再点一次「停止」触发 REC.stop → _finish */
   }
 
   var src2 = REC.Source.offline(h, ctxObj, {
@@ -1835,26 +1945,36 @@ REC.UI.run = function(){
   }, function(k){ if (bar) bar.style.width = Math.round(k * 100) + '%'; });
 
   var ses2 = REC.Encoder.start(src2.stream, mime.mime);
-  REC.busy = { ses: ses2, src: src2, ctxObj: ctxObj, snap: snap };
+  var b2 = { pending: false, ses: ses2, src: src2, ctxObj: ctxObj, snap: snap, stream: src2.stream,
+             mime: mime, dur: dur, aspect: cfg.aspect, toolId: curId, startedAt: Date.now() };
+  REC.busy = b2;
   go.disabled = true;
-  src2.done.then(function(){ _finish(ses2, mime); });
+  src2.done.then(function(res){
+    /* done 在「跑满」和「被取消」两种情况下都会 resolve。被取消时现场已由 abort()
+       收拾干净，这里再走 _finish 就会下载一段截断的半成品。 */
+    if (res && res.cancelled) return;
+    _finish(b2);
+  });
 };
 
-function _finish(ses, mime){
-  var b = REC.busy;
+function _finish(b){
+  /* 身份校验：这场录制已经不是当前现场了（被中断，或已被别的会话接管）就什么都不做。
+     abort() 会先把 REC.busy 摘掉，在途的回调全靠这一行挡住。 */
+  if (!b || REC.busy !== b || !b.ses) return;
   REC.busy = null;
-  REC.Encoder.stop(ses).then(function(blob){
-    var id = curId || 'mathviz';
-    var name = id + '-' + REC.CFG.aspect.replace(':', 'x') + '-' + REC.CFG.duration + 's.' + mime.ext;
+  /* 先停驱动，免得收尾期间还在往流里塞帧 */
+  try{ if (b.src && b.src.stop)   b.src.stop();   }catch(e){}
+  try{ if (b.src && b.src.cancel) b.src.cancel(); }catch(e){}
+  REC.Encoder.stop(b.ses).then(function(blob){
+    if (!blob || !blob.size) return;               /* 0 字节就别塞给用户了 */
+    var secs = (b.dur != null) ? b.dur : (Date.now() - b.startedAt) / 1000;
+    var name = (b.toolId || 'mathviz') + '-' + String(b.aspect).replace(':', 'x')
+             + '-' + _fmtSecs(secs) + 's.' + b.mime.ext;
     REC.Encoder.download(blob, name);
-  })['finally'](function(){
-    if (b && b.src && b.src.stop) try{ b.src.stop(); }catch(e){}
-    if (b && b.ctxObj) REC.Compositor.end(b.ctxObj);
-    if (b && b.snap)   REC.Bridge.restore(b.snap);
-    var go = document.getElementById('recGo');
-    if (go){ go.disabled = false; go.textContent = REC.t(REC.UI.L.go); }
-    var bar = document.getElementById('recBar');
-    if (bar) bar.style.width = '0';
+  })['catch'](function(){})['finally'](function(){
+    if (b.ctxObj) REC.Compositor.end(b.ctxObj);
+    if (b.snap)   REC.Bridge.restore(b.snap);
+    _recReset();
   });
 }
 
@@ -1889,6 +2009,12 @@ REC.UI.__test = function(){
     return REC.UI.run.toString().indexOf('not wired') < 0;
   })());
   ok('abort 是函数', typeof REC.abort === 'function');
+  /* 「停止」与「中断」是两条独立的路：面板上的停止必须出片，abort 才是丢弃 */
+  ok('stop 是函数', typeof REC.stop === 'function');
+  ok('stop 与 abort 不是同一个函数', REC.stop !== REC.abort);
+  ok('run 空转时点停止不抛错', (function(){
+    try{ REC.stop(); return true; }catch(e){ return false; }
+  })());
   return r;
 };
 /* ===== /REC:UI ===== */
