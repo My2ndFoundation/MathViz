@@ -10,6 +10,7 @@ A collection of **single-file, zero-dependency HTML math/physics visualization t
 - `design-system/math-viz-starter.html` — the canonical starting template. Contains all design tokens + the full engine + a declarative config layer. **Copy this to make a new tool.**
 - `outputs/*.html` — finished tools built on the engine.
 - `tools.json` — the registry of record for every published tool (id, bilingual copy, semver `version`, `engine`, `changelog`); `index.html` embeds a mirrored `TOOLS` array, and both are updated together whenever a tool is published or upgraded.
+- `app.html` — the navigation shell: a collapsible sidebar plus a main content area that loads a tool in an **iframe** (iframe, not injection: every tool is a whole page with its own top-level `state`/`cam`, full-screen canvas and keyboard shortcuts, so two of them in one document would collide). It reads `tools.json` at runtime when served, and falls back to its own embedded minimal list (id / file / cat / accent / title / kicker) when opened from `file://` — **keep that fallback list in sync when publishing a tool**, or the tool goes missing from the offline sidebar only. Tools themselves are never modified and stay independently openable.
 - `archive/` — retired tools that are no longer registered or linked from the landing page (e.g. `trig-essence-3d.html`, the original hand-written tool the design system was extracted from).
 
 ## Commands
