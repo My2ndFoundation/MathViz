@@ -1360,6 +1360,173 @@ REC.Encoder.__test = function(){
 
 /* ===== REC:COMPOSITOR ===== */
 REC.Compositor = {};
+REC.Compositor.__test = function(){
+  var r = { pass: [], fail: [] };
+  function ok(n, c){ if (c) r.pass.push(n); else r.fail.push(n); }
+  var h = REC.Bridge.get();
+  if (!h){ r.fail.push('需要先载入一个工具（Bridge 不可用）'); return r; }
+  var cfgs = [
+    { visual: 'clean',   aspect: '16:9' },
+    { visual: 'overlay', aspect: '9:16' },
+    { visual: 'overlay', aspect: '1:1'  }
+  ];
+  for (var i = 0; i < cfgs.length; i++){
+    var c = cfgs[i], tag = c.visual + '/' + c.aspect;
+    var want = REC.SIZES[c.aspect];
+    var o = REC.Compositor.begin(h, c);
+    if (!o){ r.fail.push(tag + ': begin 返回 null'); continue; }
+    ok(tag + ' 输出宽度正确', o.w === want[0]);
+    ok(tag + ' 输出高度正确', o.h === want[1]);
+    ok(tag + ' 尺寸为偶数（H.264 要求）', o.w % 2 === 0 && o.h % 2 === 0);
+    ok(tag + ' canvas backing store 匹配', o.canvas.width === want[0] && o.canvas.height === want[1]);
+    ok(tag + ' 工具 canvas 已按画幅重算', h.canvas.width === want[0] && h.canvas.height === want[1]);
+    try{ REC.Compositor.frame(o, h, { i: 0, total: 60, t: 0 }); r.pass.push(tag + ' frame() 不抛错'); }
+    catch(e){ r.fail.push(tag + ' frame() 抛错 ' + e); }
+    REC.Compositor.end(o);
+  }
+  ok('end() 后 iframe 内联尺寸已清空', frame.style.width === '');
+  ok('end() 后 stage 已摘掉 rec-live', document.querySelector('.stage').className.indexOf('rec-live') < 0);
+
+  /* readout() 常见字段分隔符 &ensp;（约 50 个工具在用），以及 &thinsp; / &lt; / &gt;，
+     必须走 frame() 同一条解码路径，解码后不能残留任何字面 & */
+  var decoded = _decodeReadoutLines('s&ensp;·&ensp;θ&thinsp;=&thinsp;&lt;12&gt;&nbsp;&minus;').join('\n');
+  ok('readout 实体解码（&ensp; 等）不残留字面 &', decoded.indexOf('&') < 0);
+  ok('readout 实体解码结果非空', decoded.replace(/\s+/g, '').length > 0);
+  return r;
+};
+
+/* 工具内部就是这么算 DPR 的（math-viz-starter.html:379），必须一致，
+   否则 backing store 对不上目标像素尺寸。 */
+function _toolDpr(win){ return Math.min(2.5, win.devicePixelRatio || 1); }
+
+/* readout() 返回的是 HTML（&ensp; / &thinsp; / &lt; / &gt; / &minus; / &nbsp; 等实体都可能出现，
+   outputs/*.html 里约 50 个工具用 &ensp; 做字段分隔符）。手工枚举实体清单容易漏，
+   干脆把换行标签换成 \n 后交给浏览器自己的 HTML 解析器解一次，读 textContent 拿到全解码的纯文本。
+   DOMParser 解析 'text/html' 是惰性的：不执行脚本、不加载资源，这里安全，也不用碰任何真实节点的 innerHTML。 */
+function _decodeReadoutLines(txt){
+  var html = String(txt).replace(/<br\s*\/?>/gi, '\n').replace(/<\/(div|p|tr)>/gi, '\n');
+  var doc = new DOMParser().parseFromString(html, 'text/html');
+  return (doc.body.textContent || '').split('\n');
+}
+
+REC.Compositor.begin = function(h, cfg){
+  var size = REC.SIZES[cfg.aspect];
+  if (!h || !size) return null;
+  var w = size[0], hh = size[1];
+  var stage = document.querySelector('.stage');
+  var dpr = _toolDpr(h.win);
+
+  /* 记住现场，end() 时逐字还原 */
+  var prev = {
+    fw: frame.style.width, fh: frame.style.height,
+    ftr: frame.style.transform, fml: frame.style.marginLeft, fmt: frame.style.marginTop
+  };
+
+  /* 关键：改 iframe 的 CSS 尺寸 → iframe 内 window.innerWidth 变 → 工具 resize() 重算构图 */
+  stage.classList.add('rec-live');
+  frame.style.width  = (w / dpr) + 'px';
+  frame.style.height = (hh / dpr) + 'px';
+  /* 缩回视口内做预览；居中靠负 margin，避免 transform 影响 offset 计算 */
+  var sc = Math.min(stage.clientWidth / (w / dpr), stage.clientHeight / (hh / dpr), 1);
+  frame.style.marginLeft = (-(w / dpr) / 2) + 'px';
+  frame.style.marginTop  = (-(hh / dpr) / 2) + 'px';
+  frame.style.transform  = 'scale(' + sc + ')';
+
+  /* 工具的 resize 监听是异步的，这里直接同步调一次，保证本函数返回时尺寸已生效 */
+  if (h.resize) { try{ h.resize(); }catch(e){} }
+  if (h.draw)   { try{ h.draw();   }catch(e){} }
+
+  var o = { w: w, h: hh, mode: (cfg.visual === 'overlay' ? 'overlay' : 'clean'),
+            canvas: null, _prev: prev, _stage: stage };
+  if (o.mode === 'overlay'){
+    var cv = document.createElement('canvas');
+    cv.width = w; cv.height = hh;
+    o.canvas = cv; o.ctx = cv.getContext('2d');
+  } else {
+    o.canvas = h.canvas;
+  }
+  return o;
+};
+
+/* 每帧调用。clean 模式什么都不用做（captureStream 直接盯着工具 canvas）。 */
+REC.Compositor.frame = function(o, h, info){
+  if (!o || o.mode !== 'overlay') return;
+  var c = o.ctx, w = o.w, hh = o.h;
+  c.clearRect(0, 0, w, hh);
+  c.drawImage(h.canvas, 0, 0, w, hh);
+
+  var vert = hh > w;
+  var pad = Math.round(w * 0.033);
+  var base = Math.round(w * 0.0125);           /* 字号基准，随画幅缩放 */
+  var sc = h.SCENES && h.curTab ? h.SCENES[h.curTab] : null;
+  var d = byId(h.toolId);
+
+  /* 标题：左上（竖屏时下移，给顶部留呼吸） */
+  var ty = vert ? Math.round(hh * 0.055) : pad;
+  if (d){
+    c.save();
+    c.textBaseline = 'top';
+    c.fillStyle = '#7d8ca6';
+    c.font = '600 ' + Math.round(base * 0.82) + 'px ui-sans-serif, -apple-system, "PingFang SC", sans-serif';
+    c.fillText(String(REC.t(d.kicker) || '').toUpperCase(), pad, ty);
+    c.fillStyle = '#dbe6f5';
+    c.font = '600 ' + Math.round(base * 1.5) + 'px ui-sans-serif, -apple-system, "PingFang SC", sans-serif';
+    c.fillText(REC.t(d.title) || '', pad, ty + Math.round(base * 1.25));
+    c.restore();
+  }
+
+  /* 图例：左下，固定色序 rose → violet → emerald → orange */
+  if (sc && sc.toggles){
+    c.save();
+    c.textBaseline = 'middle';
+    c.font = Math.round(base) + 'px ui-sans-serif, -apple-system, "PingFang SC", sans-serif';
+    var y = hh - pad, n = 0;
+    for (var k = 0; k < sc.toggles.length; k++){
+      var tg = sc.toggles[k];
+      if (!h.state[tg.key]) continue;                     /* 只画已开启的曲线 */
+      var col = REC.COLORS[n % REC.COLORS.length];
+      c.fillStyle = col;
+      c.beginPath(); c.arc(pad + base * 0.4, y, base * 0.4, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#93a3bd';
+      c.fillText(String(REC.t(tg.label) || tg.key).replace(/<[^>]+>/g, ''), pad + base * 1.3, y);
+      y -= base * 1.9; n++;
+    }
+    c.restore();
+  }
+
+  /* 读数：右上。工具的 readout() 返回 HTML，这里剥标签取纯文本，逐行画。 */
+  if (sc && sc.readout){
+    var txt = '';
+    try{ txt = String(sc.readout()); }catch(e){ txt = ''; }
+    var lines = _decodeReadoutLines(txt);
+    c.save();
+    c.textAlign = 'right';
+    c.textBaseline = 'top';
+    c.font = 'italic ' + Math.round(base * 1.05) + 'px Georgia, "Songti SC", serif';
+    c.fillStyle = '#dbe6f5';
+    var ry = ty;
+    for (var i = 0; i < lines.length; i++){
+      var ln = lines[i].replace(/\s+/g, ' ').trim();
+      if (!ln) continue;
+      c.fillText(ln, w - pad, ry);
+      ry += base * 1.6;
+      if (ry > hh * 0.5) break;                          /* 读数再长也不许压到画面中部 */
+    }
+    c.restore();
+  }
+};
+
+REC.Compositor.end = function(o){
+  if (!o) return;
+  frame.style.width      = o._prev.fw;
+  frame.style.height     = o._prev.fh;
+  frame.style.transform  = o._prev.ftr;
+  frame.style.marginLeft = o._prev.fml;
+  frame.style.marginTop  = o._prev.fmt;
+  o._stage.classList.remove('rec-live');
+  var h = REC.Bridge.get();
+  if (h){ try{ h.resize(); h.draw(); }catch(e){} }
+};
 /* ===== /REC:COMPOSITOR ===== */
 
 /* ===== REC:SOURCE ===== */
