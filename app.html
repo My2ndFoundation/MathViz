@@ -161,6 +161,7 @@ body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)
   border:1px solid rgba(255,90,138,.5);background:rgba(255,90,138,.16);color:#ffd7e3}
 .rec-go[disabled]{opacity:.45;cursor:not-allowed}
 .rec-note{margin-top:9px;color:#6f7f99;font-size:11px;line-height:1.5}
+.rec-eff{color:#ffd7e3;font-weight:600}
 .rec-bar{height:3px;margin-top:9px;border-radius:2px;background:rgba(255,255,255,.09);overflow:hidden}
 .rec-bar i{display:block;height:100%;width:0;background:#ff5a8a;transition:width .1s linear}
 /* 录制期间：iframe 脱离 flex 布局，按目标画幅定尺寸再缩放预览 */
@@ -1801,7 +1802,11 @@ REC.UI.L = {
               en: 'This browser cannot record video.' },
   willBe:   { zh: '将输出 ', en: 'Output: ' },
   heavy:    { zh: '　4K 编码较重，长片段可能丢帧。',
-              en: '　4K encoding is heavy; long clips may drop frames.' }
+              en: '　4K encoding is heavy; long clips may drop frames.' },
+  loopUp:   { zh: '无缝循环需要整数个动画周期，时长已补到一个完整周期。关掉它即可严格按设定时长录。',
+              en: 'Seamless loop needs whole animation cycles, so the clip was extended to one full cycle. Turn it off to record exactly the set duration.' },
+  loopDown: { zh: '无缝循环需要整数个动画周期，时长已收到最近的整数倍。',
+              en: 'Seamless loop needs whole animation cycles, so the clip was trimmed to the nearest whole multiple.' }
 };
 
 function _seg(key, opts){
@@ -1813,6 +1818,24 @@ function _seg(key, opts){
   }
   return s + '</div>';
 }
+
+/* 无缝循环要求整数个动画周期，所以时长会被吸附；不足一个周期时向上补成完整周期
+   —— 在 ω=0.5 的工具上，设 8s 实际录出 12.57s。面板必须当场把这个有效时长说出来，
+   否则用户要等录完看文件才发现对不上。只有「离线定长」才谈得上时长，其余模式原样返回。 */
+REC.UI.effDur = function(){
+  var req = REC.CFG.duration;
+  if (!REC.CFG.loop || REC.CFG.drive !== 'offline' || REC.CFG.visual === 'screen') return req;
+  if (!REC.Bridge.get || !REC.Source.omegaOf || !REC.Source.snapDuration) return req;
+  var h = REC.Bridge.get();
+  if (!h) return req;
+  return REC.Source.snapDuration(req, REC.Source.omegaOf(h));
+};
+
+REC.UI.durText = function(){
+  var req = REC.CFG.duration, eff = REC.UI.effDur();
+  if (Math.abs(eff - req) < 0.05) return req + 's';
+  return req + 's → <span class="rec-eff">' + _fmtSecs(eff) + 's</span>';
+};
 
 REC.UI.render = function(){
   var pan = document.getElementById('recPanel');
@@ -1830,6 +1853,10 @@ REC.UI.render = function(){
       note += '　' + px[0] + '×' + px[1];
       if (REC.CFG.res === '4K') note += REC.t(REC.UI.L.heavy);
     }
+    /* 时长被无缝循环改过就解释一句，别让用户录完对着文件猜 */
+    var effD = REC.UI.effDur();
+    if (effD - REC.CFG.duration > 0.05)      note += '<br>' + REC.t(REC.UI.L.loopUp);
+    else if (REC.CFG.duration - effD > 0.05) note += '<br>' + REC.t(REC.UI.L.loopDown);
   }
 
   pan.innerHTML =
@@ -1842,7 +1869,7 @@ REC.UI.render = function(){
       _seg('res', [['1080p','res'],['2K','res'],['4K','res']]) + '</div>' +
     '<div class="rec-row"><label>' + REC.t(REC.UI.L.drive) + '</label>' +
       _seg('drive', [['offline','offline'],['realtime','realtime']]) + '</div>' +
-    '<div class="rec-row"><label>' + REC.t(REC.UI.L.dur) + ' · <span id="recDurVal">' + REC.CFG.duration + '</span>s</label>' +
+    '<div class="rec-row"><label>' + REC.t(REC.UI.L.dur) + ' · <span id="recDurVal">' + REC.UI.durText() + '</span></label>' +
       '<input id="recDur" type="range" min="3" max="30" step="1" value="' + REC.CFG.duration + '" style="width:100%"></div>' +
     '<div class="rec-row"><label class="rec-chk"><input type="checkbox" data-k="loop"' + (REC.CFG.loop ? ' checked' : '') + '> ' + REC.t(REC.UI.L.loop) + '</label></div>' +
     '<div class="rec-row"><label class="rec-chk"><input type="checkbox" data-k="orbit"' + (REC.CFG.orbit ? ' checked' : '') + '> ' + REC.t(REC.UI.L.orbit) + '</label></div>' +
@@ -1883,12 +1910,17 @@ REC.UI.mount = function(){
   });
   pan.addEventListener('change', function(e){
     var el = e.target, k = el.getAttribute && el.getAttribute('data-k');
-    if (k && el.type === 'checkbox') REC.CFG[k] = el.checked;
+    if (k && el.type === 'checkbox'){
+      REC.CFG[k] = el.checked;
+      /* 循环开关直接决定有效时长，勾完必须重画，否则显示和实际脱节 */
+      if (k === 'loop') REC.UI.render();
+    }
   });
   pan.addEventListener('input', function(e){
     if (e.target.id === 'recDur'){
       REC.CFG.duration = +e.target.value;
-      document.getElementById('recDurVal').textContent = REC.CFG.duration;
+      /* 无缝循环会把时长吸附到周期整数倍，拖滑块时就得跟着变，不能只回显原值 */
+      document.getElementById('recDurVal').innerHTML = REC.UI.durText();
     }
   });
 };
@@ -2074,6 +2106,25 @@ REC.UI.__test = function(){
     ok('说明里报出真实像素尺寸', !!n4 && n4.textContent.indexOf('2160×3840') >= 0);
     ok('4K 给出编码较重的提示', !!n4 && n4.textContent.indexOf('4K') >= 0);
   }
+  /* 有效时长：无缝循环把时长吸附到周期整数倍，面板必须显示吸附后的值。
+     用真实踩过的场景做用例 —— ω=0.5 的工具周期 12.57s，设 8s 会被补成 12.57s。 */
+  var _realGet = REC.Bridge.get, _cfg0 = { d: REC.CFG.duration, l: REC.CFG.loop, dr: REC.CFG.drive };
+  REC.Bridge.get = function(){ return { state: { omega: 0.5 } }; };
+  REC.CFG.duration = 8; REC.CFG.loop = true; REC.CFG.drive = 'offline';
+  ok('ω=0.5 设 8s 有效时长补到 12.57s', Math.abs(REC.UI.effDur() - 12.566370614359172) < 1e-6);
+  ok('有效时长与设定不同时标出箭头', REC.UI.durText().indexOf('→') >= 0);
+  REC.UI.render();
+  var nEff = pan.querySelector('#recNote');
+  ok('说明里解释了为何被拉长', !!nEff && nEff.textContent.indexOf(REC.t(REC.UI.L.loopUp)) >= 0);
+  REC.CFG.loop = false;
+  ok('关掉无缝循环后有效时长回到设定值', REC.UI.effDur() === 8);
+  ok('无差异时不标箭头', REC.UI.durText().indexOf('→') < 0);
+  REC.CFG.loop = true; REC.CFG.drive = 'realtime';
+  ok('实时录制不吸附时长', REC.UI.effDur() === 8);
+  REC.Bridge.get = _realGet;
+  REC.CFG.duration = _cfg0.d; REC.CFG.loop = _cfg0.l; REC.CFG.drive = _cfg0.dr;
+  REC.UI.render();
+
   var v = pan.querySelector('[data-k="visual"][data-v="clean"]');
   if (v){ v.click(); ok('点击写回 CFG.visual', REC.CFG.visual === 'clean'); }
   var dur = pan.querySelector('#recDur');
