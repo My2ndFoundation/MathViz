@@ -1059,6 +1059,7 @@ function setFrame(url){
 }
 
 function go(id, push){
+  REC.abort();
   if (id && !byId(id)) id = null;
   curId = id || null;
   syncing = true;
@@ -1409,7 +1410,12 @@ function _decodeReadoutLines(txt){
   return (doc.body.textContent || '').split('\n');
 }
 
+/* 录制现场是否已在进行中：begin() 不可重入，否则第二次 begin() 会把
+   「录制态」样式当成「原始态」存进 _prev，end() 就再也恢复不回真正的原始现场了。 */
+var _compActive = null;
+
 REC.Compositor.begin = function(h, cfg){
+  if (_compActive) return null;              /* 已有一场录制在进行，拒绝重入 */
   var size = REC.SIZES[cfg.aspect];
   if (!h || !size) return null;
   var w = size[0], hh = size[1];
@@ -1426,8 +1432,11 @@ REC.Compositor.begin = function(h, cfg){
   stage.classList.add('rec-live');
   frame.style.width  = (w / dpr) + 'px';
   frame.style.height = (hh / dpr) + 'px';
-  /* 缩回视口内做预览；居中靠负 margin，避免 transform 影响 offset 计算 */
+  /* 缩回视口内做预览；居中靠负 margin，避免 transform 影响 offset 计算。
+     stage 尺寸测不到（clientWidth/clientHeight 为 0）或算出 NaN/非正数时，
+     一律回落到 1，避免 scale(0) 把 iframe 缩没或 scale(NaN) 整个失效。 */
   var sc = Math.min(stage.clientWidth / (w / dpr), stage.clientHeight / (hh / dpr), 1);
+  if (!isFinite(sc) || sc <= 0) sc = 1;
   frame.style.marginLeft = (-(w / dpr) / 2) + 'px';
   frame.style.marginTop  = (-(hh / dpr) / 2) + 'px';
   frame.style.transform  = 'scale(' + sc + ')';
@@ -1445,6 +1454,7 @@ REC.Compositor.begin = function(h, cfg){
   } else {
     o.canvas = h.canvas;
   }
+  _compActive = o;
   return o;
 };
 
@@ -1524,6 +1534,7 @@ REC.Compositor.end = function(o){
   frame.style.marginLeft = o._prev.fml;
   frame.style.marginTop  = o._prev.fmt;
   o._stage.classList.remove('rec-live');
+  if (_compActive === o) _compActive = null;    /* 解除重入锁，允许下一场录制 */
   var h = REC.Bridge.get();
   if (h){ try{ h.resize(); h.draw(); }catch(e){} }
 };
@@ -1757,8 +1768,95 @@ REC.UI.mount = function(){
   });
 };
 
-/* 录制编排在 Task 7 接上 */
-REC.UI.run = function(){ throw new Error('not wired'); };
+REC.busy = null;      /* 录制中的现场，供 abort 用 */
+
+REC.abort = function(){
+  var b = REC.busy;
+  if (!b) return;
+  REC.busy = null;
+  try{ if (b.src && b.src.cancel) b.src.cancel(); }catch(e){}
+  try{ if (b.src && b.src.stop)   b.src.stop();   }catch(e){}
+  try{ if (b.ses) REC.Encoder.stop(b.ses); }catch(e){}
+  try{ if (b.ctxObj) REC.Compositor.end(b.ctxObj); }catch(e){}
+  try{ if (b.snap) REC.Bridge.restore(b.snap); }catch(e){}
+  var go = document.getElementById('recGo');
+  if (go){ go.disabled = false; go.textContent = REC.t(REC.UI.L.go); }
+  var bar = document.getElementById('recBar');
+  if (bar) bar.style.width = '0';
+};
+
+REC.UI.run = function(){
+  if (REC.busy){ REC.abort(); return; }
+  var mime = REC.Encoder.pickMime();
+  var note = document.getElementById('recNote');
+  if (!mime){ if (note) note.textContent = REC.t(REC.UI.L.noMime); return; }
+
+  var go = document.getElementById('recGo');
+  var bar = document.getElementById('recBar');
+  var cfg = REC.CFG;
+
+  /* 模式 3：屏幕录制，不经 Bridge / Compositor，因此 file:// 下也能用 */
+  if (cfg.visual === 'screen'){
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia){
+      if (note) note.textContent = REC.t(REC.UI.L.noMime);
+      return;
+    }
+    navigator.mediaDevices.getDisplayMedia({ video: { frameRate: REC.FPS }, audio: false })
+      .then(function(st){
+        var ses = REC.Encoder.start(st, mime.mime);
+        REC.busy = { ses: ses, src: null, ctxObj: null, snap: null };
+        go.textContent = REC.t(REC.UI.L.stop);
+        /* 用户在浏览器的共享条上点「停止共享」也要收尾 */
+        st.getVideoTracks()[0].addEventListener('ended', function(){ _finish(ses, mime); });
+      })['catch'](function(){ if (note) note.textContent = REC.t(REC.UI.L.noMime); });
+    return;
+  }
+
+  var h = REC.Bridge.get();
+  if (!h){ if (note) note.textContent = REC.t(REC.UI.L.noBridge); return; }
+
+  var snap = REC.Bridge.snapshot();
+  var ctxObj = REC.Compositor.begin(h, cfg);
+  if (!ctxObj){ if (note) note.textContent = REC.t(REC.UI.L.noBridge); return; }
+
+  var dur = cfg.duration;
+  if (cfg.loop) dur = REC.Source.snapDuration(dur, h.state.omega);
+
+  if (cfg.drive === 'realtime'){
+    var src = REC.Source.realtime(h, ctxObj, cfg);
+    var ses = REC.Encoder.start(src.stream, mime.mime);
+    REC.busy = { ses: ses, src: src, ctxObj: ctxObj, snap: snap };
+    go.textContent = REC.t(REC.UI.L.stop);
+    return;                       /* 由用户再点一次「停止」触发 _finish */
+  }
+
+  var src2 = REC.Source.offline(h, ctxObj, {
+    duration: dur, loop: cfg.loop, orbit: cfg.orbit, viewTo: cfg.viewTo
+  }, function(k){ if (bar) bar.style.width = Math.round(k * 100) + '%'; });
+
+  var ses2 = REC.Encoder.start(src2.stream, mime.mime);
+  REC.busy = { ses: ses2, src: src2, ctxObj: ctxObj, snap: snap };
+  go.disabled = true;
+  src2.done.then(function(){ _finish(ses2, mime); });
+};
+
+function _finish(ses, mime){
+  var b = REC.busy;
+  REC.busy = null;
+  REC.Encoder.stop(ses).then(function(blob){
+    var id = curId || 'mathviz';
+    var name = id + '-' + REC.CFG.aspect.replace(':', 'x') + '-' + REC.CFG.duration + 's.' + mime.ext;
+    REC.Encoder.download(blob, name);
+  })['finally'](function(){
+    if (b && b.src && b.src.stop) try{ b.src.stop(); }catch(e){}
+    if (b && b.ctxObj) REC.Compositor.end(b.ctxObj);
+    if (b && b.snap)   REC.Bridge.restore(b.snap);
+    var go = document.getElementById('recGo');
+    if (go){ go.disabled = false; go.textContent = REC.t(REC.UI.L.go); }
+    var bar = document.getElementById('recBar');
+    if (bar) bar.style.width = '0';
+  });
+}
 
 REC.UI.__test = function(){
   var r = { pass: [], fail: [] };
@@ -1786,6 +1884,11 @@ REC.UI.__test = function(){
   REC.CFG.aspect = '16:9'; REC.CFG.visual = 'overlay';   /* 复位，别污染后续测试 */
   btn.click();
   ok('再点按钮收起面板', pan.className.indexOf('on') < 0);
+  ok('run 已接线（不再抛 not wired）', (function(){
+    try{ REC.UI.run.toString().indexOf('not wired'); }catch(e){ return false; }
+    return REC.UI.run.toString().indexOf('not wired') < 0;
+  })());
+  ok('abort 是函数', typeof REC.abort === 'function');
   return r;
 };
 /* ===== /REC:UI ===== */
@@ -1808,6 +1911,8 @@ function boot(){
   setSidebar(pref ? pref === 'open' : wide, false);
   if (REC.UI.mount) REC.UI.mount();
 }
+
+window.addEventListener('beforeunload', function(){ REC.abort(); });
 
 /* 工具清单优先取 tools.json（有服务器时永远最新）；取不到就用内嵌副本 */
 (function(){
