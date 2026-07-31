@@ -1134,6 +1134,7 @@ document.addEventListener('keydown', hotkey);
 
 /* iframe 载入后：把快捷键也挂到工具文档上（同源才行），并回同步高亮与地址栏 */
 frame.addEventListener('load', function(){
+  REC.Bridge.invalidate();
   var doc = null;
   try{ doc = frame.contentDocument; }catch(e){}
   if (doc){
@@ -1184,6 +1185,92 @@ REC.selftest = function(){
 
 /* ===== REC:BRIDGE ===== */
 REC.Bridge = {};
+var _bridgeCache = null;
+
+/* 工具里的顶层 const 不挂 window，只能靠全局 eval 穿透 script scope。
+   跨源（file:// 打开）时 contentWindow.eval 会抛错，这里统一吞掉并回落 null。 */
+function _peek(win, expr){
+  try{ return win.eval(expr); }catch(e){ return undefined; }
+}
+
+REC.Bridge.get = function(){
+  if (_bridgeCache && _bridgeCache.win === frame.contentWindow) return _bridgeCache;
+  _bridgeCache = null;
+  if (!curId) return null;                       /* 画廊首页没有工具可录 */
+  var win = null, doc = null;
+  try{ win = frame.contentWindow; doc = frame.contentDocument; }catch(e){ return null; }
+  if (!win || !doc) return null;
+  var cv = _peek(win, 'typeof canvas !== "undefined" ? canvas : null');
+  if (!cv || cv.tagName !== 'CANVAS') return null;
+  var h = {
+    win: win, doc: doc, canvas: cv,
+    state:   _peek(win, 'typeof state   !== "undefined" ? state   : null'),
+    cam:     _peek(win, 'typeof cam     !== "undefined" ? cam     : null'),
+    SCENES:  _peek(win, 'typeof SCENES  !== "undefined" ? SCENES  : null'),
+    curTab:  _peek(win, 'typeof curTab  !== "undefined" ? curTab  : null'),
+    samples: _peek(win, 'typeof samples !== "undefined" ? samples : null'),
+    draw:       _peek(win, 'typeof draw       === "function" ? draw       : null'),
+    resize:     _peek(win, 'typeof resize     === "function" ? resize     : null'),
+    pushSample: _peek(win, 'typeof pushSample === "function" ? pushSample : null'),
+    applyView:  _peek(win, 'typeof applyView  === "function" ? applyView  : null'),
+    toolId: curId
+  };
+  if (!h.state || !h.cam || !h.draw) return null;   /* 老工具可能不合规，直接判不可用 */
+  _bridgeCache = h;
+  return h;
+};
+
+REC.Bridge.available = function(){ return !!REC.Bridge.get(); };
+REC.Bridge.invalidate = function(){ _bridgeCache = null; };
+
+/* 离线渲染会真实推进 state 与 samples，必须能无条件还原现场 */
+REC.Bridge.snapshot = function(){
+  var h = REC.Bridge.get();
+  if (!h) return null;
+  var st = {}, k;
+  for (k in h.state) if (Object.prototype.hasOwnProperty.call(h.state, k)) st[k] = h.state[k];
+  var cm = {};
+  for (k in h.cam) if (Object.prototype.hasOwnProperty.call(h.cam, k)) cm[k] = h.cam[k];
+  return { state: st, cam: cm, samples: h.samples ? h.samples.slice() : null, curTab: h.curTab };
+};
+
+REC.Bridge.restore = function(snap){
+  var h = REC.Bridge.get();
+  if (!h || !snap) return;
+  var k;
+  for (k in snap.state) if (Object.prototype.hasOwnProperty.call(snap.state, k)) h.state[k] = snap.state[k];
+  for (k in snap.cam)   if (Object.prototype.hasOwnProperty.call(snap.cam, k))   h.cam[k]   = snap.cam[k];
+  if (snap.samples && h.samples){
+    h.samples.length = 0;
+    for (var i = 0; i < snap.samples.length; i++) h.samples.push(snap.samples[i]);
+  }
+};
+
+REC.Bridge.__test = function(){
+  var r = { pass: [], fail: [] };
+  function ok(n, c){ if (c) r.pass.push(n); else r.fail.push(n); }
+  var h = REC.Bridge.get();
+  ok('available() 与 get() 结论一致', REC.Bridge.available() === !!h);
+  if (!h){ r.fail.push('拿不到 handle（是否用 file:// 打开、或当前停在画廊首页？）'); return r; }
+  ok('canvas 是 canvas 元素', h.canvas && h.canvas.tagName === 'CANVAS');
+  ok('canvas 有尺寸', h.canvas.width > 0 && h.canvas.height > 0);
+  ok('state 是对象且含 theta', h.state && typeof h.state.theta === 'number');
+  ok('cam 是对象且含 az', h.cam && typeof h.cam.az === 'number');
+  ok('draw 是函数', typeof h.draw === 'function');
+  ok('resize 是函数', typeof h.resize === 'function');
+  ok('pushSample 是函数', typeof h.pushSample === 'function');
+  ok('samples 是数组', Object.prototype.toString.call(h.samples) === '[object Array]');
+  ok('toolId 非空', !!h.toolId);
+  /* 快照 / 还原必须真正复原被改动的字段 */
+  var snap = REC.Bridge.snapshot();
+  var t0 = h.state.theta, az0 = h.cam.az, n0 = h.samples.length;
+  h.state.theta = t0 + 12.5; h.cam.az = az0 + 1.25; h.samples.length = 0;
+  REC.Bridge.restore(snap);
+  ok('restore 复原 state.theta', Math.abs(h.state.theta - t0) < 1e-9);
+  ok('restore 复原 cam.az', Math.abs(h.cam.az - az0) < 1e-9);
+  ok('restore 复原 samples 长度', h.samples.length === n0);
+  return r;
+};
 /* ===== /REC:BRIDGE ===== */
 
 /* ===== REC:ENCODER ===== */
