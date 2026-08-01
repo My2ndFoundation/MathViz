@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.1">
+<meta name="tool-version" content="1.0.2">
 <meta name="engine-version" content="1.0.0">
 <title>参数方程的本质 · Parametric Curves as Shadows of Motion</title>
 <!-- ============================================================
@@ -16,6 +16,7 @@
   引擎区（相机 / 投影 / 绘制部件 / 交互 / 主循环）与 starter 完全一致（零改动）。
 
   版本记录（changelog，新→旧）：
+    1.0.2  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-12  首版：参数方程三视角——轨迹 x·y / 分量 x·t·y·t / 3D 提升 r(t)=(x,y,t)；
                         支持圆·摆线·利萨茹三族，含速度 r′、加速度 r″ 与参数速率 ω
@@ -793,6 +794,8 @@ function draw() {
 }
 
 function resetSim() {
+  /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
+  Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
@@ -803,37 +806,55 @@ function resetSim() {
 }
 
 let lastTs = performance.now(), lastRO = 0;
+
+/* 帧级异常兜底：同一页签的同一条错误只报一次，否则 60 fps 会把控制台刷爆。
+   resetSim() 会清空它——用户主动重置后应当允许重新报。 */
+const frameErrSeen = Object.create(null);
+function frameError(err) {
+  const k = curTab + '|' + ((err && err.message) || err);
+  if (frameErrSeen[k]) return;
+  frameErrSeen[k] = 1;
+  console.warn('[frame] 场景「' + curTab + '」抛出异常，已跳过该帧并继续渲染循环：', err);
+}
 function frame(ts) {
-  const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
-  lastTs = ts;
+  try {
+    const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
+    lastTs = ts;
 
-  if (tween) {
-    const k = Math.min(1, (ts - tween.t0) / tween.dur);
-    const e = ease(k);
-    const f = tween.from, o = tween.to;
-    cam.az = f.az + wrapPI(o.az - f.az) * e;
-    cam.el = f.el + (o.el - f.el) * e;
-    cam.dist = f.dist + (o.dist - f.dist) * e;
-    cam.tx = f.tx + (o.tx - f.tx) * e;
-    cam.ty = f.ty + (o.ty - f.ty) * e;
-    cam.tz = f.tz + (o.tz - f.tz) * e;
-    if (k >= 1) tween = null;
+    if (tween) {
+      const k = Math.min(1, (ts - tween.t0) / tween.dur);
+      const e = ease(k);
+      const f = tween.from, o = tween.to;
+      cam.az = f.az + wrapPI(o.az - f.az) * e;
+      cam.el = f.el + (o.el - f.el) * e;
+      cam.dist = f.dist + (o.dist - f.dist) * e;
+      cam.tx = f.tx + (o.tx - f.tx) * e;
+      cam.ty = f.ty + (o.ty - f.ty) * e;
+      cam.tz = f.tz + (o.tz - f.tz) * e;
+      if (k >= 1) tween = null;
+    }
+
+    if (state.running) {
+      state.t += dt;
+      state.theta += state.omega * dt;
+      applyDrive();
+      const dv = SCENES[curTab].drive;
+      if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
+      pushSample();
+    }
+    const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
+    while (samples.length && samples[0].t < state.t - windowSec) samples.shift();
+
+    draw();
+    if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
+  } catch (err) {
+    frameError(err);
+  } finally {
+    /* rAF 放 finally 是「循环永不断」的机械保证：不依赖 catch 里写对什么。
+       代价是画布可能停在最后一帧好内容而屏幕无提示——这是有意的取舍，
+       「整个工具变砖」比「画面停在错误状态」更不可接受。 */
+    requestAnimationFrame(frame);
   }
-
-  if (state.running) {
-    state.t += dt;
-    state.theta += state.omega * dt;
-    applyDrive();
-    const dv = SCENES[curTab].drive;
-    if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
-    pushSample();
-  }
-  const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
-  while (samples.length && samples[0].t < state.t - windowSec) samples.shift();
-
-  draw();
-  if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
-  requestAnimationFrame(frame);
 }
 
 const roEl = document.getElementById('readout');
