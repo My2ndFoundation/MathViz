@@ -1,0 +1,1993 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="tool-version" content="1.0.0">
+<meta name="engine-version" content="1.0.0">
+<title>三体问题 · 一条四维曲线的三个影子</title>
+<!-- ============================================================
+  三体问题：一条四维曲线的三个影子 · 交互式数学可视化
+  基于 math-viz-starter.html v1.0.0 制作
+  设计规范：math-viz-design-system.md（令牌 / 组件 / 绘制语言 / 交互词汇）
+
+  ── 物理与数值（先读这一段）────────────────────────────────
+  牛顿引力，G = 1，三体等质量 m = 1，全部量取无量纲单位。
+  力用**软化**形式：F = G m₁m₂ r /(r² + ε²)^{3/2}，对应势
+  U = −G m₁m₂ /(r² + ε²)^{1/2}。软化是**数值处理，不是物理**——
+  近距离遭遇时真实的 1/r² 会在有限步长下爆炸。ε 由滑杆可调，
+  每个页签的读数区都写明它当前的值并注明「数值处理」。
+
+  积分器：**velocity-Verlet**（辛格式）。固定步长 h = 1/1000
+  无量纲时间；引擎每帧的 dt 已被钳在 [0, 0.05]，本工具再在帧内做
+  ceil(dt/h) 个子步，子步数上限 MAX_SUB = 80（后台切回时宁可模拟
+  时间落后，也不卡死一帧）。选辛格式而非 RK4，是因为能量漂移常驻
+  读数区：辛格式的能量误差有界振荡，RK4 是单调累积。
+
+  诚实的误差：读数区常驻 |ΔE/E₀| 与 |ΔL|，当前值与峰值都报。混沌区
+  的峰值可以到 10⁻²——**这不是瑕疵披露，这是课程内容**：你连模拟都
+  算不准，正是因为它混沌。
+
+  ── 坐标与「投影」这件事 ────────────────────────────────
+  三体的位置是**真三维**的（ℝ³）。加上时间，本体是 (x, y, z, t)
+  里的一条四维曲线，而引擎只有三根世界轴。页签② 用四种喂法各看它的
+  一个三维影子：
+      世界(x,y,z) = (x,y,z)  纯空间：真实轨道，无时间   ← 必须有
+      世界(x,y,z) = (x,y,t)  第一张时间辫
+      世界(x,y,z) = (y,z,t)  第二张时间辫
+      世界(x,y,z) = (x,z,t)  第三张时间辫
+  时间轴缩放 zScale 也是必须的：空间单位与时间单位挂在正交轴上，比例
+  是人为的，不给缩放则积分久了辫子压成一根针。
+
+  ── 运动机制（规范 §8 出路①的痕迹要求）────────────────────
+  **没有任何参数带 drive。** 初始条件是**种子**，给种子加 drive 会与
+  「历史绝不重算」正面冲突（规范 §6 双语义迭代那一条）。四个页签全部
+  靠 velocity-Verlet 积分器自己推进——每个场景对象内都留了一行注释
+  写明这一点。改动种子滑杆（预设 / 倾角 / 软化 / 扰动）的语义是**重新
+  播种**：清空轨迹、从新初值重新积分，显式且由用户发起。
+
+  逃逸 / 超时自动重新播种：三体常见一体逃逸，画面会变成一条无限后退的
+  直线，实质定格。任一体离质心超出 R_ESC = 12，或积分超过 T_MAX = 200
+  无量纲时间，即自动回到种子重新播种，并在读数区留一行「第 n 次播种 ·
+  上次因逃逸/超时结束」。
+
+  ── 四个页签 ────────────────────────────────────────
+  真实运动   —— 三体在 ℝ³ 里到底在做什么；质心永远不动
+               顿悟视角：「轨道平面正视」= 沿轨道法线看下去
+  三重投影   —— 同一段运动的三个三维影子，长得毫不相干
+               顿悟视角：四种投影各一个预设，先用图 8 标定
+  图 8 编舞  —— 稳定周期解是刀锋：推 10⁻⁸，几十周期后找不回来
+               顿悟视角：「轨道正视」= 干净的 8 字
+  分道与逃逸 —— log δ(t) 的每一次跳变下面都对应一次近距离遭遇
+               顿悟视角：「log δ · t 正视」= 直线段与饱和段
+
+  版本记录（changelog，新→旧）：
+    1.0.0  2026-08-02  首个版本：四个页签（真实运动 / 三重投影 /
+                       图 8 编舞 / 分道与逃逸），velocity-Verlet 固定
+                       步长 h = 1/1000，软化力，能量与角动量漂移常驻
+                       读数，逃逸与超时自动重新播种，全量双语。
+                       Initial release: four scenes (true motion in space /
+                       triple projection / figure-8 choreography /
+                       divergence and escape), velocity-Verlet at fixed
+                       h = 1/1000, softened forces, live energy and angular
+                       momentum drift, automatic re-seeding on escape or
+                       timeout, fully bilingual.
+============================================================ -->
+<style>
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  --angle-amber:#fbbf24;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none}
+body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)}
+#scene{position:fixed;inset:0;display:block;touch-action:none;cursor:grab}
+#scene.dragging{cursor:grabbing}
+
+/* ---- 标题区 ---- */
+.brand{position:fixed;top:20px;left:24px;pointer-events:none;user-select:none;max-width:min(520px,42vw)}
+.brand .eyebrow{font-size:10px;letter-spacing:.22em;color:rgba(159,176,200,.72);margin-bottom:6px}
+.brand h1{margin:0;font-family:var(--font-math);font-weight:600;font-size:26px;letter-spacing:.08em;
+  color:#eef3fa;text-shadow:0 2px 20px rgba(45,212,234,.20)}
+.brand p{margin:7px 0 0;font-size:12.5px;line-height:1.65;color:rgba(159,176,200,.85)}
+
+/* ---- 页签 ---- */
+.tabs{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:5;
+  display:flex;gap:4px;padding:4px;border-radius:999px;
+  background:var(--panel-bg);border:1px solid var(--panel-line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
+.tab{border:1px solid transparent;background:transparent;color:#b8c6da;
+  font-size:12.5px;font-family:var(--font-cn);padding:6px 15px;border-radius:999px;cursor:pointer;
+  transition:color .15s,border-color .15s,background .15s}
+.tab:hover{color:#e8f2fb}
+.tab:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+/* 本工具 accent = emerald（设计文档 §0.5：dyn 板块已有 orange 与 violet） */
+.tab.active{background:rgba(52,211,153,.13);border-color:rgba(52,211,153,.55);color:#8ff0c8}
+
+/* ---- 底部提示 ---- */
+.hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);pointer-events:none;user-select:none;
+  font-size:11px;letter-spacing:.05em;color:rgba(159,176,200,.6);white-space:nowrap}
+
+/* ---- 控制面板 ---- */
+.panel{position:fixed;top:14px;right:14px;width:304px;max-height:calc(100vh - 28px);overflow-y:auto;
+  background:var(--panel-bg);border:1px solid var(--panel-line);border-radius:16px;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 18px 50px rgba(0,0,0,.45);user-select:none}
+.panel::-webkit-scrollbar{width:6px}
+.panel::-webkit-scrollbar-thumb{background:rgba(148,163,184,.25);border-radius:3px}
+.panel-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px 10px;
+  font-size:13px;font-weight:600;letter-spacing:.06em;color:#dbe6f5}
+.panel:not(.collapsed) .panel-head{border-bottom:1px solid var(--panel-line)}
+.ph-right{display:flex;align-items:center;gap:7px}
+.ver{font-family:var(--font-mono);font-size:10px;color:rgba(159,176,200,.55)}
+.lang{padding:3px 8px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:11px;cursor:pointer}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.fold{width:24px;height:24px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:14px;line-height:1;cursor:pointer}
+.fold:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.panel.collapsed .panel-body{display:none}
+.panel-body{padding:6px 14px 14px}
+
+/* 滑杆 */
+.ctl{margin:11px 0 3px}
+.ctl .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.ctl label{font-size:12px;color:#c6d2e4}
+.ctl label i{font-family:var(--font-math);font-style:italic;font-size:13px}
+.ctl .val{font-family:var(--font-mono);font-size:11.5px;color:#7dd3fc}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;cursor:pointer;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--trace-cyan);margin-top:-5px;border:2px solid #0b1220;box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-moz-range-thumb{width:11px;height:11px;border:2px solid #0b1220;border-radius:50%;
+  background:var(--trace-cyan);box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-offset:2px;border-radius:4px}
+
+/* 按钮 */
+.row{display:flex;gap:8px;margin:13px 0 4px}
+.btn{padding:6px 10px;border-radius:9px;border:1px solid rgba(148,163,184,.25);
+  background:rgba(30,41,59,.55);color:#d7e2f2;font-size:12px;font-family:var(--font-cn);cursor:pointer;
+  transition:border-color .15s,color .15s,background .15s}
+.btn:hover{border-color:rgba(45,212,234,.55)}
+.btn:focus-visible,.fold:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.btn.wide{flex:1}
+.btn.active{border-color:rgba(45,212,234,.8);background:rgba(45,212,234,.12);color:#9be8f7}
+.views{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 2px}
+.views .vlabel{font-size:11.5px;color:rgba(159,176,200,.8);margin-right:2px}
+.vbtn{padding:5px 9px;font-size:11.5px}
+
+/* 开关 */
+.toggles{display:flex;flex-wrap:wrap;gap:7px 12px;margin:12px 0 2px}
+.tg{display:flex;align-items:center;gap:6px;font-size:12px;color:#c6d2e4;cursor:pointer}
+.tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
+.tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
+
+/* 驱动控制行 */
+.drive{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0 2px}
+.drive .dmode{display:flex;gap:4px;margin-left:auto}
+.drive .dmode .btn{padding:4px 8px;font-size:11px}
+
+/* 读数与提示 */
+.readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
+  font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
+.readout b{font-weight:600;color:#e8eef7}
+.readout i{font-family:var(--font-math);font-style:italic}
+.readout .sinC b{color:var(--trace-rose)}
+.readout .cosC b{color:var(--trace-violet)}
+.readout .tanC b{color:var(--trace-emerald)}
+.readout .cotC b{color:var(--trace-orange)}
+/* 度量注记（琥珀）与结构 / 源几何（青）：沿用 §1.1 的语义色，不新增令牌 */
+.readout .ambC b{color:var(--angle-amber)}
+.readout .cynC b{color:var(--trace-cyan)}
+.readout .dim{color:rgba(159,176,200,.6)}
+.tips{margin-top:11px;font-size:11px;line-height:1.65;color:rgba(159,176,200,.72)}
+
+@media (max-width:760px){
+  .brand{top:12px;left:14px;max-width:70vw}
+  .brand h1{font-size:20px}
+  .brand p{display:none}
+  .tabs{top:52px;left:14px;transform:none}
+  .panel{left:10px;right:10px;top:auto;bottom:10px;width:auto;max-height:62vh}
+  .hint{display:none}
+}
+</style>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+
+<div class="brand">
+  <div class="eyebrow">INTERACTIVE MATH · 交互式数学</div>
+  <h1>三体问题 · 四维曲线的影子</h1>
+  <p id="brandDesc"></p>
+</div>
+
+<nav class="tabs" id="tabsNav"></nav>
+
+<aside class="panel" id="panel">
+  <div class="panel-head"><span id="panelTitle">参数与视角</span>
+    <span class="ph-right"><span class="ver" id="verBadge"></span><button class="lang" id="btnLang" title="切换语言 / Switch language">EN</button><button class="fold" id="btnFold" title="收起 / 展开">−</button></span></div>
+  <div class="panel-body">
+    <div id="paramsHost"></div>
+    <div class="row">
+      <button class="btn wide" id="btnPlay">⏸ 暂停</button>
+      <button class="btn" id="btnReset">↺ 重置</button>
+    </div>
+    <div id="driveHost"></div>
+    <div id="togglesHost"></div>
+    <div id="viewsHost"></div>
+    <div class="readout" id="readout"></div>
+    <div class="tips" id="tips"></div>
+  </div>
+</aside>
+
+<div class="hint">拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签</div>
+
+<script>
+'use strict';
+/* ================= i18n 核心（引擎区） ================= */
+const LANG_KEY = 'mathviz-lang';
+function resolveLang(){
+  try{
+    const q = new URLSearchParams(location.search).get('lang');
+    if (q === 'zh' || q === 'en') return q;
+    const s = localStorage.getItem(LANG_KEY);
+    if (s === 'zh' || s === 'en') return s;
+  }catch(e){}
+  return (navigator.language || 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+let LANG = resolveLang();
+function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
+
+const STARTER_VERSION = '1.0.0';
+const VERSION = document.querySelector('meta[name="tool-version"]').content;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ⓪ 工具元信息 —— id 与双语标题                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const TOOL = {
+  id: 'three-body-problem-3d',
+  /* h1 要短：品牌区 max-width 520px，再长就会钻到顶部居中的页签底下去。
+     完整的一句留给 <title> 与品牌描述。 */
+  title: { zh: '三体问题 · 一条四维曲线的三个影子', en: 'The Three-Body Problem · Three Shadows of One 4-D Curve' },
+  h1:    { zh: '三体问题 · 四维曲线的影子', en: 'The Three-Body Problem' }
+};
+
+/* 引擎 UI 文案（一般无需改动） */
+const UI = {
+  panelTitle: { zh: '参数与视角', en: 'Parameters & Views' },
+  pause:  { zh: '⏸ 暂停', en: '⏸ Pause' },
+  resume: { zh: '▶ 继续', en: '▶ Resume' },
+  reset:  { zh: '↺ 重置', en: '↺ Reset' },
+  views:  { zh: '视角', en: 'View' },
+  autoPlay: { zh: '自动播放', en: 'Auto-play' },
+  pingpong: { zh: '往返',     en: 'Ping-pong' },
+  loop:     { zh: '循环',     en: 'Loop' },
+  hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
+            en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
+};
+
+const TAU = Math.PI * 2;
+
+/* ============================================================
+   三体物理核心（场景级：位于引擎之上，引擎本身零改动）
+   全部为无量纲单位，G = 1，三体等质量 m = 1。
+   ============================================================ */
+const G_CONST = 1;
+const H_STEP  = 1 / 1000;   // 固定积分步长（无量纲时间）——辛格式必须定步长
+const MAX_SUB = 80;         // 单帧子步上限：dt ≤ 0.05 时只需 50 步，留余量且防卡死
+const R_ESC   = 12;         // 逃逸半径（相对质心）
+const T_MAX   = 200;        // 单次播种的最长积分时间
+const FIG8_T  = 6.32591398292621;   // 图 8 编舞的周期（Chenciner–Montgomery）
+const SAT_D   = 2.0;        // 分离的饱和尺度（系统本身的线度量级）
+const ENC_IN  = 0.35;       // 近距离遭遇的判定阈值
+const ENC_OUT = 0.60;       // 遭遇计数的回滞阈值（防止一次遭遇被数很多遍）
+
+const PRESET_NAME = [
+  { zh: '图 8 编舞',     en: 'Figure-8 choreography' },
+  { zh: '拉格朗日三角',   en: 'Lagrange triangle' },
+  { zh: '随机三维初值',   en: 'Generic 3-D seed' }
+];
+
+/* 三个种子初值，均满足 Σm r = 0 与 Σm v = 0（质心静止于原点） */
+function seedIC(preset) {
+  if (preset === 0) {
+    /* Chenciner–Montgomery 图 8：等质量，三体共用同一条 8 字轨道，互差 T/3 */
+    const x = 0.97000436, y = -0.24308753;
+    const vx = 0.93240737, vy = 0.86473146;
+    return {
+      m: [1, 1, 1],
+      r: [[x, y, 0], [-x, -y, 0], [0, 0, 0]],
+      v: [[vx / 2, vy / 2, 0], [vx / 2, vy / 2, 0], [-vx, -vy, 0]]
+    };
+  }
+  if (preset === 1) {
+    /* 拉格朗日等边三角：边长 a = 1 ⇒ 外接半径 R = 1/√3，角速度 ω = √(3Gm/a³) = √3。
+       等质量的三角解是**线性不稳定**的，软化与舍入迟早把它推垮——这正是它的教学价值。 */
+    const R = 1 / Math.sqrt(3), w = Math.sqrt(3);
+    const r = [], v = [];
+    for (let k = 0; k < 3; k++) {
+      const a = k * TAU / 3;
+      r.push([R * Math.cos(a), R * Math.sin(a), 0]);
+      v.push([-w * R * Math.sin(a), w * R * Math.cos(a), 0]);
+    }
+    return { m: [1, 1, 1], r: r, v: v };
+  }
+  /* 一般三维初值：本身就不共面的束缚态，实测约 t ≈ 39 抛出一体 */
+  return {
+    m: [1, 1, 1],
+    r: [[-0.90, 0.20, 0.30], [0.95, -0.15, -0.20], [-0.05, -0.05, -0.10]],
+    v: [[0.12, 0.44, -0.08], [0.10, -0.40, 0.16], [-0.22, -0.04, -0.08]]
+  };
+}
+
+/* 把整个初值刚性转到一般姿态：R = Ry(0.618·τ)·Rx(τ)。
+   只绕一根轴不够——绕 x 转不改 x 分量，(x,·) 的两张影子会保留同一套 x 结构。 */
+function rotVec(p, tilt) {
+  const c = Math.cos(tilt), s = Math.sin(tilt);
+  const c2 = Math.cos(tilt * 0.618), s2 = Math.sin(tilt * 0.618);
+  const y = p[1] * c - p[2] * s, z = p[1] * s + p[2] * c;
+  return [p[0] * c2 + z * s2, y, -p[0] * s2 + z * c2];
+}
+function rotIC(ic, tilt) {
+  return { m: ic.m.slice(), r: ic.r.map(p => rotVec(p, tilt)), v: ic.v.map(p => rotVec(p, tilt)) };
+}
+
+/* 软化加速度：a_i = Σ_j G m_j (r_j − r_i) / (|r_j − r_i|² + ε²)^{3/2} */
+function accel(m, r, eps, out) {
+  const e2 = eps * eps;
+  for (let i = 0; i < 3; i++) { out[i][0] = 0; out[i][1] = 0; out[i][2] = 0; }
+  for (let i = 0; i < 3; i++) for (let j = i + 1; j < 3; j++) {
+    const dx = r[j][0] - r[i][0], dy = r[j][1] - r[i][1], dz = r[j][2] - r[i][2];
+    const s = dx * dx + dy * dy + dz * dz + e2;
+    const inv = G_CONST / (s * Math.sqrt(s));
+    out[i][0] += m[j] * dx * inv; out[i][1] += m[j] * dy * inv; out[i][2] += m[j] * dz * inv;
+    out[j][0] -= m[i] * dx * inv; out[j][1] -= m[i] * dy * inv; out[j][2] -= m[i] * dz * inv;
+  }
+}
+/* 与软化力**配套**的势能：U = −G m_i m_j /(r² + ε²)^{1/2}。用配套的势，能量
+   才是软化动力学的严格守恒量，|ΔE/E₀| 才真的在量积分误差而不是在量软化本身。 */
+function energyOf(S, eps) {
+  const m = S.m, r = S.r, v = S.v;
+  let E = 0;
+  for (let i = 0; i < 3; i++) E += 0.5 * m[i] * (v[i][0]*v[i][0] + v[i][1]*v[i][1] + v[i][2]*v[i][2]);
+  const e2 = eps * eps;
+  for (let i = 0; i < 3; i++) for (let j = i + 1; j < 3; j++) {
+    const dx = r[j][0]-r[i][0], dy = r[j][1]-r[i][1], dz = r[j][2]-r[i][2];
+    E -= G_CONST * m[i] * m[j] / Math.sqrt(dx*dx + dy*dy + dz*dz + e2);
+  }
+  return E;
+}
+function angMomOf(S) {
+  const m = S.m, r = S.r, v = S.v;
+  let Lx = 0, Ly = 0, Lz = 0;
+  for (let i = 0; i < 3; i++) {
+    Lx += m[i] * (r[i][1]*v[i][2] - r[i][2]*v[i][1]);
+    Ly += m[i] * (r[i][2]*v[i][0] - r[i][0]*v[i][2]);
+    Lz += m[i] * (r[i][0]*v[i][1] - r[i][1]*v[i][0]);
+  }
+  return [Lx, Ly, Lz];
+}
+function comOf(S) {
+  const m = S.m, r = S.r;
+  const M = m[0] + m[1] + m[2];
+  return [(m[0]*r[0][0] + m[1]*r[1][0] + m[2]*r[2][0]) / M,
+          (m[0]*r[0][1] + m[1]*r[1][1] + m[2]*r[2][1]) / M,
+          (m[0]*r[0][2] + m[1]*r[1][2] + m[2]*r[2][2]) / M];
+}
+function makeSys(ic, eps) {
+  const S = {
+    m: ic.m.slice(),
+    r: ic.r.map(p => p.slice()),
+    v: ic.v.map(p => p.slice()),
+    a: [[0,0,0],[0,0,0],[0,0,0]]
+  };
+  accel(S.m, S.r, eps, S.a);
+  return S;
+}
+/* velocity-Verlet 单步（辛格式，定步长）：
+     v ← v + (h/2)a ; r ← r + h v ; a ← a(r) ; v ← v + (h/2)a  */
+function vstep(S, h, eps) {
+  const h2 = h * 0.5;
+  for (let i = 0; i < 3; i++) for (let k = 0; k < 3; k++) {
+    S.v[i][k] += h2 * S.a[i][k];
+    S.r[i][k] += h * S.v[i][k];
+  }
+  accel(S.m, S.r, eps, S.a);
+  for (let i = 0; i < 3; i++) for (let k = 0; k < 3; k++) S.v[i][k] += h2 * S.a[i][k];
+}
+
+/* ================= 模拟状态（一份运动，四种测量：规范 §6） ================= */
+/* 始终同时积分两套系统：A = 种子本身，B = 种子给天体 1 的 x 加上 δ₀。
+   页签①② 只画 A；页签③④ 画 A 与 B 的对照。四个页签共享同一次积分。 */
+const SIM = {
+  A: null, B: null,
+  tSim: 0,                  // 本次播种以来的积分时间（无量纲）
+  seedCount: 0,             // 播种次数
+  lastReason: null,         // 'escape' | 'timeout' | null（首次播种）
+  escapes: 0, timeouts: 0,
+  E0: 0, L0: [0,0,0],
+  driftE: 0, driftEmax: 0, driftL: 0, driftLmax: 0,
+  minSep: Infinity,         // 真实三维最近接近距离（本次播种以来）
+  minProj: { xy: Infinity, yz: Infinity, xz: Infinity },  // 各投影下"看起来的"最近接近
+  curSep: [0, 0, 0],        // 当前 r₁₂ / r₁₃ / r₂₃
+  d0: 1e-8, dSep: 0,        // 18 维相空间分离
+  encounters: 0, encArmed: true, encFlag: false,
+  choreoLost: 0,            // 图 8 失去编舞的周期号（0 = 尚未失去）
+  projChecks: 0, projViol: 0,   // 投影不等式断言的计数器
+  sig: null
+};
+
+/* 种子签名：任何一项变了都意味着「用户要求重新播种」（规范 §0.3 的显式语义）。
+   这里也是 preset / tilt / soften / logD0 四个键**真正被消费**的地方——它们不在
+   draw()/readout() 里出现，而是每帧经 pushSample → seedSig 读到。规范 §8 的
+   「含经模块级辅助函数间接读取的」说的就是这种情况，故消费它们的场景必须把它们
+   写进 params（页签③④ 的 logD0 即是如此）。 */
+function seedSig() {
+  return [Math.round(state.preset), state.tilt.toFixed(4), state.soften.toFixed(4),
+          state.logD0.toExponential(4)].join('|');
+}
+
+function seedAll(reason) {
+  const eps = state.soften;
+  const ic = rotIC(seedIC(Math.round(state.preset)), state.tilt);
+  SIM.A = makeSys(ic, eps);
+  const icB = { m: ic.m.slice(), r: ic.r.map(p => p.slice()), v: ic.v.map(p => p.slice()) };
+  icB.r[0][0] += state.logD0;          // δ₀ 只加在天体 1 的 x 上 ⇒ δ(0) = δ₀ 精确
+  SIM.B = makeSys(icB, eps);
+  SIM.tSim = 0;
+  SIM.seedCount++;
+  SIM.lastReason = reason || null;
+  SIM.E0 = energyOf(SIM.A, eps);
+  SIM.L0 = angMomOf(SIM.A);
+  SIM.driftE = SIM.driftEmax = SIM.driftL = SIM.driftLmax = 0;
+  SIM.minSep = Infinity;
+  SIM.minProj = { xy: Infinity, yz: Infinity, xz: Infinity };
+  SIM.d0 = Math.max(1e-300, state.logD0);
+  SIM.dSep = SIM.d0;
+  SIM.encounters = 0; SIM.encArmed = true; SIM.encFlag = false;
+  SIM.choreoLost = 0;
+  SIM.sig = seedSig();
+  samples.length = 0;
+}
+
+/* 18 维相空间距离（9 个位置分量 + 9 个速度分量） */
+function phaseDist(A, B) {
+  let s = 0;
+  for (let i = 0; i < 3; i++) for (let k = 0; k < 3; k++) {
+    const dr = A.r[i][k] - B.r[i][k], dv = A.v[i][k] - B.v[i][k];
+    s += dr*dr + dv*dv;
+  }
+  return Math.sqrt(s);
+}
+
+/* 每帧推进：固定步长 h 做 ceil(dt/h) 个子步，上限 MAX_SUB。
+   诊断量（最近接近、遭遇计数、投影不等式断言）逐子步统计，不会漏掉快速穿越。 */
+function stepSim(dt) {
+  const eps = state.soften;
+  let n = Math.ceil(dt / H_STEP);
+  if (n > MAX_SUB) n = MAX_SUB;     // 后台切回时宁可模拟时间落后，也不卡死一帧
+  if (n < 1) n = 1;
+  SIM.encFlag = false;
+  for (let k = 0; k < n; k++) {
+    vstep(SIM.A, H_STEP, eps);
+    vstep(SIM.B, H_STEP, eps);
+    SIM.tSim += H_STEP;
+
+    const r = SIM.A.r;
+    let md = Infinity;
+    for (let i = 0; i < 3; i++) for (let j = i + 1; j < 3; j++) {
+      const dx = r[j][0]-r[i][0], dy = r[j][1]-r[i][1], dz = r[j][2]-r[i][2];
+      const d3 = Math.sqrt(dx*dx + dy*dy + dz*dz);
+      if (d3 < md) md = d3;
+      if (d3 < SIM.minSep) SIM.minSep = d3;
+      /* 投影只会让距离变小，绝不会变大：这条不等式在每个瞬时都必须成立。
+         逐对逐子步做断言，违例数常驻页签② 读数区（实测恒为 0）。 */
+      const pxy = Math.sqrt(dx*dx + dy*dy);
+      const pyz = Math.sqrt(dy*dy + dz*dz);
+      const pxz = Math.sqrt(dx*dx + dz*dz);
+      if (pxy < SIM.minProj.xy) SIM.minProj.xy = pxy;
+      if (pyz < SIM.minProj.yz) SIM.minProj.yz = pyz;
+      if (pxz < SIM.minProj.xz) SIM.minProj.xz = pxz;
+      SIM.projChecks += 3;
+      if (pxy > d3 + 1e-9 || pyz > d3 + 1e-9 || pxz > d3 + 1e-9) SIM.projViol++;
+    }
+    if (SIM.encArmed && md < ENC_IN) { SIM.encounters++; SIM.encArmed = false; SIM.encFlag = true; }
+    else if (!SIM.encArmed && md > ENC_OUT) SIM.encArmed = true;
+  }
+
+  const rr = SIM.A.r;
+  SIM.curSep = [
+    Math.hypot(rr[1][0]-rr[0][0], rr[1][1]-rr[0][1], rr[1][2]-rr[0][2]),
+    Math.hypot(rr[2][0]-rr[0][0], rr[2][1]-rr[0][1], rr[2][2]-rr[0][2]),
+    Math.hypot(rr[2][0]-rr[1][0], rr[2][1]-rr[1][1], rr[2][2]-rr[1][2])
+  ];
+  SIM.dSep = phaseDist(SIM.A, SIM.B);
+  const E = energyOf(SIM.A, eps), L = angMomOf(SIM.A);
+  SIM.driftE = Math.abs((E - SIM.E0) / SIM.E0);
+  if (SIM.driftE > SIM.driftEmax) SIM.driftEmax = SIM.driftE;
+  SIM.driftL = Math.hypot(L[0]-SIM.L0[0], L[1]-SIM.L0[1], L[2]-SIM.L0[2]);
+  if (SIM.driftL > SIM.driftLmax) SIM.driftLmax = SIM.driftL;
+  if (!SIM.choreoLost && Math.round(state.preset) === 0 && SIM.dSep > 0.25) {
+    SIM.choreoLost = Math.floor(SIM.tSim / FIG8_T) + 1;
+  }
+
+  /* 规范 §0.4：三体常见一体逃逸，画面会变成一条无限后退的直线 —— 实质定格。
+     超出 R_ESC 或积分超过 T_MAX 即自动回到种子重新播种，并在读数区说明原因。 */
+  const com = comOf(SIM.A);
+  let far = 0;
+  for (let i = 0; i < 3; i++) {
+    far = Math.max(far, Math.hypot(rr[i][0]-com[0], rr[i][1]-com[1], rr[i][2]-com[2]));
+  }
+  if (far > R_ESC) { SIM.escapes++; seedAll('escape'); }
+  else if (SIM.tSim > T_MAX) { SIM.timeouts++; seedAll('timeout'); }
+}
+
+/* ================= 投影：四维曲线的三个影子（页签② 的核心机制） ================= */
+/* projMode 不是滑杆参数，而是由页签② 的视角预设经 onSelect 切换的显示模式，
+   所以它是模块级变量、不进 state（state 只装滑杆与开关，规范 §6）。 */
+let projMode = 'xyz';
+const PROJ_INFO = {
+  xyz: { label: { zh: '纯空间 x·y·z', en: 'Pure space x·y·z' }, ax: 'x', ay: 'y', az: 'z',
+         drop: { zh: '没有维度被丢掉：三根轴全是空间', en: 'nothing discarded: all three axes are spatial' }, key: null },
+  xyt: { label: { zh: '时间辫 x·y·t', en: 'Time braid x·y·t' }, ax: 'x', ay: 'y', az: 't',
+         drop: { zh: '丢掉的是 z', en: 'the discarded axis is z' }, key: 'xy' },
+  yzt: { label: { zh: '时间辫 y·z·t', en: 'Time braid y·z·t' }, ax: 'y', ay: 'z', az: 't',
+         drop: { zh: '丢掉的是 x', en: 'the discarded axis is x' }, key: 'yz' },
+  xzt: { label: { zh: '时间辫 x·z·t', en: 'Time braid x·z·t' }, ax: 'x', ay: 'z', az: 't',
+         drop: { zh: '丢掉的是 y', en: 'the discarded axis is y' }, key: 'xz' }
+};
+/* p = 三维位置，age = 现在减去该样本的时刻；返回世界坐标。
+   注意 state.zScale 只在**时间辫**分支里读：纯空间没有时间轴，读了它就等于
+   让页签①③ 多依赖一个它们并不用的键，与各自的 params 声明对不上（规范 §8）。 */
+function worldOf(mode, p, age) {
+  if (mode === 'xyz') return [p[0], p[1], p[2]];
+  const z = age * state.zScale;
+  if (mode === 'yzt') return [p[1], p[2], z];
+  if (mode === 'xzt') return [p[0], p[2], z];
+  return [p[0], p[1], z];        // 'xyt'
+}
+function setProj(m) { projMode = m; }
+
+/* ============================================================
+   场景级绘制部件（引擎部件不够用时在这里补，绝不改引擎）
+   ============================================================ */
+const AX = 'rgba(159,176,200,0.9)';
+const AX_DIM = 'rgba(159,176,200,0.5)';
+const BODY_COL = ['#fb7185', '#a78bfa', '#34d399'];      // 曲线启用顺序：rose → violet → emerald
+const BODY_GLOW = ['rgba(251,113,133,', 'rgba(167,139,250,', 'rgba(52,211,153,'];
+const AMBER = 'rgba(251,191,36,';
+const CYAN = 'rgba(45,212,234,';
+
+/* 可自定义轴字母的坐标轴：引擎的 drawAxes 把 x / y / t 写死了，本工具四种投影
+   的轴含义每次都不同，故在场景层做一个替身（fourier-essence-3d 同款做法）。 */
+function axes3(C, o) {
+  const ex = o.ex, ey = o.ey, ez = o.ez;
+  if (o.lx) {
+    line3(C, [-ex, 0, 0], [ex, 0, 0], { width: 1.4, color: AX });
+    arrowAt(C, [ex, 0, 0], [ex - 0.2, 0, 0], AX);
+    label3(C, [ex + 0.26, 0, 0], o.lx, { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  }
+  line3(C, [0, -ey, 0], [0, ey, 0], { width: 1.4, color: AX });
+  arrowAt(C, [0, ey, 0], [0, ey - 0.2, 0], AX);
+  label3(C, [0, ey + 0.24, 0], o.ly, { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  const z0 = o.timeAxis ? 0 : -ez;
+  line3(C, [0, 0, z0], [0, 0, ez], { width: 1.4, color: AX });
+  arrowAt(C, [0, 0, ez], [0, 0, ez - 0.2], AX);
+  label3(C, [0, 0, ez + 0.36], o.lz, { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  if (o.timeAxis) {
+    const v = state.zScale;
+    const every = v < 0.5 ? 5 : (v < 1.2 ? 2 : 1);
+    for (let k = 1; k * v <= ez - 0.2; k++) {
+      line3(C, [0, -0.06, k*v], [0, 0.06, k*v], { width: 1.2, color: AX_DIM });
+      if (k % every === 0) {
+        label3(C, [0, -0.26, k*v], String(k), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+      }
+    }
+  }
+  for (const k of (o.yTicks || [])) for (const yv of [k, -k]) {
+    line3(C, [-0.05, yv, 0], [0.05, yv, 0], { width: 1.2, color: AX_DIM });
+    label3(C, [-0.14, yv, 0], (yv < 0 ? '−' : '') + Math.abs(yv), { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+  }
+  for (const k of (o.xTicks || [])) for (const xv of [k, -k]) {
+    line3(C, [xv, -0.05, 0], [xv, 0.05, 0], { width: 1.2, color: AX_DIM });
+    label3(C, [xv, -0.25, 0], (xv < 0 ? '−' : '') + Math.abs(xv), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+  }
+}
+
+/* 轨迹取点：长拖尾时按跨度抽稀（视觉上无差别，单帧代价却是常数量级） */
+function trailPts(sys, bodyIdx, mode, xform) {
+  const n = samples.length;
+  if (n < 2) return null;
+  const stride = Math.max(1, Math.ceil(n / 700));
+  const pts = [];
+  for (let i = n - 1; i >= 0; i -= stride) {
+    const s = samples[i];
+    const p = (sys === 'A') ? s.a[bodyIdx] : s.b[bodyIdx];
+    const w = worldOf(mode, p, state.t - s.t);
+    pts.push(xform ? xform(w) : w);
+  }
+  return pts;
+}
+
+/* 一条轨迹的标准双描：外层辉光 + 内核头亮尾隐（规范 §4.2） */
+function strokeTrail(C, pts, rgbPrefix, w) {
+  if (!pts || pts.length < 2) return;
+  strokePoly(C, pts, { width: (w || 2.2) + 3.3, color: rgbPrefix + '0.13)' });
+  strokePoly(C, pts, { width: w || 2.2, fade: [rgbPrefix + '1)', rgbPrefix + '0.04)'] });
+}
+
+/* 上标数字（读数区的科学计数法用）；负号用 U+207B，与 §7 的 U+2212 同族 */
+const SUP = { '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','-':'⁻' };
+function supNum(e) { return String(e).split('').map(c => SUP[c] || c).join(''); }
+function sci(x, d) {
+  if (!isFinite(x)) return '∞';
+  if (x === 0) return '0';
+  const e = Math.floor(Math.log10(Math.abs(x)));
+  const m = x / Math.pow(10, e);
+  return m.toFixed(d == null ? 2 : d) + '×10' + supNum(e);
+}
+
+/* 读数区首两行的本工具版本：这里没有相位钟，报的是积分时间与播种记账 */
+const REASON_TXT = {
+  escape:  { zh: '上次因一体逃逸结束', en: 'previous run ended by an escape' },
+  timeout: { zh: '上次因积分超时结束', en: 'previous run ended by timeout' }
+};
+function roHead() {
+  const tail = SIM.lastReason ? t(REASON_TXT[SIM.lastReason]) : t(PRESET_NAME[Math.round(state.preset)]);
+  const seedLine = t({ zh: '第 ' + SIM.seedCount + ' 次播种 · ' + tail,
+                       en: 'seeding #' + SIM.seedCount + ' · ' + tail });
+  return '<div>t = <b>' + fmt(SIM.tSim) + '</b>' + t({ zh: ' 无量纲时间', en: ' time units' }) +
+         '&ensp;·&ensp;' + t({ zh: '倾角 ', en: 'tilt ' }) + '<b>' +
+         (state.tilt * 180 / Math.PI).toFixed(0) + '°</b></div>' +
+         '<div class="dim">' + seedLine + '</div>';
+}
+/* 守恒量的诚实披露：能量与角动量漂移，当前值与峰值都报。
+   漂移超过 1% 时明说「此后是数值虚构」——规范 §0.2：算不准本身就是课程内容，
+   要点出这一层，而不是把它藏起来。 */
+function roConserved() {
+  let s = '<div class="dim">|Δ<i>E</i>/<i>E</i>₀| = ' + sci(SIM.driftE) +
+          t({ zh: '（峰值 ', en: ' (peak ' }) + sci(SIM.driftEmax) + t({ zh: '）', en: ')' }) + '</div>' +
+          '<div class="dim">|Δ<i>L</i>| = ' + sci(SIM.driftL) +
+          t({ zh: '（峰值 ', en: ' (peak ' }) + sci(SIM.driftLmax) + t({ zh: '）', en: ')' }) + '</div>';
+  if (SIM.driftE > 0.01) {
+    s += '<div class="ambC"><b>' + t({
+      zh: '能量漂移已超过 1%：此后画的是数值虚构，不是这个初值的真解',
+      en: 'energy drift above 1% — what you see from here is numerical fiction, not this seed’s true solution'
+    }) + '</b></div>';
+  }
+  return s;
+}
+/* 软化项的披露：规范要求必须写明它是数值处理而非物理 */
+function roSoften() {
+  return '<div class="dim"><i>ε</i> = ' + state.soften.toFixed(3) +
+         t({ zh: '（软化参数：数值处理，不是物理）', en: ' (softening: a numerical device, not physics)' }) + '</div>';
+}
+
+/* 最小二乘拟合 ln δ = b + λ t —— 只用未饱和段（δ < 0.2·SAT_D）。
+   截距 b 一并返回：拟合直线必须画在数据上，锚在 δ₀ 上会整条掉到曲线底下。 */
+function fitLambda() {
+  let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const s = samples[i];
+    if (!(s.d > 0) || s.d > 0.2 * SAT_D) continue;
+    const x = s.ts, y = Math.log(s.d);
+    n++; sx += x; sy += y; sxx += x*x; sxy += x*y;
+  }
+  if (n < 24) return null;
+  const den = n * sxx - sx * sx;
+  if (Math.abs(den) < 1e-12) return null;
+  const lam = (n * sxy - sx * sy) / den;
+  return { lam: lam, b: (sy - lam * sx) / n };
+}
+
+/* 视角预设的动态相机：沿轨道法线看下去 / 沿轨道平面切向看过去。
+   引擎的 applyView() 先调 onSelect 再读 vw.az / vw.el，所以就地改写视角对象合法。
+   法线 n = Ry(0.618τ)·Rx(τ)·(0,0,1) = (cos τ·sin .618τ, −sin τ, cos τ·cos .618τ)
+   ⇒ el = −τ，az = 0.618τ。 */
+function faceOrbit(vw) {
+  vw.el = clamp(-state.tilt, -1.45, 1.53) + 0.001;
+  vw.az = 0.618 * state.tilt + 0.001;
+}
+function edgeOrbit(vw) {
+  const a = 0.618 * state.tilt;
+  vw.el = 0.001;
+  vw.az = Math.atan2(Math.cos(a), -Math.sin(a));
+}
+/* 供 onSelect 用：改开关时同步复选框（引擎给每个开关挂了 data-key） */
+function setToggle(key, on) {
+  state[key] = !!on;
+  document.querySelectorAll('input[data-key="' + key + '"]').forEach(o => { o.checked = !!on; });
+}
+/* 供 onSelect 用：改滑杆值时同步滑块回显（syncParamSlider 是引擎的同步入口） */
+function setParam(key, v) { state[key] = v; syncParamSlider(key); }
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ① 参数声明 —— 自动生成滑杆                                ║
+   ╚══════════════════════════════════════════════════════════╝ */
+/* 关于 preset：设计文档写「用预设按钮而非滑杆」。这里改用三档离散滑杆
+   （step = 1，fmt 直接给出双语预设名）—— 仓库既有工具已有同款做法
+   （complex-mult 的 locusType、algorithmic-complexity 的 recPreset），
+   且零引擎改动，天然进入 params 显隐与 i18n 机制。 */
+const PARAMS = [
+  { key: 'preset', label: { zh: '初值预设', en: 'Initial-condition preset' },
+    min: 0, max: 2, step: 1, value: 0,
+    fmt: v => t(PRESET_NAME[Math.round(v)]) },
+  { key: 'tilt', label: { zh: '轨道平面倾角', en: 'Orbital-plane tilt' },
+    min: 0, max: Math.PI / 2, step: 0.005, value: 0.55,
+    fmt: v => (v * 180 / Math.PI).toFixed(0) + '°' },
+  { key: 'zScale', label: { zh: '时间轴缩放', en: 'Time-axis scale' },
+    min: 0.2, max: 4, step: 0.01, value: 0.6,
+    fmt: v => fmt(v) + t({ zh: ' 单位/时间', en: ' units per time' }) },
+  { key: 'trail', label: { zh: '拖尾长度', en: 'Trail length' },
+    min: 1, max: 40, step: 0.5, value: 12,
+    fmt: v => fmt(v, 1) + t({ zh: ' 无量纲时间', en: ' time units' }) },
+  /* 带 map 必须成对给 invMap（规范 §8 硬约束） */
+  { key: 'logD0', label: { zh: '扰动 log₁₀ <i>δ</i>₀', en: 'Perturbation log₁₀ <i>δ</i>₀' },
+    min: -10, max: -1, step: 0.05, value: -8,
+    fmt: v => 'δ₀ = ' + sci(Math.pow(10, v)),
+    map: v => Math.pow(10, v), invMap: v => Math.log10(v) },
+  { key: 'soften', label: { zh: '软化参数 <i>ε</i>', en: 'Softening <i>ε</i>' },
+    min: 0.005, max: 0.15, step: 0.001, value: 0.01,
+    fmt: v => v.toFixed(3) + t({ zh: '（数值处理）', en: ' (numerical)' }) }
+];
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ② 场景注册 —— 每个键就是一个页签                           ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const SCENES = {
+
+  /* ────── ① 空间中的真实运动 ────── */
+  orbit: {
+    label: { zh: '真实运动', en: 'True motion' },
+    params: ['preset', 'tilt', 'trail', 'soften'],
+    /* 在动的机制（规范 §8 出路①）：velocity-Verlet 积分器每帧推进 SIM.A，
+       三体位置与拖尾都是积分结果，无需任何声明。**不给种子加 drive** ——
+       那会与「历史绝不重算」冲突（§6 双语义迭代）。逃逸 / 超时会自动重新
+       播种，所以这个页签永远不会「一次性演进后永久定格」。 */
+    brand: { zh: '三个质点、一条牛顿定律，没有解析解。这里画的是它在三维空间里真正在做的事：三条轨迹，和一个因动量守恒而永远不动的质心。拖拽旋转，从任意角度看同一段运动。',
+             en: 'Three point masses, one law of gravity, and no closed-form solution. This is what the system is really doing in 3-D space: three trajectories around a centre of mass that momentum conservation pins in place. Drag to rotate and view the same motion from any angle.' },
+    tips: { zh: '提示：这是它真正在做的事 —— 三根世界轴全是空间，没有时间混在里面。按「轨道平面正视」沿轨道法线看下去。下一页你会看到，只要换一个方向去看，同一段运动可以像三段完全不同的运动。',
+            en: 'Tip: this is what the system is really doing — all three world axes are spatial, with no time mixed in. Press "Face the orbit" to look straight down the orbital normal. On the next tab you will see that the same motion can look like three unrelated motions once you change the direction you look from.' },
+    views: {
+      iso:  { label: { zh: '立体', en: '3D' }, az: -0.7, el: 0.35, dist: 7.2, tx: 0, ty: 0, tz: 0 },
+      face: { label: { zh: '轨道平面正视', en: 'Face the orbit' }, az: 0.001, el: 0.001, dist: 6.4, tx: 0, ty: 0, tz: 0,
+              onSelect() { faceOrbit(this); } },
+      edge: { label: { zh: '轨道平面侧视', en: 'Edge on' }, az: 0.001, el: 0.001, dist: 6.4, tx: 0, ty: 0, tz: 0,
+              onSelect() { edgeOrbit(this); } },
+      top:  { label: { zh: '俯视 x·z', en: 'Top x·z' }, az: 0.001, el: 1.52, dist: 6.8, tx: 0, ty: 0, tz: 0 }
+    },
+    toggles: [
+      { key: 'showB1',    label: { zh: '天体 1 轨迹', en: 'Body 1 trail' },   color: '#fb7185', checked: true },
+      { key: 'showB2',    label: { zh: '天体 2 轨迹', en: 'Body 2 trail' },   color: '#a78bfa', checked: true },
+      { key: 'showB3',    label: { zh: '天体 3 轨迹', en: 'Body 3 trail' },   color: '#34d399', checked: true },
+      { key: 'showCom',   label: { zh: '质心', en: 'Centre of mass' },        color: '#2dd4ea', checked: true },
+      { key: 'showRuler', label: { zh: '最近距离标尺', en: 'Closest-pair ruler' }, color: '#fbbf24', checked: true },
+      { key: 'showGrid',  label: { zh: '网格', en: 'Grid' },                  color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => state.trail + 0.5,
+    draw(C) {
+      if (state.showGrid) drawGridXY(C, 2.4, 0.6);
+      axes3(C, { ex: 2.4, ey: 2.4, ez: 2.4, lx: 'x', ly: 'y', lz: 'z',
+                 timeAxis: false, xTicks: [1, 2], yTicks: [1] });
+
+      for (let i = 0; i < 3; i++) {
+        if (!state['showB' + (i + 1)]) continue;
+        strokeTrail(C, trailPts('A', i, 'xyz'), BODY_GLOW[i]);
+      }
+
+      /* 质心（青 = 结构 / 源几何）：动量守恒 ⇒ 它永远不动 */
+      if (state.showCom) {
+        const com = comOf(SIM.A);
+        solidDot(C, com, 3, CYAN + '0.95)');
+        label3(C, com, t({ zh: '质心', en: 'centre of mass' }),
+          { size: 10.5, color: CYAN + '0.85)', align: 'left', dx: 9, dy: -9 });
+      }
+
+      /* 最近的一对（琥珀 = 度量注记） */
+      if (state.showRuler) {
+        const pr = [[0, 1], [0, 2], [1, 2]];
+        let bi = 0, bd = Infinity;
+        for (let k = 0; k < 3; k++) if (SIM.curSep[k] < bd) { bd = SIM.curSep[k]; bi = k; }
+        const a = SIM.A.r[pr[bi][0]], b = SIM.A.r[pr[bi][1]];
+        line3(C, a, b, { width: 1.5, dash: [7, 7], color: AMBER + '0.85)' });
+        label3(C, [(a[0]+b[0])/2, (a[1]+b[1])/2, (a[2]+b[2])/2], fmt(bd),
+          { font: 'italic 11px ' + FONT_MATH, color: '#fbbf24', align: 'center', dy: -11 });
+      }
+
+      /* 头部光点 + 编号（六处同源的第四处） */
+      for (let i = 0; i < 3; i++) {
+        const s = proj(C, SIM.A.r[i]);
+        if (s) glowDot(s, 11, '#ffffff', BODY_GLOW[i] + '0.9)');
+        label3(C, SIM.A.r[i], String(i + 1),
+          { font: 'italic 13px ' + FONT_MATH, color: BODY_COL[i], align: 'center', dy: -16 });
+      }
+
+      /* 公式锚在**左下**：左上是品牌区，标注放那儿会和品牌描述叠在一起 */
+      label3(C, [-2.3, -2.15, 0], 'F = G m₁m₂ r /(r² + ε²)³ᐟ²',
+        { font: 'italic 13px ' + FONT_MATH, color: 'rgba(159,176,200,.75)', align: 'left' });
+    },
+    readout() {
+      return roHead() +
+        '<div class="sinC">r₁₂ = <b>' + fmt(SIM.curSep[0]) + '</b></div>' +
+        '<div class="cosC">r₁₃ = <b>' + fmt(SIM.curSep[1]) + '</b></div>' +
+        '<div class="tanC">r₂₃ = <b>' + fmt(SIM.curSep[2]) + '</b></div>' +
+        '<div class="ambC">' + t({ zh: '最近接近（真实三维）', en: 'closest approach (true 3-D)' }) +
+          ' = <b>' + (isFinite(SIM.minSep) ? fmt(SIM.minSep, 3) : '—') + '</b></div>' +
+        roConserved() + roSoften();
+    }
+  },
+
+  /* ────── ② 三重投影 · 一条四维曲线的三个影子 ────── */
+  shadows: {
+    label: { zh: '三重投影', en: 'Triple projection' },
+    params: ['preset', 'tilt', 'zScale', 'trail', 'soften'],
+    /* 在动的机制（出路①）：同一台积分器。本页签只换「喂给三根世界轴的是哪三个量」，
+       运动本身与页签① 完全是同一次积分。**无 drive**（种子不许被驱动）。 */
+    brand: { zh: '真实状态是 ℝ³ 里的三条轨迹；加上时间，本体是 (x, y, z, t) 里的一条四维曲线。引擎只有三根世界轴，每次只能看它的一个三维影子 —— 用视角按钮切换四种喂法。',
+             en: 'The true state is three trajectories in ℝ³; add time and the real object is a single curve in (x, y, z, t) — four dimensions. The engine has only three world axes, so you only ever see one 3-D shadow of it at a time. Use the view buttons to switch between the four feeds.' },
+    tips: { zh: '提示：先把预设留在「图 8 编舞」—— 一条你事先知道形状的干净闭合曲线 —— 把倾角拧到 30° 以上，再依次按三张「辫」。同一段运动的三个影子长得毫不相干；哪一张都不是真相，就像立方体在纸上的影子是个方框套方框。读数区那两行会告诉你：影子里的最近接近距离总是比真实的更小。',
+            en: 'Tip: keep the preset on "Figure-8 choreography" — a clean closed curve whose shape you already know — raise the tilt past 30°, then press the three "braid" views in turn. Three shadows of one motion, and they look like three unrelated things. None of them is the truth, just as a cube casts a square-inside-a-square onto paper. The readout makes it quantitative: the closest approach seen in a shadow is always smaller than the real one.' },
+    views: {
+      iso:    { label: { zh: '立体', en: '3D' }, az: -0.85, el: 0.32, dist: 9.5, tx: 0, ty: 0, tz: 1.4 },
+      space:  { label: { zh: '纯空间 x·y·z', en: 'Pure space' }, az: -0.7, el: 0.35, dist: 8.0, tx: 0, ty: 0, tz: 0,
+                onSelect() { setProj('xyz'); } },
+      braid1: { label: { zh: '辫 x·y·t', en: 'Braid x·y·t' }, az: -0.95, el: 0.30, dist: 11.5, tx: 0, ty: 0, tz: 2.8,
+                onSelect() { setProj('xyt'); } },
+      braid2: { label: { zh: '辫 y·z·t', en: 'Braid y·z·t' }, az: -0.95, el: 0.30, dist: 11.5, tx: 0, ty: 0, tz: 2.8,
+                onSelect() { setProj('yzt'); } },
+      braid3: { label: { zh: '辫 x·z·t', en: 'Braid x·z·t' }, az: -0.95, el: 0.30, dist: 11.5, tx: 0, ty: 0, tz: 2.8,
+                onSelect() { setProj('xzt'); } },
+      side:   { label: { zh: '辫的侧视', en: 'Braid side-on' }, az: -Math.PI/2, el: 0.001, dist: 12, tx: 0, ty: 0, tz: 3.2 }
+    },
+    toggles: [
+      { key: 'showB1',   label: { zh: '天体 1 轨迹', en: 'Body 1 trail' }, color: '#fb7185', checked: true },
+      { key: 'showB2',   label: { zh: '天体 2 轨迹', en: 'Body 2 trail' }, color: '#a78bfa', checked: true },
+      { key: 'showB3',   label: { zh: '天体 3 轨迹', en: 'Body 3 trail' }, color: '#34d399', checked: true },
+      { key: 'showDrop', label: { zh: '被丢掉的那一维', en: 'The discarded axis' }, color: '#fbbf24', checked: true },
+      { key: 'showGrid', label: { zh: '网格', en: 'Grid' }, color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => state.trail + 0.5,
+    draw(C) {
+      const m = projMode, info = PROJ_INFO[m], isT = (m !== 'xyz');
+      const zEnd = isT ? Math.min(WAVE_LEN + 0.6, state.trail * state.zScale + 0.6) : 2.4;
+
+      if (state.showGrid) {
+        drawGridXY(C, 2.4, 0.6);
+        if (isT) drawTimeGrid(C, { yMax: 2.2, v: state.zScale });
+      }
+      axes3(C, { ex: 2.4, ey: 2.4, ez: zEnd, lx: info.ax, ly: info.ay, lz: info.az,
+                 timeAxis: isT, xTicks: [1, 2], yTicks: [1] });
+
+      for (let i = 0; i < 3; i++) {
+        if (!state['showB' + (i + 1)]) continue;
+        strokeTrail(C, trailPts('A', i, m), BODY_GLOW[i]);
+      }
+
+      /* 被丢掉的那一维：从当前点沿时间轴投下的琥珀虚线。
+         纯空间视图里没有维度被丢掉，所以这组虚线自然不出现。 */
+      if (state.showDrop && isT) {
+        for (let i = 0; i < 3; i++) {
+          const w = worldOf(m, SIM.A.r[i], 0);
+          line3(C, w, [w[0], w[1], zEnd - 0.3], { width: 1, dash: [4, 5], color: AMBER + '0.28)' });
+        }
+      }
+
+      for (let i = 0; i < 3; i++) {
+        const w = worldOf(m, SIM.A.r[i], 0);
+        const s = proj(C, w);
+        if (s) glowDot(s, 11, '#ffffff', BODY_GLOW[i] + '0.9)');
+        label3(C, w, String(i + 1),
+          { font: 'italic 13px ' + FONT_MATH, color: BODY_COL[i], align: 'center', dy: -16 });
+      }
+
+      /* 同样锚在左下，避开左上的品牌区 */
+      label3(C, [-2.3, -1.95, 0], t(info.label),
+        { size: 12, color: 'rgba(159,176,200,.8)', align: 'left' });
+      label3(C, [-2.3, -2.2, 0], t(info.drop),
+        { size: 11, color: AMBER + '0.8)', align: 'left' });
+    },
+    readout() {
+      const info = PROJ_INFO[projMode];
+      const app = info.key ? SIM.minProj[info.key] : SIM.minSep;
+      return roHead() +
+        '<div>' + t({ zh: '当前投影：', en: 'projection: ' }) + '<b>' + t(info.label) + '</b></div>' +
+        '<div class="ambC">' + t({ zh: '真实最近接近 ', en: 'true closest approach ' }) + '= <b>' +
+          (isFinite(SIM.minSep) ? fmt(SIM.minSep, 3) : '—') + '</b></div>' +
+        '<div class="ambC">' + t({ zh: '影子里「看起来」的 ', en: 'apparent in this shadow ' }) + '= <b>' +
+          (isFinite(app) ? fmt(app, 3) : '—') + '</b></div>' +
+        '<div class="dim">' + t(info.drop) + '</div>' +
+        '<div class="dim">' + t({ zh: '不等式断言（投影只会让距离变小）：', en: 'assertion (projection only shrinks distances): ' }) +
+          SIM.projViol + ' / ' + SIM.projChecks + t({ zh: ' 次违例', en: ' violations' }) + '</div>' +
+        roSoften();
+    }
+  },
+
+  /* ────── ③ 图 8 编舞 · 稳定解是刀锋 ────── */
+  choreo: {
+    label: { zh: '图 8 编舞', en: 'Figure-8' },
+    params: ['preset', 'tilt', 'trail', 'logD0', 'soften'],
+    /* 在动的机制（出路①）：同一台积分器同时推进 A（原解）与 B（扰动解）。
+       两者的初值只差 δ₀，是**种子**，绝不加 drive。图 8 不会逃逸，但会在
+       T_MAX = 200（约 31 个周期）后按 §0.4 自动重新播种，故本页也不会定格。 */
+    brand: { zh: 'Chenciner–Montgomery 的图 8 编舞：三体等质量、共用同一条 8 字轨道，互差三分之一周期。它是三体的一个精确周期解 —— 也是刀锋上的平衡。',
+             en: 'The Chenciner–Montgomery figure-8 choreography: three equal masses chase one another along a single shared figure-8 orbit, offset by a third of a period. It is an exact periodic solution of the three-body problem — and a balance on a knife edge.' },
+    tips: { zh: '提示：三体不是总是混乱，是几乎总是。图 8 这样的精确解存在，翠绿那套跑几十个周期都不散；但给玫红那套加 10⁻⁸ 的扰动，若干周期后它就离开轨道再也找不回来。按「轨道正视」看那条干净的 8 字 —— 三颗珠子串在同一条曲线上，这正是「编舞」二字的意思。',
+            en: 'Tip: the three-body problem is not always chaotic — just almost always. Exact solutions like the figure-8 do exist, and the emerald copy holds its shape for dozens of periods. Perturb the rose copy by 10⁻⁸ and after a few periods it leaves the orbit for good. Press "Face the orbit" for the clean figure-8: three beads threaded on one single curve, which is exactly what "choreography" means here.' },
+    views: {
+      iso:  { label: { zh: '立体', en: '3D' }, az: -0.7, el: 0.35, dist: 9.0, tx: 0, ty: 0, tz: 0 },
+      face: { label: { zh: '轨道正视', en: 'Face the orbit' }, az: 0.001, el: 0.001, dist: 8.4, tx: 0, ty: 0, tz: 0,
+              onSelect() { setParam('preset', 0); faceOrbit(this); } },
+      pair: { label: { zh: '并排对比', en: 'Side by side' }, az: 0.001, el: 0.001, dist: 10.5, tx: 0, ty: 0, tz: 0,
+              onSelect() { setParam('preset', 0); setToggle('sideBySide', true); faceOrbit(this); } },
+      over: { label: { zh: '叠合对比', en: 'Overlaid' }, az: 0.001, el: 0.001, dist: 6.8, tx: 0, ty: 0, tz: 0,
+              onSelect() { setParam('preset', 0); setToggle('sideBySide', false); faceOrbit(this); } }
+    },
+    toggles: [
+      { key: 'showPerturb', label: { zh: '扰动解 +δ₀', en: 'Perturbed copy +δ₀' }, color: '#fb7185', checked: true },
+      { key: 'showRef',     label: { zh: '原解（精确编舞）', en: 'Exact choreography' }, color: '#34d399', checked: true },
+      { key: 'sideBySide',  label: { zh: '并排放置', en: 'Offset side by side' }, color: '#fbbf24', checked: true },
+      { key: 'showGrid',    label: { zh: '网格', en: 'Grid' }, color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => Math.max(state.trail, FIG8_T * 1.05) + 0.5,
+    draw(C) {
+      const dx = state.sideBySide ? 1.75 : 0;
+      const shiftA = w => [w[0] - dx, w[1], w[2]];
+      const shiftB = w => [w[0] + dx, w[1], w[2]];
+
+      if (state.showGrid) drawGridXY(C, 2.6, 0.65);
+      axes3(C, { ex: 3.0, ey: 2.2, ez: 2.0, lx: 'x', ly: 'y', lz: 'z',
+                 timeAxis: false, xTicks: [1], yTicks: [1] });
+
+      /* 原解：三体共用**同一条** 8 字轨道 —— 所以只画一条翠绿曲线（三段用 null
+         断开拼接），再在它上面钉三颗珠子。这正是 choreography 一词的意思。 */
+      if (state.showRef) {
+        const pts = [];
+        for (let i = 0; i < 3; i++) {
+          const p = trailPts('A', i, 'xyz', shiftA);
+          if (p) { pts.push.apply(pts, p); pts.push(null); }
+        }
+        strokeTrail(C, pts, BODY_GLOW[2]);
+        for (let i = 0; i < 3; i++) {
+          const s = proj(C, shiftA(SIM.A.r[i]));
+          if (s) glowDot(s, 10, '#ffffff', BODY_GLOW[2] + '0.9)');
+        }
+        /* 叠合模式下 dx = 0，两条标注会锚在同一个世界点上叠成乱码：
+           这时改用屏幕空间 dy 把它们上下分开（世界坐标分不开——正是因为叠合了）。 */
+        label3(C, [-dx, -1.8, 0], t({ zh: '原解 · 精确编舞', en: 'exact choreography' }),
+          { size: 11, color: BODY_COL[2], align: 'center', dy: dx ? 0 : -9 });
+      }
+
+      if (state.showPerturb) {
+        const pts = [];
+        for (let i = 0; i < 3; i++) {
+          const p = trailPts('B', i, 'xyz', shiftB);
+          if (p) { pts.push.apply(pts, p); pts.push(null); }
+        }
+        strokeTrail(C, pts, BODY_GLOW[0]);
+        for (let i = 0; i < 3; i++) {
+          const s = proj(C, shiftB(SIM.B.r[i]));
+          if (s) glowDot(s, 10, '#ffffff', BODY_GLOW[0] + '0.9)');
+        }
+        label3(C, [dx, -1.8, 0], t({ zh: '扰动解 · +δ₀', en: 'perturbed · +δ₀' }),
+          { size: 11, color: BODY_COL[0], align: 'center', dy: dx ? 0 : 9 });
+      }
+
+      /* 琥珀 = 度量注记：当前跑到第几个周期 */
+      label3(C, [0, 2.0, 0],
+        t({ zh: '第 ' + fmt(SIM.tSim / FIG8_T) + ' 个周期', en: 'period ' + fmt(SIM.tSim / FIG8_T) }),
+        { size: 11, color: '#fbbf24', align: 'center' });
+    },
+    readout() {
+      const per = SIM.tSim / FIG8_T;
+      const isFig8 = Math.round(state.preset) === 0;
+      const lost = SIM.choreoLost
+        ? t({ zh: '第 ' + SIM.choreoLost + ' 周期失去编舞', en: 'choreography lost at period ' + SIM.choreoLost })
+        : t({ zh: '编舞仍然成立', en: 'choreography still holding' });
+      return roHead() +
+        '<div class="tanC">' + t({ zh: '周期数 ', en: 'periods ' }) + '<i>t</i>/<i>T</i> = <b>' + fmt(per) +
+          '</b>&ensp;<span class="dim"><i>T</i> = ' + fmt(FIG8_T, 4) + '</span></div>' +
+        '<div class="sinC">' + t({ zh: '与原轨道的偏离 ', en: 'deviation from the exact orbit ' }) +
+          '<i>δ</i> = <b>' + sci(SIM.dSep) + '</b></div>' +
+        '<div class="ambC"><b>' + lost + '</b></div>' +
+        (isFig8 ? '' : '<div class="dim">' +
+          t({ zh: '本页以图 8 编舞为对象：请把「初值预设」拨回「图 8 编舞」',
+              en: 'this tab is about the figure-8 — set the preset back to "Figure-8 choreography"' }) + '</div>') +
+        roConserved() + roSoften();
+    }
+  },
+
+  /* ────── ④ 分道 · 逃逸 · 守恒量 ────── */
+  divergence: {
+    label: { zh: '分道与逃逸', en: 'Divergence & escape' },
+    params: ['preset', 'tilt', 'zScale', 'trail', 'logD0', 'soften'],
+    /* 在动的机制（出路①）：同一台积分器推进 A 与 B；本页画的 log δ(t) 曲线
+       由每帧的真实 δ 采样流出（pushSample 记录当时真实值，绝不重算）。
+       **无 drive**。一体逃逸或积分超时会按 §0.4 自动重新播种并计数，
+       所以曲线永远在重新生长，不会「一次性演进后永久定格」。 */
+    brand: { zh: '两套三体，初值只差 δ₀。把 log₁₀ δ(t) 沿时间轴画出来：混沌区是一条直线，斜率就是李雅普诺夫指数。每一次跳变下面，都对应一次近距离遭遇。',
+             en: 'Two three-body systems whose initial conditions differ by δ₀. Plot log₁₀ δ(t) along the time axis and the chaotic regime is a straight line whose slope is the Lyapunov exponent. Every jump in that line sits directly above a close encounter.' },
+    tips: { zh: '提示：三体的混沌有个具体的放大器 —— 近距离遭遇。两体擦身而过时，出射方向对入射参数极度敏感，一次遭遇就能把 10⁻¹⁰ 的差别放大好几个数量级。按「log δ · t 正视」，看分离曲线的每一次跳变，正下方都有一根琥珀刻线。',
+            en: 'Tip: the chaos of the three-body problem has a concrete amplifier — the close encounter. When two bodies swing past each other the outgoing direction is extremely sensitive to the incoming one, and a single pass can magnify a difference of 10⁻¹⁰ by several orders of magnitude. Press "log δ · t front" and check every jump in the separation curve: an amber tick sits right below it.' },
+    views: {
+      iso:  { label: { zh: '立体', en: '3D' }, az: -1.05, el: 0.28, dist: 14, tx: 0, ty: 0.7, tz: 2.8 },
+      logt: { label: { zh: 'log δ · t 正视', en: 'log δ · t front' }, az: -Math.PI/2, el: 0.001, dist: 14, tx: 0, ty: 0.7, tz: 3.4 },
+      sys:  { label: { zh: '两套系统特写', en: 'The two systems' }, az: -Math.PI/2, el: 0.001, dist: 4.4, tx: 0, ty: 2.6, tz: 2.4 },
+      top:  { label: { zh: '俯视', en: 'Top' }, az: -Math.PI/2, el: 1.52, dist: 13, tx: 0, ty: 0, tz: 3.4 }
+    },
+    toggles: [
+      { key: 'showDelta', label: { zh: '分离曲线 log δ', en: 'Separation log δ' }, color: '#fb7185', checked: true },
+      { key: 'showFit',   label: { zh: '指数律拟合', en: 'Exponential fit' },      color: '#a78bfa', checked: true },
+      { key: 'showSys',   label: { zh: '两套系统', en: 'Both systems' },           color: '#34d399', checked: true },
+      { key: 'showEnc',   label: { zh: '近距离遭遇', en: 'Close encounters' },     color: '#fbbf24', checked: true },
+      { key: 'showGrid',  label: { zh: '网格', en: 'Grid' },                       color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => state.trail + 0.5,
+    draw(C) {
+      const LO = -12, HI = 1, Y0 = -1.9, Y1 = 1.4;
+      const yOf = ld => Y0 + (clamp(ld, LO, HI) - LO) / (HI - LO) * (Y1 - Y0);
+      const zEnd = Math.min(WAVE_LEN + 0.6, state.trail * state.zScale + 0.6);
+
+      if (state.showGrid) drawTimeGrid(C, { yMax: 1.6, v: state.zScale });
+      /* 十年刻度（结构线，灰） */
+      for (let d = LO; d <= HI; d += 2) {
+        const y = yOf(d);
+        line3(C, [0, y, 0], [0, y, zEnd - 0.2], { width: 1, color: 'rgba(148,163,184,0.08)' });
+        label3(C, [0, y, -0.18], '10' + supNum(d),
+          { size: 10, color: 'rgba(159,176,200,.55)', align: 'right' });
+      }
+      axes3(C, { ex: 0, ey: 1.75, ez: zEnd, lx: null, ly: 'δ', lz: 't', timeAxis: true });
+
+      /* 饱和线（翠绿虚线）：δ 长到系统尺度后，曲线不再携带信息 */
+      const ySat = yOf(Math.log10(SAT_D));
+      line3(C, [0, ySat, 0], [0, ySat, zEnd - 0.2],
+        { width: 1, dash: [5, 6], color: BODY_GLOW[2] + '0.55)' });
+      label3(C, [0, ySat + 0.17, zEnd * 0.55], t({ zh: '饱和：此后不再有信息', en: 'saturated: no information beyond here' }),
+        { size: 10.5, color: BODY_GLOW[2] + '0.85)', align: 'center' });
+
+      /* 分离曲线（玫红 = 扰动解那一族） */
+      if (state.showDelta && samples.length > 1) {
+        const pts = [];
+        const stride = Math.max(1, Math.ceil(samples.length / 700));
+        for (let i = samples.length - 1; i >= 0; i -= stride) {
+          const s = samples[i];
+          pts.push([0, yOf(Math.log10(Math.max(s.d, 1e-300))), (state.t - s.t) * state.zScale]);
+        }
+        strokeTrail(C, pts, BODY_GLOW[0], 2.4);
+      }
+
+      /* 近距离遭遇（琥珀 = 度量注记）：分离曲线的每一次跳变都在一根刻线上方 */
+      if (state.showEnc) {
+        for (let i = 0; i < samples.length; i++) {
+          if (!samples[i].enc) continue;
+          const z = (state.t - samples[i].t) * state.zScale;
+          if (z > zEnd) continue;
+          line3(C, [0, Y0 - 0.20, z], [0, yOf(Math.log10(Math.max(samples[i].d, 1e-300))), z],
+            { width: 1.2, color: AMBER + '0.5)' });
+          solidDot(C, [0, Y0 - 0.20, z], 2.4, AMBER + '0.95)');
+        }
+      }
+
+      /* 指数律拟合（紫）：δ ≈ e^{b+λt}，未饱和段是一条直线。
+         画在拟合出的截距上，不是画在 δ₀ 上——后者会整条掉到曲线底下去。 */
+      const fit = fitLambda();
+      if (state.showFit && fit && fit.lam > 0) {
+        const tNow = SIM.tSim;
+        const back = Math.min(state.trail, tNow);
+        const yAt = tt => yOf((fit.b + fit.lam * tt) / Math.LN10);
+        strokePoly(C, [[0, yAt(tNow), 0], [0, yAt(tNow - back), back * state.zScale]],
+          { width: 1.6, dash: [6, 6], color: BODY_GLOW[1] + '0.9)' });
+        label3(C, [0, yAt(tNow) + 0.24, 0.45], 'λ ≈ ' + fmt(fit.lam),
+          { font: 'italic 13px ' + FONT_MATH, color: BODY_COL[1], align: 'left' });
+      }
+
+      /* 两套系统的 x·y 投影，上下叠放在图上方。两处安排都由本页的顿悟视角
+         （沿世界 x 轴的侧视）决定：
+         ① 两套必须**竖直**叠放而不是左右并排——左右的偏移在侧视里是深度，会叠成一团；
+         ② 插图本身必须铺在**世界 y·z 平面**上（系统的 x 喂给世界 z）——铺在 x·y 平面
+            的话，插图在侧视里会被压成一根竖线。
+         同理，两个标注用**屏幕空间** dx 偏出去，世界 x 方向的偏移在侧视里也是深度。 */
+      if (state.showSys) {
+        const K = 0.20, EXT = 2.2, YA = 2.1, YB = 3.1, Z0 = 2.4;
+        /* 定窗口：跑出 EXT 的点返回 null（折线在此断开），逃逸的天体自然离开视窗，
+           而不会把插图撑破、压到另一套系统上去。 */
+        const put = (w, s) => {
+          if (Math.hypot(w[0], w[1]) > EXT) return null;
+          return [0, w[1] * K + (s === 'A' ? YA : YB), w[0] * K + Z0];
+        };
+        for (const which of ['A', 'B']) {
+          const col = which === 'A' ? BODY_GLOW[2] : BODY_GLOW[0];
+          const pts = [];
+          for (let i = 0; i < 3; i++) {
+            const p = trailPts(which, i, 'xyz', w => put(w, which));
+            if (p) { pts.push.apply(pts, p); pts.push(null); }
+          }
+          strokeTrail(C, pts, col, 1.8);
+          const sys = which === 'A' ? SIM.A : SIM.B;
+          for (let i = 0; i < 3; i++) {
+            const w = put(sys.r[i], which);
+            const s = w && proj(C, w);
+            if (s) glowDot(s, 8, '#ffffff', col + '0.9)');
+          }
+        }
+        label3(C, [0, YA, Z0], t({ zh: '原解', en: 'reference' }),
+          { size: 10.5, color: BODY_COL[2], align: 'left', dx: 56 });
+        label3(C, [0, YB, Z0], t({ zh: '扰动解 +δ₀', en: 'perturbed +δ₀' }),
+          { size: 10.5, color: BODY_COL[0], align: 'left', dx: 56 });
+      }
+    },
+    readout() {
+      const fit = fitLambda();
+      const lam = (fit && fit.lam > 0) ? fit.lam : null;
+      const dbl = lam ? Math.LN2 / lam : null;
+      return roHead() +
+        '<div class="sinC"><i>δ</i>(<i>t</i>) = <b>' + sci(SIM.dSep) + '</b>' +
+          '&ensp;<span class="dim">δ₀ = ' + sci(SIM.d0) + '</span></div>' +
+        '<div class="cosC">λ ≈ <b>' + (lam ? fmt(lam) : '—') + '</b>&ensp;·&ensp;' +
+          t({ zh: '倍增时间 ', en: 'doubling time ' }) + (dbl ? fmt(dbl) : '—') + '</div>' +
+        '<div class="ambC">' + t({ zh: '近距离遭遇 ', en: 'close encounters ' }) + '<b>' + SIM.encounters +
+          t({ zh: ' 次', en: '' }) + '</b>&ensp;·&ensp;' + t({ zh: '逃逸 ', en: 'escapes ' }) + '<b>' + SIM.escapes +
+          t({ zh: ' 次', en: '' }) + '</b></div>' +
+        roConserved() + roSoften();
+    }
+  }
+};
+
+/* ================= 常量与状态（引擎区，以下一般无需改动） ================= */
+const WAVE_LEN = 8;      // t 轴的世界长度（可视窗口）
+const NEAR = 0.15;       // 近裁剪面
+
+const FONT_CN = 'ui-sans-serif,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif';
+const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
+
+const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
+const samples = [];
+let curTab = null;
+const RELABEL = [];
+const cams = {};
+let cam = null;
+let tween = null;
+const lastView = {};
+const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ③ 采样 —— 按你的工具需要扩展字段                           ║
+   ║  原则：记录"当时的真实值"，参数中途改变时历史不重算            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+let lastSampleT = 0;
+function pushSample() {
+  /* 本工具没有相位钟：显式把 ω 置 0，防引擎的 theta 积分把 undefined 累成 NaN。
+     pushSample() 在 resetSim() 里先于第一帧被调用，所以这一句总是先生效。 */
+  state.omega = 0;
+
+  /* 种子变了（用户动了预设 / 倾角 / 软化 / 扰动）= 显式重新播种：清空轨迹、
+     从新初值重新积分。这是规范 §0.3 要求的「显式、用户发起」，而不是每帧
+     偷偷重算历史；已经画出去的那段轨迹是当时的真实值，不会被追溯改写。 */
+  if (SIM.sig !== seedSig()) {
+    seedAll(null);
+    SIM.seedCount = 1; SIM.lastReason = null;
+    lastSampleT = state.t;
+  }
+
+  /* 推进积分器：引擎已把 dt 钳在 [0, 0.05]，这里再拆成固定步长 h 的子步 */
+  const dt = clamp(state.t - lastSampleT, 0, 0.05);
+  lastSampleT = state.t;
+  if (dt > 0) stepSim(dt);
+
+  /* 记录**当时的真实值**：位置与 δ 都是这一刻积分器算出来的。 */
+  samples.push({
+    t: state.t,
+    ts: SIM.tSim,
+    a: [SIM.A.r[0].slice(), SIM.A.r[1].slice(), SIM.A.r[2].slice()],
+    b: [SIM.B.r[0].slice(), SIM.B.r[1].slice(), SIM.B.r[2].slice()],
+    d: SIM.dSep,
+    enc: SIM.encFlag
+  });
+}
+
+/* ================= 画布 ================= */
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = 1, FOCAL = 900, CX = 0, CY = 0, bgGrad = null;
+
+function resize() {
+  DPR = Math.min(2.5, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  CX = W / 2; CY = H / 2;
+  FOCAL = 1.2 * Math.min(H, W * 1.1);
+  bgGrad = ctx.createRadialGradient(W*0.5, H*0.3, 0, W*0.5, H*0.42, Math.max(W, H)*0.95);
+  bgGrad.addColorStop(0, '#0c1526');
+  bgGrad.addColorStop(1, '#05070d');
+}
+window.addEventListener('resize', resize);
+
+/* ================= 基础数学 ================= */
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const mod2pi = a => { a %= TAU; if (a < 0) a += TAU; return a; };
+const wrapPI = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
+const ease = k => k < 0.5 ? 4*k*k*k : 1 - Math.pow(-2*k + 2, 3) / 2;
+const fmt = (x, d = 2) => x.toFixed(d);
+const fmtS = (x, d = 2) => (x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
+
+const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+const dot3 = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+
+/* ================= 轨道相机与投影 ================= */
+function makeCam() {
+  const cp = Math.cos(cam.el), sp = Math.sin(cam.el);
+  const eye = [
+    cam.tx + cam.dist * cp * Math.sin(cam.az),
+    cam.ty + cam.dist * sp,
+    cam.tz + cam.dist * cp * Math.cos(cam.az)
+  ];
+  const f = norm(sub([cam.tx, cam.ty, cam.tz], eye));
+  const r = norm(cross(f, [0, 1, 0]));
+  const u = cross(r, f);
+  return { eye, f, r, u };
+}
+function camPt(C, p) {
+  const d = sub(p, C.eye);
+  return [dot3(d, C.r), dot3(d, C.u), dot3(d, C.f)];
+}
+function scr(c) { const s = FOCAL / c[2]; return [CX + c[0]*s, CY - c[1]*s]; }
+function proj(C, p) { const c = camPt(C, p); return c[2] < NEAR ? null : scr(c); }
+function clipNear(a, b) {
+  const t = (NEAR - a[2]) / (b[2] - a[2]);
+  return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, NEAR];
+}
+
+/* 折线路径（支持 null 断点 + 近平面裁剪）；返回 [首点, 末点] 屏幕坐标 */
+function polyPath(C, pts) {
+  if (pts.length < 2) return null;
+  let head = null, tail = null, contin = false, prev = null;
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    const P = pts[i];
+    if (P === null) { prev = null; contin = false; continue; }
+    const cur = camPt(C, P);
+    if (prev !== null) {
+      let a = prev, b = cur;
+      const av = a[2] >= NEAR, bv = b[2] >= NEAR;
+      if (av || bv) {
+        if (!av) a = clipNear(a, b);
+        if (!bv) b = clipNear(b, a);
+        const sA = scr(a), sB = scr(b);
+        if (!contin) ctx.moveTo(sA[0], sA[1]);
+        ctx.lineTo(sB[0], sB[1]);
+        if (!head) head = sA;
+        tail = sB;
+        contin = bv;
+      } else {
+        contin = false;
+      }
+    }
+    prev = cur;
+  }
+  return head ? [head, tail] : null;
+}
+
+function strokePoly(C, pts, o) {
+  const ht = polyPath(C, pts);
+  if (!ht) return;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = o.width || 2;
+  if (o.alpha != null) ctx.globalAlpha = o.alpha;
+  if (o.dash) ctx.setLineDash(o.dash);
+  if (o.fade) {
+    const h = ht[0], t = ht[1];
+    if (Math.hypot(t[0]-h[0], t[1]-h[1]) < 2) {
+      ctx.strokeStyle = o.fade[0];
+    } else {
+      const g = ctx.createLinearGradient(h[0], h[1], t[0], t[1]);
+      g.addColorStop(0, o.fade[0]);
+      g.addColorStop(1, o.fade[1]);
+      ctx.strokeStyle = g;
+    }
+  } else {
+    ctx.strokeStyle = o.color;
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+const line3 = (C, a, b, o) => strokePoly(C, [a, b], o);
+
+function glowDot(s, r, core, mid) {
+  const g = ctx.createRadialGradient(s[0], s[1], 0, s[0], s[1], r);
+  g.addColorStop(0, core);
+  g.addColorStop(0.35, mid);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+function solidDot(C, p, r, color) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+
+function label3(C, p, text, o) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.save();
+  ctx.font = o.font || ((o.size || 12) + 'px ' + FONT_CN);
+  ctx.fillStyle = o.color || '#c4d2e6';
+  ctx.textAlign = o.align || 'left';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(3,6,12,.85)';
+  ctx.shadowBlur = 4;
+  ctx.fillText(text, s[0] + (o.dx || 0), s[1] + (o.dy || 0));
+  ctx.restore();
+}
+
+function arrowAt(C, tip3, before3, color) {
+  const t = proj(C, tip3), b = proj(C, before3);
+  if (!t || !b) return;
+  const a = Math.atan2(t[1]-b[1], t[0]-b[0]);
+  const L = 9;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.4;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a-0.42), t[1]-L*Math.sin(a-0.42));
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a+0.42), t[1]-L*Math.sin(a+0.42));
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* ================= 常用场景部件 ================= */
+const AXIS = 'rgba(159,176,200,0.9)';
+const AXIS_DIM = 'rgba(159,176,200,0.5)';
+
+/* 坐标轴：o = { ex, ey, yTicks:[], xTicks:[], tAxis:bool, v(秒刻度间距的波速) } */
+function drawAxes(C, o) {
+  const ex = o.ex, ey = o.ey;
+  line3(C, [-ex, 0, 0], [ex, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [ex, 0, 0], [ex - 0.2, 0, 0], AXIS);
+  label3(C, [ex + 0.22, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  line3(C, [0, -ey, 0], [0, ey, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, ey, 0], [0, ey - 0.2, 0], AXIS);
+  label3(C, [0, ey + 0.18, 0], 'y', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  if (o.tAxis) {
+    line3(C, [0, 0, 0], [0, 0, WAVE_LEN + 0.5], { width: 1.4, color: AXIS });
+    arrowAt(C, [0, 0, WAVE_LEN + 0.5], [0, 0, WAVE_LEN + 0.3], AXIS);
+    label3(C, [0, 0, WAVE_LEN + 0.9], 't', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+    const v = o.v || 1;
+    const every = v < 0.8 ? 2 : 1;
+    for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+      line3(C, [0, -0.06, k*v], [0, 0.06, k*v], { width: 1.2, color: AXIS_DIM });
+      if (k % every === 0) {
+        label3(C, [0, -0.25, k*v], k + 's', { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+      }
+    }
+  }
+  for (const k of (o.yTicks || [])) {
+    for (const yv of [k, -k]) {
+      line3(C, [-0.05, yv, 0], [0.05, yv, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [-0.13, yv, 0], (yv < 0 ? '−' : '') + Math.abs(yv), { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+    }
+  }
+  for (const k of (o.xTicks || [])) {
+    for (const xv of [k, -k]) {
+      line3(C, [xv, -0.05, 0], [xv, 0.05, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [xv, -0.24, 0], (xv < 0 ? '−' : '') + Math.abs(xv), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+    }
+  }
+}
+
+/* z=0 平面方格网格（几何类场景） */
+function drawGridXY(C, g, step) {
+  const n = Math.round(g / step);
+  for (let i = -n; i <= n; i++) {
+    if (i === 0) continue;
+    const u = i * step;
+    line3(C, [u, -g, 0], [u, g, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+    line3(C, [-g, u, 0], [g, u, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+  }
+}
+
+/* y–t 时间平面网格（流式波形类场景）：o = { yMax, v } */
+function drawTimeGrid(C, o) {
+  const g = o.yMax, v = o.v;
+  for (let i = Math.round(-g*2); i <= Math.round(g*2); i++) {
+    if (i === 0) continue;
+    line3(C, [0, i/2, 0], [0, i/2, WAVE_LEN], { width: 1, color: 'rgba(148,163,184,0.10)' });
+  }
+  for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+    line3(C, [0, -g, k*v], [0, g, k*v], { width: 1, color: 'rgba(148,163,184,0.07)' });
+  }
+}
+
+/* 周期标尺（琥珀）：在平面 x=px、高度 yb 处，从 z=0 画到 z=T·v */
+function drawPeriodBracket(C, Tsec, v, px, yb, text) {
+  const zT = Tsec * v;
+  if (zT > WAVE_LEN + 0.01) return;
+  const amber = 'rgba(251,191,36,0.75)';
+  line3(C, [px, yb, 0], [px, yb, zT], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, 0], [px, yb + 0.06, 0], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, zT], [px, yb + 0.06, zT], { width: 1.2, color: amber });
+  label3(C, [px, yb - 0.2, zT/2], text, { size: 10.5, color: 'rgba(251,191,36,.9)', align: 'center' });
+}
+
+/* 单位圆（半径 A，位于 z=0 平面，青色源几何） */
+function drawCircle(C, A) {
+  const cpts = [];
+  for (let i = 0; i <= 72; i++) {
+    const a = i / 72 * TAU;
+    cpts.push([A * Math.cos(a), A * Math.sin(a), 0]);
+  }
+  strokePoly(C, cpts, { width: 6, color: 'rgba(45,212,234,0.13)' });
+  strokePoly(C, cpts, { width: 2, color: 'rgba(45,212,234,0.95)' });
+  for (let q = 0; q < 4; q++) {
+    const a = q * Math.PI / 2;
+    line3(C, [A*0.95*Math.cos(a), A*0.95*Math.sin(a), 0],
+             [A*1.06*Math.cos(a), A*1.06*Math.sin(a), 0],
+             { width: 1, color: 'rgba(45,212,234,0.5)' });
+  }
+  solidDot(C, [0, 0, 0], 2.2, 'rgba(159,176,200,0.9)');
+}
+
+/* 角度弧 θ（琥珀度量注记） */
+function drawAngleArc(C, th, A) {
+  const thm = mod2pi(th);
+  if (thm <= 0.03) return;
+  const r0 = Math.max(0.14, Math.min(0.34, 0.5 * A));
+  const n = Math.max(2, Math.ceil(thm / 0.06));
+  const apts = [];
+  for (let j = 0; j <= n; j++) {
+    const a = thm * j / n;
+    apts.push([r0 * Math.cos(a), r0 * Math.sin(a), 0]);
+  }
+  strokePoly(C, apts, { width: 1.6, color: 'rgba(251,191,36,0.9)' });
+  label3(C, [(r0 + 0.15) * Math.cos(thm/2), (r0 + 0.15) * Math.sin(thm/2), 0], 'θ',
+    { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+}
+
+/* 读数区固定首两行 */
+function readoutHead() {
+  const th = state.theta;
+  const deg = (mod2pi(th) * 180 / Math.PI).toFixed(0);
+  const lap = fmt(th / TAU);
+  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;θ = ωt = <b>' + fmt(th) + '</b> rad</div>' +
+         '<div class="dim">' + t({ zh: '≡ ' + deg + '°（第 ' + lap + ' 圈）', en: '≡ ' + deg + '° (turn ' + lap + ')' }) + '</div>';
+}
+
+/* ================= 主绘制与主循环 ================= */
+function draw() {
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+  const C = makeCam();
+  SCENES[curTab].draw(C);
+}
+
+function resetSim() {
+  /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
+  Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  state.t = 0;
+  state.theta = 0;
+  /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
+     相位上，「重置」就名不副实了 */
+  Object.keys(driveOff).forEach(id => { driveOff[id] = 0; driveOffAt[id] = 0; });
+  samples.length = 0;
+  /* 本工具：重置 = 回到种子重新播种，播种计数与断言计数一并归零 */
+  seedAll(null);
+  SIM.seedCount = 1; SIM.lastReason = null;
+  SIM.escapes = 0; SIM.timeouts = 0;
+  SIM.projChecks = 0; SIM.projViol = 0;
+  lastSampleT = 0;
+  pushSample();
+}
+
+let lastTs = performance.now(), lastRO = 0;
+
+/* 帧级异常兜底：同一页签的同一条错误只报一次，否则 60 fps 会把控制台刷爆。
+   resetSim() 会清空它——用户主动重置后应当允许重新报。 */
+const frameErrSeen = Object.create(null);
+function frameError(err) {
+  const k = curTab + '|' + ((err && err.message) || err);
+  if (frameErrSeen[k]) return;
+  frameErrSeen[k] = 1;
+  console.warn('[frame] 场景「' + curTab + '」抛出异常，已跳过该帧并继续渲染循环：', err);
+}
+function frame(ts) {
+  try {
+    const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
+    lastTs = ts;
+
+    if (tween) {
+      const k = Math.min(1, (ts - tween.t0) / tween.dur);
+      const e = ease(k);
+      const f = tween.from, o = tween.to;
+      cam.az = f.az + wrapPI(o.az - f.az) * e;
+      cam.el = f.el + (o.el - f.el) * e;
+      cam.dist = f.dist + (o.dist - f.dist) * e;
+      cam.tx = f.tx + (o.tx - f.tx) * e;
+      cam.ty = f.ty + (o.ty - f.ty) * e;
+      cam.tz = f.tz + (o.tz - f.tz) * e;
+      if (k >= 1) tween = null;
+    }
+
+    if (state.running) {
+      state.t += dt;
+      state.theta += state.omega * dt;
+      applyDrive();
+      const dv = SCENES[curTab].drive;
+      if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
+      pushSample();
+    }
+    const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
+    while (samples.length && samples[0].t < state.t - windowSec) samples.shift();
+
+    draw();
+    if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
+  } catch (err) {
+    frameError(err);
+  } finally {
+    /* rAF 放 finally 是「循环永不断」的机械保证：不依赖 catch 里写对什么。
+       代价是画布可能停在最后一帧好内容而屏幕无提示——这是有意的取舍，
+       「整个工具变砖」比「画面停在错误状态」更不可接受。 */
+    requestAnimationFrame(frame);
+  }
+}
+
+const roEl = document.getElementById('readout');
+function updateReadout() { roEl.innerHTML = SCENES[curTab].readout(); }
+
+/* ================= 场景作用域参数与时间驱动 ================= */
+const paramWraps = {};   // key -> { wrap, input, val, p }
+const autoPlay = {};     // tabId -> 是否自动播放
+const driveMode = {};    // tabId -> 'loop' | 'pingpong'
+const driveOff = {};     // tabId -> 驱动时钟相对引擎时钟的累计偏移（= 自动播放累计关停时长）
+const driveOffAt = {};   // tabId -> 本次关停的起点（引擎时钟读数）
+
+/* 驱动时钟：引擎时钟减去「自动播放关掉的那些时间」。关停期间它不走，
+   所以重新打开时驱动量从原地续上，不跳变。求值仍是纯函数——只是把
+   自变量从 state.t 换成这个校正过的时钟，不做增量积分：既不累积浮点
+   漂移，录制器按固定 dt 离线重放也能复现同一串值（偏移在一次渲染内是常量）。
+   已知语义：偏移只扣「自动播放关停」的时长，不扣「页签没被选中」的时长——
+   离开某页签 10 秒再切回来，它的驱动量会跳到 10 秒后的位置。这与「暂停只冻结
+   模拟、相机照走」是同一族约定（时钟是全局的，页签只是不同的观测口），
+   如需改成每页签独立时钟，得连录制器的离线重放一起改，不要只改这里。 */
+function driveClock(id) { return state.t - (driveOff[id] || 0); }
+
+/* 驱动求值：驱动时钟（见 driveClock）的纯函数，不做增量积分 —— 不累积
+   浮点漂移，暂停恢复不跳变，且录制器按固定 dt 推进 state.t 时可直接复用。 */
+function driveValue(d, tt, mode) {
+  const m = mode || d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+  const u = ((tt / d.period) % 1 + 1) % 1;              // 负时间也落在 [0,1)
+  const s = (m === 'loop') ? u : (u < 0.5 ? 2 * u : 2 - 2 * u);
+  return d.from + (d.to - d.from) * s;
+}
+
+/* 把当前场景的驱动量按引擎时钟写回 state。只动数据、不碰 DOM ——
+   录制器的离线渲染也调它，那条路径上没有面板可同步（见规范 §D1）。 */
+function applyDrive() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return;
+  state[sc.drive.key] = driveValue(sc.drive, driveClock(curTab), driveMode[curTab]);
+}
+
+/* 供录制器判断无缝循环的吸附基准；无驱动或用户关掉自动播放时返回 null */
+function driveInfo() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return null;
+  return { key: sc.drive.key, period: sc.drive.period, mode: driveMode[curTab] };
+}
+
+const warnedNoInvMap = {};   // key -> 已就「有 map 没 invMap」告警过
+
+/* 把驱动出的值反算回滑块刻度并回显。带 map 的参数必须提供 invMap，
+   否则只能退回显示映射后的值（规范 §8 已把 invMap 列为硬约束）。 */
+function syncParamSlider(key) {
+  const e = paramWraps[key];
+  if (!e) return;
+  /* 本函数每帧都被调用，所以每个 key 只喊一次，别把控制台刷爆 */
+  if (e.p.map && !e.p.invMap && !warnedNoInvMap[key]) {
+    warnedNoInvMap[key] = true;
+    console.warn('[math-viz] 参数 "' + key + '" 声明了 map 却没有 invMap：' +
+                 '驱动值会被当作滑杆原始值写进量程，回显与 state 会错位（规范 §8）。');
+  }
+  const raw = (e.p.map && e.p.invMap) ? e.p.invMap(state[key]) : state[key];
+  /* 先写进 input，再读回来显示：range 带 step，写进去的值会被吸附到刻度上。
+     若直接显示 raw，读数与滑杆句柄就会对不上；更要命的是下一次 upd() 读的是
+     吸附后的 input.value，会把这点差值永久写回 state —— 暂停时 frame() 不再跑
+     applyDrive()，再也修不回来。upd() 的触发面已经收窄到「用户拖动这根滑杆」
+     一条：语言切换只调 render()（见下方 relabel 注释），不再写 state。 */
+  e.input.value = raw;
+  e.val.textContent = e.p.fmt(parseFloat(e.input.value));
+}
+
+/* 按当前页签的 params 显隐滑块。省略 params = 全部显示（向后兼容）。
+   不复制 DOM：滑块值是跨页签共享的 state，复制会引入多份 DOM 的同步问题。 */
+function syncParamVisibility() {
+  const list = SCENES[curTab] && SCENES[curTab].params;
+  Object.keys(paramWraps).forEach(k => {
+    paramWraps[k].wrap.style.display = (!list || list.indexOf(k) >= 0) ? '' : 'none';
+  });
+}
+
+/* 开关自动播放的唯一入口：复选框与「拖滑块接管」都走这里，驱动时钟的记账
+   才不会漏。关掉时记下停摆起点，打开时把停摆时长补进偏移量。 */
+function setAutoPlayFor(id, on) {
+  on = !!on;
+  if (!!autoPlay[id] === on) return;            // 状态没变就别动时钟，避免重复记账
+  if (on) driveOff[id] += state.t - driveOffAt[id];
+  else driveOffAt[id] = state.t;
+  autoPlay[id] = on;
+  refreshDriveRow(id);
+}
+
+function setAutoPlay(on) { setAutoPlayFor(curTab, on); }
+
+function refreshDriveRow(id) {
+  const row = document.querySelector('.drive[data-tab="' + id + '"]');
+  if (!row) return;
+  row.querySelector('input').checked = !!autoPlay[id];
+  row.querySelectorAll('[data-mode]').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === driveMode[id]);
+  });
+}
+
+function buildDrive() {
+  const host = document.getElementById('driveHost');
+  Object.keys(SCENES).forEach(id => {
+    const d = SCENES[id].drive;
+    if (!d) return;
+    autoPlay[id] = true;
+    driveMode[id] = d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+    driveOff[id] = 0; driveOffAt[id] = 0;      // 先置零，页签才不会把 undefined 读进算式
+    const row = document.createElement('div');
+    row.className = 'drive';
+    row.dataset.tab = id;
+    row.innerHTML = '<label class="tg"><input type="checkbox" checked><span class="autoL"></span></label>' +
+      '<span class="dmode"><button class="btn" data-mode="pingpong"></button>' +
+      '<button class="btn" data-mode="loop"></button></span>';
+    row.querySelector('input').addEventListener('change', e => { setAutoPlayFor(id, e.target.checked); });
+    row.querySelectorAll('[data-mode]').forEach(b => {
+      b.addEventListener('click', () => { driveMode[id] = b.dataset.mode; refreshDriveRow(id); });
+    });
+    host.appendChild(row);
+    const relabel = () => {
+      row.querySelector('.autoL').textContent = t(UI.autoPlay);
+      row.querySelector('[data-mode="pingpong"]').textContent = t(UI.pingpong);
+      row.querySelector('[data-mode="loop"]').textContent = t(UI.loop);
+    };
+    RELABEL.push(relabel);
+    relabel();
+    refreshDriveRow(id);
+  });
+}
+
+/* ================= UI 生成（由 ①② 声明驱动） ================= */
+function buildParams() {
+  const host = document.getElementById('paramsHost');
+  PARAMS.forEach(p => {
+    const wrap = document.createElement('div');
+    wrap.className = 'ctl';
+    wrap.innerHTML = '<div class="top"><label></label><span class="val"></span></div>';
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
+    const val = wrap.querySelector('.val');
+    /* render 只回显滑杆当前刻度；upd 才是「用户动了滑杆」的语义（写 state）。
+       两者分开，语言切换就不会顺手把读数写回 state —— 见下方 relabel 注释。 */
+    const render = () => { val.textContent = p.fmt(parseFloat(input.value)); };
+    const upd = () => {
+      const raw = parseFloat(input.value);
+      state[p.key] = p.map ? p.map(raw) : raw;
+      render();
+    };
+    input.addEventListener('input', upd);
+    wrap.appendChild(input);
+    host.appendChild(wrap);
+    paramWraps[p.key] = { wrap, input, val, p };
+    /* 用户伸手拖被驱动的滑块 = 明确要接管，自动播放当场关闭，
+       否则下一帧就会被驱动值覆盖回去。这是与「暂停只冻结模拟」一致的语义。 */
+    input.addEventListener('input', () => {
+      const d = SCENES[curTab] && SCENES[curTab].drive;
+      if (d && d.key === p.key && autoPlay[curTab]) setAutoPlay(false);
+    });
+    upd();                       // 建面板时用默认刻度初始化 state
+    /* 语言切换只重排文案（fmt 里可能带 t()），绝不能顺手调 upd() 把滑杆刻度
+       写回 state：被 drive 驱动的参数，其 state 值比滑杆 step 精细得多，写回去
+       等于把它永久量化一次；暂停时 frame() 不再跑 applyDrive()，再也修不回来。 */
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); render(); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+function buildToggles() {
+  const host = document.getElementById('togglesHost');
+  Object.keys(SCENES).forEach(id => {
+    const grp = document.createElement('div');
+    grp.className = 'toggles';
+    grp.dataset.tab = id;
+    SCENES[id].toggles.forEach(tg => {
+      if (!(tg.key in state)) state[tg.key] = tg.checked;
+      const lab = document.createElement('label');
+      lab.className = 'tg';
+      lab.innerHTML = '<input type="checkbox" data-key="' + tg.key + '"' + (state[tg.key] ? ' checked' : '') + '>' +
+        '<i class="dot" style="--c:' + tg.color + '"></i><span class="tgl"></span>';
+      const cb = lab.querySelector('input');
+      cb.addEventListener('change', () => {
+        state[tg.key] = cb.checked;
+        document.querySelectorAll('input[data-key="' + tg.key + '"]').forEach(o => { o.checked = cb.checked; });
+      });
+      const relabel = () => { lab.querySelector('.tgl').innerHTML = t(tg.label); };
+      RELABEL.push(relabel);
+      relabel();
+      grp.appendChild(lab);
+    });
+    host.appendChild(grp);
+  });
+}
+
+function buildViews() {
+  const host = document.getElementById('viewsHost');
+  Object.keys(SCENES).forEach(id => {
+    const row = document.createElement('div');
+    row.className = 'views';
+    row.dataset.tab = id;
+    const lab = document.createElement('span');
+    lab.className = 'vlabel';
+    row.appendChild(lab);
+    const labRelabel = () => { lab.textContent = t(UI.views); };
+    RELABEL.push(labRelabel);
+    labRelabel();
+    Object.keys(SCENES[id].views).forEach(name => {
+      const b = document.createElement('button');
+      b.className = 'btn vbtn';
+      b.dataset.view = name;
+      b.addEventListener('click', () => applyView(name));
+      row.appendChild(b);
+      const relabel = () => { b.textContent = t(SCENES[id].views[name].label); };
+      RELABEL.push(relabel);
+      relabel();
+    });
+    host.appendChild(row);
+  });
+}
+
+function buildTabs() {
+  const nav = document.getElementById('tabsNav');
+  Object.keys(SCENES).forEach(id => {
+    const b = document.createElement('button');
+    b.className = 'tab';
+    b.dataset.tab = id;
+    b.addEventListener('click', () => switchTab(id));
+    nav.appendChild(b);
+    const relabel = () => { b.textContent = t(SCENES[id].label); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+/* ================= 视角与页签 ================= */
+/* 选择器必须限定在 .views 之内：.vbtn 只是个样式类，工具可能为了复用外观
+   把它挂到别处的按钮上（如文本预设）。不限定的话 closest('.views') 会返回
+   null，这里当场抛错，视角高亮从此再不更新。行为查询不能只认样式类。 */
+function refreshViewButtons() {
+  document.querySelectorAll('.views .vbtn').forEach(b => {
+    const row = b.closest('.views');
+    b.classList.toggle('active', row.dataset.tab === curTab && b.dataset.view === lastView[curTab]);
+  });
+}
+function viewDist(d) { return (W < 820 || W < H) ? d * 1.4 : d; }
+function applyView(name) {
+  const vw = SCENES[curTab].views[name];
+  if (!vw) return;
+  if (vw.onSelect) vw.onSelect();   /* 可选联动：如自动开启该视角对应的曲线开关 */
+  tween = {
+    from: { az: cam.az, el: cam.el, dist: cam.dist, tx: cam.tx, ty: cam.ty, tz: cam.tz },
+    to:   { az: vw.az, el: vw.el, dist: viewDist(vw.dist), tx: vw.tx || 0, ty: vw.ty || 0, tz: vw.tz || 0 },
+    t0: performance.now(),
+    dur: REDUCED ? 1 : 750
+  };
+  lastView[curTab] = name;
+  refreshViewButtons();
+}
+
+const brandDesc = document.getElementById('brandDesc');
+const tipsEl = document.getElementById('tips');
+function switchTab(id) {
+  if (id === curTab) return;
+  curTab = id;
+  tween = null;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+  document.querySelectorAll('.toggles[data-tab], .views[data-tab], .drive[data-tab]').forEach(el => {
+    el.style.display = el.dataset.tab === id ? '' : 'none';
+  });
+  cam = cams[id];
+  brandDesc.textContent = t(SCENES[id].brand);
+  tipsEl.textContent = t(SCENES[id].tips);
+  syncParamVisibility();
+  refreshViewButtons();
+  updateReadout();
+}
+
+/* ================= 播放 / 重置 / 折叠 ================= */
+const btnPlay = document.getElementById('btnPlay');
+function togglePlay() {
+  state.running = !state.running;
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+}
+btnPlay.addEventListener('click', togglePlay);
+document.getElementById('btnReset').addEventListener('click', resetSim);
+
+const panel = document.getElementById('panel');
+const btnFold = document.getElementById('btnFold');
+btnFold.addEventListener('click', () => {
+  const c = panel.classList.toggle('collapsed');
+  btnFold.textContent = c ? '+' : '−';
+});
+if (window.innerWidth < 760) {
+  panel.classList.add('collapsed');
+  btnFold.textContent = '+';
+}
+
+/* ================= 语言切换 ================= */
+function applyLang() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.title = t(TOOL.title);
+  document.querySelector('.brand h1').textContent = t(TOOL.h1);
+  document.getElementById('panelTitle').textContent = t(UI.panelTitle);
+  document.querySelector('.hint').textContent = t(UI.hint);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+  document.getElementById('btnReset').textContent = t(UI.reset);
+  RELABEL.forEach(f => f());
+  brandDesc.textContent = t(SCENES[curTab].brand);
+  tipsEl.textContent = t(SCENES[curTab].tips);
+  updateReadout();
+}
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('lang', l);
+    history.replaceState(null, '', u);
+  } catch (e) {}
+  applyLang();
+}
+document.getElementById('btnLang').addEventListener('click', () => setLang(LANG === 'zh' ? 'en' : 'zh'));
+document.getElementById('verBadge').textContent = 'v' + VERSION;
+
+/* ================= 交互：旋转 / 平移 / 缩放 ================= */
+const pointers = new Map();
+let pinch = null;
+
+function pan(dx, dy) {
+  const C = makeCam();
+  const s = cam.dist / FOCAL;
+  cam.tx = clamp(cam.tx - C.r[0]*dx*s + C.u[0]*dy*s, -6, 6);
+  cam.ty = clamp(cam.ty - C.r[1]*dx*s + C.u[1]*dy*s, -5, 5);
+  cam.tz = clamp(cam.tz - C.r[2]*dx*s + C.u[2]*dy*s, -3, 11);
+}
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, btn: e.button });
+  tween = null;
+  lastView[curTab] = null;
+  refreshViewButtons();
+  if (pointers.size === 2) {
+    const vs = Array.from(pointers.values());
+    pinch = {
+      gap: Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y),
+      cx: (vs[0].x + vs[1].x) / 2,
+      cy: (vs[0].y + vs[1].y) / 2
+    };
+  }
+  canvas.classList.add('dragging');
+});
+
+canvas.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  p.x = e.clientX;
+  p.y = e.clientY;
+  if (pointers.size === 1) {
+    const panMode = e.shiftKey || (e.buttons & 2) || p.btn === 2 || p.btn === 1;
+    if (panMode) {
+      pan(dx, dy);
+    } else {
+      cam.az -= dx * 0.0055;
+      cam.el = clamp(cam.el + dy * 0.0055, -1.45, 1.53);
+    }
+  } else if (pointers.size === 2 && pinch) {
+    const vs = Array.from(pointers.values());
+    const gap = Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y);
+    const cx = (vs[0].x + vs[1].x) / 2, cy = (vs[0].y + vs[1].y) / 2;
+    if (gap > 1) cam.dist = clamp(cam.dist * pinch.gap / gap, 4.5, 60);
+    pan(cx - pinch.cx, cy - pinch.cy);
+    pinch = { gap: gap, cx: cx, cy: cy };
+  }
+});
+
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+  if (!pointers.size) canvas.classList.remove('dragging');
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  tween = null;
+  cam.dist = clamp(cam.dist * Math.exp(e.deltaY * 0.0012), 4.5, 60);
+}, { passive: false });
+
+canvas.addEventListener('dblclick', () => applyView(Object.keys(SCENES[curTab].views)[0]));
+
+window.addEventListener('keydown', e => {
+  const tg = e.target.tagName;
+  if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || tg === 'BUTTON') return;
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'r' || e.key === 'R') resetSim();
+  else if (e.key === 't' || e.key === 'T') {
+    const keys = Object.keys(SCENES);
+    switchTab(keys[(keys.indexOf(curTab) + 1) % keys.length]);
+  }
+  else if (e.key >= '1' && e.key <= '9') {
+    const names = Object.keys(SCENES[curTab].views);
+    const i = +e.key - 1;
+    if (i < names.length) applyView(names[i]);
+  }
+});
+
+/* ================= 启动 ================= */
+resize();
+buildTabs();
+buildParams();
+buildDrive();
+buildToggles();
+buildViews();
+Object.keys(SCENES).forEach(id => {
+  const first = Object.keys(SCENES[id].views)[0];
+  const v = SCENES[id].views[first];
+  cams[id] = { az: v.az, el: v.el, dist: viewDist(v.dist), tx: v.tx || 0, ty: v.ty || 0, tz: v.tz || 0 };
+  lastView[id] = first;
+});
+switchTab(Object.keys(SCENES)[0]);
+applyLang();
+resetSim();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

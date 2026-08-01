@@ -79,6 +79,8 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 
 | [混沌双摆 · 确定性的不可预测 · Chaotic Double Pendulum](outputs/chaos-double-pendulum-3d.html) | Twin pendulums differing in the sixth decimal, the parallel family of log δ(t) lines that prices one more digit of precision at ln10/λ seconds of forecast, stretching and folding as the mechanism of chaos, and KAM tori breaking on a Poincaré section |
 
+| [三体问题 · 一条四维曲线的三个影子 · The Three-Body Problem](outputs/three-body-problem-3d.html) | The real ℝ³ motion plus three time-braids of the same (x, y, z, t) curve, calibrated on a tilted figure-8 whose shadows lie by a measurable amount; the choreography as a knife-edge solution, and close encounters as the amplifier behind every jump in the separation curve |
+
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
 ## Usage
