@@ -491,8 +491,10 @@ function noticeLines(P){
 const PARAMS = [
   { key: 'omega', label: { zh: '编码速度 <i>v</i>', en: 'Encoding speed <i>v</i>' }, min: 0.2, max: 8, step: 0.1, value: 1.5,
     fmt: v => fmt(v, 1) + t({ zh: ' 步/s', en: ' steps/s' }) },
+  /* capN 被「词频统计 / 建树 / 逐字编码」三页的 drive 驱动：map 取整后 state 存的
+     就是整数刻度本身，故 invMap 取恒等 —— 但必须显式写出来（规范 §8） */
   { key: 'capN',  label: { zh: '字符表上限 <i>N</i>', en: 'Alphabet cap <i>N</i>' },  min: 4,   max: 16, step: 1, value: 14,
-    map: v => Math.round(v), fmt: v => Math.round(v) + t({ zh: ' 种', en: ' symbols' }) },
+    map: v => Math.round(v), invMap: v => v, fmt: v => Math.round(v) + t({ zh: ' 种', en: ' symbols' }) },
   /* symSel 被「编码表」页的 drive 驱动：map 取整后 state 存的就是整数刻度本身，
      故 invMap 是恒等映射 —— 但必须显式写出来，否则引擎会告警并按无 invMap 处理（规范 §8） */
   { key: 'symSel', label: { zh: '选中字符 <i>i</i>', en: 'Selected symbol <i>i</i>' }, min: 0, max: 15, step: 1, value: 0,
@@ -516,6 +518,22 @@ const SCENES = {
   freq: {
     label: { zh: '词频统计', en: 'Frequencies' },
     params: ['omega', 'capN'],
+    /* 本页确为静止页签：步进钟数完文本里的每一个字符就停住，读数区自己写着
+       「完成（按 R 重放）· 已暂停」，之后频次柱与文本流逐位不变。
+       两根滑杆里 ω 是钟本身，能拖的只有字符表上限 N —— 而它恰好是这一页立论的边界：
+       brand 说「频率是霍夫曼编码唯一的输入」，N 决定了哪些字符还算得上「一个字符」，
+       被挤出去的那些连柱子都不再有（读数区会明说丢掉了几种、覆盖率剩多少）。
+       值域 4 … distinct：上界写成 getter 跟着文本框走。字符表的真实种类数由文本决定，
+       P.distinct 是**未经截顶**的那个数（buildPipeline 先统计、后按 cap 截断），
+       所以这个 getter 不会与被驱动的 capN 互相纠缠。若钉死成滑杆量程 16，
+       默认示例文本只有 7 种字符，扫掠有一多半时间落在「N ≥ 7，什么也不裁」的平段上，
+       画面停着不动——那等于把静止页签换个地方留着。
+       退化情形：文本只有三四种字符时 to 被夹回 4 = from，驱动值恒定、画面静止但不报错，
+       正确对应「字符本来就没几种，无从裁起」。
+       取整后每档各占一段平台，是有意的阶梯驱动：柱子要停住才数得清。
+       N 从上界跳回 4 整排柱子会瞬间少掉一半 ⇒ linear（往返）；12 s 一个来回。
+       capN 被用作缓存键并传给 buildPipeline，那里已 clamp(Math.round(...), 2, 16)。 */
+    drive: { key: 'capN', from: 4, get to() { return clamp(PIPE().distinct, 4, 16); }, period: 12, kind: 'linear' },
     brand: { zh: '编码器读不懂文本的意思，它只数数：每个字符出现了多少次。频率是霍夫曼编码唯一的输入。字符沿 t 轴流走，频次柱在原地长高——拖拽画布旋转观察。',
              en: 'The encoder never reads meaning — it only counts how often each character occurs. Frequency is the sole input to Huffman coding. Characters stream away along the t axis while the count bars grow in place — drag the canvas to rotate.' },
     tips: { zh: '提示：按 2 键正视 字符·次数——语义、语序、内容全部消失了，只剩一排高低不同的柱子，霍夫曼从这一刻起只认这排柱子。中途调快速度 v，已经流出去的字符仍保持它们当时的真实间距。',
@@ -617,6 +635,12 @@ const SCENES = {
   build: {
     label: { zh: '建树', en: 'Build the tree' },
     params: ['omega', 'capN'],
+    /* 与「词频统计」页同一诊断（m−1 步合并完就永久定格）与同一个自变量：
+       本页可拖的滑杆只有 N。它一动，参与合并的叶子换一批，权重排序跟着换，
+       整棵树重新长一遍——tips 让人看的「越罕见的字符沉得越深」因此可以反复对照，
+       而不是只在开局那几秒出现一次。
+       值域、getter 上界、kind、周期与取整说明均与「词频统计」页同口径，见那一页。 */
+    drive: { key: 'capN', from: 4, get to() { return clamp(PIPE().distinct, 4, 16); }, period: 12, kind: 'linear' },
     brand: { zh: '每一拍取出权重最小的两个节点，合并成一个新节点，权重相加——重复 m−1 次，树就长成了。这里的 z 轴是合并步数，不是时间。',
              en: 'Each tick takes the two lightest nodes and merges them into a new one whose weight is their sum — repeat m−1 times and the tree is grown. Here the z axis is the merge step, not time.' },
     tips: { zh: '提示：按 2 键侧视 层级·步——越早被合并的（也就是越罕见的）字符，头顶叠的祖先越多，最终在树里沉得越深，码字也就越长。面板逐条列出了每一步到底合并了谁和谁。',
@@ -867,6 +891,11 @@ const SCENES = {
   encode: {
     label: { zh: '逐字编码', en: 'Encode & decode' },
     params: ['omega', 'capN'],
+    /* 同上：码流跑完整段文本后永久定格。自变量仍是 N，且这一页的效果最直白——
+       N 一收紧，码表变短、码字变短，紫色 Huffman 码流与下方定长基线的长度差
+       整条重画一遍，「Huffman 总 47 bit vs 定长 54 bit」那组读数随之改写。
+       值域、getter 上界、kind、周期与取整说明均与「词频统计」页同口径，见那一页。 */
+    drive: { key: 'capN', from: 4, get to() { return clamp(PIPE().distinct, 4, 16); }, period: 12, kind: 'linear' },
     brand: { zh: '按码表把文本逐字换成比特，码流像示波器上的方波一样流出。下面那条定长基线用同样的方式编码同一段文本——它越跑越长。',
              en: 'The code table turns the text into bits one character at a time, and the stream unrolls like a square wave on an oscilloscope. Below it, a fixed-length baseline encodes the same text — and keeps running longer.' },
     tips: { zh: '提示：按 2 键侧视 码流——紫色方波里每个字符占据的宽度就是它的代价，高频字符只占窄窄一格；关掉「码字分组」，所有分隔标记消失，绿色解码行依然一字不差——前缀码不需要任何分隔符。',

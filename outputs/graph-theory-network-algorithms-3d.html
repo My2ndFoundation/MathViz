@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.1">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.0.0">
 <title>图论与网络算法 · Graph Theory &amp; Network Algorithms</title>
 <!-- ============================================================
@@ -17,6 +17,7 @@
   （BFS 的层 / Dijkstra 的最短距离 / Kruskal 的边权），不是人为时间。
 
   版本记录（changelog，新→旧）：
+    1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块；
                        去除「图预设」滑块标签里遗留的页签后缀
     1.0.0  2026-07-30  首个版本：路径与连通 / BFS / Dijkstra / Kruskal 四场景（含双语）
@@ -357,10 +358,13 @@ const PRESET_NAMES = [
 const PARAMS = [
   { key: 'omega',     label: { zh: '步速 <i>v</i>',        en: 'Step rate <i>v</i>' },        min: 0.1, max: 2.5, step: 0.05, value: 0.55,
     fmt: v => fmt(v) + t({ zh: ' 步/s', en: ' steps/s' }) },
+  /* startNode 被 BFS / Dijkstra 两页的 drive 驱动：map 取整后 state 存的就是整数刻度本身，
+     故 invMap 是恒等映射 —— 但必须显式写出来，否则引擎会告警并按无 invMap 处理（规范 §8） */
   { key: 'startNode', label: { zh: '起点 <i>s</i>',        en: 'Start node <i>s</i>' },       min: 0,   max: 8,   step: 1,    value: 0,
-    fmt: v => t({ zh: '节点 ', en: 'node ' }) + NODE_NAMES[Math.round(v)], map: v => Math.round(v) },
+    fmt: v => t({ zh: '节点 ', en: 'node ' }) + NODE_NAMES[clamp(Math.round(v), 0, 8)], map: v => Math.round(v), invMap: v => v },
+  /* wvar 被「最小生成树」页的 drive 驱动，同样按 §8 补恒等 invMap */
   { key: 'wvar',      label: { zh: '权重扰动 <i>k</i>',    en: 'Weight variation <i>k</i>' }, min: 0,   max: 3,   step: 1,    value: 0,
-    fmt: v => Math.round(v) === 0 ? t({ zh: '0（基础权重）', en: '0 (base weights)' }) : '+' + Math.round(v), map: v => Math.round(v) },
+    fmt: v => Math.round(v) === 0 ? t({ zh: '0（基础权重）', en: '0 (base weights)' }) : '+' + Math.round(v), map: v => Math.round(v), invMap: v => v },
   { key: 'preset',    label: { zh: '图预设',      en: 'Graph preset' }, min: 0, max: 2,  step: 1,    value: 0,
     fmt: v => t(PRESET_NAMES[Math.round(v)]), map: v => Math.round(v) }
 ];
@@ -371,15 +375,24 @@ const stepF = () => state.theta;
 const di = x => isFinite(x) ? String(x) : '∞';
 const nodePt = (i, z) => [NODES[i][0], NODES[i][1], z || 0];
 
+/* 起点与权重扰动的唯一读法。这两根滑杆被 BFS / Dijkstra / 最小生成树三页的 drive 驱动，
+   而 drive 写进 state 的是**连续值**（两个整数刻度之间的任意实数），这里它们又同时被当作
+   数组下标和缓存键使用，所以必须在场景消费点取整并夹取（§硬约束，且不改引擎）：
+   · 不取整：computeBFS(3.7) 会去读 NODES[3.7] = undefined，draw() 抛 TypeError，
+     frame() 没有 try/catch，渲染循环就此永久死掉；
+   · 不取整的缓存键还会让 traces() 每帧重算三套图算法（浮点键永远不命中）。 */
+const sNode = () => clamp(Math.round(state.startNode || 0), 0, NODES.length - 1);
+const wVar  = () => clamp(Math.round(state.wvar || 0), 0, 3);
+
 /* 算法结果缓存：同一 (起点, 扰动) 只算一次，重置可复现 */
 let _tr = { key: null };
 function traces(){
-  const key = state.startNode + '|' + state.wvar;
+  const key = sNode() + '|' + wVar();
   if (_tr.key !== key){
-    const w = edgeWeights(state.wvar);
+    const w = edgeWeights(wVar());
     _tr = { key: key, w: w,
-      bfs: computeBFS(state.startNode),
-      dij: computeDijkstra(state.startNode, w),
+      bfs: computeBFS(sNode()),
+      dij: computeDijkstra(sNode(), w),
       mst: computeKruskal(w) };
   }
   return _tr;
@@ -554,6 +567,18 @@ const SCENES = {
   bfs: {
     label: { zh: '广度优先 BFS', en: 'BFS' },
     params: ['startNode', 'omega'],
+    /* 本页确为静止页签：步进钟 ⌊ωt⌋ 只用四步就把九个节点全部提升到各自的层高，
+       之后 S = min(stepF(), maxLayer) 被钉在 maxLayer 上，读数区自己写着
+       「完成（按 R 重放）」——一次性演进后永久定格。
+       tips 的最后一句就是自变量：「改变起点 s，层级立即重排」。本页两根滑杆里
+       ω 是钟本身，能拖的只有起点 s，而它恰好是这一页真正要人体会的东西——
+       同一张图换个源点，谁离得近谁离得远整个换一套说法。
+       值域取满 [0, 8]（九个节点都是合法源点，无退化端）。取整后每个节点各占一段平台，
+       是有意的阶梯驱动：层级要停住才看得清，连续插值反而只会看到一团抖动。
+       从节点 I 跳回节点 A 整幅层级图会瞬间重排 ⇒ linear（往返）。
+       周期 18 s：来回各扫九个节点，每个节点约 1 s，够把新的层级读一遍。
+       startNode 被用作数组下标与缓存键，已在 sNode() 里 round + clamp。 */
+    drive: { key: 'startNode', from: 0, to: 8, period: 18, kind: 'linear' },
     brand: { zh: 'BFS 从起点一层一层向外扩张：每一步把「已知区域」的边界外推一格，先到达必最近（按边数）。z 轴就是距离层级，一层一格。',
              en: 'BFS grows outward from the source one layer per step: each step pushes the frontier of the known region one hop further, so reached-first means fewest edges. The z-axis is the distance layer, one notch per hop.' },
     tips: { zh: '顿悟：按 2 侧视——搜索波前是一层层等高的台阶，BFS 树的每条边都恰好跨越相邻两层；按 3 正视，层级塌缩回原图。改变起点 s，层级立即重排。',
@@ -606,14 +631,14 @@ const SCENES = {
           line3(C, nodePt(i, 0), nodePt(i, zi), { width: 1.5, dash: [7, 7], color: 'rgba(251,191,36,0.3)' });
         }
         const isFr = state.showFront && bfs.layer[i] === Lf;
-        if (i === state.startNode){
+        if (i === sNode()){
           drawNodeDot(C, i, zi, 11, 'rgba(186,240,255,0.9)');
         } else {
           drawNodeDot(C, i, zi, isFr ? 9.5 : 7, isFr ? 'rgba(167,139,250,0.9)' : 'rgba(45,212,234,0.85)');
         }
         nodeLabel(C, i, zi);
       }
-      label3(C, [2.5, -1.75, 0], t({ zh: '起点 ', en: 'start ' }) + NODE_NAMES[state.startNode],
+      label3(C, [2.5, -1.75, 0], t({ zh: '起点 ', en: 'start ' }) + NODE_NAMES[sNode()],
         { size: 11, color: 'rgba(186,240,255,0.85)', align: 'center' });
     },
     readout(){
@@ -635,6 +660,12 @@ const SCENES = {
   dij: {
     label: { zh: 'Dijkstra 最短路', en: 'Dijkstra' },
     params: ['startNode', 'wvar', 'omega'],
+    /* 与 BFS 页同一诊断：九步敲定完九个节点后永久定格（读数区「完成（按 R 重放）」）。
+       两根可拖的滑杆里选起点 s 而不是权重扰动 k：tips 说「每个节点的高度字面上就是
+       它到起点的最短距离」，高度这件事只有换源点才会整体改写；k 只是把某几条边的坡度
+       调一调，最短路树多半原样不动。k 因此留给用户，让他自己去试「负权会怎样」那个反例。
+       值域、kind、周期与取整夹取均与 BFS 页同口径，见那一页的说明。 */
+    drive: { key: 'startNode', from: 0, to: 8, period: 18, kind: 'linear' },
     brand: { zh: 'Dijkstra 每一步敲定一个「当前最近」的未定节点，再松弛它的邻边。不变量：敲定过的距离绝不再变——这正是它要求边权非负的原因。节点的高度就是最短距离。',
              en: 'Each Dijkstra step settles the closest unsettled node, then relaxes its edges. The invariant — a settled distance never changes again — is exactly why edge weights must be non-negative. A node’s height is its shortest distance.' },
     tips: { zh: '顿悟：按 2 侧视——每个节点的高度字面上就是它到起点的最短距离，最短路树成了一张缆车图；玫红树边的坡长就是边权。若允许负权边，「敲定不悔」的不变量就会被推翻。',
@@ -671,7 +702,7 @@ const SCENES = {
       for (let i = 0; i < EDGES.length; i++) drawEdge3(C, i, 0, 0, { width: 1.2, color: 'rgba(159,176,200,0.28)' });
       if (state.showDist) for (let i = 0; i < EDGES.length; i++) weightLabel(C, i, w[i], 0);
       if (state.showDist) drawZRuler(C, -2.75, -1.75, maxd * zs, maxd > 12 ? 5 : 2, zs, { zh: '距离', en: 'dist' });
-      const snapPrev = settledN > 0 ? dij.steps[settledN - 1].snap : dij.dist.map((d, i) => i === state.startNode ? 0 : Infinity);
+      const snapPrev = settledN > 0 ? dij.steps[settledN - 1].snap : dij.dist.map((d, i) => i === sNode() ? 0 : Infinity);
       /* 最短路树（玫红缆车图） */
       if (state.showSPT){
         for (let k = 0; k < Math.min(settledN + 1, nStep); k++){
@@ -700,10 +731,10 @@ const SCENES = {
       }
       /* 完成后：到最远节点的路径（橙） */
       if (state.showFar && state.theta >= nStep){
-        let far = state.startNode;
+        let far = sNode();
         dij.dist.forEach((d, i) => { if (isFinite(d) && d > dij.dist[far]) far = i; });
         const walk = [];
-        for (let u = far; u >= 0; u = dij.parent[u]){ walk.push(u); if (u === state.startNode) break; }
+        for (let u = far; u >= 0; u = dij.parent[u]){ walk.push(u); if (u === sNode()) break; }
         walk.reverse();
         const pts = walk.map(u => nodePt(u, dij.dist[u] * zs));
         strokePoly(C, pts, { width: 6.5, color: 'rgba(251,146,60,0.16)' });
@@ -722,7 +753,7 @@ const SCENES = {
         }
         if (state.showDist && zi > 0.02) line3(C, nodePt(i, 0), nodePt(i, zi), { width: 1.5, dash: [7, 7], color: 'rgba(251,191,36,0.3)' });
         const rising = settledN < nStep && dij.steps[settledN].u === i;
-        if (i === state.startNode) drawNodeDot(C, i, zi, 11, 'rgba(186,240,255,0.9)');
+        if (i === sNode()) drawNodeDot(C, i, zi, 11, 'rgba(186,240,255,0.9)');
         else drawNodeDot(C, i, zi, rising ? 9.5 : 7.5, rising ? 'rgba(251,113,133,0.9)' : 'rgba(52,211,153,0.88)');
         nodeLabel(C, i, zi);
         if (state.showDist) label3(C, nodePt(i, zi), 'd=' + dij.dist[i], { size: 10, color: '#fbbf24', align: 'center', dy: 14 });
@@ -739,10 +770,10 @@ const SCENES = {
         cur = '<div class="tanC">' + t({ zh: '本步敲定：', en: 'settling: ' }) + '<b>' + NODE_NAMES[st.u] + '</b> (d = ' + st.du + ')</div>' +
               '<div class="cosC">' + t({ zh: '松弛：', en: 'relax: ' }) + '<b>' + (imp.join(' · ') || t({ zh: '无改进', en: 'no improvement' })) + '</b></div>';
       } else {
-        let far = state.startNode;
+        let far = sNode();
         dij.dist.forEach((d, i) => { if (isFinite(d) && d > dij.dist[far]) far = i; });
         const walk = [];
-        for (let u = far; u >= 0; u = dij.parent[u]){ walk.push(NODE_NAMES[u]); if (u === state.startNode) break; }
+        for (let u = far; u >= 0; u = dij.parent[u]){ walk.push(NODE_NAMES[u]); if (u === sNode()) break; }
         walk.reverse();
         cur = '<div class="tanC">' + t({ zh: '已敲定', en: 'settled' }) + ' <b>9</b> / 9</div>' +
               '<div class="cotC">' + t({ zh: '最远 ', en: 'farthest ' }) + NODE_NAMES[far] + t({ zh: '：', en: ': ' }) + 'd = <b>' + dij.dist[far] + '</b> · ' + walk.join('–') + '</div>';
@@ -757,6 +788,16 @@ const SCENES = {
   mst: {
     label: { zh: '最小生成树', en: 'MST (Kruskal)' },
     params: ['wvar', 'omega'],
+    /* 同上：十步检完十条边后永久定格。本页没有起点可言（Kruskal 不需要源点），
+       两根滑杆里 ω 是钟，真正的自变量只剩权重扰动 k —— 而它正是这一页的要害：
+       tips 让人看「每条边悬挂在 z = 权重的高度上，算法像涨潮一样从低到高收边」，
+       k 一动，整排边在权重阶梯上重新排队，谁先被收、谁因成环被弹回（玫红 ×）跟着换人，
+       连总权 Σw 都变——「最小」这件事是相对一组具体权重而言的，这一点只有动起来才看得见。
+       值域取满 [0, 3]：k = 0 是「基础权重」这个必要的对照基准，不是退化端。
+       取整后四档各占一段平台（阶梯驱动，理由同 BFS 页）。
+       k = 3 跳回 0 整棵树会瞬间换形 ⇒ linear（往返）；四档来回，取 12 s，每档约 1.5 s。
+       wvar 被用作缓存键，已在 wVar() 里 round + clamp。 */
+    drive: { key: 'wvar', from: 0, to: 3, period: 12, kind: 'linear' },
     brand: { zh: 'Kruskal 按权重从小到大逐条检边：不成环就收入树中，成环就丢弃。「连接所有节点」与「总权最小」是两个约束，恰好 n−1 条边同时满足它们。',
              en: 'Kruskal examines edges from lightest to heaviest: keep an edge unless it closes a cycle. "Connect every node" and "minimize total weight" are two separate constraints — exactly n−1 edges satisfy both.' },
     tips: { zh: '顿悟：按 3 侧视——每条边悬挂在 z = 权重的高度上，算法像涨潮一样从低到高收边，成环的边被弹回（玫红 ×）；青色虚线圈是并查集的分量，收边即合并。按 2 正视看最终的最小生成树。',

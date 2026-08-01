@@ -233,7 +233,9 @@ const PARAMS = [
   { key: 'm2',    label: { zh: '杆 · 质量 <i>m₂</i>',      en: 'Rod · mass <i>m₂</i>' },          min: 0.2, max: 3,    step: 0.05, value: 1.6,  fmt: v => fmt(v) },
   { key: 'x2',    label: { zh: '杆 · 位置 <i>x₂</i>',      en: 'Rod · position <i>x₂</i>' },      min: 0.2, max: 2,    step: 0.05, value: 1.1,  fmt: v => fmt(v) },
   { key: 'm3',    label: { zh: '质心 · 附加质量 <i>m₃</i>', en: 'CoM · extra mass <i>m₃</i>' },    min: 0,   max: 2.5,  step: 0.05, value: 0,    fmt: v => fmt(v) },
-  { key: 'tilt',  label: { zh: '倾倒 · 倾角 <i>β</i>',     en: 'Toppling · tilt <i>β</i>' },      min: 0,   max: 40,   step: 0.5,  value: 10,   fmt: v => fmt(v, 0) + '°', map: v => v * Math.PI / 180 },
+  /* tilt 被「倾倒」页的 drive 驱动：滑杆刻度是度、state 存的是弧度，
+     §8 硬约束要求 map 必须配 invMap，否则滑杆回显不出被驱动的角度 */
+  { key: 'tilt',  label: { zh: '倾倒 · 倾角 <i>β</i>',     en: 'Toppling · tilt <i>β</i>' },      min: 0,   max: 40,   step: 0.5,  value: 10,   fmt: v => fmt(v, 0) + '°', map: v => v * Math.PI / 180, invMap: v => v * 180 / Math.PI },
   { key: 'baseW', label: { zh: '倾倒 · 底宽 <i>b</i>',     en: 'Toppling · base <i>b</i>' },      min: 0.4, max: 1.6,  step: 0.02, value: 0.9,  fmt: v => fmt(v) }
 ];
 
@@ -418,6 +420,15 @@ const SCENES = {
   equil: {
     label: { zh: '平衡', en: 'Equilibrium' },
     params: ['m1', 'x1', 'm2', 'x2'],
+    /* 本页确为静止页签：被演示量 M↺ / M↻ / R 三个数在 30 s 内十进制展开逐位不变
+       （恒为 1.44 / 1.76 / 2.80），画面上那点残余差异是 dt 抖动的亚像素重采样，不是内容。
+       tips 直接点名了自变量：「调 x₂ 或 m₂，让玫红（逆时针）与紫（顺时针）两条力矩曲线完全重合」。
+       两者里选 x₂：力臂在画面上是看得见的一段长度，载荷沿杆滑过去时两条力矩曲线交叉的那一刻
+       就是 Στ = 0，而调 m₂ 只改变一个数值标注。
+       满量程 [0.2, 2]，两端都不退化：默认 m₁g|x₁| = 1.44、m₂g = 1.6，平衡点落在 x₂ = 0.9，
+       正好在量程内侧，一个来回穿过 Στ = 0 两次——顿悟点每 8 s 出现两回。
+       x₂ = 2 直接跳回 0.2 载荷会沿杆瞬移 ⇒ linear（往返）；构型简单，取房规默认 8 s。 */
+    drive: { key: 'x2', from: 0.2, to: 2, period: 8, kind: 'linear' },
     brand: { zh: '杆上两个载荷绕支点各产生一个力矩：逆时针 m₁g|x₁| 与顺时针 m₂gx₂。刚体平衡要求合力矩为零、合力也为零——支点反力 R 始终托住全部重量。移动滑杆寻找平衡。',
              en: 'Two loads on a rod each take a moment about the pivot: anticlockwise m₁g|x₁| and clockwise m₂gx₂. Rigid-body equilibrium demands zero net moment and zero net force — the pivot reaction R always carries the whole weight. Move the sliders to find balance.' },
     tips: { zh: '顿悟点：调 x₂ 或 m₂，让玫红（逆时针）与紫（顺时针）两条力矩曲线完全重合——按 3 侧视 τ·t，重合的那一刻杆归于水平，这就是 Στ = 0；而 R = (m₁+m₂)g 只由合力条件决定，与力矩无关。',
@@ -613,6 +624,15 @@ const SCENES = {
   topple: {
     label: { zh: '倾倒', en: 'Toppling' },
     params: ['tilt', 'baseW'],
+    /* 同「平衡」页：β、βc、margin 三个数 30 s 内逐位不变，是静止页签。
+       tips 就是一句驱动说明：「缓缓增大 β——紫色重力作用线扫向琥珀色支点棱边，恰好压线时
+       β = βc = atan(b/h)」。自变量是倾角 β，另一根滑杆 b 的作用是移动这个临界值。
+       满量程 [0°, 40°]，两端都不退化：默认 b = 0.90、h = 1.20 ⇒ βc = 36.9°，落在量程内侧，
+       所以一趟扫掠必然穿过临界角——稳定裕度曲线过零、指示器翻面，正是这一页要人看见的那一刻。
+       from/to 写成弧度：tilt 带 map（度 → 弧度），而 drive 写的是 state 值，不再过 map。
+       同一条 §8 硬约束要求补 invMap，见 PARAMS 里 tilt 那一行。
+       40° 直接跳回 0° 方块会瞬间弹正 ⇒ linear（往返）；tips 说「缓缓」，取 10 s 而非默认 8 s。 */
+    drive: { key: 'tilt', from: 0, to: 40 * Math.PI / 180, period: 10, kind: 'linear' },
     brand: { zh: '方块是否倾倒只看一件事：质心的重力作用线是否落在支撑区域内。落在里面，重力矩把它压回去；越过支点棱边，同一个重力就变成倾倒力矩。临界角满足 tan βc = b/h。',
              en: 'Whether the block topples comes down to one thing: does the line of action of gravity through the centre of mass fall inside the base of support? Inside, gravity restores the block; past the pivot edge, the same weight becomes a toppling moment. The critical angle satisfies tan βc = b/h.' },
     tips: { zh: '顿悟点：按 2 正视 x·y，缓缓增大 β——紫色重力作用线扫向琥珀色支点棱边，恰好压线时 β = βc = atan(b/h)，玫红稳定裕度曲线同时穿过零。加宽底座 b，临界角随之增大。',

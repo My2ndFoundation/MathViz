@@ -286,9 +286,17 @@ const mxN = x => x * 0.9;
 
 /* —— 轨道（orbit = 数列本身；同一只步进时钟 n = ⌊ωt⌋ 驱动两台机器） —— */
 let orbF = [0], orbN = [0];
+/* 只追加语义下已真实迭代到第几步。原先直接拿 orbF.length − 1 当步号，
+   蛛网 / 三维序列两页被驱动后 orbF 会被 replayOrbF() 整条裁短，长度不再等于步号，
+   append 循环的条件就永远成立、每帧补几百步。改用独立计数器，两种语义共用同一只步进钟。 */
+let famN = 0;
+function famSeed() {
+  return famIdx() === 0 ? clamp(state.x0, -2, 2) : clamp(state.x0, 0.02, 0.98);
+}
 function reseed() {
-  orbF = [famIdx() === 0 ? clamp(state.x0, -2, 2) : clamp(state.x0, 0.02, 0.98)];
+  orbF = [famSeed()];
   orbN = [clamp(state.x0, -2, 2)];
+  famN = 0;
 }
 function stepVal(map, x) {
   if (!isFinite(x) || Math.abs(x) > DIVERGE) return Infinity;
@@ -316,16 +324,44 @@ const NEWTON_RUN = 4;
 /* 用引擎的只读访问器判定，不要手写 `autoPlay[...] && SCENES[...].drive`：
    同一个判据在仓库里出现两种写法，正是这个引擎被复制成 51 份后最容易漂移的地方。
    driveInfo() 已经含「当前页签有 drive」+「用户没关掉自动播放」两个条件。 */
-function newtonDriven() {
+/* 三个页签都以 x₀ 为驱动量，而 driveInfo() 只报「当前页签」的驱动，不报是哪一页——
+   所以还要用 curTab 区分。否则在蛛网页开着自动播放，会连带把牛顿页那条只追加的
+   真实轨道也重播掉（反之亦然）。 */
+function drivenOn(id) {
   const d = driveInfo();
-  return !!d && d.key === 'x0';
+  return curTab === id && !!d && d.key === 'x0';
 }
+function newtonDriven() { return drivenOn('newton'); }
+/* 蛛网 / 三维序列两页共用 orbF，故共用同一个判别与同一个重播 */
+function famDriven() { return drivenOn('cobweb') || drivenOn('lift'); }
 function replayOrbN() {
   /* 用未截顶的 θ 数步：ORBIT_MAX 是给 orbF 数组封顶的，而重播出来的轨道
      长度恒 ≤ NEWTON_RUN + 1，不受那条上限约束，也就不会在 t 很大时卡住不动。 */
   const steps = 1 + (Math.floor(Math.max(0, state.theta)) % NEWTON_RUN);
   orbN = [clamp(state.x0, -2, 2)];
   for (let i = 0; i < steps; i++) orbN.push(stepVal(nMap, orbN[i]));
+}
+
+/* —— 蛛网 / 三维序列两页的「重新播种」（仅在 x₀ 被驱动时生效） ——
+   与牛顿页同一口径，理由也同一条：这两页也是「一次性演进后永久定格」。默认
+   f(x) = 0.6x + 0.5 大约十步就把轨道吸到不动点 1.25 上，之后 xₙ₊₁ = xₙ 逐位相同
+   （实测自 t = 200 s 起真实 rAF 逐帧比对 361 帧全同、maxΔ = 0）；就算换成发散参数，
+   轨道也只是一次性飞出画外再不回头。而且 nNow() 把步号钉在 ORBIT_MAX − 1，
+   t 超过约 400 s 之后连"再迭代一步"都不会发生了。
+   驱动 x₀ 后这一页有两只钟：步进钟 n = ⌊ωt⌋ 说"这一轮演到第几步"，驱动说"从哪里出发"。
+   每 FAM_RUN 步为一轮，轮满就把蛛网收回起点、以此刻的 x₀ 重演——所以画出来的永远是
+   滑杆上那个起点的真实轨道，不会出现"轨迹用旧 x₀ 算、滑杆已经滑到别处"的自相矛盾。
+   关掉自动播放（或伸手拖 x₀）立刻回到原语义：一次播种、只向前走、绝不重算；
+   famN 与 ⌊ωt⌋ 同步递增，所以下一整数步就从重播出来的那条短轨道继续往后接，不会卡住。
+   一轮 12 步的两条理由：上界——蛛网折线每步画"竖线撞曲线 + 横线回对角线"两段，
+   12 步已经足够看完 |f′| < 1 的完整吸入过程（0.6¹² ≈ 0.002，误差早已看不见），
+   再长就只是一堆叠在不动点上的短线段；下界——至少要 3、4 步才谈得上"看出被吸进去还是甩出去"，
+   12 步在两族参数下都留足了余量。 */
+const FAM_RUN = 12;
+function replayOrbF() {
+  const steps = 1 + (Math.floor(Math.max(0, state.theta)) % FAM_RUN);
+  orbF = [famSeed()];
+  for (let i = 0; i < steps; i++) orbF.push(stepVal(fMap, orbF[i]));
 }
 
 /* —— 蛛网折线（顶点由新到旧，头亮尾隐；越界裁剪并断开） —— */
@@ -430,6 +466,11 @@ function roHead(machine) {
   const nCell = newtonDriven()
     ? 'n = <b>' + (orbN.length - 1) + '</b> / ' + NEWTON_RUN +
       t({ zh: '（本轮）', en: ' (this run)' })
+    /* 蛛网 / 三维序列两页同理：被驱动时画面只有本轮的 FAM_RUN 步，
+       再印全局的 ⌊ωt⌋ 就是读数与画布各说各话。 */
+    : famDriven()
+    ? 'n = <b>' + (orbF.length - 1) + '</b> / ' + FAM_RUN +
+      t({ zh: '（本轮）', en: ' (this run)' })
     : 'n = ⌊ωt⌋ = <b>' + nNow() + '</b>';
   return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;' + nCell + '</div>' +
          '<div class="dim">' + t({ zh: '迭代机 ', en: 'machine ' }) + machine + '</div>';
@@ -487,6 +528,20 @@ const SCENES = {
   cobweb: {
     label: { zh: '蛛网图', en: 'Cobweb' },
     params: ['family', 'a', 'b', 'r', 'x0', 'omega'],
+    /* 本页确为静止页签：步进钟一直在走，但轨道十来步就被吸到不动点上，
+       之后逐位不变（真实 rAF 自 t = 200 s 起 12 s、361 帧全同、maxΔ = 0）。
+       六根滑杆里 ω 是钟本身、family 是二选一、a/b/r 是"这台机器长什么样"，
+       真正的自变量是起点 x₀：它一路滑过去，蛛网就从不动点的一侧换到另一侧，
+       tips 说的"单调爬近 / 螺旋交替"两种走法在同一屏里轮流出现，而被吸向哪里始终不变
+       ——"起点不重要，机器才重要"正是这一页要人看见的东西。
+       与牛顿页驱动同一根滑杆是有意的：三页的自变量本来就都是起点，
+       各页按 curTab 分开判别（见 drivenOn），互不重播对方的轨道。
+       值域取满 [−2, 2]：逻辑族的种子在 famSeed() 里会被夹到 [0.02, 0.98]，
+       两端都不退化（线性族在 |x| 很大时也只是被更快地吸回来）。
+       从 2 跳回 −2 蛛网会整张翻到画面另一侧 ⇒ linear（往返）；
+       与牛顿页同取 8 s，同一个工具里三页节奏一致。
+       配套的重新播种见 replayOrbF——只声明 drive 而不重播，画面会用旧 x₀ 的轨迹骗人。 */
+    drive: { key: 'x0', from: -2, to: 2, period: 8, kind: 'linear' },
     brand: { zh: '递推 xₙ₊₁ = f(xₙ) 不是给出数列，而是一台把输出送回输入的机器。竖线撞向曲线取值、横线滑回对角线换座——蛛网图就是机器运转的轨迹。切换函数家族、拖动 a 或 r 观察收敛与发散。',
              en: 'A recurrence xₙ₊₁ = f(xₙ) does not hand you the sequence — it defines a machine that feeds output back into input. Vertical to the curve, horizontal to the diagonal: the cobweb is the machine running. Switch families and drag a or r to watch it converge or escape.' },
     tips: { zh: '提示：不动点处 |f′| < 1 时蛛网被吸进去（0 < a < 1 单调爬近，−1 < a < 0 螺旋交替），|f′| > 1 被甩出去；逻辑家族把 r 推过 3，蛛网收敛成一个方框——2 周期诞生。按 2「正视蛛网」看得最清。',
@@ -578,6 +633,12 @@ const SCENES = {
   lift: {
     label: { zh: '三维序列', en: '3D sequence' },
     params: ['family', 'a', 'b', 'r', 'x0', 'omega'],
+    /* 与「蛛网图」页同一条轨道 orbF、同一个诊断（t≈200 s 起 360 帧全同、maxΔ = 0），
+       所以驱动量、值域、kind、周期全部照搬那一页的说明，重播也共用 replayOrbF。
+       本页额外的好处：x₀ 一动，空间折线整条在 (xₙ, xₙ₊₁) 底面上平移而 z 向层数不变，
+       按 2 正视时所有点仍然牢牢贴在曲线 y = f(x) 上——tips 的顿悟点因此可以反复看到，
+       而不是只在开局那十几秒出现一次。 */
+    drive: { key: 'x0', from: -2, to: 2, period: 8, kind: 'linear' },
     brand: { zh: '把数列抬进三维：第 n 步是空间中一点 (xₙ, xₙ₊₁, n)，整个序列成为一条空间折线。它在底面上的影子是蛛网轨道，在侧面上的影子是时间序列——同一条折线，两种读法。',
              en: 'Lift the sequence into 3D: step n is the point (xₙ, xₙ₊₁, n), so the whole sequence becomes a space polyline. Its shadow on the floor is the cobweb orbit; its side shadow is the time series — one polyline, two readings.' },
     tips: { zh: '提示：按 2「正视 xₙ·xₙ₊₁」——所有点瞬间塌缩到曲线 y = f(x) 上，因为 xₙ₊₁ 本来就是 f(xₙ)：每个序列点都活在函数上。按 3 侧视，同一条折线又变回时间序列。',
@@ -806,11 +867,16 @@ function pushSample() {
      历史轨迹绝不重算（§6）。θ = 0 意味着刚重置：以 x₀ 重新播种。 */
   if (state.theta === 0) reseed();
   const nT = nNow();
-  while (orbF.length - 1 < nT) {
-    orbF.push(stepVal(fMap, orbF[orbF.length - 1]));
+  const famD = famDriven();
+  /* 步号用独立计数器 famN，不再拿 orbF.length − 1 顶替：蛛网被驱动时 orbF 每帧被
+     replayOrbF() 裁到 ≤ FAM_RUN + 1，用长度当步号会让这个循环每帧补上几百步。 */
+  while (famN < nT) {
+    famN++;
+    if (!famD) orbF.push(stepVal(fMap, orbF[orbF.length - 1]));
     orbN.push(stepVal(nMap, orbN[orbN.length - 1]));
   }
-  /* 牛顿页被驱动时按当前 x₀ 重播这一轮（见 replayOrbN）：orbF 不受影响。 */
+  /* 各页按自己的驱动状态重播；两条轨道互不干扰（见 drivenOn）。 */
+  if (famD) replayOrbF();
   if (newtonDriven()) replayOrbN();
   const i = Math.min(nT, orbF.length - 1);
   /* 牛顿轨道重播后长度只到本轮步数，全局步号 i 会越界 —— 取它自己的末项，
