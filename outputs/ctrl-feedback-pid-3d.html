@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.1.0">
 <title>让倒立摆站起来 · 反馈与 PID</title>
 <!-- ============================================================
@@ -19,6 +19,8 @@
   更新 —— 这是刻意的：采样带来的纯延迟正是页签③ 的教学核心。
 
   版本记录（changelog，新→旧）：
+    1.1.0  2026-08-02  新增「演示时长」滑杆（4–60 s）：它同时决定一屏的时间跨度与「一轮」的长度，于是慢过程也能完整看完。原先轮长写死 7/8/5 s，再怎么放慢时间轴，场景每几秒就重踢一脚。默认 8 s 与改动前完全一致
+                  Adds a demo-span slider (4–60 s) that sets both the visible time window and the length of one round, so slow processes can be watched end to end. Round lengths used to be hard-coded at 7/8/5 s, so no amount of slowing the time axis stopped the scene re-kicking every few seconds. The 8 s default reproduces the previous behaviour exactly
     1.0.0  2026-08-02  首发：开环 vs 闭环、P/I/D 三项分解、相位与临界增益、
                        观测器 vs 差分求导 四个页签
                        First release: open vs closed loop, P/I/D decomposition,
@@ -287,8 +289,12 @@ const PARAMS = [
     min: 3,   max: 120, step: 1,    value: 40,   fmt: v => fmt(v, 0) + ' N·m' },
   { key: 'tilt',  label: { zh: '每轮初始倾角 <i>θ</i>₀',   en: 'Initial tilt per round <i>θ</i>₀' },
     min: 0,   max: 0.5, step: 0.01, value: 0.20, fmt: v => fmt(v) + ' rad' },
-  { key: 'waveSpeed', label: { zh: '波形展开速度', en: 'Wave unroll speed' },
-    min: 0.5, max: 2.5, step: 0.05, value: 1.2,  fmt: v => fmt(v) + t({ zh: ' 单位/s', en: ' units/s' }) }
+  /* 「演示时长」= 一屏 = 一轮。滑杆读秒，state.waveSpeed 存的是世界速度，
+     故 map/invMap 成对（§8 硬约束）。默认 8 s 与改动前的轮长 7/8/5 s 一致。 */
+  { key: 'waveSpeed', label: { zh: '演示时长（一屏 = 一轮）', en: 'Demo span (one screen = one round)' },
+    min: 4, max: 60, step: 0.5, value: 8,
+    map: v => WAVE_LEN / v, invMap: v => WAVE_LEN / v,
+    fmt: v => fmt(v, v < 10 ? 1 : 0) + ' s' }
 ];
 
 /* ══════════════════════════════════════════════════════════════
@@ -304,7 +310,13 @@ const SECRET_K = 0.7;      // 「偷偷改摆长」的倍率：−30%
 const OBS_P = 8;           // 龙贝格观测器极点（重根 −8, −8）
 const DN = 200;            // 延迟环形缓冲长度（80 ms / H_FIX = 160，留余量）
 const PZ = -2.4;           // 摆体所在的 z 平面（时间轴起点之前，侧视时与波形分开）
-const ROUND_LOOP = 7.0, ROUND_PID = 8.0, ROUND_PH = 5.0;   // 各页签「一轮」的秒数
+/* 各页签「一轮」的秒数：由「演示时长」滑杆推出，保持原来 7:8:5 的相对节奏
+   （滑杆默认 8 s 时正好还原成 7 / 8 / 5）。原先写死，于是再怎么放慢时间轴，
+   场景每 5–8 秒就重踢一脚，看不到更长的连续过程。 */
+function demoSpan()  { return WAVE_LEN / state.waveSpeed; }
+function roundLoop() { return demoSpan() * 0.875; }
+function roundPid()  { return demoSpan(); }
+function roundPh()   { return demoSpan() * 0.625; }
 
 const aOf  = L => G / L;                 // 线性化正反馈系数 g/L
 const buOf = L => 1 / (MASS * L * L);    // 力矩 → 角加速度增益 1/(mL²)
@@ -480,14 +492,14 @@ function subStep(h) {
   W.t += h; W.tLoop += h; W.tPid += h; W.tPh += h;
 
   /* 稳态误差与饱和占比：每轮末段 1.5 s 取统计，轮末冻结供读数 */
-  if (W.tPid > ROUND_PID - 1.5) { W.ssSum += W.pid.th; W.ssN++; }
+  if (W.tPid > roundPid() - 1.5) { W.ssSum += W.pid.th; W.ssN++; }
   W.satSum += W.pid.satF; W.satN++;
 
   /* 每轮重新踢一脚：四个页签都靠积分器自走，永不定格（规范 §8 出路①） */
-  if (W.tLoop >= ROUND_LOOP) seedLoop();
-  if (W.tPid  >= ROUND_PID)  { W.ssMeas = W.ssN ? W.ssSum / W.ssN : null;
+  if (W.tLoop >= roundLoop()) seedLoop();
+  if (W.tPid  >= roundPid())  { W.ssMeas = W.ssN ? W.ssSum / W.ssN : null;
                                W.satPct = W.satN ? W.satSum / W.satN * 100 : 0; seedPid(); }
-  if (W.tPh   >= ROUND_PH)   seedPh();
+  if (W.tPh   >= roundPh())   seedPh();
 }
 
 /* 定步长子步进：把引擎那一帧的 dt 切成整数个 h = 1/2000 s，余量留到下一帧
@@ -764,7 +776,7 @@ const SCENES = {
 
   /* ── ① 开环 vs 闭环 ──────────────────────────────────────
      动力来源（规范 §8 出路①）：没有 drive 声明 —— 三只摆由 subStep() 的
-     RK4 积分器自走，摆座扰动 d = d₀·sin(2t) 一直在晃，且每 ROUND_LOOP = 7 s
+     RK4 积分器自走，摆座扰动 d = d₀·sin(2t) 一直在晃，且每 roundLoop() 秒（随「演示时长」）
      重新踢一脚（seedLoop），永不定格。种子参数 tilt / len 一律不加 drive。 */
   loop: {
     label: { zh: '开环 vs 闭环', en: 'Open vs closed loop' },
@@ -846,13 +858,13 @@ const SCENES = {
           t({ zh: '控制器按', en: 'controller assumes' }) + ' ' + fmt(state.len) + ' m&ensp;·&ensp;' +
           t({ zh: '模型失配', en: 'mismatch' }) + ' <b class="amb">' + fmtS(mis, 0) + '%</b></div>' +
         '<div class="dim">' + t({ zh: '扰动 d = d₀·sin(2t)，每 ', en: 'disturbance d = d₀·sin(2t); re-kicked every ' }) +
-          fmt(ROUND_LOOP, 1) + t({ zh: ' s 重新踢一脚', en: ' s' }) + '</div>';
+          fmt(roundLoop(), 1) + t({ zh: ' s 重新踢一脚', en: ' s' }) + '</div>';
     }
   },
 
   /* ── ② P / I / D = 现在 / 过去 / 未来 ───────────────────────
      动力来源（规范 §8 出路①）：无 drive —— PID 摆由 RK4 积分器自走，常值
-     扰动常驻，且每 ROUND_PID = 8 s 重新踢一脚（seedPid），永不定格。 */
+     扰动常驻，且每 roundPid() 秒重新踢一脚（随「演示时长」）（seedPid），永不定格。 */
   pid: {
     label: { zh: 'P / I / D', en: 'P / I / D' },
     params: ['len', 'damp', 'kp', 'ki', 'kd', 'fs', 'dist', 'noise', 'uMax', 'tilt', 'waveSpeed'],
@@ -987,7 +999,7 @@ const SCENES = {
 
   /* ── ③ 力不是太大，是来得太晚 ──────────────────────────────
      动力来源（规范 §8 出路①）：无 drive —— P 单项闭环由 RK4 积分器自走，
-     每 ROUND_PH = 5 s 重新踢一脚（seedPh），衰减或发散都能反复看。 */
+     每 roundPh() 秒重新踢一脚（随「演示时长」）（seedPh），衰减或发散都能反复看。 */
   phase: {
     label: { zh: '相位与延迟', en: 'Phase & delay' },
     params: ['len', 'damp', 'kp', 'fs', 'delay', 'uMax', 'tilt', 'waveSpeed'],
