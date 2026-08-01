@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.0.1">
 <meta name="engine-version" content="1.0.0">
 <title>混沌双摆 · 确定性的不可预测</title>
 <!-- ============================================================
@@ -31,6 +31,21 @@
   （§8 出路① + 出路④ 的痕迹要求）。
 
   版本记录（新→旧）：
+    1.0.1  2026-08-02  页签① 的「分手」改为可反复看：两摆真正分开后再留一个
+                       完整窗口就重新播种。原先它是一次性事件（实测 t ≈ 11 s
+                       发生），去别的页签逛一圈回来就已经错过且无提示；②③ 页
+                       本就各有重播种，①页是漏了。判据用「下摆末端拉开多少」
+                       而非照抄②③的「跑满一根时间轴」——默认 zScale 下窗口只有
+                       6.7 s，短于 11 s，照抄会赶在分手之前重来
+                       Tab 1's split is now repeatable: the pair re-seeds one
+                       full window after the bobs visibly separate. It used to
+                       be a one-shot event (measured at t ≈ 11 s) that any tab
+                       excursion silently consumed; tabs 2 and 3 already
+                       re-seeded, tab 1 was an omission. The trigger is bob
+                       separation rather than tabs 2–3's "one full time axis",
+                       because at the default zScale that window is 6.7 s —
+                       shorter than 11 s, so copying it would re-seed before
+                       the split ever happened
     1.0.0  2026-08-02  首个版本：四个页签（孪生双摆 / 分离的指数律 /
                        初值扇面的拉伸与折叠 / 庞加莱截面从可积到混沌），
                        固定步长 RK4 子步进，全量双语，frame() 加固
@@ -288,6 +303,12 @@ const SXY = 1.7 / Math.PI;       // 相平面：θ ∈ [−π, π] → 世界 [�
    页签③ 拉伸到充满相平面约 7 s，故时间轴 ×0.83、实时；
    页签④ 截面要几百个穿越点才有结构，故 10 倍速。
    这些倍率只改「这组实验推进多快」，不改任何物理量，读数里的 t 一律是模拟秒。 */
+/* 页签① 一轮的判据不能照抄 ②③ 的「跑满一根时间轴」：实测两摆在 t ≈ 11 s 才
+   真正分开，而默认 zScale = 1.2 时可视窗口只有 WAVE_LEN/1.2 ≈ 6.7 s —— 按窗口
+   重播种会赶在分手之前就重来，用户永远看不到那一刻。改用内容判据：等下摆末端
+   真的拉开 TWIN_APART 个世界单位之后，再完整留一个窗口让「已分开」走完再重来，
+   于是「重合 → 分手 → 分开」三段每轮都看得全。 */
+const TWIN_APART = 0.3;          // 页签① 判定「肉眼已是两个摆」的下摆末端间距（世界单位）
 const LYAP_RATE = 3;             // 页签② 积分加速倍率
 const LYAP_ZF = 0.28;            // 页签② 时间轴相对 zScale 的压缩
 /* 一轮的长度 = WAVE_LEN / (zScale · ENS_ZBOOST) ≈ 8.8 s：实测丝长在 8.8 s 前后
@@ -382,7 +403,7 @@ function supTxt(k) { return SUP[String(k)] || String(k); }
    而是同一套方程的另外几场实验，混进 samples[] 会让滑窗语义打架。 */
 const SIM = {
   seeded: false,
-  twin: { a: null, b: null, t: 0, e0: 0, drift: 0, d0: 1e-6, d: 1e-6, round: 0 },
+  twin: { a: null, b: null, t: 0, e0: 0, drift: 0, d0: 1e-6, d: 1e-6, round: 0, apartAt: -1 },
   lyap: { ref: null, per: [], ser: [], t: 0, e0: 0, drift: 0, round: 0, samp: 0 },
   ens:  { sys: [], hist: [], t: 0, e0: 0, drift: 0, round: 0, snapAt: -1, len: 0, folds: 0, foldIdx: [] },
   poin: { sys: [], pre: [], pts: null, t: 0, e0: 0, drift: 0, round: 0, cross: 0,
@@ -400,7 +421,7 @@ function seedTwin() {
   T.a = [state.th1, state.th2, 0, 0];
   T.b = [state.th1, state.th2 + state.logD0, 0, 0];   // state.logD0 已经过 map，存的是 10^v
   T.d0 = phaseDist(T.a, T.b); T.d = T.d0;
-  T.t = 0; T.e0 = energyOf(T.a); T.drift = 0; T.round++;
+  T.t = 0; T.e0 = energyOf(T.a); T.drift = 0; T.round++; T.apartAt = -1;
   samples.length = 0;                                  // 重新播种 = 清空轨迹，而不是偷偷重算历史
 }
 function seedLyap() {
@@ -455,9 +476,17 @@ function checkReseed() {
 
 function stepTwin(dt) {
   const T = SIM.twin;
+  /* 分开之后再留整整一个窗口就重新播种，让「分手」可以反复看 —— 判据是内容
+     而不是「跑满一根时间轴」，理由见 TWIN_APART 处的注释。②③ 页同样永不定格，
+     只是它们的现象本来就落在一个窗口之内，故用的是窗口判据。 */
+  if (T.apartAt >= 0 && T.t - T.apartAt > WAVE_LEN / state.zScale) { seedTwin(); return; }
   advance(T.a, dt); advance(T.b, dt);
   T.t += dt;
   T.d = phaseDist(T.a, T.b);
+  if (T.apartAt < 0) {
+    const A = bob2(T.a), B = bob2(T.b);
+    if (Math.hypot(A[0] - B[0], A[1] - B[1]) > TWIN_APART) T.apartAt = T.t;
+  }
   T.drift = Math.max(T.drift, driftRel(energyOf(T.a), T.e0));
 }
 function stepLyap(dt) {
