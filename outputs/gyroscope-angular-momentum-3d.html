@@ -1,0 +1,2324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="tool-version" content="1.0.0">
+<meta name="engine-version" content="1.1.0">
+<title>陀螺仪的原理 · 角动量与姿态控制</title>
+<!-- ============================================================
+  陀螺仪的原理 · 角动量与姿态控制 —— gyroscope-angular-momentum-3d
+  设计规范：math-viz-design-system.md（令牌 / 组件 / 绘制语言 / 交互词汇）
+  引擎：math-viz-starter.html STARTER_VERSION 1.1.0（引擎区一行未改）
+
+  五个页签，一根角动量矢量贯穿始终：
+    ① 自旋 · 角动量      转动被压成一根 L，长度不变、方向由右手定则给出
+    ② 万向节 · 六自由度   三层环读出三个转动自由度；三个平动它完全看不见
+    ③ 进动 · 章动        τ = dL/dt 垂直于 L，所以陀螺不倒、只是绕圈
+    ④ 反作用轮           Jb·ψ̇b + Jw·ωw 守恒；轮子饱和就等于失去姿态控制
+    ⑤ 控制力矩陀螺 CMG    τ = −Ω × Lw，把「搬动 L」翻译成放大了的力矩
+
+  版本记录（changelog，新→旧）：
+    1.0.0  2026-08-01  首个版本：自旋与角动量 / 万向节与六自由度 / 进动与章动 /
+                       反作用轮 / 控制力矩陀螺 五场景，含真实的定点陀螺欧拉—拉格朗日
+                       积分、万向节死锁演示与轮速饱和，双语
+============================================================ -->
+<style>
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  --angle-amber:#fbbf24;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none}
+body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)}
+#scene{position:fixed;inset:0;display:block;touch-action:none;cursor:grab}
+#scene.dragging{cursor:grabbing}
+
+/* ---- 标题区 ---- */
+.brand{position:fixed;top:20px;left:24px;pointer-events:none;user-select:none;max-width:min(520px,42vw)}
+.brand .eyebrow{font-size:10px;letter-spacing:.22em;color:rgba(159,176,200,.72);margin-bottom:6px}
+.brand h1{margin:0;font-family:var(--font-math);font-weight:600;font-size:26px;letter-spacing:.08em;
+  color:#eef3fa;text-shadow:0 2px 20px rgba(45,212,234,.20)}
+.brand p{margin:7px 0 0;font-size:12.5px;line-height:1.65;color:rgba(159,176,200,.85)}
+
+/* ---- 页签 ---- */
+.tabs{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:5;
+  display:flex;gap:4px;padding:4px;border-radius:999px;
+  background:var(--panel-bg);border:1px solid var(--panel-line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
+.tab{border:1px solid transparent;background:transparent;color:#b8c6da;
+  font-size:12.5px;font-family:var(--font-cn);padding:6px 15px;border-radius:999px;cursor:pointer;
+  transition:color .15s,border-color .15s,background .15s}
+.tab:hover{color:#e8f2fb}
+.tab:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.tab.active{background:rgba(45,212,234,.13);border-color:rgba(45,212,234,.55);color:#9be8f7}
+
+/* ---- 底部提示 ---- */
+.hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);pointer-events:none;user-select:none;
+  font-size:11px;letter-spacing:.05em;color:rgba(159,176,200,.6);white-space:nowrap}
+
+/* ---- 控制面板 ---- */
+.panel{position:fixed;top:14px;right:14px;width:304px;max-height:calc(100vh - 28px);overflow-y:auto;
+  background:var(--panel-bg);border:1px solid var(--panel-line);border-radius:16px;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 18px 50px rgba(0,0,0,.45);user-select:none}
+.panel::-webkit-scrollbar{width:6px}
+.panel::-webkit-scrollbar-thumb{background:rgba(148,163,184,.25);border-radius:3px}
+.panel-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px 10px;
+  font-size:13px;font-weight:600;letter-spacing:.06em;color:#dbe6f5}
+.panel:not(.collapsed) .panel-head{border-bottom:1px solid var(--panel-line)}
+.ph-right{display:flex;align-items:center;gap:7px}
+.ver{font-family:var(--font-mono);font-size:10px;color:rgba(159,176,200,.55)}
+.lang{padding:3px 8px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:11px;cursor:pointer}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.fold{width:24px;height:24px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:14px;line-height:1;cursor:pointer}
+.fold:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.panel.collapsed .panel-body{display:none}
+.panel-body{padding:6px 14px 14px}
+
+/* 滑杆 */
+.ctl{margin:11px 0 3px}
+.ctl .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.ctl label{font-size:12px;color:#c6d2e4}
+.ctl label i{font-family:var(--font-math);font-style:italic;font-size:13px}
+.ctl .val{font-family:var(--font-mono);font-size:11.5px;color:#7dd3fc}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;cursor:pointer;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--trace-cyan);margin-top:-5px;border:2px solid #0b1220;box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-moz-range-thumb{width:11px;height:11px;border:2px solid #0b1220;border-radius:50%;
+  background:var(--trace-cyan);box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-offset:2px;border-radius:4px}
+
+/* 按钮 */
+.row{display:flex;gap:8px;margin:13px 0 4px}
+.btn{padding:6px 10px;border-radius:9px;border:1px solid rgba(148,163,184,.25);
+  background:rgba(30,41,59,.55);color:#d7e2f2;font-size:12px;font-family:var(--font-cn);cursor:pointer;
+  transition:border-color .15s,color .15s,background .15s}
+.btn:hover{border-color:rgba(45,212,234,.55)}
+.btn:focus-visible,.fold:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.btn.wide{flex:1}
+.btn.active{border-color:rgba(45,212,234,.8);background:rgba(45,212,234,.12);color:#9be8f7}
+.views{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 2px}
+.views .vlabel{font-size:11.5px;color:rgba(159,176,200,.8);margin-right:2px}
+.vbtn{padding:5px 9px;font-size:11.5px}
+
+/* 开关 */
+.toggles{display:flex;flex-wrap:wrap;gap:7px 12px;margin:12px 0 2px}
+.tg{display:flex;align-items:center;gap:6px;font-size:12px;color:#c6d2e4;cursor:pointer}
+.tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
+.tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
+
+/* 驱动控制行 */
+.drive{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0 2px}
+.drive .dmode{display:flex;gap:4px;margin-left:auto}
+.drive .dmode .btn{padding:4px 8px;font-size:11px}
+
+/* 录制 / 回放行（§11）；未声明 RECORD 的工具里 #recHost 始终为空 */
+.recrow{display:flex;flex-wrap:wrap;gap:6px;margin:11px 0 2px}
+.recrow .btn{padding:5px 9px;font-size:11.5px}
+.recinfo{font-family:var(--font-mono);font-size:11px;line-height:1.6;
+  color:var(--ui-slate);margin:2px 0 2px;word-break:break-word}
+
+/* 读数与提示 */
+.readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
+  font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
+.readout b{font-weight:600;color:#e8eef7}
+.readout .sinC b{color:var(--trace-rose)}
+.readout .cosC b{color:var(--trace-violet)}
+.readout .tanC b{color:var(--trace-emerald)}
+.readout .cotC b{color:var(--trace-orange)}
+.readout .dim{color:rgba(159,176,200,.6)}
+.tips{margin-top:11px;font-size:11px;line-height:1.65;color:rgba(159,176,200,.72)}
+
+@media (max-width:760px){
+  .brand{top:12px;left:14px;max-width:70vw}
+  .brand h1{font-size:20px}
+  .brand p{display:none}
+  .tabs{top:52px;left:14px;transform:none}
+  .panel{left:10px;right:10px;top:auto;bottom:10px;width:auto;max-height:62vh}
+  .hint{display:none}
+}
+</style>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+
+<div class="brand">
+  <div class="eyebrow">INTERACTIVE MATH · 交互式数学</div>
+  <h1>陀螺仪 · 角动量与姿态</h1>
+  <p id="brandDesc"></p>
+</div>
+
+<nav class="tabs" id="tabsNav"></nav>
+
+<aside class="panel" id="panel">
+  <div class="panel-head"><span id="panelTitle">参数与视角</span>
+    <span class="ph-right"><span class="ver" id="verBadge"></span><button class="lang" id="btnLang" title="切换语言 / Switch language">EN</button><button class="fold" id="btnFold" title="收起 / 展开">−</button></span></div>
+  <div class="panel-body">
+    <div id="paramsHost"></div>
+    <div class="row">
+      <button class="btn wide" id="btnPlay">⏸ 暂停</button>
+      <button class="btn" id="btnReset">↺ 重置</button>
+    </div>
+    <div id="driveHost"></div>
+    <div id="recHost"></div>
+    <div id="togglesHost"></div>
+    <div id="viewsHost"></div>
+    <div class="readout" id="readout"></div>
+    <div class="tips" id="tips"></div>
+  </div>
+</aside>
+
+<div class="hint">拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签</div>
+
+<script>
+'use strict';
+/* ================= i18n 核心（引擎区） ================= */
+const LANG_KEY = 'mathviz-lang';
+function resolveLang(){
+  try{
+    const q = new URLSearchParams(location.search).get('lang');
+    if (q === 'zh' || q === 'en') return q;
+    const s = localStorage.getItem(LANG_KEY);
+    if (s === 'zh' || s === 'en') return s;
+  }catch(e){}
+  return (navigator.language || 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+let LANG = resolveLang();
+function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
+
+const STARTER_VERSION = '1.1.0';
+const VERSION = document.querySelector('meta[name="tool-version"]').content;
+const ENGINE_VERSION = document.querySelector('meta[name="engine-version"]').content;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ⓪ 工具元信息 —— id 与双语标题                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const TOOL = {
+  id: 'gyroscope-angular-momentum-3d',
+  title: { zh: '陀螺仪的原理 · 角动量与姿态控制', en: 'How a Gyroscope Works · Angular Momentum & Attitude Control' },
+  h1:    { zh: '陀螺仪 · 角动量与姿态', en: 'Gyroscope · Momentum' }
+};
+
+/* 引擎 UI 文案（一般无需改动） */
+const UI = {
+  panelTitle: { zh: '参数与视角', en: 'Parameters & Views' },
+  pause:  { zh: '⏸ 暂停', en: '⏸ Pause' },
+  resume: { zh: '▶ 继续', en: '▶ Resume' },
+  reset:  { zh: '↺ 重置', en: '↺ Reset' },
+  views:  { zh: '视角', en: 'View' },
+  autoPlay: { zh: '自动播放', en: 'Auto-play' },
+  pingpong: { zh: '往返',     en: 'Ping-pong' },
+  loop:     { zh: '循环',     en: 'Loop' },
+  /* 演算记录与回放（§11）。仅当场景在 RECORD 里声明了钩子时才出现。 */
+  recRec:    { zh: '● 记录',   en: '● Record' },
+  recStop:   { zh: '■ 停止',   en: '■ Stop' },
+  recSave:   { zh: '⬇ 保存',   en: '⬇ Save' },
+  recLoad:   { zh: '⬆ 载入',   en: '⬆ Load' },
+  recExit:   { zh: '✕ 退出回放', en: '✕ Exit replay' },
+  recPlay:   { zh: '▶',        en: '▶' },
+  recPause:  { zh: '⏸',        en: '⏸' },
+  recRewind: { zh: '⏮',        en: '⏮' },
+  recRows:   { zh: ' 行',      en: ' rows' },
+  recFull:   { zh: '已达行数上限，录制停止（数据完整，未截断）',
+               en: 'Row limit reached, recording stopped (data complete, not truncated)' },
+  recRoundEnd: { zh: '本轮结束，录制自动停止', en: 'Round complete, recording stopped' },
+  recReplay: { zh: '回放中', en: 'Replaying' },
+  recVerifyOK: { zh: '种子比对：本机复现（δ = ', en: 'Seed check: reproduced here (δ = ' },
+  recVerifyNo: { zh: '种子比对：本机复现不了（δ = ', en: 'Seed check: not reproducible here (δ = ' },
+  recVerifyTail: { zh: '）—— 这不是 bug，见提示', en: ') — not a bug, see the tip' },
+  hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
+            en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
+};
+
+/* TAU 提到 PARAMS/SCENES 之前声明：SCENES.lissa.drive 在对象字面量里直接引用它
+   （非惰性函数体内），若仍留在原「常量与状态」区（SCENES 之后）会触发 TDZ 报错。 */
+const TAU = Math.PI * 2;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  场景级三维部件与物理子模拟（非引擎，本工具私有）            ║
+   ║  引擎只提供 z=0 平面上的圆与折线；陀螺仪要画的是任意姿态下    ║
+   ║  的刚体、万向环与矢量，所以在这里补一层。引擎区一行未改。     ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+const DEG = Math.PI / 180;
+
+/* 语义色字面量（与 :root 里的 CSS 变量同值，「六处同源」靠它们串起来） */
+const CLR = {
+  rose: '#fb7185', violet: '#a78bfa', emerald: '#34d399', orange: '#fb923c',
+  cyan: '#2dd4ea', amber: '#fbbf24', bright: '#e2e8f0', slate: '#9fb0c8'
+};
+function rgba(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+}
+
+/* ---- 向量 ---- */
+const vAdd = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const vSub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const vMul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
+const vLen = a => Math.hypot(a[0], a[1], a[2]);
+const vUnit = a => { const l = vLen(a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+const vCross = (a, b) => [a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0]];
+
+/* ---- 3×3 旋转矩阵（行主序）：mv(A,v) = A·v，colOf(A,i) = A·ê_i ---- */
+const MI = [[1,0,0],[0,1,0],[0,0,1]];
+const RX = a => { const c = Math.cos(a), s = Math.sin(a); return [[1,0,0],[0,c,-s],[0,s,c]]; };
+const RY = a => { const c = Math.cos(a), s = Math.sin(a); return [[c,0,s],[0,1,0],[-s,0,c]]; };
+const RZ = a => { const c = Math.cos(a), s = Math.sin(a); return [[c,-s,0],[s,c,0],[0,0,1]]; };
+function mm(A, B) {
+  const C = [[0,0,0],[0,0,0],[0,0,0]];
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+    let s = 0;
+    for (let k = 0; k < 3; k++) s += A[i][k] * B[k][j];
+    C[i][j] = s;
+  }
+  return C;
+}
+const mv = (A, v) => [
+  A[0][0]*v[0] + A[0][1]*v[1] + A[0][2]*v[2],
+  A[1][0]*v[0] + A[1][1]*v[1] + A[1][2]*v[2],
+  A[2][0]*v[0] + A[2][1]*v[1] + A[2][2]*v[2]
+];
+const colOf = (A, i) => [A[0][i], A[1][i], A[2][i]];
+/* 罗德里格斯公式：绕单位轴 u 转 a 角。用它积分姿态矩阵，结果天然正交，
+   不像 Ṙ = [ω]×R 的一阶欧拉那样会慢慢漂成非正交阵。 */
+function rotAxisM(u, a) {
+  const c = Math.cos(a), s = Math.sin(a), k = 1 - c, x = u[0], y = u[1], z = u[2];
+  return [[k*x*x + c,   k*x*y - s*z, k*x*z + s*y],
+          [k*x*y + s*z, k*y*y + c,   k*y*z - s*x],
+          [k*x*z - s*y, k*y*z + s*x, k*z*z + c]];
+}
+
+/* ---- 三维绘制部件 ---- */
+
+/* 任意平面上的圆：圆心 c，平面由单位向量 u、w 张成 */
+function ringPts(c, u, w, r, n) {
+  const N = n || 72, pts = [];
+  for (let i = 0; i <= N; i++) {
+    const a = i / N * TAU, ca = Math.cos(a) * r, sa = Math.sin(a) * r;
+    pts.push([c[0] + u[0]*ca + w[0]*sa, c[1] + u[1]*ca + w[1]*sa, c[2] + u[2]*ca + w[2]*sa]);
+  }
+  return pts;
+}
+
+/* 矢量：辉光 + 内核 + 箭头 + 标注。所有物理矢量共用这一个配方。 */
+function drawVec(C, o, v, hex, text, opt) {
+  const L = vLen(v);
+  if (L < 1e-3) return;
+  const op = opt || {};
+  const tip = vAdd(o, v);
+  const back = vAdd(o, vMul(v, Math.max(0.02, 1 - 0.2 / L)));
+  if (!op.dash) line3(C, o, tip, { width: 5.5, color: rgba(hex, 0.13) });
+  line3(C, o, tip, { width: op.width || 2.2, color: rgba(hex, op.alpha || 0.95), dash: op.dash });
+  arrowAt(C, tip, back, rgba(hex, 0.95));
+  if (text) label3(C, vAdd(tip, vMul(vUnit(v), 0.22)), text,
+    { font: 'italic 13px ' + FONT_MATH, color: hex, align: op.align || 'center' });
+}
+
+/* 转子圆盘：轮缘（辉光 + 内核）+ 轮辐（让自旋可见）+ 轮毂 */
+function drawDisc(C, c, u, w, r, phase, hex, opt) {
+  const op = opt || {};
+  const rim = ringPts(c, u, w, r);
+  strokePoly(C, rim, { width: 6, color: rgba(hex, 0.13) });
+  strokePoly(C, rim, { width: 2, color: rgba(hex, 0.95) });
+  const nsp = op.spokes == null ? 6 : op.spokes;
+  for (let k = 0; k < nsp; k++) {
+    const a = phase + k / nsp * TAU, ca = Math.cos(a) * r, sa = Math.sin(a) * r;
+    line3(C, c, [c[0] + u[0]*ca + w[0]*sa, c[1] + u[1]*ca + w[1]*sa, c[2] + u[2]*ca + w[2]*sa],
+      { width: 1.3, color: rgba(hex, 0.5) });
+  }
+  solidDot(C, c, 2.6, rgba(hex, 0.9));
+}
+
+/* 自旋方向的弧形箭头：右手定则的图示。
+   drawDisc 里点的位置是 c + u·cos a + w·sin a，相位增大即由 u 转向 w，
+   其角速度方向恰是 u × w —— 所以调用方只要保证 u × w = 自旋轴，
+   这根弧的指向就与 ω、L 自洽（三处圆盘都按这条约定给基向量）。 */
+function drawSpinSense(C, c, u, w, r, phase, hex) {
+  const n = 26, a0 = phase + 0.3, a1 = a0 + 2.3, pts = [];
+  for (let i = 0; i <= n; i++) {
+    const a = a0 + (a1 - a0) * i / n, ca = Math.cos(a) * r, sa = Math.sin(a) * r;
+    pts.push([c[0] + u[0]*ca + w[0]*sa, c[1] + u[1]*ca + w[1]*sa, c[2] + u[2]*ca + w[2]*sa]);
+  }
+  strokePoly(C, pts, { width: 1.8, color: rgba(hex, 0.85) });
+  arrowAt(C, pts[n], pts[n-1], rgba(hex, 0.9));
+}
+
+/* 万向环：一圈细环 + 两枚枢轴销（销的方向 = 该环的转轴，死锁时就看它们重合） */
+function drawGimbalRing(C, c, u, w, r, hex, alpha) {
+  const rim = ringPts(c, u, w, r, 84);
+  strokePoly(C, rim, { width: 5, color: rgba(hex, 0.10) });
+  strokePoly(C, rim, { width: 1.8, color: rgba(hex, alpha == null ? 0.9 : alpha) });
+  for (const s of [1, -1]) {
+    const p = vAdd(c, vMul(u, r * s));
+    line3(C, p, vAdd(c, vMul(u, r * 1.14 * s)), { width: 2.2, color: rgba(hex, 0.85) });
+    solidDot(C, p, 2.4, rgba(hex, 0.9));
+  }
+}
+
+/* 线框盒：载体外壳 / 星体本体 */
+function drawBox(C, c, R, h, color, width) {
+  const q = [[-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],[-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1]];
+  const P = q.map(v => vAdd(c, mv(R, [v[0]*h[0], v[1]*h[1], v[2]*h[2]])));
+  const E = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+  E.forEach(e => line3(C, P[e[0]], P[e[1]], { width: width || 1.4, color: color }));
+}
+
+/* 三维坐标三元组（空间页签用；流式页签仍用引擎的 drawAxes，第三轴是 t） */
+function drawTriad(C, e) {
+  const A = AXIS, F = 'italic 15px ' + FONT_MATH;
+  line3(C, [-e,0,0], [e,0,0], { width: 1.4, color: A }); arrowAt(C, [e,0,0], [e-0.2,0,0], A);
+  label3(C, [e+0.24,0,0], 'x', { font: F, color: '#c4d2e6', align: 'center' });
+  line3(C, [0,-e,0], [0,e,0], { width: 1.4, color: A }); arrowAt(C, [0,e,0], [0,e-0.2,0], A);
+  label3(C, [0,e+0.22,0], 'y', { font: F, color: '#c4d2e6', align: 'center' });
+  line3(C, [0,0,-e], [0,0,e], { width: 1.4, color: A }); arrowAt(C, [0,0,e], [0,0,e-0.2], A);
+  label3(C, [0,0,e+0.24], 'z', { font: F, color: '#c4d2e6', align: 'center' });
+}
+
+/* 水平地面网格（y = 常数的 x–z 平面）——进动页要有「地面」才看得出没倒 */
+function drawGridXZ(C, g, step, y) {
+  const n = Math.round(g / step);
+  for (let i = -n; i <= n; i++) {
+    const u = i * step;
+    line3(C, [u, y, -g], [u, y, g], { width: 1, color: 'rgba(148,163,184,0.07)' });
+    line3(C, [-g, y, u], [g, y, u], { width: 1, color: 'rgba(148,163,184,0.07)' });
+  }
+}
+
+/* 历史曲线的统一配方（§4.2）：外层同色辉光 + 内核头亮尾隐渐变 */
+function drawTrace(C, pts, hex) {
+  if (pts.length < 2) return;
+  strokePoly(C, pts, { width: 5.5, color: rgba(hex, 0.13) });
+  strokePoly(C, pts, { width: 2.2, fade: [rgba(hex, 1), rgba(hex, 0.04)] });
+}
+
+/* 把 samples 铺到时间轴上：plane='y' 走 y·t 平面，plane='x' 走 x·t 平面。
+   由新到旧，最新样本贴在 z=0（§4.1）。 */
+function traceOf(f, plane, v) {
+  const p = [];
+  for (let i = samples.length - 1; i >= 0; i--) {
+    const s = samples[i], z = (state.t - s.t) * v;
+    if (z > WAVE_LEN) break;
+    const u = f(s);
+    p.push(plane === 'y' ? [0, u, z] : [u, 0, z]);
+  }
+  return p;
+}
+const vOf = () => WAVE_LEN / state.span;
+
+/* ══════════════════ 物理子模拟 ══════════════════
+   三个页签有各自的真实动力学。全部在 pushSample() 里按 state.t 的增量推进
+   （见 ③），所以「暂停只冻结模拟、相机照常」与「历史绝不重算」都自动成立。 */
+
+const ROTOR_R = 0.85;                       // 转子半径（世界单位）
+const ROTOR_I = 0.5 * ROTOR_R * ROTOR_R;    // I = ½ m a²，取 m = 1
+const LSCALE = 0.23;                        // 角动量 → 世界长度的显示比例
+const TSCALE = 0.30;                        // 力矩   → 世界长度的显示比例
+const L_ARM = 1.55;                         // 陀螺支点到轴尖的臂长
+const CMGS = 0.16;                          // CMG 角动量 → 世界长度
+const CLIP_W = 2.2;                         // 无界值的裁剪半宽（§6 奇点处理）
+let SPIN_PH = 0;                            // 转子自旋相位（只用于画轮辐）
+
+/* ---- ① 对称陀螺：定点转动（进动页） ----
+   以 I₁ = 1 归一，I₃ = state.iRatio。θ 自竖直向上量起，φ 是进动角，ψ 是自旋角。
+     φ̇  = (p_φ − I₃ω₃cosθ) / (I₁ sin²θ)
+     I₁θ̈ = (I₁φ̇²cosθ − I₃ω₃φ̇ + Mgl) sinθ
+   初值 θ̇ = φ̇ = 0 ⇒ p_φ = I₃ω₃cosθ₀，于是「先掉一点、再被自旋拉住」的尖点章动
+   是解出来的，不是画出来的。 */
+const TOP = { th: 0, thd: 0, phid: 0, phi: 0, psi: 0, pphi: 0, sig: '', trail: [] };
+function topSig() { return [state.theta0, state.spin, state.mgl, state.iRatio].join('|'); }
+function topReseed() {
+  const th0 = clamp(state.theta0, 0.05, Math.PI - 0.05);
+  TOP.th = th0; TOP.thd = 0; TOP.phid = 0; TOP.phi = 0; TOP.psi = 0;
+  TOP.pphi = state.iRatio * state.spin * Math.cos(th0);
+  TOP.sig = topSig();
+  TOP.trail.length = 0;
+}
+function topStep(h) {
+  const I3 = state.iRatio, w3 = state.spin, K = state.mgl;
+  const th = clamp(TOP.th, 0.02, Math.PI - 0.02);
+  const s = Math.sin(th), c = Math.cos(th);
+  const phid = (TOP.pphi - I3 * w3 * c) / (s * s);
+  TOP.phid = phid;
+  TOP.thd += (phid * phid * c - I3 * w3 * phid + K) * s * h;
+  TOP.th = clamp(th + TOP.thd * h, 0.02, Math.PI - 0.02);
+  if (TOP.th <= 0.0201 || TOP.th >= Math.PI - 0.0201) TOP.thd = 0;   // 触界不穿透
+  TOP.phi += phid * h;
+  TOP.psi += (w3 - phid * c) * h;
+}
+function topFrame() {
+  const s = Math.sin(TOP.th), c = Math.cos(TOP.th);
+  const cp = Math.cos(TOP.phi), sp = Math.sin(TOP.phi);
+  return { n: [s*cp, c, s*sp], eth: [c*cp, -s, c*sp], eph: [-sp, 0, cp] };
+}
+/* L = I₃ω₃ n̂ + I₁θ̇ ê_θ + I₁φ̇sinθ ê_φ —— 横向那两项就是肉眼看到的章动抖动 */
+function topL() {
+  const F = topFrame(), a = state.iRatio * state.spin;
+  const b = TOP.thd, d = TOP.phid * Math.sin(TOP.th);
+  return [F.n[0]*a + F.eth[0]*b + F.eph[0]*d,
+          F.n[1]*a + F.eth[1]*b + F.eph[1]*d,
+          F.n[2]*a + F.eth[2]*b + F.eph[2]*d];
+}
+/* τ = (l n̂) × (−Mg ŷ) = −Mgl (n̂ × ŷ)：水平、且垂直于轴的水平投影 */
+function topTorque() { return vMul(vCross(topFrame().n, [0,1,0]), -state.mgl); }
+
+/* ---- ② 反作用轮卫星（反作用轮页） ----
+   无外力矩时 J_b ψ̇_b + J_w ω_w 守恒。控制器是 PD：星体要转多少，
+   轮子必须反着转多少——这条守恒律就是这一页的全部内容。 */
+const SAT = { psi: 0, psid: 0, ww: 0, ph: 0, sat: 0, tc: 0 };
+function satReset() { SAT.psi = 0; SAT.psid = 0; SAT.ww = 0; SAT.ph = 0; SAT.sat = 0; SAT.tc = 0; }
+function satStep(h) {
+  const Jw = state.iwRatio, lam = state.gainK;                 // J_b ≡ 1
+  const cmd = -(2 * 0.9 * lam * SAT.psid + lam * lam * wrapPI(SAT.psi - state.psiCmd));
+  /* 轮子只能在 ±ωmax 之间存角动量。先按指令积一步，再把轮速钳回量程，真正
+     交付给星体的力矩由「轮速实际改变了多少」倒推 —— 这样 Jb·ψ̇b + Jw·ωw 的
+     守恒在饱和时也逐位成立。（曾经写成「越界就把 tc 清零」：那样轮子会冻在
+     离上限还差一截的地方，而且刚好卡住的那一帧之后 sat 标志立刻掉回 0，
+     警告一闪就没，用户只看到卫星莫名其妙翻掉。） */
+  const wNew = clamp(SAT.ww - cmd / Jw * h, -state.wMax, state.wMax);
+  const tc = -(wNew - SAT.ww) * Jw / h;
+  SAT.tc = tc;
+  SAT.ww = wNew;
+  SAT.psid += (tc + state.dist) * h;
+  SAT.psi += SAT.psid * h;
+  SAT.sat = Math.abs(SAT.ww) >= state.wMax * 0.995 ? 1 : 0;
+}
+
+/* ---- ③ 控制力矩陀螺 CMG（CMG 页） ----
+   轮子转速恒定、|L_w| 恒定，只把它的指向整体转过去：
+     τ = −Ω × L_w，  |τ| = h·|Ω|
+   总角动量守恒直接给出星体角速度 ω_b = (L_w0 − L_w)/J，不必再积一次方程。 */
+const CMG = { R: MI, prevD: 0, rate: 0, ph: 0, om: [0,0,0], tau: [0,0,0], L0: null, trail: [] };
+function cmgLw(d) { return [state.hw * Math.cos(d), 0, -state.hw * Math.sin(d)]; }
+function cmgReset() {
+  CMG.R = MI; CMG.prevD = state.gimbAng; CMG.rate = 0; CMG.ph = 0;
+  CMG.om = [0,0,0]; CMG.tau = [0,0,0]; CMG.L0 = cmgLw(state.gimbAng); CMG.trail.length = 0;
+}
+function cmgStep(dt) {
+  const d = state.gimbAng;
+  /* Ω 由框架角的实际变化率算出——自动播放在推它是这样，你伸手拖那根滑杆
+     也是这样，力矩一视同仁。一阶低通只是让帧抖动不至于让箭头闪烁。 */
+  const raw = dt > 1e-6 ? wrapPI(d - CMG.prevD) / dt : 0;
+  CMG.prevD = d;
+  CMG.rate += (raw - CMG.rate) * Math.min(1, dt * 14);
+  const Lw = cmgLw(d);
+  if (!CMG.L0) CMG.L0 = Lw;
+  CMG.tau = vMul(vCross([0, CMG.rate, 0], Lw), -1);
+  CMG.om = vMul(vSub(CMG.L0, Lw), 1 / state.jBody);
+  const wl = vLen(CMG.om);
+  if (wl > 1e-9) CMG.R = mm(rotAxisM(vMul(CMG.om, 1 / wl), wl * dt), CMG.R);
+  /* 本页轮子的"看起来在转"由 h 决定，不去读第①页的 ωs —— 那会是一条
+     本页没有滑杆可纠正的隐藏依赖（规范 §6 场景作用域参数）。 */
+  CMG.ph = (CMG.ph + state.hw * 3 * dt) % TAU;
+  CMG.trail.push(vMul(Lw, CMGS));
+  if (CMG.trail.length > 1100) CMG.trail.shift();
+}
+
+/* ---- ④ 第①页转子的轴向（由「转子倾角」滑杆摆动） ---- */
+function spinAxis() { return [-Math.sin(state.tilt), Math.cos(state.tilt), 0]; }
+/* 与轴垂直的一组基，用来画圆盘所在的平面 */
+function spinPlane() {
+  const n = spinAxis();
+  const u = vUnit(vCross(n, [0,0,1]));
+  return { n: n, u: u, w: vCross(n, u) };
+}
+
+/* ---- ⑤ 万向节链（六自由度页） ----
+   载体姿态 R_c = R_y(偏航)·R_x(俯仰)·R_z(横滚)。三层环依次绕 ê_z、ê_x、ê_y 转，
+   转角取载体欧拉角的相反数，于是
+     R_c · R_z(−横滚) · R_x(−俯仰) · R_y(−偏航) = I
+   最内层——转子——的自旋轴恒等于世界 ŷ。这不是画上去的效果，是恒等式。
+   万向节死锁：中环转到 ±90° 时外环枢轴与转子轴重合，三个环只剩两个自由度。 */
+function gimbalChain() {
+  const Rc = mm(RY(state.carYaw), mm(RX(state.carPitch), RZ(state.carRoll)));
+  const R1 = mm(Rc, RZ(-state.carRoll));
+  const R2 = mm(R1, RX(-state.carPitch));
+  return { Rc: Rc, R1: R1, R2: R2, lock: Math.abs(Math.cos(state.carPitch)) };
+}
+
+/* 两个方向之间的圆弧（度量注记）。圆心恒在原点，半径 r。 */
+function drawArcBetween(C, a, b, r, hex, text) {
+  const A = vUnit(a), B = vUnit(b);
+  const ang = Math.acos(clamp(A[0]*B[0] + A[1]*B[1] + A[2]*B[2], -1, 1));
+  if (ang < 0.04) return;
+  let perp = vSub(B, vMul(A, Math.cos(ang)));
+  const pl = vLen(perp);
+  if (pl < 1e-6) return;
+  perp = vMul(perp, 1 / pl);
+  const n = Math.max(2, Math.ceil(ang / 0.06)), pts = [];
+  for (let i = 0; i <= n; i++) {
+    const u = ang * i / n;
+    pts.push(vMul(vAdd(vMul(A, Math.cos(u)), vMul(perp, Math.sin(u))), r));
+  }
+  strokePoly(C, pts, { width: 1.6, color: rgba(hex, 0.9) });
+  if (text) label3(C, vMul(vAdd(vMul(A, Math.cos(ang/2)), vMul(perp, Math.sin(ang/2))), r + 0.2), text,
+    { font: 'italic 13px ' + FONT_MATH, color: hex, align: 'center' });
+}
+
+/* 读数区固定首行（本工具没有相位钟，用不上引擎的 readoutHead） */
+function head(line2) {
+  return '<div>t = <b>' + fmt(state.t) + '</b> s</div>' +
+         '<div class="dim">' + line2 + '</div>';
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ① 参数声明 —— 自动生成滑杆                                ║
+   ║  key: state 中的键 · label: 支持 <i>数学符号</i>            ║
+   ║  fmt: 格式化"滑杆原始值"用于显示 · map(可选): 原始值→状态值   ║
+   ║  invMap: 状态值→原始值。声明了 map 就必须给，否则被 drive     ║
+   ║          驱动时滑块回显会错位（规范 §8 硬约束）               ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const PARAMS = [
+  /* —— 转子本身 —— */
+  { key: 'spin',  label: { zh: '转子自旋 <i>ω</i>s', en: 'Rotor spin <i>ω</i>s' },
+    min: 4, max: 30, step: 0.5, value: 8, fmt: v => fmt(v) + ' rad/s' },
+  { key: 'tilt',  label: { zh: '转子倾角 <i>β</i>', en: 'Rotor tilt <i>β</i>' },
+    min: -75, max: 75, step: 1, value: 25, fmt: v => fmt(v, 0) + '°',
+    map: v => v * DEG, invMap: v => v / DEG },
+
+  /* —— 载体的六个自由度：三个转动 + 三个平动 —— */
+  { key: 'carRoll',  label: { zh: '载体 横滚 <i>φ</i>', en: 'Carrier roll <i>φ</i>' },
+    min: -180, max: 180, step: 1, value: 25, fmt: v => fmt(v, 0) + '°',
+    map: v => v * DEG, invMap: v => v / DEG },
+  { key: 'carPitch', label: { zh: '载体 俯仰 <i>θ</i>', en: 'Carrier pitch <i>θ</i>' },
+    min: -180, max: 180, step: 1, value: 30, fmt: v => fmt(v, 0) + '°',
+    map: v => v * DEG, invMap: v => v / DEG },
+  { key: 'carYaw',   label: { zh: '载体 偏航 <i>ψ</i>', en: 'Carrier yaw <i>ψ</i>' },
+    min: -180, max: 180, step: 1, value: 0, fmt: v => fmt(v, 0) + '°',
+    map: v => v * DEG, invMap: v => v / DEG },
+  { key: 'carX', label: { zh: '载体 平移 <i>x</i>', en: 'Carrier shift <i>x</i>' },
+    min: -2, max: 2, step: 0.05, value: 0, fmt: v => fmtS(v) },
+  { key: 'carY', label: { zh: '载体 平移 <i>y</i>', en: 'Carrier shift <i>y</i>' },
+    min: -2, max: 2, step: 0.05, value: 0, fmt: v => fmtS(v) },
+  { key: 'carZ', label: { zh: '载体 平移 <i>z</i>', en: 'Carrier shift <i>z</i>' },
+    min: -2, max: 2, step: 0.05, value: 0, fmt: v => fmtS(v) },
+
+  /* —— 重力下的定点陀螺 —— */
+  { key: 'theta0', label: { zh: '初始倾角 <i>θ</i>₀', en: 'Initial tilt <i>θ</i>₀' },
+    min: 10, max: 150, step: 1, value: 55, fmt: v => fmt(v, 0) + '°',
+    map: v => v * DEG, invMap: v => v / DEG },
+  { key: 'mgl',    label: { zh: '重力力矩 <i>Mgl</i>', en: 'Gravity torque <i>Mgl</i>' },
+    min: 0.5, max: 6, step: 0.1, value: 3, fmt: v => fmt(v) },
+  { key: 'iRatio', label: { zh: '惯量比 <i>I</i>₃/<i>I</i>₁', en: 'Inertia ratio <i>I</i>₃/<i>I</i>₁' },
+    min: 0.2, max: 1.2, step: 0.02, value: 0.5, fmt: v => fmt(v) },
+
+  /* —— 反作用轮卫星 —— */
+  { key: 'psiCmd',  label: { zh: '目标偏航 <i>ψ</i>c', en: 'Target yaw <i>ψ</i>c' },
+    min: -90, max: 90, step: 1, value: 0, fmt: v => fmt(v, 0) + '°',
+    map: v => v * DEG, invMap: v => v / DEG },
+  { key: 'iwRatio', label: { zh: '轮体惯量比 <i>J</i>w/<i>J</i>b', en: 'Wheel inertia <i>J</i>w/<i>J</i>b' },
+    min: 0.005, max: 0.12, step: 0.005, value: 0.03, fmt: v => fmt(v, 3) },
+  { key: 'gainK',   label: { zh: '控制带宽 <i>λ</i>', en: 'Control bandwidth <i>λ</i>' },
+    min: 0.2, max: 2.5, step: 0.05, value: 1, fmt: v => fmt(v) + ' rad/s' },
+  { key: 'wMax',    label: { zh: '轮速上限 <i>ω</i>max', en: 'Wheel speed limit <i>ω</i>max' },
+    min: 5, max: 120, step: 5, value: 60, fmt: v => fmt(v, 0) + ' rad/s' },
+  { key: 'dist',    label: { zh: '外扰力矩 <i>τ</i>d', en: 'External torque <i>τ</i>d' },
+    min: 0, max: 0.06, step: 0.002, value: 0, fmt: v => fmt(v, 3) },
+
+  /* —— 控制力矩陀螺 CMG —— */
+  { key: 'hw',      label: { zh: '轮体角动量 <i>h</i>', en: 'Wheel momentum <i>h</i>' },
+    min: 1, max: 12, step: 0.5, value: 5, fmt: v => fmt(v) },
+  { key: 'gimbAng', label: { zh: '框架角 <i>δ</i>', en: 'Gimbal angle <i>δ</i>' },
+    min: -180, max: 180, step: 1, value: 0, fmt: v => fmt(v, 0) + '°',
+    map: v => v * DEG, invMap: v => v / DEG },
+  { key: 'jBody',   label: { zh: '星体转动惯量 <i>J</i>', en: 'Spacecraft inertia <i>J</i>' },
+    min: 2, max: 30, step: 0.5, value: 12, fmt: v => fmt(v) },
+
+  /* —— 流式页签的时间轴 —— */
+  { key: 'span', label: { zh: '演示时长', en: 'Demo span' },
+    min: 6, max: 40, step: 1, value: 14, fmt: v => fmt(v, 0) + ' s' }
+];
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ② 场景注册 —— 每个键就是一个页签                           ║
+   ║  必填：label / brand / tips / views(首项即"立体"，双击回正)  ║
+   ║        params(本页签真正读取的滑块 key 数组，决定面板显隐)    ║
+   ║        drive(随时间自走的量；静态页签写 drive: null 并注释)   ║
+   ║        toggles(曲线按 rose→violet→emerald→orange 取色)     ║
+   ║        draw(C) / readout()                                ║
+   ║  可选：sampleWindow() 历史滑窗秒数 · views[x].onSelect 联动 ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const SCENES = {
+
+  /* ══════════ ① 自旋与角动量：一个旋转如何被压成一根矢量 ══════════ */
+  spin: {
+    label: { zh: '自旋 · 角动量', en: 'Spin & momentum' },
+    params: ['spin', 'tilt', 'span'],
+    /* 倾角是标量区间，单向回绕会跳变 → kind: 'linear'（默认 pingpong），
+       轴于是"点头"，Lx 与 Ly 此消彼长而 |L| 纹丝不动。 */
+    drive: { key: 'tilt', from: -60 * DEG, to: 60 * DEG, period: 11, kind: 'linear' },
+    brand: { zh: '转子上每一点的速度都在变，但 L = Iω 这根矢量始终指着自旋轴。轴在点头，分量此消彼长，模长却是一条直线——这条直线就是陀螺仪全部本领的本钱。',
+             en: 'Every point on the rotor keeps changing velocity, yet the single vector L = Iω always points along the spin axis. As the axis nods, the components trade off while the magnitude stays a flat line — and that flat line is the entire capital a gyroscope trades on.' },
+    tips: { zh: '提示：按 3 切到「侧视 Ly·t」。轴每摆一次，玫红的 Ly 与紫色的 Lx 就交换一次大小，而翠绿的 |L| 是一条笔直的横线——旋转被压缩成了一根长度不变、只有方向会被力矩推动的矢量。',
+            en: 'Tip: press 3 for the "Side Ly·t" view. Each nod of the axis makes the rose Ly and the violet Lx trade places, while the emerald |L| stays a dead-straight line — the spin has been compressed into one vector whose length never changes and whose direction only a torque can move.' },
+    views: {
+      iso:   { label: { zh: '立体',        en: '3D' },        az: -0.85,      el: 0.32,  dist: 10,   tx: 0, ty: 0, tz: 2.6 },
+      front: { label: { zh: '正视 x·y',    en: 'Front x·y' },  az: 0.001,      el: 0.02,  dist: 7,    tx: 0, ty: 0, tz: 0 },
+      sideL: { label: { zh: '侧视 Ly·t',   en: 'Side Ly·t' },  az: -Math.PI/2, el: 0.001, dist: 11,   tx: 0, ty: 0, tz: 3.4,
+               onSelect: () => { state.showLy = true; state.showLm = true; syncToggles(); } },
+      topL:  { label: { zh: '俯视 Lx·t',   en: 'Top Lx·t' },   az: 0.001,      el: 1.52,  dist: 11,   tx: 0, ty: 0, tz: 3.4,
+               onSelect: () => { state.showLx = true; syncToggles(); } }
+    },
+    toggles: [
+      { key: 'showLy',    label: { zh: '竖直分量 Ly', en: 'Vertical component Ly' },   color: '#fb7185', checked: true },
+      { key: 'showLx',    label: { zh: '水平分量 Lx', en: 'Horizontal component Lx' }, color: '#a78bfa', checked: true },
+      { key: 'showLm',    label: { zh: '模长 |L|（不变量）', en: 'Magnitude |L| (invariant)' }, color: '#34d399', checked: true },
+      { key: 'showOmega', label: { zh: '角速度 ω · 轮缘速度 · 右手定则', en: 'ω, rim velocities, right-hand rule' }, color: '#2dd4ea', checked: true },
+      { key: 'showGuides', label: { zh: '投影辅助线', en: 'Projection guides' }, color: '#fbbf24', checked: true },
+      { key: 'showGrid',  label: { zh: '网格', en: 'Grid' }, color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => state.span + 0.5,
+    draw(C) {
+      const v = vOf(), P = spinPlane(), n = P.n;
+      const Lm = ROTOR_I * state.spin, k = LSCALE;
+
+      if (state.showGrid) drawTimeGrid(C, { yMax: 2.3, v: v });
+      drawAxes(C, { ex: 2.3, ey: 2.5, yTicks: [1, 2], xTicks: [1, 2], tAxis: true, v: v });
+
+      /* 历史曲线（由新到旧，头亮尾隐） */
+      if (state.showLm) drawTrace(C, traceOf(s => s.lm * k, 'y', v), CLR.emerald);
+      if (state.showLx) drawTrace(C, traceOf(s => s.lx * k, 'x', v), CLR.violet);
+      if (state.showLy) drawTrace(C, traceOf(s => s.ly * k, 'y', v), CLR.rose);
+
+      /* 转子（源几何 = 青） */
+      drawDisc(C, [0,0,0], P.u, P.w, ROTOR_R, SPIN_PH, CLR.cyan, { spokes: 8 });
+
+      /* 轮缘速度 v = ω × r：每一点都不同，加起来才是那一根 L */
+      if (state.showOmega) {
+        for (let i = 0; i < 8; i++) {
+          const a = SPIN_PH + i / 8 * TAU;
+          const r = vAdd(vMul(P.u, Math.cos(a) * ROTOR_R), vMul(P.w, Math.sin(a) * ROTOR_R));
+          const vel = vMul(vCross(vMul(n, state.spin), r), 0.055);
+          const tip = vAdd(r, vel);
+          line3(C, r, tip, { width: 1.4, color: rgba(CLR.cyan, 0.55) });
+          arrowAt(C, tip, r, rgba(CLR.cyan, 0.7));
+        }
+        /* 右手定则：四指顺着轮缘转，拇指就是 ω，也就是 L。
+           轴向不是约定俗成，它是叉积 r × v 唯一的公共方向。 */
+        drawSpinSense(C, [0,0,0], P.u, P.w, ROTOR_R * 0.52, SPIN_PH, CLR.cyan);
+        drawVec(C, [0,0,0], vMul(n, 1.15), CLR.cyan, 'ω', { width: 1.8, alpha: 0.75 });
+        label3(C, vAdd(vMul(n, 1.32), vMul(P.u, 0.30)),
+          t({ zh: '右手定则', en: 'right-hand rule' }),
+          { size: 11, color: rgba(CLR.cyan, 0.8), align: 'left' });
+      }
+
+      /* 角动量本体 */
+      const Lv = vMul(n, Lm * k);
+      drawVec(C, [0,0,0], Lv, CLR.rose, 'L');
+
+      /* 分量投影：L 的头 → 两根轴 */
+      if (state.showGuides) {
+        line3(C, Lv, [0, Lv[1], 0], { width: 1.5, dash: [7,7], color: rgba(CLR.rose, 0.8) });
+        line3(C, Lv, [Lv[0], 0, 0], { width: 1.5, dash: [7,7], color: rgba(CLR.violet, 0.8) });
+        const fy = proj(C, [0, Lv[1], 0]); if (fy) glowDot(fy, 9, '#ffffff', rgba(CLR.rose, 0.85));
+        const fx = proj(C, [Lv[0], 0, 0]); if (fx) glowDot(fx, 9, '#ffffff', rgba(CLR.violet, 0.85));
+        const fm = proj(C, [0, Lm * k, 0]); if (fm) glowDot(fm, 8, '#ffffff', rgba(CLR.emerald, 0.8));
+      }
+
+      label3(C, [0, 2.25, 1.2], 'L = Iω = ½ma²ωs',
+        { font: 'italic 13px ' + FONT_MATH, color: CLR.rose, align: 'center' });
+      label3(C, [0, -2.25, 1.2], '|L| = ' + fmt(Lm) + t({ zh: '（与倾角无关）', en: ' (independent of tilt)' }),
+        { font: 'italic 13px ' + FONT_MATH, color: CLR.emerald, align: 'center' });
+    },
+    readout() {
+      const n = spinAxis(), Lm = ROTOR_I * state.spin;
+      return head(t({ zh: '转子 I = ½ma² = ', en: 'Rotor I = ½ma² = ' }) + fmt(ROTOR_I) +
+                  '&ensp;·&ensp;' + t({ zh: '倾角 β = ', en: 'tilt β = ' }) + fmt(state.tilt / DEG, 0) + '°') +
+        '<div class="sinC">Ly = |L| cos β = <b>' + fmtS(Lm * n[1]) + '</b></div>' +
+        '<div class="cosC">Lx = −|L| sin β = <b>' + fmtS(Lm * n[0]) + '</b></div>' +
+        '<div class="tanC">|L| = <b>' + fmt(Lm) + '</b></div>' +
+        '<div class="dim">' + t({ zh: '轮缘线速度 = ωs·a = ' + fmt(state.spin * ROTOR_R) + '，每点方向都不同；Σ r × mv 求和后只剩轴向的一根 L，指向由右手定则给出',
+                                  en: 'Rim speed = ωs·a = ' + fmt(state.spin * ROTOR_R) + '; every point points elsewhere, yet Σ r × mv leaves one axial L, its direction set by the right-hand rule' }) + '</div>';
+    }
+  },
+
+  /* ══════════ ② 万向节与六自由度：载体动，转子不动 ══════════ */
+  gimbal: {
+    label: { zh: '万向节 · 六自由度', en: 'Gimbals & 6-DOF' },
+    params: ['spin', 'carRoll', 'carPitch', 'carYaw', 'carX', 'carY', 'carZ'],
+    /* 偏航是角度量，绕满一圈首尾天然相接 → kind: 'circular'（默认 loop） */
+    drive: { key: 'carYaw', from: -Math.PI, to: Math.PI, period: 16, kind: 'circular' },
+    brand: { zh: '载体有六个自由度：三个平动、三个转动。三层万向环把三个转动一一读了出来，而转子的自旋轴恒指惯性空间——这就是「姿态基准」的定义。三根平移滑杆随便拖，读数一个字不变。',
+             en: 'A carrier has six degrees of freedom: three translations and three rotations. Three nested gimbals read out each rotation, while the rotor axis stays locked to inertial space — that is what an attitude reference means. Drag the three translation sliders as much as you like: not one digit of the reading moves.' },
+    tips: { zh: '提示：按 2 切到「沿轴俯视」——外壳与三层环绕着转，转子那个圆纹丝不动。再把「载体 俯仰」推到 ±90°：外环枢轴与转子轴重合，三个环只剩两个自由度，这就是万向节死锁，阿波罗 11 号的制导计算机上真有一条「别进死区」的红线。',
+            en: 'Tip: press 2 for the along-axis top view — the case and all three rings whirl, while the rotor circle does not budge. Then push carrier pitch to ±90°: the outer pivot lines up with the rotor axis and three rings collapse to two degrees of freedom. That is gimbal lock, and Apollo 11 really did carry a "do not enter" zone on its guidance display.' },
+    views: {
+      iso:   { label: { zh: '立体',       en: '3D' },              az: -0.8,  el: 0.30, dist: 9.5, tx: 0, ty: 0, tz: 0 },
+      axis:  { label: { zh: '沿轴俯视',   en: 'Along the axis' },  az: 0.001, el: 1.52, dist: 8.5, tx: 0, ty: 0, tz: 0 },
+      front: { label: { zh: '正视 x·y',   en: 'Front x·y' },       az: 0.001, el: 0.02, dist: 8.5, tx: 0, ty: 0, tz: 0 }
+    },
+    toggles: [
+      { key: 'showRotor', label: { zh: '转子与角动量 L', en: 'Rotor and L' },        color: '#fb7185', checked: true },
+      { key: 'showRings', label: { zh: '三层万向环',     en: 'Three gimbal rings' }, color: '#2dd4ea', checked: true },
+      { key: 'showCase',  label: { zh: '载体外壳与本体轴', en: 'Carrier case and body axes' }, color: '#e2e8f0', checked: true },
+      { key: 'showRef',   label: { zh: '惯性基准线',     en: 'Inertial reference' }, color: '#fbbf24', checked: true },
+      { key: 'showGrid',  label: { zh: '网格', en: 'Grid' }, color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => 1,
+    draw(C) {
+      const G = gimbalChain(), p = [state.carX, state.carY, state.carZ];
+      const locked = G.lock < 0.26;
+
+      if (state.showGrid) drawGridXZ(C, 3, 0.5, -2.1);
+      drawTriad(C, 2.5);
+
+      /* 惯性基准：转子轴永远平行于它，不管载体怎么动 */
+      if (state.showRef) {
+        line3(C, [0, -2.1, 0], [0, 2.4, 0], { width: 1.3, dash: [4,5], color: rgba(CLR.amber, 0.5) });
+        label3(C, [0, 2.6, 0], t({ zh: '惯性基准', en: 'inertial reference' }),
+          { size: 11, color: rgba(CLR.amber, 0.85), align: 'center' });
+      }
+
+      /* 载体：三个平动自由度就是这根偏移矢量 */
+      if (state.showCase) {
+        drawBox(C, p, G.Rc, [1.62, 1.62, 1.62], rgba(CLR.bright, 0.34), 1.3);
+        for (let i = 0; i < 3; i++) {
+          drawVec(C, p, vMul(colOf(G.Rc, i), 1.05), CLR.bright, ['x', 'y', 'z'][i] + '′',
+            { width: 1.5, alpha: 0.6 });
+        }
+        if (vLen(p) > 0.02) {
+          line3(C, [0,0,0], p, { width: 1.4, dash: [6,6], color: rgba(CLR.slate, 0.65) });
+          solidDot(C, [0,0,0], 2.4, rgba(CLR.slate, 0.9));
+        }
+      }
+
+      /* 三层万向环：转角取载体欧拉角的相反数，链条乘完恰好是单位阵 */
+      if (state.showRings) {
+        drawGimbalRing(C, p, colOf(G.R1, 2), colOf(G.R1, 0), 1.34,
+          locked ? CLR.orange : CLR.cyan, 0.9);
+        drawGimbalRing(C, p, colOf(G.R2, 0), colOf(G.R2, 1), 1.06, CLR.cyan, 0.72);
+        drawGimbalRing(C, p, [0,1,0], [1,0,0], 0.84, CLR.cyan, 0.55);
+      }
+
+      /* 转子：法向恒为世界 ŷ —— 这不是画上去的效果，是恒等式 */
+      if (state.showRotor) {
+        /* 基向量按 u × w = 自旋轴 给：ẑ × x̂ = ŷ，于是轮辐转向与 L 自洽 */
+        drawDisc(C, p, [0,0,1], [1,0,0], 0.66, SPIN_PH, CLR.rose, { spokes: 8 });
+        drawSpinSense(C, p, [0,0,1], [1,0,0], 0.36, SPIN_PH, CLR.rose);
+        drawVec(C, p, [0, 1.5, 0], CLR.rose, 'L');
+        line3(C, vAdd(p, [0,-1.4,0]), vAdd(p, [0,1.4,0]), { width: 1.5, color: rgba(CLR.rose, 0.55) });
+        const sp = proj(C, p); if (sp) glowDot(sp, 13, '#ffffff', 'rgba(186,240,255,0.9)');
+      }
+
+      if (locked) {
+        /* 同时偏 y 与 z：正视里落在下方，沿轴俯视里落在圆外，两个视角都读得到 */
+        label3(C, vAdd(p, [0, -1.95, -1.55]), t({ zh: '⚠ 万向节死锁：外环枢轴 ∥ 转子轴', en: '⚠ Gimbal lock: outer pivot ∥ rotor axis' }),
+          { size: 12, color: CLR.orange, align: 'center' });
+      }
+    },
+    readout() {
+      const G = gimbalChain();
+      const d = a => fmt(a / DEG, 0) + '°';
+      return head(t({ zh: '万向环读出的姿态（转动 3 个自由度）', en: 'Attitude read off the gimbals (3 rotational DOF)' })) +
+        '<div class="sinC">' + t({ zh: '横滚 φ', en: 'roll φ' }) + ' = <b>' + d(state.carRoll) + '</b>&ensp;' +
+          t({ zh: '俯仰 θ', en: 'pitch θ' }) + ' = <b>' + d(state.carPitch) + '</b>&ensp;' +
+          t({ zh: '偏航 ψ', en: 'yaw ψ' }) + ' = <b>' + d(state.carYaw) + '</b></div>' +
+        '<div>' + t({ zh: '位置（平动 3 个自由度）', en: 'Position (3 translational DOF)' }) + ' = (' +
+          fmtS(state.carX) + ', ' + fmtS(state.carY) + ', ' + fmtS(state.carZ) + ')</div>' +
+        '<div class="dim">' + t({ zh: '陀螺仪对这三个数一无所知——它只测转动', en: 'the gyro knows nothing of these three; it measures rotation only' }) + '</div>' +
+        '<div class="' + (G.lock < 0.26 ? 'cotC' : 'tanC') + '">' + t({ zh: '死锁裕度 |cos θ| = ', en: 'lock margin |cos θ| = ' }) +
+          '<b>' + fmt(G.lock) + '</b>' + (G.lock < 0.26 ? t({ zh: ' ← 已进入死区', en: ' ← inside the dead zone' }) : '') + '</div>';
+    }
+  },
+
+  /* ══════════ ③ 进动与章动：力矩不让它倒，只让它转圈 ══════════ */
+  precess: {
+    label: { zh: '进动 · 章动', en: 'Precession & nutation' },
+    params: ['spin', 'theta0', 'mgl', 'iRatio'],
+    /* drive: 无。本页由引擎时钟直接驱动（规范 §8 出路①）——pushSample 按 state.t
+       的增量积分定点陀螺的欧拉—拉格朗日方程，θ / φ / ψ 每帧都在走，且进动是
+       永续的，不会「一次性演进后定格」。 */
+    brand: { zh: '重力想把陀螺按倒，可它给出的是力矩 τ = r × mg，而 dL = τ dt 垂直于 L。于是 L 不是变短、是被推向侧面——陀螺不倒，只是绕着竖直轴转圈。',
+             en: 'Gravity wants to pull the top over, but what it supplies is a torque τ = r × mg, and dL = τ dt is perpendicular to L. So L is not shortened, it is pushed sideways — the top does not fall, it circles the vertical instead.' },
+    tips: { zh: '提示：按 2 切到「俯视 x·z」。翠绿的 τ 永远切于轴尖画出的圆，橙色的 dL 就沿着它——每一瞬间被加上的都是「侧向」而不是「向下」。把自旋调慢，尖点状的章动小圈立刻长大；调到 30，陀螺几乎硬得像被焊住了。',
+            en: 'Tip: press 2 for the top view x·z. The emerald τ is always tangent to the circle the tip draws, and the orange dL runs along it — what gets added each instant is sideways, never downward. Slow the spin down and the cusped nutation loops blow up; take it to 30 and the top goes nearly rigid.' },
+    views: {
+      iso:   { label: { zh: '立体',      en: '3D' },        az: -0.9,  el: 0.30, dist: 8.5, tx: 0, ty: 0.35, tz: 0 },
+      top:   { label: { zh: '俯视 x·z',  en: 'Top x·z' },   az: 0.001, el: 1.52, dist: 7.5, tx: 0, ty: 0,    tz: 0 },
+      front: { label: { zh: '正视 x·y',  en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 7.5, tx: 0, ty: 0.5,  tz: 0 }
+    },
+    toggles: [
+      { key: 'showTrail', label: { zh: '轴尖轨迹',        en: 'Tip trail' },        color: '#fb7185', checked: true },
+      { key: 'showL3',    label: { zh: '角动量 L',        en: 'Angular momentum L' }, color: '#a78bfa', checked: true },
+      { key: 'showTau',   label: { zh: '重力力矩 τ',      en: 'Gravity torque τ' },   color: '#34d399', checked: true },
+      { key: 'showDL',    label: { zh: '增量 dL = τ·dt',  en: 'Increment dL = τ·dt' }, color: '#fb923c', checked: true },
+      { key: 'showW',     label: { zh: '重力 mg',         en: 'Weight mg' },          color: '#e2e8f0', checked: true },
+      { key: 'showGrid',  label: { zh: '网格', en: 'Grid' }, color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => 1,
+    draw(C) {
+      const F = topFrame(), n = F.n;
+      const tip = vMul(n, L_ARM), com = vMul(n, L_ARM * 0.55);
+      const Lv = topL(), tau = topTorque();
+
+      if (state.showGrid) drawGridXZ(C, 2.6, 0.4, 0);
+      drawTriad(C, 2.2);
+
+      /* 竖直参考（进动轴）与进动锥的圆 */
+      line3(C, [0,0,0], [0, 2.1, 0], { width: 1.3, dash: [4,5], color: rgba(CLR.slate, 0.5) });
+      const rc = L_ARM * Math.sin(TOP.th), yc = L_ARM * Math.cos(TOP.th);
+      strokePoly(C, ringPts([0, yc, 0], [1,0,0], [0,0,1], rc, 64),
+        { width: 1, dash: [5,6], color: rgba(CLR.amber, 0.28) });
+      drawArcBetween(C, [0,1,0], n, 0.55, CLR.amber, 'θ');
+
+      /* 轴尖轨迹：进动的大圆 + 章动的小尖点 */
+      if (state.showTrail && TOP.trail.length > 1) {
+        const p = [];
+        for (let i = TOP.trail.length - 1; i >= 0; i--) p.push(TOP.trail[i]);
+        drawTrace(C, p, CLR.rose);
+      }
+
+      /* 陀螺本体：轴 + 圆盘（源几何 = 青） */
+      line3(C, [0,0,0], tip, { width: 2, color: 'rgba(241,245,249,0.92)' });
+      const du = vUnit(vCross(n, [0,1,0])), dw = vCross(n, du);
+      drawDisc(C, vMul(n, L_ARM * 0.68), du, dw, 0.5, TOP.psi, CLR.cyan, { spokes: 8 });
+      solidDot(C, [0,0,0], 3, rgba(CLR.slate, 0.95));
+      const st = proj(C, tip); if (st) glowDot(st, 13, '#ffffff', 'rgba(186,240,255,0.9)');
+
+      if (state.showW) {
+        drawVec(C, com, [0, -0.62, 0], CLR.bright, 'mg', { width: 1.7, alpha: 0.7 });
+      }
+      if (state.showL3) drawVec(C, [0,0,0], vMul(Lv, LSCALE), CLR.violet, 'L');
+      if (state.showTau) drawVec(C, [0,0,0], vMul(tau, TSCALE), CLR.emerald, 'τ');
+      if (state.showDL) {
+        const anchor = vMul(Lv, LSCALE);
+        drawVec(C, anchor, vMul(tau, TSCALE * 0.55), CLR.orange, 'dL', { width: 1.9 });
+        drawArcBetween(C, Lv, tau, 0.42, CLR.amber, '90°');
+      }
+    },
+    readout() {
+      const Om = TOP.phid || 0;
+      const Omth = state.mgl / (state.iRatio * state.spin);
+      return head(t({ zh: '定点对称陀螺：I₁ = 1，I₃ = ', en: 'Symmetric top about a fixed point: I₁ = 1, I₃ = ' }) + fmt(state.iRatio)) +
+        '<div class="sinC">' + t({ zh: '倾角 θ', en: 'tilt θ' }) + ' = <b>' + fmt(TOP.th / DEG, 0) + '°</b>&ensp;·&ensp;' +
+          t({ zh: '进动角 φ', en: 'precession φ' }) + ' = <b>' + fmt(mod2pi(TOP.phi) / DEG, 0) + '°</b></div>' +
+        '<div class="cosC">' + t({ zh: '进动速率 φ̇', en: 'precession rate φ̇' }) + ' = <b>' + fmtS(Om) + '</b> rad/s</div>' +
+        '<div class="tanC">|τ| = Mgl·sin θ = <b>' + fmt(state.mgl * Math.sin(TOP.th)) + '</b></div>' +
+        '<div class="dim">' + t({ zh: '慢进动近似 Mgl/(I₃ωs) = ', en: 'slow-precession estimate Mgl/(I₃ωs) = ' }) + fmt(Omth) +
+          ' rad/s&ensp;·&ensp;' + t({ zh: '章动频率 ≈ I₃ωs/I₁ = ', en: 'nutation rate ≈ I₃ωs/I₁ = ' }) +
+          fmt(state.iRatio * state.spin) + ' rad/s</div>';
+    }
+  },
+
+  /* ══════════ ④ 反作用轮：卫星只能「借」角动量 ══════════ */
+  wheel: {
+    label: { zh: '反作用轮', en: 'Reaction wheel' },
+    params: ['psiCmd', 'iwRatio', 'gainK', 'wMax', 'dist', 'span'],
+    /* 目标角是标量区间 → kind: 'linear'（默认 pingpong），卫星来回转体 */
+    drive: { key: 'psiCmd', from: -80 * DEG, to: 80 * DEG, period: 10, kind: 'linear' },
+    brand: { zh: '真空里没有可以蹬的地面。卫星要转身，只能让内部的飞轮反着转：Jb ψ̇b + Jw ωw 恒定，它转多少，轮子必须反着转多少。两条曲线永远是镜像。',
+             en: 'In vacuum there is no ground to push against. To turn, a satellite must spin an internal wheel the other way: Jb ψ̇b + Jw ωw stays constant, so whatever the body turns, the wheel must turn back. The two curves are mirror images, always.' },
+    tips: { zh: '提示：按 2 切到「俯视 L·t」。紫色的星体角动量与翠绿的轮子角动量是一对镜像，橙色的总和是一条平线。再把「外扰力矩」拉开——总和变成斜坡，轮子被一路推到上限，控制当场失效：这就是真实卫星必须定期「卸载」动量的原因。',
+            en: 'Tip: press 2 for the top view L·t. The violet body momentum and the emerald wheel momentum mirror each other, and the orange sum is a flat line. Now open up the external torque: the sum becomes a ramp, the wheel is driven to its limit and control dies on the spot — which is why real satellites must periodically dump momentum.' },
+    views: {
+      iso:   { label: { zh: '立体',      en: '3D' },        az: -0.9,       el: 0.30,  dist: 11.5, tx: 0, ty: 0, tz: 2.8 },
+      topL:  { label: { zh: '俯视 L·t',  en: 'Top L·t' },   az: 0.001,      el: 1.52,  dist: 12,   tx: 0, ty: 0, tz: 3.4,
+               onSelect: () => { state.showLb = true; state.showLw = true; state.showLsum = true; syncToggles(); } },
+      sideP: { label: { zh: '侧视 ψ·t',  en: 'Side ψ·t' },  az: -Math.PI/2, el: 0.001, dist: 12,   tx: 0, ty: 0, tz: 3.4,
+               onSelect: () => { state.showPsi = true; syncToggles(); } },
+      front: { label: { zh: '正视 x·y',  en: 'Front x·y' }, az: 0.001,      el: 0.02,  dist: 6.5,  tx: 0, ty: 0, tz: 0 }
+    },
+    toggles: [
+      { key: 'showPsi',  label: { zh: '星体偏航 ψb',      en: 'Body yaw ψb' },        color: '#fb7185', checked: true },
+      { key: 'showLb',   label: { zh: '星体角动量 Lb',    en: 'Body momentum Lb' },   color: '#a78bfa', checked: true },
+      { key: 'showLw',   label: { zh: '轮子角动量 Lw',    en: 'Wheel momentum Lw' },  color: '#34d399', checked: true },
+      { key: 'showLsum', label: { zh: '总和 Lb + Lw',     en: 'Total Lb + Lw' },      color: '#fb923c', checked: true },
+      { key: 'showGuides', label: { zh: '目标 ψc 与投影线', en: 'Target ψc and guides' }, color: '#fbbf24', checked: true },
+      { key: 'showGrid', label: { zh: '网格', en: 'Grid' }, color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => state.span + 0.5,
+    draw(C) {
+      /* 失控（轮子饱和）后星体是无界翻滚，按 §6 裁到 CLIP 世界单位 */
+      const v = vOf(), LS = 1.8, clip = u => clamp(u, -CLIP_W, CLIP_W);
+      const Rb = RY(SAT.psi);
+
+      if (state.showGrid) drawTimeGrid(C, { yMax: 2, v: v });
+      drawAxes(C, { ex: 2, ey: 2.1, yTicks: [1], xTicks: [1], tAxis: true, v: v });
+
+      if (state.showGuides) drawTrace(C, traceOf(s => s.psic, 'y', v), CLR.amber);
+      if (state.showLsum) drawTrace(C, traceOf(s => clip((s.lb + s.lw) * LS), 'x', v), CLR.orange);
+      if (state.showLw)   drawTrace(C, traceOf(s => clip(s.lw * LS), 'x', v), CLR.emerald);
+      if (state.showLb)   drawTrace(C, traceOf(s => clip(s.lb * LS), 'x', v), CLR.violet);
+      if (state.showPsi)  drawTrace(C, traceOf(s => clip(s.psib), 'y', v), CLR.rose);
+
+      /* 星体：本体盒 + 内置飞轮（飞轮转轴 = 世界 ŷ = 偏航轴） */
+      drawBox(C, [0,0,0], Rb, [0.52, 0.24, 0.36], rgba(CLR.bright, 0.55), 1.5);
+      /* u × w = ẑ × x̂ = ŷ：飞轮的转向与它携带的 Lw 同号（右手定则） */
+      drawDisc(C, [0,0,0], [0,0,1], [1,0,0], 0.30, SAT.ph, CLR.emerald, { spokes: 6 });
+      drawVec(C, [0,0,0], vMul(colOf(Rb, 0), 1.15), CLR.rose, 'ψb');
+      if (state.showGuides) {
+        const cmd = mv(RY(state.psiCmd), [1.42, 0, 0]);
+        drawVec(C, [0,0,0], cmd, CLR.amber, 'ψc', { width: 1.5, alpha: 0.8, dash: [7,7] });
+      }
+
+      /* 头部光点：曲线与几何在 z=0 处交班 */
+      const hd = (u, plane, hex) => {
+        const s = proj(C, plane === 'y' ? [0, u, 0] : [u, 0, 0]);
+        if (s) glowDot(s, 9, '#ffffff', rgba(hex, 0.85));
+      };
+      if (state.showPsi)  hd(clip(SAT.psi), 'y', CLR.rose);
+      if (state.showLb)   hd(clip(SAT.psid * LS), 'x', CLR.violet);
+      if (state.showLw)   hd(clip(state.iwRatio * SAT.ww * LS), 'x', CLR.emerald);
+      if (state.showLsum) hd(clip((SAT.psid + state.iwRatio * SAT.ww) * LS), 'x', CLR.orange);
+
+      label3(C, [1.55, 0, 1.1], 'Jb·ψ̇b + Jw·ωw = ' + t({ zh: '常数', en: 'const' }),
+        { font: 'italic 13px ' + FONT_MATH, color: CLR.orange, align: 'left' });
+      if (SAT.sat) {
+        label3(C, [0, -1.7, 1.2], t({ zh: '⚠ 轮速饱和 —— 控制力矩已归零', en: '⚠ Wheel saturated — control torque is gone' }),
+          { size: 12, color: CLR.orange, align: 'center' });
+      }
+    },
+    readout() {
+      const Lb = SAT.psid, Lw = state.iwRatio * SAT.ww;
+      const err = wrapPI(SAT.psi - state.psiCmd);
+      return head(t({ zh: '真空中无外力矩：总角动量只能被"搬运"，不能被制造',
+                      en: 'No external torque in vacuum: total momentum can only be moved around, never created' })) +
+        '<div class="sinC">ψb = <b>' + fmtS(SAT.psi / DEG, 1) + '°</b>&ensp;·&ensp;' +
+          t({ zh: '误差', en: 'error' }) + ' = <b>' + fmtS(err / DEG, 1) + '°</b></div>' +
+        '<div class="cosC">Lb = Jb·ψ̇b = <b>' + fmtS(Lb, 3) + '</b></div>' +
+        '<div class="tanC">Lw = Jw·ωw = <b>' + fmtS(Lw, 3) + '</b>&ensp;(ωw = ' + fmtS(SAT.ww, 1) + ' rad/s)</div>' +
+        '<div class="cotC">Lb + Lw = <b>' + fmtS(Lb + Lw, 3) + '</b>' +
+          t({ zh: state.dist > 0 ? '（外扰在往里灌，斜坡）' : '（无外扰，恒定）',
+              en: state.dist > 0 ? ' (external torque is pumping it — a ramp)' : ' (no external torque — constant)' }) + '</div>' +
+        '<div class="dim">' + t({ zh: '轮速 / 上限 = ', en: 'wheel speed / limit = ' }) +
+          fmt(Math.abs(SAT.ww) / state.wMax * 100, 0) + '%' +
+          (SAT.sat ? t({ zh: ' —— 已饱和，需要推力器卸载', en: ' — saturated; thrusters must dump it' }) : '') + '</div>';
+    }
+  },
+
+  /* ══════════ ⑤ 控制力矩陀螺：把转动翻译成 90° 外的力矩 ══════════ */
+  cmg: {
+    label: { zh: '控制力矩陀螺', en: 'Control moment gyro' },
+    params: ['hw', 'gimbAng', 'jBody'],
+    /* 框架角是角度量，绕满一圈首尾相接 → kind: 'circular'（默认 loop） */
+    drive: { key: 'gimbAng', from: -Math.PI, to: Math.PI, period: 12, kind: 'circular' },
+    brand: { zh: '轮子转速不变，只把它的指向整体搬过去：τ = −Ω × Lw，大小是 h·Ω。一台小小的框架电机，因此能给出反作用轮想都不敢想的力矩——国际空间站靠的就是这个。',
+             en: 'The wheel speed never changes; only its direction is carried around: τ = −Ω × Lw, of magnitude h·Ω. A tiny gimbal motor therefore delivers torque a reaction wheel could never dream of — this is what holds the ISS.' },
+    tips: { zh: '提示：按 2 切到「俯视 x·z」。紫色 Lw 的尖端在画一个圆，而玫红的 τ 永远切在这个圆上、恰好领先 90°——力矩不是「拧」出来的，是「搬」出来的：搬动 L 的速率就是力矩。你自己拖那根框架角滑杆，拖得越快，τ 越长。',
+            en: 'Tip: press 2 for the top view x·z. The tip of the violet Lw traces a circle, and the rose τ is always tangent to it, exactly 90° ahead — torque is not twisted out, it is carried out: the rate at which L is moved is the torque. Drag the gimbal-angle slider yourself; the faster you drag, the longer τ grows.' },
+    views: {
+      iso:   { label: { zh: '立体',      en: '3D' },        az: -0.85, el: 0.32, dist: 9.5, tx: 0, ty: 0, tz: 0 },
+      top:   { label: { zh: '俯视 x·z',  en: 'Top x·z' },   az: 0.001, el: 1.52, dist: 8.5, tx: 0, ty: 0, tz: 0 },
+      front: { label: { zh: '正视 x·y',  en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 8.5, tx: 0, ty: 0, tz: 0 }
+    },
+    toggles: [
+      { key: 'showTau5',  label: { zh: '输出力矩 τ',    en: 'Output torque τ' },       color: '#fb7185', checked: true },
+      { key: 'showLw5',   label: { zh: '轮体角动量 Lw', en: 'Wheel momentum Lw' },     color: '#a78bfa', checked: true },
+      { key: 'showOmb',   label: { zh: '星体角速度 ωb', en: 'Spacecraft rate ωb' },    color: '#34d399', checked: true },
+      { key: 'showFrame', label: { zh: '框架与自旋轴 Ω', en: 'Gimbal and its axis Ω' }, color: '#2dd4ea', checked: true },
+      { key: 'showHull',  label: { zh: '星体本体',      en: 'Spacecraft body' },       color: '#e2e8f0', checked: true },
+      { key: 'showGrid',  label: { zh: '网格', en: 'Grid' }, color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => 1,
+    draw(C) {
+      const Lw = cmgLw(state.gimbAng), wHat = vUnit(Lw);
+      const tau = CMG.tau;
+
+      if (state.showGrid) drawGridXZ(C, 2.6, 0.5, -1.9);
+      drawTriad(C, 2.3);
+
+      if (state.showHull) {
+        drawBox(C, [0,0,0], CMG.R, [1.25, 0.78, 1.25], rgba(CLR.bright, 0.30), 1.3);
+        for (let i = 0; i < 3; i++) {
+          drawVec(C, [0,0,0], vMul(colOf(CMG.R, i), 1.55), CLR.bright, ['x', 'y', 'z'][i] + '′',
+            { width: 1.4, alpha: 0.5 });
+        }
+      }
+
+      /* 框架：环平面含自旋轴与框架轴；框架轴（青）就是 Ω 的方向 */
+      if (state.showFrame) {
+        drawGimbalRing(C, [0,0,0], [0,1,0], wHat, 1.02, CLR.cyan, 0.8);
+        line3(C, [0,-1.5,0], [0,1.5,0], { width: 1.4, dash: [6,6], color: rgba(CLR.cyan, 0.5) });
+        drawVec(C, [0,0,0], [0, clamp(CMG.rate * 1.1, -1.5, 1.5), 0], CLR.cyan, 'Ω', { width: 1.8 });
+      }
+
+      /* Lw 尖端画出的圆：这就是「搬运」本身 */
+      if (state.showLw5 && CMG.trail.length > 1) {
+        const p = [];
+        for (let i = CMG.trail.length - 1; i >= 0; i--) p.push(CMG.trail[i]);
+        drawTrace(C, p, CLR.violet);
+      }
+
+      /* 转子：法向 = wHat，盘面由 ŷ 与 ŷ×wHat 张成 */
+      drawDisc(C, [0,0,0], [0,1,0], vCross(wHat, [0,1,0]), 0.62, CMG.ph, CLR.violet, { spokes: 8 });
+
+      if (state.showLw5) drawVec(C, [0,0,0], vMul(Lw, CMGS), CLR.violet, 'Lw');
+      if (state.showTau5) {
+        drawVec(C, [0,0,0], vMul(tau, TSCALE), CLR.rose, 'τ');
+        if (vLen(tau) > 0.05) drawArcBetween(C, Lw, tau, 0.6, CLR.amber, '90°');
+      }
+      if (state.showOmb) drawVec(C, [0,0,0], vMul(CMG.om, 1.1), CLR.emerald, 'ωb');
+
+      label3(C, [0, -0.02, -2.05], 'τ = −Ω × Lw',
+        { font: 'italic 13px ' + FONT_MATH, color: CLR.rose, align: 'center' });
+    },
+    readout() {
+      const tm = vLen(CMG.tau), rate = CMG.rate;
+      return head(t({ zh: '轮子转速不变，被搬动的只是它的指向', en: 'The wheel speed is fixed; only its direction is being carried' })) +
+        '<div class="sinC">|τ| = h·|Ω| = <b>' + fmt(tm) + '</b></div>' +
+        '<div class="cosC">|Lw| = <b>' + fmt(state.hw) + '</b>&ensp;·&ensp;' +
+          t({ zh: '框架角 δ', en: 'gimbal angle δ' }) + ' = <b>' + fmtS(state.gimbAng / DEG, 0) + '°</b></div>' +
+        '<div class="tanC">|ωb| = <b>' + fmt(vLen(CMG.om)) + '</b> rad/s&ensp;' +
+          t({ zh: '（上限 2h/J = ', en: '(bounded by 2h/J = ' }) + fmt(2 * state.hw / state.jBody) + '）</div>' +
+        '<div class="dim">Ω = <b>' + fmtS(rate) + '</b> rad/s&ensp;·&ensp;' +
+          t({ zh: '国际空间站的 CMG：h ≈ 4760 N·m·s，Ω 只要 0.01 rad/s 就是 47.6 N·m',
+              en: 'ISS CMGs: h ≈ 4760 N·m·s, so Ω of just 0.01 rad/s gives 47.6 N·m' }) + '</div>';
+    }
+  }
+};
+
+/* 视角联动（views[x].onSelect）改的是 state，面板上的复选框要跟着走。
+   引擎的开关是每个页签一组 DOM，用 data-key 精确定位，别去认样式类。 */
+function syncToggles() {
+  document.querySelectorAll('#togglesHost input[data-key]').forEach(cb => {
+    cb.checked = !!state[cb.dataset.key];
+  });
+}
+
+/* ================= 常量与状态（引擎区，以下一般无需改动） ================= */
+const WAVE_LEN = 8;      // t 轴的世界长度（可视窗口）
+const NEAR = 0.15;       // 近裁剪面
+
+const FONT_CN = 'ui-sans-serif,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif';
+const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
+
+const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
+const samples = [];
+let curTab = null;
+const RELABEL = [];
+const cams = {};
+let cam = null;
+let tween = null;
+const lastView = {};
+const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ③ 采样 —— 按你的工具需要扩展字段                           ║
+   ║  原则：记录"当时的真实值"，参数中途改变时历史不重算            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+let lastSampleT = 0;
+const SUB_H = 0.0008;                       // 物理子步长（章动频率最高时也够密）
+
+function resetPhysics() {
+  topReseed(); satReset(); cmgReset();
+  SPIN_PH = 0;
+}
+
+/* 三个页签各自的真实动力学都在这里推进：引擎每帧调一次 pushSample，
+   dt 取自 state.t 的增量（规范 §6「暂停只冻结模拟」于是自动成立——
+   暂停时 state.t 不走，dt 为 0，相机与绘制照常）。 */
+function stepPhysics(dt) {
+  if (TOP.sig !== topSig()) topReseed();    // 初值/参数变了 = 重做一次实验，轨迹显式清空
+  const n = clamp(Math.ceil(dt / SUB_H), 1, 400);
+  const h = dt / n;
+  for (let i = 0; i < n; i++) { topStep(h); satStep(h); }
+  cmgStep(dt);                              // ω_b 是守恒律给的闭式解，无需子步
+  SAT.ph = (SAT.ph + SAT.ww * dt) % TAU;
+  SPIN_PH = (SPIN_PH + state.spin * dt) % TAU;
+  TOP.trail.push(vMul(topFrame().n, L_ARM));
+  if (TOP.trail.length > 900) TOP.trail.shift();
+}
+
+function pushSample() {
+  /* 本工具没有相位钟：显式把 ω 置 0，防引擎的 theta 积分把 undefined 累成 NaN。 */
+  state.omega = 0;
+
+  if (state.t < lastSampleT || state.t === 0) resetPhysics();   // resetSim() 把 t 归零
+  const dt = clamp(state.t - lastSampleT, 0, 0.05);
+  lastSampleT = state.t;
+  if (dt > 0) stepPhysics(dt);
+
+  /* 记录的是「当时的真实值」：中途改滑杆不会重算已经画出去的那一段（§4.6）。 */
+  const n = spinAxis(), Lm = ROTOR_I * state.spin;
+  samples.push({
+    t: state.t,
+    lx: Lm * n[0], ly: Lm * n[1], lm: Lm,
+    psib: SAT.psi, psic: state.psiCmd,
+    lb: SAT.psid, lw: state.iwRatio * SAT.ww
+  });
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ④ 演算记录与回放（可选）—— 规范 §11                        ║
+   ║  只有「同一次运行不可复得」的工具才需要（混沌、多体、由种子    ║
+   ║  驱动的迭代）。不声明 RECORD 就完全没有录制 UI，行为与体积     ║
+   ║  均不受影响 —— 绝大多数工具应当保持不声明。                   ║
+   ╚══════════════════════════════════════════════════════════╝
+
+   写法（每个可录制页签一份，键名与 SCENES 对应）：
+
+   const RECORD = {
+     lissa: {
+       capture:  () => ({ th: state.theta }),        // 完整状态向量，JSON 可序列化
+       restore:  s  => { state.theta = s.th; },      // 必须与 capture 对称（§8）
+       seed:     () => ({ omega: state.omega }),     // 初值 + 积分参数
+       reseed:   s  => { state.omega = s.omega; resetSim(); },
+       lock:     ['omega'],                          // 回放期间置灰的滑杆
+       roundOf:  () => 0                             // 当前轮次，供「录一轮」判定
+     }
+   };
+
+   本模板不声明（示例场景无此需要），故下面给一个空对象占位。 */
+const RECORD = {};
+
+/* ================= 画布 ================= */
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = 1, FOCAL = 900, CX = 0, CY = 0, bgGrad = null;
+
+function resize() {
+  DPR = Math.min(2.5, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  CX = W / 2; CY = H / 2;
+  FOCAL = 1.2 * Math.min(H, W * 1.1);
+  bgGrad = ctx.createRadialGradient(W*0.5, H*0.3, 0, W*0.5, H*0.42, Math.max(W, H)*0.95);
+  bgGrad.addColorStop(0, '#0c1526');
+  bgGrad.addColorStop(1, '#05070d');
+}
+window.addEventListener('resize', resize);
+
+/* ================= 基础数学 ================= */
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const mod2pi = a => { a %= TAU; if (a < 0) a += TAU; return a; };
+const wrapPI = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
+const ease = k => k < 0.5 ? 4*k*k*k : 1 - Math.pow(-2*k + 2, 3) / 2;
+const fmt = (x, d = 2) => x.toFixed(d);
+const fmtS = (x, d = 2) => (x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
+
+const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+const dot3 = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+
+/* ================= 轨道相机与投影 ================= */
+function makeCam() {
+  const cp = Math.cos(cam.el), sp = Math.sin(cam.el);
+  const eye = [
+    cam.tx + cam.dist * cp * Math.sin(cam.az),
+    cam.ty + cam.dist * sp,
+    cam.tz + cam.dist * cp * Math.cos(cam.az)
+  ];
+  const f = norm(sub([cam.tx, cam.ty, cam.tz], eye));
+  const r = norm(cross(f, [0, 1, 0]));
+  const u = cross(r, f);
+  return { eye, f, r, u };
+}
+function camPt(C, p) {
+  const d = sub(p, C.eye);
+  return [dot3(d, C.r), dot3(d, C.u), dot3(d, C.f)];
+}
+function scr(c) { const s = FOCAL / c[2]; return [CX + c[0]*s, CY - c[1]*s]; }
+function proj(C, p) { const c = camPt(C, p); return c[2] < NEAR ? null : scr(c); }
+function clipNear(a, b) {
+  const t = (NEAR - a[2]) / (b[2] - a[2]);
+  return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, NEAR];
+}
+
+/* 折线路径（支持 null 断点 + 近平面裁剪）；返回 [首点, 末点] 屏幕坐标 */
+function polyPath(C, pts) {
+  if (pts.length < 2) return null;
+  let head = null, tail = null, contin = false, prev = null;
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    const P = pts[i];
+    if (P === null) { prev = null; contin = false; continue; }
+    const cur = camPt(C, P);
+    if (prev !== null) {
+      let a = prev, b = cur;
+      const av = a[2] >= NEAR, bv = b[2] >= NEAR;
+      if (av || bv) {
+        if (!av) a = clipNear(a, b);
+        if (!bv) b = clipNear(b, a);
+        const sA = scr(a), sB = scr(b);
+        if (!contin) ctx.moveTo(sA[0], sA[1]);
+        ctx.lineTo(sB[0], sB[1]);
+        if (!head) head = sA;
+        tail = sB;
+        contin = bv;
+      } else {
+        contin = false;
+      }
+    }
+    prev = cur;
+  }
+  return head ? [head, tail] : null;
+}
+
+function strokePoly(C, pts, o) {
+  const ht = polyPath(C, pts);
+  if (!ht) return;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = o.width || 2;
+  if (o.alpha != null) ctx.globalAlpha = o.alpha;
+  if (o.dash) ctx.setLineDash(o.dash);
+  if (o.fade) {
+    const h = ht[0], t = ht[1];
+    if (Math.hypot(t[0]-h[0], t[1]-h[1]) < 2) {
+      ctx.strokeStyle = o.fade[0];
+    } else {
+      const g = ctx.createLinearGradient(h[0], h[1], t[0], t[1]);
+      g.addColorStop(0, o.fade[0]);
+      g.addColorStop(1, o.fade[1]);
+      ctx.strokeStyle = g;
+    }
+  } else {
+    ctx.strokeStyle = o.color;
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+const line3 = (C, a, b, o) => strokePoly(C, [a, b], o);
+
+function glowDot(s, r, core, mid) {
+  const g = ctx.createRadialGradient(s[0], s[1], 0, s[0], s[1], r);
+  g.addColorStop(0, core);
+  g.addColorStop(0.35, mid);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+function solidDot(C, p, r, color) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+
+function label3(C, p, text, o) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.save();
+  ctx.font = o.font || ((o.size || 12) + 'px ' + FONT_CN);
+  ctx.fillStyle = o.color || '#c4d2e6';
+  ctx.textAlign = o.align || 'left';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(3,6,12,.85)';
+  ctx.shadowBlur = 4;
+  ctx.fillText(text, s[0] + (o.dx || 0), s[1] + (o.dy || 0));
+  ctx.restore();
+}
+
+function arrowAt(C, tip3, before3, color) {
+  const t = proj(C, tip3), b = proj(C, before3);
+  if (!t || !b) return;
+  const a = Math.atan2(t[1]-b[1], t[0]-b[0]);
+  const L = 9;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.4;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a-0.42), t[1]-L*Math.sin(a-0.42));
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a+0.42), t[1]-L*Math.sin(a+0.42));
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* ================= 常用场景部件 ================= */
+const AXIS = 'rgba(159,176,200,0.9)';
+const AXIS_DIM = 'rgba(159,176,200,0.5)';
+
+/* 坐标轴：o = { ex, ey, yTicks:[], xTicks:[], tAxis:bool, v(秒刻度间距的波速) } */
+function drawAxes(C, o) {
+  const ex = o.ex, ey = o.ey;
+  line3(C, [-ex, 0, 0], [ex, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [ex, 0, 0], [ex - 0.2, 0, 0], AXIS);
+  label3(C, [ex + 0.22, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  line3(C, [0, -ey, 0], [0, ey, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, ey, 0], [0, ey - 0.2, 0], AXIS);
+  label3(C, [0, ey + 0.18, 0], 'y', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  if (o.tAxis) {
+    line3(C, [0, 0, 0], [0, 0, WAVE_LEN + 0.5], { width: 1.4, color: AXIS });
+    arrowAt(C, [0, 0, WAVE_LEN + 0.5], [0, 0, WAVE_LEN + 0.3], AXIS);
+    label3(C, [0, 0, WAVE_LEN + 0.9], 't', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+    const v = o.v || 1;
+    const every = v < 0.8 ? 2 : 1;
+    for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+      line3(C, [0, -0.06, k*v], [0, 0.06, k*v], { width: 1.2, color: AXIS_DIM });
+      if (k % every === 0) {
+        label3(C, [0, -0.25, k*v], k + 's', { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+      }
+    }
+  }
+  for (const k of (o.yTicks || [])) {
+    for (const yv of [k, -k]) {
+      line3(C, [-0.05, yv, 0], [0.05, yv, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [-0.13, yv, 0], (yv < 0 ? '−' : '') + Math.abs(yv), { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+    }
+  }
+  for (const k of (o.xTicks || [])) {
+    for (const xv of [k, -k]) {
+      line3(C, [xv, -0.05, 0], [xv, 0.05, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [xv, -0.24, 0], (xv < 0 ? '−' : '') + Math.abs(xv), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+    }
+  }
+}
+
+/* z=0 平面方格网格（几何类场景） */
+function drawGridXY(C, g, step) {
+  const n = Math.round(g / step);
+  for (let i = -n; i <= n; i++) {
+    if (i === 0) continue;
+    const u = i * step;
+    line3(C, [u, -g, 0], [u, g, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+    line3(C, [-g, u, 0], [g, u, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+  }
+}
+
+/* y–t 时间平面网格（流式波形类场景）：o = { yMax, v } */
+function drawTimeGrid(C, o) {
+  const g = o.yMax, v = o.v;
+  for (let i = Math.round(-g*2); i <= Math.round(g*2); i++) {
+    if (i === 0) continue;
+    line3(C, [0, i/2, 0], [0, i/2, WAVE_LEN], { width: 1, color: 'rgba(148,163,184,0.10)' });
+  }
+  for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+    line3(C, [0, -g, k*v], [0, g, k*v], { width: 1, color: 'rgba(148,163,184,0.07)' });
+  }
+}
+
+/* 周期标尺（琥珀）：在平面 x=px、高度 yb 处，从 z=0 画到 z=T·v */
+function drawPeriodBracket(C, Tsec, v, px, yb, text) {
+  const zT = Tsec * v;
+  if (zT > WAVE_LEN + 0.01) return;
+  const amber = 'rgba(251,191,36,0.75)';
+  line3(C, [px, yb, 0], [px, yb, zT], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, 0], [px, yb + 0.06, 0], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, zT], [px, yb + 0.06, zT], { width: 1.2, color: amber });
+  label3(C, [px, yb - 0.2, zT/2], text, { size: 10.5, color: 'rgba(251,191,36,.9)', align: 'center' });
+}
+
+/* 单位圆（半径 A，位于 z=0 平面，青色源几何） */
+function drawCircle(C, A) {
+  const cpts = [];
+  for (let i = 0; i <= 72; i++) {
+    const a = i / 72 * TAU;
+    cpts.push([A * Math.cos(a), A * Math.sin(a), 0]);
+  }
+  strokePoly(C, cpts, { width: 6, color: 'rgba(45,212,234,0.13)' });
+  strokePoly(C, cpts, { width: 2, color: 'rgba(45,212,234,0.95)' });
+  for (let q = 0; q < 4; q++) {
+    const a = q * Math.PI / 2;
+    line3(C, [A*0.95*Math.cos(a), A*0.95*Math.sin(a), 0],
+             [A*1.06*Math.cos(a), A*1.06*Math.sin(a), 0],
+             { width: 1, color: 'rgba(45,212,234,0.5)' });
+  }
+  solidDot(C, [0, 0, 0], 2.2, 'rgba(159,176,200,0.9)');
+}
+
+/* 角度弧 θ（琥珀度量注记） */
+function drawAngleArc(C, th, A) {
+  const thm = mod2pi(th);
+  if (thm <= 0.03) return;
+  const r0 = Math.max(0.14, Math.min(0.34, 0.5 * A));
+  const n = Math.max(2, Math.ceil(thm / 0.06));
+  const apts = [];
+  for (let j = 0; j <= n; j++) {
+    const a = thm * j / n;
+    apts.push([r0 * Math.cos(a), r0 * Math.sin(a), 0]);
+  }
+  strokePoly(C, apts, { width: 1.6, color: 'rgba(251,191,36,0.9)' });
+  label3(C, [(r0 + 0.15) * Math.cos(thm/2), (r0 + 0.15) * Math.sin(thm/2), 0], 'θ',
+    { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+}
+
+/* 读数区固定首两行 */
+function readoutHead() {
+  const th = state.theta;
+  const deg = (mod2pi(th) * 180 / Math.PI).toFixed(0);
+  const lap = fmt(th / TAU);
+  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;θ = ωt = <b>' + fmt(th) + '</b> rad</div>' +
+         '<div class="dim">' + t({ zh: '≡ ' + deg + '°（第 ' + lap + ' 圈）', en: '≡ ' + deg + '° (turn ' + lap + ')' }) + '</div>';
+}
+
+/* ================= 主绘制与主循环 ================= */
+function draw() {
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+  const C = makeCam();
+  SCENES[curTab].draw(C);
+}
+
+/* 帧级异常兜底：同一页签的同一条错误只报一次，否则 60 fps 会把控制台刷爆。
+   resetSim() 会清空它——用户主动重置后应当允许重新报。
+   声明必须排在 resetSim() 之前：resetSim() 引用 frameErrSeen，声明留在它下方
+   就只靠「启动序列恰好先求值到这里」躲开 TDZ，是结构性的隐患，而这份 starter
+   会被复制给所有未来工具。 */
+const frameErrSeen = Object.create(null);
+function frameError(err) {
+  const k = curTab + '|' + ((err && err.message) || err);
+  if (frameErrSeen[k]) return;
+  frameErrSeen[k] = 1;
+  console.warn('[frame] 场景「' + curTab + '」抛出异常，已跳过该帧并继续渲染循环：', err);
+}
+
+function resetSim() {
+  /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
+  Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  state.t = 0;
+  state.theta = 0;
+  /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
+     相位上，「重置」就名不副实了 */
+  Object.keys(driveOff).forEach(id => { driveOff[id] = 0; driveOffAt[id] = 0; });
+  samples.length = 0;
+  pushSample();
+}
+
+let lastTs = performance.now(), lastRO = 0;
+function frame(ts) {
+  try {
+    const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
+    lastTs = ts;
+
+    if (tween) {
+      const k = Math.min(1, (ts - tween.t0) / tween.dur);
+      const e = ease(k);
+      const f = tween.from, o = tween.to;
+      cam.az = f.az + wrapPI(o.az - f.az) * e;
+      cam.el = f.el + (o.el - f.el) * e;
+      cam.dist = f.dist + (o.dist - f.dist) * e;
+      cam.tx = f.tx + (o.tx - f.tx) * e;
+      cam.ty = f.ty + (o.ty - f.ty) * e;
+      cam.tz = f.tz + (o.tz - f.tz) * e;
+      if (k >= 1) tween = null;
+    }
+
+    /* 回放冻结的是「演算」，不是「观察」：相机 tween 在上面已经走过了，
+       视角、开关、绘制全部照常 —— 与「暂停只冻结模拟」同一条精神（§11.7）。 */
+    if (recState.mode === 'replay') {
+      recStep(dt);
+    } else if (state.running) {
+      if (recState.mode === 'recording') {
+        /* 录制时把时间量子化成整数个 REC_DT。理由（§11.2）：物理若由变长的
+           帧 dt 推进，轨迹就依赖于帧率抖动，「从同一种子重算」在**本机**都对
+           不上，比对曲线也就失去意义。量子化之后轨迹是种子的确定性函数，
+           本机重算能贴到舍入噪声，跨机器的差别才干净地归因于超越函数实现。 */
+        recState.acc += dt;
+        let guard = 0;
+        while (recState.acc >= REC_DT && guard++ < 64) { recState.acc -= REC_DT; simAdvance(REC_DT); recPush(); }
+      } else {
+        simAdvance(dt);
+      }
+    }
+    const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
+    while (samples.length && samples[0].t < state.t - windowSec) samples.shift();
+
+    draw();
+    if (ts - lastRO > 120) { lastRO = ts; updateReadout(); refreshRecInfo(); }
+  } catch (err) {
+    frameError(err);
+  } finally {
+    /* rAF 放 finally 是「循环永不断」的机械保证：不依赖 catch 里写对什么。
+       代价是画布可能停在最后一帧好内容而屏幕无提示——这是有意的取舍，
+       「整个工具变砖」比「画面停在错误状态」更不可接受。 */
+    requestAnimationFrame(frame);
+  }
+}
+
+const roEl = document.getElementById('readout');
+function updateReadout() { roEl.innerHTML = SCENES[curTab].readout(); }
+
+/* ================= 场景作用域参数与时间驱动 ================= */
+const paramWraps = {};   // key -> { wrap, input, val, p }
+const autoPlay = {};     // tabId -> 是否自动播放
+const driveMode = {};    // tabId -> 'loop' | 'pingpong'
+const driveOff = {};     // tabId -> 驱动时钟相对引擎时钟的累计偏移（= 自动播放累计关停时长）
+const driveOffAt = {};   // tabId -> 本次关停的起点（引擎时钟读数）
+
+/* 驱动时钟：引擎时钟减去「自动播放关掉的那些时间」。关停期间它不走，
+   所以重新打开时驱动量从原地续上，不跳变。求值仍是纯函数——只是把
+   自变量从 state.t 换成这个校正过的时钟，不做增量积分：既不累积浮点
+   漂移，录制器按固定 dt 离线重放也能复现同一串值（偏移在一次渲染内是常量）。
+   已知语义：偏移只扣「自动播放关停」的时长，不扣「页签没被选中」的时长——
+   离开某页签 10 秒再切回来，它的驱动量会跳到 10 秒后的位置。这与「暂停只冻结
+   模拟、相机照走」是同一族约定（时钟是全局的，页签只是不同的观测口），
+   如需改成每页签独立时钟，得连录制器的离线重放一起改，不要只改这里。 */
+function driveClock(id) { return state.t - (driveOff[id] || 0); }
+
+/* 驱动求值：驱动时钟（见 driveClock）的纯函数，不做增量积分 —— 不累积
+   浮点漂移，暂停恢复不跳变，且录制器按固定 dt 推进 state.t 时可直接复用。 */
+function driveValue(d, tt, mode) {
+  const m = mode || d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+  const u = ((tt / d.period) % 1 + 1) % 1;              // 负时间也落在 [0,1)
+  const s = (m === 'loop') ? u : (u < 0.5 ? 2 * u : 2 - 2 * u);
+  return d.from + (d.to - d.from) * s;
+}
+
+/* 把当前场景的驱动量按引擎时钟写回 state。只动数据、不碰 DOM ——
+   录制器的离线渲染也调它，那条路径上没有面板可同步（见规范 §D1）。 */
+function applyDrive() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return;
+  state[sc.drive.key] = driveValue(sc.drive, driveClock(curTab), driveMode[curTab]);
+}
+
+/* 供录制器判断无缝循环的吸附基准；无驱动或用户关掉自动播放时返回 null */
+function driveInfo() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return null;
+  return { key: sc.drive.key, period: sc.drive.period, mode: driveMode[curTab] };
+}
+
+const warnedNoInvMap = {};   // key -> 已就「有 map 没 invMap」告警过
+
+/* 把驱动出的值反算回滑块刻度并回显。带 map 的参数必须提供 invMap，
+   否则只能退回显示映射后的值（规范 §8 已把 invMap 列为硬约束）。 */
+function syncParamSlider(key) {
+  const e = paramWraps[key];
+  if (!e) return;
+  /* 本函数每帧都被调用，所以每个 key 只喊一次，别把控制台刷爆 */
+  if (e.p.map && !e.p.invMap && !warnedNoInvMap[key]) {
+    warnedNoInvMap[key] = true;
+    console.warn('[math-viz] 参数 "' + key + '" 声明了 map 却没有 invMap：' +
+                 '驱动值会被当作滑杆原始值写进量程，回显与 state 会错位（规范 §8）。');
+  }
+  const raw = (e.p.map && e.p.invMap) ? e.p.invMap(state[key]) : state[key];
+  /* 先写进 input，再读回来显示：range 带 step，写进去的值会被吸附到刻度上。
+     若直接显示 raw，读数与滑杆句柄就会对不上；更要命的是下一次 upd() 读的是
+     吸附后的 input.value，会把这点差值永久写回 state —— 暂停时 frame() 不再跑
+     applyDrive()，再也修不回来。upd() 的触发面已经收窄到「用户拖动这根滑杆」
+     一条：语言切换只调 render()（见下方 relabel 注释），不再写 state。 */
+  e.input.value = raw;
+  e.val.textContent = e.p.fmt(parseFloat(e.input.value));
+}
+
+/* 按当前页签的 params 显隐滑块。省略 params = 全部显示（向后兼容）。
+   不复制 DOM：滑块值是跨页签共享的 state，复制会引入多份 DOM 的同步问题。 */
+function syncParamVisibility() {
+  const list = SCENES[curTab] && SCENES[curTab].params;
+  Object.keys(paramWraps).forEach(k => {
+    paramWraps[k].wrap.style.display = (!list || list.indexOf(k) >= 0) ? '' : 'none';
+  });
+}
+
+/* 开关自动播放的唯一入口：复选框与「拖滑块接管」都走这里，驱动时钟的记账
+   才不会漏。关掉时记下停摆起点，打开时把停摆时长补进偏移量。 */
+function setAutoPlayFor(id, on) {
+  on = !!on;
+  if (!!autoPlay[id] === on) return;            // 状态没变就别动时钟，避免重复记账
+  if (on) driveOff[id] += state.t - driveOffAt[id];
+  else driveOffAt[id] = state.t;
+  autoPlay[id] = on;
+  refreshDriveRow(id);
+}
+
+function setAutoPlay(on) { setAutoPlayFor(curTab, on); }
+
+function refreshDriveRow(id) {
+  const row = document.querySelector('.drive[data-tab="' + id + '"]');
+  if (!row) return;
+  row.querySelector('input').checked = !!autoPlay[id];
+  row.querySelectorAll('[data-mode]').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === driveMode[id]);
+  });
+}
+
+function buildDrive() {
+  const host = document.getElementById('driveHost');
+  Object.keys(SCENES).forEach(id => {
+    const d = SCENES[id].drive;
+    if (!d) return;
+    autoPlay[id] = true;
+    driveMode[id] = d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+    driveOff[id] = 0; driveOffAt[id] = 0;      // 先置零，页签才不会把 undefined 读进算式
+    const row = document.createElement('div');
+    row.className = 'drive';
+    row.dataset.tab = id;
+    row.innerHTML = '<label class="tg"><input type="checkbox" checked><span class="autoL"></span></label>' +
+      '<span class="dmode"><button class="btn" data-mode="pingpong"></button>' +
+      '<button class="btn" data-mode="loop"></button></span>';
+    row.querySelector('input').addEventListener('change', e => { setAutoPlayFor(id, e.target.checked); });
+    row.querySelectorAll('[data-mode]').forEach(b => {
+      b.addEventListener('click', () => { driveMode[id] = b.dataset.mode; refreshDriveRow(id); });
+    });
+    host.appendChild(row);
+    const relabel = () => {
+      row.querySelector('.autoL').textContent = t(UI.autoPlay);
+      row.querySelector('[data-mode="pingpong"]').textContent = t(UI.pingpong);
+      row.querySelector('[data-mode="loop"]').textContent = t(UI.loop);
+    };
+    RELABEL.push(relabel);
+    relabel();
+    refreshDriveRow(id);
+  });
+}
+
+/* ================= UI 生成（由 ①② 声明驱动） ================= */
+function buildParams() {
+  const host = document.getElementById('paramsHost');
+  PARAMS.forEach(p => {
+    const wrap = document.createElement('div');
+    wrap.className = 'ctl';
+    wrap.innerHTML = '<div class="top"><label></label><span class="val"></span></div>';
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
+    const val = wrap.querySelector('.val');
+    /* render 只回显滑杆当前刻度；upd 才是「用户动了滑杆」的语义（写 state）。
+       两者分开，语言切换就不会顺手把读数写回 state —— 见下方 relabel 注释。 */
+    const render = () => { val.textContent = p.fmt(parseFloat(input.value)); };
+    const upd = () => {
+      const raw = parseFloat(input.value);
+      state[p.key] = p.map ? p.map(raw) : raw;
+      render();
+    };
+    input.addEventListener('input', upd);
+    wrap.appendChild(input);
+    host.appendChild(wrap);
+    paramWraps[p.key] = { wrap, input, val, p };
+    /* 用户伸手拖被驱动的滑块 = 明确要接管，自动播放当场关闭，
+       否则下一帧就会被驱动值覆盖回去。这是与「暂停只冻结模拟」一致的语义。 */
+    input.addEventListener('input', () => {
+      const d = SCENES[curTab] && SCENES[curTab].drive;
+      if (d && d.key === p.key && autoPlay[curTab]) setAutoPlay(false);
+    });
+    upd();                       // 建面板时用默认刻度初始化 state
+    /* 语言切换只重排文案（fmt 里可能带 t()），绝不能顺手调 upd() 把滑杆刻度
+       写回 state：被 drive 驱动的参数，其 state 值比滑杆 step 精细得多，写回去
+       等于把它永久量化一次；暂停时 frame() 不再跑 applyDrive()，再也修不回来。 */
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); render(); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+function buildToggles() {
+  const host = document.getElementById('togglesHost');
+  Object.keys(SCENES).forEach(id => {
+    const grp = document.createElement('div');
+    grp.className = 'toggles';
+    grp.dataset.tab = id;
+    SCENES[id].toggles.forEach(tg => {
+      if (!(tg.key in state)) state[tg.key] = tg.checked;
+      const lab = document.createElement('label');
+      lab.className = 'tg';
+      lab.innerHTML = '<input type="checkbox" data-key="' + tg.key + '"' + (state[tg.key] ? ' checked' : '') + '>' +
+        '<i class="dot" style="--c:' + tg.color + '"></i><span class="tgl"></span>';
+      const cb = lab.querySelector('input');
+      cb.addEventListener('change', () => {
+        state[tg.key] = cb.checked;
+        document.querySelectorAll('input[data-key="' + tg.key + '"]').forEach(o => { o.checked = cb.checked; });
+      });
+      const relabel = () => { lab.querySelector('.tgl').innerHTML = t(tg.label); };
+      RELABEL.push(relabel);
+      relabel();
+      grp.appendChild(lab);
+    });
+    host.appendChild(grp);
+  });
+}
+
+function buildViews() {
+  const host = document.getElementById('viewsHost');
+  Object.keys(SCENES).forEach(id => {
+    const row = document.createElement('div');
+    row.className = 'views';
+    row.dataset.tab = id;
+    const lab = document.createElement('span');
+    lab.className = 'vlabel';
+    row.appendChild(lab);
+    const labRelabel = () => { lab.textContent = t(UI.views); };
+    RELABEL.push(labRelabel);
+    labRelabel();
+    Object.keys(SCENES[id].views).forEach(name => {
+      const b = document.createElement('button');
+      b.className = 'btn vbtn';
+      b.dataset.view = name;
+      b.addEventListener('click', () => applyView(name));
+      row.appendChild(b);
+      const relabel = () => { b.textContent = t(SCENES[id].views[name].label); };
+      RELABEL.push(relabel);
+      relabel();
+    });
+    host.appendChild(row);
+  });
+}
+
+function buildTabs() {
+  const nav = document.getElementById('tabsNav');
+  Object.keys(SCENES).forEach(id => {
+    const b = document.createElement('button');
+    b.className = 'tab';
+    b.dataset.tab = id;
+    b.addEventListener('click', () => switchTab(id));
+    nav.appendChild(b);
+    const relabel = () => { b.textContent = t(SCENES[id].label); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+/* ================= 视角与页签 ================= */
+/* 选择器必须限定在 .views 之内：.vbtn 只是个样式类，工具可能为了复用外观
+   把它挂到别处的按钮上（如文本预设）。不限定的话 closest('.views') 会返回
+   null，这里当场抛错，视角高亮从此再不更新。行为查询不能只认样式类。 */
+function refreshViewButtons() {
+  document.querySelectorAll('.views .vbtn').forEach(b => {
+    const row = b.closest('.views');
+    b.classList.toggle('active', row.dataset.tab === curTab && b.dataset.view === lastView[curTab]);
+  });
+}
+function viewDist(d) { return (W < 820 || W < H) ? d * 1.4 : d; }
+function applyView(name) {
+  const vw = SCENES[curTab].views[name];
+  if (!vw) return;
+  if (vw.onSelect) vw.onSelect();   /* 可选联动：如自动开启该视角对应的曲线开关 */
+  tween = {
+    from: { az: cam.az, el: cam.el, dist: cam.dist, tx: cam.tx, ty: cam.ty, tz: cam.tz },
+    to:   { az: vw.az, el: vw.el, dist: viewDist(vw.dist), tx: vw.tx || 0, ty: vw.ty || 0, tz: vw.tz || 0 },
+    t0: performance.now(),
+    dur: REDUCED ? 1 : 750
+  };
+  lastView[curTab] = name;
+  refreshViewButtons();
+}
+
+const brandDesc = document.getElementById('brandDesc');
+const tipsEl = document.getElementById('tips');
+/* ══════════════ 演算记录与回放（规范 §11）══════════════
+   自成一节，刻意排在所有 UI 构建器之后、switchTab 之前：它与「场景时间
+   驱动」是两个子系统，嵌在后者中间会让 scripts/port_drive_engine.py 把
+   它当成驱动引擎的一部分灌进另外 50 个工具（实测踩过）。 */
+
+/* ══════════════ 演算记录与回放 · 引擎侧（规范 §11） ══════════════
+   工具只提供 RECORD 里的六个钩子；序列化、下载/上传、回放时钟、校验、
+   种子比对全在这里，各工具不得自己再写一份。 */
+const REC_FORMAT = 'mathviz-run';
+const REC_FORMAT_VERSION = 1;
+const REC_DT = 0.02;         // 采样间隔（模拟秒）
+const REC_MAX_ROWS = 20000;  // 行数上限；到顶停录并提示，绝不静默截断（§11.4）
+const REC_PREC = 12;         // 数值有效位；比对基线要把这项舍入计入（§11.4）
+
+const recState = {
+  mode: 'live',              // 'live' | 'recording' | 'replay'
+  rows: [], fields: null, shape: null,
+  seed: null, tab: null, srcName: null,
+  i: 0, playing: true, rate: 1, acc: 0, t0: 0,
+  roundAt: null, note: null,
+  verify: null               // { delta, reproduced } —— §11.2 的种子比对结论
+};
+
+function recHooks(tab) { return RECORD && RECORD[tab || curTab] || null; }
+
+/* 唯一的只读判据访问器。工具的 draw()/readout() 要查模式一律走它，
+   不得自拼判据 —— 理由同 §6「双语义迭代」：同一判据两种写法必然漂移。 */
+function recInfo() {
+  if (!recHooks()) return null;
+  return {
+    mode: recState.mode,
+    rows: recState.rows.length,
+    i: recState.i,
+    playing: recState.playing,
+    srcName: recState.srcName,
+    verify: recState.verify,
+    note: recState.note
+  };
+}
+
+/* capture() 的对象 → 一行数字。展开顺序由第一次调用的结构冻结（§11.6）。 */
+function recShapeOf(o) {
+  const f = [];
+  (function walk(v, path) {
+    if (Array.isArray(v)) v.forEach((x, i) => walk(x, path + '[' + i + ']'));
+    else if (v && typeof v === 'object') Object.keys(v).forEach(k => walk(v[k], path ? path + '.' + k : k));
+    else f.push(path);
+  })(o, '');
+  return f;
+}
+function recFlatten(o) {
+  const out = [];
+  (function walk(v) {
+    if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === 'object') Object.keys(v).forEach(k => walk(v[k]));
+    else out.push(typeof v === 'number' ? +v.toPrecision(REC_PREC) : v);
+  })(o);
+  return out;
+}
+function recUnflatten(row, tmpl) {
+  let i = 0;
+  return (function walk(v) {
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') { const o = {}; Object.keys(v).forEach(k => { o[k] = walk(v[k]); }); return o; }
+    return row[i++];
+  })(tmpl);
+}
+
+/* 推进一步模拟。抽出来是为了让「录制时按 REC_DT 量子化」与「种子重算」
+   走的是同一条代码路径 —— 两边若各写一份，重算就不再是重算了。 */
+function simAdvance(d) {
+  state.t += d;
+  state.theta += state.omega * d;
+  applyDrive();
+  const dv = SCENES[curTab].drive;
+  if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
+  pushSample();
+}
+
+function recStartRecording() {
+  const h = recHooks(); if (!h) return;
+  /* 起录前先把本页签重置到一轮的开头（§11.3）。这一步是引擎的责任，不是各
+     工具在 seed() 里偷偷做 —— 否则 seed() 就成了一个会改状态的取值器，是留给
+     下一个人的陷阱。理由：不重置的话，seed 描述的是这一轮的起点，而第 0 行
+     描述的是「你按下录制的那一刻」，§11.2 的重算于是从头就跟存档不在同一段
+     时间上，比对必然失败，且失败得像一次正常的混沌发散——查都没处查。 */
+  if (h.reseed && h.seed) h.reseed(h.seed());
+  const snap = h.capture();
+  recState.mode = 'recording';
+  recState.rows = []; recState.tab = curTab;
+  recState.shape = snap; recState.fields = recShapeOf(snap);
+  recState.seed = h.seed(); recState.roundAt = h.roundOf();
+  recState.t0 = state.t;          // 录制起点的引擎时钟；回放要照它复原，见 recStep
+  recState.note = null; recState.verify = null; recState.acc = 0;
+  recPush();                                      // 立即记下第 0 行
+  buildRecRow();
+}
+function recStopRecording(note) {
+  if (recState.mode !== 'recording') return;
+  recState.mode = 'live';
+  recState.note = note || null;
+  buildRecRow();
+}
+
+/* 记一行。**不做时间节流** —— 录制态下 frame() 已经把推进量子化成整数个
+   REC_DT，一格一行即可。曾经写成「state.t - lastAt >= REC_DT」的节流：累加出
+   的差常是 0.019999999999999997，于是约一半的行被悄悄丢掉，行号与步数错位，
+   种子重算怎么算都对不上。量子化之后节流就是多余且有害的。 */
+function recPush() {
+  if (recState.mode !== 'recording') return;
+  const h = recHooks(); if (!h) return;
+  if (h.roundOf() !== recState.roundAt) { recStopRecording(UI.recRoundEnd); return; }  // §11.3 录一轮
+  recState.rows.push(recFlatten(h.capture()));
+  if (recState.rows.length >= REC_MAX_ROWS) recStopRecording(UI.recFull);
+}
+
+/* 回放推进：按 rate 走行号，restore 后照常 pushSample()，
+   于是历史曲线、读数、绘制全部沿用实时那一套。 */
+function recStep(dt) {
+  const h = recHooks(); if (!h || !recState.rows.length) return;
+  if (recState.playing) {
+    recState.acc += dt * recState.rate;
+    while (recState.acc >= REC_DT && recState.i < recState.rows.length - 1) { recState.acc -= REC_DT; recState.i++; }
+    if (recState.i >= recState.rows.length - 1) { recState.acc = 0; recState.playing = false; buildRecRow(); }
+  }
+  h.restore(recUnflatten(recState.rows[recState.i], recState.shape));
+  /* 从录制起点算起，不是从 0 —— 录制未必始于 t = 0，凭空归零会让任何把引擎
+     时钟纳入 capture() 的工具在回放时对不上（实测三体差 6.0 s，正是起录前
+     跑过的那段）。 */
+  state.t = recState.t0 + recState.i * REC_DT;
+  pushSample();
+}
+
+function recExitReplay() {
+  if (recState.mode !== 'replay') return;
+  recState.mode = 'live';
+  recState.rows = []; recState.i = 0; recState.srcName = null; recState.verify = null; recState.note = null;
+  resetSim();
+  buildRecRow();
+}
+
+function recSave() {
+  if (!recState.rows.length) return;
+  const doc = {
+    format: REC_FORMAT, formatVersion: REC_FORMAT_VERSION,
+    tool: { id: TOOL.id, version: VERSION, engine: ENGINE_VERSION },
+    tab: recState.tab, recordedAt: new Date().toISOString(),
+    seed: recState.seed,
+    trace: { dt: REC_DT, t0: recState.t0, fields: recState.fields, rows: recState.rows }
+  };
+  const blob = new Blob([JSON.stringify(doc)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = TOOL.id + '-' + recState.tab + '.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/* 加载校验（§11.5）：五步，任一不过即明确拒绝，不做兼容性猜测。 */
+function recValidate(doc) {
+  if (!doc || doc.format !== REC_FORMAT) return { zh: '不是 MathViz 存档文件', en: 'Not a MathViz run file' };
+  if (doc.formatVersion !== REC_FORMAT_VERSION)
+    return { zh: '存档格式版本 ' + doc.formatVersion + ' 本工具不认识', en: 'Unknown archive format version ' + doc.formatVersion };
+  if (!doc.tool || doc.tool.id !== TOOL.id)
+    return { zh: '这份存档属于「' + ((doc.tool && doc.tool.id) || '?') + '」，不是本工具',
+             en: 'This archive belongs to "' + ((doc.tool && doc.tool.id) || '?') + '", not this tool' };
+  const h = recHooks(doc.tab);
+  if (!h) return { zh: '存档的页签「' + doc.tab + '」在本工具中不可录制', en: 'Tab "' + doc.tab + '" is not recordable here' };
+  const want = recShapeOf(h.capture());
+  const got = (doc.trace && doc.trace.fields) || [];
+  if (want.length !== got.length || want.some((k, i) => k !== got[i]))
+    return { zh: '存档的字段与本版本不一致，拒绝载入（字段错位会画出看似合理实则错误的图）',
+             en: 'Field set does not match this version; refusing to load (a mismatch would draw a plausible but wrong picture)' };
+  if (!doc.trace.rows || !doc.trace.rows.length) return { zh: '存档里没有数据行', en: 'Archive contains no rows' };
+  return null;
+}
+
+/* §11.2：用种子在本机重新积分，与记录的轨迹逐点比对。
+   工具没给 reseed/seed 就跳过（返回 null），不阻塞回放。 */
+function recVerify(doc) {
+  const h = recHooks(doc.tab);
+  if (!h || !h.reseed || !doc.seed) return null;
+  /* 重算是一次「离线」推演：它会走 simAdvance，因而动到 state.t 与 samples。
+     全部存下来在 finally 里还原 —— 比对不该在用户的现场留下任何痕迹。 */
+  const keep = h.capture();
+  const keepT = state.t, keepSamples = samples.slice();
+  try {
+    h.reseed(doc.seed);
+    let worst = 0;
+    const n = Math.min(doc.trace.rows.length, 400);
+    for (let k = 0; k < n; k++) {
+      const mine = recFlatten(h.capture()), theirs = doc.trace.rows[k];
+      for (let j = 0; j < mine.length; j++) {
+        const a = +mine[j], b = +theirs[j];
+        if (isFinite(a) && isFinite(b)) worst = Math.max(worst, Math.abs(a - b));
+      }
+      /* 走与录制时完全相同的推进路径（同一个 simAdvance、同一个 REC_DT），
+         否则「重算」就变成了另一条数值轨迹，本机也会报复现失败。 */
+      if (k < n - 1) simAdvance(REC_DT);
+    }
+    /* 阈值要把 toPrecision(REC_PREC) 的舍入算进去（§11.4）：存档只留 12 位
+       有效数字，本机完美复现时 δ 也就落在这个量级，而非 0。 */
+    return { delta: worst, reproduced: worst < 1e-9 };
+  } catch (e) {
+    return null;
+  } finally {
+    h.restore(keep);
+    state.t = keepT;
+    samples.length = 0; keepSamples.forEach(s => samples.push(s));
+  }
+}
+
+function recLoadDoc(doc, name) {
+  const bad = recValidate(doc);
+  if (bad) { recState.note = bad; buildRecRow(); return false; }
+  const h = recHooks(doc.tab);
+  if (doc.tab !== curTab) switchTab(doc.tab);
+  recState.verify = recVerify(doc);
+  recState.mode = 'replay';
+  recState.rows = doc.trace.rows;
+  recState.fields = doc.trace.fields;
+  recState.shape = h.capture();
+  recState.seed = doc.seed; recState.tab = doc.tab; recState.srcName = name;
+  recState.t0 = +doc.trace.t0 || 0;
+  recState.i = 0; recState.acc = 0; recState.playing = true; recState.rate = 1; recState.note = null;
+  samples.length = 0;
+  buildRecRow();
+  return true;
+}
+
+/* 录制 / 回放行（§11）。只在当前页签声明了 RECORD 钩子时出现；
+   整行每次重建 —— 它的状态机只有三态，重建比增量改 DOM 更不容易漂。 */
+function buildRecRow() {
+  const host = document.getElementById('recHost');
+  if (!host) return;
+  host.innerHTML = '';
+  if (!recHooks()) return;
+
+  const row = document.createElement('div');
+  row.className = 'row recrow';
+  const mk = (labObj, fn, cls) => {
+    const b = document.createElement('button');
+    b.className = 'btn' + (cls ? ' ' + cls : '');
+    b.textContent = t(labObj);
+    b.addEventListener('click', fn);
+    return b;
+  };
+
+  if (recState.mode === 'replay') {
+    row.appendChild(mk(recState.playing ? UI.recPause : UI.recPlay,
+      () => { recState.playing = !recState.playing; buildRecRow(); }));
+    row.appendChild(mk(UI.recRewind, () => { recState.i = 0; recState.acc = 0; recState.playing = true; buildRecRow(); }));
+    const rate = document.createElement('button');
+    rate.className = 'btn';
+    rate.textContent = recState.rate + '×';
+    rate.addEventListener('click', () => {
+      const steps = [0.25, 0.5, 1, 2, 4];
+      recState.rate = steps[(steps.indexOf(recState.rate) + 1) % steps.length];
+      buildRecRow();
+    });
+    row.appendChild(rate);
+    row.appendChild(mk(UI.recExit, recExitReplay));
+  } else if (recState.mode === 'recording') {
+    row.appendChild(mk(UI.recStop, () => recStopRecording(null), 'wide'));
+    row.appendChild(mk(UI.recSave, recSave));
+  } else {
+    row.appendChild(mk(UI.recRec, recStartRecording, 'wide'));
+    row.appendChild(mk(UI.recSave, recSave));
+    row.appendChild(mk(UI.recLoad, () => {
+      const inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = 'application/json,.json';
+      inp.addEventListener('change', () => {
+        const f = inp.files && inp.files[0];
+        if (!f) return;
+        const rd = new FileReader();
+        rd.onload = () => {
+          let doc = null;
+          try { doc = JSON.parse(rd.result); }
+          catch (e) { recState.note = { zh: '文件不是合法 JSON', en: 'File is not valid JSON' }; buildRecRow(); return; }
+          recLoadDoc(doc, f.name);
+        };
+        rd.readAsText(f);
+      });
+      inp.click();
+    }));
+  }
+  host.appendChild(row);
+
+  /* 状态行：进度 / 行数 / 存档来源 / 种子比对结论 / 提示 */
+  const info = document.createElement('div');
+  info.className = 'recinfo';
+  const bits = [];
+  if (recState.mode === 'replay') {
+    bits.push(t(UI.recReplay) + ' ' + (recState.i + 1) + ' / ' + recState.rows.length);
+    if (recState.srcName) bits.push(recState.srcName);
+    if (recState.verify) {
+      /* 尾巴「这不是 bug，见提示」只在**复现失败**时才有意义 —— 成功时贴上去
+         会读成「复现了 —— 这不是 bug」，反而让人以为出了事。 */
+      bits.push(t(recState.verify.reproduced ? UI.recVerifyOK : UI.recVerifyNo) +
+                recState.verify.delta.toExponential(1) +
+                (recState.verify.reproduced ? '）' : t(UI.recVerifyTail)));
+    }
+  } else {
+    bits.push(recState.rows.length + t(UI.recRows));
+  }
+  if (recState.note) bits.push(t(recState.note));
+  info.textContent = bits.join(' · ');
+  info.dataset.rec = '1';
+  host.appendChild(info);
+
+  refreshRecLocks();
+}
+
+/* 录制中行数是每帧在长的，而 buildRecRow() 只在状态切换时跑 —— 只改这一行
+   文本，别整行重建（重建会打断按钮的焦点与 hover）。由 frame() 的读数节流
+   一并调用，120 ms 一次足够。 */
+function refreshRecInfo() {
+  if (recState.mode !== 'recording') return;
+  const el = document.querySelector('#recHost .recinfo[data-rec]');
+  if (!el) return;
+  const bits = [recState.rows.length + t(UI.recRows)];
+  if (recState.note) bits.push(t(recState.note));
+  el.textContent = bits.join(' · ');
+}
+
+/* 回放期间种子滑杆置灰 —— 改它们等于改种子，画面与数据会脱节（§11.7）。 */
+function refreshRecLocks() {
+  const h = recHooks();
+  const lock = (recState.mode === 'replay' && h && h.lock) || [];
+  Object.keys(paramWraps).forEach(k => {
+    const e = paramWraps[k];
+    if (!e) return;
+    const on = lock.indexOf(k) >= 0;
+    e.input.disabled = on;
+    e.wrap.style.opacity = on ? '0.45' : '';
+  });
+}
+
+function switchTab(id) {
+  if (id === curTab) return;
+  curTab = id;
+  tween = null;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+  document.querySelectorAll('.toggles[data-tab], .views[data-tab], .drive[data-tab]').forEach(el => {
+    el.style.display = el.dataset.tab === id ? '' : 'none';
+  });
+  cam = cams[id];
+  brandDesc.textContent = t(SCENES[id].brand);
+  tipsEl.textContent = t(SCENES[id].tips);
+  /* 换页签 = 换实验：正在录的那一轮不再对应画面，停录并保留已录数据；
+     回放态则整个退出 —— 存档是绑定页签的（§11.4 的 tab 字段）。 */
+  if (recState.mode === 'recording' && recState.tab !== id) recStopRecording(null);
+  if (recState.mode === 'replay' && recState.tab !== id) recExitReplay();
+  buildRecRow();
+  syncParamVisibility();
+  refreshViewButtons();
+  updateReadout();
+}
+
+/* ================= 播放 / 重置 / 折叠 ================= */
+const btnPlay = document.getElementById('btnPlay');
+function togglePlay() {
+  state.running = !state.running;
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+}
+btnPlay.addEventListener('click', togglePlay);
+document.getElementById('btnReset').addEventListener('click', resetSim);
+
+const panel = document.getElementById('panel');
+const btnFold = document.getElementById('btnFold');
+btnFold.addEventListener('click', () => {
+  const c = panel.classList.toggle('collapsed');
+  btnFold.textContent = c ? '+' : '−';
+});
+if (window.innerWidth < 760) {
+  panel.classList.add('collapsed');
+  btnFold.textContent = '+';
+}
+
+/* ================= 语言切换 ================= */
+function applyLang() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.title = t(TOOL.title);
+  document.querySelector('.brand h1').textContent = t(TOOL.h1);
+  document.getElementById('panelTitle').textContent = t(UI.panelTitle);
+  document.querySelector('.hint').textContent = t(UI.hint);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+  document.getElementById('btnReset').textContent = t(UI.reset);
+  RELABEL.forEach(f => f());
+  buildRecRow();               // 录制行的文案是建行时取的 t()，整行重建即跟随语言
+  brandDesc.textContent = t(SCENES[curTab].brand);
+  tipsEl.textContent = t(SCENES[curTab].tips);
+  updateReadout();
+}
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('lang', l);
+    history.replaceState(null, '', u);
+  } catch (e) {}
+  applyLang();
+}
+document.getElementById('btnLang').addEventListener('click', () => setLang(LANG === 'zh' ? 'en' : 'zh'));
+document.getElementById('verBadge').textContent = 'v' + VERSION;
+
+/* ================= 交互：旋转 / 平移 / 缩放 ================= */
+const pointers = new Map();
+let pinch = null;
+
+function pan(dx, dy) {
+  const C = makeCam();
+  const s = cam.dist / FOCAL;
+  cam.tx = clamp(cam.tx - C.r[0]*dx*s + C.u[0]*dy*s, -6, 6);
+  cam.ty = clamp(cam.ty - C.r[1]*dx*s + C.u[1]*dy*s, -5, 5);
+  cam.tz = clamp(cam.tz - C.r[2]*dx*s + C.u[2]*dy*s, -3, 11);
+}
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, btn: e.button });
+  tween = null;
+  lastView[curTab] = null;
+  refreshViewButtons();
+  if (pointers.size === 2) {
+    const vs = Array.from(pointers.values());
+    pinch = {
+      gap: Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y),
+      cx: (vs[0].x + vs[1].x) / 2,
+      cy: (vs[0].y + vs[1].y) / 2
+    };
+  }
+  canvas.classList.add('dragging');
+});
+
+canvas.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  p.x = e.clientX;
+  p.y = e.clientY;
+  if (pointers.size === 1) {
+    const panMode = e.shiftKey || (e.buttons & 2) || p.btn === 2 || p.btn === 1;
+    if (panMode) {
+      pan(dx, dy);
+    } else {
+      cam.az -= dx * 0.0055;
+      cam.el = clamp(cam.el + dy * 0.0055, -1.45, 1.53);
+    }
+  } else if (pointers.size === 2 && pinch) {
+    const vs = Array.from(pointers.values());
+    const gap = Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y);
+    const cx = (vs[0].x + vs[1].x) / 2, cy = (vs[0].y + vs[1].y) / 2;
+    if (gap > 1) cam.dist = clamp(cam.dist * pinch.gap / gap, 4.5, 60);
+    pan(cx - pinch.cx, cy - pinch.cy);
+    pinch = { gap: gap, cx: cx, cy: cy };
+  }
+});
+
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+  if (!pointers.size) canvas.classList.remove('dragging');
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  tween = null;
+  cam.dist = clamp(cam.dist * Math.exp(e.deltaY * 0.0012), 4.5, 60);
+}, { passive: false });
+
+canvas.addEventListener('dblclick', () => applyView(Object.keys(SCENES[curTab].views)[0]));
+
+window.addEventListener('keydown', e => {
+  const tg = e.target.tagName;
+  if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || tg === 'BUTTON') return;
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'r' || e.key === 'R') resetSim();
+  else if (e.key === 't' || e.key === 'T') {
+    const keys = Object.keys(SCENES);
+    switchTab(keys[(keys.indexOf(curTab) + 1) % keys.length]);
+  }
+  else if (e.key >= '1' && e.key <= '9') {
+    const names = Object.keys(SCENES[curTab].views);
+    const i = +e.key - 1;
+    if (i < names.length) applyView(names[i]);
+  }
+});
+
+/* ================= 启动 ================= */
+resize();
+buildTabs();
+buildParams();
+buildDrive();
+buildToggles();
+buildViews();
+Object.keys(SCENES).forEach(id => {
+  const first = Object.keys(SCENES[id].views)[0];
+  const v = SCENES[id].views[first];
+  cams[id] = { az: v.az, el: v.el, dist: viewDist(v.dist), tx: v.tx || 0, ty: v.ty || 0, tz: v.tz || 0 };
+  lastView[id] = first;
+});
+switchTab(Object.keys(SCENES)[0]);
+applyLang();
+resetSim();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
