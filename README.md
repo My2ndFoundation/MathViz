@@ -75,6 +75,8 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 
 | [光锥 · 四维时空的因果结构 · The Light Cone](outputs/spacetime-light-cone-3d.html) | A flash sweeping the cone into being (so 45° is a conclusion, not a convention), s² carving out absolute future, past and elsewhere, proper time running the triangle inequality backwards, and boosts as hyperbolic rotations that leave the cone untouched |
 
+| [从牛顿到闵可夫斯基 · 时空的重建 · Newton to Minkowski](outputs/newton-to-minkowski-3d.html) | Newton's stack of absolute simultaneity slices, the crack where Galilean velocity addition fails, and the minus sign derived rather than assumed — drag ε from +1 to −1 and the null set morphs from a point to a plane to the 45° cone, plus where γ takes over |
+
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
 ## Usage
