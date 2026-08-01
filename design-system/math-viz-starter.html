@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <meta name="tool-version" content="1.0.0">
-<meta name="engine-version" content="1.0.0">
+<meta name="engine-version" content="1.1.0">
 <title>数学可视化起步模板 · Math-Viz Starter</title>
 <!-- ============================================================
   数学可视化交互教学工具 · 起步模板 · STARTER_VERSION 1.0.0
@@ -129,6 +129,12 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 .drive .dmode{display:flex;gap:4px;margin-left:auto}
 .drive .dmode .btn{padding:4px 8px;font-size:11px}
 
+/* 录制 / 回放行（§11）；未声明 RECORD 的工具里 #recHost 始终为空 */
+.recrow{display:flex;flex-wrap:wrap;gap:6px;margin:11px 0 2px}
+.recrow .btn{padding:5px 9px;font-size:11.5px}
+.recinfo{font-family:var(--font-mono);font-size:11px;line-height:1.6;
+  color:var(--ui-slate);margin:2px 0 2px;word-break:break-word}
+
 /* 读数与提示 */
 .readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
   font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
@@ -172,6 +178,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       <button class="btn" id="btnReset">↺ 重置</button>
     </div>
     <div id="driveHost"></div>
+    <div id="recHost"></div>
     <div id="togglesHost"></div>
     <div id="viewsHost"></div>
     <div class="readout" id="readout"></div>
@@ -197,8 +204,9 @@ function resolveLang(){
 let LANG = resolveLang();
 function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
 
-const STARTER_VERSION = '1.0.0';
+const STARTER_VERSION = '1.1.0';
 const VERSION = document.querySelector('meta[name="tool-version"]').content;
+const ENGINE_VERSION = document.querySelector('meta[name="engine-version"]').content;
 
 /* ╔══════════════════════════════════════════════════════════╗
    ║  ⓪ 工具元信息 —— id 与双语标题                              ║
@@ -219,6 +227,23 @@ const UI = {
   autoPlay: { zh: '自动播放', en: 'Auto-play' },
   pingpong: { zh: '往返',     en: 'Ping-pong' },
   loop:     { zh: '循环',     en: 'Loop' },
+  /* 演算记录与回放（§11）。仅当场景在 RECORD 里声明了钩子时才出现。 */
+  recRec:    { zh: '● 记录',   en: '● Record' },
+  recStop:   { zh: '■ 停止',   en: '■ Stop' },
+  recSave:   { zh: '⬇ 保存',   en: '⬇ Save' },
+  recLoad:   { zh: '⬆ 载入',   en: '⬆ Load' },
+  recExit:   { zh: '✕ 退出回放', en: '✕ Exit replay' },
+  recPlay:   { zh: '▶',        en: '▶' },
+  recPause:  { zh: '⏸',        en: '⏸' },
+  recRewind: { zh: '⏮',        en: '⏮' },
+  recRows:   { zh: ' 行',      en: ' rows' },
+  recFull:   { zh: '已达行数上限，录制停止（数据完整，未截断）',
+               en: 'Row limit reached, recording stopped (data complete, not truncated)' },
+  recRoundEnd: { zh: '本轮结束，录制自动停止', en: 'Round complete, recording stopped' },
+  recReplay: { zh: '回放中', en: 'Replaying' },
+  recVerifyOK: { zh: '种子比对：本机复现（δ = ', en: 'Seed check: reproduced here (δ = ' },
+  recVerifyNo: { zh: '种子比对：本机复现不了（δ = ', en: 'Seed check: not reproducible here (δ = ' },
+  recVerifyTail: { zh: '）—— 这不是 bug，见提示', en: ') — not a bug, see the tip' },
   hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
             en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
 };
@@ -391,6 +416,29 @@ function pushSample() {
     y: A * Math.sin(2*th)                /* 示例场景：利萨茹 y 分量 */
   });
 }
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ④ 演算记录与回放（可选）—— 规范 §11                        ║
+   ║  只有「同一次运行不可复得」的工具才需要（混沌、多体、由种子    ║
+   ║  驱动的迭代）。不声明 RECORD 就完全没有录制 UI，行为与体积     ║
+   ║  均不受影响 —— 绝大多数工具应当保持不声明。                   ║
+   ╚══════════════════════════════════════════════════════════╝
+
+   写法（每个可录制页签一份，键名与 SCENES 对应）：
+
+   const RECORD = {
+     lissa: {
+       capture:  () => ({ th: state.theta }),        // 完整状态向量，JSON 可序列化
+       restore:  s  => { state.theta = s.th; },      // 必须与 capture 对称（§8）
+       seed:     () => ({ omega: state.omega }),     // 初值 + 积分参数
+       reseed:   s  => { state.omega = s.omega; resetSim(); },
+       lock:     ['omega'],                          // 回放期间置灰的滑杆
+       roundOf:  () => 0                             // 当前轮次，供「录一轮」判定
+     }
+   };
+
+   本模板不声明（示例场景无此需要），故下面给一个空对象占位。 */
+const RECORD = {};
 
 /* ================= 画布 ================= */
 const canvas = document.getElementById('scene');
@@ -725,19 +773,28 @@ function frame(ts) {
       if (k >= 1) tween = null;
     }
 
-    if (state.running) {
-      state.t += dt;
-      state.theta += state.omega * dt;
-      applyDrive();
-      const dv = SCENES[curTab].drive;
-      if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
-      pushSample();
+    /* 回放冻结的是「演算」，不是「观察」：相机 tween 在上面已经走过了，
+       视角、开关、绘制全部照常 —— 与「暂停只冻结模拟」同一条精神（§11.7）。 */
+    if (recState.mode === 'replay') {
+      recStep(dt);
+    } else if (state.running) {
+      if (recState.mode === 'recording') {
+        /* 录制时把时间量子化成整数个 REC_DT。理由（§11.2）：物理若由变长的
+           帧 dt 推进，轨迹就依赖于帧率抖动，「从同一种子重算」在**本机**都对
+           不上，比对曲线也就失去意义。量子化之后轨迹是种子的确定性函数，
+           本机重算能贴到舍入噪声，跨机器的差别才干净地归因于超越函数实现。 */
+        recState.acc += dt;
+        let guard = 0;
+        while (recState.acc >= REC_DT && guard++ < 64) { recState.acc -= REC_DT; simAdvance(REC_DT); recPush(); }
+      } else {
+        simAdvance(dt);
+      }
     }
     const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
     while (samples.length && samples[0].t < state.t - windowSec) samples.shift();
 
     draw();
-    if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
+    if (ts - lastRO > 120) { lastRO = ts; updateReadout(); refreshRecInfo(); }
   } catch (err) {
     frameError(err);
   } finally {
@@ -790,6 +847,231 @@ function driveInfo() {
   const sc = SCENES[curTab];
   if (!sc || !sc.drive || !autoPlay[curTab]) return null;
   return { key: sc.drive.key, period: sc.drive.period, mode: driveMode[curTab] };
+}
+
+/* ══════════════ 演算记录与回放 · 引擎侧（规范 §11） ══════════════
+   工具只提供 RECORD 里的六个钩子；序列化、下载/上传、回放时钟、校验、
+   种子比对全在这里，各工具不得自己再写一份。 */
+const REC_FORMAT = 'mathviz-run';
+const REC_FORMAT_VERSION = 1;
+const REC_DT = 0.02;         // 采样间隔（模拟秒）
+const REC_MAX_ROWS = 20000;  // 行数上限；到顶停录并提示，绝不静默截断（§11.4）
+const REC_PREC = 12;         // 数值有效位；比对基线要把这项舍入计入（§11.4）
+
+const recState = {
+  mode: 'live',              // 'live' | 'recording' | 'replay'
+  rows: [], fields: null, shape: null,
+  seed: null, tab: null, srcName: null,
+  i: 0, playing: true, rate: 1, acc: 0, t0: 0,
+  roundAt: null, note: null,
+  verify: null               // { delta, reproduced } —— §11.2 的种子比对结论
+};
+
+function recHooks(tab) { return RECORD && RECORD[tab || curTab] || null; }
+
+/* 唯一的只读判据访问器。工具的 draw()/readout() 要查模式一律走它，
+   不得自拼判据 —— 理由同 §6「双语义迭代」：同一判据两种写法必然漂移。 */
+function recInfo() {
+  if (!recHooks()) return null;
+  return {
+    mode: recState.mode,
+    rows: recState.rows.length,
+    i: recState.i,
+    playing: recState.playing,
+    srcName: recState.srcName,
+    verify: recState.verify,
+    note: recState.note
+  };
+}
+
+/* capture() 的对象 → 一行数字。展开顺序由第一次调用的结构冻结（§11.6）。 */
+function recShapeOf(o) {
+  const f = [];
+  (function walk(v, path) {
+    if (Array.isArray(v)) v.forEach((x, i) => walk(x, path + '[' + i + ']'));
+    else if (v && typeof v === 'object') Object.keys(v).forEach(k => walk(v[k], path ? path + '.' + k : k));
+    else f.push(path);
+  })(o, '');
+  return f;
+}
+function recFlatten(o) {
+  const out = [];
+  (function walk(v) {
+    if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === 'object') Object.keys(v).forEach(k => walk(v[k]));
+    else out.push(typeof v === 'number' ? +v.toPrecision(REC_PREC) : v);
+  })(o);
+  return out;
+}
+function recUnflatten(row, tmpl) {
+  let i = 0;
+  return (function walk(v) {
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') { const o = {}; Object.keys(v).forEach(k => { o[k] = walk(v[k]); }); return o; }
+    return row[i++];
+  })(tmpl);
+}
+
+/* 推进一步模拟。抽出来是为了让「录制时按 REC_DT 量子化」与「种子重算」
+   走的是同一条代码路径 —— 两边若各写一份，重算就不再是重算了。 */
+function simAdvance(d) {
+  state.t += d;
+  state.theta += state.omega * d;
+  applyDrive();
+  const dv = SCENES[curTab].drive;
+  if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
+  pushSample();
+}
+
+function recStartRecording() {
+  const h = recHooks(); if (!h) return;
+  /* 起录前先把本页签重置到一轮的开头（§11.3）。这一步是引擎的责任，不是各
+     工具在 seed() 里偷偷做 —— 否则 seed() 就成了一个会改状态的取值器，是留给
+     下一个人的陷阱。理由：不重置的话，seed 描述的是这一轮的起点，而第 0 行
+     描述的是「你按下录制的那一刻」，§11.2 的重算于是从头就跟存档不在同一段
+     时间上，比对必然失败，且失败得像一次正常的混沌发散——查都没处查。 */
+  if (h.reseed && h.seed) h.reseed(h.seed());
+  const snap = h.capture();
+  recState.mode = 'recording';
+  recState.rows = []; recState.tab = curTab;
+  recState.shape = snap; recState.fields = recShapeOf(snap);
+  recState.seed = h.seed(); recState.roundAt = h.roundOf();
+  recState.t0 = state.t;          // 录制起点的引擎时钟；回放要照它复原，见 recStep
+  recState.note = null; recState.verify = null; recState.acc = 0;
+  recPush();                                      // 立即记下第 0 行
+  buildRecRow();
+}
+function recStopRecording(note) {
+  if (recState.mode !== 'recording') return;
+  recState.mode = 'live';
+  recState.note = note || null;
+  buildRecRow();
+}
+
+/* 记一行。**不做时间节流** —— 录制态下 frame() 已经把推进量子化成整数个
+   REC_DT，一格一行即可。曾经写成「state.t - lastAt >= REC_DT」的节流：累加出
+   的差常是 0.019999999999999997，于是约一半的行被悄悄丢掉，行号与步数错位，
+   种子重算怎么算都对不上。量子化之后节流就是多余且有害的。 */
+function recPush() {
+  if (recState.mode !== 'recording') return;
+  const h = recHooks(); if (!h) return;
+  if (h.roundOf() !== recState.roundAt) { recStopRecording(UI.recRoundEnd); return; }  // §11.3 录一轮
+  recState.rows.push(recFlatten(h.capture()));
+  if (recState.rows.length >= REC_MAX_ROWS) recStopRecording(UI.recFull);
+}
+
+/* 回放推进：按 rate 走行号，restore 后照常 pushSample()，
+   于是历史曲线、读数、绘制全部沿用实时那一套。 */
+function recStep(dt) {
+  const h = recHooks(); if (!h || !recState.rows.length) return;
+  if (recState.playing) {
+    recState.acc += dt * recState.rate;
+    while (recState.acc >= REC_DT && recState.i < recState.rows.length - 1) { recState.acc -= REC_DT; recState.i++; }
+    if (recState.i >= recState.rows.length - 1) { recState.acc = 0; recState.playing = false; buildRecRow(); }
+  }
+  h.restore(recUnflatten(recState.rows[recState.i], recState.shape));
+  /* 从录制起点算起，不是从 0 —— 录制未必始于 t = 0，凭空归零会让任何把引擎
+     时钟纳入 capture() 的工具在回放时对不上（实测三体差 6.0 s，正是起录前
+     跑过的那段）。 */
+  state.t = recState.t0 + recState.i * REC_DT;
+  pushSample();
+}
+
+function recExitReplay() {
+  if (recState.mode !== 'replay') return;
+  recState.mode = 'live';
+  recState.rows = []; recState.i = 0; recState.srcName = null; recState.verify = null; recState.note = null;
+  resetSim();
+  buildRecRow();
+}
+
+function recSave() {
+  if (!recState.rows.length) return;
+  const doc = {
+    format: REC_FORMAT, formatVersion: REC_FORMAT_VERSION,
+    tool: { id: TOOL.id, version: VERSION, engine: ENGINE_VERSION },
+    tab: recState.tab, recordedAt: new Date().toISOString(),
+    seed: recState.seed,
+    trace: { dt: REC_DT, t0: recState.t0, fields: recState.fields, rows: recState.rows }
+  };
+  const blob = new Blob([JSON.stringify(doc)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = TOOL.id + '-' + recState.tab + '.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/* 加载校验（§11.5）：五步，任一不过即明确拒绝，不做兼容性猜测。 */
+function recValidate(doc) {
+  if (!doc || doc.format !== REC_FORMAT) return { zh: '不是 MathViz 存档文件', en: 'Not a MathViz run file' };
+  if (doc.formatVersion !== REC_FORMAT_VERSION)
+    return { zh: '存档格式版本 ' + doc.formatVersion + ' 本工具不认识', en: 'Unknown archive format version ' + doc.formatVersion };
+  if (!doc.tool || doc.tool.id !== TOOL.id)
+    return { zh: '这份存档属于「' + ((doc.tool && doc.tool.id) || '?') + '」，不是本工具',
+             en: 'This archive belongs to "' + ((doc.tool && doc.tool.id) || '?') + '", not this tool' };
+  const h = recHooks(doc.tab);
+  if (!h) return { zh: '存档的页签「' + doc.tab + '」在本工具中不可录制', en: 'Tab "' + doc.tab + '" is not recordable here' };
+  const want = recShapeOf(h.capture());
+  const got = (doc.trace && doc.trace.fields) || [];
+  if (want.length !== got.length || want.some((k, i) => k !== got[i]))
+    return { zh: '存档的字段与本版本不一致，拒绝载入（字段错位会画出看似合理实则错误的图）',
+             en: 'Field set does not match this version; refusing to load (a mismatch would draw a plausible but wrong picture)' };
+  if (!doc.trace.rows || !doc.trace.rows.length) return { zh: '存档里没有数据行', en: 'Archive contains no rows' };
+  return null;
+}
+
+/* §11.2：用种子在本机重新积分，与记录的轨迹逐点比对。
+   工具没给 reseed/seed 就跳过（返回 null），不阻塞回放。 */
+function recVerify(doc) {
+  const h = recHooks(doc.tab);
+  if (!h || !h.reseed || !doc.seed) return null;
+  /* 重算是一次「离线」推演：它会走 simAdvance，因而动到 state.t 与 samples。
+     全部存下来在 finally 里还原 —— 比对不该在用户的现场留下任何痕迹。 */
+  const keep = h.capture();
+  const keepT = state.t, keepSamples = samples.slice();
+  try {
+    h.reseed(doc.seed);
+    let worst = 0;
+    const n = Math.min(doc.trace.rows.length, 400);
+    for (let k = 0; k < n; k++) {
+      const mine = recFlatten(h.capture()), theirs = doc.trace.rows[k];
+      for (let j = 0; j < mine.length; j++) {
+        const a = +mine[j], b = +theirs[j];
+        if (isFinite(a) && isFinite(b)) worst = Math.max(worst, Math.abs(a - b));
+      }
+      /* 走与录制时完全相同的推进路径（同一个 simAdvance、同一个 REC_DT），
+         否则「重算」就变成了另一条数值轨迹，本机也会报复现失败。 */
+      if (k < n - 1) simAdvance(REC_DT);
+    }
+    /* 阈值要把 toPrecision(REC_PREC) 的舍入算进去（§11.4）：存档只留 12 位
+       有效数字，本机完美复现时 δ 也就落在这个量级，而非 0。 */
+    return { delta: worst, reproduced: worst < 1e-9 };
+  } catch (e) {
+    return null;
+  } finally {
+    h.restore(keep);
+    state.t = keepT;
+    samples.length = 0; keepSamples.forEach(s => samples.push(s));
+  }
+}
+
+function recLoadDoc(doc, name) {
+  const bad = recValidate(doc);
+  if (bad) { recState.note = bad; buildRecRow(); return false; }
+  const h = recHooks(doc.tab);
+  if (doc.tab !== curTab) switchTab(doc.tab);
+  recState.verify = recVerify(doc);
+  recState.mode = 'replay';
+  recState.rows = doc.trace.rows;
+  recState.fields = doc.trace.fields;
+  recState.shape = h.capture();
+  recState.seed = doc.seed; recState.tab = doc.tab; recState.srcName = name;
+  recState.t0 = +doc.trace.t0 || 0;
+  recState.i = 0; recState.acc = 0; recState.playing = true; recState.rate = 1; recState.note = null;
+  samples.length = 0;
+  buildRecRow();
+  return true;
 }
 
 const warnedNoInvMap = {};   // key -> 已就「有 map 没 invMap」告警过
@@ -873,6 +1155,114 @@ function buildDrive() {
     RELABEL.push(relabel);
     relabel();
     refreshDriveRow(id);
+  });
+}
+
+/* 录制 / 回放行（§11）。只在当前页签声明了 RECORD 钩子时出现；
+   整行每次重建 —— 它的状态机只有三态，重建比增量改 DOM 更不容易漂。 */
+function buildRecRow() {
+  const host = document.getElementById('recHost');
+  if (!host) return;
+  host.innerHTML = '';
+  if (!recHooks()) return;
+
+  const row = document.createElement('div');
+  row.className = 'row recrow';
+  const mk = (labObj, fn, cls) => {
+    const b = document.createElement('button');
+    b.className = 'btn' + (cls ? ' ' + cls : '');
+    b.textContent = t(labObj);
+    b.addEventListener('click', fn);
+    return b;
+  };
+
+  if (recState.mode === 'replay') {
+    row.appendChild(mk(recState.playing ? UI.recPause : UI.recPlay,
+      () => { recState.playing = !recState.playing; buildRecRow(); }));
+    row.appendChild(mk(UI.recRewind, () => { recState.i = 0; recState.acc = 0; recState.playing = true; buildRecRow(); }));
+    const rate = document.createElement('button');
+    rate.className = 'btn';
+    rate.textContent = recState.rate + '×';
+    rate.addEventListener('click', () => {
+      const steps = [0.25, 0.5, 1, 2, 4];
+      recState.rate = steps[(steps.indexOf(recState.rate) + 1) % steps.length];
+      buildRecRow();
+    });
+    row.appendChild(rate);
+    row.appendChild(mk(UI.recExit, recExitReplay));
+  } else if (recState.mode === 'recording') {
+    row.appendChild(mk(UI.recStop, () => recStopRecording(null), 'wide'));
+    row.appendChild(mk(UI.recSave, recSave));
+  } else {
+    row.appendChild(mk(UI.recRec, recStartRecording, 'wide'));
+    row.appendChild(mk(UI.recSave, recSave));
+    row.appendChild(mk(UI.recLoad, () => {
+      const inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = 'application/json,.json';
+      inp.addEventListener('change', () => {
+        const f = inp.files && inp.files[0];
+        if (!f) return;
+        const rd = new FileReader();
+        rd.onload = () => {
+          let doc = null;
+          try { doc = JSON.parse(rd.result); }
+          catch (e) { recState.note = { zh: '文件不是合法 JSON', en: 'File is not valid JSON' }; buildRecRow(); return; }
+          recLoadDoc(doc, f.name);
+        };
+        rd.readAsText(f);
+      });
+      inp.click();
+    }));
+  }
+  host.appendChild(row);
+
+  /* 状态行：进度 / 行数 / 存档来源 / 种子比对结论 / 提示 */
+  const info = document.createElement('div');
+  info.className = 'recinfo';
+  const bits = [];
+  if (recState.mode === 'replay') {
+    bits.push(t(UI.recReplay) + ' ' + (recState.i + 1) + ' / ' + recState.rows.length);
+    if (recState.srcName) bits.push(recState.srcName);
+    if (recState.verify) {
+      /* 尾巴「这不是 bug，见提示」只在**复现失败**时才有意义 —— 成功时贴上去
+         会读成「复现了 —— 这不是 bug」，反而让人以为出了事。 */
+      bits.push(t(recState.verify.reproduced ? UI.recVerifyOK : UI.recVerifyNo) +
+                recState.verify.delta.toExponential(1) +
+                (recState.verify.reproduced ? '）' : t(UI.recVerifyTail)));
+    }
+  } else {
+    bits.push(recState.rows.length + t(UI.recRows));
+  }
+  if (recState.note) bits.push(t(recState.note));
+  info.textContent = bits.join(' · ');
+  info.dataset.rec = '1';
+  host.appendChild(info);
+
+  refreshRecLocks();
+}
+
+/* 录制中行数是每帧在长的，而 buildRecRow() 只在状态切换时跑 —— 只改这一行
+   文本，别整行重建（重建会打断按钮的焦点与 hover）。由 frame() 的读数节流
+   一并调用，120 ms 一次足够。 */
+function refreshRecInfo() {
+  if (recState.mode !== 'recording') return;
+  const el = document.querySelector('#recHost .recinfo[data-rec]');
+  if (!el) return;
+  const bits = [recState.rows.length + t(UI.recRows)];
+  if (recState.note) bits.push(t(recState.note));
+  el.textContent = bits.join(' · ');
+}
+
+/* 回放期间种子滑杆置灰 —— 改它们等于改种子，画面与数据会脱节（§11.7）。 */
+function refreshRecLocks() {
+  const h = recHooks();
+  const lock = (recState.mode === 'replay' && h && h.lock) || [];
+  Object.keys(paramWraps).forEach(k => {
+    const e = paramWraps[k];
+    if (!e) return;
+    const on = lock.indexOf(k) >= 0;
+    e.input.disabled = on;
+    e.wrap.style.opacity = on ? '0.45' : '';
   });
 }
 
@@ -1019,6 +1409,11 @@ function switchTab(id) {
   cam = cams[id];
   brandDesc.textContent = t(SCENES[id].brand);
   tipsEl.textContent = t(SCENES[id].tips);
+  /* 换页签 = 换实验：正在录的那一轮不再对应画面，停录并保留已录数据；
+     回放态则整个退出 —— 存档是绑定页签的（§11.4 的 tab 字段）。 */
+  if (recState.mode === 'recording' && recState.tab !== id) recStopRecording(null);
+  if (recState.mode === 'replay' && recState.tab !== id) recExitReplay();
+  buildRecRow();
   syncParamVisibility();
   refreshViewButtons();
   updateReadout();
@@ -1055,6 +1450,7 @@ function applyLang() {
   btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
   document.getElementById('btnReset').textContent = t(UI.reset);
   RELABEL.forEach(f => f());
+  buildRecRow();               // 录制行的文案是建行时取的 t()，整行重建即跟随语言
   brandDesc.textContent = t(SCENES[curTab].brand);
   tipsEl.textContent = t(SCENES[curTab].tips);
   updateReadout();
