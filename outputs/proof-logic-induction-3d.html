@@ -1046,6 +1046,19 @@ function draw() {
   SCENES[curTab].draw(C);
 }
 
+/* 帧级异常兜底：同一页签的同一条错误只报一次，否则 60 fps 会把控制台刷爆。
+   resetSim() 会清空它——用户主动重置后应当允许重新报。
+   声明必须排在 resetSim() 之前：resetSim() 引用 frameErrSeen，声明留在它下方
+   就只靠「启动序列恰好先求值到这里」躲开 TDZ，是结构性的隐患，而这份 starter
+   会被复制给所有未来工具。 */
+const frameErrSeen = Object.create(null);
+function frameError(err) {
+  const k = curTab + '|' + ((err && err.message) || err);
+  if (frameErrSeen[k]) return;
+  frameErrSeen[k] = 1;
+  console.warn('[frame] 场景「' + curTab + '」抛出异常，已跳过该帧并继续渲染循环：', err);
+}
+
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
@@ -1059,16 +1072,6 @@ function resetSim() {
 }
 
 let lastTs = performance.now(), lastRO = 0;
-
-/* 帧级异常兜底：同一页签的同一条错误只报一次，否则 60 fps 会把控制台刷爆。
-   resetSim() 会清空它——用户主动重置后应当允许重新报。 */
-const frameErrSeen = Object.create(null);
-function frameError(err) {
-  const k = curTab + '|' + ((err && err.message) || err);
-  if (frameErrSeen[k]) return;
-  frameErrSeen[k] = 1;
-  console.warn('[frame] 场景「' + curTab + '」抛出异常，已跳过该帧并继续渲染循环：', err);
-}
 function frame(ts) {
   try {
     const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
