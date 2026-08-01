@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.2">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.0.0">
 <title>霍夫曼编码 · 从文本到比特 · Huffman Coding</title>
 <!-- ============================================================
@@ -20,6 +20,7 @@
   （state.theta = 已走的「拍」数），可调速、可暂停。
 
   版本记录（changelog，新→旧）：
+    1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
     1.0.2  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.1  2026-07-31  修复视角按钮高亮永不生效：文本预设按钮复用了 .vbtn 样式类，
                        refreshViewButtons 未限定容器，closest('.views') 返回 null 而抛错
@@ -492,8 +493,10 @@ const PARAMS = [
     fmt: v => fmt(v, 1) + t({ zh: ' 步/s', en: ' steps/s' }) },
   { key: 'capN',  label: { zh: '字符表上限 <i>N</i>', en: 'Alphabet cap <i>N</i>' },  min: 4,   max: 16, step: 1, value: 14,
     map: v => Math.round(v), fmt: v => Math.round(v) + t({ zh: ' 种', en: ' symbols' }) },
+  /* symSel 被「编码表」页的 drive 驱动：map 取整后 state 存的就是整数刻度本身，
+     故 invMap 是恒等映射 —— 但必须显式写出来，否则引擎会告警并按无 invMap 处理（规范 §8） */
   { key: 'symSel', label: { zh: '选中字符 <i>i</i>', en: 'Selected symbol <i>i</i>' }, min: 0, max: 15, step: 1, value: 0,
-    map: v => Math.round(v),
+    map: v => Math.round(v), invMap: v => v,
     fmt: v => { const P = PIPE(), i = clamp(Math.round(v), 0, P.m - 1), ch = P.leafOrder[i];
                 return '「' + glyph(ch) + '」 ' + P.codes.get(ch); } }
 ];
@@ -719,6 +722,22 @@ const SCENES = {
   codes: {
     label: { zh: '编码表', en: 'Code table' },
     params: ['capN', 'symSel'],
+    /* 本页是四页里唯一该驱动的：symSel 不是"预设选择器"，而是码树叶子的有序索引
+       （leafOrder 是中序遍历，即码字的字典序），扫一遍就是紫色路径自左向右扫过整棵树，
+       每个字符的「从根往下走、左 0 右 1」被逐个演一遍 —— brand 那句话本来就是个动作。
+       顺带把 tips 的对照也带活：路径扫到哪个字符，那一对柱（玫红理想 −log₂pᵢ /
+       紫色实际 ℓᵢ）就被点名，读者不必自己点 14 次才发现两排柱始终贴在一起。
+       不驱动 capN：它一动整棵码树重建，扫描就没有可扫的固定对象了。
+       值域 0 … (m−1)：上界写成 getter 跟着文本框走。字符表大小 m 由 TEXT_STATE.raw 决定、
+       随时会变，若把上界钉死成滑杆量程 15，默认文本（m = 7）会让 sel = clamp(round, 0, m−1)
+       在顶端饱和，单程约 57% 的时间停在最后一片叶子上。引擎侧无需任何改动：
+       driveValue() 是全文唯一读 d.to 的地方（`d.from + (d.to − d.from) * s`），
+       取值器每次求值都返回当前的 m−1，扫描范围因此始终恰好覆盖整个码表 —— 不多扫也不漏扫。
+       退化情形 m = 1（例如「单字符」样例）时 to === from === 0，驱动值恒为 0，
+       画面静止但不报错，正确对应「只有一个字符、没什么可扫」。
+       首尾（最左叶 ↔ 最右叶）差别大、跳回会突变 → linear（pingpong 折返，来回各扫一遍）。
+       周期 16 s：pingpong 下单程 8 s，m = 7 时约 1.1 s 一个字符，够看清一条路径再走下一条。 */
+    drive: { key: 'symSel', from: 0, get to() { return Math.max(0, PIPE().m - 1); }, period: 16, kind: 'linear' },
     brand: { zh: '从根往下走：左边记 0、右边记 1，走到叶子就读出该字符的码字。码字只长在叶子上——所以没有任何码字是另一个码字的前缀。',
              en: 'Walk down from the root: left writes 0, right writes 1, and the leaf you land on spells that character’s codeword. Codewords live only on leaves — which is exactly why no codeword is a prefix of another.' },
     tips: { zh: '提示：按 2 键正视 码树——高频字符挂得浅、码字就短，实际码长 ℓᵢ 紧贴理想值 −log₂pᵢ（按 3 俯视比较两排柱）。至于熵为何是下界，见《信息熵、惊奇度与编码》。',
