@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.0.1">
 <meta name="engine-version" content="1.0.0">
 <title>从牛顿到闵可夫斯基 · 时空的重建</title>
 <!-- ============================================================
@@ -45,6 +45,7 @@
                      顿悟视角：「log–log 正视」= β²/2 渐近直线与 β→1 发散同框
 
   版本记录（新→旧）：
+    1.0.1  2026-08-01  帧级异常兜底收口到引擎标准：按页签去重，不再全局只报一次
     1.0.0  2026-08-02  首个版本：五个页签（牛顿平直时空 / 速度叠加的裂缝 /
                        符号的诞生 / 剪切→双曲旋转 / γ 何时接管），全量双语，
                        frame() 加固
@@ -1521,7 +1522,22 @@ function draw() {
   SCENES[curTab].draw(C);
 }
 
+/* 帧级异常兜底：同一页签的同一条错误只报一次，否则 60 fps 会把控制台刷爆。
+   resetSim() 会清空它——用户主动重置后应当允许重新报。
+   声明必须排在 resetSim() 之前：resetSim() 引用 frameErrSeen，声明留在它下方
+   就只靠「启动序列恰好先求值到这里」躲开 TDZ，是结构性的隐患，而这份 starter
+   会被复制给所有未来工具。 */
+const frameErrSeen = Object.create(null);
+function frameError(err) {
+  const k = curTab + '|' + ((err && err.message) || err);
+  if (frameErrSeen[k]) return;
+  frameErrSeen[k] = 1;
+  console.warn('[frame] 场景「' + curTab + '」抛出异常，已跳过该帧并继续渲染循环：', err);
+}
+
 function resetSim() {
+  /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
+  Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
@@ -1532,10 +1548,6 @@ function resetSim() {
 }
 
 let lastTs = performance.now(), lastRO = 0;
-let frameErrLogged = false;
-/* 规范 §8 硬要求：frame() 整体 try/catch，rAF 放 finally —— 任何一帧抛错
-   （某个场景的 draw/readout 出问题）都不能让动画循环整个停死，画面必须继续。
-   错误只喊一次，避免把控制台刷爆。 */
 function frame(ts) {
   try {
     const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
@@ -1568,11 +1580,11 @@ function frame(ts) {
     draw();
     if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
   } catch (err) {
-    if (!frameErrLogged) {
-      frameErrLogged = true;
-      console.error('[math-viz] frame() 抛错，已捕获，动画循环继续：', err);
-    }
+    frameError(err);
   } finally {
+    /* rAF 放 finally 是「循环永不断」的机械保证：不依赖 catch 里写对什么。
+       代价是画布可能停在最后一帧好内容而屏幕无提示——这是有意的取舍，
+       「整个工具变砖」比「画面停在错误状态」更不可接受。 */
     requestAnimationFrame(frame);
   }
 }

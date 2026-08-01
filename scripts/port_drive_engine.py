@@ -28,10 +28,20 @@
       改动传播不过去 —— 真要改 relabel 块的文本，得先给它补一条能区分两种形态
       的定位规则。
 
-第三件事（阶段 4 新增）：frame() 加固（harden）——见文件下半部 FRAME_OLD_* 一节。
-  它覆盖**全部 51 个** outputs（含 EXCLUDE 里的 trig-essence-3d-new：那个文件
-  没有 SCENES、进不了移植阶段，但有同构的 frame() 与同样的「变砖」风险）。
-  同样是 probe 幂等 + 严格字面替换，且只在真的加固了某个文件时才给它递增版本号。
+第三件事（阶段 4 起）：帧级兜底的收口（harden）——见 FRAME_OLD_* 与 harden()。
+  它覆盖**全部** outputs（含 EXCLUDE 里的 trig-essence-3d-new：那个文件没有
+  SCENES、进不了移植阶段，但有同构的 frame() 与同样的「变砖」风险）。
+
+  阶段 5 把判据从「frame() 是否与 starter 逐字节相同」改成「**兜底那一层是否
+  合规**」，两者天差地别：
+    * 合规 = 有引擎标准的 frameError()（按 curTab + 消息去重、console.warn）、
+      声明块排在 resetSim() 之前、resetSim() 会清表。
+    * frame() **循环体的形状不在判据里**。帧内定步长子步进（混沌 / 多体工具
+      必须这样积分）、达到条件重新播种，都是正当写法，不该被报成偏离。
+      见规范 §6「主循环体内」与 §8 第 7 条的结构断言。
+  所以「跳过清单」里只会出现真正需要人看的东西：兜底缺失且形状认不出、或者
+  有 try/catch 却用了认不出的错误容器。形状不同而兜底合规的工具**根本不进
+  跳过清单**——它在 harden 里一步都不会被改动。
 
 用法：
     python3 scripts/port_drive_engine.py            # 补齐 + 更新 + 加固
@@ -49,6 +59,9 @@ OUTPUTS = os.path.join(ROOT, 'outputs')
 # engine-version: pre-declarative，没有 SCENES，不在**移植**范围内。
 # 注意它仍在 **frame() 加固** 范围内（harden 单独跑，见 main()）。
 EXCLUDE = {'trig-essence-3d-new.html'}
+
+# resetSim() 与 frame() 之间那一行标准声明。收口时该区间要归一成它。
+LASTTS = 'let lastTs = performance.now(), lastRO = 0;'
 
 
 # ---------------------------------------------------------------- starter 抽取
@@ -158,11 +171,23 @@ def extract_starter():
 
     # ⑪ 帧级异常兜底（阶段 4）：frameError 定义 + 加固后的 frame() 外壳。
     #    只切「新文本」——「旧文本」starter 里已经不存在了，见 FRAME_OLD_* 一节。
+    #    阶段 5 起，这一块的**位置**也是规范的一部分：必须排在 resetSim() 之前，
+    #    否则 resetSim() 引用 frameErrSeen 只靠启动序列的调用顺序躲开 TDZ。
     i = _one(L, lambda l: l.startswith('/* 帧级异常兜底'), 'frameError 注释')
     j = _one(L, lambda l: l == 'function frame(ts) {', 'frame 定义')
-    assert L[i - 1] == '' and L[i - 2] == 'let lastTs = performance.now(), lastRO = 0;', L[i - 2:i]
-    g['frameerr'] = L[i - 1:j]          # 前导空行 + 注释 + frameErrSeen + frameError()
-    assert g['frameerr'][-1] == '}' and 'function frameError(err) {' in g['frameerr'], g['frameerr']
+    r = _one(L, lambda l: l == 'function resetSim() {', 'resetSim 定义')
+    assert i < r, 'starter 的 frameErrSeen 声明必须排在 resetSim() 之前'
+    assert L[r - 1] == '' and L[r - 2] == '}', L[r - 2:r]
+    # 前导空行 + 注释 + frameErrSeen + frameError() + 收尾空行。**两端的空行都要
+    # 带上**：place_frameerr 摘块时把两端空行一并吃掉、插入前也把落点前的空行
+    # 清干净，一进一出对称，脚本才是幂等的（不对称会让第二次运行少一个空行）。
+    assert L[i - 1] == '', L[i - 2:i]
+    g['frameerr'] = L[i - 1:r]
+    assert 'const frameErrSeen = Object.create(null);' in g['frameerr'], g['frameerr']
+    assert 'function frameError(err) {' in g['frameerr'], g['frameerr']
+    assert g['frameerr'][0] == '' and g['frameerr'][-1] == '', g['frameerr'][:1] + g['frameerr'][-2:]
+    assert g['frameerr'][-2] == '}', g['frameerr'][-3:]
+    assert L[j - 1] == LASTTS, L[j - 2:j]
     k = _one(L, lambda l: l == '  } catch (err) {', 'frame 的 catch 行')
     e = k
     while L[e] != '}':
@@ -319,6 +344,12 @@ FRAME_VARIANTS = [('A', FRAME_OLD_A), ('B', FRAME_OLD_B), ('C', FRAME_OLD_C)]
 
 # 头注释 changelog 里新增的那一行（版本号按各文件实际递增值填）
 CHANGELOG_NOTE = '2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环'
+UNIFY_NOTE = '2026-08-01  帧级异常兜底收口到引擎标准：按页签去重，不再全局只报一次'
+
+# 自造的一次性错误容器。**判据是「有没有用非标准容器」，不是「frame() 是否与
+# starter 逐字节相同」**——形状不同而兜底合规的工具（例如帧内定步长子步进的
+# 混沌 / 多体工具）不该被报成偏离，见规范 §6「主循环体内」。
+DEVIANT_PROBES = ('frameErrLogged', 'frameErr ', 'frameErr=')
 
 
 def _wrap_frame(old, g):
@@ -344,7 +375,102 @@ def _find_block(lines, old, what):
     return hits[0] if hits else None
 
 
-def bump_patch(lines):
+def _frame_span(lines):
+    """frame() 的 (定义行, 顶格收尾 } 行)。只认结构，不管循环体写了什么。"""
+    j = _idx(lines, lambda l: l == 'function frame(ts) {', 'frame 定义')
+    e = next((i for i in range(j + 1, len(lines)) if lines[i] == '}'), None)
+    if e is None:
+        raise Miss('frame() 找不到顶格收尾 }')
+    return j, e
+
+
+def place_frameerr(lines, g):
+    """把 frameErrSeen / frameError() 的声明块放到 resetSim() **之前**，文本对齐 starter。
+
+    位置是结构性的，不是风格：resetSim() 引用 frameErrSeen，声明留在它下方就只靠
+    「启动序列恰好先求值到这里」躲开 TDZ。**零行为变化**——const 在任何调用之前
+    就求值完毕，所以这一步不递增版本号。
+
+    块已存在就整块摘走再按位插入（顺带把 starter 改过的措辞传播过去，与
+    update_blocks 同一思路）；不存在（刚被 unify / 机械包裹处理过）就直接插入。
+    """
+    lines = list(lines)
+    have = [i for i, l in enumerate(lines) if l == 'const frameErrSeen = Object.create(null);']
+    if len(have) > 1:
+        raise Miss('frameErrSeen 声明命中 %d 次（期望 1）' % len(have))
+    if have:
+        s = _idx(lines, lambda l: l.startswith('/* 帧级异常兜底'), 'frameError 注释')
+        f = _idx(lines, lambda l: l == 'function frameError(err) {', 'frameError 定义')
+        if not s < have[0] < f:
+            raise Miss('声明块三行不按 注释→const→function 排列')
+        e = next((i for i in range(f + 1, len(lines)) if lines[i] == '}'), None)
+        if e is None:
+            raise Miss('frameError() 找不到顶格收尾 }')
+        # 连同两端紧邻的空行一起摘走。g['frameerr'] 自带两端空行，一进一出必须
+        # 对称，否则第二次运行会比第一次少一个空行（脚本就不幂等了）。
+        lo, hi = s, e + 1
+        while hi < len(lines) and lines[hi] == '':
+            hi += 1
+        while lo > 0 and lines[lo - 1] == '':
+            lo -= 1
+        del lines[lo:hi]
+    r = _idx(lines, lambda l: l == 'function resetSim() {', 'resetSim 定义')
+    while r > 0 and lines[r - 1] == '':      # 落点前的空行也清干净，同上
+        r -= 1
+        del lines[r]
+    lines[r:r] = g['frameerr']
+    return lines
+
+
+def _decl_run(lines):
+    """resetSim() 收尾 } 与 frame() 定义之间那段声明区的 (起, 止)。"""
+    r = _idx(lines, lambda l: l == 'function resetSim() {', 'resetSim 定义')
+    j = _idx(lines, lambda l: l == 'function frame(ts) {', 'frame 定义')
+    k = next((i for i in range(r + 1, j) if lines[i] == '}'), None)
+    if k is None:
+        raise Miss('resetSim() 找不到顶格收尾 }（或它排在 frame() 之后）')
+    return k + 1, j
+
+
+def unify(lines, g):
+    """把手写的一次性错误容器收口到引擎标准。返回新行列表。
+
+    **结构定位，不比对 frame() 循环体的形状** —— 体内写什么是工具自己的事
+    （规范 §6「主循环体内」）。只动两处，循环体一个字不碰：
+      ① resetSim() 与 frame() 之间的声明区，归一成单独一行 LASTTS；
+      ② catch 到函数收尾，整段换成 starter 的标准尾巴（catch 里只调 frameError）。
+    """
+    lines = list(lines)
+
+    # ① 声明区。只允许含空行 / 注释 / lastTs 声明 / 自造容器这四类，
+    #    出现别的东西就当场 Miss —— 宁可跳过让人来看，不做「猜一个位置删掉」。
+    s, e = _decl_run(lines)
+    run, inc = lines[s:e], False
+    for l in run:
+        t = l.strip()
+        if inc:
+            inc = '*/' not in t
+            continue
+        if t == '' or t.startswith(LASTTS[:14]) or any(p in l for p in DEVIANT_PROBES):
+            continue
+        if t.startswith('/*'):
+            inc = '*/' not in t
+            continue
+        raise Miss('声明区里有预料之外的一行，不敢动：%r' % t)
+    if inc:
+        raise Miss('声明区里的块注释没有收尾')
+    lines[s:e] = ['', LASTTS]
+
+    # ② catch → 函数收尾
+    j, fe = _frame_span(lines)
+    ci = [i for i in range(j + 1, fe) if lines[i] == '  } catch (err) {']
+    if len(ci) != 1:
+        raise Miss('frame() 内 } catch (err) { 命中 %d 次（期望 1）' % len(ci))
+    lines[ci[0]:fe + 1] = g['frame_tail']
+    return lines
+
+
+def bump_patch(lines, note=CHANGELOG_NOTE):
     """meta 的 patch 位 +1，并在 changelog 顶端加一行。返回 (旧版本, 新版本)。
 
     **读该文件当前的值再加一**，不写死 1.1.0 → 1.1.1：仓库里版本号分散在
@@ -368,39 +494,65 @@ def bump_patch(lines):
           if l.startswith('  版本记录（') and l.endswith('新→旧）：')]
     if len(ci) != 1:
         raise Miss('changelog 标题命中 %d 次（期望 1）' % len(ci))
-    lines[ci[0] + 1:ci[0] + 1] = ['    %s  %s' % (new_v, CHANGELOG_NOTE)]
+    lines[ci[0] + 1:ci[0] + 1] = ['    %s  %s' % (new_v, note)]
     return old_v, new_v
 
 
 def harden(lines, g):
-    """frame() 加固 + resetSim() 清表 + patch 版本号。全部 51 个文件通用。"""
+    """帧级兜底的收口。判据只看**兜底那一层**，与 frame() 循环体的形状无关。
+
+    三步，各自独立：
+      ① 兜底缺失 / 不合规 → 补齐或收口（真实行为变化，递增 patch 版本号）；
+      ② 声明块归位到 resetSim() 之前（纯位置调整，零行为变化，不动版本号）；
+      ③ resetSim() 清空去重表。
+    """
     lines = list(lines)
     done = []
 
     def already(probe):
         return any(probe in l for l in lines)
 
-    hardened = False
+    note = None
     if not already('function frameError(err) {'):
-        found = [(tag, old, _find_block(lines, old, 'frame() 变体 %s' % tag))
-                 for tag, old in FRAME_VARIANTS]
-        hit = [f for f in found if f[2] is not None]
-        if len(hit) != 1:
-            raise Miss('frame() 变体识别失败：三种已知变体命中 %d 种（期望 1）' % len(hit))
-        tag, old, at = hit[0]
-        lines[at:at + len(old)] = g['frameerr'] + _wrap_frame(old, g)
-        done.append('frame~' + tag)
-        hardened = True
+        if already('} finally {'):
+            # 已经有 try/catch/finally，但用的是自造的错误容器（全局一次性布尔）。
+            # 那种写法第一条错报完就永久关麦，第二个页签抛出的错会被完全吞掉。
+            if not any(p in l for l in lines for p in DEVIANT_PROBES):
+                raise Miss('frame() 有 try/catch 但既无 frameError() 也认不出错误容器，'
+                           '需人工判断')
+            lines = unify(lines, g)
+            done.append('unify')
+            note = UNIFY_NOTE
+        else:
+            # 完全没加固。机械包裹只对已知的三种 frame() 字面形态成立；
+            # 形状不同的新工具应当直接从 starter 拷，脚本不猜。
+            found = [(tag, old, _find_block(lines, old, 'frame() 变体 %s' % tag))
+                     for tag, old in FRAME_VARIANTS]
+            hit = [f for f in found if f[2] is not None]
+            if len(hit) != 1:
+                raise Miss('frame() 没有 try/catch，且不是已知的三种字面形态之一'
+                           '（命中 %d 种）：请照 starter 手工加固' % len(hit))
+            tag, old, at = hit[0]
+            lines[at:at + len(old)] = _wrap_frame(old, g)
+            done.append('frame~' + tag)
+            note = CHANGELOG_NOTE
+
+    # 声明块归位：位置是结构性的（TDZ），文本顺带对齐 starter。零行为变化。
+    moved = place_frameerr(lines, g)
+    if moved != lines:
+        lines = moved
+        if not note:
+            done.append('frameerr~pos')
 
     if not already('清空帧级异常去重表'):
         at = _idx(lines, lambda l: l == 'function resetSim() {', 'resetSim 定义')
         lines[at + 1:at + 1] = g['resetguard']
         done.append('resetguard')
 
-    # 版本号只在「本轮真的加固了这个文件」时递增：这样重复运行不会重复 +1，
-    # 而一个从加固后 starter 拷出来的新工具（生来就有 frameError）也不会被误伤。
-    if hardened:
-        old_v, new_v = bump_patch(lines)
+    # 版本号只在「本轮真的改了兜底行为」时递增：位置调整不算，重复运行也不会
+    # 重复 +1，而从 starter 拷出来的新工具（生来就合规）不会被误伤。
+    if note:
+        old_v, new_v = bump_patch(lines, note)
         done.append('ver %s→%s' % (old_v, new_v))
 
     return lines, done

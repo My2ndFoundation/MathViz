@@ -118,6 +118,8 @@ HTML 中数学符号写法：`角速度 <i>ω</i>`，由 `.ctl label i { font-fa
 | 相机过渡 | 750ms · easeInOutCubic（`prefers-reduced-motion` 时 1ms） |
 | UI hover | `transition: .15s`（边框色 / 文字色 / 背景） |
 | 主循环 | rAF 常驻（暂停仅停模拟，相机仍可动）；`dt = clamp(Δ, 0, 0.05)` 防后台跳变 |
+| 主循环的兜底 | **引擎既定成员，照抄 starter，不要自造**：`frame()` 整体包 `try/catch`，`requestAnimationFrame(frame)` 放 `finally`（机械保证「循环永不断」，不依赖 catch 里写对什么）；catch 里**只调** `frameError(err)`——它用 `frameErrSeen` 按「`curTab` + 错误消息」组成的键去重后 `console.warn`，`resetSim()` 清表。`frameErrSeen` / `frameError()` 的声明要排在 `resetSim()` **之前**（`resetSim()` 引用 `frameErrSeen`）。详见 §8 自查清单同名条目 |
+| 主循环**体内** | 不受上一条约束，由工具自己决定。帧内定步长子步进（把一帧的 `dt` 切成 `ceil(dt/h)` 个固定步长 `h`，并给子步数设上限防后台切回卡死）、达到条件后重新播种，都是正当写法——混沌系统直接拿 `dt` 积分是灾难，必须这样写。**标准件是兜底那一层，不是循环体的形状**：别照抄 starter 的循环体，也别指望所有工具的 `frame()` 逐字节相同 |
 | 读数刷新 | 节流 120ms |
 
 ---
@@ -330,7 +332,55 @@ tips：**一段话只讲一个顿悟点**，并指向具体操作（某视角 / 
 3. 在 `SCENES` 注册场景：`label`（页签名）、`brand`、`tips`、`views`（首项 iso）、`toggles`（曲线开关按启用顺序取色）、`params`（本页签真正读取的滑块 key 数组）、`drive`（时间驱动声明；正当静止写显式 `null` 并注释理由，已有动画则不写 `drive` 而留一行注释说明它靠什么在动——四条出路见下方自查清单）、`draw(C)`、`readout()`；
 4. 按需扩展 `pushSample` 的采样字段（原则：记录当时真实值）；
 5. 用引擎部件拼场景：`drawAxes / drawGridXY / drawTimeGrid / drawPeriodBracket / drawCircle / drawAngleArc / strokePoly / line3 / glowDot / label3`；
-6. 自查清单：□ 曲线六处同源 □ 有顿悟视角 □ tips 只讲一件事 □ 暂停时相机仍可动 □ 参数中途可调且历史不重算 □ 移动端折叠正常 □ 每个场景声明 params，且与该场景实际读取的 state 键一致（含经模块级辅助函数间接读取的） □ 没有静止页签：每个页签必须落在**四条出路之一**，且后三条都要留下可核对的痕迹——① 由引擎时钟直接驱动（`theta` / `state.t` 让被演示量自己走，无需任何声明）；② 声明 `drive`；③ 正当静止：显式写 `drive: null` **并在同一处注释写明理由**（静态对照场景合法，但须是有意识的选择）；④ 已有动画、故不声明 `drive`：**必须在场景里留一行注释写明它靠什么机制在动**（哪个量、由谁推进、晚期实测读数）。第 ④ 条不是可选的礼貌——没有这行注释，「已排除」与「漏了」在事后审计里无法区分。判「有没有动」的口径：**一次性演进后永久定格算静止**（喂满 20 s 再推到 t≈200 s 取窗口，不重复帧 = 1 即定格），此时正确的修法通常是让这段演进在工具局部区循环起来，而不是补一条假的 `drive: null` 理由 □ 被 drive 驱动的参数若带 map，必须同时提供 invMap（否则滑块无法回显驱动值） □ drive 的 [from, to] 必须落在该参数映射后的 [min, max] 之内（越界会被滑杆钳住：读数与滑杆句柄停在端点上；此后**用户第一次拖动这根滑杆**时 upd() 就把钳过的值写回 state。语言切换不再触发此事——relabel 只调 render()，见 §6「滑杆的两个闭包」） □ 引擎的行为查询不只认样式类：querySelectorAll 限定结构容器（如 .views .vbtn）或改用 data-* 属性 □ `frame()` 有 `try/catch` 且 `requestAnimationFrame(frame)` 在 `finally` 里（一帧抛出不得杀死整个渲染循环；rAF 放 finally 是机械保证，不依赖 catch 里写对什么） □ `node --check` 通过 □ 双语：全部文案为 `{zh,en}` 对象并经 `t()`；`?lang=en` 直达、切换按钮、记忆、`<html lang>`/`document.title` 跟随均正常（§9）□ 版本：meta 两枚 + 头注释 changelog + 面板角标齐备；已登记 `tools.json` 并同步 `index.html` 内嵌 TOOLS 与 README 工具表（§10）
+6. 自查清单：□ 曲线六处同源 □ 有顿悟视角 □ tips 只讲一件事 □ 暂停时相机仍可动 □ 参数中途可调且历史不重算 □ 移动端折叠正常 □ 每个场景声明 params，且与该场景实际读取的 state 键一致（含经模块级辅助函数间接读取的） □ 没有静止页签：每个页签必须落在**四条出路之一**，且后三条都要留下可核对的痕迹——① 由引擎时钟直接驱动（`theta` / `state.t` 让被演示量自己走，无需任何声明）；② 声明 `drive`；③ 正当静止：显式写 `drive: null` **并在同一处注释写明理由**（静态对照场景合法，但须是有意识的选择）；④ 已有动画、故不声明 `drive`：**必须在场景里留一行注释写明它靠什么机制在动**（哪个量、由谁推进、晚期实测读数）。第 ④ 条不是可选的礼貌——没有这行注释，「已排除」与「漏了」在事后审计里无法区分。判「有没有动」的口径：**一次性演进后永久定格算静止**（喂满 20 s 再推到 t≈200 s 取窗口，不重复帧 = 1 即定格），此时正确的修法通常是让这段演进在工具局部区循环起来，而不是补一条假的 `drive: null` 理由 □ 被 drive 驱动的参数若带 map，必须同时提供 invMap（否则滑块无法回显驱动值） □ drive 的 [from, to] 必须落在该参数映射后的 [min, max] 之内（越界会被滑杆钳住：读数与滑杆句柄停在端点上；此后**用户第一次拖动这根滑杆**时 upd() 就把钳过的值写回 state。语言切换不再触发此事——relabel 只调 render()，见 §6「滑杆的两个闭包」） □ 引擎的行为查询不只认样式类：querySelectorAll 限定结构容器（如 .views .vbtn）或改用 data-* 属性 □ `frame()` 有 `try/catch` 且 `requestAnimationFrame(frame)` 在 `finally` 里（一帧抛出不得杀死整个渲染循环；rAF 放 finally 是机械保证，不依赖 catch 里写对什么）。**去重器同样是标准件**：catch 里只调引擎的 `frameError(err)`，它靠 `frameErrSeen` 按「`curTab` + 错误消息」组成的键去重、`console.warn` 输出、`resetSim()` 清表；声明位置排在 `resetSim()` 之前。**不许自造一次性全局布尔**（`let frameErrLogged = false` / `let frameErr = false` 之类）——那种写法第一条错报完就永久关麦，**第二个页签抛出的错会被完全吞掉**，用户和维护者都再也看不见；按页签去重的口径是「同一页签的不同错误、不同页签的同一错误，都各报一次」。反过来，`frame()` **体内**写什么不受本条约束（子步进、重新播种等见 §6「主循环体内」），下方的结构断言也只查兜底那一层，与循环体形状无关 □ `node --check` 通过 □ 双语：全部文案为 `{zh,en}` 对象并经 `t()`；`?lang=en` 直达、切换按钮、记忆、`<html lang>`/`document.title` 跟随均正常（§9）□ 版本：meta 两枚 + 头注释 changelog + 面板角标齐备；已登记 `tools.json` 并同步 `index.html` 内嵌 TOOLS 与 README 工具表（§10）
+
+7. `frame()` 兜底层的结构断言（上一条清单项的机器可查版本）：
+
+```bash
+python3 - outputs/*.html <<'PY'
+import sys
+bad = 0
+for path in sys.argv[1:]:
+    L = open(path, encoding='utf-8').read().split('\n')
+    why = []
+    st = [i for i, l in enumerate(L) if l == 'function frame(ts) {']
+    if len(st) != 1:
+        why.append('function frame(ts) { 命中 %d 次（期望 1）' % len(st))
+    else:
+        s = st[0]
+        e = next((i for i in range(s + 1, len(L)) if L[i] == '}'), None)
+        body = L[s + 1:e] if e else []
+        # A. 外壳：三条断言，与循环体的形状无关（子步进、重新播种都不影响）
+        if not body or body[0].strip() != 'try {':
+            why.append('函数体第一行不是 try {')
+        fin = [i for i, l in enumerate(body) if l.strip() == '} finally {']
+        raf = [i for i, l in enumerate(body) if 'requestAnimationFrame(frame)' in l]
+        if len(fin) != 1: why.append('} finally { 出现 %d 次（期望 1）' % len(fin))
+        if len(raf) != 1: why.append('rAF 出现 %d 次（期望 1）' % len(raf))
+        if len(fin) == 1 and len(raf) == 1 and raf[0] < fin[0]:
+            why.append('rAF 在 } finally { 之前')
+        # B. 兜底层：只调 frameError()，且声明排在 resetSim() 之前
+        cat = [i for i, l in enumerate(body) if l.strip() == '} catch (err) {']
+        if len(cat) != 1: why.append('} catch (err) { 出现 %d 次（期望 1）' % len(cat))
+        elif len(fin) == 1 and [l.strip() for l in body[cat[0]+1:fin[0]] if l.strip()] != ['frameError(err);']:
+            why.append('catch 体不是单独一句 frameError(err);')
+    d = [i for i, l in enumerate(L) if l == 'const frameErrSeen = Object.create(null);']
+    r = [i for i, l in enumerate(L) if l == 'function resetSim() {']
+    if len(d) != 1: why.append('frameErrSeen 声明命中 %d 次（期望 1）' % len(d))
+    elif len(r) == 1 and d[0] > r[0]: why.append('frameErrSeen 声明排在 resetSim() 之后（TDZ 隐患）')
+    if not any('Object.keys(frameErrSeen)' in l for l in L):
+        why.append('resetSim() 没有清空 frameErrSeen')
+    if any(p in l for l in L for p in ('frameErrLogged', 'frameErr ', 'frameErr=')):
+        why.append('存在自造的一次性错误容器')
+    if why:
+        bad += 1
+        print('FAIL  %s\n%s' % (path, ''.join('        · %s\n' % w for w in why)), end='')
+print('%d 个文件，%d 个不合规' % (len(sys.argv) - 1, bad))
+sys.exit(1 if bad else 0)
+PY
+```
+
+   为什么是解析式断言而不是 `grep`：**曾经用过** `grep -B2 "requestAnimationFrame(frame);" outputs/*.html | grep -c "} finally {"`，它检查的是「`finally` 与 rAF 之间隔几行」，而那段距离取决于中间写了几行设计注释——纯属自由。实测：51 个引擎标准文件的距离是 4 行（中间三行注释），`-B2` 只数出 3 个，**51/54 的假阴性**。把 `-B2` 换成 `-B5` 不是修复，只是把一个脆弱的行数换成另一个：注释多写一行就又塌了。断言必须落在结构上（哪一行是函数体第一行、某个记号在函数体内出现几次、谁的行号在谁之后），不能落在行距上。同理，断言里**不许**出现「与 starter 逐字节相同」这种判据——那会把帧内子步进的混沌/多体工具判成违规，而它们的写法是对的（§6「主循环体内」）。
 
 ### 给 Claude Code 的任务简报模板
 
