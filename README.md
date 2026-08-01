@@ -73,6 +73,8 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [霍夫曼编码 · 从文本到比特 · Huffman Coding](outputs/huffman-coding-text-3d.html) | Type your own text and watch it become bits: frequencies replacing meaning, the tree merging bottom-up, short codes for frequent characters, and a decoder recovering the text from a stream with no separators |
 | [维度的阶梯 · 从点到分形 · Dimension & Fractals](outputs/dimension-fractal-3d.html) | d = log N / log r on one log-log fan, with the non-integer slopes wedged between the integers; box counting that measures the dimension, the Hausdorff measure that forces the exponent, and a tesseract whose nested cubes are only a shadow |
 
+| [光锥 · 四维时空的因果结构 · The Light Cone](outputs/spacetime-light-cone-3d.html) | A flash sweeping the cone into being (so 45° is a conclusion, not a convention), s² carving out absolute future, past and elsewhere, proper time running the triangle inequality backwards, and boosts as hyperbolic rotations that leave the cone untouched |
+
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
 ## Usage
