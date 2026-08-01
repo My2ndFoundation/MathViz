@@ -374,12 +374,11 @@ const SCENES = {
   series: {
     label: { zh: '级数 · 收敛与发散', en: 'Series · Converge or not' },
     params: ['omega'],
-    /* 正当静止（驱动会破坏教学意图）：本页签已经由引擎时钟驱动——pushSample()
-       按 ⌊θ/0.5⌋ 把三条赛道逐项累加到 60 项，画面本来就在长。审计脚本只推
-       draw() 不推 pushSample()，才把它读成静止。而本页签唯一的 param 是
-       累加速度 ω：那是时钟的速度旋钮，不是被演示量，驱动它只会让同一段
-       累加忽快忽慢，什么都不多讲。按 R 重放才是作者给的复看入口。 */
-    drive: null,
+    /* 已有动画（故不声明 drive）：本页签由引擎相位钟 θ 驱动——pushSample() 按
+       ⌊θ/0.5⌋ 把三条赛道逐项累加到 60 项，走完后留几拍看清终态再从头累一次
+       （循环的由来见下方 pushSample() 上的注释）。本页签唯一的 param 是累加
+       速度 ω：那是这只钟的速度旋钮，不是被演示量，驱动它只会让同一段累加忽快
+       忽慢，什么都不多讲。按 R 可随时立刻重开。 */
     brand: { zh: '三条部分和赛道：Σ1/n 没有天花板、慢慢爬到无穷；Σ1/n² 停在 π²/6 之下；Σ1/2ⁿ 秒速贴上 1。差别只有一个字——阶：1/n² 恰好是 1/n 的高阶无穷小。',
              en: 'Three partial-sum tracks: Σ1/n has no ceiling and crawls to infinity; Σ1/n² halts under π²/6; Σ1/2ⁿ snaps to 1. The only difference is order — 1/n² is exactly a higher-order infinitesimal of 1/n.' },
     tips: { zh: '提示：切「立体」看三条赛道并排生长——琥珀虚线是收敛级数的天花板，玫红调和级数没有天花板（画到 60 项才 4.68，但它终将超过任何数）。就差一阶，命运两分。按 R 重开。',
@@ -550,17 +549,32 @@ const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion:
    ║  ③ 采样 —— 按你的工具需要扩展字段                           ║
    ║  原则：记录"当时的真实值"，参数中途改变时历史不重算            ║
    ╚══════════════════════════════════════════════════════════╝ */
-/* 级数累加：θ 驱动逐项相加（每 0.5θ 一项，画到 60 项）；θ 回卷（R）即清零重开。
-   记录的是当时的真实部分和——不重算（§6） */
+/* 级数累加：θ 驱动逐项相加（每 0.5θ 一项，画到 60 项）；相位回卷（R 或走满一轮）
+   即清零重开。记录的是当时的真实部分和——不重算（§6）
+
+   为什么「级数」页没有 drive、而是改这里：驱动量必须是本页 params 里的一根滑杆，
+   而这一页只有一根 ω，它是钟的速度旋钮不是被演示量（驱动它只让同一段累加忽快忽慢）。
+   这一页的自变量本来就是引擎相位钟 θ：项数 n = ⌊θ/0.5⌋，三条赛道一项一项往前长。
+   病不在缺驱动量，而在这只钟走过 30 之后 n 被夹在 60，画面永久定格在「已累到 60 项」
+   上（实测 ω=0.8 时 t≈37.5 s 封顶；t≈200 s 起 12 秒窗口 721 帧只有 1 个不重复画面、
+   maxΔ = 0、读数正文 distinct = 1）。修法与「数学归纳法」页一致：走完 60 项后多留
+   SER_HOLD 拍看清终态，再从头累一次。
+   这不违反「历史绝不重算」——samples 一条都不改写；sim 的清零走的正是 R 键
+   （resetSim 把 θ 归零）本来就有的那条重开路径，只是现在也可由相位自己绕回起点触发。 */
+const SER_N = 60, SER_DTH = 0.5, SER_HOLD = 5;    // 60 项 · 每项 0.5θ · 终态多留 5θ
+const SER_CYCLE = SER_N * SER_DTH + SER_HOLD;     // 一轮 35θ（ω=0.8 时约 43.8 s，ω=3 时约 11.7 s）
+function seriesPhase() { return Math.max(0, state.theta) % SER_CYCLE; }
+
 const sim = { last: 1e9, n: 0, s1: 0, s2: 0, s3: 0, tr1: [], tr2: [], tr3: [] };
 
 function pushSample() {
-  if (state.theta < sim.last) {
+  const ph = seriesPhase();
+  if (ph < sim.last) {
     sim.n = 0; sim.s1 = sim.s2 = sim.s3 = 0;
     sim.tr1 = [[0, 0]]; sim.tr2 = [[0, 0]]; sim.tr3 = [[0, 0]];
   }
-  sim.last = state.theta;
-  const target = Math.min(60, Math.floor(state.theta / 0.5));
+  sim.last = ph;
+  const target = Math.min(SER_N, Math.floor(ph / SER_DTH));
   while (sim.n < target) {
     sim.n++;
     sim.s1 += 1 / sim.n;
