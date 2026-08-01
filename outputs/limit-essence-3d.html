@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.0">
+<meta name="tool-version" content="1.1.1">
 <meta name="engine-version" content="1.0.0">
 <title>极限的本质 · 阶决定生死</title>
 <!-- ============================================================
@@ -13,6 +13,7 @@
   引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
 
   版本记录（changelog，新→旧）：
+    1.1.1  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
     1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-12  首个版本（含双语）
@@ -378,11 +379,11 @@ const SCENES = {
        ⌊θ/0.5⌋ 把三条赛道逐项累加到 60 项，走完后留几拍看清终态再从头累一次
        （循环的由来见下方 pushSample() 上的注释）。本页签唯一的 param 是累加
        速度 ω：那是这只钟的速度旋钮，不是被演示量，驱动它只会让同一段累加忽快
-       忽慢，什么都不多讲。按 R 可随时立刻重开。 */
+       忽慢，什么都不多讲。走完一轮会自己从头重来，按 R 只是立刻重开的快捷方式。 */
     brand: { zh: '三条部分和赛道：Σ1/n 没有天花板、慢慢爬到无穷；Σ1/n² 停在 π²/6 之下；Σ1/2ⁿ 秒速贴上 1。差别只有一个字——阶：1/n² 恰好是 1/n 的高阶无穷小。',
              en: 'Three partial-sum tracks: Σ1/n has no ceiling and crawls to infinity; Σ1/n² halts under π²/6; Σ1/2ⁿ snaps to 1. The only difference is order — 1/n² is exactly a higher-order infinitesimal of 1/n.' },
-    tips: { zh: '提示：切「立体」看三条赛道并排生长——琥珀虚线是收敛级数的天花板，玫红调和级数没有天花板（画到 60 项才 4.68，但它终将超过任何数）。就差一阶，命运两分。按 R 重开。',
-            en: 'Tip: in "3D" watch the three tracks grow side by side — amber dashes are the ceilings of the convergent ones, while the rose harmonic series has none (only 4.68 after 60 terms, yet it eventually beats any number). One order apart, two fates. Press R to restart.' },
+    tips: { zh: '提示：切「立体」看三条赛道并排生长——琥珀虚线是收敛级数的天花板，玫红调和级数没有天花板（画到 60 项才 4.68，但它终将超过任何数）。就差一阶，命运两分。走完 60 项会自己从头累一次，也可按 R 立刻重开。',
+            en: 'Tip: in "3D" watch the three tracks grow side by side — amber dashes are the ceilings of the convergent ones, while the rose harmonic series has none (only 4.68 after 60 terms, yet it eventually beats any number). One order apart, two fates. After 60 terms it starts over on its own; press R to restart immediately.' },
     views: {
       iso:   { label: { zh: '立体',     en: '3D' },        az: -0.65, el: 0.35, dist: 10.5, tx: 0, ty: 0.8, tz: 1.4 },
       front: { label: { zh: '正视 叠影', en: 'Front: overlay' }, az: 0.001, el: 0.02, dist: 8, tx: 0, ty: 0.9, tz: 0 }
@@ -559,6 +560,10 @@ const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion:
    上（实测 ω=0.8 时 t≈37.5 s 封顶；t≈200 s 起 12 秒窗口 721 帧只有 1 个不重复画面、
    maxΔ = 0、读数正文 distinct = 1）。修法与「数学归纳法」页一致：走完 60 项后多留
    SER_HOLD 拍看清终态，再从头累一次。
+   修复后同一口径实测（t≈200 s 起 12 s / 721 帧窗口）：20 个不重复画面。
+   20 看着不多，是因为这一页本就是阶梯式跳变而非连续运动——ω=0.8 时每 0.625 s
+   才加一项，12 s 恰好覆盖 20 个项数档（窗口内 n 从 40 走到 59；一轮 35θ ≈ 43.8 s
+   比窗口长，本窗口不含回卷）；相邻帧 maxΔ = 237，与上面定格时的 maxΔ = 0 是两回事。
    这不违反「历史绝不重算」——samples 一条都不改写；sim 的清零走的正是 R 键
    （resetSim 把 θ 归零）本来就有的那条重开路径，只是现在也可由相位自己绕回起点触发。 */
 const SER_N = 60, SER_DTH = 0.5, SER_HOLD = 5;    // 60 项 · 每项 0.5θ · 终态多留 5θ
@@ -878,6 +883,8 @@ function draw() {
 }
 
 function resetSim() {
+  /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
+  Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
@@ -888,37 +895,55 @@ function resetSim() {
 }
 
 let lastTs = performance.now(), lastRO = 0;
+
+/* 帧级异常兜底：同一页签的同一条错误只报一次，否则 60 fps 会把控制台刷爆。
+   resetSim() 会清空它——用户主动重置后应当允许重新报。 */
+const frameErrSeen = Object.create(null);
+function frameError(err) {
+  const k = curTab + '|' + ((err && err.message) || err);
+  if (frameErrSeen[k]) return;
+  frameErrSeen[k] = 1;
+  console.warn('[frame] 场景「' + curTab + '」抛出异常，已跳过该帧并继续渲染循环：', err);
+}
 function frame(ts) {
-  const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
-  lastTs = ts;
+  try {
+    const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
+    lastTs = ts;
 
-  if (tween) {
-    const k = Math.min(1, (ts - tween.t0) / tween.dur);
-    const e = ease(k);
-    const f = tween.from, o = tween.to;
-    cam.az = f.az + wrapPI(o.az - f.az) * e;
-    cam.el = f.el + (o.el - f.el) * e;
-    cam.dist = f.dist + (o.dist - f.dist) * e;
-    cam.tx = f.tx + (o.tx - f.tx) * e;
-    cam.ty = f.ty + (o.ty - f.ty) * e;
-    cam.tz = f.tz + (o.tz - f.tz) * e;
-    if (k >= 1) tween = null;
+    if (tween) {
+      const k = Math.min(1, (ts - tween.t0) / tween.dur);
+      const e = ease(k);
+      const f = tween.from, o = tween.to;
+      cam.az = f.az + wrapPI(o.az - f.az) * e;
+      cam.el = f.el + (o.el - f.el) * e;
+      cam.dist = f.dist + (o.dist - f.dist) * e;
+      cam.tx = f.tx + (o.tx - f.tx) * e;
+      cam.ty = f.ty + (o.ty - f.ty) * e;
+      cam.tz = f.tz + (o.tz - f.tz) * e;
+      if (k >= 1) tween = null;
+    }
+
+    if (state.running) {
+      state.t += dt;
+      state.theta += state.omega * dt;
+      applyDrive();
+      const dv = SCENES[curTab].drive;
+      if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
+      pushSample();
+    }
+    const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
+    while (samples.length && samples[0].t < state.t - windowSec) samples.shift();
+
+    draw();
+    if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
+  } catch (err) {
+    frameError(err);
+  } finally {
+    /* rAF 放 finally 是「循环永不断」的机械保证：不依赖 catch 里写对什么。
+       代价是画布可能停在最后一帧好内容而屏幕无提示——这是有意的取舍，
+       「整个工具变砖」比「画面停在错误状态」更不可接受。 */
+    requestAnimationFrame(frame);
   }
-
-  if (state.running) {
-    state.t += dt;
-    state.theta += state.omega * dt;
-    applyDrive();
-    const dv = SCENES[curTab].drive;
-    if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
-    pushSample();
-  }
-  const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
-  while (samples.length && samples[0].t < state.t - windowSec) samples.shift();
-
-  draw();
-  if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
-  requestAnimationFrame(frame);
 }
 
 const roEl = document.getElementById('readout');

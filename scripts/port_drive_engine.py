@@ -28,8 +28,13 @@
       改动传播不过去 —— 真要改 relabel 块的文本，得先给它补一条能区分两种形态
       的定位规则。
 
+第三件事（阶段 4 新增）：frame() 加固（harden）——见文件下半部 FRAME_OLD_* 一节。
+  它覆盖**全部 51 个** outputs（含 EXCLUDE 里的 trig-essence-3d-new：那个文件
+  没有 SCENES、进不了移植阶段，但有同构的 frame() 与同样的「变砖」风险）。
+  同样是 probe 幂等 + 严格字面替换，且只在真的加固了某个文件时才给它递增版本号。
+
 用法：
-    python3 scripts/port_drive_engine.py            # 补齐 + 更新
+    python3 scripts/port_drive_engine.py            # 补齐 + 更新 + 加固
     python3 scripts/port_drive_engine.py --check    # 只检查，未落地/有漂移则 exit 1
 """
 
@@ -41,7 +46,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STARTER = os.path.join(ROOT, 'design-system', 'math-viz-starter.html')
 OUTPUTS = os.path.join(ROOT, 'outputs')
 
-# engine-version: pre-declarative，没有 SCENES，不在本次移植范围内
+# engine-version: pre-declarative，没有 SCENES，不在**移植**范围内。
+# 注意它仍在 **frame() 加固** 范围内（harden 单独跑，见 main()）。
 EXCLUDE = {'trig-essence-3d-new.html'}
 
 
@@ -113,9 +119,14 @@ def extract_starter():
                   + part1 + [''] + part2)
 
     # ⑥ frame() 里的驱动求值与滑块同步
-    i = _one(L, lambda l: l == '    applyDrive();', 'frame 内 applyDrive')
-    g['frame'] = L[i:i + 3]
-    assert 'syncParamSlider(dv.key)' in g['frame'][2], g['frame']
+    #    starter 的 frame() 已加固（函数体整体缩进两格），所以这里切出来的是
+    #    **加固后**的 6 空格形态 frame_h；补齐阶段面对的是尚未加固的文件，
+    #    需要 4 空格形态，故一并保存一份去掉两格缩进的 frame。
+    i = _one(L, lambda l: l == '      applyDrive();', 'frame 内 applyDrive')
+    g['frame_h'] = L[i:i + 3]
+    assert 'syncParamSlider(dv.key)' in g['frame_h'][2], g['frame_h']
+    assert all(l.startswith('      ') for l in g['frame_h']), g['frame_h']
+    g['frame'] = [l[2:] for l in g['frame_h']]
 
     # ⑦ resetSim() 里对 driveOff / driveOffAt 的归零
     i = _one(L, lambda l: l.startswith('  /* 驱动时钟的偏移一并归零'), 'resetSim 归零注释')
@@ -145,6 +156,36 @@ def extract_starter():
         end += 1
     g['relabel'] = L[i:end + 1]
 
+    # ⑪ 帧级异常兜底（阶段 4）：frameError 定义 + 加固后的 frame() 外壳。
+    #    只切「新文本」——「旧文本」starter 里已经不存在了，见 FRAME_OLD_* 一节。
+    i = _one(L, lambda l: l.startswith('/* 帧级异常兜底'), 'frameError 注释')
+    j = _one(L, lambda l: l == 'function frame(ts) {', 'frame 定义')
+    assert L[i - 1] == '' and L[i - 2] == 'let lastTs = performance.now(), lastRO = 0;', L[i - 2:i]
+    g['frameerr'] = L[i - 1:j]          # 前导空行 + 注释 + frameErrSeen + frameError()
+    assert g['frameerr'][-1] == '}' and 'function frameError(err) {' in g['frameerr'], g['frameerr']
+    k = _one(L, lambda l: l == '  } catch (err) {', 'frame 的 catch 行')
+    e = k
+    while L[e] != '}':
+        e += 1
+    g['frame_new'] = L[j:e + 1]         # 加固后的 frame() 全文，仅用于自检
+    g['frame_tail'] = L[k:e + 1]        # } catch … } finally { … rAF … } }
+    assert g['frame_new'][1] == '  try {', g['frame_new'][:3]
+    assert g['frame_tail'][-2:] == ['  }', '}'], g['frame_tail'][-3:]
+    assert g['frame_tail'][-3] == '    requestAnimationFrame(frame);', g['frame_tail'][-3]
+
+    # ⑫ resetSim() 开头清空去重表的两行
+    i = _one(L, lambda l: l == 'function resetSim() {', 'resetSim 定义')
+    g['resetguard'] = L[i + 1:i + 3]
+    assert g['resetguard'][0].startswith('  /* 清空帧级异常去重表'), g['resetguard']
+    assert 'Object.keys(frameErrSeen)' in g['resetguard'][1], g['resetguard']
+
+    # 自检：把内联的旧文本 A 走一遍机械包裹，必须逐字等于 starter 的现状。
+    # starter 一旦改了 frame() 的措辞或实现，这里当场炸，不会把过期文本铺出去。
+    got = _wrap_frame(FRAME_OLD_A, g)
+    if got != g['frame_new']:
+        raise SystemExit('frame() 加固自检失败：包裹 FRAME_OLD_A 的结果与 starter 不符\n'
+                         + '\n'.join('  %-2s %s' % ('!' if a != b else ' ', a)
+                                     for a, b in zip(got + [''] * 9, g['frame_new'] + [''] * 9)))
     return g
 
 
@@ -192,6 +233,179 @@ class Miss(Exception):
     pass
 
 
+# --------------------------------------------------------- frame() 加固（阶段 4）
+# 目的：frame() 里任何一段抛出，末尾那句 requestAnimationFrame(frame) 就到不了，
+#      渲染循环永久断掉 —— 相机 / 页签 / 语言切换一起死，整个工具变砖。
+#      加固 = 整帧包一层 try/catch，rAF 挪进 finally。
+#
+# 为什么旧文本必须内联：starter 里已经是**加固后**的样子，切不出「加固前」。
+# outputs 里的 frame() 只有三种字面变体（sha1 前 10 位 / 个数）：
+#   3596fa4be1  49  与 starter 加固前逐字节相同
+#   97f4b2f9e5   1  cartesian-polar-coordinate-3d：state.running 块多了 kPhase / morphK
+#   4a471a027f   1  trig-essence-3d-new：pre-declarative，无 applyDrive，windowSec 另算
+# 三段都逐字列在下面，替换命中数必须恰为 1，绝不模糊匹配。
+#
+# 注意：A / B 两段里已经含有阶段 1/3 的驱动引擎行（applyDrive / syncParamSlider）。
+# 若日后要给一个**尚未落地驱动引擎**的文件跑本脚本，先跑一遍补齐（那一阶段会把
+# 驱动行插进 4 空格形态的 frame()），本轮加固就能命中；顺序在 port() 里已排好。
+
+FRAME_OLD_HEAD = '''\
+function frame(ts) {
+  const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
+  lastTs = ts;
+
+  if (tween) {
+    const k = Math.min(1, (ts - tween.t0) / tween.dur);
+    const e = ease(k);
+    const f = tween.from, o = tween.to;
+    cam.az = f.az + wrapPI(o.az - f.az) * e;
+    cam.el = f.el + (o.el - f.el) * e;
+    cam.dist = f.dist + (o.dist - f.dist) * e;
+    cam.tx = f.tx + (o.tx - f.tx) * e;
+    cam.ty = f.ty + (o.ty - f.ty) * e;
+    cam.tz = f.tz + (o.tz - f.tz) * e;
+    if (k >= 1) tween = null;
+  }
+
+'''
+
+FRAME_OLD_FOOT = '''
+
+  draw();
+  if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
+  requestAnimationFrame(frame);
+}'''
+
+FRAME_OLD_A = (FRAME_OLD_HEAD + '''\
+  if (state.running) {
+    state.t += dt;
+    state.theta += state.omega * dt;
+    applyDrive();
+    const dv = SCENES[curTab].drive;
+    if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
+    pushSample();
+  }
+  const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
+  while (samples.length && samples[0].t < state.t - windowSec) samples.shift();\
+''' + FRAME_OLD_FOOT).split('\n')
+
+FRAME_OLD_B = (FRAME_OLD_HEAD + '''\
+  if (state.running) {
+    state.t += dt;
+    state.theta += state.speed * 0.75 * dt;
+    state.kPhase += state.speed * 0.55 * dt;
+    state.morphK = 0.5 - 0.5 * Math.cos(state.kPhase);
+    syncKSlider();
+    applyDrive();
+    const dv = SCENES[curTab].drive;
+    if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
+    pushSample();
+  }
+  const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
+  while (samples.length && samples[0].t < state.t - windowSec) samples.shift();\
+''' + FRAME_OLD_FOOT).split('\n')
+
+FRAME_OLD_C = (FRAME_OLD_HEAD + '''\
+  if (state.running) {
+    state.t += dt;
+    state.theta += state.omega * dt;
+    pushSample();
+  }
+  const windowSec = WAVE_LEN / state.waveSpeed + 0.5;
+  while (samples.length && samples[0].t < state.t - windowSec) samples.shift();\
+''' + FRAME_OLD_FOOT).split('\n')
+
+FRAME_VARIANTS = [('A', FRAME_OLD_A), ('B', FRAME_OLD_B), ('C', FRAME_OLD_C)]
+
+# 头注释 changelog 里新增的那一行（版本号按各文件实际递增值填）
+CHANGELOG_NOTE = '2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环'
+
+
+def _wrap_frame(old, g):
+    """把一段未加固的 frame() 机械地包进 try/catch/finally。
+
+    机械 = 只做两件事：函数体整体缩进两格；把末尾那句 rAF 换成 starter 的
+    catch/finally 尾巴。新代码一个字都不在这里内联，全部来自 starter。
+    """
+    assert old[0] == 'function frame(ts) {' and old[-1] == '}', old[:1] + old[-1:]
+    assert old[-2] == '  requestAnimationFrame(frame);', old[-2]
+    body = old[1:-2]
+    return ([old[0], '  try {']
+            + [('  ' + l if l.strip() else l) for l in body]
+            + g['frame_tail'])
+
+
+def _find_block(lines, old, what):
+    """字面块的唯一位置；找不到返回 None，找到多处即 Miss。"""
+    hits = [i for i in range(len(lines) - len(old) + 1)
+            if lines[i:i + len(old)] == old]
+    if len(hits) > 1:
+        raise Miss('%s：待替换块命中 %d 次（期望 1）' % (what, len(hits)))
+    return hits[0] if hits else None
+
+
+def bump_patch(lines):
+    """meta 的 patch 位 +1，并在 changelog 顶端加一行。返回 (旧版本, 新版本)。
+
+    **读该文件当前的值再加一**，不写死 1.1.0 → 1.1.1：仓库里版本号分散在
+    1.0.1 / 1.1.0 / 1.1.1 / 1.2.0 / 1.3.0 五个值上，照字面套会写错 16 个文件。
+    """
+    # 只认 <meta> 声明本身：面板版本徽章那句 querySelector('meta[name="tool-version"]')
+    # 也含同一串文字，不能一并命中
+    mi = [i for i, l in enumerate(lines) if l.startswith('<meta name="tool-version"')]
+    if len(mi) != 1:
+        raise Miss('tool-version meta 命中 %d 次（期望 1）' % len(mi))
+    m = re.search(r'content="(\d+)\.(\d+)\.(\d+)"', lines[mi[0]])
+    if not m:
+        raise Miss('tool-version meta 不是三段式 semver：%s' % lines[mi[0]].strip())
+    old_v = '%s.%s.%s' % m.groups()
+    new_v = '%s.%s.%d' % (m.group(1), m.group(2), int(m.group(3)) + 1)
+    lines[mi[0]] = lines[mi[0]].replace('content="%s"' % old_v, 'content="%s"' % new_v)
+
+    # changelog 标题两种写法（「版本记录（新→旧）：」/「版本记录（changelog，新→旧）：」）
+    # 各文件保持原样，这里只认前后缀
+    ci = [i for i, l in enumerate(lines)
+          if l.startswith('  版本记录（') and l.endswith('新→旧）：')]
+    if len(ci) != 1:
+        raise Miss('changelog 标题命中 %d 次（期望 1）' % len(ci))
+    lines[ci[0] + 1:ci[0] + 1] = ['    %s  %s' % (new_v, CHANGELOG_NOTE)]
+    return old_v, new_v
+
+
+def harden(lines, g):
+    """frame() 加固 + resetSim() 清表 + patch 版本号。全部 51 个文件通用。"""
+    lines = list(lines)
+    done = []
+
+    def already(probe):
+        return any(probe in l for l in lines)
+
+    hardened = False
+    if not already('function frameError(err) {'):
+        found = [(tag, old, _find_block(lines, old, 'frame() 变体 %s' % tag))
+                 for tag, old in FRAME_VARIANTS]
+        hit = [f for f in found if f[2] is not None]
+        if len(hit) != 1:
+            raise Miss('frame() 变体识别失败：三种已知变体命中 %d 种（期望 1）' % len(hit))
+        tag, old, at = hit[0]
+        lines[at:at + len(old)] = g['frameerr'] + _wrap_frame(old, g)
+        done.append('frame~' + tag)
+        hardened = True
+
+    if not already('清空帧级异常去重表'):
+        at = _idx(lines, lambda l: l == 'function resetSim() {', 'resetSim 定义')
+        lines[at + 1:at + 1] = g['resetguard']
+        done.append('resetguard')
+
+    # 版本号只在「本轮真的加固了这个文件」时递增：这样重复运行不会重复 +1，
+    # 而一个从加固后 starter 拷出来的新工具（生来就有 frameError）也不会被误伤。
+    if hardened:
+        old_v, new_v = bump_patch(lines)
+        done.append('ver %s→%s' % (old_v, new_v))
+
+    return lines, done
+
+
 # ------------------------------------------------------------- 更新阶段的定位表
 # 每项 = (块名, 锚点判据, 收尾规则)。收尾规则四选一：
 #   ('blank', None)   直到第一个空行（不含）
@@ -211,7 +425,9 @@ BLOCK_SPECS = [
     # funcs 是脚本插进去的整段，头一行就是它自带的分节注释，结尾恰好抵住 switchTab
     ('funcs', lambda l: l == '/* ================= 场景时间驱动（引擎区） ================= */',
      ('excl', lambda l: l.startswith('function switchTab(id) {'))),
-    ('frame', lambda l: l == '    applyDrive();',
+    # 加固后 frame() 的函数体缩进两格，锚点用 6 空格形态；文件若尚未加固则
+    # 这一条当场 Miss 并跳过（本次运行的补齐阶段刚从 starter 插进去，本就是最新的）
+    ('frame_h', lambda l: l == '      applyDrive();',
      ('incl', lambda l: 'syncParamSlider(dv.key)' in l)),
     ('reset', lambda l: l.startswith('  /* 驱动时钟的偏移一并归零'),
      ('incl', lambda l: 'Object.keys(driveOff)' in l)),
@@ -435,6 +651,11 @@ def port(lines, g):
     lines, upd = update_blocks(lines, g, reg, cfg)
     done.extend(upd)
 
+    # ⑭ frame() 加固：**必须排在最后**。加固会把函数体整体缩进两格，
+    #    上面 ⑥ 的补齐锚点（'    pushSample();' 等）都是未加固的 4 空格形态。
+    lines, hard = harden(lines, g)
+    done.extend(hard)
+
     return lines, done
 
 
@@ -442,8 +663,7 @@ def main():
     check = '--check' in sys.argv
     g = extract_starter()
 
-    files = sorted(f for f in os.listdir(OUTPUTS)
-                   if f.endswith('.html') and f not in EXCLUDE)
+    files = sorted(f for f in os.listdir(OUTPUTS) if f.endswith('.html'))
     changed, skipped, untouched = [], [], []
 
     for name in files:
@@ -451,7 +671,12 @@ def main():
         with open(path, encoding='utf-8') as fh:
             src = fh.read()
         try:
-            new_lines, done = port(src.split('\n'), g)
+            # EXCLUDE 里的文件进不了移植阶段（没有 SCENES / 滑块登记表），
+            # 但 frame() 加固对它同样适用 —— 单独跑 harden。
+            if name in EXCLUDE:
+                new_lines, done = harden(src.split('\n'), g)
+            else:
+                new_lines, done = port(src.split('\n'), g)
         except Miss as err:
             skipped.append((name, str(err)))
             continue
