@@ -11,9 +11,26 @@
   * cartesian-polar-coordinate-3d 用 paramRefs / ref.cfg 而非 paramWraps / e.p，
     脚本按该文件的实际登记表改写 syncParamSlider，不并列引入第二套登记表。
 
+两个阶段，别混为一谈：
+  ① 补齐（第 ①…⑫ 步）——判据是「整文件存在性」：probe 字符串出现过就整块跳过。
+     这一段只管「引擎有没有落地」，天生**只能补齐，不能更新**。
+  ② 更新（update_blocks）——判据是「位置」：BLOCK_SPECS 给每个逐字复制块配一个
+     锚点行 + 收尾规则，同一个定位器在 outputs 里切出旧文本、与 starter 的当前
+     文本比对，不同就整块换掉。starter 改了措辞或实现，靠这一段传播过去。
+
+  更新阶段的边界（写在这里，省得下一个人再踩）：
+    * 只覆盖「逐字复制自 starter」的块。工具局部区（PARAMS / SCENES / draw /
+      readout）永远不在此列 —— 那是各工具自己的代码，脚本无权改。
+    * 锚点行必须稳定。改了锚点行 = 定位失败 = 当场 Miss 并整文件跳过，
+      不做模糊匹配，也不会「猜」一个位置写进去。
+    * relabel 块**不在** BLOCK_SPECS 里：paramWraps 版以 `    upd();` 开头，
+      paramRefs 版把这行丢掉了，同一个锚点切不出两种形态。它仍只走补齐这一路，
+      改动传播不过去 —— 真要改 relabel 块的文本，得先给它补一条能区分两种形态
+      的定位规则。
+
 用法：
-    python3 scripts/port_drive_engine.py            # 落地
-    python3 scripts/port_drive_engine.py --check    # 只检查，未落地则 exit 1
+    python3 scripts/port_drive_engine.py            # 补齐 + 更新
+    python3 scripts/port_drive_engine.py --check    # 只检查，未落地/有漂移则 exit 1
 """
 
 import os
@@ -65,6 +82,12 @@ def extract_starter():
     # ① CSS：.drive / .dmode 规则
     i = _one(L, lambda l: l == '/* 驱动控制行 */', 'CSS 驱动控制行')
     g['css'] = _slice_until_blank(L, i)
+    # 内容 assert 与 ui/tables/frame/reset 同理：_slice_until_blank 以空行收尾，
+    # starter 若在 .drive 规则中间插一个空行，这里会静默截断并把半截 CSS 写进 50 个文件。
+    assert (len(g['css']) == 4
+            and g['css'][1].startswith('.drive{')
+            and g['css'][2].startswith('.drive .dmode{')
+            and g['css'][3].startswith('.drive .dmode .btn{')), g['css']
 
     # ② DOM 容器
     i = _one(L, lambda l: 'id="driveHost"' in l, '#driveHost 容器')
@@ -167,6 +190,84 @@ def _remap(block, table, drop_prefix=None):
 
 class Miss(Exception):
     pass
+
+
+# ------------------------------------------------------------- 更新阶段的定位表
+# 每项 = (块名, 锚点判据, 收尾规则)。收尾规则四选一：
+#   ('blank', None)   直到第一个空行（不含）
+#   ('lines', n)      锚点起算 n 行
+#   ('incl',  pred)   直到第一条满足 pred 的行（含）
+#   ('excl',  pred)   直到第一条满足 pred 的行（不含），并去掉尾部空行
+# 锚点在整份文件里必须唯一命中一次，否则 Miss。
+BLOCK_SPECS = [
+    ('css', lambda l: l == '/* 驱动控制行 */',
+     ('blank', None)),
+    ('dom', lambda l: 'id="driveHost"' in l,
+     ('lines', 1)),
+    ('ui', lambda l: l.startswith('  autoPlay: {'),
+     ('incl', lambda l: l.startswith('  loop:'))),
+    ('tables', lambda l: l.startswith('const autoPlay = {};'),
+     ('incl', lambda l: l.startswith('const driveOffAt = {};'))),
+    # funcs 是脚本插进去的整段，头一行就是它自带的分节注释，结尾恰好抵住 switchTab
+    ('funcs', lambda l: l == '/* ================= 场景时间驱动（引擎区） ================= */',
+     ('excl', lambda l: l.startswith('function switchTab(id) {'))),
+    ('frame', lambda l: l == '    applyDrive();',
+     ('incl', lambda l: 'syncParamSlider(dv.key)' in l)),
+    ('reset', lambda l: l.startswith('  /* 驱动时钟的偏移一并归零'),
+     ('incl', lambda l: 'Object.keys(driveOff)' in l)),
+    ('takeover', lambda l: l.startswith('    /* 用户伸手拖被驱动的滑块'),
+     ('incl', lambda l: l == '    });')),
+    ('render', lambda l: l.startswith('    /* render 只回显滑杆当前刻度；'),
+     ('incl', lambda l: l == '    };')),
+]
+
+
+def _span(lines, at, end, what):
+    hits = [i for i, l in enumerate(lines) if at(l)]
+    if len(hits) != 1:
+        raise Miss('%s：锚点命中 %d 次（期望 1）' % (what, len(hits)))
+    s = hits[0]
+    kind, arg = end
+    if kind == 'lines':
+        return s, s + arg
+    e = s
+    if kind == 'blank':
+        while e < len(lines) and lines[e].strip() != '':
+            e += 1
+        return s, e
+    while e < len(lines) and not arg(lines[e]):
+        e += 1
+    if e >= len(lines):
+        raise Miss('%s：找不到收尾行' % what)
+    if kind == 'incl':
+        return s, e + 1
+    while e > s and lines[e - 1].strip() == '':
+        e -= 1
+    return s, e
+
+
+def update_blocks(lines, g, reg, cfg):
+    """把已落地的逐字复制块对齐到 starter 的当前文本。返回 (新行列表, 更新过的块名)。
+
+    只在「块已存在」时才动手 —— 不存在是补齐阶段的事。
+    """
+    lines = list(lines)
+    hit = []
+    for name, at, end in BLOCK_SPECS:
+        want = g[name]
+        if name == 'funcs' and reg != 'paramWraps':
+            want = [l.replace('const e = paramWraps[key];', 'const e = %s[key];' % reg)
+                     .replace('e.p.', 'e.%s.' % cfg) for l in want]
+        elif name == 'render' and reg != 'paramWraps':
+            want = _remap(g['render'], REF_RENDER)
+        try:
+            s, e = _span(lines, at, end, '更新 %s' % name)
+        except Miss:
+            continue                      # 该块还没落地：交给补齐阶段
+        if lines[s:e] != want:
+            lines[s:e] = want
+            hit.append(name + '~upd')
+    return lines, hit
 
 
 def _idx(lines, pred, what):
@@ -329,6 +430,10 @@ def port(lines, g):
             new = _remap(g['relabel'], REF_RELABEL, drop_prefix='    upd();')
         replace_block(old, 'buildParams 的 relabel', new)
         done.append('relabel')
+
+    # ⑬ 更新阶段：把已落地的逐字复制块对齐到 starter 的当前文本（见模块 docstring）
+    lines, upd = update_blocks(lines, g, reg, cfg)
+    done.extend(upd)
 
     return lines, done
 
