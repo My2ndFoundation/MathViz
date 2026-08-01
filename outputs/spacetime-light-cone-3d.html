@@ -1,0 +1,1795 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="tool-version" content="1.0.0">
+<meta name="engine-version" content="1.0.0">
+<title>光锥 · 四维时空的因果结构</title>
+<!-- ============================================================
+  光锥：四维时空的因果结构 · 交互式数学可视化
+  基于 math-viz-starter.html v1.0.0 制作
+  设计规范：math-viz-design-system.md（令牌 / 组件 / 绘制语言 / 交互词汇）
+
+  坐标约定（本工具的关键偏离，务必先读）：
+    x, y = 两个空间维；z = ct，取 c = 1，故光锥半顶角恰 45°。
+    引擎的「z 是时间轴」约定在这里字面成立，但这是**时空图上的几何时间**，
+    不是历史采样流。samples[] 不参与作图：整张图每帧由参数直接重新生成，
+    所以 pushSample() 只记 t，保持最小实现（规范 §4.6 的「历史存当时真实值」
+    不受影响——本工具没有需要保真的历史波形）。
+
+  符号约定：s² = (ct)² − r²（类时为正）。读数区每页都写明，避免歧义。
+
+  五个页签共享同一份 state（同一套时空，不同的测量）：
+    闪光与锥的诞生 —— 一次闪光扫出锥面；c 各向同性 ⇒ 锥不动，让步的是「同时」
+                     顿悟视角：「俯视 x·y」= 圆心动还是不动
+    光锥与因果     —— s² 的符号把时空切成绝对未来 / 绝对过去 / 别处
+                     顿悟视角：「x·ct 侧视」= 教科书那张 45° 剖面
+    世界线与固有时 —— 闵可夫斯基三角不等式反过来：直的那条最长
+                     顿悟视角：「x·ct 侧视」= 钟点疏密一眼可见
+    洛伦兹推动     —— ct′ 与 x′ 对称剪切；光锥纹丝不动
+                     顿悟视角：「沿光锥看」= 那条亮线不随 β 动
+    不变双曲线     —— 推动 = 双曲旋转；欧氏尺子在闵氏图上量不得
+                     顿悟视角：「x·ct 侧视」= 双曲线以光锥为渐近线
+
+  版本记录（新→旧）：
+    1.0.0  2026-08-01  首个版本：五个页签（闪光生锥 / 因果分类 / 固有时 /
+                       洛伦兹推动 / 不变双曲面），全量双语，frame() 加固
+                       Initial release: five scenes (flash-born cone / causal
+                       classification / proper time / Lorentz boost /
+                       invariant hyperbolae), full zh-en i18n, hardened frame()
+============================================================ -->
+<style>
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  --angle-amber:#fbbf24;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none}
+body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)}
+#scene{position:fixed;inset:0;display:block;touch-action:none;cursor:grab}
+#scene.dragging{cursor:grabbing}
+
+/* ---- 标题区 ---- */
+.brand{position:fixed;top:20px;left:24px;pointer-events:none;user-select:none;max-width:min(520px,42vw)}
+.brand .eyebrow{font-size:10px;letter-spacing:.22em;color:rgba(159,176,200,.72);margin-bottom:6px}
+.brand h1{margin:0;font-family:var(--font-math);font-weight:600;font-size:26px;letter-spacing:.08em;
+  color:#eef3fa;text-shadow:0 2px 20px rgba(45,212,234,.20)}
+.brand p{margin:7px 0 0;font-size:12.5px;line-height:1.65;color:rgba(159,176,200,.85)}
+
+/* ---- 页签 ---- */
+.tabs{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:5;
+  display:flex;gap:4px;padding:4px;border-radius:999px;
+  background:var(--panel-bg);border:1px solid var(--panel-line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
+.tab{border:1px solid transparent;background:transparent;color:#b8c6da;
+  font-size:12.5px;font-family:var(--font-cn);padding:6px 15px;border-radius:999px;cursor:pointer;
+  transition:color .15s,border-color .15s,background .15s}
+.tab:hover{color:#e8f2fb}
+.tab:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.tab.active{background:rgba(251,191,36,.13);border-color:rgba(251,191,36,.55);color:#fcd77a}
+
+/* ---- 底部提示 ---- */
+.hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);pointer-events:none;user-select:none;
+  font-size:11px;letter-spacing:.05em;color:rgba(159,176,200,.6);white-space:nowrap}
+
+/* ---- 控制面板 ---- */
+.panel{position:fixed;top:14px;right:14px;width:304px;max-height:calc(100vh - 28px);overflow-y:auto;
+  background:var(--panel-bg);border:1px solid var(--panel-line);border-radius:16px;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 18px 50px rgba(0,0,0,.45);user-select:none}
+.panel::-webkit-scrollbar{width:6px}
+.panel::-webkit-scrollbar-thumb{background:rgba(148,163,184,.25);border-radius:3px}
+.panel-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px 10px;
+  font-size:13px;font-weight:600;letter-spacing:.06em;color:#dbe6f5}
+.panel:not(.collapsed) .panel-head{border-bottom:1px solid var(--panel-line)}
+.ph-right{display:flex;align-items:center;gap:7px}
+.ver{font-family:var(--font-mono);font-size:10px;color:rgba(159,176,200,.55)}
+.lang{padding:3px 8px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:11px;cursor:pointer}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.fold{width:24px;height:24px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:14px;line-height:1;cursor:pointer}
+.fold:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.panel.collapsed .panel-body{display:none}
+.panel-body{padding:6px 14px 14px}
+
+/* 滑杆 */
+.ctl{margin:11px 0 3px}
+.ctl .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.ctl label{font-size:12px;color:#c6d2e4}
+.ctl label i{font-family:var(--font-math);font-style:italic;font-size:13px}
+.ctl .val{font-family:var(--font-mono);font-size:11.5px;color:#7dd3fc}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;cursor:pointer;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--trace-cyan);margin-top:-5px;border:2px solid #0b1220;box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-moz-range-thumb{width:11px;height:11px;border:2px solid #0b1220;border-radius:50%;
+  background:var(--trace-cyan);box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-offset:2px;border-radius:4px}
+
+/* 按钮 */
+.row{display:flex;gap:8px;margin:13px 0 4px}
+.btn{padding:6px 10px;border-radius:9px;border:1px solid rgba(148,163,184,.25);
+  background:rgba(30,41,59,.55);color:#d7e2f2;font-size:12px;font-family:var(--font-cn);cursor:pointer;
+  transition:border-color .15s,color .15s,background .15s}
+.btn:hover{border-color:rgba(45,212,234,.55)}
+.btn:focus-visible,.fold:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.btn.wide{flex:1}
+.btn.active{border-color:rgba(45,212,234,.8);background:rgba(45,212,234,.12);color:#9be8f7}
+.views{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 2px}
+.views .vlabel{font-size:11.5px;color:rgba(159,176,200,.8);margin-right:2px}
+.vbtn{padding:5px 9px;font-size:11.5px}
+
+/* 开关 */
+.toggles{display:flex;flex-wrap:wrap;gap:7px 12px;margin:12px 0 2px}
+.tg{display:flex;align-items:center;gap:6px;font-size:12px;color:#c6d2e4;cursor:pointer}
+.tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
+.tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
+
+/* 驱动控制行 */
+.drive{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0 2px}
+.drive .dmode{display:flex;gap:4px;margin-left:auto}
+.drive .dmode .btn{padding:4px 8px;font-size:11px}
+
+/* 读数与提示 */
+.readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
+  font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
+.readout b{font-weight:600;color:#e8eef7}
+.readout .c1{color:#a9b8cd}
+.readout .c1 b{color:var(--trace-rose)}
+.readout .c2 b{color:var(--trace-violet)}
+.readout .c3 b{color:var(--trace-emerald)}
+.readout .c4 b{color:var(--trace-orange)}
+.readout .amC b{color:var(--angle-amber)}
+.readout .cyC b{color:var(--trace-cyan)}
+.readout .dim{color:rgba(159,176,200,.6)}
+.tips{margin-top:11px;font-size:11px;line-height:1.65;color:rgba(159,176,200,.72)}
+
+@media (max-width:760px){
+  .brand{top:12px;left:14px;max-width:70vw}
+  .brand h1{font-size:20px}
+  .brand p{display:none}
+  .tabs{top:52px;left:14px;transform:none}
+  .panel{left:10px;right:10px;top:auto;bottom:10px;width:auto;max-height:62vh}
+  .hint{display:none}
+}
+</style>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+
+<div class="brand">
+  <div class="eyebrow">INTERACTIVE MATH · 交互式数学</div>
+  <h1>光锥 · 四维时空的因果结构</h1>
+  <p id="brandDesc"></p>
+</div>
+
+<nav class="tabs" id="tabsNav"></nav>
+
+<aside class="panel" id="panel">
+  <div class="panel-head"><span id="panelTitle">参数与视角</span>
+    <span class="ph-right"><span class="ver" id="verBadge"></span><button class="lang" id="btnLang" title="切换语言 / Switch language">EN</button><button class="fold" id="btnFold" title="收起 / 展开">−</button></span></div>
+  <div class="panel-body">
+    <div id="paramsHost"></div>
+    <div class="row">
+      <button class="btn wide" id="btnPlay">⏸ 暂停</button>
+      <button class="btn" id="btnReset">↺ 重置</button>
+    </div>
+    <div id="driveHost"></div>
+    <div id="togglesHost"></div>
+    <div id="viewsHost"></div>
+    <div class="readout" id="readout"></div>
+    <div class="tips" id="tips"></div>
+  </div>
+</aside>
+
+<div class="hint">拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签</div>
+
+<script>
+'use strict';
+/* ================= i18n 核心（引擎区） ================= */
+const LANG_KEY = 'mathviz-lang';
+function resolveLang(){
+  try{
+    const q = new URLSearchParams(location.search).get('lang');
+    if (q === 'zh' || q === 'en') return q;
+    const s = localStorage.getItem(LANG_KEY);
+    if (s === 'zh' || s === 'en') return s;
+  }catch(e){}
+  return (navigator.language || 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+let LANG = resolveLang();
+function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
+
+const STARTER_VERSION = '1.0.0';
+const VERSION = document.querySelector('meta[name="tool-version"]').content;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ⓪ 工具元信息 —— id 与双语标题                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const TOOL = {
+  id: 'spacetime-light-cone-3d',
+  title: { zh: '光锥 · 四维时空的因果结构', en: 'Light Cone · Causal Structure of Spacetime' },
+  h1:    { zh: '光锥 · 四维时空的因果结构', en: 'Light Cone · Causal Structure' }
+};
+
+/* 引擎 UI 文案（一般无需改动） */
+const UI = {
+  panelTitle: { zh: '参数与视角', en: 'Parameters & Views' },
+  pause:  { zh: '⏸ 暂停', en: '⏸ Pause' },
+  resume: { zh: '▶ 继续', en: '▶ Resume' },
+  reset:  { zh: '↺ 重置', en: '↺ Reset' },
+  views:  { zh: '视角', en: 'View' },
+  autoPlay: { zh: '自动播放', en: 'Auto-play' },
+  pingpong: { zh: '往返',     en: 'Ping-pong' },
+  loop:     { zh: '循环',     en: 'Loop' },
+  hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
+            en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
+};
+
+const TAU = Math.PI * 2;
+
+/* ================= 本工具的世界常量与语义色 ================= */
+const CT_MAX = 4.2;      // 光锥在 ct 方向的绘制半长（世界单位）
+const R_MAX  = 4.2;      // 空间方向的绘制半径
+const CT_END = 4;        // 页签③：世界线从事件 A(ct=0) 到事件 B(ct=CT_END)
+
+/* 曲线语义色，启用顺序 rose → violet → emerald → orange；
+   amber 留给光锥——光锥是**尺子**（度量注记），不是数据曲线（规范 §1.1）。 */
+const C_ROSE = '#fb7185', C_VIOLET = '#a78bfa', C_EMERALD = '#34d399', C_ORANGE = '#fb923c';
+const C_AMBER = '#fbbf24', C_CYAN = '#2dd4ea';
+
+function rgba(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+}
+/* |值| > 999 显示 ±∞（规范 §7）；γ 在 β→±1 时会炸开 */
+function fmtInf(x, d) {
+  if (!isFinite(x) || Math.abs(x) > 999) return (x < 0 ? '−∞' : '+∞');
+  return fmtS(x, d == null ? 2 : d);
+}
+/* 快度 φ ↔ 速度 β。state.rapid 存的是**快度**，滑杆刻度是 β —— 见 ① PARAMS 注释 */
+function betaNow() { return Math.tanh(state.rapid); }
+function gammaNow() { return Math.cosh(state.rapid); }
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ① 参数声明 —— 自动生成滑杆                                ║
+   ╚══════════════════════════════════════════════════════════╝ */
+/* 关于 beta 的映射：页签⑤要求事件沿双曲线**匀速**滑动，而"匀速"在闵氏几何里
+   指快度 φ = artanh β 匀速增长（φ 才是双曲"角度"，β 只是它的 tanh）。引擎的
+   applyDrive() 把驱动值直接写进 state，不经过 map，所以让 state 里存的就是
+   快度：key = 'rapid'（state 值 = φ），滑杆的原始刻度仍是 β（min/max/step/
+   读数全按 β），由 map: β→φ / invMap: φ→β 双向换算。于是
+     · 用户拖滑杆 → 按 β 线性拖，符合直觉；
+     · drive 线性推进 state.rapid → 事件沿双曲线匀速滑，符合几何。
+   §8 硬约束：带 map 必须同时带 invMap；drive 的 [from,to] 落在映射后的
+   [map(min), map(max)] = [artanh(−0.95), artanh(0.95)] ≈ [−1.832, 1.832] 内。 */
+const PARAMS = [
+  { key: 'flashT', label: { zh: '闪光扩张时刻 <i>ct</i>', en: 'Flash expansion time <i>ct</i>' },
+    min: 0, max: 4, step: 0.02, value: 2.2, fmt: v => fmt(v) },
+  { key: 'evR',    label: { zh: '事件空间距离 <i>r</i>', en: 'Event spatial distance <i>r</i>' },
+    min: 0, max: 4, step: 0.02, value: 1.2, fmt: v => fmt(v) },
+  { key: 'evT',    label: { zh: '事件时刻 <i>ct</i>', en: 'Event time <i>ct</i>' },
+    min: -4, max: 4, step: 0.02, value: 2, fmt: v => fmtS(v) },
+  { key: 'tTurn',  label: { zh: '折返时刻 <i>ct</i>₁', en: 'Turnaround time <i>ct</i>₁' },
+    min: 0.5, max: 3.5, step: 0.02, value: 2, fmt: v => fmt(v) },
+  { key: 'rapid',  label: { zh: '推动速度 <i>β</i> = <i>v</i>/<i>c</i>', en: 'Boost speed <i>β</i> = <i>v</i>/<i>c</i>' },
+    min: -0.95, max: 0.95, step: 0.005, value: 0.6, fmt: v => fmtS(v, 3),
+    map: v => Math.atanh(v), invMap: v => Math.tanh(v) },
+  { key: 'sInv',   label: { zh: '不变间隔 <i>s</i>', en: 'Invariant interval <i>s</i>' },
+    min: 0.4, max: 3.5, step: 0.02, value: 1.5, fmt: v => fmt(v) }
+];
+
+/* ================= 场景级绘制部件（引擎之上的一层，引擎本身零改动） ================= */
+
+/* 时空坐标轴：x、y 是空间，z 轴写作 ct（引擎的 drawAxes 把 z 标成 t，
+   且量程绑死 WAVE_LEN，这里另起一份而不是去改引擎——规范"引擎 diff = 0"）。 */
+function drawStAxes(C, o) {
+  o = o || {};
+  const ex = o.ex != null ? o.ex : R_MAX;
+  const ez = o.ez != null ? o.ez : CT_MAX;
+  const z0 = o.zMin != null ? o.zMin : -ez;
+  line3(C, [-ex, 0, 0], [ex, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [ex, 0, 0], [ex - 0.2, 0, 0], AXIS);
+  label3(C, [ex + 0.3, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  if (o.yAxis !== false) {
+    line3(C, [0, -ex, 0], [0, ex, 0], { width: 1.4, color: AXIS });
+    arrowAt(C, [0, ex, 0], [0, ex - 0.2, 0], AXIS);
+    label3(C, [0, ex + 0.26, 0], 'y', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  }
+  line3(C, [0, 0, z0], [0, 0, ez], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, 0, ez], [0, 0, ez - 0.2], AXIS);
+  label3(C, [0, 0, ez + 0.34], 'ct', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  for (let k = Math.ceil(z0); k <= Math.floor(ez); k++) {
+    if (k === 0) continue;
+    line3(C, [-0.07, 0, k], [0.07, 0, k], { width: 1.2, color: AXIS_DIM });
+    label3(C, [-0.2, 0, k], (k < 0 ? '−' : '') + Math.abs(k), { size: 10, color: 'rgba(159,176,200,.6)', align: 'right' });
+  }
+  for (let k = -Math.floor(ex); k <= Math.floor(ex); k++) {
+    if (k === 0) continue;
+    line3(C, [k, 0, -0.07], [k, 0, 0.07], { width: 1.2, color: AXIS_DIM });
+  }
+  solidDot(C, [0, 0, 0], 2.2, 'rgba(159,176,200,0.9)');
+}
+
+/* x–ct 平面的网格（闵氏图的方格纸） */
+function drawXCTGrid(C, gx, gz) {
+  for (let i = -gx; i <= gx; i++) {
+    if (i === 0) continue;
+    line3(C, [i, 0, -gz], [i, 0, gz], { width: 1, color: 'rgba(148,163,184,0.07)' });
+  }
+  for (let k = -gz; k <= gz; k++) {
+    if (k === 0) continue;
+    line3(C, [-gx, 0, k], [gx, 0, k], { width: 1, color: 'rgba(148,163,184,0.07)' });
+  }
+}
+
+/* 光锥（琥珀 = 度量注记）。o = { ez, zMin, alpha, rulings } */
+function drawLightCone(C, o) {
+  o = o || {};
+  const ez = o.ez != null ? o.ez : CT_MAX;
+  const zMin = o.zMin != null ? o.zMin : -ez;
+  const a = o.alpha != null ? o.alpha : 1;
+  const NR = o.rulings != null ? o.rulings : 14;
+  const sides = zMin < 0 ? [1, -1] : [1];
+  for (const s of sides) {
+    const L = s > 0 ? ez : Math.min(ez, -zMin);
+    for (let i = 0; i < NR; i++) {
+      const a0 = i / NR * TAU;
+      line3(C, [0, 0, 0], [L * Math.cos(a0), L * Math.sin(a0), s * L],
+        { width: 1.2, color: rgba(C_AMBER, (s > 0 ? 0.30 : 0.20) * a) });
+    }
+    for (let k = 1; k <= Math.floor(L); k++) {
+      const pts = [];
+      for (let j = 0; j <= 56; j++) {
+        const a1 = j / 56 * TAU;
+        pts.push([k * Math.cos(a1), k * Math.sin(a1), s * k]);
+      }
+      strokePoly(C, pts, { width: 1.2, color: rgba(C_AMBER, (s > 0 ? 0.42 : 0.28) * a) });
+    }
+    /* x–ct 剖面上的两条母线画亮：侧视时就是教科书那个 45° 的 X */
+    for (const sx of [1, -1]) {
+      line3(C, [0, 0, 0], [sx * L, 0, s * L], { width: 1.8, color: rgba(C_AMBER, 0.9 * a) });
+    }
+  }
+}
+
+/* z = 0 的「此刻」空间切片（青 = 源几何 / 结构） */
+function drawNowSlice(C, R) {
+  const pts = [];
+  for (let i = 0; i <= 64; i++) { const a = i / 64 * TAU; pts.push([R * Math.cos(a), R * Math.sin(a), 0]); }
+  strokePoly(C, pts, { width: 5, color: rgba(C_CYAN, 0.12) });
+  strokePoly(C, pts, { width: 1.6, color: rgba(C_CYAN, 0.7) });
+}
+
+/* 以 (cx, 0, ct) 为心、半径 rad 的等时圆 */
+function ringPts(cx, ct, rad, n) {
+  const pts = [];
+  const N = n || 72;
+  for (let i = 0; i <= N; i++) { const a = i / N * TAU; pts.push([cx + rad * Math.cos(a), rad * Math.sin(a), ct]); }
+  return pts;
+}
+
+/* 事件因果分类（符号约定 s² = (ct)² − r²，类时为正） */
+function classify(s2, ct) {
+  if (Math.abs(s2) < 0.02) {
+    return { hex: C_AMBER, cls: 'amC',
+      kind: { zh: '类光', en: 'Lightlike' },
+      where: ct >= 0 ? { zh: '未来光锥面上', en: 'on the future cone' } : { zh: '过去光锥面上', en: 'on the past cone' },
+      say: { zh: '恰好一束光可以连上它', en: 'exactly one light ray connects you' } };
+  }
+  if (s2 > 0) {
+    return { hex: C_ROSE, cls: 'c1',
+      kind: { zh: '类时', en: 'Timelike' },
+      where: ct >= 0 ? { zh: '绝对未来', en: 'absolute future' } : { zh: '绝对过去', en: 'absolute past' },
+      say: ct >= 0 ? { zh: '你能影响它', en: 'you can influence it' } : { zh: '它能影响你', en: 'it can influence you' } };
+  }
+  return { hex: C_VIOLET, cls: 'c2',
+    kind: { zh: '类空', en: 'Spacelike' },
+    where: { zh: '别处', en: 'elsewhere' },
+    say: { zh: '彼此无法通信', en: 'no signal either way' } };
+}
+
+/* 世界线：逐段判断是否落在光锥内（|dr/d(ct)| < 1），越界段画虚线 */
+function segTimelike(a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+  return dz * dz - dx * dx - dy * dy > 1e-9;
+}
+function properTime(pts) {
+  let tau = 0, bad = false;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+    const q = dz * dz - dx * dx - dy * dy;
+    if (q <= 0) bad = true; else tau += Math.sqrt(q);
+  }
+  return { tau: tau, bad: bad };
+}
+function strokeWorldline(C, pts, hex) {
+  strokePoly(C, pts, { width: 5.5, color: rgba(hex, 0.13) });
+  for (let i = 1; i < pts.length; i++) {
+    const ok = segTimelike(pts[i - 1], pts[i]);
+    line3(C, pts[i - 1], pts[i], ok
+      ? { width: 2.2, color: rgba(hex, 0.95) }
+      : { width: 2.2, dash: [7, 7], color: rgba(hex, 0.75) });
+  }
+}
+/* 沿世界线按**固有时**等间距打钟点 */
+function clockTicks(pts, dTau) {
+  const out = [];
+  let carry = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+    const q = dz * dz - dx * dx - dy * dy;
+    if (q <= 0) { carry = 0; continue; }
+    const seg = Math.sqrt(q);
+    let u = dTau - carry;
+    while (u <= seg + 1e-9) {
+      const k = u / seg;
+      out.push([a[0] + dx * k, a[1] + dy * k, a[2] + dz * k]);
+      u += dTau;
+    }
+    carry = (carry + seg) % dTau;
+  }
+  return out;
+}
+
+/* 页签③的三条世界线（均从 A(0,0,0) 到 B(0,0,CT_END)） */
+function twinGeometry() {
+  const t1 = state.tTurn;
+  /* 折返点取在光锥内 85%：两段的 |β| = X/Δct ≤ 0.85，永远亚光速 */
+  const X = 0.85 * Math.min(t1, CT_END - t1);
+  return { t1: t1, X: X };
+}
+function inertialPath() { return [[0, 0, 0], [0, 0, CT_END]]; }
+function twinPath() {
+  const g = twinGeometry();
+  return [[0, 0, 0], [g.X, 0, g.t1], [0, 0, CT_END]];
+}
+function accelPath() {
+  /* 连续加速者：x = Xa·sin(π·ct/CT_END)，无折角。
+     max|dx/d(ct)| = Xa·π/CT_END，取 Xa ≤ 1.1 ⇒ ≤ 0.864 < 1，恒在锥内。 */
+  const Xa = Math.min(twinGeometry().X, 1.1);
+  const pts = [];
+  for (let i = 0; i <= 96; i++) {
+    const ct = CT_END * i / 96;
+    pts.push([Xa * Math.sin(Math.PI * ct / CT_END), 0, ct]);
+  }
+  return pts;
+}
+
+/* 页签④⑤：S′ 系的同时线 ct = β(x − x₀) + ct₀，限制在 |ct| ≤ CT_MAX 内 */
+function simulLine(C, x0, ct0, b, opt) {
+  const lim = CT_MAX;
+  let u1 = -R_MAX, u2 = R_MAX;
+  if (Math.abs(b) > 1e-6) {
+    const a1 = ( lim - ct0) / b + x0;
+    const a2 = (-lim - ct0) / b + x0;
+    u1 = Math.max(u1, Math.min(a1, a2));
+    u2 = Math.min(u2, Math.max(a1, a2));
+  }
+  if (u2 <= u1) return;
+  line3(C, [u1, 0, b * (u1 - x0) + ct0], [u2, 0, b * (u2 - x0) + ct0], opt);
+}
+
+/* 读数区固定首两行：本工具没有相位钟，第一行给引擎时钟 + 坐标约定，
+   第二行把符号约定写死，杜绝 (ct)²−r² 与 r²−(ct)² 的歧义 */
+function roHead() {
+  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;' +
+    t({ zh: '坐标 x, y = 空间，z = ct（c = 1）', en: 'coords x, y = space, z = ct (c = 1)' }) + '</div>' +
+    '<div class="dim">' + t({ zh: '符号约定 s² = (ct)² − r²（类时为正）', en: 'sign convention s² = (ct)² − r² (timelike positive)' }) + '</div>';
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ② 场景注册 —— 每个键就是一个页签                           ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const SCENES = {
+
+  /* ────── ① 闪光与锥的诞生：锥是被闪光扫出来的 ────── */
+  birth: {
+    label: { zh: '闪光生锥', en: 'Flash-born cone' },
+    params: ['flashT', 'rapid'],
+    /* ct 是坐标量（线性区间），单向回绕会跳变 ⇒ kind: 'linear' → 默认 pingpong */
+    drive: { key: 'flashT', from: 0, to: 4, period: 8, kind: 'linear' },
+    brand: { zh: '原点发出一次闪光：每个时刻它是半径 r = ct 的圆，圆一边长大一边沿 ct 上升，扫出的曲面就是光锥。c = 1 ⇒ 母线斜率恰 1 ⇒ 45°。',
+             en: 'One flash leaves the origin: at each instant it is a circle of radius r = ct that grows as it rises along ct, and the surface it sweeps is the light cone. c = 1 makes every generator slope 1 — exactly 45°.' },
+    tips: { zh: '锥不是画出来的，是闪光扫出来的。光速对谁都一样，所以这个锥对谁都一样——于是「同时」只好让位。切到「俯视 x·y」，开关「伽利略速度叠加」，看紫圆的圆心是漂走还是钉死。',
+            en: 'The cone is not drawn — it is swept out by the flash. Light speed is the same for everyone, so the cone is the same for everyone, and it is simultaneity that has to give way. Switch to "Top x·y" and toggle "Galilean addition" to see whether the violet centre drifts or stays pinned.' },
+    views: {
+      iso:  { label: { zh: '立体', en: '3D' }, az: -0.78, el: 0.32, dist: 13, tx: 0, ty: 0, tz: 1.4 },
+      /* x·ct 侧视：az≈0、el 取下限 −1.45 时，屏幕右 = +x、屏幕上 = +ct（引擎的
+         up 恒为世界 y，只有这个姿态能把 ct 立起来），即教科书那张闵氏图。 */
+      side: { label: { zh: 'x·ct 侧视', en: 'Side x·ct' }, az: 0.001, el: -1.45, dist: 11, tx: 0, ty: 0, tz: 1.4 },
+      top:  { label: { zh: '俯视 x·y', en: 'Top x·y' }, az: 0.001, el: 0.02, dist: 10.5, tx: 0, ty: 0, tz: 0 }
+    },
+    toggles: [
+      { key: 'showObs',   label: { zh: '运动观察者世界线', en: 'Moving observer worldline' }, color: C_ROSE,   checked: true },
+      { key: 'galilean',  label: { zh: '伽利略速度叠加（对照）', en: 'Galilean addition (control)' }, color: C_VIOLET, checked: false },
+      { key: 'showCone1', label: { zh: '闪光扫出的锥面', en: 'Swept cone surface' }, color: C_AMBER,  checked: true },
+      { key: 'showGrid',  label: { zh: '网格', en: 'Grid' }, color: '#64748b', checked: true }
+    ],
+    draw(C) {
+      const ct = state.flashT, b = betaNow();
+      const cx = state.galilean ? b * ct : 0;     // 伽利略：圆心跟着观察者跑；爱因斯坦：钉在原点
+
+      if (state.showGrid) { drawXCTGrid(C, 4, 4); drawGridXY(C, 3, 1); }
+
+      /* 已扫过的锥面（只画未来那半） */
+      if (state.showCone1 && ct > 0.02) {
+        for (let i = 0; i < 14; i++) {
+          const a0 = i / 14 * TAU;
+          line3(C, [0, 0, 0], [ct * Math.cos(a0), ct * Math.sin(a0), ct],
+            { width: 1.2, color: rgba(C_AMBER, 0.28) });
+        }
+        for (let k = 1; k <= 6; k++) {
+          const z = ct * k / 6;
+          strokePoly(C, ringPts(0, z, z), { width: 1.1, color: rgba(C_AMBER, 0.22) });
+        }
+        for (const sx of [1, -1]) {
+          line3(C, [0, 0, 0], [sx * ct, 0, ct], { width: 1.8, color: rgba(C_AMBER, 0.9) });
+        }
+      }
+
+      drawStAxes(C, { ez: CT_MAX, zMin: -0.6 });
+
+      /* 当前时刻的光前沿：实线圆，半径 r = ct */
+      strokePoly(C, ringPts(0, ct, ct), { width: 6, color: rgba(C_AMBER, 0.14) });
+      strokePoly(C, ringPts(0, ct, ct), { width: 2.4, color: rgba(C_AMBER, 0.95) });
+
+      /* 运动观察者（rose）：世界线 x = β·ct */
+      if (state.showObs) {
+        strokePoly(C, [[0, 0, 0], [b * CT_MAX, 0, CT_MAX]], { width: 5.5, color: rgba(C_ROSE, 0.13) });
+        line3(C, [0, 0, 0], [b * CT_MAX, 0, CT_MAX], { width: 2.2, color: rgba(C_ROSE, 0.95) });
+        const op = proj(C, [b * ct, 0, ct]);
+        if (op) glowDot(op, 10, '#ffffff', rgba(C_ROSE, 0.9));
+        label3(C, [b * CT_MAX, 0, CT_MAX], t({ zh: '观察者 β', en: 'observer β' }),
+          { size: 11.5, color: C_ROSE, align: 'left', dx: 10 });
+      }
+
+      /* 观察者眼中的闪光圆（violet）：伽利略歪、爱因斯坦重合 */
+      strokePoly(C, ringPts(cx, ct, ct), { width: 2, dash: [7, 7], color: rgba(C_VIOLET, 0.95) });
+      if (ct > 0.02) {
+        for (const sx of [1, -1]) {
+          line3(C, [0, 0, 0], [cx + sx * ct, 0, ct], { width: 1.4, dash: [6, 6], color: rgba(C_VIOLET, 0.55) });
+        }
+      }
+      const cp = proj(C, [cx, 0, ct]);
+      if (cp) glowDot(cp, 9, '#ffffff', rgba(C_VIOLET, 0.9));
+
+      /* 投影虚线：当前圆心 → ct 轴 */
+      if (state.galilean) {
+        line3(C, [cx, 0, ct], [0, 0, ct], { width: 1.5, dash: [7, 7], color: rgba(C_VIOLET, 0.6) });
+      }
+
+      /* 公式标注 */
+      label3(C, [0.25, 0, ct + 0.34], 'r = ct', { font: 'italic 13px ' + FONT_MATH, color: C_AMBER, align: 'left' });
+      label3(C, [-R_MAX + 0.3, 0.5, CT_MAX - 0.35], '(ct)² − r² = 0',
+        { font: 'italic 13px ' + FONT_MATH, color: C_AMBER, align: 'left' });
+      label3(C, [-R_MAX + 0.3, -0.5, CT_MAX - 0.95], 's² = (ct)² − x² − y²',
+        { font: 'italic 13px ' + FONT_MATH, color: '#c4d2e6', align: 'left' });
+      label3(C, [cx, 0, ct], t(state.galilean ? { zh: '圆心随他漂走', en: 'centre drifts with him' }
+                                              : { zh: '圆心钉在原点', en: 'centre pinned at origin' }),
+        { size: 11, color: C_VIOLET, align: 'left', dx: 12, dy: 14 });
+    },
+    readout() {
+      const ct = state.flashT, b = betaNow();
+      const cx = state.galilean ? b * ct : 0;
+      return roHead() +
+        '<div class="amC">' + t({ zh: '光前沿', en: 'Light front' }) + '&ensp;r = ct = <b>' + fmt(ct) + '</b></div>' +
+        '<div class="amC">(ct)² − r² = <b>' + fmt(0) + '</b>&ensp;' + t({ zh: '（对所有观察者成立）', en: '(holds for every observer)' }) + '</div>' +
+        '<div class="c1">' + t({ zh: '观察者', en: 'Observer' }) + '&ensp;β = <b>' + fmtS(b, 3) + '</b>&ensp;·&ensp;γ = ' + fmtInf(gammaNow()) + '</div>' +
+        '<div class="c2">' + t({ zh: '他的闪光圆心', en: 'His flash centre' }) + '&ensp;x = <b>' + fmtS(cx) + '</b>&ensp;·&ensp;' +
+          t(state.galilean ? { zh: '伽利略：锥歪了', en: 'Galilean: the cone tips over' }
+                           : { zh: '爱因斯坦：锥不动', en: 'Einstein: the cone stays put' }) + '</div>' +
+        '<div class="dim">' + t({ zh: '既然 (ct)² − r² = 0 人人成立，把它推广到锥内外 ⇒ s² = (ct)² − x² − y²',
+                                  en: 'since (ct)² − r² = 0 holds for all, extend it off the cone ⇒ s² = (ct)² − x² − y²' }) + '</div>';
+    }
+  },
+
+  /* ────── ② 光锥与因果：s² 的符号就是因果 ────── */
+  cone: {
+    label: { zh: '光锥与因果', en: 'Cone & causality' },
+    params: ['evR', 'evT'],
+    drive: { key: 'evT', from: -3.9, to: 3.9, period: 9, kind: 'linear' },
+    brand: { zh: '以「此刻此地」为顶点的双锥把时空切成三块：绝对未来、绝对过去，以及既非过去也非未来的「别处」。判据只有一个——s² 的符号。',
+             en: 'The double cone with its apex at "here and now" cuts spacetime into three: the absolute future, the absolute past, and an "elsewhere" that is neither. One criterion decides it all — the sign of s².' },
+    tips: { zh: '光锥不是光的轨迹，是因果的边界。让事件沿 ct 走一遍（自动播放），切到「x·ct 侧视」看它从绝对过去经过「别处」进入绝对未来——在「别处」那一段，它和你互相不存在。',
+            en: 'The light cone is not the path of light — it is the boundary of causality. Let the event run along ct (auto-play) and switch to "Side x·ct": it passes from the absolute past through "elsewhere" into the absolute future — and while it is in "elsewhere", you and it simply do not exist for one another.' },
+    views: {
+      iso:  { label: { zh: '立体', en: '3D' }, az: -0.78, el: 0.34, dist: 14, tx: 0, ty: 0, tz: 0 },
+      side: { label: { zh: 'x·ct 侧视', en: 'Side x·ct' }, az: 0.001, el: -1.45, dist: 12, tx: 0, ty: 0, tz: 0 },
+      top:  { label: { zh: '俯视 x·y', en: 'Top x·y' }, az: 0.001, el: 0.02, dist: 11, tx: 0, ty: 0, tz: 0 }
+    },
+    toggles: [
+      { key: 'showEvent', label: { zh: '事件 E 与因果连线', en: 'Event E and its interval' }, color: C_ROSE,  checked: true },
+      { key: 'showNow',   label: { zh: '「此刻」空间切片', en: '"Now" spatial slice' }, color: C_CYAN,  checked: true },
+      { key: 'showCone2', label: { zh: '光锥', en: 'Light cone' }, color: C_AMBER, checked: true },
+      { key: 'showGuides',label: { zh: '投影辅助线', en: 'Projection guides' }, color: C_AMBER, checked: true },
+      { key: 'showGrid',  label: { zh: '网格', en: 'Grid' }, color: '#64748b', checked: true }
+    ],
+    draw(C) {
+      const r = state.evR, ct = state.evT;
+      const s2 = ct * ct - r * r;
+      const K = classify(s2, ct);
+
+      if (state.showGrid) { drawXCTGrid(C, 4, 4); drawGridXY(C, 3, 1); }
+      if (state.showCone2) drawLightCone(C, {});
+      if (state.showNow) drawNowSlice(C, 3.2);
+      drawStAxes(C, {});
+
+      /* 区域名 */
+      label3(C, [0, 0, CT_MAX - 0.9], t({ zh: '绝对未来', en: 'absolute future' }),
+        { size: 11.5, color: 'rgba(159,176,200,.78)', align: 'left', dx: 10 });
+      label3(C, [0, 0, -CT_MAX + 0.9], t({ zh: '绝对过去', en: 'absolute past' }),
+        { size: 11.5, color: 'rgba(159,176,200,.78)', align: 'left', dx: 10 });
+      label3(C, [3.3, 0, 0.28], t({ zh: '别处', en: 'elsewhere' }),
+        { size: 11.5, color: 'rgba(167,139,250,.85)', align: 'center' });
+
+      if (state.showEvent) {
+        const E = [r, 0, ct];
+        /* 锥内实线、锥外虚线 */
+        line3(C, [0, 0, 0], E, s2 >= 0
+          ? { width: 2.2, color: rgba(K.hex, 0.95) }
+          : { width: 2.2, dash: [7, 7], color: rgba(K.hex, 0.9) });
+        if (state.showGuides) {
+          line3(C, E, [0, 0, ct], { width: 1.5, dash: [7, 7], color: rgba(K.hex, 0.6) });
+          line3(C, E, [r, 0, 0],  { width: 1.5, dash: [7, 7], color: rgba(K.hex, 0.6) });
+          const f1 = proj(C, [0, 0, ct]); if (f1) glowDot(f1, 8, '#ffffff', rgba(K.hex, 0.85));
+          const f2 = proj(C, [r, 0, 0]);  if (f2) glowDot(f2, 8, '#ffffff', rgba(K.hex, 0.85));
+        }
+        const sp = proj(C, E);
+        if (sp) glowDot(sp, 15, '#ffffff', rgba(K.hex, 0.9));
+        /* 标注挂在事件左侧：evR ≥ 0 ⇒ E 恒在 +x 一侧，往右写会钻到参数面板底下 */
+        label3(C, E, 'E', { font: 'italic 13px ' + FONT_MATH, color: K.hex, align: 'right', dx: -14, dy: -11 });
+        label3(C, E, t(K.kind), { size: 11, color: K.hex, align: 'right', dx: -14, dy: 6 });
+      }
+
+      label3(C, [-R_MAX + 0.3, 0.5, CT_MAX - 0.35], 's² = (ct)² − r²',
+        { font: 'italic 13px ' + FONT_MATH, color: '#c4d2e6', align: 'left' });
+      label3(C, [-R_MAX + 0.3, -0.5, CT_MAX - 0.95], 's² = ' + fmtS(state.evT * state.evT - state.evR * state.evR),
+        { font: 'italic 13px ' + FONT_MATH, color: K.hex, align: 'left' });
+    },
+    readout() {
+      const r = state.evR, ct = state.evT;
+      const s2 = ct * ct - r * r;
+      const K = classify(s2, ct);
+      let extra;
+      if (s2 > 0.02) extra = t({ zh: '固有时 τ = √s² = ', en: 'proper time τ = √s² = ' }) + fmt(Math.sqrt(s2));
+      else if (s2 < -0.02) extra = t({ zh: '固有距离 σ = √(−s²) = ', en: 'proper distance σ = √(−s²) = ' }) + fmt(Math.sqrt(-s2));
+      else extra = t({ zh: 'τ = σ = 0（光锥面）', en: 'τ = σ = 0 (on the cone)' });
+      return roHead() +
+        '<div>' + t({ zh: '事件 E', en: 'Event E' }) + '&ensp;ct = <b>' + fmtS(ct) + '</b>&ensp;·&ensp;r = <b>' + fmt(r) + '</b></div>' +
+        '<div class="' + K.cls + '">s² = (ct)² − r² = <b>' + (s2 >= 0 ? '+' : '') + fmtS(s2) + '</b></div>' +
+        '<div class="' + K.cls + '"><b>' + t(K.kind) + '</b>&ensp;·&ensp;' + t(K.where) + '&ensp;·&ensp;' + t(K.say) + '</div>' +
+        '<div class="dim">' + extra + '</div>';
+    }
+  },
+
+  /* ────── ③ 世界线与固有时：直的那条最长 ────── */
+  worldline: {
+    label: { zh: '世界线与固有时', en: 'Worldlines & proper time' },
+    params: ['tTurn'],
+    drive: { key: 'tTurn', from: 0.6, to: 3.4, period: 10, kind: 'linear' },
+    brand: { zh: '从事件 A 到事件 B，三个人走了三条世界线：一直不动、匀速折返、连续加速。钟点按固有时等间距打——谁的钟走得多，一眼就看得见。',
+             en: 'Three travellers get from event A to event B along three worldlines: staying put, turning around at constant speed, and accelerating smoothly. The tick marks are spaced by equal proper time, so whose clock ran longer is plainly visible.' },
+    tips: { zh: '闵可夫斯基几何里三角不等式反过来——两点之间，直的那条世界线最长。切到「x·ct 侧视」，比较三条线上钟点的疏密：折返得越急，回来时你的钟走得越少。',
+            en: 'In Minkowski geometry the triangle inequality is reversed: between two events the straight worldline is the longest. Switch to "Side x·ct" and compare the tick spacing — the sharper the turnaround, the less your clock has advanced when you get back.' },
+    views: {
+      iso:  { label: { zh: '立体', en: '3D' }, az: -0.78, el: 0.30, dist: 11, tx: 0, ty: 0, tz: 1.9 },
+      side: { label: { zh: 'x·ct 侧视', en: 'Side x·ct' }, az: 0.001, el: -1.45, dist: 8.6, tx: 0, ty: 0, tz: 1.9 },
+      top:  { label: { zh: '俯视 x·y', en: 'Top x·y' }, az: 0.001, el: 0.02, dist: 8.5, tx: 0, ty: 0, tz: 1.9 }
+    },
+    toggles: [
+      { key: 'showInert', label: { zh: '静止者（直线）', en: 'Stay-at-home (straight)' }, color: C_ROSE,    checked: true },
+      { key: 'showTwin',  label: { zh: '折返双生子', en: 'Turnaround twin' }, color: C_VIOLET,  checked: true },
+      { key: 'showAccel', label: { zh: '连续加速者', en: 'Smoothly accelerating' }, color: C_EMERALD, checked: true },
+      { key: 'showTicks', label: { zh: '固有时钟点 Δτ = 0.5', en: 'Proper-time ticks Δτ = 0.5' }, color: C_AMBER, checked: true },
+      { key: 'showGrid',  label: { zh: '网格', en: 'Grid' }, color: '#64748b', checked: true }
+    ],
+    draw(C) {
+      if (state.showGrid) { drawXCTGrid(C, 4, 4); drawGridXY(C, 3, 1); }
+      drawLightCone(C, { ez: CT_MAX, zMin: 0, alpha: 0.75 });
+      drawStAxes(C, { ez: CT_MAX, zMin: -0.6 });
+
+      const lines = [
+        { on: state.showInert, pts: inertialPath(), hex: C_ROSE,    tag: { zh: '静止者', en: 'stay-at-home' }, anchor: 0.55 },
+        { on: state.showTwin,  pts: twinPath(),     hex: C_VIOLET,  tag: { zh: '折返双生子', en: 'turnaround twin' }, anchor: 1 },
+        { on: state.showAccel, pts: accelPath(),    hex: C_EMERALD, tag: { zh: '连续加速者', en: 'accelerating' }, anchor: 0.5 }
+      ];
+      for (const L of lines) {
+        if (!L.on) continue;
+        strokeWorldline(C, L.pts, L.hex);
+      }
+      if (state.showTicks) {
+        for (const L of lines) {
+          if (!L.on) continue;
+          for (const p of clockTicks(L.pts, 0.5)) solidDot(C, p, 3, rgba(L.hex, 0.95));
+        }
+      }
+      /* 每条曲线的头部光点：取它最有辨识度的那个事件（折点 / 最远点 / 中点） */
+      for (const L of lines) {
+        if (!L.on) continue;
+        let hp;
+        if (L.pts.length === 3) hp = L.pts[1];
+        else if (L.pts.length === 2) hp = [0, 0, CT_END * 0.5];
+        else hp = L.pts[Math.round((L.pts.length - 1) / 2)];
+        const s = proj(C, hp);
+        if (s) glowDot(s, 10, '#ffffff', rgba(L.hex, 0.9));
+        label3(C, hp, t(L.tag), { size: 11, color: L.hex, align: 'left', dx: 12, dy: -10 });
+      }
+
+      /* 事件 A 与 B */
+      const pa = proj(C, [0, 0, 0]);       if (pa) glowDot(pa, 13, '#ffffff', 'rgba(186,240,255,0.9)');
+      const pb = proj(C, [0, 0, CT_END]);  if (pb) glowDot(pb, 13, '#ffffff', 'rgba(186,240,255,0.9)');
+      label3(C, [0, 0, 0], 'A', { font: 'italic 13px ' + FONT_MATH, color: '#e2e8f0', align: 'right', dx: -13 });
+      label3(C, [0, 0, CT_END], 'B', { font: 'italic 13px ' + FONT_MATH, color: '#e2e8f0', align: 'right', dx: -13 });
+
+      label3(C, [-R_MAX + 0.3, 0.5, CT_MAX - 0.35], 'Δτ = ∫ √(1 − β²) d(ct)',
+        { font: 'italic 13px ' + FONT_MATH, color: '#c4d2e6', align: 'left' });
+    },
+    readout() {
+      const A = properTime(inertialPath()), B = properTime(twinPath()), D = properTime(accelPath());
+      const g = twinGeometry();
+      const bOut = g.X / g.t1, bBack = g.X / (CT_END - g.t1);
+      const warn = (A.bad || B.bad || D.bad)
+        ? '<div class="c4"><b>' + t({ zh: '⚠ 有线段越出光锥（|dr/d(ct)| ≥ 1），已画成虚线', en: '⚠ a segment leaves the light cone (|dr/d(ct)| ≥ 1) — drawn dashed' }) + '</b></div>'
+        : '';
+      return roHead() +
+        '<div>' + t({ zh: '坐标时', en: 'coordinate time' }) + '&ensp;Δt = <b>' + fmt(CT_END) + '</b>&ensp;(A → B)</div>' +
+        '<div class="c1">' + t({ zh: '静止者', en: 'stay-at-home' }) + '&ensp;Δτ = <b>' + fmt(A.tau) + '</b>&ensp;·&ensp;Δτ/Δt = ' + fmt(A.tau / CT_END) + '</div>' +
+        '<div class="c2">' + t({ zh: '折返双生子', en: 'turnaround twin' }) + '&ensp;Δτ = <b>' + fmt(B.tau) + '</b>&ensp;·&ensp;Δτ/Δt = ' + fmt(B.tau / CT_END) + '</div>' +
+        '<div class="c3">' + t({ zh: '连续加速者', en: 'accelerating' }) + '&ensp;Δτ = <b>' + fmt(D.tau) + '</b>&ensp;·&ensp;Δτ/Δt = ' + fmt(D.tau / CT_END) + '</div>' +
+        warn +
+        '<div class="dim">' + t({ zh: '双生子两段速度 β = ', en: 'twin leg speeds β = ' }) + fmt(bOut) + ' / ' + fmt(bBack) +
+          '&ensp;·&ensp;' + t({ zh: '直线最长（闵氏三角不等式反向）', en: 'the straight line is longest (reversed triangle inequality)' }) + '</div>';
+    }
+  },
+
+  /* ────── ④ 洛伦兹推动与同时面：锥不动，同时面让步 ────── */
+  boost: {
+    label: { zh: '洛伦兹推动', en: 'Lorentz boost' },
+    params: ['rapid'],
+    /* state.rapid 存快度 φ；[from,to] = ±artanh(0.9) ⊂ [artanh(∓0.95)]（见 ① 注释） */
+    drive: { key: 'rapid', from: -Math.atanh(0.9), to: Math.atanh(0.9), period: 10, kind: 'linear' },
+    brand: { zh: '推动到速度 β：观察者的时间轴 ct′ 与他的同时面 x′ 向光锥对称剪切。两个在 S 系同时的事件，从此落在他不同的同时面上——而光锥纹丝不动。',
+             en: 'Boost to speed β and the observer’s time axis ct′ and his simultaneity slice x′ shear symmetrically toward the light cone. Two events simultaneous in S now land on different slices of his — while the light cone itself never moves.' },
+    tips: { zh: '「同时」不是宇宙的属性，是你切出来的一张面。拖动 β，看紫色那对同时事件分出了先后；再切到「沿光锥看」——无论 β 取多少，那条亮线纹丝不动，所以因果没乱。',
+            en: '"Simultaneous" is not a property of the universe — it is a slice you cut. Drag β and watch the violet pair acquire an order; then switch to "Along the cone": whatever β you pick, that bright line never budges, so causality stays intact.' },
+    views: {
+      iso:  { label: { zh: '立体', en: '3D' }, az: -0.78, el: 0.34, dist: 14, tx: 0, ty: 0, tz: 0 },
+      side: { label: { zh: 'x·ct 侧视', en: 'Side x·ct' }, az: 0.001, el: -1.45, dist: 12, tx: 0, ty: 0, tz: 0 },
+      /* 沿 45° 母线看：视线几乎贴着 x–ct 平面里的那条母线，锥退化成一道亮线，
+         而 ct′ 与 x′ 随 β 一起往这条线上挤——它本身纹丝不动。
+         el 不取 0：el = 0 时整个 x–ct 平面都会退化成一条线，什么也分辨不出来，
+         留一点仰角才能看见"两轴往不动的那条线上挤"这件事。 */
+      ray:  { label: { zh: '沿光锥看', en: 'Along the cone' }, az: Math.PI / 4, el: 0.34, dist: 13, tx: 0, ty: 0, tz: 0 }
+    },
+    toggles: [
+      { key: 'showCtP',   label: { zh: '观察者时间轴 ct′', en: 'Observer time axis ct′' }, color: C_ROSE,    checked: true },
+      { key: 'showPair',  label: { zh: 'S 系同时的一对事件', en: 'Pair simultaneous in S' }, color: C_VIOLET,  checked: true },
+      { key: 'showXP',    label: { zh: '同时面族 x′', en: 'Simultaneity slices x′' }, color: C_EMERALD, checked: true },
+      { key: 'showGuides',label: { zh: '投影辅助线', en: 'Projection guides' }, color: C_AMBER, checked: true },
+      { key: 'showGrid',  label: { zh: '网格', en: 'Grid' }, color: '#64748b', checked: true }
+    ],
+    draw(C) {
+      const b = betaNow(), g = gammaNow();
+      const E1 = [-1.5, 0, 2], E2 = [1.5, 0, 2];
+
+      if (state.showGrid) { drawXCTGrid(C, 4, 4); drawGridXY(C, 3, 1); }
+      drawLightCone(C, {});
+      drawStAxes(C, {});
+
+      /* 同时面族 x′：ct = βx + c（emerald，结构档） */
+      if (state.showXP) {
+        for (let c = -3; c <= 3; c++) {
+          if (c === 0) continue;
+          simulLine(C, 0, c, b, { width: 1.2, color: rgba(C_EMERALD, 0.28) });
+        }
+        simulLine(C, 0, 0, b, { width: 2.2, color: rgba(C_EMERALD, 0.95) });
+        const xe = Math.min(R_MAX, CT_MAX / Math.max(Math.abs(b), 1e-6));
+        label3(C, [xe, 0, b * xe], 'x′', { font: 'italic 15px ' + FONT_MATH, color: C_EMERALD, align: 'left', dx: 10 });
+      }
+
+      /* 观察者时间轴 ct′：x = β·ct（rose） */
+      if (state.showCtP) {
+        const zu = CT_MAX;
+        strokePoly(C, [[-b * zu, 0, -zu], [b * zu, 0, zu]], { width: 5.5, color: rgba(C_ROSE, 0.13) });
+        line3(C, [-b * zu, 0, -zu], [b * zu, 0, zu], { width: 2.2, color: rgba(C_ROSE, 0.95) });
+        label3(C, [b * zu, 0, zu], 'ct′', { font: 'italic 15px ' + FONT_MATH, color: C_ROSE, align: 'left', dx: 10 });
+        const op = proj(C, [b * 2, 0, 2]);
+        if (op) glowDot(op, 10, '#ffffff', rgba(C_ROSE, 0.9));
+      }
+
+      /* S 系同时的一对事件（violet），以及它们各自所在的 S′ 同时面 */
+      if (state.showPair) {
+        line3(C, E1, E2, { width: 1.6, dash: [5, 6], color: rgba(C_VIOLET, 0.55) });
+        for (const E of [E1, E2]) {
+          simulLine(C, E[0], E[2], b, { width: 1.4, dash: [7, 7], color: rgba(C_VIOLET, 0.75) });
+          const s = proj(C, E);
+          if (s) glowDot(s, 11, '#ffffff', rgba(C_VIOLET, 0.9));
+          if (state.showGuides) {
+            /* 事件在 ct′ 轴上的读数点：S 坐标 (βγt′, 0, γt′) */
+            const tp = g * (E[2] - b * E[0]);
+            line3(C, E, [b * g * tp, 0, g * tp], { width: 1.5, dash: [7, 7], color: rgba(C_AMBER, 0.6) });
+            const q = proj(C, [b * g * tp, 0, g * tp]);
+            if (q) glowDot(q, 8, '#ffffff', rgba(C_AMBER, 0.85));
+          }
+        }
+        label3(C, E1, 'E₁', { font: 'italic 13px ' + FONT_MATH, color: C_VIOLET, align: 'right', dx: -12 });
+        label3(C, E2, 'E₂', { font: 'italic 13px ' + FONT_MATH, color: C_VIOLET, align: 'left', dx: 12 });
+      }
+
+      label3(C, [-R_MAX + 0.3, 0.5, CT_MAX - 0.35], 'ct′ = γ(ct − βx)',
+        { font: 'italic 13px ' + FONT_MATH, color: C_ROSE, align: 'left' });
+      label3(C, [-R_MAX + 0.3, -0.5, CT_MAX - 0.95], 'x′ = γ(x − β·ct)',
+        { font: 'italic 13px ' + FONT_MATH, color: C_EMERALD, align: 'left' });
+      /* 挂在 +x/+ct 那条母线上：「沿光锥看」正是沿它看过去，两轴就是往它上面挤 */
+      label3(C, [R_MAX * 0.78, 0.35, R_MAX * 0.78], t({ zh: '光锥不动', en: 'the cone does not move' }),
+        { size: 11.5, color: rgba(C_AMBER, 0.9), align: 'right', dy: -12 });
+    },
+    readout() {
+      const b = betaNow(), g = gammaNow();
+      const t1 = g * (2 - b * (-1.5)), t2 = g * (2 - b * 1.5);
+      return roHead() +
+        '<div class="c1">β = <b>' + fmtS(b, 3) + '</b>&ensp;·&ensp;γ = 1/√(1−β²) = <b>' + fmtInf(g) + '</b>&ensp;·&ensp;φ = artanh β = ' + fmtS(state.rapid) + '</div>' +
+        '<div class="c2">E₁(x=−1.50, ct=2.00)&ensp;ct′ = <b>' + fmtS(t1) + '</b></div>' +
+        '<div class="c2">E₂(x=+1.50, ct=2.00)&ensp;ct′ = <b>' + fmtS(t2) + '</b></div>' +
+        '<div class="c3">Δct′ = <b>' + fmtS(t2 - t1) + '</b>&ensp;' +
+          t({ zh: '（S 系里两者同时，Δct = 0）', en: '(simultaneous in S: Δct = 0)' }) + '</div>' +
+        '<div class="dim">' + t({ zh: '两轴向 45° 母线对称剪切；光锥是唯一不动的东西',
+                                  en: 'both axes shear symmetrically toward the 45° generator; the cone alone is fixed' }) + '</div>';
+    }
+  },
+
+  /* ────── ⑤ 不变双曲线：推动 = 双曲旋转 ────── */
+  hyperbola: {
+    label: { zh: '不变双曲线', en: 'Invariant hyperbolae' },
+    params: ['rapid', 'sInv'],
+    /* 驱动的是快度 φ（state.rapid），不是 β —— 快度才是双曲"角度"，
+       φ 匀速增长才让事件沿双曲线**匀速**滑动；滑杆刻度仍是 β。 */
+    drive: { key: 'rapid', from: -Math.atanh(0.92), to: Math.atanh(0.92), period: 12, kind: 'linear' },
+    brand: { zh: 's² 的等值面：类时（s² > 0）是双叶双曲面，类空（s² < 0）是单叶双曲面，s = 0 恰是光锥本身。推动时事件沿双曲线滑动，却永远离不开它。',
+             en: 'The level sets of s²: timelike (s² > 0) is a two-sheet hyperboloid, spacelike (s² < 0) a one-sheet one, and s = 0 is the light cone itself. A boost slides events along these curves and never off them.' },
+    tips: { zh: '推动就是双曲旋转：欧氏旋转让点沿圆走、保住半径；洛伦兹推动让事件沿双曲线走、保住 s。切到「x·ct 侧视」，看事件贴着双曲线滑动，而双曲线以光锥为渐近线——光锥就是那个圆心退到无穷远的「圆」。',
+            en: 'A boost is a hyperbolic rotation: a Euclidean rotation slides points along a circle and preserves the radius; a Lorentz boost slides events along a hyperbola and preserves s. Switch to "Side x·ct" and watch the event glide along the curve whose asymptote is the light cone — the cone is the "circle" whose centre has receded to infinity.' },
+    views: {
+      iso:  { label: { zh: '立体', en: '3D' }, az: -0.78, el: 0.34, dist: 14, tx: 0, ty: 0, tz: 0 },
+      side: { label: { zh: 'x·ct 侧视', en: 'Side x·ct' }, az: 0.001, el: -1.45, dist: 12, tx: 0, ty: 0, tz: 0 },
+      top:  { label: { zh: '俯视 x·y', en: 'Top x·y' }, az: 0.001, el: 0.02, dist: 11, tx: 0, ty: 0, tz: 0 }
+    },
+    toggles: [
+      { key: 'showTL',   label: { zh: '类时双曲面 s² > 0', en: 'Timelike sheet s² > 0' }, color: C_ROSE,    checked: true },
+      { key: 'showSL',   label: { zh: '类空双曲面 s² < 0', en: 'Spacelike sheet s² < 0' }, color: C_VIOLET,  checked: true },
+      { key: 'showCal',  label: { zh: '轴的刻度标定', en: 'Axis calibration' }, color: C_EMERALD, checked: true },
+      { key: 'showGrid', label: { zh: '网格', en: 'Grid' }, color: '#64748b', checked: true }
+    ],
+    draw(C) {
+      const s = state.sInv, ph = state.rapid, b = betaNow(), g = gammaNow();
+      /* 事件沿双曲线滑动：P 在类时支上，Q 在类空支上，共用同一个快度 φ */
+      const P = [s * Math.sinh(ph), 0, s * Math.cosh(ph)];
+      const Q = [s * Math.cosh(ph), 0, s * Math.sinh(ph)];
+
+      if (state.showGrid) { drawXCTGrid(C, 4, 4); drawGridXY(C, 3, 1); }
+      drawLightCone(C, { alpha: 0.85 });
+      drawStAxes(C, {});
+
+      /* 类时双曲面（双叶，rose）：ct = ±√(s² + r²) */
+      if (state.showTL) {
+        for (const sg of [1, -1]) {
+          for (let m = 0; m < 8; m++) {
+            const a0 = m / 8 * Math.PI, ca = Math.cos(a0), sa = Math.sin(a0);
+            const mp = [];
+            for (let i = -30; i <= 30; i++) {
+              const rr = R_MAX * i / 30;
+              mp.push([rr * ca, rr * sa, sg * Math.sqrt(s * s + rr * rr)]);
+            }
+            strokePoly(C, mp, { width: 1.1, color: rgba(C_ROSE, 0.22) });
+          }
+          for (let k = 1; k <= 4; k++) {
+            const zz = s + k * 0.8;
+            if (zz > CT_MAX) break;
+            const rr = Math.sqrt(Math.max(0, zz * zz - s * s));
+            strokePoly(C, ringPts(0, sg * zz, rr), { width: 1.1, color: rgba(C_ROSE, 0.20) });
+          }
+          /* x–ct 剖面亮线 */
+          const cs = [];
+          for (let i = -60; i <= 60; i++) {
+            const x = R_MAX * i / 60;
+            cs.push([x, 0, sg * Math.sqrt(s * s + x * x)]);
+          }
+          strokePoly(C, cs, { width: 5.5, color: rgba(C_ROSE, 0.13) });
+          strokePoly(C, cs, { width: 2.2, color: rgba(C_ROSE, 0.95) });
+        }
+      }
+
+      /* 类空双曲面（单叶，violet）：r = √(s² + (ct)²) */
+      if (state.showSL) {
+        for (let k = -3; k <= 3; k++) {
+          const zz = k * 1.0;
+          if (Math.abs(zz) > CT_MAX) continue;
+          strokePoly(C, ringPts(0, zz, Math.sqrt(s * s + zz * zz)), { width: 1.1, color: rgba(C_VIOLET, 0.22) });
+        }
+        for (const sx of [1, -1]) {
+          const cs = [];
+          for (let i = -60; i <= 60; i++) {
+            const zz = CT_MAX * i / 60;
+            cs.push([sx * Math.sqrt(s * s + zz * zz), 0, zz]);
+          }
+          strokePoly(C, cs, { width: 5.5, color: rgba(C_VIOLET, 0.13) });
+          strokePoly(C, cs, { width: 2.2, color: rgba(C_VIOLET, 0.95) });
+        }
+      }
+
+      /* 刻度标定（emerald）：ct′ 与 x′ 轴上的「单位」正落在双曲线上，
+         而欧氏尺子量出来的长度并不相等——这就是闵氏图不能用直尺量的原因 */
+      if (state.showCal) {
+        const zu = CT_MAX;
+        line3(C, [-b * zu, 0, -zu], [b * zu, 0, zu], { width: 1.6, color: rgba(C_EMERALD, 0.7) });
+        simulLine(C, 0, 0, b, { width: 1.6, color: rgba(C_EMERALD, 0.7) });
+        label3(C, [b * zu, 0, zu], 'ct′', { font: 'italic 15px ' + FONT_MATH, color: C_EMERALD, align: 'left', dx: 10 });
+        const xe = Math.min(R_MAX, CT_MAX / Math.max(Math.abs(b), 1e-6));
+        label3(C, [xe, 0, b * xe], 'x′', { font: 'italic 15px ' + FONT_MATH, color: C_EMERALD, align: 'left', dx: 10 });
+        /* 单位刻度短线，垂直于各自的轴方向（在图上只是标记，不是欧氏长度） */
+        line3(C, [P[0] - 0.12, 0, P[2] + 0.12], [P[0] + 0.12, 0, P[2] - 0.12], { width: 1.6, color: rgba(C_EMERALD, 0.9) });
+        line3(C, [Q[0] - 0.12, 0, Q[2] + 0.12], [Q[0] + 0.12, 0, Q[2] - 0.12], { width: 1.6, color: rgba(C_EMERALD, 0.9) });
+      }
+
+      /* 滑动中的事件：头部光点（六处同源） */
+      if (state.showTL) {
+        const p1 = proj(C, P);
+        if (p1) glowDot(p1, 14, '#ffffff', rgba(C_ROSE, 0.9));
+        label3(C, P, 'P', { font: 'italic 13px ' + FONT_MATH, color: C_ROSE, align: 'left', dx: 12, dy: -10 });
+      }
+      if (state.showSL) {
+        const p2 = proj(C, Q);
+        if (p2) glowDot(p2, 12, '#ffffff', rgba(C_VIOLET, 0.9));
+        label3(C, Q, 'Q', { font: 'italic 13px ' + FONT_MATH, color: C_VIOLET, align: 'left', dx: 12, dy: -10 });
+      }
+
+      label3(C, [-R_MAX + 0.3, 0.5, CT_MAX - 0.35], '(ct)² − x² − y² = s²',
+        { font: 'italic 13px ' + FONT_MATH, color: C_ROSE, align: 'left' });
+      label3(C, [-R_MAX + 0.3, -0.5, CT_MAX - 0.95], 'ct = s·cosh φ,  x = s·sinh φ',
+        { font: 'italic 13px ' + FONT_MATH, color: '#c4d2e6', align: 'left' });
+      /* γ = cosh φ：β = 0.6 ⇒ φ = 0.6931 ⇒ γ = 1.25 */
+      label3(C, [R_MAX - 0.3, 0, -CT_MAX + 0.45], 'γ = cosh φ = ' + fmtInf(g),
+        { font: 'italic 13px ' + FONT_MATH, color: C_EMERALD, align: 'right' });
+    },
+    readout() {
+      const s = state.sInv, ph = state.rapid, b = betaNow(), g = gammaNow();
+      const P = [s * Math.sinh(ph), 0, s * Math.cosh(ph)];
+      const chk = P[2] * P[2] - P[0] * P[0];
+      return roHead() +
+        '<div class="c3">φ = artanh β = <b>' + fmtS(ph) + '</b>&ensp;·&ensp;β = tanh φ = ' + fmtS(b, 3) + '&ensp;·&ensp;γ = cosh φ = <b>' + fmtInf(g) + '</b></div>' +
+        '<div class="c1">P&ensp;ct = s·cosh φ = <b>' + fmt(P[2]) + '</b>&ensp;·&ensp;x = s·sinh φ = <b>' + fmtS(P[0]) + '</b></div>' +
+        '<div class="c1">(ct)² − x² = <b>' + fmt(chk) + '</b> = s² = ' + fmt(s * s) + '&ensp;' + t({ zh: '（推动不改它）', en: '(the boost cannot change it)' }) + '</div>' +
+        '<div class="c2">' + t({ zh: '类空支 Q', en: 'spacelike branch Q' }) + '&ensp;x = s·cosh φ = <b>' + fmt(s * Math.cosh(ph)) + '</b>&ensp;·&ensp;s² = ' + fmtS(-s * s) + '</div>' +
+        '<div class="dim">' + t({ zh: '欧氏旋转保半径、点沿圆走；洛伦兹推动保 s、事件沿双曲线走',
+                                  en: 'a Euclidean rotation preserves the radius and slides along a circle; a boost preserves s and slides along a hyperbola' }) + '</div>';
+    }
+  }
+};
+
+/* ================= 常量与状态（引擎区，以下一般无需改动） ================= */
+const WAVE_LEN = 8;      // t 轴的世界长度（可视窗口）
+const NEAR = 0.15;       // 近裁剪面
+
+const FONT_CN = 'ui-sans-serif,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif';
+const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
+
+const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
+const samples = [];
+let curTab = null;
+const RELABEL = [];
+const cams = {};
+let cam = null;
+let tween = null;
+const lastView = {};
+const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ③ 采样 —— 保持最小实现                                     ║
+   ╚══════════════════════════════════════════════════════════╝ */
+/* 本工具的 z 轴是时空图上的**几何时间 ct**，不是历史采样流：整张图每帧由
+   参数（flashT / evR / evT / tTurn / rapid / sInv）直接重新生成，samples[]
+   不参与任何绘制。所以这里只记 t，保持最小实现——规范 §4.6 的「历史存当时
+   真实值」不受影响，因为本工具没有需要保真的历史波形。 */
+state.omega = 0;   // 本工具不用相位钟；置 0 防引擎的 theta 积分出 NaN
+function pushSample() {
+  samples.push({ t: state.t });
+}
+
+/* ================= 画布 ================= */
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = 1, FOCAL = 900, CX = 0, CY = 0, bgGrad = null;
+
+function resize() {
+  DPR = Math.min(2.5, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  CX = W / 2; CY = H / 2;
+  FOCAL = 1.2 * Math.min(H, W * 1.1);
+  bgGrad = ctx.createRadialGradient(W*0.5, H*0.3, 0, W*0.5, H*0.42, Math.max(W, H)*0.95);
+  bgGrad.addColorStop(0, '#0c1526');
+  bgGrad.addColorStop(1, '#05070d');
+}
+window.addEventListener('resize', resize);
+
+/* ================= 基础数学 ================= */
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const mod2pi = a => { a %= TAU; if (a < 0) a += TAU; return a; };
+const wrapPI = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
+const ease = k => k < 0.5 ? 4*k*k*k : 1 - Math.pow(-2*k + 2, 3) / 2;
+const fmt = (x, d = 2) => x.toFixed(d);
+const fmtS = (x, d = 2) => (x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
+
+const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+const dot3 = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+
+/* ================= 轨道相机与投影 ================= */
+function makeCam() {
+  const cp = Math.cos(cam.el), sp = Math.sin(cam.el);
+  const eye = [
+    cam.tx + cam.dist * cp * Math.sin(cam.az),
+    cam.ty + cam.dist * sp,
+    cam.tz + cam.dist * cp * Math.cos(cam.az)
+  ];
+  const f = norm(sub([cam.tx, cam.ty, cam.tz], eye));
+  const r = norm(cross(f, [0, 1, 0]));
+  const u = cross(r, f);
+  return { eye, f, r, u };
+}
+function camPt(C, p) {
+  const d = sub(p, C.eye);
+  return [dot3(d, C.r), dot3(d, C.u), dot3(d, C.f)];
+}
+function scr(c) { const s = FOCAL / c[2]; return [CX + c[0]*s, CY - c[1]*s]; }
+function proj(C, p) { const c = camPt(C, p); return c[2] < NEAR ? null : scr(c); }
+function clipNear(a, b) {
+  const t = (NEAR - a[2]) / (b[2] - a[2]);
+  return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, NEAR];
+}
+
+/* 折线路径（支持 null 断点 + 近平面裁剪）；返回 [首点, 末点] 屏幕坐标 */
+function polyPath(C, pts) {
+  if (pts.length < 2) return null;
+  let head = null, tail = null, contin = false, prev = null;
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    const P = pts[i];
+    if (P === null) { prev = null; contin = false; continue; }
+    const cur = camPt(C, P);
+    if (prev !== null) {
+      let a = prev, b = cur;
+      const av = a[2] >= NEAR, bv = b[2] >= NEAR;
+      if (av || bv) {
+        if (!av) a = clipNear(a, b);
+        if (!bv) b = clipNear(b, a);
+        const sA = scr(a), sB = scr(b);
+        if (!contin) ctx.moveTo(sA[0], sA[1]);
+        ctx.lineTo(sB[0], sB[1]);
+        if (!head) head = sA;
+        tail = sB;
+        contin = bv;
+      } else {
+        contin = false;
+      }
+    }
+    prev = cur;
+  }
+  return head ? [head, tail] : null;
+}
+
+function strokePoly(C, pts, o) {
+  const ht = polyPath(C, pts);
+  if (!ht) return;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = o.width || 2;
+  if (o.alpha != null) ctx.globalAlpha = o.alpha;
+  if (o.dash) ctx.setLineDash(o.dash);
+  if (o.fade) {
+    const h = ht[0], t = ht[1];
+    if (Math.hypot(t[0]-h[0], t[1]-h[1]) < 2) {
+      ctx.strokeStyle = o.fade[0];
+    } else {
+      const g = ctx.createLinearGradient(h[0], h[1], t[0], t[1]);
+      g.addColorStop(0, o.fade[0]);
+      g.addColorStop(1, o.fade[1]);
+      ctx.strokeStyle = g;
+    }
+  } else {
+    ctx.strokeStyle = o.color;
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+const line3 = (C, a, b, o) => strokePoly(C, [a, b], o);
+
+function glowDot(s, r, core, mid) {
+  const g = ctx.createRadialGradient(s[0], s[1], 0, s[0], s[1], r);
+  g.addColorStop(0, core);
+  g.addColorStop(0.35, mid);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+function solidDot(C, p, r, color) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+
+function label3(C, p, text, o) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.save();
+  ctx.font = o.font || ((o.size || 12) + 'px ' + FONT_CN);
+  ctx.fillStyle = o.color || '#c4d2e6';
+  ctx.textAlign = o.align || 'left';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(3,6,12,.85)';
+  ctx.shadowBlur = 4;
+  ctx.fillText(text, s[0] + (o.dx || 0), s[1] + (o.dy || 0));
+  ctx.restore();
+}
+
+function arrowAt(C, tip3, before3, color) {
+  const t = proj(C, tip3), b = proj(C, before3);
+  if (!t || !b) return;
+  const a = Math.atan2(t[1]-b[1], t[0]-b[0]);
+  const L = 9;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.4;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a-0.42), t[1]-L*Math.sin(a-0.42));
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a+0.42), t[1]-L*Math.sin(a+0.42));
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* ================= 常用场景部件 ================= */
+const AXIS = 'rgba(159,176,200,0.9)';
+const AXIS_DIM = 'rgba(159,176,200,0.5)';
+
+/* 坐标轴：o = { ex, ey, yTicks:[], xTicks:[], tAxis:bool, v(秒刻度间距的波速) } */
+function drawAxes(C, o) {
+  const ex = o.ex, ey = o.ey;
+  line3(C, [-ex, 0, 0], [ex, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [ex, 0, 0], [ex - 0.2, 0, 0], AXIS);
+  label3(C, [ex + 0.22, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  line3(C, [0, -ey, 0], [0, ey, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, ey, 0], [0, ey - 0.2, 0], AXIS);
+  label3(C, [0, ey + 0.18, 0], 'y', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  if (o.tAxis) {
+    line3(C, [0, 0, 0], [0, 0, WAVE_LEN + 0.5], { width: 1.4, color: AXIS });
+    arrowAt(C, [0, 0, WAVE_LEN + 0.5], [0, 0, WAVE_LEN + 0.3], AXIS);
+    label3(C, [0, 0, WAVE_LEN + 0.9], 't', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+    const v = o.v || 1;
+    const every = v < 0.8 ? 2 : 1;
+    for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+      line3(C, [0, -0.06, k*v], [0, 0.06, k*v], { width: 1.2, color: AXIS_DIM });
+      if (k % every === 0) {
+        label3(C, [0, -0.25, k*v], k + 's', { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+      }
+    }
+  }
+  for (const k of (o.yTicks || [])) {
+    for (const yv of [k, -k]) {
+      line3(C, [-0.05, yv, 0], [0.05, yv, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [-0.13, yv, 0], (yv < 0 ? '−' : '') + Math.abs(yv), { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+    }
+  }
+  for (const k of (o.xTicks || [])) {
+    for (const xv of [k, -k]) {
+      line3(C, [xv, -0.05, 0], [xv, 0.05, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [xv, -0.24, 0], (xv < 0 ? '−' : '') + Math.abs(xv), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+    }
+  }
+}
+
+/* z=0 平面方格网格（几何类场景） */
+function drawGridXY(C, g, step) {
+  const n = Math.round(g / step);
+  for (let i = -n; i <= n; i++) {
+    if (i === 0) continue;
+    const u = i * step;
+    line3(C, [u, -g, 0], [u, g, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+    line3(C, [-g, u, 0], [g, u, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+  }
+}
+
+/* y–t 时间平面网格（流式波形类场景）：o = { yMax, v } */
+function drawTimeGrid(C, o) {
+  const g = o.yMax, v = o.v;
+  for (let i = Math.round(-g*2); i <= Math.round(g*2); i++) {
+    if (i === 0) continue;
+    line3(C, [0, i/2, 0], [0, i/2, WAVE_LEN], { width: 1, color: 'rgba(148,163,184,0.10)' });
+  }
+  for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+    line3(C, [0, -g, k*v], [0, g, k*v], { width: 1, color: 'rgba(148,163,184,0.07)' });
+  }
+}
+
+/* 周期标尺（琥珀）：在平面 x=px、高度 yb 处，从 z=0 画到 z=T·v */
+function drawPeriodBracket(C, Tsec, v, px, yb, text) {
+  const zT = Tsec * v;
+  if (zT > WAVE_LEN + 0.01) return;
+  const amber = 'rgba(251,191,36,0.75)';
+  line3(C, [px, yb, 0], [px, yb, zT], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, 0], [px, yb + 0.06, 0], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, zT], [px, yb + 0.06, zT], { width: 1.2, color: amber });
+  label3(C, [px, yb - 0.2, zT/2], text, { size: 10.5, color: 'rgba(251,191,36,.9)', align: 'center' });
+}
+
+/* 单位圆（半径 A，位于 z=0 平面，青色源几何） */
+function drawCircle(C, A) {
+  const cpts = [];
+  for (let i = 0; i <= 72; i++) {
+    const a = i / 72 * TAU;
+    cpts.push([A * Math.cos(a), A * Math.sin(a), 0]);
+  }
+  strokePoly(C, cpts, { width: 6, color: 'rgba(45,212,234,0.13)' });
+  strokePoly(C, cpts, { width: 2, color: 'rgba(45,212,234,0.95)' });
+  for (let q = 0; q < 4; q++) {
+    const a = q * Math.PI / 2;
+    line3(C, [A*0.95*Math.cos(a), A*0.95*Math.sin(a), 0],
+             [A*1.06*Math.cos(a), A*1.06*Math.sin(a), 0],
+             { width: 1, color: 'rgba(45,212,234,0.5)' });
+  }
+  solidDot(C, [0, 0, 0], 2.2, 'rgba(159,176,200,0.9)');
+}
+
+/* 角度弧 θ（琥珀度量注记） */
+function drawAngleArc(C, th, A) {
+  const thm = mod2pi(th);
+  if (thm <= 0.03) return;
+  const r0 = Math.max(0.14, Math.min(0.34, 0.5 * A));
+  const n = Math.max(2, Math.ceil(thm / 0.06));
+  const apts = [];
+  for (let j = 0; j <= n; j++) {
+    const a = thm * j / n;
+    apts.push([r0 * Math.cos(a), r0 * Math.sin(a), 0]);
+  }
+  strokePoly(C, apts, { width: 1.6, color: 'rgba(251,191,36,0.9)' });
+  label3(C, [(r0 + 0.15) * Math.cos(thm/2), (r0 + 0.15) * Math.sin(thm/2), 0], 'θ',
+    { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+}
+
+/* 读数区固定首两行（本工具改用场景级 roHead()，此函数保留以维持引擎完整性） */
+function readoutHead() {
+  const th = state.theta;
+  const deg = (mod2pi(th) * 180 / Math.PI).toFixed(0);
+  const lap = fmt(th / TAU);
+  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;θ = ωt = <b>' + fmt(th) + '</b> rad</div>' +
+         '<div class="dim">' + t({ zh: '≡ ' + deg + '°（第 ' + lap + ' 圈）', en: '≡ ' + deg + '° (turn ' + lap + ')' }) + '</div>';
+}
+
+/* ================= 主绘制与主循环 ================= */
+function draw() {
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+  const C = makeCam();
+  SCENES[curTab].draw(C);
+}
+
+function resetSim() {
+  state.t = 0;
+  state.theta = 0;
+  /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
+     相位上，「重置」就名不副实了 */
+  Object.keys(driveOff).forEach(id => { driveOff[id] = 0; driveOffAt[id] = 0; });
+  samples.length = 0;
+  pushSample();
+}
+
+let lastTs = performance.now(), lastRO = 0;
+let frameErrLogged = false;
+/* 规范 §8 硬要求：frame() 整体 try/catch，rAF 放 finally —— 任何一帧抛错
+   （某个场景的 draw/readout 出问题）都不能让动画循环整个停死，画面必须继续。
+   错误只喊一次，避免把控制台刷爆。 */
+function frame(ts) {
+  try {
+    const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
+    lastTs = ts;
+
+    if (tween) {
+      const k = Math.min(1, (ts - tween.t0) / tween.dur);
+      const e = ease(k);
+      const f = tween.from, o = tween.to;
+      cam.az = f.az + wrapPI(o.az - f.az) * e;
+      cam.el = f.el + (o.el - f.el) * e;
+      cam.dist = f.dist + (o.dist - f.dist) * e;
+      cam.tx = f.tx + (o.tx - f.tx) * e;
+      cam.ty = f.ty + (o.ty - f.ty) * e;
+      cam.tz = f.tz + (o.tz - f.tz) * e;
+      if (k >= 1) tween = null;
+    }
+
+    if (state.running) {
+      state.t += dt;
+      state.theta += state.omega * dt;
+      applyDrive();
+      const dv = SCENES[curTab].drive;
+      if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
+      pushSample();
+    }
+    const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
+    while (samples.length && samples[0].t < state.t - windowSec) samples.shift();
+
+    draw();
+    if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
+  } catch (err) {
+    if (!frameErrLogged) {
+      frameErrLogged = true;
+      console.error('[math-viz] frame() 抛错，已捕获，动画循环继续：', err);
+    }
+  } finally {
+    requestAnimationFrame(frame);
+  }
+}
+
+const roEl = document.getElementById('readout');
+function updateReadout() { roEl.innerHTML = SCENES[curTab].readout(); }
+
+/* ================= 场景作用域参数与时间驱动 ================= */
+const paramWraps = {};   // key -> { wrap, input, val, p }
+const autoPlay = {};     // tabId -> 是否自动播放
+const driveMode = {};    // tabId -> 'loop' | 'pingpong'
+const driveOff = {};     // tabId -> 驱动时钟相对引擎时钟的累计偏移（= 自动播放累计关停时长）
+const driveOffAt = {};   // tabId -> 本次关停的起点（引擎时钟读数）
+
+/* 驱动时钟：引擎时钟减去「自动播放关掉的那些时间」。关停期间它不走，
+   所以重新打开时驱动量从原地续上，不跳变。求值仍是纯函数——只是把
+   自变量从 state.t 换成这个校正过的时钟，不做增量积分：既不累积浮点
+   漂移，录制器按固定 dt 离线重放也能复现同一串值（偏移在一次渲染内是常量）。
+   已知语义：偏移只扣「自动播放关停」的时长，不扣「页签没被选中」的时长——
+   离开某页签 10 秒再切回来，它的驱动量会跳到 10 秒后的位置。这与「暂停只冻结
+   模拟、相机照走」是同一族约定（时钟是全局的，页签只是不同的观测口），
+   如需改成每页签独立时钟，得连录制器的离线重放一起改，不要只改这里。 */
+function driveClock(id) { return state.t - (driveOff[id] || 0); }
+
+/* 驱动求值：驱动时钟（见 driveClock）的纯函数，不做增量积分 —— 不累积
+   浮点漂移，暂停恢复不跳变，且录制器按固定 dt 推进 state.t 时可直接复用。 */
+function driveValue(d, tt, mode) {
+  const m = mode || d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+  const u = ((tt / d.period) % 1 + 1) % 1;              // 负时间也落在 [0,1)
+  const s = (m === 'loop') ? u : (u < 0.5 ? 2 * u : 2 - 2 * u);
+  return d.from + (d.to - d.from) * s;
+}
+
+/* 把当前场景的驱动量按引擎时钟写回 state。只动数据、不碰 DOM ——
+   录制器的离线渲染也调它，那条路径上没有面板可同步（见规范 §D1）。 */
+function applyDrive() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return;
+  state[sc.drive.key] = driveValue(sc.drive, driveClock(curTab), driveMode[curTab]);
+}
+
+/* 供录制器判断无缝循环的吸附基准；无驱动或用户关掉自动播放时返回 null */
+function driveInfo() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return null;
+  return { key: sc.drive.key, period: sc.drive.period, mode: driveMode[curTab] };
+}
+
+const warnedNoInvMap = {};   // key -> 已就「有 map 没 invMap」告警过
+
+/* 把驱动出的值反算回滑块刻度并回显。带 map 的参数必须提供 invMap，
+   否则只能退回显示映射后的值（规范 §8 已把 invMap 列为硬约束）。 */
+function syncParamSlider(key) {
+  const e = paramWraps[key];
+  if (!e) return;
+  /* 本函数每帧都被调用，所以每个 key 只喊一次，别把控制台刷爆 */
+  if (e.p.map && !e.p.invMap && !warnedNoInvMap[key]) {
+    warnedNoInvMap[key] = true;
+    console.warn('[math-viz] 参数 "' + key + '" 声明了 map 却没有 invMap：' +
+                 '驱动值会被当作滑杆原始值写进量程，回显与 state 会错位（规范 §8）。');
+  }
+  const raw = (e.p.map && e.p.invMap) ? e.p.invMap(state[key]) : state[key];
+  /* 先写进 input，再读回来显示：range 带 step，写进去的值会被吸附到刻度上。
+     若直接显示 raw，读数与滑杆句柄就会对不上；更要命的是下一次 upd() 读的是
+     吸附后的 input.value，会把这点差值永久写回 state —— 暂停时 frame() 不再跑
+     applyDrive()，再也修不回来。upd() 的触发面已经收窄到「用户拖动这根滑杆」
+     一条：语言切换只调 render()（见下方 relabel 注释），不再写 state。 */
+  e.input.value = raw;
+  e.val.textContent = e.p.fmt(parseFloat(e.input.value));
+}
+
+/* 按当前页签的 params 显隐滑块。省略 params = 全部显示（向后兼容）。
+   不复制 DOM：滑块值是跨页签共享的 state，复制会引入多份 DOM 的同步问题。 */
+function syncParamVisibility() {
+  const list = SCENES[curTab] && SCENES[curTab].params;
+  Object.keys(paramWraps).forEach(k => {
+    paramWraps[k].wrap.style.display = (!list || list.indexOf(k) >= 0) ? '' : 'none';
+  });
+}
+
+/* 开关自动播放的唯一入口：复选框与「拖滑块接管」都走这里，驱动时钟的记账
+   才不会漏。关掉时记下停摆起点，打开时把停摆时长补进偏移量。 */
+function setAutoPlayFor(id, on) {
+  on = !!on;
+  if (!!autoPlay[id] === on) return;            // 状态没变就别动时钟，避免重复记账
+  if (on) driveOff[id] += state.t - driveOffAt[id];
+  else driveOffAt[id] = state.t;
+  autoPlay[id] = on;
+  refreshDriveRow(id);
+}
+
+function setAutoPlay(on) { setAutoPlayFor(curTab, on); }
+
+function refreshDriveRow(id) {
+  const row = document.querySelector('.drive[data-tab="' + id + '"]');
+  if (!row) return;
+  row.querySelector('input').checked = !!autoPlay[id];
+  row.querySelectorAll('[data-mode]').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === driveMode[id]);
+  });
+}
+
+function buildDrive() {
+  const host = document.getElementById('driveHost');
+  Object.keys(SCENES).forEach(id => {
+    const d = SCENES[id].drive;
+    if (!d) return;
+    autoPlay[id] = true;
+    driveMode[id] = d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+    driveOff[id] = 0; driveOffAt[id] = 0;      // 先置零，页签才不会把 undefined 读进算式
+    const row = document.createElement('div');
+    row.className = 'drive';
+    row.dataset.tab = id;
+    row.innerHTML = '<label class="tg"><input type="checkbox" checked><span class="autoL"></span></label>' +
+      '<span class="dmode"><button class="btn" data-mode="pingpong"></button>' +
+      '<button class="btn" data-mode="loop"></button></span>';
+    row.querySelector('input').addEventListener('change', e => { setAutoPlayFor(id, e.target.checked); });
+    row.querySelectorAll('[data-mode]').forEach(b => {
+      b.addEventListener('click', () => { driveMode[id] = b.dataset.mode; refreshDriveRow(id); });
+    });
+    host.appendChild(row);
+    const relabel = () => {
+      row.querySelector('.autoL').textContent = t(UI.autoPlay);
+      row.querySelector('[data-mode="pingpong"]').textContent = t(UI.pingpong);
+      row.querySelector('[data-mode="loop"]').textContent = t(UI.loop);
+    };
+    RELABEL.push(relabel);
+    relabel();
+    refreshDriveRow(id);
+  });
+}
+
+/* ================= UI 生成（由 ①② 声明驱动） ================= */
+function buildParams() {
+  const host = document.getElementById('paramsHost');
+  PARAMS.forEach(p => {
+    const wrap = document.createElement('div');
+    wrap.className = 'ctl';
+    wrap.innerHTML = '<div class="top"><label></label><span class="val"></span></div>';
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
+    const val = wrap.querySelector('.val');
+    /* render 只回显滑杆当前刻度；upd 才是「用户动了滑杆」的语义（写 state）。
+       两者分开，语言切换就不会顺手把读数写回 state —— 见下方 relabel 注释。 */
+    const render = () => { val.textContent = p.fmt(parseFloat(input.value)); };
+    const upd = () => {
+      const raw = parseFloat(input.value);
+      state[p.key] = p.map ? p.map(raw) : raw;
+      render();
+    };
+    input.addEventListener('input', upd);
+    wrap.appendChild(input);
+    host.appendChild(wrap);
+    paramWraps[p.key] = { wrap, input, val, p };
+    /* 用户伸手拖被驱动的滑块 = 明确要接管，自动播放当场关闭，
+       否则下一帧就会被驱动值覆盖回去。这是与「暂停只冻结模拟」一致的语义。 */
+    input.addEventListener('input', () => {
+      const d = SCENES[curTab] && SCENES[curTab].drive;
+      if (d && d.key === p.key && autoPlay[curTab]) setAutoPlay(false);
+    });
+    upd();                       // 建面板时用默认刻度初始化 state
+    /* 语言切换只重排文案（fmt 里可能带 t()），绝不能顺手调 upd() 把滑杆刻度
+       写回 state：被 drive 驱动的参数，其 state 值比滑杆 step 精细得多，写回去
+       等于把它永久量化一次；暂停时 frame() 不再跑 applyDrive()，再也修不回来。 */
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); render(); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+function buildToggles() {
+  const host = document.getElementById('togglesHost');
+  Object.keys(SCENES).forEach(id => {
+    const grp = document.createElement('div');
+    grp.className = 'toggles';
+    grp.dataset.tab = id;
+    SCENES[id].toggles.forEach(tg => {
+      if (!(tg.key in state)) state[tg.key] = tg.checked;
+      const lab = document.createElement('label');
+      lab.className = 'tg';
+      lab.innerHTML = '<input type="checkbox" data-key="' + tg.key + '"' + (state[tg.key] ? ' checked' : '') + '>' +
+        '<i class="dot" style="--c:' + tg.color + '"></i><span class="tgl"></span>';
+      const cb = lab.querySelector('input');
+      cb.addEventListener('change', () => {
+        state[tg.key] = cb.checked;
+        document.querySelectorAll('input[data-key="' + tg.key + '"]').forEach(o => { o.checked = cb.checked; });
+      });
+      const relabel = () => { lab.querySelector('.tgl').innerHTML = t(tg.label); };
+      RELABEL.push(relabel);
+      relabel();
+      grp.appendChild(lab);
+    });
+    host.appendChild(grp);
+  });
+}
+
+function buildViews() {
+  const host = document.getElementById('viewsHost');
+  Object.keys(SCENES).forEach(id => {
+    const row = document.createElement('div');
+    row.className = 'views';
+    row.dataset.tab = id;
+    const lab = document.createElement('span');
+    lab.className = 'vlabel';
+    row.appendChild(lab);
+    const labRelabel = () => { lab.textContent = t(UI.views); };
+    RELABEL.push(labRelabel);
+    labRelabel();
+    Object.keys(SCENES[id].views).forEach(name => {
+      const b = document.createElement('button');
+      b.className = 'btn vbtn';
+      b.dataset.view = name;
+      b.addEventListener('click', () => applyView(name));
+      row.appendChild(b);
+      const relabel = () => { b.textContent = t(SCENES[id].views[name].label); };
+      RELABEL.push(relabel);
+      relabel();
+    });
+    host.appendChild(row);
+  });
+}
+
+function buildTabs() {
+  const nav = document.getElementById('tabsNav');
+  Object.keys(SCENES).forEach(id => {
+    const b = document.createElement('button');
+    b.className = 'tab';
+    b.dataset.tab = id;
+    b.addEventListener('click', () => switchTab(id));
+    nav.appendChild(b);
+    const relabel = () => { b.textContent = t(SCENES[id].label); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+/* ================= 视角与页签 ================= */
+/* 选择器必须限定在 .views 之内：.vbtn 只是个样式类，工具可能为了复用外观
+   把它挂到别处的按钮上（如文本预设）。不限定的话 closest('.views') 会返回
+   null，这里当场抛错，视角高亮从此再不更新。行为查询不能只认样式类。 */
+function refreshViewButtons() {
+  document.querySelectorAll('.views .vbtn').forEach(b => {
+    const row = b.closest('.views');
+    b.classList.toggle('active', row.dataset.tab === curTab && b.dataset.view === lastView[curTab]);
+  });
+}
+function viewDist(d) { return (W < 820 || W < H) ? d * 1.4 : d; }
+function applyView(name) {
+  const vw = SCENES[curTab].views[name];
+  if (!vw) return;
+  if (vw.onSelect) vw.onSelect();   /* 可选联动：如自动开启该视角对应的曲线开关 */
+  tween = {
+    from: { az: cam.az, el: cam.el, dist: cam.dist, tx: cam.tx, ty: cam.ty, tz: cam.tz },
+    to:   { az: vw.az, el: vw.el, dist: viewDist(vw.dist), tx: vw.tx || 0, ty: vw.ty || 0, tz: vw.tz || 0 },
+    t0: performance.now(),
+    dur: REDUCED ? 1 : 750
+  };
+  lastView[curTab] = name;
+  refreshViewButtons();
+}
+
+const brandDesc = document.getElementById('brandDesc');
+const tipsEl = document.getElementById('tips');
+function switchTab(id) {
+  if (id === curTab) return;
+  curTab = id;
+  tween = null;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+  document.querySelectorAll('.toggles[data-tab], .views[data-tab], .drive[data-tab]').forEach(el => {
+    el.style.display = el.dataset.tab === id ? '' : 'none';
+  });
+  cam = cams[id];
+  brandDesc.textContent = t(SCENES[id].brand);
+  tipsEl.textContent = t(SCENES[id].tips);
+  syncParamVisibility();
+  refreshViewButtons();
+  updateReadout();
+}
+
+/* ================= 播放 / 重置 / 折叠 ================= */
+const btnPlay = document.getElementById('btnPlay');
+function togglePlay() {
+  state.running = !state.running;
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+}
+btnPlay.addEventListener('click', togglePlay);
+document.getElementById('btnReset').addEventListener('click', resetSim);
+
+const panel = document.getElementById('panel');
+const btnFold = document.getElementById('btnFold');
+btnFold.addEventListener('click', () => {
+  const c = panel.classList.toggle('collapsed');
+  btnFold.textContent = c ? '+' : '−';
+});
+if (window.innerWidth < 760) {
+  panel.classList.add('collapsed');
+  btnFold.textContent = '+';
+}
+
+/* ================= 语言切换 ================= */
+function applyLang() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.title = t(TOOL.title);
+  document.querySelector('.brand h1').textContent = t(TOOL.h1);
+  document.getElementById('panelTitle').textContent = t(UI.panelTitle);
+  document.querySelector('.hint').textContent = t(UI.hint);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+  document.getElementById('btnReset').textContent = t(UI.reset);
+  RELABEL.forEach(f => f());
+  brandDesc.textContent = t(SCENES[curTab].brand);
+  tipsEl.textContent = t(SCENES[curTab].tips);
+  updateReadout();
+}
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('lang', l);
+    history.replaceState(null, '', u);
+  } catch (e) {}
+  applyLang();
+}
+document.getElementById('btnLang').addEventListener('click', () => setLang(LANG === 'zh' ? 'en' : 'zh'));
+document.getElementById('verBadge').textContent = 'v' + VERSION;
+
+/* ================= 交互：旋转 / 平移 / 缩放 ================= */
+const pointers = new Map();
+let pinch = null;
+
+function pan(dx, dy) {
+  const C = makeCam();
+  const s = cam.dist / FOCAL;
+  cam.tx = clamp(cam.tx - C.r[0]*dx*s + C.u[0]*dy*s, -6, 6);
+  cam.ty = clamp(cam.ty - C.r[1]*dx*s + C.u[1]*dy*s, -5, 5);
+  cam.tz = clamp(cam.tz - C.r[2]*dx*s + C.u[2]*dy*s, -3, 11);
+}
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, btn: e.button });
+  tween = null;
+  lastView[curTab] = null;
+  refreshViewButtons();
+  if (pointers.size === 2) {
+    const vs = Array.from(pointers.values());
+    pinch = {
+      gap: Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y),
+      cx: (vs[0].x + vs[1].x) / 2,
+      cy: (vs[0].y + vs[1].y) / 2
+    };
+  }
+  canvas.classList.add('dragging');
+});
+
+canvas.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  p.x = e.clientX;
+  p.y = e.clientY;
+  if (pointers.size === 1) {
+    const panMode = e.shiftKey || (e.buttons & 2) || p.btn === 2 || p.btn === 1;
+    if (panMode) {
+      pan(dx, dy);
+    } else {
+      cam.az -= dx * 0.0055;
+      cam.el = clamp(cam.el + dy * 0.0055, -1.45, 1.53);
+    }
+  } else if (pointers.size === 2 && pinch) {
+    const vs = Array.from(pointers.values());
+    const gap = Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y);
+    const cx = (vs[0].x + vs[1].x) / 2, cy = (vs[0].y + vs[1].y) / 2;
+    if (gap > 1) cam.dist = clamp(cam.dist * pinch.gap / gap, 4.5, 60);
+    pan(cx - pinch.cx, cy - pinch.cy);
+    pinch = { gap: gap, cx: cx, cy: cy };
+  }
+});
+
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+  if (!pointers.size) canvas.classList.remove('dragging');
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  tween = null;
+  cam.dist = clamp(cam.dist * Math.exp(e.deltaY * 0.0012), 4.5, 60);
+}, { passive: false });
+
+canvas.addEventListener('dblclick', () => applyView(Object.keys(SCENES[curTab].views)[0]));
+
+window.addEventListener('keydown', e => {
+  const tg = e.target.tagName;
+  if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || tg === 'BUTTON') return;
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'r' || e.key === 'R') resetSim();
+  else if (e.key === 't' || e.key === 'T') {
+    const keys = Object.keys(SCENES);
+    switchTab(keys[(keys.indexOf(curTab) + 1) % keys.length]);
+  }
+  else if (e.key >= '1' && e.key <= '9') {
+    const names = Object.keys(SCENES[curTab].views);
+    const i = +e.key - 1;
+    if (i < names.length) applyView(names[i]);
+  }
+});
+
+/* ================= 启动 ================= */
+resize();
+buildTabs();
+buildParams();
+buildDrive();
+buildToggles();
+buildViews();
+Object.keys(SCENES).forEach(id => {
+  const first = Object.keys(SCENES[id].views)[0];
+  const v = SCENES[id].views[first];
+  cams[id] = { az: v.az, el: v.el, dist: viewDist(v.dist), tx: v.tx || 0, ty: v.ty || 0, tz: v.tz || 0 };
+  lastView[id] = first;
+});
+switchTab(Object.keys(SCENES)[0]);
+applyLang();
+resetSim();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
