@@ -77,6 +77,8 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 
 | [从牛顿到闵可夫斯基 · 时空的重建 · Newton to Minkowski](outputs/newton-to-minkowski-3d.html) | Newton's stack of absolute simultaneity slices, the crack where Galilean velocity addition fails, and the minus sign derived rather than assumed — drag ε from +1 to −1 and the null set morphs from a point to a plane to the 45° cone, plus where γ takes over |
 
+| [混沌双摆 · 确定性的不可预测 · Chaotic Double Pendulum](outputs/chaos-double-pendulum-3d.html) | Twin pendulums differing in the sixth decimal, the parallel family of log δ(t) lines that prices one more digit of precision at ln10/λ seconds of forecast, stretching and folding as the mechanism of chaos, and KAM tori breaking on a Poincaré section |
+
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
 ## Usage
