@@ -71,6 +71,7 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [线积分、Green 定理与 Stokes 定理 · Line Integrals, Green's & Stokes'](outputs/line-integrals-green-stokes-3d.html) | Line integrals as a signed fence of F·T̂, Green's theorem as interior cells cancelling until only the rim survives, and Stokes' theorem bending the same picture over a soap-film surface |
 | [信息熵、惊奇度与编码 · Information Entropy, Surprise & Coding](outputs/information-entropy-coding-3d.html) | Surprise as −log₂p (+1 bit per halving), entropy as long-run average surprise peaking at the fair coin, and Huffman trees whose mean code length never beats the entropy line |
 | [霍夫曼编码 · 从文本到比特 · Huffman Coding](outputs/huffman-coding-text-3d.html) | Type your own text and watch it become bits: frequencies replacing meaning, the tree merging bottom-up, short codes for frequent characters, and a decoder recovering the text from a stream with no separators |
+| [维度的阶梯 · 从点到分形 · Dimension & Fractals](outputs/dimension-fractal-3d.html) | d = log N / log r on one log-log fan, with the non-integer slopes wedged between the integers; box counting that measures the dimension, the Hausdorff measure that forces the exponent, and a tesseract whose nested cubes are only a shadow |
 
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
