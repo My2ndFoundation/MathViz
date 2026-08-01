@@ -794,7 +794,7 @@ function frame(ts) {
     while (samples.length && samples[0].t < state.t - windowSec) samples.shift();
 
     draw();
-    if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
+    if (ts - lastRO > 120) { lastRO = ts; updateReadout(); refreshRecInfo(); }
   } catch (err) {
     frameError(err);
   } finally {
@@ -862,7 +862,7 @@ const recState = {
   mode: 'live',              // 'live' | 'recording' | 'replay'
   rows: [], fields: null, shape: null,
   seed: null, tab: null, srcName: null,
-  i: 0, playing: true, rate: 1, acc: 0,
+  i: 0, playing: true, rate: 1, acc: 0, t0: 0,
   roundAt: null, note: null,
   verify: null               // { delta, reproduced } —— §11.2 的种子比对结论
 };
@@ -925,11 +925,18 @@ function simAdvance(d) {
 
 function recStartRecording() {
   const h = recHooks(); if (!h) return;
+  /* 起录前先把本页签重置到一轮的开头（§11.3）。这一步是引擎的责任，不是各
+     工具在 seed() 里偷偷做 —— 否则 seed() 就成了一个会改状态的取值器，是留给
+     下一个人的陷阱。理由：不重置的话，seed 描述的是这一轮的起点，而第 0 行
+     描述的是「你按下录制的那一刻」，§11.2 的重算于是从头就跟存档不在同一段
+     时间上，比对必然失败，且失败得像一次正常的混沌发散——查都没处查。 */
+  if (h.reseed && h.seed) h.reseed(h.seed());
   const snap = h.capture();
   recState.mode = 'recording';
   recState.rows = []; recState.tab = curTab;
   recState.shape = snap; recState.fields = recShapeOf(snap);
   recState.seed = h.seed(); recState.roundAt = h.roundOf();
+  recState.t0 = state.t;          // 录制起点的引擎时钟；回放要照它复原，见 recStep
   recState.note = null; recState.verify = null; recState.acc = 0;
   recPush();                                      // 立即记下第 0 行
   buildRecRow();
@@ -963,7 +970,10 @@ function recStep(dt) {
     if (recState.i >= recState.rows.length - 1) { recState.acc = 0; recState.playing = false; buildRecRow(); }
   }
   h.restore(recUnflatten(recState.rows[recState.i], recState.shape));
-  state.t = recState.i * REC_DT;
+  /* 从录制起点算起，不是从 0 —— 录制未必始于 t = 0，凭空归零会让任何把引擎
+     时钟纳入 capture() 的工具在回放时对不上（实测三体差 6.0 s，正是起录前
+     跑过的那段）。 */
+  state.t = recState.t0 + recState.i * REC_DT;
   pushSample();
 }
 
@@ -982,7 +992,7 @@ function recSave() {
     tool: { id: TOOL.id, version: VERSION, engine: ENGINE_VERSION },
     tab: recState.tab, recordedAt: new Date().toISOString(),
     seed: recState.seed,
-    trace: { dt: REC_DT, fields: recState.fields, rows: recState.rows }
+    trace: { dt: REC_DT, t0: recState.t0, fields: recState.fields, rows: recState.rows }
   };
   const blob = new Blob([JSON.stringify(doc)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -1057,6 +1067,7 @@ function recLoadDoc(doc, name) {
   recState.fields = doc.trace.fields;
   recState.shape = h.capture();
   recState.seed = doc.seed; recState.tab = doc.tab; recState.srcName = name;
+  recState.t0 = +doc.trace.t0 || 0;
   recState.i = 0; recState.acc = 0; recState.playing = true; recState.rate = 1; recState.note = null;
   samples.length = 0;
   buildRecRow();
@@ -1213,17 +1224,33 @@ function buildRecRow() {
     bits.push(t(UI.recReplay) + ' ' + (recState.i + 1) + ' / ' + recState.rows.length);
     if (recState.srcName) bits.push(recState.srcName);
     if (recState.verify) {
+      /* 尾巴「这不是 bug，见提示」只在**复现失败**时才有意义 —— 成功时贴上去
+         会读成「复现了 —— 这不是 bug」，反而让人以为出了事。 */
       bits.push(t(recState.verify.reproduced ? UI.recVerifyOK : UI.recVerifyNo) +
-                recState.verify.delta.toExponential(1) + t(UI.recVerifyTail));
+                recState.verify.delta.toExponential(1) +
+                (recState.verify.reproduced ? '）' : t(UI.recVerifyTail)));
     }
   } else {
     bits.push(recState.rows.length + t(UI.recRows));
   }
   if (recState.note) bits.push(t(recState.note));
   info.textContent = bits.join(' · ');
+  info.dataset.rec = '1';
   host.appendChild(info);
 
   refreshRecLocks();
+}
+
+/* 录制中行数是每帧在长的，而 buildRecRow() 只在状态切换时跑 —— 只改这一行
+   文本，别整行重建（重建会打断按钮的焦点与 hover）。由 frame() 的读数节流
+   一并调用，120 ms 一次足够。 */
+function refreshRecInfo() {
+  if (recState.mode !== 'recording') return;
+  const el = document.querySelector('#recHost .recinfo[data-rec]');
+  if (!el) return;
+  const bits = [recState.rows.length + t(UI.recRows)];
+  if (recState.note) bits.push(t(recState.note));
+  el.textContent = bits.join(' · ');
 }
 
 /* 回放期间种子滑杆置灰 —— 改它们等于改种子，画面与数据会脱节（§11.7）。 */
