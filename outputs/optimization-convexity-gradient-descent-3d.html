@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.1">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.0.0">
 <title>优化、凸性与梯度下降 · Optimisation & Gradient Descent</title>
 <!-- ============================================================
@@ -13,6 +13,10 @@
   引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
 
   版本记录（changelog，新→旧）：
+    1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
+                       驱动接管时下降轨道改为整条重播，轨迹始终对应当前参数
+                       学习率 η 滑块补进「损失曲面 / 凸与非凸」两页（两页都在用 η）
+                       关掉自动播放时轨道随读数的 n 一起收回，不再多画出几十步
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-30  首个版本（含双语，四场景：一维下降 / 损失曲面 / 凸与非凸 / 约束优化）
 ============================================================ -->
@@ -120,6 +124,11 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 .tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
 .tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
 
+/* 驱动控制行 */
+.drive{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0 2px}
+.drive .dmode{display:flex;gap:4px;margin-left:auto}
+.drive .dmode .btn{padding:4px 8px;font-size:11px}
+
 /* 读数与提示 */
 .readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
   font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
@@ -162,6 +171,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       <button class="btn wide" id="btnPlay">⏸ 暂停</button>
       <button class="btn" id="btnReset">↺ 重置</button>
     </div>
+    <div id="driveHost"></div>
     <div id="togglesHost"></div>
     <div id="viewsHost"></div>
     <div class="readout" id="readout"></div>
@@ -206,6 +216,9 @@ const UI = {
   resume: { zh: '▶ 继续', en: '▶ Resume' },
   reset:  { zh: '↺ 重置', en: '↺ Reset' },
   views:  { zh: '视角', en: 'View' },
+  autoPlay: { zh: '自动播放', en: 'Auto-play' },
+  pingpong: { zh: '往返',     en: 'Ping-pong' },
+  loop:     { zh: '循环',     en: 'Loop' },
   hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
             en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
 };
@@ -273,7 +286,13 @@ function constrOpt() {
   return { inside: false, x: bx, y: by, f: bf };
 }
 
-/* —— 梯度下降轨道（真实历史：只追加，参数中途改变不重算旧步；R 重置重播） —— */
+/* —— 梯度下降轨道 —— 两种语义，按「驱动是否接管本页签」切换：
+   · 手动模式（自动播放关闭）：真实历史，只追加，参数中途改变不重算旧步，
+     R 重置重播。这是本工具原有的不变量，一字未动。
+   · 驱动模式（本页签有 drive 且自动播放开着）：驱动量每帧都在变，若还只追加，
+     画面就会留着一条用旧参数算出的轨迹，与读数对不上——那正是「真实历史」
+     不变量本来要防的事。所以此时改为整条重播：每帧用当前参数从 x₀ 重算固定
+     步数，轨迹与读数始终同源。关掉自动播放即刻回到追加语义。 */
 let orb1 = [0], orbA = [[0, 0]], orbB1 = [[0, 0]], orbB2 = [[0, 0]];
 function reseedOrbits() {
   const x0 = clamp(state.startX, -1.8, 1.8), y0 = clamp(state.startY, -1.8, 1.8);
@@ -282,7 +301,34 @@ function reseedOrbits() {
   orbB1 = [[x0, y0]];
   orbB2 = [[-x0, -y0]];   /* B 从中心对称起点出发 */
 }
-function nNow() { return Math.min(Math.floor(state.theta), ORBIT_MAX); }
+
+/* 驱动模式下每帧重播的步数（按页签）：
+   one 的轨迹沿 n 轴排开，可视窗口只容得下 WAVE_LEN*0.8/ZSTEP ≈ 14 步，
+   取满这一窗，画出来正好是从 x₀ 到第 14 步的完整一段；
+   valley / convex 的路径整条画在 xy 平面上（drawSurfPath 最多取 260 点），
+   步数给足才看得出 zig-zag 抖动与最终落进哪个井。 */
+const ORBIT_SHOW = { one: 14, valley: 60, convex: 60 };
+
+function nNow() {
+  /* driveInfo() 是引擎提供的只读访问器：本页签有 drive 且自动播放开着才非 null */
+  if (driveInfo() && ORBIT_SHOW[curTab]) return ORBIT_SHOW[curTab];
+  return Math.min(Math.floor(state.theta), ORBIT_MAX);
+}
+
+/* 把四条轨道裁到 n 步（只缩不增）。用途见 pushSample()：读数报出的 n 与画面上
+   真正画出的步数必须同源，而画面取的是 orb*.length − 1。 */
+function trimOrbits(n) {
+  const len = Math.max(1, n + 1);
+  if (len >= orb1.length) return;
+  orb1.length = len; orbA.length = len; orbB1.length = len; orbB2.length = len;
+}
+
+/* 驱动模式下判断「该重播了没有」的参数指纹：只要有一个入参动了就整条重算 */
+function orbSig() {
+  return state.eta + '|' + state.lam + '|' + state.startX + '|' + state.startY +
+         '|' + Math.round(state.surfSel);
+}
+let lastOrbSig = null;
 function gdStep1(x) {
   if (!isFinite(x)) return Infinity;
   const nx = x - state.eta * d1(x);
@@ -452,9 +498,17 @@ function setTg(key, val) {
 
 /* —— 读数区固定首两行（步进时钟版本）与公共小件 —— */
 function roHead() {
-  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;n = ⌊ωt⌋ = <b>' + nNow() + '</b></div>' +
+  /* 驱动接管时 n 不再是 ⌊ωt⌋ 而是每帧重播的固定步数，标签得跟着改口，
+     否则读数会宣称一个与画面不符的来源 */
+  const drv = driveInfo();
+  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;' +
+         (drv ? t({ zh: '重播 n = ', en: 'replay n = ' }) : 'n = ⌊ωt⌋ = ') +
+         '<b>' + nNow() + '</b></div>' +
          '<div class="dim">η = ' + fmt(state.eta) + '&ensp;·&ensp;' +
-         t({ zh: '起点由 x₀, y₀ 设定 · 按 R 重播', en: 'start set by x₀, y₀ · press R to replay' }) + '</div>';
+         t(drv ? { zh: '自动播放中 · 轨迹每帧按当前参数从 x₀ 重播',
+                   en: 'auto-playing · trajectory replayed from x₀ each frame' }
+               : { zh: '起点由 x₀, y₀ 设定 · 按 R 重播',
+                   en: 'start set by x₀, y₀ · press R to replay' }) + '</div>';
 }
 function capNote() {
   return orb1.length - 1 >= ORBIT_MAX
@@ -462,7 +516,13 @@ function capNote() {
     : '';
 }
 function divergedLabel(C, y) {
-  label3(C, [0, y, 0], t({ zh: '发散 → ±∞ · 减小 η 后按 R', en: 'diverged → ±∞ · lower η, press R' }),
+  /* 两种语义给的是两条不同的出路，标签得跟着改口（与 roHead 同一原则）：
+     驱动接管时轨迹每帧按当前参数整条重播，η 一小下一帧就重新算出有限轨迹，
+     发散不再是死局；手动模式下轨道只追加，发散那一步已经写进历史，
+     必须按 R 才会从 x₀ 重播。三个页签都能就地调 η（见各页 params）。 */
+  label3(C, [0, y, 0], t(driveInfo()
+    ? { zh: '发散 → ±∞ · 减小 η 即刻重播（无需按 R）', en: 'diverged → ±∞ · lower η and it replays at once (no R)' }
+    : { zh: '发散 → ±∞ · 减小 η 后按 R', en: 'diverged → ±∞ · lower η, press R' }),
     { font: 'italic 14px ' + FONT_MATH, color: ROSE, align: 'center' });
 }
 
@@ -489,6 +549,19 @@ const SCENES = {
   one: {
     label: { zh: '一维下降', en: '1-D descent' },
     params: ['eta', 'startX', 'omega'],
+    /* tips 的顿悟点逐字点名了 η 的三段命运：「η < 0.83 单调滑落；0.83 < η < 1.67
+       左右振荡仍收敛；η > 1.67 每步越弹越高、发散」——自变量就是学习率。
+       不驱动迭代步数 n：它是这场演进自己的一次性时钟，推它只会把轨道推到收敛后
+       定格；要让演进反复重新上膛，得动的是「下一次从 x₀ 出发时用哪个 η」。
+       配合驱动模式的整条重播（见 orb* 注释），η 一变整条轨迹立刻按新值重算：
+       低 η 是贴着抛物线缓缓下滑的密集台阶，越过 0.83 开始左右横跳，
+       越过 1.67 台阶一级比一级高、冲出裁剪框——三段命运连续地演给人看。
+       值域取满量程 [0.02, 2]：0.02 是 tips 说的「缓慢」（不退化，只是走得少），
+       2 落在发散区（|1−1.2η| = 1.4）。发散在重播语义下不再是死局——下一帧 η 一小
+       就重新算出有限轨迹，这正是旧的只追加语义做不到、必须改成重播的原因。
+       linear：2 直接跳回 0.02 会让轨迹从炸裂瞬间塌回贴地 → 默认 pingpong。
+       period 12 s：三段命运各要看清，慢一点。 */
+    drive: { key: 'eta', from: 0.02, to: 2, period: 12, kind: 'linear' },
     brand: { zh: '在一维函数 f(x) = 0.6x² 上执行梯度下降 xₙ₊₁ = xₙ − η·f′(xₙ)：切线斜率给出方向与步长，学习率 η 决定下降是稳定、缓慢还是发散。迭代沿 n 轴流出，拖拽旋转观察。',
              en: 'Gradient descent on the 1-D function f(x) = 0.6x²: xₙ₊₁ = xₙ − η·f′(xₙ). The tangent slope sets each step, and the learning rate η decides whether the descent is stable, slow, or divergent. Iterates stream out along the n axis; drag to rotate.' },
     tips: { zh: '顿悟点：按 3「损失 f·n」侧视——三维轨迹塌缩成一条「损失曲线」。η < 0.83 单调滑落；0.83 < η < 1.67 左右振荡仍收敛；η > 1.67 每步越弹越高、发散。改参数后按 R 从 x₀ 重播。',
@@ -579,7 +652,26 @@ const SCENES = {
   /* ────── 二维损失曲面：凸谷地、等高线与 zig-zag ────── */
   valley: {
     label: { zh: '损失曲面', en: 'Loss surface' },
-    params: ['lam', 'startX', 'startY', 'omega'],
+    /* η 必须在场：本页的下降路径由 gdStep2 逐步读 state.eta 算出，读数印着 η 与
+       η* = 2/(0.35λ)，tips 更是直说「把 λ 调到 8、η 调到 0.6 再按 R」——它是本页
+       正在教的量，却在阶段 2 的 params 收窄里被漏掉了。η 又是全局共享的：一维页
+       默认自动播放，几秒后就把它推到任意值（实测离开时 η ≈ 1.55），本页此前
+       连一根滑块都没有，用户无从拉回。补进来即可就地调回，且不会关掉 λ 的
+       自动播放（引擎只在「拖的正是被驱动的那根滑块」时才接管）。 */
+    params: ['lam', 'eta', 'startX', 'startY', 'omega'],
+    /* brand 与 tips 都把条件数 λ 摆在第一位：「λ 拉大后它变成狭长谷地」
+       「把 λ 调到 8、η 调到 0.6 再按 R，路径先在谷壁间剧烈抖动、再沿谷底缓慢爬行」
+       ——自变量就是 λ，不是迭代步数。
+       λ 有两条通道同时受益：曲面网格与等高线图直接由 λ 算出（碗连续拉长成谷、
+       等高线由圆变扁），而下降路径经重播语义按新 λ 整条重算，于是「谷越窄、
+       zig-zag 越剧烈」这条因果是同一帧里一起变的，看得见对应关系。
+       起点 x₀/y₀ 不选：本页的主角是谷的形状，不是从哪儿出发。
+       值域满量程 [1, 8]：λ=1 是各向同性圆碗（路径笔直射向中心，zig-zag 消失），
+       λ=8 是最病态窄谷，两端都是要看的教学端点，不退化；最小值对任何 λ 都在原点，
+       重播不会把路径的终点扯歪。
+       linear：8 直接跳回 1 会让整张曲面瞬间回弹 → 默认 pingpong。
+       period 10 s：曲面 + 等高线 + 路径三样要一起读。 */
+    drive: { key: 'lam', from: 1, to: 8, period: 10, kind: 'linear' },
     brand: { zh: '椭圆抛物面 f = 0.175(x² + λy²) 是一只凸碗：λ 拉大后它变成狭长谷地。下降路径每一步都垂直穿过等高线，却在陡峭的谷壁间来回抖动——这就是病态条件数带来的 zig-zag。',
              en: 'The elliptic paraboloid f = 0.175(x² + λy²) is a convex bowl: raising λ stretches it into a long narrow valley. Each descent step crosses the contours at a right angle, yet bounces between the steep valley walls — the classic zig-zag of ill conditioning.' },
     tips: { zh: '顿悟点：按 2「等高线 x·y」俯视——路径垂直穿过每一条等高线，直指中心；把 λ 调到 8、η 调到 0.6 再按 R，路径先在谷壁间剧烈抖动、再沿谷底缓慢爬行。η 超过 2/(0.35λ) 则直接发散。',
@@ -646,7 +738,25 @@ const SCENES = {
   /* ────── 凸与非凸：局部最小值依赖初始点 ────── */
   convex: {
     label: { zh: '凸与非凸', en: 'Convex vs non-convex' },
-    params: ['surfSel', 'startX', 'startY', 'omega'],
+    /* 同 valley：两条路径都由 gdStep2 读 state.eta 推进，η 却不在本页 params 里。
+       一维页自动播放把 η 推高后（实测离开时 ≈ 1.55），双井井底 x = ±√1.5 处
+       f″ = 0.6668·(3x²−1.5) = 2.0，稳定上界 η* = 2/f″ ≈ 1.0，井底就不再是吸引子：
+       η = 1.55 时路径落进一个周期 4 的循环 x ≈ 0.15 → 0.38 → 0.91 → 1.54（实测），
+       始终停不到 1.2247 上，「落进哪个井底」这个顿悟点被冲淡；补上滑块即可就地调回。 */
+    params: ['surfSel', 'eta', 'startX', 'startY', 'omega'],
+    /* 本页的顿悟点是「局部最小值依赖初始点」——tips：「A、B 两球滚进不同的井底
+       （换预设或起点后按 R）」。自变量就是**起点**，取 x₀。
+       正是重播语义让这一页第一次名副其实：旧的只追加语义下，拖 x₀ 不按 R 根本
+       不改路径，白色起点标记会从两条路径的起点上滑走；现在 x₀ 一动两条路径整条
+       重算，标记与路径始终咬合。默认预设「双井」的势垒在 x = 0（井底在 ±√1.5），
+       而 B 从中心对称起点 −x₀ 出发，所以 x₀ 扫过 0 的那一刻 A、B 同时换井——
+       「同一张曲面、同样的算法，只因出发点不同就落进不同的井」当场演完。
+       不驱动 surfSel：三档曲面是离散预设，且 gdStep2 每步都读当前预设的梯度，
+       扫动它会拼出一条哪张曲面上都不存在的假轨迹。不驱动 omega：它是「放多快」。
+       值域 [−1.8, 1.8]：与 reseedOrbits 的 clamp 边界一致，取满不退化。
+       linear：+1.8 直接跳回 −1.8 会让两条路径瞬间对调 → 默认 pingpong。
+       period 12 s：要留时间看两条路径各自滚到哪个井底。 */
+    drive: { key: 'startX', from: -1.8, to: 1.8, period: 12, kind: 'linear' },
     brand: { zh: '凸碗只有一个最小值，从哪里出发都滑向同一处；双井与鞍点则不然——路径 A、B 从中心对称的两个起点出发，可能落入不同的局部最小值。梯度下降只承诺局部下降，不承诺全局最优。',
              en: 'A convex bowl has a single minimum: every start slides to the same place. Not so for the double well and the saddle — paths A and B, launched from two centrally symmetric starts, can settle into different local minima. Gradient descent promises local decrease, never global optimality.' },
     tips: { zh: '顿悟点：选「双井」预设，按 2「剖面 x·f」正视——A、B 两球滚进不同的井底（换预设或起点后按 R）。凸函数里这永远不会发生：局部最小值 = 全局最小值。选「鞍点」并把 y₀ 调到 0，梯度没有 y 分量，路径会停在鞍点上。',
@@ -795,6 +905,10 @@ const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 �
 const samples = [];
 let curTab = null;
 const paramWraps = {};   // key -> { wrap, input, val, p }
+const autoPlay = {};     // tabId -> 是否自动播放
+const driveMode = {};    // tabId -> 'loop' | 'pingpong'
+const driveOff = {};     // tabId -> 驱动时钟相对引擎时钟的累计偏移（= 自动播放累计关停时长）
+const driveOffAt = {};   // tabId -> 本次关停的起点（引擎时钟读数）
 const RELABEL = [];
 const cams = {};
 let cam = null;
@@ -804,14 +918,27 @@ const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion:
 
 /* ╔══════════════════════════════════════════════════════════╗
    ║  ③ 采样 —— 步进时钟：n = ⌊ωt⌋ 推进四条下降轨道               ║
-   ║  原则：轨道只追加"当时的真实位置"；参数中途改变不重算旧步，     ║
-   ║        重置（R）时从当前起点重播                             ║
+   ║  原则：手动模式下轨道只追加"当时的真实位置"，参数中途改变不重算  ║
+   ║        旧步，重置（R）时从当前起点重播；驱动模式下整条重播      ║
+   ║        （见 orb* 上方注释）                                  ║
    ╚══════════════════════════════════════════════════════════╝ */
 function pushSample() {
-  if (state.theta === 0) reseedOrbits();
+  if (state.theta === 0) { reseedOrbits(); lastOrbSig = null; }
   const n = nNow();
+  /* 「驱动 → 手动」的反向过渡（关掉自动播放，或伸手拖被驱动的那根滑块——
+     引擎会当场关掉自动播放）：nNow() 立刻退回 ⌊ωt⌋，可重播留下的长轨道
+     不会自己变短，于是读数报 n = 5 而画面画着 60 步，要等 ⌊ωt⌋ 涨过
+     ORBIT_SHOW 才自愈（valley/convex 约 50 秒）。每帧把轨道裁到 n（只缩不增），
+     读数与画面重新同源。裁完之后只追加：手动模式「记录当时的真实值、
+     参数中途改变不重算旧步」的语义从这一帧起完整成立，未被破坏。 */
+  trimOrbits(n);
+  const S = SURF3[Math.round(state.surfSel)];
+  /* 驱动接管且入参变了 → 丢掉旧轨迹，用当前参数从 x₀ 重播，
+     避免画出一条与读数不同源的陈旧轨迹 */
+  const sig = orbSig();
+  if (driveInfo() && sig !== lastOrbSig) reseedOrbits();
+  lastOrbSig = sig;
   while (orb1.length - 1 < n) {
-    const S = SURF3[Math.round(state.surfSel)];
     orb1.push(gdStep1(orb1[orb1.length - 1]));
     orbA.push(gdStep2(orbA[orbA.length - 1], g2));
     orbB1.push(gdStep2(orbB1[orbB1.length - 1], S.g));
@@ -1117,6 +1244,9 @@ function draw() {
 function resetSim() {
   state.t = 0;
   state.theta = 0;
+  /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
+     相位上，「重置」就名不副实了 */
+  Object.keys(driveOff).forEach(id => { driveOff[id] = 0; driveOffAt[id] = 0; });
   samples.length = 0;
   pushSample();
 }
@@ -1142,6 +1272,9 @@ function frame(ts) {
   if (state.running) {
     state.t += dt;
     state.theta += state.omega * dt;
+    applyDrive();
+    const dv = SCENES[curTab].drive;
+    if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
     pushSample();
   }
   const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
@@ -1166,16 +1299,29 @@ function buildParams() {
     input.type = 'range';
     input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
     const val = wrap.querySelector('.val');
+    /* render 只回显滑杆当前刻度；upd 才是「用户动了滑杆」的语义（写 state）。
+       两者分开，语言切换就不会顺手把读数写回 state —— 见下方 relabel 注释。 */
+    const render = () => { val.textContent = p.fmt(parseFloat(input.value)); };
     const upd = () => {
       const raw = parseFloat(input.value);
       state[p.key] = p.map ? p.map(raw) : raw;
-      val.textContent = p.fmt(raw);
+      render();
     };
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
     paramWraps[p.key] = { wrap, input, val, p };
-    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
+    /* 用户伸手拖被驱动的滑块 = 明确要接管，自动播放当场关闭，
+       否则下一帧就会被驱动值覆盖回去。这是与「暂停只冻结模拟」一致的语义。 */
+    input.addEventListener('input', () => {
+      const d = SCENES[curTab] && SCENES[curTab].drive;
+      if (d && d.key === p.key && autoPlay[curTab]) setAutoPlay(false);
+    });
+    upd();                       // 建面板时用默认刻度初始化 state
+    /* 语言切换只重排文案（fmt 里可能带 t()），绝不能顺手调 upd() 把滑杆刻度
+       写回 state：被 drive 驱动的参数，其 state 值比滑杆 step 精细得多，写回去
+       等于把它永久量化一次；暂停时 frame() 不再跑 applyDrive()，再也修不回来。 */
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); render(); };
     RELABEL.push(relabel);
     relabel();
   });
@@ -1280,12 +1426,122 @@ function syncParamVisibility() {
   });
 }
 
+/* ================= 场景时间驱动（引擎区） ================= */
+/* 驱动时钟：引擎时钟减去「自动播放关掉的那些时间」。关停期间它不走，
+   所以重新打开时驱动量从原地续上，不跳变。求值仍是纯函数——只是把
+   自变量从 state.t 换成这个校正过的时钟，不做增量积分：既不累积浮点
+   漂移，录制器按固定 dt 离线重放也能复现同一串值（偏移在一次渲染内是常量）。
+   已知语义：偏移只扣「自动播放关停」的时长，不扣「页签没被选中」的时长——
+   离开某页签 10 秒再切回来，它的驱动量会跳到 10 秒后的位置。这与「暂停只冻结
+   模拟、相机照走」是同一族约定（时钟是全局的，页签只是不同的观测口），
+   如需改成每页签独立时钟，得连录制器的离线重放一起改，不要只改这里。 */
+function driveClock(id) { return state.t - (driveOff[id] || 0); }
+
+/* 驱动求值：驱动时钟（见 driveClock）的纯函数，不做增量积分 —— 不累积
+   浮点漂移，暂停恢复不跳变，且录制器按固定 dt 推进 state.t 时可直接复用。 */
+function driveValue(d, tt, mode) {
+  const m = mode || d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+  const u = ((tt / d.period) % 1 + 1) % 1;              // 负时间也落在 [0,1)
+  const s = (m === 'loop') ? u : (u < 0.5 ? 2 * u : 2 - 2 * u);
+  return d.from + (d.to - d.from) * s;
+}
+
+/* 把当前场景的驱动量按引擎时钟写回 state。只动数据、不碰 DOM ——
+   录制器的离线渲染也调它，那条路径上没有面板可同步（见规范 §D1）。 */
+function applyDrive() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return;
+  state[sc.drive.key] = driveValue(sc.drive, driveClock(curTab), driveMode[curTab]);
+}
+
+/* 供录制器判断无缝循环的吸附基准；无驱动或用户关掉自动播放时返回 null */
+function driveInfo() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return null;
+  return { key: sc.drive.key, period: sc.drive.period, mode: driveMode[curTab] };
+}
+
+const warnedNoInvMap = {};   // key -> 已就「有 map 没 invMap」告警过
+
+/* 把驱动出的值反算回滑块刻度并回显。带 map 的参数必须提供 invMap，
+   否则只能退回显示映射后的值（规范 §8 已把 invMap 列为硬约束）。 */
+function syncParamSlider(key) {
+  const e = paramWraps[key];
+  if (!e) return;
+  /* 本函数每帧都被调用，所以每个 key 只喊一次，别把控制台刷爆 */
+  if (e.p.map && !e.p.invMap && !warnedNoInvMap[key]) {
+    warnedNoInvMap[key] = true;
+    console.warn('[math-viz] 参数 "' + key + '" 声明了 map 却没有 invMap：' +
+                 '驱动值会被当作滑杆原始值写进量程，回显与 state 会错位（规范 §8）。');
+  }
+  const raw = (e.p.map && e.p.invMap) ? e.p.invMap(state[key]) : state[key];
+  /* 先写进 input，再读回来显示：range 带 step，写进去的值会被吸附到刻度上。
+     若直接显示 raw，读数与滑杆句柄就会对不上；更要命的是下一次 upd() 读的是
+     吸附后的 input.value，会把这点差值永久写回 state —— 暂停时 frame() 不再跑
+     applyDrive()，再也修不回来。upd() 的触发面已经收窄到「用户拖动这根滑杆」
+     一条：语言切换只调 render()（见下方 relabel 注释），不再写 state。 */
+  e.input.value = raw;
+  e.val.textContent = e.p.fmt(parseFloat(e.input.value));
+}
+
+/* 开关自动播放的唯一入口：复选框与「拖滑块接管」都走这里，驱动时钟的记账
+   才不会漏。关掉时记下停摆起点，打开时把停摆时长补进偏移量。 */
+function setAutoPlayFor(id, on) {
+  on = !!on;
+  if (!!autoPlay[id] === on) return;            // 状态没变就别动时钟，避免重复记账
+  if (on) driveOff[id] += state.t - driveOffAt[id];
+  else driveOffAt[id] = state.t;
+  autoPlay[id] = on;
+  refreshDriveRow(id);
+}
+
+function setAutoPlay(on) { setAutoPlayFor(curTab, on); }
+
+function refreshDriveRow(id) {
+  const row = document.querySelector('.drive[data-tab="' + id + '"]');
+  if (!row) return;
+  row.querySelector('input').checked = !!autoPlay[id];
+  row.querySelectorAll('[data-mode]').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === driveMode[id]);
+  });
+}
+
+function buildDrive() {
+  const host = document.getElementById('driveHost');
+  Object.keys(SCENES).forEach(id => {
+    const d = SCENES[id].drive;
+    if (!d) return;
+    autoPlay[id] = true;
+    driveMode[id] = d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+    driveOff[id] = 0; driveOffAt[id] = 0;      // 先置零，页签才不会把 undefined 读进算式
+    const row = document.createElement('div');
+    row.className = 'drive';
+    row.dataset.tab = id;
+    row.innerHTML = '<label class="tg"><input type="checkbox" checked><span class="autoL"></span></label>' +
+      '<span class="dmode"><button class="btn" data-mode="pingpong"></button>' +
+      '<button class="btn" data-mode="loop"></button></span>';
+    row.querySelector('input').addEventListener('change', e => { setAutoPlayFor(id, e.target.checked); });
+    row.querySelectorAll('[data-mode]').forEach(b => {
+      b.addEventListener('click', () => { driveMode[id] = b.dataset.mode; refreshDriveRow(id); });
+    });
+    host.appendChild(row);
+    const relabel = () => {
+      row.querySelector('.autoL').textContent = t(UI.autoPlay);
+      row.querySelector('[data-mode="pingpong"]').textContent = t(UI.pingpong);
+      row.querySelector('[data-mode="loop"]').textContent = t(UI.loop);
+    };
+    RELABEL.push(relabel);
+    relabel();
+    refreshDriveRow(id);
+  });
+}
+
 function switchTab(id) {
   if (id === curTab) return;
   curTab = id;
   tween = null;
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
-  document.querySelectorAll('.toggles[data-tab], .views[data-tab]').forEach(el => {
+  document.querySelectorAll('.toggles[data-tab], .views[data-tab], .drive[data-tab]').forEach(el => {
     el.style.display = el.dataset.tab === id ? '' : 'none';
   });
   cam = cams[id];
@@ -1434,6 +1690,7 @@ window.addEventListener('keydown', e => {
 resize();
 buildTabs();
 buildParams();
+buildDrive();
 buildToggles();
 buildViews();
 Object.keys(SCENES).forEach(id => {

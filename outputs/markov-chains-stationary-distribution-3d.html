@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.1">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.0.0">
 <title>Markov 链与稳定分布 · Markov Chains & Stationary Distributions</title>
 <!-- ============================================================
@@ -19,6 +19,7 @@
   行向量约定（全文一致）：pₙ₊₁ = pₙP，P 为行随机矩阵（每行和为 1）。
 
   版本记录（changelog，新→旧）：
+    1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-31  首个版本：转移网络 / 向量迭代 / 概率单纯形 / 收敛型态四场景
 ============================================================ -->
@@ -126,6 +127,11 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 .tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
 .tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
 
+/* 驱动控制行 */
+.drive{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0 2px}
+.drive .dmode{display:flex;gap:4px;margin-left:auto}
+.drive .dmode .btn{padding:4px 8px;font-size:11px}
+
 /* 读数与提示 */
 .readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
   font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
@@ -168,6 +174,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       <button class="btn wide" id="btnPlay">⏸ 暂停</button>
       <button class="btn" id="btnReset">↺ 重置</button>
     </div>
+    <div id="driveHost"></div>
     <div id="togglesHost"></div>
     <div id="viewsHost"></div>
     <div class="readout" id="readout"></div>
@@ -212,6 +219,9 @@ const UI = {
   resume: { zh: '▶ 继续', en: '▶ Resume' },
   reset:  { zh: '↺ 重置', en: '↺ Reset' },
   views:  { zh: '视角', en: 'View' },
+  autoPlay: { zh: '自动播放', en: 'Auto-play' },
+  pingpong: { zh: '往返',     en: 'Ping-pong' },
+  loop:     { zh: '循环',     en: 'Loop' },
   hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
             en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
 };
@@ -237,9 +247,15 @@ const PRESETS = [
     P: [[0.6, 0.2, 0.2], [0.3, 0.5, 0.2], [0, 0, 1]] }
 ];
 
+/* 预设下标的唯一读法。preset 被「向量迭代 / 收敛型态」两页的 drive 驱动，
+   而 drive 写进 state 的是连续值（3.0 个刻度之间的任意实数），直接当数组下标会读出
+   undefined 并让 draw() 抛异常、渲染循环整个死掉。所以在场景消费点取整并夹取
+   （§硬约束：驱动量若被用作数组下标必须 round + clamp，且不改引擎）。 */
+function presetIdx() { return clamp(Math.round(state.preset || 0), 0, PRESETS.length - 1); }
+
 /* 当前转移矩阵：预设 + 惰性混合 P = (1−m)P₀ + mI（不改变稳定分布 π） */
 function curMatrix() {
-  const base = PRESETS[Math.round(state.preset || 0)].P;
+  const base = PRESETS[presetIdx()].P;
   const m = state.mix || 0;
   const P = [];
   for (let i = 0; i < 3; i++) {
@@ -506,6 +522,23 @@ const SCENES = {
   iterate: {
     label: { zh: '向量迭代', en: 'Iteration' },
     params: ['preset', 'mix', 'w1', 'w2', 'w3', 'omega'],
+    /* 本页确为静止页签：pₙ 只用十来步就贴上 π，之后 pₙ₊₁ = pₙP 逐位不变
+       （实测 t≈200 s 起 12 s 内 p₁/p₂/p₃ 恒为 0.32/0.43/0.25，画面逐像素相同）。
+       要让它重新动起来，只能让 **π 自己移动**——本页四类滑杆里能做到这件事的只有 preset：
+       · mix 不行：P = (1−m)P₀ + mI ⇒ πP = (1−m)π + mπ = π，惰性混合按定义不改变 π，
+         pₙ 已经落在 π 上时驱动 m 一个像素都不会变（这也是「概率单纯形」页驱动 m 却成立的原因——
+         那一页被演示的是轨迹本身，不是终点）；
+       · w₁w₂w₃ 不行：它们只在 reseedChain() 里被读一次，pCur 是绝不重算的真实累积（§4.6），
+         中途改权重不会回头重新播种；
+       · ω 是钟本身。
+       所以驱动 preset。它虽然是离散选择，却不属于「驱动预设选择器只会让画面闪一下」那一类：
+       每换一次链，pₙ 要花好几步才迁移到新的 π 上，换来的是一段多秒的重新收敛——
+       而「pₙ 一步步压平到 πᵢ」正是这一页要演的东西。
+       值域取满 [0, 2]（遍历 / 周期 / 吸收三条链都不退化）。取整后三档的驻留不等长
+       （中间那档占一半行程），这是四舍五入的必然结果，不做人为补偿。
+       从吸收链跳回遍历链画面会突变 ⇒ linear（往返）；一档要留够步数看收敛，取 20 s。
+       preset 被用作数组下标，已在 presetIdx() 里 round + clamp。 */
+    drive: { key: 'preset', from: 0, to: 2, period: 20, kind: 'linear' },
     brand: { zh: '把分布写成行向量 pₙ，每走一步右乘转移矩阵：pₙ₊₁ = pₙP。三条阶梯曲线沿 t 轴流出，逐渐压平在各自的稳定值 πᵢ 上。',
              en: 'Write the distribution as a row vector pₙ; each step multiplies it by the transition matrix: pₙ₊₁ = pₙP. Three staircase curves stream along the t axis and flatten onto their stationary values πᵢ.' },
     tips: { zh: '提示：π 不是「算到最后」才出现的终点，而是转移一步后原地不动的向量。切「侧视 p·t」：三条阶梯曲线各自压平在同色虚线 πᵢ 上——那正是 πP = π。',
@@ -569,6 +602,22 @@ const SCENES = {
   simplex: {
     label: { zh: '概率单纯形', en: 'Simplex' },
     params: ['preset', 'mix', 'w1', 'w2', 'w3', 'omega'],
+    /* 说明：本页**并非静止页签** —— 白色当前轨迹的步进 pCur 由 floor(state.theta) 推进、
+       并在 pushSample() 里累加成轨迹，它本来就随引擎时钟走。（首轮 30 帧探针把它报成静止，
+       是因为默认 preset 为遍历链、起点 w=(1,0,0)，几步之后 pCur 就贴到 π 上不再肉眼可见地移动。）
+       这里额外加 drive，驱动的是**转移矩阵本身**而不是那条轨迹，两者不冲突：
+       tips 的括号里藏着本页最要紧的一句 ——「（周期链例外：轨迹绕 π 打转，不收敛。）」
+       惰性混合 m 正是解除这个例外的旋钮：P = (1−m)P₀ + mI 给每个状态加自环，
+       周期性被打破，三条角落参考轨迹从「绕着 π 转圈」改为「螺旋收进 π」。
+       **注意 π 本身不动**：π P = (1−m)πP₀ + mπ = π，惰性混合不改变稳定分布
+       （见本文件 curMatrix() 上方那行注释）。变的是**能不能收敛、以及收敛多快**
+       （λ₂ ↦ (1−m)λ₂ + m），不是 π 的位置。
+       只驱动 m：本页真正影响画面的滑块只有 preset 与 mix 两根
+       （w₁w₂w₃ 只在重置时决定起点，ω 只是步速）；preset 是 3 个离散的链型预设，
+       驱动预设选择器只会让画面隔一会儿跳一下，不是动画，故留给用户自己挑。
+       量程取满 0…0.9（m = 0 即原始链，是必要的对照基准，非退化）。
+       0.9 跳回 0 会突变 → linear（pingpong）。周期 8 s。 */
+    drive: { key: 'mix', from: 0, to: 0.9, period: 8, kind: 'linear' },
     brand: { zh: 'p₁+p₂+p₃ = 1，所有可能的分布都住在一个三角形——概率单纯形里。不同起点的轨迹在三角形内一步步汇聚到同一个稳定点 π。',
              en: 'Since p₁+p₂+p₃ = 1, every possible distribution lives inside one triangle — the probability simplex. Trajectories from different starting points converge step by step to the same stationary point π.' },
     tips: { zh: '提示：按「正视单纯形」，从三个角出发的参考轨迹与你的白色轨迹汇聚到同一个琥珀点。πP = π 说明 π 正是转移矩阵特征值 1 的特征向量。（周期链例外：轨迹绕 π 打转，不收敛。）',
@@ -647,6 +696,16 @@ const SCENES = {
   regimes: {
     label: { zh: '收敛型态', en: 'Convergence' },
     params: ['preset', 'mix', 'w1', 'w2', 'w3', 'omega'],
+    /* 同「向量迭代」页：d(n) = ½Σ|pₙ−π| 在十来步后归零并永久停在零上
+       （实测 t≈200 s 起 12 s 内恒为 0.00），是静止页签。
+       驱动 preset 的理由在这一页比上一页更直白——brand 的三句话说的就是三个预设：
+       「遍历链按 |λ₂|ⁿ 几何衰减，周期链永不衰减，吸收链把全部质量送进吸收态」。
+       自动播放依次走过这三条链，橙色 d(n) 曲线与琥珀包络 |λ₂|ⁿ 就把三种收敛型态
+       连成一条可以直接对比的历史；tips 让人手动做的第一步（「把预设调到周期链」）
+       自动播放替他做了，第二步（拖 m 打破周期性）仍留给他自己。
+       不驱动 m 的理由同上页：m 不改变 π，d(n) 已经归零时驱动它不产生位移。
+       值域、kind、周期与取整夹取均与「向量迭代」页同口径，见那一页的说明。 */
+    drive: { key: 'preset', from: 0, to: 2, period: 20, kind: 'linear' },
     brand: { zh: '并非所有链都收敛。总变差距离 d(n) = ½Σ|pₙ−π| 度量当前分布离 π 有多远：遍历链按 |λ₂|ⁿ 几何衰减，周期链永不衰减，吸收链把全部质量送进吸收态。',
              en: 'Not every chain converges. The total-variation distance d(n) = ½Σ|pₙ−π| measures how far the current distribution is from π: ergodic chains decay geometrically like |λ₂|ⁿ, periodic chains never decay, and absorbing chains funnel all mass into the absorbing state.' },
     tips: { zh: '提示：把预设调到「周期链」——|λ₂| = 1，d(n) 永不衰减，分布绕着 π 打转。再拖动惰性混合 m > 0 给每个状态加上自环：周期被打破，曲线立刻转为几何衰减。',
@@ -697,7 +756,7 @@ const SCENES = {
     },
     readout() {
       const P = curMatrix(), pi = stationaryDist(P), l2 = lambda2(P);
-      const idx = Math.round(state.preset || 0);
+      const idx = presetIdx();
       let note;
       if (l2 > 0.999) note = t({ zh: '|λ₂| = 1 → 永不收敛：分布绕 π 周期振荡（试试 m > 0）', en: '|λ₂| = 1 → never converges: mass cycles around π (try m > 0)' });
       else if (idx === 2) note = t({ zh: '吸收链：质量终被 C 吞并，π = (0, 0, 1)', en: 'absorbing: all mass ends in C, π = (0, 0, 1)' });
@@ -722,6 +781,10 @@ const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 �
 const samples = [];
 let curTab = null;
 const paramWraps = {};   // key -> { wrap, input, val, p }
+const autoPlay = {};     // tabId -> 是否自动播放
+const driveMode = {};    // tabId -> 'loop' | 'pingpong'
+const driveOff = {};     // tabId -> 驱动时钟相对引擎时钟的累计偏移（= 自动播放累计关停时长）
+const driveOffAt = {};   // tabId -> 本次关停的起点（引擎时钟读数）
 const RELABEL = [];
 const cams = {};
 let cam = null;
@@ -1044,6 +1107,9 @@ function draw() {
 function resetSim() {
   state.t = 0;
   state.theta = 0;
+  /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
+     相位上，「重置」就名不副实了 */
+  Object.keys(driveOff).forEach(id => { driveOff[id] = 0; driveOffAt[id] = 0; });
   samples.length = 0;
   pushSample();
 }
@@ -1069,6 +1135,9 @@ function frame(ts) {
   if (state.running) {
     state.t += dt;
     state.theta += state.omega * dt;
+    applyDrive();
+    const dv = SCENES[curTab].drive;
+    if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
     pushSample();
   }
   const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
@@ -1093,16 +1162,29 @@ function buildParams() {
     input.type = 'range';
     input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
     const val = wrap.querySelector('.val');
+    /* render 只回显滑杆当前刻度；upd 才是「用户动了滑杆」的语义（写 state）。
+       两者分开，语言切换就不会顺手把读数写回 state —— 见下方 relabel 注释。 */
+    const render = () => { val.textContent = p.fmt(parseFloat(input.value)); };
     const upd = () => {
       const raw = parseFloat(input.value);
       state[p.key] = p.map ? p.map(raw) : raw;
-      val.textContent = p.fmt(raw);
+      render();
     };
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
     paramWraps[p.key] = { wrap, input, val, p };
-    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
+    /* 用户伸手拖被驱动的滑块 = 明确要接管，自动播放当场关闭，
+       否则下一帧就会被驱动值覆盖回去。这是与「暂停只冻结模拟」一致的语义。 */
+    input.addEventListener('input', () => {
+      const d = SCENES[curTab] && SCENES[curTab].drive;
+      if (d && d.key === p.key && autoPlay[curTab]) setAutoPlay(false);
+    });
+    upd();                       // 建面板时用默认刻度初始化 state
+    /* 语言切换只重排文案（fmt 里可能带 t()），绝不能顺手调 upd() 把滑杆刻度
+       写回 state：被 drive 驱动的参数，其 state 值比滑杆 step 精细得多，写回去
+       等于把它永久量化一次；暂停时 frame() 不再跑 applyDrive()，再也修不回来。 */
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); render(); };
     RELABEL.push(relabel);
     relabel();
   });
@@ -1207,12 +1289,122 @@ function syncParamVisibility() {
   });
 }
 
+/* ================= 场景时间驱动（引擎区） ================= */
+/* 驱动时钟：引擎时钟减去「自动播放关掉的那些时间」。关停期间它不走，
+   所以重新打开时驱动量从原地续上，不跳变。求值仍是纯函数——只是把
+   自变量从 state.t 换成这个校正过的时钟，不做增量积分：既不累积浮点
+   漂移，录制器按固定 dt 离线重放也能复现同一串值（偏移在一次渲染内是常量）。
+   已知语义：偏移只扣「自动播放关停」的时长，不扣「页签没被选中」的时长——
+   离开某页签 10 秒再切回来，它的驱动量会跳到 10 秒后的位置。这与「暂停只冻结
+   模拟、相机照走」是同一族约定（时钟是全局的，页签只是不同的观测口），
+   如需改成每页签独立时钟，得连录制器的离线重放一起改，不要只改这里。 */
+function driveClock(id) { return state.t - (driveOff[id] || 0); }
+
+/* 驱动求值：驱动时钟（见 driveClock）的纯函数，不做增量积分 —— 不累积
+   浮点漂移，暂停恢复不跳变，且录制器按固定 dt 推进 state.t 时可直接复用。 */
+function driveValue(d, tt, mode) {
+  const m = mode || d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+  const u = ((tt / d.period) % 1 + 1) % 1;              // 负时间也落在 [0,1)
+  const s = (m === 'loop') ? u : (u < 0.5 ? 2 * u : 2 - 2 * u);
+  return d.from + (d.to - d.from) * s;
+}
+
+/* 把当前场景的驱动量按引擎时钟写回 state。只动数据、不碰 DOM ——
+   录制器的离线渲染也调它，那条路径上没有面板可同步（见规范 §D1）。 */
+function applyDrive() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return;
+  state[sc.drive.key] = driveValue(sc.drive, driveClock(curTab), driveMode[curTab]);
+}
+
+/* 供录制器判断无缝循环的吸附基准；无驱动或用户关掉自动播放时返回 null */
+function driveInfo() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return null;
+  return { key: sc.drive.key, period: sc.drive.period, mode: driveMode[curTab] };
+}
+
+const warnedNoInvMap = {};   // key -> 已就「有 map 没 invMap」告警过
+
+/* 把驱动出的值反算回滑块刻度并回显。带 map 的参数必须提供 invMap，
+   否则只能退回显示映射后的值（规范 §8 已把 invMap 列为硬约束）。 */
+function syncParamSlider(key) {
+  const e = paramWraps[key];
+  if (!e) return;
+  /* 本函数每帧都被调用，所以每个 key 只喊一次，别把控制台刷爆 */
+  if (e.p.map && !e.p.invMap && !warnedNoInvMap[key]) {
+    warnedNoInvMap[key] = true;
+    console.warn('[math-viz] 参数 "' + key + '" 声明了 map 却没有 invMap：' +
+                 '驱动值会被当作滑杆原始值写进量程，回显与 state 会错位（规范 §8）。');
+  }
+  const raw = (e.p.map && e.p.invMap) ? e.p.invMap(state[key]) : state[key];
+  /* 先写进 input，再读回来显示：range 带 step，写进去的值会被吸附到刻度上。
+     若直接显示 raw，读数与滑杆句柄就会对不上；更要命的是下一次 upd() 读的是
+     吸附后的 input.value，会把这点差值永久写回 state —— 暂停时 frame() 不再跑
+     applyDrive()，再也修不回来。upd() 的触发面已经收窄到「用户拖动这根滑杆」
+     一条：语言切换只调 render()（见下方 relabel 注释），不再写 state。 */
+  e.input.value = raw;
+  e.val.textContent = e.p.fmt(parseFloat(e.input.value));
+}
+
+/* 开关自动播放的唯一入口：复选框与「拖滑块接管」都走这里，驱动时钟的记账
+   才不会漏。关掉时记下停摆起点，打开时把停摆时长补进偏移量。 */
+function setAutoPlayFor(id, on) {
+  on = !!on;
+  if (!!autoPlay[id] === on) return;            // 状态没变就别动时钟，避免重复记账
+  if (on) driveOff[id] += state.t - driveOffAt[id];
+  else driveOffAt[id] = state.t;
+  autoPlay[id] = on;
+  refreshDriveRow(id);
+}
+
+function setAutoPlay(on) { setAutoPlayFor(curTab, on); }
+
+function refreshDriveRow(id) {
+  const row = document.querySelector('.drive[data-tab="' + id + '"]');
+  if (!row) return;
+  row.querySelector('input').checked = !!autoPlay[id];
+  row.querySelectorAll('[data-mode]').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === driveMode[id]);
+  });
+}
+
+function buildDrive() {
+  const host = document.getElementById('driveHost');
+  Object.keys(SCENES).forEach(id => {
+    const d = SCENES[id].drive;
+    if (!d) return;
+    autoPlay[id] = true;
+    driveMode[id] = d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+    driveOff[id] = 0; driveOffAt[id] = 0;      // 先置零，页签才不会把 undefined 读进算式
+    const row = document.createElement('div');
+    row.className = 'drive';
+    row.dataset.tab = id;
+    row.innerHTML = '<label class="tg"><input type="checkbox" checked><span class="autoL"></span></label>' +
+      '<span class="dmode"><button class="btn" data-mode="pingpong"></button>' +
+      '<button class="btn" data-mode="loop"></button></span>';
+    row.querySelector('input').addEventListener('change', e => { setAutoPlayFor(id, e.target.checked); });
+    row.querySelectorAll('[data-mode]').forEach(b => {
+      b.addEventListener('click', () => { driveMode[id] = b.dataset.mode; refreshDriveRow(id); });
+    });
+    host.appendChild(row);
+    const relabel = () => {
+      row.querySelector('.autoL').textContent = t(UI.autoPlay);
+      row.querySelector('[data-mode="pingpong"]').textContent = t(UI.pingpong);
+      row.querySelector('[data-mode="loop"]').textContent = t(UI.loop);
+    };
+    RELABEL.push(relabel);
+    relabel();
+    refreshDriveRow(id);
+  });
+}
+
 function switchTab(id) {
   if (id === curTab) return;
   curTab = id;
   tween = null;
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
-  document.querySelectorAll('.toggles[data-tab], .views[data-tab]').forEach(el => {
+  document.querySelectorAll('.toggles[data-tab], .views[data-tab], .drive[data-tab]').forEach(el => {
     el.style.display = el.dataset.tab === id ? '' : 'none';
   });
   cam = cams[id];
@@ -1361,6 +1553,7 @@ window.addEventListener('keydown', e => {
 resize();
 buildTabs();
 buildParams();
+buildDrive();
 buildToggles();
 buildViews();
 Object.keys(SCENES).forEach(id => {

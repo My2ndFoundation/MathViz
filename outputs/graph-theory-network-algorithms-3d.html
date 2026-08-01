@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.1">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.0.0">
 <title>图论与网络算法 · Graph Theory &amp; Network Algorithms</title>
 <!-- ============================================================
@@ -17,6 +17,7 @@
   （BFS 的层 / Dijkstra 的最短距离 / Kruskal 的边权），不是人为时间。
 
   版本记录（changelog，新→旧）：
+    1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块；
                        去除「图预设」滑块标签里遗留的页签后缀
     1.0.0  2026-07-30  首个版本：路径与连通 / BFS / Dijkstra / Kruskal 四场景（含双语）
@@ -125,6 +126,11 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 .tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
 .tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
 
+/* 驱动控制行 */
+.drive{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0 2px}
+.drive .dmode{display:flex;gap:4px;margin-left:auto}
+.drive .dmode .btn{padding:4px 8px;font-size:11px}
+
 /* 读数与提示 */
 .readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
   font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
@@ -167,6 +173,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       <button class="btn wide" id="btnPlay">⏸ 暂停</button>
       <button class="btn" id="btnReset">↺ 重置</button>
     </div>
+    <div id="driveHost"></div>
     <div id="togglesHost"></div>
     <div id="viewsHost"></div>
     <div class="readout" id="readout"></div>
@@ -211,6 +218,9 @@ const UI = {
   resume: { zh: '▶ 继续', en: '▶ Resume' },
   reset:  { zh: '↺ 重置', en: '↺ Reset' },
   views:  { zh: '视角', en: 'View' },
+  autoPlay: { zh: '自动播放', en: 'Auto-play' },
+  pingpong: { zh: '往返',     en: 'Ping-pong' },
+  loop:     { zh: '循环',     en: 'Loop' },
   hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
             en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
 };
@@ -348,10 +358,13 @@ const PRESET_NAMES = [
 const PARAMS = [
   { key: 'omega',     label: { zh: '步速 <i>v</i>',        en: 'Step rate <i>v</i>' },        min: 0.1, max: 2.5, step: 0.05, value: 0.55,
     fmt: v => fmt(v) + t({ zh: ' 步/s', en: ' steps/s' }) },
+  /* startNode 被 BFS / Dijkstra 两页的 drive 驱动：map 取整后 state 存的就是整数刻度本身，
+     故 invMap 是恒等映射 —— 但必须显式写出来，否则引擎会告警并按无 invMap 处理（规范 §8） */
   { key: 'startNode', label: { zh: '起点 <i>s</i>',        en: 'Start node <i>s</i>' },       min: 0,   max: 8,   step: 1,    value: 0,
-    fmt: v => t({ zh: '节点 ', en: 'node ' }) + NODE_NAMES[Math.round(v)], map: v => Math.round(v) },
+    fmt: v => t({ zh: '节点 ', en: 'node ' }) + NODE_NAMES[clamp(Math.round(v), 0, 8)], map: v => Math.round(v), invMap: v => v },
+  /* wvar 被「最小生成树」页的 drive 驱动，同样按 §8 补恒等 invMap */
   { key: 'wvar',      label: { zh: '权重扰动 <i>k</i>',    en: 'Weight variation <i>k</i>' }, min: 0,   max: 3,   step: 1,    value: 0,
-    fmt: v => Math.round(v) === 0 ? t({ zh: '0（基础权重）', en: '0 (base weights)' }) : '+' + Math.round(v), map: v => Math.round(v) },
+    fmt: v => Math.round(v) === 0 ? t({ zh: '0（基础权重）', en: '0 (base weights)' }) : '+' + Math.round(v), map: v => Math.round(v), invMap: v => v },
   { key: 'preset',    label: { zh: '图预设',      en: 'Graph preset' }, min: 0, max: 2,  step: 1,    value: 0,
     fmt: v => t(PRESET_NAMES[Math.round(v)]), map: v => Math.round(v) }
 ];
@@ -362,15 +375,24 @@ const stepF = () => state.theta;
 const di = x => isFinite(x) ? String(x) : '∞';
 const nodePt = (i, z) => [NODES[i][0], NODES[i][1], z || 0];
 
+/* 起点与权重扰动的唯一读法。这两根滑杆被 BFS / Dijkstra / 最小生成树三页的 drive 驱动，
+   而 drive 写进 state 的是**连续值**（两个整数刻度之间的任意实数），这里它们又同时被当作
+   数组下标和缓存键使用，所以必须在场景消费点取整并夹取（§硬约束，且不改引擎）：
+   · 不取整：computeBFS(3.7) 会去读 NODES[3.7] = undefined，draw() 抛 TypeError，
+     frame() 没有 try/catch，渲染循环就此永久死掉；
+   · 不取整的缓存键还会让 traces() 每帧重算三套图算法（浮点键永远不命中）。 */
+const sNode = () => clamp(Math.round(state.startNode || 0), 0, NODES.length - 1);
+const wVar  = () => clamp(Math.round(state.wvar || 0), 0, 3);
+
 /* 算法结果缓存：同一 (起点, 扰动) 只算一次，重置可复现 */
 let _tr = { key: null };
 function traces(){
-  const key = state.startNode + '|' + state.wvar;
+  const key = sNode() + '|' + wVar();
   if (_tr.key !== key){
-    const w = edgeWeights(state.wvar);
+    const w = edgeWeights(wVar());
     _tr = { key: key, w: w,
-      bfs: computeBFS(state.startNode),
-      dij: computeDijkstra(state.startNode, w),
+      bfs: computeBFS(sNode()),
+      dij: computeDijkstra(sNode(), w),
       mst: computeKruskal(w) };
   }
   return _tr;
@@ -545,6 +567,18 @@ const SCENES = {
   bfs: {
     label: { zh: '广度优先 BFS', en: 'BFS' },
     params: ['startNode', 'omega'],
+    /* 本页确为静止页签：步进钟 ⌊ωt⌋ 只用四步就把九个节点全部提升到各自的层高，
+       之后 S = min(stepF(), maxLayer) 被钉在 maxLayer 上，读数区自己写着
+       「完成（按 R 重放）」——一次性演进后永久定格。
+       tips 的最后一句就是自变量：「改变起点 s，层级立即重排」。本页两根滑杆里
+       ω 是钟本身，能拖的只有起点 s，而它恰好是这一页真正要人体会的东西——
+       同一张图换个源点，谁离得近谁离得远整个换一套说法。
+       值域取满 [0, 8]（九个节点都是合法源点，无退化端）。取整后每个节点各占一段平台，
+       是有意的阶梯驱动：层级要停住才看得清，连续插值反而只会看到一团抖动。
+       从节点 I 跳回节点 A 整幅层级图会瞬间重排 ⇒ linear（往返）。
+       周期 18 s：来回各扫九个节点，每个节点约 1 s，够把新的层级读一遍。
+       startNode 被用作数组下标与缓存键，已在 sNode() 里 round + clamp。 */
+    drive: { key: 'startNode', from: 0, to: 8, period: 18, kind: 'linear' },
     brand: { zh: 'BFS 从起点一层一层向外扩张：每一步把「已知区域」的边界外推一格，先到达必最近（按边数）。z 轴就是距离层级，一层一格。',
              en: 'BFS grows outward from the source one layer per step: each step pushes the frontier of the known region one hop further, so reached-first means fewest edges. The z-axis is the distance layer, one notch per hop.' },
     tips: { zh: '顿悟：按 2 侧视——搜索波前是一层层等高的台阶，BFS 树的每条边都恰好跨越相邻两层；按 3 正视，层级塌缩回原图。改变起点 s，层级立即重排。',
@@ -597,14 +631,14 @@ const SCENES = {
           line3(C, nodePt(i, 0), nodePt(i, zi), { width: 1.5, dash: [7, 7], color: 'rgba(251,191,36,0.3)' });
         }
         const isFr = state.showFront && bfs.layer[i] === Lf;
-        if (i === state.startNode){
+        if (i === sNode()){
           drawNodeDot(C, i, zi, 11, 'rgba(186,240,255,0.9)');
         } else {
           drawNodeDot(C, i, zi, isFr ? 9.5 : 7, isFr ? 'rgba(167,139,250,0.9)' : 'rgba(45,212,234,0.85)');
         }
         nodeLabel(C, i, zi);
       }
-      label3(C, [2.5, -1.75, 0], t({ zh: '起点 ', en: 'start ' }) + NODE_NAMES[state.startNode],
+      label3(C, [2.5, -1.75, 0], t({ zh: '起点 ', en: 'start ' }) + NODE_NAMES[sNode()],
         { size: 11, color: 'rgba(186,240,255,0.85)', align: 'center' });
     },
     readout(){
@@ -626,6 +660,12 @@ const SCENES = {
   dij: {
     label: { zh: 'Dijkstra 最短路', en: 'Dijkstra' },
     params: ['startNode', 'wvar', 'omega'],
+    /* 与 BFS 页同一诊断：九步敲定完九个节点后永久定格（读数区「完成（按 R 重放）」）。
+       两根可拖的滑杆里选起点 s 而不是权重扰动 k：tips 说「每个节点的高度字面上就是
+       它到起点的最短距离」，高度这件事只有换源点才会整体改写；k 只是把某几条边的坡度
+       调一调，最短路树多半原样不动。k 因此留给用户，让他自己去试「负权会怎样」那个反例。
+       值域、kind、周期与取整夹取均与 BFS 页同口径，见那一页的说明。 */
+    drive: { key: 'startNode', from: 0, to: 8, period: 18, kind: 'linear' },
     brand: { zh: 'Dijkstra 每一步敲定一个「当前最近」的未定节点，再松弛它的邻边。不变量：敲定过的距离绝不再变——这正是它要求边权非负的原因。节点的高度就是最短距离。',
              en: 'Each Dijkstra step settles the closest unsettled node, then relaxes its edges. The invariant — a settled distance never changes again — is exactly why edge weights must be non-negative. A node’s height is its shortest distance.' },
     tips: { zh: '顿悟：按 2 侧视——每个节点的高度字面上就是它到起点的最短距离，最短路树成了一张缆车图；玫红树边的坡长就是边权。若允许负权边，「敲定不悔」的不变量就会被推翻。',
@@ -662,7 +702,7 @@ const SCENES = {
       for (let i = 0; i < EDGES.length; i++) drawEdge3(C, i, 0, 0, { width: 1.2, color: 'rgba(159,176,200,0.28)' });
       if (state.showDist) for (let i = 0; i < EDGES.length; i++) weightLabel(C, i, w[i], 0);
       if (state.showDist) drawZRuler(C, -2.75, -1.75, maxd * zs, maxd > 12 ? 5 : 2, zs, { zh: '距离', en: 'dist' });
-      const snapPrev = settledN > 0 ? dij.steps[settledN - 1].snap : dij.dist.map((d, i) => i === state.startNode ? 0 : Infinity);
+      const snapPrev = settledN > 0 ? dij.steps[settledN - 1].snap : dij.dist.map((d, i) => i === sNode() ? 0 : Infinity);
       /* 最短路树（玫红缆车图） */
       if (state.showSPT){
         for (let k = 0; k < Math.min(settledN + 1, nStep); k++){
@@ -691,10 +731,10 @@ const SCENES = {
       }
       /* 完成后：到最远节点的路径（橙） */
       if (state.showFar && state.theta >= nStep){
-        let far = state.startNode;
+        let far = sNode();
         dij.dist.forEach((d, i) => { if (isFinite(d) && d > dij.dist[far]) far = i; });
         const walk = [];
-        for (let u = far; u >= 0; u = dij.parent[u]){ walk.push(u); if (u === state.startNode) break; }
+        for (let u = far; u >= 0; u = dij.parent[u]){ walk.push(u); if (u === sNode()) break; }
         walk.reverse();
         const pts = walk.map(u => nodePt(u, dij.dist[u] * zs));
         strokePoly(C, pts, { width: 6.5, color: 'rgba(251,146,60,0.16)' });
@@ -713,7 +753,7 @@ const SCENES = {
         }
         if (state.showDist && zi > 0.02) line3(C, nodePt(i, 0), nodePt(i, zi), { width: 1.5, dash: [7, 7], color: 'rgba(251,191,36,0.3)' });
         const rising = settledN < nStep && dij.steps[settledN].u === i;
-        if (i === state.startNode) drawNodeDot(C, i, zi, 11, 'rgba(186,240,255,0.9)');
+        if (i === sNode()) drawNodeDot(C, i, zi, 11, 'rgba(186,240,255,0.9)');
         else drawNodeDot(C, i, zi, rising ? 9.5 : 7.5, rising ? 'rgba(251,113,133,0.9)' : 'rgba(52,211,153,0.88)');
         nodeLabel(C, i, zi);
         if (state.showDist) label3(C, nodePt(i, zi), 'd=' + dij.dist[i], { size: 10, color: '#fbbf24', align: 'center', dy: 14 });
@@ -730,10 +770,10 @@ const SCENES = {
         cur = '<div class="tanC">' + t({ zh: '本步敲定：', en: 'settling: ' }) + '<b>' + NODE_NAMES[st.u] + '</b> (d = ' + st.du + ')</div>' +
               '<div class="cosC">' + t({ zh: '松弛：', en: 'relax: ' }) + '<b>' + (imp.join(' · ') || t({ zh: '无改进', en: 'no improvement' })) + '</b></div>';
       } else {
-        let far = state.startNode;
+        let far = sNode();
         dij.dist.forEach((d, i) => { if (isFinite(d) && d > dij.dist[far]) far = i; });
         const walk = [];
-        for (let u = far; u >= 0; u = dij.parent[u]){ walk.push(NODE_NAMES[u]); if (u === state.startNode) break; }
+        for (let u = far; u >= 0; u = dij.parent[u]){ walk.push(NODE_NAMES[u]); if (u === sNode()) break; }
         walk.reverse();
         cur = '<div class="tanC">' + t({ zh: '已敲定', en: 'settled' }) + ' <b>9</b> / 9</div>' +
               '<div class="cotC">' + t({ zh: '最远 ', en: 'farthest ' }) + NODE_NAMES[far] + t({ zh: '：', en: ': ' }) + 'd = <b>' + dij.dist[far] + '</b> · ' + walk.join('–') + '</div>';
@@ -748,6 +788,16 @@ const SCENES = {
   mst: {
     label: { zh: '最小生成树', en: 'MST (Kruskal)' },
     params: ['wvar', 'omega'],
+    /* 同上：十步检完十条边后永久定格。本页没有起点可言（Kruskal 不需要源点），
+       两根滑杆里 ω 是钟，真正的自变量只剩权重扰动 k —— 而它正是这一页的要害：
+       tips 让人看「每条边悬挂在 z = 权重的高度上，算法像涨潮一样从低到高收边」，
+       k 一动，整排边在权重阶梯上重新排队，谁先被收、谁因成环被弹回（玫红 ×）跟着换人，
+       连总权 Σw 都变——「最小」这件事是相对一组具体权重而言的，这一点只有动起来才看得见。
+       值域取满 [0, 3]：k = 0 是「基础权重」这个必要的对照基准，不是退化端。
+       取整后四档各占一段平台（阶梯驱动，理由同 BFS 页）。
+       k = 3 跳回 0 整棵树会瞬间换形 ⇒ linear（往返）；四档来回，取 12 s，每档约 1.5 s。
+       wvar 被用作缓存键，已在 wVar() 里 round + clamp。 */
+    drive: { key: 'wvar', from: 0, to: 3, period: 12, kind: 'linear' },
     brand: { zh: 'Kruskal 按权重从小到大逐条检边：不成环就收入树中，成环就丢弃。「连接所有节点」与「总权最小」是两个约束，恰好 n−1 条边同时满足它们。',
              en: 'Kruskal examines edges from lightest to heaviest: keep an edge unless it closes a cycle. "Connect every node" and "minimize total weight" are two separate constraints — exactly n−1 edges satisfy both.' },
     tips: { zh: '顿悟：按 3 侧视——每条边悬挂在 z = 权重的高度上，算法像涨潮一样从低到高收边，成环的边被弹回（玫红 ×）；青色虚线圈是并查集的分量，收边即合并。按 2 正视看最终的最小生成树。',
@@ -849,6 +899,10 @@ const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 �
 const samples = [];
 let curTab = null;
 const paramWraps = {};   // key -> { wrap, input, val, p }
+const autoPlay = {};     // tabId -> 是否自动播放
+const driveMode = {};    // tabId -> 'loop' | 'pingpong'
+const driveOff = {};     // tabId -> 驱动时钟相对引擎时钟的累计偏移（= 自动播放累计关停时长）
+const driveOffAt = {};   // tabId -> 本次关停的起点（引擎时钟读数）
 const RELABEL = [];
 const cams = {};
 let cam = null;
@@ -1167,6 +1221,9 @@ function draw() {
 function resetSim() {
   state.t = 0;
   state.theta = 0;
+  /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
+     相位上，「重置」就名不副实了 */
+  Object.keys(driveOff).forEach(id => { driveOff[id] = 0; driveOffAt[id] = 0; });
   samples.length = 0;
   pushSample();
 }
@@ -1192,6 +1249,9 @@ function frame(ts) {
   if (state.running) {
     state.t += dt;
     state.theta += state.omega * dt;
+    applyDrive();
+    const dv = SCENES[curTab].drive;
+    if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
     pushSample();
   }
   const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
@@ -1216,16 +1276,29 @@ function buildParams() {
     input.type = 'range';
     input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
     const val = wrap.querySelector('.val');
+    /* render 只回显滑杆当前刻度；upd 才是「用户动了滑杆」的语义（写 state）。
+       两者分开，语言切换就不会顺手把读数写回 state —— 见下方 relabel 注释。 */
+    const render = () => { val.textContent = p.fmt(parseFloat(input.value)); };
     const upd = () => {
       const raw = parseFloat(input.value);
       state[p.key] = p.map ? p.map(raw) : raw;
-      val.textContent = p.fmt(raw);
+      render();
     };
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
     paramWraps[p.key] = { wrap, input, val, p };
-    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
+    /* 用户伸手拖被驱动的滑块 = 明确要接管，自动播放当场关闭，
+       否则下一帧就会被驱动值覆盖回去。这是与「暂停只冻结模拟」一致的语义。 */
+    input.addEventListener('input', () => {
+      const d = SCENES[curTab] && SCENES[curTab].drive;
+      if (d && d.key === p.key && autoPlay[curTab]) setAutoPlay(false);
+    });
+    upd();                       // 建面板时用默认刻度初始化 state
+    /* 语言切换只重排文案（fmt 里可能带 t()），绝不能顺手调 upd() 把滑杆刻度
+       写回 state：被 drive 驱动的参数，其 state 值比滑杆 step 精细得多，写回去
+       等于把它永久量化一次；暂停时 frame() 不再跑 applyDrive()，再也修不回来。 */
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); render(); };
     RELABEL.push(relabel);
     relabel();
   });
@@ -1330,12 +1403,122 @@ function syncParamVisibility() {
   });
 }
 
+/* ================= 场景时间驱动（引擎区） ================= */
+/* 驱动时钟：引擎时钟减去「自动播放关掉的那些时间」。关停期间它不走，
+   所以重新打开时驱动量从原地续上，不跳变。求值仍是纯函数——只是把
+   自变量从 state.t 换成这个校正过的时钟，不做增量积分：既不累积浮点
+   漂移，录制器按固定 dt 离线重放也能复现同一串值（偏移在一次渲染内是常量）。
+   已知语义：偏移只扣「自动播放关停」的时长，不扣「页签没被选中」的时长——
+   离开某页签 10 秒再切回来，它的驱动量会跳到 10 秒后的位置。这与「暂停只冻结
+   模拟、相机照走」是同一族约定（时钟是全局的，页签只是不同的观测口），
+   如需改成每页签独立时钟，得连录制器的离线重放一起改，不要只改这里。 */
+function driveClock(id) { return state.t - (driveOff[id] || 0); }
+
+/* 驱动求值：驱动时钟（见 driveClock）的纯函数，不做增量积分 —— 不累积
+   浮点漂移，暂停恢复不跳变，且录制器按固定 dt 推进 state.t 时可直接复用。 */
+function driveValue(d, tt, mode) {
+  const m = mode || d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+  const u = ((tt / d.period) % 1 + 1) % 1;              // 负时间也落在 [0,1)
+  const s = (m === 'loop') ? u : (u < 0.5 ? 2 * u : 2 - 2 * u);
+  return d.from + (d.to - d.from) * s;
+}
+
+/* 把当前场景的驱动量按引擎时钟写回 state。只动数据、不碰 DOM ——
+   录制器的离线渲染也调它，那条路径上没有面板可同步（见规范 §D1）。 */
+function applyDrive() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return;
+  state[sc.drive.key] = driveValue(sc.drive, driveClock(curTab), driveMode[curTab]);
+}
+
+/* 供录制器判断无缝循环的吸附基准；无驱动或用户关掉自动播放时返回 null */
+function driveInfo() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return null;
+  return { key: sc.drive.key, period: sc.drive.period, mode: driveMode[curTab] };
+}
+
+const warnedNoInvMap = {};   // key -> 已就「有 map 没 invMap」告警过
+
+/* 把驱动出的值反算回滑块刻度并回显。带 map 的参数必须提供 invMap，
+   否则只能退回显示映射后的值（规范 §8 已把 invMap 列为硬约束）。 */
+function syncParamSlider(key) {
+  const e = paramWraps[key];
+  if (!e) return;
+  /* 本函数每帧都被调用，所以每个 key 只喊一次，别把控制台刷爆 */
+  if (e.p.map && !e.p.invMap && !warnedNoInvMap[key]) {
+    warnedNoInvMap[key] = true;
+    console.warn('[math-viz] 参数 "' + key + '" 声明了 map 却没有 invMap：' +
+                 '驱动值会被当作滑杆原始值写进量程，回显与 state 会错位（规范 §8）。');
+  }
+  const raw = (e.p.map && e.p.invMap) ? e.p.invMap(state[key]) : state[key];
+  /* 先写进 input，再读回来显示：range 带 step，写进去的值会被吸附到刻度上。
+     若直接显示 raw，读数与滑杆句柄就会对不上；更要命的是下一次 upd() 读的是
+     吸附后的 input.value，会把这点差值永久写回 state —— 暂停时 frame() 不再跑
+     applyDrive()，再也修不回来。upd() 的触发面已经收窄到「用户拖动这根滑杆」
+     一条：语言切换只调 render()（见下方 relabel 注释），不再写 state。 */
+  e.input.value = raw;
+  e.val.textContent = e.p.fmt(parseFloat(e.input.value));
+}
+
+/* 开关自动播放的唯一入口：复选框与「拖滑块接管」都走这里，驱动时钟的记账
+   才不会漏。关掉时记下停摆起点，打开时把停摆时长补进偏移量。 */
+function setAutoPlayFor(id, on) {
+  on = !!on;
+  if (!!autoPlay[id] === on) return;            // 状态没变就别动时钟，避免重复记账
+  if (on) driveOff[id] += state.t - driveOffAt[id];
+  else driveOffAt[id] = state.t;
+  autoPlay[id] = on;
+  refreshDriveRow(id);
+}
+
+function setAutoPlay(on) { setAutoPlayFor(curTab, on); }
+
+function refreshDriveRow(id) {
+  const row = document.querySelector('.drive[data-tab="' + id + '"]');
+  if (!row) return;
+  row.querySelector('input').checked = !!autoPlay[id];
+  row.querySelectorAll('[data-mode]').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === driveMode[id]);
+  });
+}
+
+function buildDrive() {
+  const host = document.getElementById('driveHost');
+  Object.keys(SCENES).forEach(id => {
+    const d = SCENES[id].drive;
+    if (!d) return;
+    autoPlay[id] = true;
+    driveMode[id] = d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+    driveOff[id] = 0; driveOffAt[id] = 0;      // 先置零，页签才不会把 undefined 读进算式
+    const row = document.createElement('div');
+    row.className = 'drive';
+    row.dataset.tab = id;
+    row.innerHTML = '<label class="tg"><input type="checkbox" checked><span class="autoL"></span></label>' +
+      '<span class="dmode"><button class="btn" data-mode="pingpong"></button>' +
+      '<button class="btn" data-mode="loop"></button></span>';
+    row.querySelector('input').addEventListener('change', e => { setAutoPlayFor(id, e.target.checked); });
+    row.querySelectorAll('[data-mode]').forEach(b => {
+      b.addEventListener('click', () => { driveMode[id] = b.dataset.mode; refreshDriveRow(id); });
+    });
+    host.appendChild(row);
+    const relabel = () => {
+      row.querySelector('.autoL').textContent = t(UI.autoPlay);
+      row.querySelector('[data-mode="pingpong"]').textContent = t(UI.pingpong);
+      row.querySelector('[data-mode="loop"]').textContent = t(UI.loop);
+    };
+    RELABEL.push(relabel);
+    relabel();
+    refreshDriveRow(id);
+  });
+}
+
 function switchTab(id) {
   if (id === curTab) return;
   curTab = id;
   tween = null;
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
-  document.querySelectorAll('.toggles[data-tab], .views[data-tab]').forEach(el => {
+  document.querySelectorAll('.toggles[data-tab], .views[data-tab], .drive[data-tab]').forEach(el => {
     el.style.display = el.dataset.tab === id ? '' : 'none';
   });
   cam = cams[id];
@@ -1484,6 +1667,7 @@ window.addEventListener('keydown', e => {
 resize();
 buildTabs();
 buildParams();
+buildDrive();
 buildToggles();
 buildViews();
 Object.keys(SCENES).forEach(id => {

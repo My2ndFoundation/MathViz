@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.2">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.0.0">
 <title>霍夫曼编码 · 从文本到比特 · Huffman Coding</title>
 <!-- ============================================================
@@ -20,6 +20,7 @@
   （state.theta = 已走的「拍」数），可调速、可暂停。
 
   版本记录（changelog，新→旧）：
+    1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
     1.0.2  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.1  2026-07-31  修复视角按钮高亮永不生效：文本预设按钮复用了 .vbtn 样式类，
                        refreshViewButtons 未限定容器，closest('.views') 返回 null 而抛错
@@ -129,6 +130,11 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 .tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
 .tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
 
+/* 驱动控制行 */
+.drive{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0 2px}
+.drive .dmode{display:flex;gap:4px;margin-left:auto}
+.drive .dmode .btn{padding:4px 8px;font-size:11px}
+
 /* 读数与提示 */
 .readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
   font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
@@ -186,6 +192,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       <button class="btn wide" id="btnPlay">⏸ 暂停</button>
       <button class="btn" id="btnReset">↺ 重置</button>
     </div>
+    <div id="driveHost"></div>
     <div id="togglesHost"></div>
     <div id="viewsHost"></div>
     <div class="readout" id="readout"></div>
@@ -230,6 +237,9 @@ const UI = {
   resume: { zh: '▶ 继续', en: '▶ Resume' },
   reset:  { zh: '↺ 重置', en: '↺ Reset' },
   views:  { zh: '视角', en: 'View' },
+  autoPlay: { zh: '自动播放', en: 'Auto-play' },
+  pingpong: { zh: '往返',     en: 'Ping-pong' },
+  loop:     { zh: '循环',     en: 'Loop' },
   hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
             en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
 };
@@ -481,10 +491,14 @@ function noticeLines(P){
 const PARAMS = [
   { key: 'omega', label: { zh: '编码速度 <i>v</i>', en: 'Encoding speed <i>v</i>' }, min: 0.2, max: 8, step: 0.1, value: 1.5,
     fmt: v => fmt(v, 1) + t({ zh: ' 步/s', en: ' steps/s' }) },
+  /* capN 被「词频统计 / 建树 / 逐字编码」三页的 drive 驱动：map 取整后 state 存的
+     就是整数刻度本身，故 invMap 取恒等 —— 但必须显式写出来（规范 §8） */
   { key: 'capN',  label: { zh: '字符表上限 <i>N</i>', en: 'Alphabet cap <i>N</i>' },  min: 4,   max: 16, step: 1, value: 14,
-    map: v => Math.round(v), fmt: v => Math.round(v) + t({ zh: ' 种', en: ' symbols' }) },
+    map: v => Math.round(v), invMap: v => v, fmt: v => Math.round(v) + t({ zh: ' 种', en: ' symbols' }) },
+  /* symSel 被「编码表」页的 drive 驱动：map 取整后 state 存的就是整数刻度本身，
+     故 invMap 是恒等映射 —— 但必须显式写出来，否则引擎会告警并按无 invMap 处理（规范 §8） */
   { key: 'symSel', label: { zh: '选中字符 <i>i</i>', en: 'Selected symbol <i>i</i>' }, min: 0, max: 15, step: 1, value: 0,
-    map: v => Math.round(v),
+    map: v => Math.round(v), invMap: v => v,
     fmt: v => { const P = PIPE(), i = clamp(Math.round(v), 0, P.m - 1), ch = P.leafOrder[i];
                 return '「' + glyph(ch) + '」 ' + P.codes.get(ch); } }
 ];
@@ -504,6 +518,22 @@ const SCENES = {
   freq: {
     label: { zh: '词频统计', en: 'Frequencies' },
     params: ['omega', 'capN'],
+    /* 本页确为静止页签：步进钟数完文本里的每一个字符就停住，读数区自己写着
+       「完成（按 R 重放）· 已暂停」，之后频次柱与文本流逐位不变。
+       两根滑杆里 ω 是钟本身，能拖的只有字符表上限 N —— 而它恰好是这一页立论的边界：
+       brand 说「频率是霍夫曼编码唯一的输入」，N 决定了哪些字符还算得上「一个字符」，
+       被挤出去的那些连柱子都不再有（读数区会明说丢掉了几种、覆盖率剩多少）。
+       值域 4 … distinct：上界写成 getter 跟着文本框走。字符表的真实种类数由文本决定，
+       P.distinct 是**未经截顶**的那个数（buildPipeline 先统计、后按 cap 截断），
+       所以这个 getter 不会与被驱动的 capN 互相纠缠。若钉死成滑杆量程 16，
+       默认示例文本只有 7 种字符，扫掠有一多半时间落在「N ≥ 7，什么也不裁」的平段上，
+       画面停着不动——那等于把静止页签换个地方留着。
+       退化情形：文本只有三四种字符时 to 被夹回 4 = from，驱动值恒定、画面静止但不报错，
+       正确对应「字符本来就没几种，无从裁起」。
+       取整后每档各占一段平台，是有意的阶梯驱动：柱子要停住才数得清。
+       N 从上界跳回 4 整排柱子会瞬间少掉一半 ⇒ linear（往返）；12 s 一个来回。
+       capN 被用作缓存键并传给 buildPipeline，那里已 clamp(Math.round(...), 2, 16)。 */
+    drive: { key: 'capN', from: 4, get to() { return clamp(PIPE().distinct, 4, 16); }, period: 12, kind: 'linear' },
     brand: { zh: '编码器读不懂文本的意思，它只数数：每个字符出现了多少次。频率是霍夫曼编码唯一的输入。字符沿 t 轴流走，频次柱在原地长高——拖拽画布旋转观察。',
              en: 'The encoder never reads meaning — it only counts how often each character occurs. Frequency is the sole input to Huffman coding. Characters stream away along the t axis while the count bars grow in place — drag the canvas to rotate.' },
     tips: { zh: '提示：按 2 键正视 字符·次数——语义、语序、内容全部消失了，只剩一排高低不同的柱子，霍夫曼从这一刻起只认这排柱子。中途调快速度 v，已经流出去的字符仍保持它们当时的真实间距。',
@@ -605,6 +635,12 @@ const SCENES = {
   build: {
     label: { zh: '建树', en: 'Build the tree' },
     params: ['omega', 'capN'],
+    /* 与「词频统计」页同一诊断（m−1 步合并完就永久定格）与同一个自变量：
+       本页可拖的滑杆只有 N。它一动，参与合并的叶子换一批，权重排序跟着换，
+       整棵树重新长一遍——tips 让人看的「越罕见的字符沉得越深」因此可以反复对照，
+       而不是只在开局那几秒出现一次。
+       值域、getter 上界、kind、周期与取整说明均与「词频统计」页同口径，见那一页。 */
+    drive: { key: 'capN', from: 4, get to() { return clamp(PIPE().distinct, 4, 16); }, period: 12, kind: 'linear' },
     brand: { zh: '每一拍取出权重最小的两个节点，合并成一个新节点，权重相加——重复 m−1 次，树就长成了。这里的 z 轴是合并步数，不是时间。',
              en: 'Each tick takes the two lightest nodes and merges them into a new one whose weight is their sum — repeat m−1 times and the tree is grown. Here the z axis is the merge step, not time.' },
     tips: { zh: '提示：按 2 键侧视 层级·步——越早被合并的（也就是越罕见的）字符，头顶叠的祖先越多，最终在树里沉得越深，码字也就越长。面板逐条列出了每一步到底合并了谁和谁。',
@@ -710,6 +746,22 @@ const SCENES = {
   codes: {
     label: { zh: '编码表', en: 'Code table' },
     params: ['capN', 'symSel'],
+    /* 本页是四页里唯一该驱动的：symSel 不是"预设选择器"，而是码树叶子的有序索引
+       （leafOrder 是中序遍历，即码字的字典序），扫一遍就是紫色路径自左向右扫过整棵树，
+       每个字符的「从根往下走、左 0 右 1」被逐个演一遍 —— brand 那句话本来就是个动作。
+       顺带把 tips 的对照也带活：路径扫到哪个字符，那一对柱（玫红理想 −log₂pᵢ /
+       紫色实际 ℓᵢ）就被点名，读者不必自己点 14 次才发现两排柱始终贴在一起。
+       不驱动 capN：它一动整棵码树重建，扫描就没有可扫的固定对象了。
+       值域 0 … (m−1)：上界写成 getter 跟着文本框走。字符表大小 m 由 TEXT_STATE.raw 决定、
+       随时会变，若把上界钉死成滑杆量程 15，默认文本（m = 7）会让 sel = clamp(round, 0, m−1)
+       在顶端饱和，单程约 57% 的时间停在最后一片叶子上。引擎侧无需任何改动：
+       driveValue() 是全文唯一读 d.to 的地方（`d.from + (d.to − d.from) * s`），
+       取值器每次求值都返回当前的 m−1，扫描范围因此始终恰好覆盖整个码表 —— 不多扫也不漏扫。
+       退化情形 m = 1（例如「单字符」样例）时 to === from === 0，驱动值恒为 0，
+       画面静止但不报错，正确对应「只有一个字符、没什么可扫」。
+       首尾（最左叶 ↔ 最右叶）差别大、跳回会突变 → linear（pingpong 折返，来回各扫一遍）。
+       周期 16 s：pingpong 下单程 8 s，m = 7 时约 1.1 s 一个字符，够看清一条路径再走下一条。 */
+    drive: { key: 'symSel', from: 0, get to() { return Math.max(0, PIPE().m - 1); }, period: 16, kind: 'linear' },
     brand: { zh: '从根往下走：左边记 0、右边记 1，走到叶子就读出该字符的码字。码字只长在叶子上——所以没有任何码字是另一个码字的前缀。',
              en: 'Walk down from the root: left writes 0, right writes 1, and the leaf you land on spells that character’s codeword. Codewords live only on leaves — which is exactly why no codeword is a prefix of another.' },
     tips: { zh: '提示：按 2 键正视 码树——高频字符挂得浅、码字就短，实际码长 ℓᵢ 紧贴理想值 −log₂pᵢ（按 3 俯视比较两排柱）。至于熵为何是下界，见《信息熵、惊奇度与编码》。',
@@ -839,6 +891,11 @@ const SCENES = {
   encode: {
     label: { zh: '逐字编码', en: 'Encode & decode' },
     params: ['omega', 'capN'],
+    /* 同上：码流跑完整段文本后永久定格。自变量仍是 N，且这一页的效果最直白——
+       N 一收紧，码表变短、码字变短，紫色 Huffman 码流与下方定长基线的长度差
+       整条重画一遍，「Huffman 总 47 bit vs 定长 54 bit」那组读数随之改写。
+       值域、getter 上界、kind、周期与取整说明均与「词频统计」页同口径，见那一页。 */
+    drive: { key: 'capN', from: 4, get to() { return clamp(PIPE().distinct, 4, 16); }, period: 12, kind: 'linear' },
     brand: { zh: '按码表把文本逐字换成比特，码流像示波器上的方波一样流出。下面那条定长基线用同样的方式编码同一段文本——它越跑越长。',
              en: 'The code table turns the text into bits one character at a time, and the stream unrolls like a square wave on an oscilloscope. Below it, a fixed-length baseline encodes the same text — and keeps running longer.' },
     tips: { zh: '提示：按 2 键侧视 码流——紫色方波里每个字符占据的宽度就是它的代价，高频字符只占窄窄一格；关掉「码字分组」，所有分隔标记消失，绿色解码行依然一字不差——前缀码不需要任何分隔符。',
@@ -1006,6 +1063,10 @@ const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 �
 const samples = [];
 let curTab = null;
 const paramWraps = {};   // key -> { wrap, input, val, p }
+const autoPlay = {};     // tabId -> 是否自动播放
+const driveMode = {};    // tabId -> 'loop' | 'pingpong'
+const driveOff = {};     // tabId -> 驱动时钟相对引擎时钟的累计偏移（= 自动播放累计关停时长）
+const driveOffAt = {};   // tabId -> 本次关停的起点（引擎时钟读数）
 const RELABEL = [];
 const cams = {};
 let cam = null;
@@ -1324,6 +1385,9 @@ function draw() {
 function resetSim() {
   state.t = 0;
   state.theta = 0;
+  /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
+     相位上，「重置」就名不副实了 */
+  Object.keys(driveOff).forEach(id => { driveOff[id] = 0; driveOffAt[id] = 0; });
   samples.length = 0;
   pushSample();
 }
@@ -1349,6 +1413,9 @@ function frame(ts) {
   if (state.running) {
     state.t += dt;
     state.theta += state.omega * dt;
+    applyDrive();
+    const dv = SCENES[curTab].drive;
+    if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
     pushSample();
   }
   const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
@@ -1373,16 +1440,29 @@ function buildParams() {
     input.type = 'range';
     input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
     const val = wrap.querySelector('.val');
+    /* render 只回显滑杆当前刻度；upd 才是「用户动了滑杆」的语义（写 state）。
+       两者分开，语言切换就不会顺手把读数写回 state —— 见下方 relabel 注释。 */
+    const render = () => { val.textContent = p.fmt(parseFloat(input.value)); };
     const upd = () => {
       const raw = parseFloat(input.value);
       state[p.key] = p.map ? p.map(raw) : raw;
-      val.textContent = p.fmt(raw);
+      render();
     };
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
     paramWraps[p.key] = { wrap, input, val, p };
-    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
+    /* 用户伸手拖被驱动的滑块 = 明确要接管，自动播放当场关闭，
+       否则下一帧就会被驱动值覆盖回去。这是与「暂停只冻结模拟」一致的语义。 */
+    input.addEventListener('input', () => {
+      const d = SCENES[curTab] && SCENES[curTab].drive;
+      if (d && d.key === p.key && autoPlay[curTab]) setAutoPlay(false);
+    });
+    upd();                       // 建面板时用默认刻度初始化 state
+    /* 语言切换只重排文案（fmt 里可能带 t()），绝不能顺手调 upd() 把滑杆刻度
+       写回 state：被 drive 驱动的参数，其 state 值比滑杆 step 精细得多，写回去
+       等于把它永久量化一次；暂停时 frame() 不再跑 applyDrive()，再也修不回来。 */
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); render(); };
     RELABEL.push(relabel);
     relabel();
   });
@@ -1489,12 +1569,122 @@ function syncParamVisibility() {
   });
 }
 
+/* ================= 场景时间驱动（引擎区） ================= */
+/* 驱动时钟：引擎时钟减去「自动播放关掉的那些时间」。关停期间它不走，
+   所以重新打开时驱动量从原地续上，不跳变。求值仍是纯函数——只是把
+   自变量从 state.t 换成这个校正过的时钟，不做增量积分：既不累积浮点
+   漂移，录制器按固定 dt 离线重放也能复现同一串值（偏移在一次渲染内是常量）。
+   已知语义：偏移只扣「自动播放关停」的时长，不扣「页签没被选中」的时长——
+   离开某页签 10 秒再切回来，它的驱动量会跳到 10 秒后的位置。这与「暂停只冻结
+   模拟、相机照走」是同一族约定（时钟是全局的，页签只是不同的观测口），
+   如需改成每页签独立时钟，得连录制器的离线重放一起改，不要只改这里。 */
+function driveClock(id) { return state.t - (driveOff[id] || 0); }
+
+/* 驱动求值：驱动时钟（见 driveClock）的纯函数，不做增量积分 —— 不累积
+   浮点漂移，暂停恢复不跳变，且录制器按固定 dt 推进 state.t 时可直接复用。 */
+function driveValue(d, tt, mode) {
+  const m = mode || d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+  const u = ((tt / d.period) % 1 + 1) % 1;              // 负时间也落在 [0,1)
+  const s = (m === 'loop') ? u : (u < 0.5 ? 2 * u : 2 - 2 * u);
+  return d.from + (d.to - d.from) * s;
+}
+
+/* 把当前场景的驱动量按引擎时钟写回 state。只动数据、不碰 DOM ——
+   录制器的离线渲染也调它，那条路径上没有面板可同步（见规范 §D1）。 */
+function applyDrive() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return;
+  state[sc.drive.key] = driveValue(sc.drive, driveClock(curTab), driveMode[curTab]);
+}
+
+/* 供录制器判断无缝循环的吸附基准；无驱动或用户关掉自动播放时返回 null */
+function driveInfo() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return null;
+  return { key: sc.drive.key, period: sc.drive.period, mode: driveMode[curTab] };
+}
+
+const warnedNoInvMap = {};   // key -> 已就「有 map 没 invMap」告警过
+
+/* 把驱动出的值反算回滑块刻度并回显。带 map 的参数必须提供 invMap，
+   否则只能退回显示映射后的值（规范 §8 已把 invMap 列为硬约束）。 */
+function syncParamSlider(key) {
+  const e = paramWraps[key];
+  if (!e) return;
+  /* 本函数每帧都被调用，所以每个 key 只喊一次，别把控制台刷爆 */
+  if (e.p.map && !e.p.invMap && !warnedNoInvMap[key]) {
+    warnedNoInvMap[key] = true;
+    console.warn('[math-viz] 参数 "' + key + '" 声明了 map 却没有 invMap：' +
+                 '驱动值会被当作滑杆原始值写进量程，回显与 state 会错位（规范 §8）。');
+  }
+  const raw = (e.p.map && e.p.invMap) ? e.p.invMap(state[key]) : state[key];
+  /* 先写进 input，再读回来显示：range 带 step，写进去的值会被吸附到刻度上。
+     若直接显示 raw，读数与滑杆句柄就会对不上；更要命的是下一次 upd() 读的是
+     吸附后的 input.value，会把这点差值永久写回 state —— 暂停时 frame() 不再跑
+     applyDrive()，再也修不回来。upd() 的触发面已经收窄到「用户拖动这根滑杆」
+     一条：语言切换只调 render()（见下方 relabel 注释），不再写 state。 */
+  e.input.value = raw;
+  e.val.textContent = e.p.fmt(parseFloat(e.input.value));
+}
+
+/* 开关自动播放的唯一入口：复选框与「拖滑块接管」都走这里，驱动时钟的记账
+   才不会漏。关掉时记下停摆起点，打开时把停摆时长补进偏移量。 */
+function setAutoPlayFor(id, on) {
+  on = !!on;
+  if (!!autoPlay[id] === on) return;            // 状态没变就别动时钟，避免重复记账
+  if (on) driveOff[id] += state.t - driveOffAt[id];
+  else driveOffAt[id] = state.t;
+  autoPlay[id] = on;
+  refreshDriveRow(id);
+}
+
+function setAutoPlay(on) { setAutoPlayFor(curTab, on); }
+
+function refreshDriveRow(id) {
+  const row = document.querySelector('.drive[data-tab="' + id + '"]');
+  if (!row) return;
+  row.querySelector('input').checked = !!autoPlay[id];
+  row.querySelectorAll('[data-mode]').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === driveMode[id]);
+  });
+}
+
+function buildDrive() {
+  const host = document.getElementById('driveHost');
+  Object.keys(SCENES).forEach(id => {
+    const d = SCENES[id].drive;
+    if (!d) return;
+    autoPlay[id] = true;
+    driveMode[id] = d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+    driveOff[id] = 0; driveOffAt[id] = 0;      // 先置零，页签才不会把 undefined 读进算式
+    const row = document.createElement('div');
+    row.className = 'drive';
+    row.dataset.tab = id;
+    row.innerHTML = '<label class="tg"><input type="checkbox" checked><span class="autoL"></span></label>' +
+      '<span class="dmode"><button class="btn" data-mode="pingpong"></button>' +
+      '<button class="btn" data-mode="loop"></button></span>';
+    row.querySelector('input').addEventListener('change', e => { setAutoPlayFor(id, e.target.checked); });
+    row.querySelectorAll('[data-mode]').forEach(b => {
+      b.addEventListener('click', () => { driveMode[id] = b.dataset.mode; refreshDriveRow(id); });
+    });
+    host.appendChild(row);
+    const relabel = () => {
+      row.querySelector('.autoL').textContent = t(UI.autoPlay);
+      row.querySelector('[data-mode="pingpong"]').textContent = t(UI.pingpong);
+      row.querySelector('[data-mode="loop"]').textContent = t(UI.loop);
+    };
+    RELABEL.push(relabel);
+    relabel();
+    refreshDriveRow(id);
+  });
+}
+
 function switchTab(id) {
   if (id === curTab) return;
   curTab = id;
   tween = null;
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
-  document.querySelectorAll('.toggles[data-tab], .views[data-tab]').forEach(el => {
+  document.querySelectorAll('.toggles[data-tab], .views[data-tab], .drive[data-tab]').forEach(el => {
     el.style.display = el.dataset.tab === id ? '' : 'none';
   });
   cam = cams[id];
@@ -1643,6 +1833,7 @@ window.addEventListener('keydown', e => {
 resize();
 buildTabs();
 buildParams();
+buildDrive();
 buildToggles();
 buildViews();
 Object.keys(SCENES).forEach(id => {

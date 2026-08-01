@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.1">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.0.0">
 <title>最小二乘与正交投影 · Least Squares & Orthogonal Projection</title>
 <!-- ============================================================
@@ -16,6 +16,7 @@
   写出来就是正规方程 AᵀA x̂ = Aᵀb。
 
   版本记录（changelog，新→旧）：
+    1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-30  首个版本：向量投影 / 列空间最近点 / 直线拟合 / 正规方程 四场景（含双语）
 ============================================================ -->
@@ -123,6 +124,11 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 .tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
 .tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
 
+/* 驱动控制行 */
+.drive{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0 2px}
+.drive .dmode{display:flex;gap:4px;margin-left:auto}
+.drive .dmode .btn{padding:4px 8px;font-size:11px}
+
 /* 读数与提示 */
 .readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
   font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
@@ -165,6 +171,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       <button class="btn wide" id="btnPlay">⏸ 暂停</button>
       <button class="btn" id="btnReset">↺ 重置</button>
     </div>
+    <div id="driveHost"></div>
     <div id="togglesHost"></div>
     <div id="viewsHost"></div>
     <div class="readout" id="readout"></div>
@@ -209,6 +216,9 @@ const UI = {
   resume: { zh: '▶ 继续', en: '▶ Resume' },
   reset:  { zh: '↺ 重置', en: '↺ Reset' },
   views:  { zh: '视角', en: 'View' },
+  autoPlay: { zh: '自动播放', en: 'Auto-play' },
+  pingpong: { zh: '往返',     en: 'Ping-pong' },
+  loop:     { zh: '循环',     en: 'Loop' },
   hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
             en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
 };
@@ -351,6 +361,13 @@ const SCENES = {
   proj: {
     label: { zh: '向量投影', en: 'Projection' },
     params: ['bx', 'by', 'bz', 'omega'],
+    /* 子空间是 y = 0 那张平面，于是 p = (bx, 0, bz)、r = (0, by, 0)——by 正是
+       b 离开子空间的那一个分量，也就是残差本身。驱动 by：r 伸长又缩回、
+       俯视时 b 与 p 的影子分开又重合，tips 的 |b|² = |p|² + |r|² 每一帧都在变。
+       满量程 [−2, 2]：中点 by = 0 是「b 已经在子空间里、r = 0」的教学要点，
+       两端是残差最大，都不退化。
+       linear：+2 跳回 −2 会让 b 从平面上方瞬移到下方 → 默认 pingpong。 */
+    drive: { key: 'by', from: -2, to: 2, period: 8, kind: 'linear' },
     brand: { zh: '把向量 b 垂直压到子空间上：落点 p 是子空间里离 b 最近的点，残差 r = b − p 与整个子空间垂直。拖动 b 的三个分量，或让 b 旋转起来观察。',
              en: 'Drop the vector b perpendicularly onto a subspace: the foot p is the closest point in the subspace, and the residual r = b − p is perpendicular to all of it. Drag the components of b, or let it spin.' },
     tips: { zh: '按 3 俯视：b 恰好落在 p 上——正交投影就是头顶灯光打下的影子；按 2 正视，平面塌成一条线、r 竖直挺立，直角一眼可见。读数区的 |b|² = |p|² + |r|² 就是勾股定理。',
@@ -415,6 +432,14 @@ const SCENES = {
   cols: {
     label: { zh: '列空间最近点', en: 'Column space' },
     params: ['bx', 'by', 'bz', 'omega'],
+    /* 列空间 span(a₁, a₂) 的法向 a₁×a₂ = (0.7, −2.1, 0.6) 以 y 分量为主，
+       所以三个分量里 by 最「垂直于平面」——驱动它，b 穿过列空间又退出来，
+       残差 r 过零再反向，组合台阶 x̂₁a₁ + x̂₂a₂ 一路跟着重排。
+       这正好演到 brand 的那句「b 根本不在 A 的列空间里」的反面：
+       扫到某一刻 b 恰好落进平面，最小二乘退化成精确解。
+       满量程 [−2, 2]，与「向量投影」页同一根滑块，切页签不跳。
+       linear → 默认 pingpong（+2 直接跳回 −2 会让 b 穿模瞬移）。 */
+    drive: { key: 'by', from: -2, to: 2, period: 8, kind: 'linear' },
     brand: { zh: 'Ax = b 无精确解时，b 根本不在 A 的列空间里。最小二乘取列空间中离 b 最近的点 Ax̂——即 b 的正交投影；残差同时垂直于每一根列向量：Aᵀ(b − Ax̂) = 0。',
              en: 'When Ax = b has no exact solution, b is simply not in the column space of A. Least squares takes the closest point Ax̂ in the column space — the orthogonal projection of b; the residual is perpendicular to every column at once: Aᵀ(b − Ax̂) = 0.' },
     tips: { zh: '按 3 沿法向看：b 塌到 Ax̂ 上——它就是平面里能达到的最近点；按 2 边视，列空间成一条线，r 与它垂直。打开「组合台阶」，看 x̂₁a₁ + x̂₂a₂ 如何一步步走到投影点。',
@@ -485,6 +510,18 @@ const SCENES = {
   fit: {
     label: { zh: '直线拟合', en: 'Line fit' },
     params: ['m', 'c', 'noise'],
+    /* brand 直说「拖动 m、c，看当前点沿碗面滑向碗底」，tips 的顿悟点是误差碗
+       只有一个最低点——自变量取斜率 m：玫红直线绕着数据转，竖直残差一根根
+       伸缩，橙色当前点沿碗面滑过碗底再爬上另一侧。
+       值域没有取满量程 [−2, 2]：drawSSE 只在 m* ± 1.1 的窗口里画碗，出了这个
+       窗口当前点就被 clamp 钉在碗沿上不动。
+       而 m* 还随本页的 noise 滑块漂移（noise 越大 m* 越小），所以区间不能只按
+       默认 noise = 0.25 定：实测 noise 从 0 走到 0.8，m* 由 0.550 降到 0.456，
+       碗窗上沿随之由 1.650 收到 1.556。故取 [−0.5, 1.55]——在整根 noise 量程上
+       都落在碗窗内（最紧的一档是 noise = 0.8 的 [−0.644, 1.556]），
+       保证用户无论把 noise 拖到哪里，当前点都全程贴在碗面上。
+       三维碗 + SSE 读数要看，取 10 s；linear → 默认 pingpong。 */
+    drive: { key: 'm', from: -0.5, to: 1.55, period: 10, kind: 'linear' },
     brand: { zh: '给一堆数据点配一条 y = mx + c：每个点的误差取竖直残差，平方求和得 SSE(m, c)——它是 (m, c) 平面上的一只抛物碗。拖动 m、c，看当前点沿碗面滑向碗底。',
              en: 'Fit y = mx + c to scattered data: each point contributes a vertical residual, and the sum of squares SSE(m, c) is a paraboloid bowl over the (m, c) plane. Drag m and c and watch the current point slide down the bowl.' },
     tips: { zh: '按 3 看误差碗：SSE 只有一个最低点，碗底 (m*, c*) 就是最小二乘解；按 4 俯视，碗塌成一圈圈椭圆等高线。注意：回归的残差是竖直距离，不是到直线的几何最短距离。',
@@ -566,6 +603,18 @@ const SCENES = {
   normal: {
     label: { zh: '正规方程', en: 'Normal equations' },
     params: ['m', 'c'],
+    /* tips：「拖动 m、c，白色试探点 A(c, m) 在平面内游走，‖b − A(c, m)‖ 永远
+       不小于 |r|」——本页要证的就是这条不等式**从不被打破**，自变量取 m，
+       试探点便在 span(1, x) 里沿一条直线来回走，读数区那条不等式全程可读。
+       注意别把话说过头：等号只在 (m, c) 同时等于 (m̂, ĉ) ≈ (0.86, 0.36) 时才取到，
+       而本页只驱动 m、c 停在默认的 −0.40，所以**扫描过程中等号取不到**。
+       实测（c = −0.40，m 从 −1 扫到 1）：‖b − A‖ 由 3.450 单调降到 1.288，
+       而 |r| = 0.0185——差着约 70 倍，不等式始终宽松成立。
+       就算放开区间也够不着：c 固定时沿 m 的最近点在 m ≈ 1.013，已在 [−1, 1] 之外。
+       值域取 [−1, 1] 而非满量程 [−2, 2]：平面片是 drawSpanPlane(…, 1.0) 画的，
+       系数超过 ±1 试探点就走到画出来的平面之外，看着像脱离了子空间。
+       linear → 默认 pingpong；8 s（构型简单，只有一个点在走）。 */
+    drive: { key: 'm', from: -1, to: 1, period: 8, kind: 'linear' },
     brand: { zh: '三个数据点，让样本空间恰好是 R³：b = (y₁, y₂, y₃) 是一个点，所有直线 c·1 + m·x 织成一张平面。拟合 = 把 b 投影到这张平面——三条竖直残差合成的 r 与平面垂直，展开即 AᵀA x̂ = Aᵀb。',
              en: 'With three data points the sample space is exactly R³: b = (y₁, y₂, y₃) is a single point, and all lines c·1 + m·x weave a plane. Fitting = projecting b onto that plane — the three vertical residuals assemble into one vector r perpendicular to it, and writing that out gives AᵀA x̂ = Aᵀb.' },
     tips: { zh: '按 2 边视：span(1, x) 塌成一条线，r 与它垂直——正规方程不是代数技巧，就是这一个直角。拖动 m、c，白色试探点 A(c, m) 在平面内游走，‖b − A(c, m)‖ 永远不小于 |r|。',
@@ -646,6 +695,10 @@ const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 �
 const samples = [];
 let curTab = null;
 const paramWraps = {};   // key -> { wrap, input, val, p }
+const autoPlay = {};     // tabId -> 是否自动播放
+const driveMode = {};    // tabId -> 'loop' | 'pingpong'
+const driveOff = {};     // tabId -> 驱动时钟相对引擎时钟的累计偏移（= 自动播放累计关停时长）
+const driveOffAt = {};   // tabId -> 本次关停的起点（引擎时钟读数）
 const RELABEL = [];
 const cams = {};
 let cam = null;
@@ -958,6 +1011,9 @@ function draw() {
 function resetSim() {
   state.t = 0;
   state.theta = 0;
+  /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
+     相位上，「重置」就名不副实了 */
+  Object.keys(driveOff).forEach(id => { driveOff[id] = 0; driveOffAt[id] = 0; });
   samples.length = 0;
   pushSample();
 }
@@ -983,6 +1039,9 @@ function frame(ts) {
   if (state.running) {
     state.t += dt;
     state.theta += state.omega * dt;
+    applyDrive();
+    const dv = SCENES[curTab].drive;
+    if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
     pushSample();
   }
   const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
@@ -1007,16 +1066,29 @@ function buildParams() {
     input.type = 'range';
     input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
     const val = wrap.querySelector('.val');
+    /* render 只回显滑杆当前刻度；upd 才是「用户动了滑杆」的语义（写 state）。
+       两者分开，语言切换就不会顺手把读数写回 state —— 见下方 relabel 注释。 */
+    const render = () => { val.textContent = p.fmt(parseFloat(input.value)); };
     const upd = () => {
       const raw = parseFloat(input.value);
       state[p.key] = p.map ? p.map(raw) : raw;
-      val.textContent = p.fmt(raw);
+      render();
     };
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
     paramWraps[p.key] = { wrap, input, val, p };
-    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
+    /* 用户伸手拖被驱动的滑块 = 明确要接管，自动播放当场关闭，
+       否则下一帧就会被驱动值覆盖回去。这是与「暂停只冻结模拟」一致的语义。 */
+    input.addEventListener('input', () => {
+      const d = SCENES[curTab] && SCENES[curTab].drive;
+      if (d && d.key === p.key && autoPlay[curTab]) setAutoPlay(false);
+    });
+    upd();                       // 建面板时用默认刻度初始化 state
+    /* 语言切换只重排文案（fmt 里可能带 t()），绝不能顺手调 upd() 把滑杆刻度
+       写回 state：被 drive 驱动的参数，其 state 值比滑杆 step 精细得多，写回去
+       等于把它永久量化一次；暂停时 frame() 不再跑 applyDrive()，再也修不回来。 */
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); render(); };
     RELABEL.push(relabel);
     relabel();
   });
@@ -1121,12 +1193,122 @@ function syncParamVisibility() {
   });
 }
 
+/* ================= 场景时间驱动（引擎区） ================= */
+/* 驱动时钟：引擎时钟减去「自动播放关掉的那些时间」。关停期间它不走，
+   所以重新打开时驱动量从原地续上，不跳变。求值仍是纯函数——只是把
+   自变量从 state.t 换成这个校正过的时钟，不做增量积分：既不累积浮点
+   漂移，录制器按固定 dt 离线重放也能复现同一串值（偏移在一次渲染内是常量）。
+   已知语义：偏移只扣「自动播放关停」的时长，不扣「页签没被选中」的时长——
+   离开某页签 10 秒再切回来，它的驱动量会跳到 10 秒后的位置。这与「暂停只冻结
+   模拟、相机照走」是同一族约定（时钟是全局的，页签只是不同的观测口），
+   如需改成每页签独立时钟，得连录制器的离线重放一起改，不要只改这里。 */
+function driveClock(id) { return state.t - (driveOff[id] || 0); }
+
+/* 驱动求值：驱动时钟（见 driveClock）的纯函数，不做增量积分 —— 不累积
+   浮点漂移，暂停恢复不跳变，且录制器按固定 dt 推进 state.t 时可直接复用。 */
+function driveValue(d, tt, mode) {
+  const m = mode || d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+  const u = ((tt / d.period) % 1 + 1) % 1;              // 负时间也落在 [0,1)
+  const s = (m === 'loop') ? u : (u < 0.5 ? 2 * u : 2 - 2 * u);
+  return d.from + (d.to - d.from) * s;
+}
+
+/* 把当前场景的驱动量按引擎时钟写回 state。只动数据、不碰 DOM ——
+   录制器的离线渲染也调它，那条路径上没有面板可同步（见规范 §D1）。 */
+function applyDrive() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return;
+  state[sc.drive.key] = driveValue(sc.drive, driveClock(curTab), driveMode[curTab]);
+}
+
+/* 供录制器判断无缝循环的吸附基准；无驱动或用户关掉自动播放时返回 null */
+function driveInfo() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return null;
+  return { key: sc.drive.key, period: sc.drive.period, mode: driveMode[curTab] };
+}
+
+const warnedNoInvMap = {};   // key -> 已就「有 map 没 invMap」告警过
+
+/* 把驱动出的值反算回滑块刻度并回显。带 map 的参数必须提供 invMap，
+   否则只能退回显示映射后的值（规范 §8 已把 invMap 列为硬约束）。 */
+function syncParamSlider(key) {
+  const e = paramWraps[key];
+  if (!e) return;
+  /* 本函数每帧都被调用，所以每个 key 只喊一次，别把控制台刷爆 */
+  if (e.p.map && !e.p.invMap && !warnedNoInvMap[key]) {
+    warnedNoInvMap[key] = true;
+    console.warn('[math-viz] 参数 "' + key + '" 声明了 map 却没有 invMap：' +
+                 '驱动值会被当作滑杆原始值写进量程，回显与 state 会错位（规范 §8）。');
+  }
+  const raw = (e.p.map && e.p.invMap) ? e.p.invMap(state[key]) : state[key];
+  /* 先写进 input，再读回来显示：range 带 step，写进去的值会被吸附到刻度上。
+     若直接显示 raw，读数与滑杆句柄就会对不上；更要命的是下一次 upd() 读的是
+     吸附后的 input.value，会把这点差值永久写回 state —— 暂停时 frame() 不再跑
+     applyDrive()，再也修不回来。upd() 的触发面已经收窄到「用户拖动这根滑杆」
+     一条：语言切换只调 render()（见下方 relabel 注释），不再写 state。 */
+  e.input.value = raw;
+  e.val.textContent = e.p.fmt(parseFloat(e.input.value));
+}
+
+/* 开关自动播放的唯一入口：复选框与「拖滑块接管」都走这里，驱动时钟的记账
+   才不会漏。关掉时记下停摆起点，打开时把停摆时长补进偏移量。 */
+function setAutoPlayFor(id, on) {
+  on = !!on;
+  if (!!autoPlay[id] === on) return;            // 状态没变就别动时钟，避免重复记账
+  if (on) driveOff[id] += state.t - driveOffAt[id];
+  else driveOffAt[id] = state.t;
+  autoPlay[id] = on;
+  refreshDriveRow(id);
+}
+
+function setAutoPlay(on) { setAutoPlayFor(curTab, on); }
+
+function refreshDriveRow(id) {
+  const row = document.querySelector('.drive[data-tab="' + id + '"]');
+  if (!row) return;
+  row.querySelector('input').checked = !!autoPlay[id];
+  row.querySelectorAll('[data-mode]').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === driveMode[id]);
+  });
+}
+
+function buildDrive() {
+  const host = document.getElementById('driveHost');
+  Object.keys(SCENES).forEach(id => {
+    const d = SCENES[id].drive;
+    if (!d) return;
+    autoPlay[id] = true;
+    driveMode[id] = d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+    driveOff[id] = 0; driveOffAt[id] = 0;      // 先置零，页签才不会把 undefined 读进算式
+    const row = document.createElement('div');
+    row.className = 'drive';
+    row.dataset.tab = id;
+    row.innerHTML = '<label class="tg"><input type="checkbox" checked><span class="autoL"></span></label>' +
+      '<span class="dmode"><button class="btn" data-mode="pingpong"></button>' +
+      '<button class="btn" data-mode="loop"></button></span>';
+    row.querySelector('input').addEventListener('change', e => { setAutoPlayFor(id, e.target.checked); });
+    row.querySelectorAll('[data-mode]').forEach(b => {
+      b.addEventListener('click', () => { driveMode[id] = b.dataset.mode; refreshDriveRow(id); });
+    });
+    host.appendChild(row);
+    const relabel = () => {
+      row.querySelector('.autoL').textContent = t(UI.autoPlay);
+      row.querySelector('[data-mode="pingpong"]').textContent = t(UI.pingpong);
+      row.querySelector('[data-mode="loop"]').textContent = t(UI.loop);
+    };
+    RELABEL.push(relabel);
+    relabel();
+    refreshDriveRow(id);
+  });
+}
+
 function switchTab(id) {
   if (id === curTab) return;
   curTab = id;
   tween = null;
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
-  document.querySelectorAll('.toggles[data-tab], .views[data-tab]').forEach(el => {
+  document.querySelectorAll('.toggles[data-tab], .views[data-tab], .drive[data-tab]').forEach(el => {
     el.style.display = el.dataset.tab === id ? '' : 'none';
   });
   cam = cams[id];
@@ -1275,6 +1457,7 @@ window.addEventListener('keydown', e => {
 resize();
 buildTabs();
 buildParams();
+buildDrive();
 buildToggles();
 buildViews();
 Object.keys(SCENES).forEach(id => {

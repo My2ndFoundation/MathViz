@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.1">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.0.0">
 <title>递推、迭代与稳定性 · Recurrence & Iteration</title>
 <!-- ============================================================
@@ -25,8 +25,13 @@
 
   采样原则：orbit 记录每一步的真实迭代值；参数中途改变只影响
   未来的步骤，历史轨迹绝不重算；重置（R）以 x₀ 重新播种。
+  唯一的例外是牛顿页开着自动播放时：x₀ 由时间驱动，轨道每帧按当前 x₀
+  重播这一轮（见 replayOrbN），画的永远是此刻那个起点的真实级联；
+  关掉自动播放即回到上面的原语义，蛛网 / 三维序列两页始终不受影响。
 
   版本记录（changelog，新→旧）：
+    1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换；
+                       牛顿页在驱动下按当前 x₀ 重新上膛，收敛后不再永久定格
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-12  首个版本：蛛网图 / 三维序列 / 牛顿迭代三页签
 ============================================================ -->
@@ -134,6 +139,11 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 .tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
 .tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
 
+/* 驱动控制行 */
+.drive{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0 2px}
+.drive .dmode{display:flex;gap:4px;margin-left:auto}
+.drive .dmode .btn{padding:4px 8px;font-size:11px}
+
 /* 读数与提示 */
 .readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
   font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
@@ -176,6 +186,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       <button class="btn wide" id="btnPlay">⏸ 暂停</button>
       <button class="btn" id="btnReset">↺ 重置</button>
     </div>
+    <div id="driveHost"></div>
     <div id="togglesHost"></div>
     <div id="viewsHost"></div>
     <div class="readout" id="readout"></div>
@@ -220,6 +231,9 @@ const UI = {
   resume: { zh: '▶ 继续', en: '▶ Resume' },
   reset:  { zh: '↺ 重置', en: '↺ Reset' },
   views:  { zh: '视角', en: 'View' },
+  autoPlay: { zh: '自动播放', en: 'Auto-play' },
+  pingpong: { zh: '往返',     en: 'Ping-pong' },
+  loop:     { zh: '循环',     en: 'Loop' },
   hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
             en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
 };
@@ -272,9 +286,17 @@ const mxN = x => x * 0.9;
 
 /* —— 轨道（orbit = 数列本身；同一只步进时钟 n = ⌊ωt⌋ 驱动两台机器） —— */
 let orbF = [0], orbN = [0];
+/* 只追加语义下已真实迭代到第几步。原先直接拿 orbF.length − 1 当步号，
+   蛛网 / 三维序列两页被驱动后 orbF 会被 replayOrbF() 整条裁短，长度不再等于步号，
+   append 循环的条件就永远成立、每帧补几百步。改用独立计数器，两种语义共用同一只步进钟。 */
+let famN = 0;
+function famSeed() {
+  return famIdx() === 0 ? clamp(state.x0, -2, 2) : clamp(state.x0, 0.02, 0.98);
+}
 function reseed() {
-  orbF = [famIdx() === 0 ? clamp(state.x0, -2, 2) : clamp(state.x0, 0.02, 0.98)];
+  orbF = [famSeed()];
   orbN = [clamp(state.x0, -2, 2)];
+  famN = 0;
 }
 function stepVal(map, x) {
   if (!isFinite(x) || Math.abs(x) > DIVERGE) return Infinity;
@@ -282,6 +304,65 @@ function stepVal(map, x) {
   return (!isFinite(y) || Math.abs(y) > DIVERGE) ? Infinity : y;
 }
 function nNow() { return Math.min(Math.floor(state.theta), ORBIT_MAX - 1); }
+
+/* —— 牛顿页的「重新上膛」（仅在 x₀ 被驱动时生效） ——
+   牛顿法五六步就把误差压到机器精度，之后 xₙ 恒等于根：一次演进演完，画面永久定格。
+   驱动 x₀ 后，这一页有两只钟且分工不同：步进钟 n = ⌊ωt⌋ 说「这一轮演到第几步」，
+   驱动说「这一轮从哪里开始」。每 NEWTON_RUN 步为一轮，轮满就把级联收回起点重演。
+   轨道按「当前 x₀ 走到第 n 步」逐帧重播，所以画出来的永远是此刻滑杆上那个起点的
+   真实级联——不会出现轨迹用旧 x₀ 算、滑杆却已经滑到别处的自相矛盾。
+   关掉自动播放（或伸手拖 x₀）立刻回到原语义：一次播种、只向前走、绝不重算。
+   蛛网 / 三维序列两页共用的 orbF 完全不受影响，仍是绝不重算的真实历史。 */
+/* 一轮 4 步，步号 k = 1…4（不含 0）。两条边界各有理由：
+   上界 4 —— 切线步骤只画最近 4 步，k ≤ 4 才保证这 4 步里含第 1 步，也就是那条从当前
+   x₀ 出发、随 x₀ 一起滑动的切线；再长一步，画面里就只剩几条早已收敛到根、叠在一起
+   不动的线段了（实测：一轮 7 步时，步号 5、6 上出现整整 0.5 s 的零像素变化）。
+   下界 1 —— 步号 0 那一帧只有一个孤零零的起点：既没有切线可画，读数区也只能写
+   「上一步 ±∞」，与本页 tips 让人盯的「误差 ≈ 前误差²」直接打架。每轮从第 1 步起，
+   前一步的误差就永远存在，那句话才句句为真。 */
+const NEWTON_RUN = 4;
+/* 用引擎的只读访问器判定，不要手写 `autoPlay[...] && SCENES[...].drive`：
+   同一个判据在仓库里出现两种写法，正是这个引擎被复制成 51 份后最容易漂移的地方。
+   driveInfo() 已经含「当前页签有 drive」+「用户没关掉自动播放」两个条件。 */
+/* 三个页签都以 x₀ 为驱动量，而 driveInfo() 只报「当前页签」的驱动，不报是哪一页——
+   所以还要用 curTab 区分。否则在蛛网页开着自动播放，会连带把牛顿页那条只追加的
+   真实轨道也重播掉（反之亦然）。 */
+function drivenOn(id) {
+  const d = driveInfo();
+  return curTab === id && !!d && d.key === 'x0';
+}
+function newtonDriven() { return drivenOn('newton'); }
+/* 蛛网 / 三维序列两页共用 orbF，故共用同一个判别与同一个重播 */
+function famDriven() { return drivenOn('cobweb') || drivenOn('lift'); }
+function replayOrbN() {
+  /* 用未截顶的 θ 数步：ORBIT_MAX 是给 orbF 数组封顶的，而重播出来的轨道
+     长度恒 ≤ NEWTON_RUN + 1，不受那条上限约束，也就不会在 t 很大时卡住不动。 */
+  const steps = 1 + (Math.floor(Math.max(0, state.theta)) % NEWTON_RUN);
+  orbN = [clamp(state.x0, -2, 2)];
+  for (let i = 0; i < steps; i++) orbN.push(stepVal(nMap, orbN[i]));
+}
+
+/* —— 蛛网 / 三维序列两页的「重新播种」（仅在 x₀ 被驱动时生效） ——
+   与牛顿页同一口径，理由也同一条：这两页也是「一次性演进后永久定格」。默认
+   f(x) = 0.6x + 0.5 大约十步就把轨道吸到不动点 1.25 上，之后 xₙ₊₁ = xₙ 逐位相同
+   （实测自 t = 200 s 起真实 rAF 逐帧比对 361 帧全同、maxΔ = 0）；就算换成发散参数，
+   轨道也只是一次性飞出画外再不回头。而且 nNow() 把步号钉在 ORBIT_MAX − 1，
+   t 超过约 400 s 之后连"再迭代一步"都不会发生了。
+   驱动 x₀ 后这一页有两只钟：步进钟 n = ⌊ωt⌋ 说"这一轮演到第几步"，驱动说"从哪里出发"。
+   每 FAM_RUN 步为一轮，轮满就把蛛网收回起点、以此刻的 x₀ 重演——所以画出来的永远是
+   滑杆上那个起点的真实轨道，不会出现"轨迹用旧 x₀ 算、滑杆已经滑到别处"的自相矛盾。
+   关掉自动播放（或伸手拖 x₀）立刻回到原语义：一次播种、只向前走、绝不重算；
+   famN 与 ⌊ωt⌋ 同步递增，所以下一整数步就从重播出来的那条短轨道继续往后接，不会卡住。
+   一轮 12 步的两条理由：上界——蛛网折线每步画"竖线撞曲线 + 横线回对角线"两段，
+   12 步已经足够看完 |f′| < 1 的完整吸入过程（0.6¹² ≈ 0.002，误差早已看不见），
+   再长就只是一堆叠在不动点上的短线段；下界——至少要 3、4 步才谈得上"看出被吸进去还是甩出去"，
+   12 步在两族参数下都留足了余量。 */
+const FAM_RUN = 12;
+function replayOrbF() {
+  const steps = 1 + (Math.floor(Math.max(0, state.theta)) % FAM_RUN);
+  orbF = [famSeed()];
+  for (let i = 0; i < steps; i++) orbF.push(stepVal(fMap, orbF[i]));
+}
 
 /* —— 蛛网折线（顶点由新到旧，头亮尾隐；越界裁剪并断开） —— */
 function cobwebPts(orb, M, maxV) {
@@ -380,7 +461,18 @@ function forceToggle(key) {
 
 /* —— 读数区固定首两行（步进时钟版本） —— */
 function roHead(machine) {
-  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;n = ⌊ωt⌋ = <b>' + nNow() + '</b></div>' +
+  /* 牛顿页被驱动时级联每 NEWTON_RUN 步重演一轮，画面上只有第 1…4 步；此时再印全局的
+     n = ⌊ωt⌋ 就是在说谎（读数一路数到 46，画布上只有 4 步）。改印本轮步号，与画布同源。 */
+  const nCell = newtonDriven()
+    ? 'n = <b>' + (orbN.length - 1) + '</b> / ' + NEWTON_RUN +
+      t({ zh: '（本轮）', en: ' (this run)' })
+    /* 蛛网 / 三维序列两页同理：被驱动时画面只有本轮的 FAM_RUN 步，
+       再印全局的 ⌊ωt⌋ 就是读数与画布各说各话。 */
+    : famDriven()
+    ? 'n = <b>' + (orbF.length - 1) + '</b> / ' + FAM_RUN +
+      t({ zh: '（本轮）', en: ' (this run)' })
+    : 'n = ⌊ωt⌋ = <b>' + nNow() + '</b>';
+  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;' + nCell + '</div>' +
          '<div class="dim">' + t({ zh: '迭代机 ', en: 'machine ' }) + machine + '</div>';
 }
 function seqTail(orb, m) {
@@ -436,6 +528,20 @@ const SCENES = {
   cobweb: {
     label: { zh: '蛛网图', en: 'Cobweb' },
     params: ['family', 'a', 'b', 'r', 'x0', 'omega'],
+    /* 本页确为静止页签：步进钟一直在走，但轨道十来步就被吸到不动点上，
+       之后逐位不变（真实 rAF 自 t = 200 s 起 12 s、361 帧全同、maxΔ = 0）。
+       六根滑杆里 ω 是钟本身、family 是二选一、a/b/r 是"这台机器长什么样"，
+       真正的自变量是起点 x₀：它一路滑过去，蛛网就从不动点的一侧换到另一侧，
+       tips 说的"单调爬近 / 螺旋交替"两种走法在同一屏里轮流出现，而被吸向哪里始终不变
+       ——"起点不重要，机器才重要"正是这一页要人看见的东西。
+       与牛顿页驱动同一根滑杆是有意的：三页的自变量本来就都是起点，
+       各页按 curTab 分开判别（见 drivenOn），互不重播对方的轨道。
+       值域取满 [−2, 2]：逻辑族的种子在 famSeed() 里会被夹到 [0.02, 0.98]，
+       两端都不退化（线性族在 |x| 很大时也只是被更快地吸回来）。
+       从 2 跳回 −2 蛛网会整张翻到画面另一侧 ⇒ linear（往返）；
+       与牛顿页同取 8 s，同一个工具里三页节奏一致。
+       配套的重新播种见 replayOrbF——只声明 drive 而不重播，画面会用旧 x₀ 的轨迹骗人。 */
+    drive: { key: 'x0', from: -2, to: 2, period: 8, kind: 'linear' },
     brand: { zh: '递推 xₙ₊₁ = f(xₙ) 不是给出数列，而是一台把输出送回输入的机器。竖线撞向曲线取值、横线滑回对角线换座——蛛网图就是机器运转的轨迹。切换函数家族、拖动 a 或 r 观察收敛与发散。',
              en: 'A recurrence xₙ₊₁ = f(xₙ) does not hand you the sequence — it defines a machine that feeds output back into input. Vertical to the curve, horizontal to the diagonal: the cobweb is the machine running. Switch families and drag a or r to watch it converge or escape.' },
     tips: { zh: '提示：不动点处 |f′| < 1 时蛛网被吸进去（0 < a < 1 单调爬近，−1 < a < 0 螺旋交替），|f′| > 1 被甩出去；逻辑家族把 r 推过 3，蛛网收敛成一个方框——2 周期诞生。按 2「正视蛛网」看得最清。',
@@ -527,6 +633,12 @@ const SCENES = {
   lift: {
     label: { zh: '三维序列', en: '3D sequence' },
     params: ['family', 'a', 'b', 'r', 'x0', 'omega'],
+    /* 与「蛛网图」页同一条轨道 orbF、同一个诊断（t≈200 s 起 360 帧全同、maxΔ = 0），
+       所以驱动量、值域、kind、周期全部照搬那一页的说明，重播也共用 replayOrbF。
+       本页额外的好处：x₀ 一动，空间折线整条在 (xₙ, xₙ₊₁) 底面上平移而 z 向层数不变，
+       按 2 正视时所有点仍然牢牢贴在曲线 y = f(x) 上——tips 的顿悟点因此可以反复看到，
+       而不是只在开局那十几秒出现一次。 */
+    drive: { key: 'x0', from: -2, to: 2, period: 8, kind: 'linear' },
     brand: { zh: '把数列抬进三维：第 n 步是空间中一点 (xₙ, xₙ₊₁, n)，整个序列成为一条空间折线。它在底面上的影子是蛛网轨道，在侧面上的影子是时间序列——同一条折线，两种读法。',
              en: 'Lift the sequence into 3D: step n is the point (xₙ, xₙ₊₁, n), so the whole sequence becomes a space polyline. Its shadow on the floor is the cobweb orbit; its side shadow is the time series — one polyline, two readings.' },
     tips: { zh: '提示：按 2「正视 xₙ·xₙ₊₁」——所有点瞬间塌缩到曲线 y = f(x) 上，因为 xₙ₊₁ 本来就是 f(xₙ)：每个序列点都活在函数上。按 3 侧视，同一条折线又变回时间序列。',
@@ -605,6 +717,18 @@ const SCENES = {
   newton: {
     label: { zh: '牛顿迭代', en: 'Newton' },
     params: ['x0', 'omega', 'gsel'],
+    /* tips 让人「盯住误差」，可误差在收敛后就不再变了——这一页演一次就永久定格。
+       本页三根滑块里 ω 是钟本身、g 是离散选择，真正的自变量只有起点 x₀：起点一路滑过去，
+       「从哪来」决定要几步才被二次收敛吸住，也决定是从上方单调逼近还是先越过根再回头。
+       值域没取满 [−2, 2]，收进 [0.7, 2]：牛顿映射在 g′ = 0 处没有定义，下一步直接飞出画框
+       （x²−2 的退化点在 0，x³−x 的在 ±0.577，都落在量程中段而非两端），扫掠必须绕开；
+       负半轴只是正半轴关于根的镜像，收掉不丢任何教学内容。这一段里两个 g 都全程收敛到
+       正根，画面上永远有在动的东西。
+       从 2 跳回 0.7 起点会瞬移 ⇒ linear（往返）；每步一次迭代，8 s 足够读完误差那两行。
+       8 s 与「一轮 4 步 ÷ 默认 ω = 1」相位锁定：一轮正好扫完起点区间的一趟，去程一轮、
+       回程一轮，画面每 8 s 严丝合缝地重复一次（实测 Δ8 s 逐像素为 0、Δ10 s 为 0.13%）。
+       配套的重新上膛见 replayOrbN——只声明 drive 而不重播，画面会用旧 x₀ 的轨迹骗人。 */
+    drive: { key: 'x0', from: 0.7, to: 2, period: 8, kind: 'linear' },
     brand: { zh: '牛顿法只是另一台迭代机：f(x) = x − g(x)/g′(x)。每一步在 (xₙ, g(xₙ)) 作切线、滑到与 x 轴的交点，就得到 xₙ₊₁；在根附近误差按平方缩小。',
              en: 'Newton’s method is just another iteration machine: f(x) = x − g(x)/g′(x). Each step draws the tangent at (xₙ, g(xₙ)) and slides to where it hits the x-axis — that is xₙ₊₁. Near a root the error shrinks quadratically.' },
     tips: { zh: '提示：盯住读数区的误差——每一步大约是前一步的平方（二次收敛）。按 3「迭代机 f」：切线步骤原来就是同一张蛛网图，只是这台 f 在根处斜率为 0，把蛛网吸得飞快。',
@@ -701,7 +825,11 @@ const SCENES = {
         '<div class="sinC">g(xₙ) = <b>' + (isFinite(xk) ? fmtV(G.g(xk), 4) : '±∞') + '</b></div>' +
         '<div class="tanC">g′(xₙ) = <b>' + (isFinite(xk) ? fmtV(G.d(xk)) : '±∞') + '</b></div>' +
         '<div class="dim">|xₙ − x*| = ' + err + '&ensp;·&ensp;' + t({ zh: '上一步 ', en: 'prev ' }) + errP + '</div>' +
-        '<div class="dim">' + t({ zh: '误差 ≈ 前误差²（二次收敛）', en: 'error ≈ (previous error)² — quadratic' }) + '</div>' + capNote();
+        '<div class="dim">' + t({ zh: '误差 ≈ 前误差²（二次收敛）', en: 'error ≈ (previous error)² — quadratic' }) + '</div>' +
+        /* 迭代上限说的是 orbF 那条一直往前长的轨道。本页被驱动时每轮重播、轨道恒 ≤ 5 项，
+           永远碰不到上限，不该跟着弹「按 R 重置」——按了也只是把驱动相位归零。
+           判据放在这里而不是 capNote() 里：那是三个页签共用的，改它会连累蛛网页。 */
+        (newtonDriven() ? '' : capNote());
     }
   }
 };
@@ -718,6 +846,10 @@ const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 �
 const samples = [];
 let curTab = null;
 const paramWraps = {};   // key -> { wrap, input, val, p }
+const autoPlay = {};     // tabId -> 是否自动播放
+const driveMode = {};    // tabId -> 'loop' | 'pingpong'
+const driveOff = {};     // tabId -> 驱动时钟相对引擎时钟的累计偏移（= 自动播放累计关停时长）
+const driveOffAt = {};   // tabId -> 本次关停的起点（引擎时钟读数）
 const RELABEL = [];
 const cams = {};
 let cam = null;
@@ -735,16 +867,26 @@ function pushSample() {
      历史轨迹绝不重算（§6）。θ = 0 意味着刚重置：以 x₀ 重新播种。 */
   if (state.theta === 0) reseed();
   const nT = nNow();
-  while (orbF.length - 1 < nT) {
-    orbF.push(stepVal(fMap, orbF[orbF.length - 1]));
+  const famD = famDriven();
+  /* 步号用独立计数器 famN，不再拿 orbF.length − 1 顶替：蛛网被驱动时 orbF 每帧被
+     replayOrbF() 裁到 ≤ FAM_RUN + 1，用长度当步号会让这个循环每帧补上几百步。 */
+  while (famN < nT) {
+    famN++;
+    if (!famD) orbF.push(stepVal(fMap, orbF[orbF.length - 1]));
     orbN.push(stepVal(nMap, orbN[orbN.length - 1]));
   }
+  /* 各页按自己的驱动状态重播；两条轨道互不干扰（见 drivenOn）。 */
+  if (famD) replayOrbF();
+  if (newtonDriven()) replayOrbN();
   const i = Math.min(nT, orbF.length - 1);
+  /* 牛顿轨道重播后长度只到本轮步数，全局步号 i 会越界 —— 取它自己的末项，
+     记录的仍是"此刻的真实迭代值"。未重播时两条轨道等长，末项就是 orbN[i]。 */
+  const xn = orbN[orbN.length - 1];
   samples.push({
     t: state.t,
     n: i,
     xf: isFinite(orbF[i]) ? orbF[i] : null,
-    xn: isFinite(orbN[i]) ? orbN[i] : null
+    xn: isFinite(xn) ? xn : null
   });
 }
 
@@ -1040,6 +1182,9 @@ function draw() {
 function resetSim() {
   state.t = 0;
   state.theta = 0;
+  /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
+     相位上，「重置」就名不副实了 */
+  Object.keys(driveOff).forEach(id => { driveOff[id] = 0; driveOffAt[id] = 0; });
   samples.length = 0;
   pushSample();
 }
@@ -1065,6 +1210,9 @@ function frame(ts) {
   if (state.running) {
     state.t += dt;
     state.theta += state.omega * dt;
+    applyDrive();
+    const dv = SCENES[curTab].drive;
+    if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
     pushSample();
   }
   const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
@@ -1089,16 +1237,29 @@ function buildParams() {
     input.type = 'range';
     input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
     const val = wrap.querySelector('.val');
+    /* render 只回显滑杆当前刻度；upd 才是「用户动了滑杆」的语义（写 state）。
+       两者分开，语言切换就不会顺手把读数写回 state —— 见下方 relabel 注释。 */
+    const render = () => { val.textContent = p.fmt(parseFloat(input.value)); };
     const upd = () => {
       const raw = parseFloat(input.value);
       state[p.key] = p.map ? p.map(raw) : raw;
-      val.textContent = p.fmt(raw);
+      render();
     };
     input.addEventListener('input', upd);
     wrap.appendChild(input);
     host.appendChild(wrap);
     paramWraps[p.key] = { wrap, input, val, p };
-    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); upd(); };
+    /* 用户伸手拖被驱动的滑块 = 明确要接管，自动播放当场关闭，
+       否则下一帧就会被驱动值覆盖回去。这是与「暂停只冻结模拟」一致的语义。 */
+    input.addEventListener('input', () => {
+      const d = SCENES[curTab] && SCENES[curTab].drive;
+      if (d && d.key === p.key && autoPlay[curTab]) setAutoPlay(false);
+    });
+    upd();                       // 建面板时用默认刻度初始化 state
+    /* 语言切换只重排文案（fmt 里可能带 t()），绝不能顺手调 upd() 把滑杆刻度
+       写回 state：被 drive 驱动的参数，其 state 值比滑杆 step 精细得多，写回去
+       等于把它永久量化一次；暂停时 frame() 不再跑 applyDrive()，再也修不回来。 */
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); render(); };
     RELABEL.push(relabel);
     relabel();
   });
@@ -1203,12 +1364,122 @@ function syncParamVisibility() {
   });
 }
 
+/* ================= 场景时间驱动（引擎区） ================= */
+/* 驱动时钟：引擎时钟减去「自动播放关掉的那些时间」。关停期间它不走，
+   所以重新打开时驱动量从原地续上，不跳变。求值仍是纯函数——只是把
+   自变量从 state.t 换成这个校正过的时钟，不做增量积分：既不累积浮点
+   漂移，录制器按固定 dt 离线重放也能复现同一串值（偏移在一次渲染内是常量）。
+   已知语义：偏移只扣「自动播放关停」的时长，不扣「页签没被选中」的时长——
+   离开某页签 10 秒再切回来，它的驱动量会跳到 10 秒后的位置。这与「暂停只冻结
+   模拟、相机照走」是同一族约定（时钟是全局的，页签只是不同的观测口），
+   如需改成每页签独立时钟，得连录制器的离线重放一起改，不要只改这里。 */
+function driveClock(id) { return state.t - (driveOff[id] || 0); }
+
+/* 驱动求值：驱动时钟（见 driveClock）的纯函数，不做增量积分 —— 不累积
+   浮点漂移，暂停恢复不跳变，且录制器按固定 dt 推进 state.t 时可直接复用。 */
+function driveValue(d, tt, mode) {
+  const m = mode || d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+  const u = ((tt / d.period) % 1 + 1) % 1;              // 负时间也落在 [0,1)
+  const s = (m === 'loop') ? u : (u < 0.5 ? 2 * u : 2 - 2 * u);
+  return d.from + (d.to - d.from) * s;
+}
+
+/* 把当前场景的驱动量按引擎时钟写回 state。只动数据、不碰 DOM ——
+   录制器的离线渲染也调它，那条路径上没有面板可同步（见规范 §D1）。 */
+function applyDrive() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return;
+  state[sc.drive.key] = driveValue(sc.drive, driveClock(curTab), driveMode[curTab]);
+}
+
+/* 供录制器判断无缝循环的吸附基准；无驱动或用户关掉自动播放时返回 null */
+function driveInfo() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return null;
+  return { key: sc.drive.key, period: sc.drive.period, mode: driveMode[curTab] };
+}
+
+const warnedNoInvMap = {};   // key -> 已就「有 map 没 invMap」告警过
+
+/* 把驱动出的值反算回滑块刻度并回显。带 map 的参数必须提供 invMap，
+   否则只能退回显示映射后的值（规范 §8 已把 invMap 列为硬约束）。 */
+function syncParamSlider(key) {
+  const e = paramWraps[key];
+  if (!e) return;
+  /* 本函数每帧都被调用，所以每个 key 只喊一次，别把控制台刷爆 */
+  if (e.p.map && !e.p.invMap && !warnedNoInvMap[key]) {
+    warnedNoInvMap[key] = true;
+    console.warn('[math-viz] 参数 "' + key + '" 声明了 map 却没有 invMap：' +
+                 '驱动值会被当作滑杆原始值写进量程，回显与 state 会错位（规范 §8）。');
+  }
+  const raw = (e.p.map && e.p.invMap) ? e.p.invMap(state[key]) : state[key];
+  /* 先写进 input，再读回来显示：range 带 step，写进去的值会被吸附到刻度上。
+     若直接显示 raw，读数与滑杆句柄就会对不上；更要命的是下一次 upd() 读的是
+     吸附后的 input.value，会把这点差值永久写回 state —— 暂停时 frame() 不再跑
+     applyDrive()，再也修不回来。upd() 的触发面已经收窄到「用户拖动这根滑杆」
+     一条：语言切换只调 render()（见下方 relabel 注释），不再写 state。 */
+  e.input.value = raw;
+  e.val.textContent = e.p.fmt(parseFloat(e.input.value));
+}
+
+/* 开关自动播放的唯一入口：复选框与「拖滑块接管」都走这里，驱动时钟的记账
+   才不会漏。关掉时记下停摆起点，打开时把停摆时长补进偏移量。 */
+function setAutoPlayFor(id, on) {
+  on = !!on;
+  if (!!autoPlay[id] === on) return;            // 状态没变就别动时钟，避免重复记账
+  if (on) driveOff[id] += state.t - driveOffAt[id];
+  else driveOffAt[id] = state.t;
+  autoPlay[id] = on;
+  refreshDriveRow(id);
+}
+
+function setAutoPlay(on) { setAutoPlayFor(curTab, on); }
+
+function refreshDriveRow(id) {
+  const row = document.querySelector('.drive[data-tab="' + id + '"]');
+  if (!row) return;
+  row.querySelector('input').checked = !!autoPlay[id];
+  row.querySelectorAll('[data-mode]').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === driveMode[id]);
+  });
+}
+
+function buildDrive() {
+  const host = document.getElementById('driveHost');
+  Object.keys(SCENES).forEach(id => {
+    const d = SCENES[id].drive;
+    if (!d) return;
+    autoPlay[id] = true;
+    driveMode[id] = d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+    driveOff[id] = 0; driveOffAt[id] = 0;      // 先置零，页签才不会把 undefined 读进算式
+    const row = document.createElement('div');
+    row.className = 'drive';
+    row.dataset.tab = id;
+    row.innerHTML = '<label class="tg"><input type="checkbox" checked><span class="autoL"></span></label>' +
+      '<span class="dmode"><button class="btn" data-mode="pingpong"></button>' +
+      '<button class="btn" data-mode="loop"></button></span>';
+    row.querySelector('input').addEventListener('change', e => { setAutoPlayFor(id, e.target.checked); });
+    row.querySelectorAll('[data-mode]').forEach(b => {
+      b.addEventListener('click', () => { driveMode[id] = b.dataset.mode; refreshDriveRow(id); });
+    });
+    host.appendChild(row);
+    const relabel = () => {
+      row.querySelector('.autoL').textContent = t(UI.autoPlay);
+      row.querySelector('[data-mode="pingpong"]').textContent = t(UI.pingpong);
+      row.querySelector('[data-mode="loop"]').textContent = t(UI.loop);
+    };
+    RELABEL.push(relabel);
+    relabel();
+    refreshDriveRow(id);
+  });
+}
+
 function switchTab(id) {
   if (id === curTab) return;
   curTab = id;
   tween = null;
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
-  document.querySelectorAll('.toggles[data-tab], .views[data-tab]').forEach(el => {
+  document.querySelectorAll('.toggles[data-tab], .views[data-tab], .drive[data-tab]').forEach(el => {
     el.style.display = el.dataset.tab === id ? '' : 'none';
   });
   cam = cams[id];
@@ -1357,6 +1628,7 @@ window.addEventListener('keydown', e => {
 resize();
 buildTabs();
 buildParams();
+buildDrive();
 buildToggles();
 buildViews();
 Object.keys(SCENES).forEach(id => {
