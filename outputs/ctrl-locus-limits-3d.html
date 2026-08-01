@@ -1,0 +1,2402 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="tool-version" content="1.0.0">
+<meta name="engine-version" content="1.1.0">
+<title>从根轨迹到守恒律 · 反馈的深层结构</title>
+<!-- ============================================================
+  从根轨迹到守恒律 · 反馈的深层结构 —— ctrl-locus-limits-3d
+  From Root Locus to Conservation Laws · The Deep Structure of Feedback
+
+  被控对象自始至终是倒立摆（§0.1）：θ̈ = (g/L)·θ + u/(mL²)，开环极点 ±√(g/L)。
+  四个页签问它四个问题：极点去哪了 · 要消掉什么 · 代价是多少 · 一只手能管几件事。
+
+  设计规范：math-viz-design-system.md（令牌 / 组件 / 绘制语言 / 交互词汇）
+  引擎来源：math-viz-starter.html · STARTER_VERSION 1.1.0（引擎区一行未改）
+
+  制作新工具只需修改三处（均在脚本区顶部，以 ①②③ 标记）：
+    ① PARAMS      —— 声明滑杆参数（自动生成 UI）
+    ② SCENES      —— 注册场景页签（brand / tips / views / toggles / draw / readout）
+    ③ pushSample  —— 按需扩展采样字段（原则：记录当时的真实值）
+
+  版本记录（changelog，新→旧）：
+    1.0.0  2026-08-02  首版：增益轴上的三维根轨迹束 · 内模原理与误差谱打洞 ·
+                       波德水床效应（∫ln|S|dω = π·p 实测守恒）· 小车-摆的必要多样性
+                       v1.0.0 initial release: 3-D root-locus bundle along the gain
+                       axis, internal model principle with a notched error spectrum,
+                       Bode's waterbed (∫ln|S|dω = π·p verified numerically), and
+                       requisite variety on a cart-pole
+============================================================ -->
+<style>
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  --angle-amber:#fbbf24;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none}
+body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)}
+#scene{position:fixed;inset:0;display:block;touch-action:none;cursor:grab}
+#scene.dragging{cursor:grabbing}
+
+/* ---- 标题区 ---- */
+.brand{position:fixed;top:20px;left:24px;pointer-events:none;user-select:none;max-width:min(520px,42vw)}
+.brand .eyebrow{font-size:10px;letter-spacing:.22em;color:rgba(159,176,200,.72);margin-bottom:6px}
+.brand h1{margin:0;font-family:var(--font-math);font-weight:600;font-size:26px;letter-spacing:.08em;
+  color:#eef3fa;text-shadow:0 2px 20px rgba(45,212,234,.20)}
+.brand p{margin:7px 0 0;font-size:12.5px;line-height:1.65;color:rgba(159,176,200,.85)}
+
+/* ---- 页签 ---- */
+.tabs{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:5;
+  display:flex;gap:4px;padding:4px;border-radius:999px;
+  background:var(--panel-bg);border:1px solid var(--panel-line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
+.tab{border:1px solid transparent;background:transparent;color:#b8c6da;
+  font-size:12.5px;font-family:var(--font-cn);padding:6px 15px;border-radius:999px;cursor:pointer;
+  transition:color .15s,border-color .15s,background .15s}
+.tab:hover{color:#e8f2fb}
+.tab:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.tab.active{background:rgba(45,212,234,.13);border-color:rgba(45,212,234,.55);color:#9be8f7}
+
+/* ---- 底部提示 ---- */
+.hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);pointer-events:none;user-select:none;
+  font-size:11px;letter-spacing:.05em;color:rgba(159,176,200,.6);white-space:nowrap}
+
+/* ---- 控制面板 ---- */
+.panel{position:fixed;top:14px;right:14px;width:304px;max-height:calc(100vh - 28px);overflow-y:auto;
+  background:var(--panel-bg);border:1px solid var(--panel-line);border-radius:16px;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 18px 50px rgba(0,0,0,.45);user-select:none}
+.panel::-webkit-scrollbar{width:6px}
+.panel::-webkit-scrollbar-thumb{background:rgba(148,163,184,.25);border-radius:3px}
+.panel-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px 10px;
+  font-size:13px;font-weight:600;letter-spacing:.06em;color:#dbe6f5}
+.panel:not(.collapsed) .panel-head{border-bottom:1px solid var(--panel-line)}
+.ph-right{display:flex;align-items:center;gap:7px}
+.ver{font-family:var(--font-mono);font-size:10px;color:rgba(159,176,200,.55)}
+.lang{padding:3px 8px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:11px;cursor:pointer}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.fold{width:24px;height:24px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:14px;line-height:1;cursor:pointer}
+.fold:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.panel.collapsed .panel-body{display:none}
+.panel-body{padding:6px 14px 14px}
+
+/* 滑杆 */
+.ctl{margin:11px 0 3px}
+.ctl .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.ctl label{font-size:12px;color:#c6d2e4}
+.ctl label i{font-family:var(--font-math);font-style:italic;font-size:13px}
+.ctl .val{font-family:var(--font-mono);font-size:11.5px;color:#7dd3fc}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;cursor:pointer;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--trace-cyan);margin-top:-5px;border:2px solid #0b1220;box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-moz-range-thumb{width:11px;height:11px;border:2px solid #0b1220;border-radius:50%;
+  background:var(--trace-cyan);box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-offset:2px;border-radius:4px}
+
+/* 按钮 */
+.row{display:flex;gap:8px;margin:13px 0 4px}
+.btn{padding:6px 10px;border-radius:9px;border:1px solid rgba(148,163,184,.25);
+  background:rgba(30,41,59,.55);color:#d7e2f2;font-size:12px;font-family:var(--font-cn);cursor:pointer;
+  transition:border-color .15s,color .15s,background .15s}
+.btn:hover{border-color:rgba(45,212,234,.55)}
+.btn:focus-visible,.fold:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.btn.wide{flex:1}
+.btn.active{border-color:rgba(45,212,234,.8);background:rgba(45,212,234,.12);color:#9be8f7}
+.views{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 2px}
+.views .vlabel{font-size:11.5px;color:rgba(159,176,200,.8);margin-right:2px}
+.vbtn{padding:5px 9px;font-size:11.5px}
+
+/* 开关 */
+.toggles{display:flex;flex-wrap:wrap;gap:7px 12px;margin:12px 0 2px}
+.tg{display:flex;align-items:center;gap:6px;font-size:12px;color:#c6d2e4;cursor:pointer}
+.tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
+.tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
+
+/* 驱动控制行 */
+.drive{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0 2px}
+.drive .dmode{display:flex;gap:4px;margin-left:auto}
+.drive .dmode .btn{padding:4px 8px;font-size:11px}
+
+/* 录制 / 回放行（§11）；未声明 RECORD 的工具里 #recHost 始终为空 */
+.recrow{display:flex;flex-wrap:wrap;gap:6px;margin:11px 0 2px}
+.recrow .btn{padding:5px 9px;font-size:11.5px}
+.recinfo{font-family:var(--font-mono);font-size:11px;line-height:1.6;
+  color:var(--ui-slate);margin:2px 0 2px;word-break:break-word}
+
+/* 读数与提示 */
+.readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
+  font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
+.readout b{font-weight:600;color:#e8eef7}
+.readout .sinC b{color:var(--trace-rose)}
+.readout .cosC b{color:var(--trace-violet)}
+.readout .tanC b{color:var(--trace-emerald)}
+.readout .cotC b{color:var(--trace-orange)}
+.readout .dim{color:rgba(159,176,200,.6)}
+.tips{margin-top:11px;font-size:11px;line-height:1.65;color:rgba(159,176,200,.72)}
+
+@media (max-width:760px){
+  .brand{top:12px;left:14px;max-width:70vw}
+  .brand h1{font-size:20px}
+  .brand p{display:none}
+  .tabs{top:52px;left:14px;transform:none}
+  .panel{left:10px;right:10px;top:auto;bottom:10px;width:auto;max-height:62vh}
+  .hint{display:none}
+}
+</style>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+
+<div class="brand">
+  <div class="eyebrow">INTERACTIVE MATH · 交互式数学</div>
+  <h1>从根轨迹到守恒律</h1>
+  <p id="brandDesc"></p>
+</div>
+
+<nav class="tabs" id="tabsNav"></nav>
+
+<aside class="panel" id="panel">
+  <div class="panel-head"><span id="panelTitle">参数与视角</span>
+    <span class="ph-right"><span class="ver" id="verBadge"></span><button class="lang" id="btnLang" title="切换语言 / Switch language">EN</button><button class="fold" id="btnFold" title="收起 / 展开">−</button></span></div>
+  <div class="panel-body">
+    <div id="paramsHost"></div>
+    <div class="row">
+      <button class="btn wide" id="btnPlay">⏸ 暂停</button>
+      <button class="btn" id="btnReset">↺ 重置</button>
+    </div>
+    <div id="driveHost"></div>
+    <div id="recHost"></div>
+    <div id="togglesHost"></div>
+    <div id="viewsHost"></div>
+    <div class="readout" id="readout"></div>
+    <div class="tips" id="tips"></div>
+  </div>
+</aside>
+
+<div class="hint">拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签</div>
+
+<script>
+'use strict';
+/* ================= i18n 核心（引擎区） ================= */
+const LANG_KEY = 'mathviz-lang';
+function resolveLang(){
+  try{
+    const q = new URLSearchParams(location.search).get('lang');
+    if (q === 'zh' || q === 'en') return q;
+    const s = localStorage.getItem(LANG_KEY);
+    if (s === 'zh' || s === 'en') return s;
+  }catch(e){}
+  return (navigator.language || 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+let LANG = resolveLang();
+function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
+
+const STARTER_VERSION = '1.1.0';
+const VERSION = document.querySelector('meta[name="tool-version"]').content;
+const ENGINE_VERSION = document.querySelector('meta[name="engine-version"]').content;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ⓪ 工具元信息 —— id 与双语标题                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const TOOL = {
+  id: 'ctrl-locus-limits-3d',
+  title: { zh: '从根轨迹到守恒律 · 反馈的深层结构',
+           en: 'From Root Locus to Conservation Laws · The Deep Structure of Feedback' },
+  h1:    { zh: '从根轨迹到守恒律', en: 'Root Locus to Conservation Laws' }
+};
+
+/* 引擎 UI 文案（一般无需改动） */
+const UI = {
+  panelTitle: { zh: '参数与视角', en: 'Parameters & Views' },
+  pause:  { zh: '⏸ 暂停', en: '⏸ Pause' },
+  resume: { zh: '▶ 继续', en: '▶ Resume' },
+  reset:  { zh: '↺ 重置', en: '↺ Reset' },
+  views:  { zh: '视角', en: 'View' },
+  autoPlay: { zh: '自动播放', en: 'Auto-play' },
+  pingpong: { zh: '往返',     en: 'Ping-pong' },
+  loop:     { zh: '循环',     en: 'Loop' },
+  /* 演算记录与回放（§11）。仅当场景在 RECORD 里声明了钩子时才出现。 */
+  recRec:    { zh: '● 记录',   en: '● Record' },
+  recStop:   { zh: '■ 停止',   en: '■ Stop' },
+  recSave:   { zh: '⬇ 保存',   en: '⬇ Save' },
+  recLoad:   { zh: '⬆ 载入',   en: '⬆ Load' },
+  recExit:   { zh: '✕ 退出回放', en: '✕ Exit replay' },
+  recPlay:   { zh: '▶',        en: '▶' },
+  recPause:  { zh: '⏸',        en: '⏸' },
+  recRewind: { zh: '⏮',        en: '⏮' },
+  recRows:   { zh: ' 行',      en: ' rows' },
+  recFull:   { zh: '已达行数上限，录制停止（数据完整，未截断）',
+               en: 'Row limit reached, recording stopped (data complete, not truncated)' },
+  recRoundEnd: { zh: '本轮结束，录制自动停止', en: 'Round complete, recording stopped' },
+  recReplay: { zh: '回放中', en: 'Replaying' },
+  recVerifyOK: { zh: '种子比对：本机复现（δ = ', en: 'Seed check: reproduced here (δ = ' },
+  recVerifyNo: { zh: '种子比对：本机复现不了（δ = ', en: 'Seed check: not reproducible here (δ = ' },
+  recVerifyTail: { zh: '）—— 这不是 bug，见提示', en: ') — not a bug, see the tip' },
+  hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
+            en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
+};
+
+/* TAU 提到 PARAMS/SCENES 之前声明：SCENES.lissa.drive 在对象字面量里直接引用它
+   （非惰性函数体内），若仍留在原「常量与状态」区（SCENES 之后）会触发 TDZ 报错。 */
+const TAU = Math.PI * 2;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ① 参数声明 —— 自动生成滑杆                                ║
+   ║  key: state 中的键 · label: 支持 <i>数学符号</i>            ║
+   ║  fmt: 格式化"滑杆原始值"用于显示 · map(可选): 原始值→状态值   ║
+   ║  invMap: 状态值→原始值。声明了 map 就必须给（规范 §8 硬约束） ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const PARAMS = [
+  { key: 'L',      label: { zh: '摆长 <i>L</i>',          en: 'Pendulum length <i>L</i>' },   min: 0.4, max: 1.3,  step: 0.05, value: 1.0,  fmt: v => fmt(v) + ' m' },
+  { key: 'mass',   label: { zh: '摆质量 <i>m</i>',        en: 'Pendulum mass <i>m</i>' },     min: 0.4, max: 1.3,  step: 0.05, value: 1.0,  fmt: v => fmt(v) + ' kg' },
+  { key: 'K',      label: { zh: '比例增益 <i>K</i>',      en: 'Proportional gain <i>K</i>' }, min: 0,   max: 40,   step: 0.2,  value: 20,   fmt: v => fmt(v) + ' N·m/rad' },
+  { key: 'Td',     label: { zh: '微分时间 <i>T<sub>d</sub></i>', en: 'Derivative time <i>T<sub>d</sub></i>' }, min: 0.05, max: 0.5, step: 0.01, value: 0.18, fmt: v => fmt(v) + ' s' },
+  { key: 'tauF',   label: { zh: '微分滤波 <i>τ<sub>f</sub></i>', en: 'Derivative filter <i>τ<sub>f</sub></i>' }, min: 0.05, max: 0.35, step: 0.01, value: 0.12, fmt: v => fmt(v) + ' s' },
+  { key: 'Ti',     label: { zh: '积分时间 <i>T<sub>i</sub></i>', en: 'Integral time <i>T<sub>i</sub></i>' },   min: 1.0, max: 6.0,  step: 0.1,  value: 2.0,  fmt: v => fmt(v) + ' s' },
+  { key: 'wDist',  label: { zh: '扰动频率 <i>ω<sub>d</sub></i>', en: 'Disturbance frequency <i>ω<sub>d</sub></i>' }, min: 1.0, max: 12, step: 0.1, value: 5.0, fmt: v => fmt(v) + ' rad/s' },
+  { key: 'dAmp',   label: { zh: '扰动幅度 <i>d</i>',      en: 'Disturbance amplitude <i>d</i>' }, min: 0, max: 2.5, step: 0.05, value: 1.2, fmt: v => fmt(v) + ' N·m' },
+  { key: 'rhoRes', label: { zh: '谐振器收敛率 <i>ρ</i>',  en: 'Resonator learning rate <i>ρ</i>' }, min: 0.05, max: 1.0, step: 0.05, value: 0.70, fmt: v => fmt(v) + ' /s' },
+  { key: 'wProbe', label: { zh: '探测频率 <i>ω</i>',      en: 'Probe frequency <i>ω</i>' },   min: 0.3, max: 16,   step: 0.1,  value: 3.0,  fmt: v => fmt(v) + ' rad/s' },
+  { key: 'woFrac', label: { zh: '位置环带宽 <i>ω<sub>o</sub></i> ÷ <i>z</i>', en: 'Position-loop bandwidth <i>ω<sub>o</sub></i> ÷ <i>z</i>' }, min: 0.05, max: 0.45, step: 0.01, value: 0.30, fmt: v => fmt(v) }
+];
+
+/* ═══════════════ 被控对象与控制器：全工具共用的数学 ═══════════════
+   §0.1 的锚 —— 倒立摆的线性化模型自始至终是被控对象：
+
+       θ̈ = (g/L)·θ + u/(mL²)        ⇒   开环极点 s = ±√(g/L)
+
+   记 a = g/L、b = 1/(mL²)，则 P(s) = b/(s² − a)，
+   右半平面那个极点 p = +√a 就是「必倒」的数学，三个页签的读数区都显示它。
+
+   控制器是「带滤波微分」的 PID：
+
+       C(s) = K·(1 + (τf+Td)s)/(1 + τf s)   [ + K/(Ti·s) ]
+
+   微分必须滤波，这不是装饰：不滤波时 L(s) 的相对阶只有 1，波德灵敏度积分
+   会多出 −(π/2)·lim s·L(s) 一项，页签③ 要演示的守恒律当场不成立。
+   滤波之后相对阶为 2、无右半平面零点，∫₀^∞ ln|S| dω = π·p 才是干净的。 */
+const G = 9.81;
+const TS = 1 / 500;        // 控制器采样周期：零阶保持离散更新（§0.3）
+const SUBN = 4;            // 每个控制周期内被控对象的 RK4 子步数
+const HH = TS / SUBN;      // 定步长 h = 1/2000 s（§0.3 要求，不拿帧 dt 直接积）
+const MAX_TICK = 800;      // 后台切回时的子步上限，防一帧卡死
+const WAVE_V = 1.0;        // 时间轴世界速度（世界单位 / 秒）
+const K_MAX = 40;          // 增益轴量程：页签① 的世界 z 轴就是 K ∈ [0, K_MAX]
+/* 增益轴的世界长度刻意短于 WAVE_LEN：引擎只有透视投影，物体在深度方向铺得越长，
+   「沿增益轴俯视」时近端（大 K）被放得越大，那张教科书根轨迹图就越不像。
+   K_LEN = 4.6 配 dist = 15，首尾放大比 ≈ 1.36，已足够接近正交投影；而虚轴
+   Re s = 0 恒落在屏幕中线上（与深度无关），所以「穿越虚轴」这件事始终是准的。 */
+const K_LEN = 4.6;
+const CART_M = 1.0;        // 小车质量：教学参数，固定 1 kg（页签④）
+const RESP_T = 3.5;        // 页签① 响应小窗的一轮时长（够 7 个时间常数，瞬态填满小窗）
+const EPI_T = 8;           // 页签④ 一次「实验」的时长
+const SPEC_N = 512;        // 误差谱 DFT 点数
+const SPEC_FS = 32;        // 误差谱采样率 Hz ⇒ 窗长 16 s，Δω = 0.393 rad/s
+const SPEC_BINS = 41;      // 画到 ω ≈ 16 rad/s
+
+/* 被控对象的当前系数（滑杆一动即变，控制器是活的，不重算历史） */
+function plantA() { return G / state.L; }
+function plantB() { return 1 / (state.mass * state.L * state.L); }
+function omega0() { return Math.sqrt(G / state.L); }          // p = +√(g/L)
+function Kcrit()  { return state.mass * G * state.L; }        // 劳斯判据：K > mgL
+function loopPar(useI) {
+  return { a: plantA(), b: plantB(), K: state.K, Td: state.Td, tf: state.tauF, Ti: state.Ti, useI: !!useI };
+}
+
+/* ---- 复数（只够本工具用） ---- */
+const zAdd = (x, y) => [x[0] + y[0], x[1] + y[1]];
+const zMul = (x, y) => [x[0]*y[0] - x[1]*y[1], x[0]*y[1] + x[1]*y[0]];
+const zDiv = (x, y) => { const d = y[0]*y[0] + y[1]*y[1] || 1e-300; return [(x[0]*y[0] + x[1]*y[1])/d, (x[1]*y[0] - x[0]*y[1])/d]; };
+const zAbs = x => Math.hypot(x[0], x[1]);
+
+/* 开环频率响应 L(jω) = C(jω)·P(jω) */
+function loopL(w, P) {
+  let C = zMul([P.K, 0], zDiv(zAdd([1, 0], [0, (P.tf + P.Td) * w]), zAdd([1, 0], [0, P.tf * w])));
+  if (P.useI) C = zAdd(C, zDiv([P.K / P.Ti, 0], [0, w]));
+  return zMul(C, [P.b / (-w*w - P.a), 0]);      // P(jω) = b/((jω)² − a) 恒为实负数
+}
+/* ln|S(jω)| = −½·ln|1+L|²。用 log1p 而不是 Math.log(|1+L|)：尾部 |L| ~ 1e-31 时
+   1+L 会舍成 1、对数塌成 0，而那一段乘上换元因子 sec²u 后恰恰是有限贡献。 */
+function lnS(w, P) {
+  const L = loopL(w, P);
+  const v = -0.5 * Math.log1p(2*L[0] + L[0]*L[0] + L[1]*L[1]);
+  return isFinite(v) ? clamp(v, -40, 40) : (v < 0 ? -40 : 40);
+}
+function lnT(w, P) {
+  const L = loopL(w, P);
+  const T = zDiv(L, zAdd([1, 0], L));
+  const v = Math.log(zAbs(T) + 1e-300);
+  return isFinite(v) ? clamp(v, -40, 40) : -40;
+}
+
+/* 闭环稳定性：劳斯–赫尔维茨。
+   PD（三次）：τf s³ + s² + (Kb(τf+Td) − aτf)s + (Kb − a)
+     全正 + a2a1 > a3a0  ⇔  K > a/b = mgL（解析结论，页签① 的临界增益）
+   PID（四次）：τf·Ti s⁴ + Ti s³ + (bK·Ti(τf+Td) − a·τf·Ti)s² + (bK(Ti+τf) − a·Ti)s + bK
+     I 项不是免费的：它把稳定下界从 mgL 抬高了。 */
+function pdPoly(P)  { return [P.tf, 1, P.K*P.b*(P.tf + P.Td) - P.a*P.tf, P.K*P.b - P.a]; }
+function pidPoly(P) {
+  return [P.tf*P.Ti, P.Ti,
+          P.b*P.K*P.Ti*(P.tf + P.Td) - P.a*P.tf*P.Ti,
+          P.b*P.K*(P.Ti + P.tf) - P.a*P.Ti,
+          P.b*P.K];
+}
+function routhStable(c) {
+  if (c.some(v => !(v > 0))) return false;
+  if (c.length === 4) return c[1]*c[2] > c[0]*c[3];
+  if (c.length === 5) return c[1]*c[2]*c[3] > c[3]*c[3]*c[0] + c[1]*c[1]*c[4];
+  return true;
+}
+function loopStable(P) { return routhStable(P.useI ? pidPoly(P) : pdPoly(P)); }
+
+/* 谐振器（页签② 的「正弦的模型」）：R(s) = Kr(cosφ·s − sinφ·ωd)/(s² + ωd²)。
+   阻尼取 0 —— 内模原理要的就是虚轴上那一对极点，稳态误差才是**准确**的零。
+   相位 φ = −∠(P·S)(jωd) 让新引入的那对极点直着往左半平面走；
+   增益 Kr = 2ρ/|P·S| 把左移速率定成 ρ（于是滑杆读数就是「多快学会」）。 */
+function resTune(P, wd, rho) {
+  const PS = zDiv([P.b / (-wd*wd - P.a), 0], zAdd([1, 0], loopL(wd, P)));
+  const mag = zAbs(PS);
+  return mag > 1e-12 ? { Kr: 2 * rho / mag, phi: -Math.atan2(PS[1], PS[0]) } : { Kr: 0, phi: 0 };
+}
+
+/* ---- 三次实系数方程求根（页签① 的闭环极点） ---- */
+function cubicRoots(A) {
+  const b = A[1]/A[0], c = A[2]/A[0], d = A[3]/A[0];
+  const p = c - b*b/3, q = 2*b*b*b/27 - b*c/3 + d, sh = -b/3;
+  const disc = q*q/4 + p*p*p/27;
+  if (disc > 0) {
+    const sq = Math.sqrt(disc);
+    const u = Math.cbrt(-q/2 + sq), v = Math.cbrt(-q/2 - sq);
+    return [[u + v + sh, 0], [-(u+v)/2 + sh, Math.sqrt(3)/2*(u - v)], [-(u+v)/2 + sh, -Math.sqrt(3)/2*(u - v)]];
+  }
+  const r0 = 2 * Math.sqrt(-p/3);
+  const ph = Math.acos(clamp(3*q/(p*r0), -1, 1)) / 3;
+  return [0, 1, 2].map(k => [r0 * Math.cos(ph - TAU*k/3) + sh, 0]);
+}
+function clPoles(K) { const P = loopPar(false); P.K = K; return cubicRoots(pdPoly(P)); }
+
+/* ---- 页签① 的三维曲线束：按 K 连续追踪三条支 ---- */
+const LOC_N = 181;
+const locusCache = { sig: '', br: null };
+function locusData() {
+  const sig = [state.L, state.mass, state.Td, state.tauF].join('|');
+  if (locusCache.sig === sig) return locusCache;
+  const br = [[], [], []];
+  let prev = null;
+  for (let i = 0; i < LOC_N; i++) {
+    const K = i / (LOC_N - 1) * K_MAX;
+    let r = clPoles(K);
+    if (prev) {                              /* 连续性追踪：贪心最近邻配对，
+                                                否则三条支会在分离点上互相串色 */
+      const used = [false, false, false], ord = [];
+      for (let j = 0; j < 3; j++) {
+        let bi = -1, bd = Infinity;
+        for (let k = 0; k < 3; k++) {
+          if (used[k]) continue;
+          const d = Math.hypot(r[k][0] - prev[j][0], r[k][1] - prev[j][1]);
+          if (d < bd) { bd = d; bi = k; }
+        }
+        used[bi] = true; ord.push(r[bi]);
+      }
+      r = ord;
+    } else {                                  /* K = 0：按 +√a、−√a、−1/τf 定序 */
+      r.sort((u, v) => v[0] - u[0]);
+    }
+    for (let j = 0; j < 3; j++) br[j].push({ K: K, re: r[j][0], im: r[j][1] });
+    prev = r;
+  }
+  locusCache.sig = sig; locusCache.br = br;
+  return locusCache;
+}
+
+/* ---- 页签③ 的波德灵敏度积分 ----
+   ∫₀^∞ ln|S(jω)| dω：ω = tan u 换元把无穷区间压进 [0, π/2)，被积函数
+   f(tan u)·sec²u 在端点有界（尾部 ln|S| ~ A/ω²，乘 sec²u 恰好收敛到 A），
+   于是复合辛普森就够。实测 N = 4000 时相对误差 ~0.1%，N = 2·10⁵ 时 ~0.001%。 */
+const BODE_N = 4000, SP_W = 20;
+const bodeCache = { sig: '', I: 0, aPlus: 0, aMinus: 0, vis: 0, stable: true, curve: null, tcurve: null, peak: 0 };
+function bodeData() {
+  const P = loopPar(true);
+  const sig = [P.a, P.b, P.K, P.Td, P.tf, P.Ti].join('|');
+  if (bodeCache.sig === sig) return bodeCache;
+  const h = (Math.PI / 2) / BODE_N;
+  let sAll = 0, sPos = 0, sNeg = 0;
+  for (let i = 0; i <= BODE_N; i++) {
+    const u = i * h, w = Math.tan(u), sec2 = 1 + w*w;
+    let f;
+    if (i === 0) f = lnS(1e-9, P);
+    else if (!isFinite(w) || w > 1e15) f = 0;
+    else f = lnS(w, P) * sec2;
+    const wt = (i === 0 || i === BODE_N) ? 1 : (i % 2 ? 4 : 2);
+    sAll += wt * f;
+    if (f > 0) sPos += wt * f; else sNeg += wt * (-f);
+  }
+  const k = h / 3;
+  bodeCache.I = sAll * k; bodeCache.aPlus = sPos * k; bodeCache.aMinus = sNeg * k;
+  /* 可见区间 [0, SP_W] 的面积，另算一份 —— 画面上填色的就是它，
+     不能拿全区间的数字冒充画面上的那块（尾部真的在框外）。 */
+  let vis = 0;
+  const M = 2000, hv = SP_W / M;
+  for (let i = 0; i <= M; i++) {
+    const w = i * hv;
+    const f = lnS(i === 0 ? 1e-9 : w, P);
+    vis += ((i === 0 || i === M) ? 1 : (i % 2 ? 4 : 2)) * f;
+  }
+  bodeCache.vis = vis * hv / 3;
+  bodeCache.stable = loopStable(P);
+  const cur = [], tcur = [];
+  let peak = 0;
+  for (let i = 0; i <= 300; i++) {
+    const w = i / 300 * SP_W;
+    const v = lnS(i === 0 ? 1e-6 : w, P);
+    cur.push([w, v]); peak = Math.max(peak, Math.abs(v));
+    tcur.push([w, lnT(i === 0 ? 1e-6 : w, P)]);
+  }
+  bodeCache.curve = cur; bodeCache.tcurve = tcur; bodeCache.peak = peak;
+  bodeCache.sig = sig;
+  return bodeCache;
+}
+
+/* ---- 误差谱（页签②）：定速率环形缓冲 + 汉宁窗 DFT ---- */
+const specBuf = new Float64Array(SPEC_N);
+let specHead = 0, specAcc = 0, specFilled = 0;
+const specOut = { at: -1, mag: null };
+function specPush(v) {
+  specAcc += TS;
+  if (specAcc < 1 / SPEC_FS) return;
+  specAcc -= 1 / SPEC_FS;
+  specBuf[specHead] = v;
+  specHead = (specHead + 1) % SPEC_N;
+  if (specFilled < SPEC_N) specFilled++;
+}
+function specData() {
+  if (specOut.at === specHead) return specOut.mag;      // 每格只算一次
+  const mag = new Float64Array(SPEC_BINS);
+  for (let k = 0; k < SPEC_BINS; k++) {
+    let re = 0, im = 0;
+    for (let n = 0; n < SPEC_N; n++) {
+      const x = specBuf[(specHead + n) % SPEC_N] * (0.5 - 0.5 * Math.cos(TAU * n / (SPEC_N - 1)));
+      const ang = -TAU * k * n / SPEC_N;
+      re += x * Math.cos(ang); im += x * Math.sin(ang);
+    }
+    mag[k] = Math.hypot(re, im) * 2 / SPEC_N;
+  }
+  specOut.at = specHead; specOut.mag = mag;
+  return mag;
+}
+const specOmega = k => TAU * k * SPEC_FS / SPEC_N;
+/* 误差谱的纵轴用**绝对** dB（参考 1 rad），不按峰值归一。
+   归一化会在残差被消掉后把剩下的舍入噪声重新拉满量程 —— 洞看上去反而还在。 */
+const SPEC_FLOOR = 100;                                  // 触底 −100 dB
+function specY(mag) { return clamp((20 * Math.log10(Math.max(mag, 1e-18)) + SPEC_FLOOR) / SPEC_FLOOR * 2.3, 0, 2.3); }
+
+/* 扰动里的一小撮宽带背景（确定性线性同余 + 一阶低通，转折 ≈ 10 rad/s）。
+   没有它，正弦被谐振器消干净后整条谱一起塌到底 —— 那是「关灯」，不是「打洞」。
+   有了它，只有 ωd 那一根掉进底噪里，谱上真的出现一个洞。 */
+let nzSeed = 20260802, nzVal = 0;
+function nzTick(amp) {
+  nzSeed = (Math.imul(nzSeed, 1664525) + 1013904223) >>> 0;
+  nzVal += ((nzSeed / 4294967296 * 2 - 1) * amp - nzVal) * 0.02;
+  return nzVal;
+}
+
+/* ═══════════════ 四路仿真（都是同一根杆子，只是问法不同） ═══════════════
+   每个页签一路，全部在 pushSample() 里以定步长推进（③ 编辑点）。
+   控制器按 TS 零阶保持更新，被控对象在两次更新之间用 RK4 走 SUBN 个 h 子步。 */
+const SIM = { clock: 0, acc: 0, A: null, B: null, C: null, D: null, dMode: null };
+
+function seedPen(th0) { return { th: th0, om: 0, xi: 0, w: 0, r1: 0, r2: 0, u: 0, uP: 0, uI: 0, uR: 0, d: 0, t0: SIM.clock }; }
+function seedCart() {
+  const pos = !!state.posCtrl;
+  return { x: 0, v: 0, th: pos ? 0.0 : 0.15, om: 0, F: 0, minx: 0, t0: SIM.clock, pos: pos };
+}
+function seedAll() {
+  SIM.A = seedPen(0.10);
+  SIM.B = seedPen(0.03);
+  SIM.C = seedPen(0.0);
+  SIM.D = seedCart();
+  SIM.acc = 0;
+  specBuf.fill(0); specHead = 0; specFilled = 0; specAcc = 0; specOut.at = -1;
+  nzSeed = 20260802; nzVal = 0;
+}
+
+/* 一个控制周期：先按采样值更新控制器状态，再把被控对象积过去 */
+function penTick(S, P, o) {
+  const e = -S.th;                                   // 参考角度恒为 0（把杆立住）
+  const beta = (P.tf + P.Td) / P.tf;
+  S.uP = P.K * (beta * e + (1 - beta) * S.w);
+  S.uI = o.useI ? (P.K / P.Ti) * S.xi : 0;
+  S.uR = o.useRes ? o.Kr * (Math.cos(o.phi) * S.r2 - Math.sin(o.phi) * o.wd * S.r1) : 0;
+  S.u = clamp(S.uP + S.uI + S.uR, -o.umax, o.umax);
+  S.sat = Math.abs(S.uP + S.uI + S.uR) > o.umax;
+  S.xi += e * TS;
+  const kf = Math.exp(-TS / P.tf);                   // D 滤波器的一阶精确解
+  S.w = kf * S.w + (1 - kf) * e;
+  if (o.wd > 0) {                                    /* 谐振器用零阶保持的精确旋转推进：
+                                                        前向欧拉在无阻尼振子上会指数发散 */
+    const c = Math.cos(o.wd * TS), s = Math.sin(o.wd * TS), w2 = o.wd * o.wd;
+    const r1 = c * S.r1 + s / o.wd * S.r2 + (1 - c) / w2 * e;
+    const r2 = -o.wd * s * S.r1 + c * S.r2 + s / o.wd * e;
+    S.r1 = r1; S.r2 = r2;
+  }
+  const f = (th) => P.a * th + P.b * (S.u + S.d);    // θ̈ = aθ + b(u+d)
+  for (let i = 0; i < SUBN; i++) {
+    const k1t = S.om,                    k1o = f(S.th);
+    const k2t = S.om + HH/2 * k1o,       k2o = f(S.th + HH/2 * k1t);
+    const k3t = S.om + HH/2 * k2o,       k3o = f(S.th + HH/2 * k2t);
+    const k4t = S.om + HH * k3o,         k4o = f(S.th + HH * k3t);
+    S.th += HH/6 * (k1t + 2*k2t + 2*k3t + k4t);
+    S.om += HH/6 * (k1o + 2*k2o + 2*k3o + k4o);
+  }
+}
+
+/* 小车-摆（页签④，线性化）：一个作动器 F，两个要管的量 θ 与 x
+     θ̈ = [(M+m)gθ − F]/(lM)      ẍ = (F − mgθ)/M
+   内环把 θ 拉到 θref（带宽 6 rad/s），外环用 θref 去挪 x。
+   准静态下 ẍ = c·θref，c = g·kp/(kp − (M+m)g) —— 想往前走，先得倾过去。 */
+function cartGains() {
+  const M = CART_M, m = state.mass, l = state.L;
+  const wi = 6, zi = 0.8;
+  const kp = (M + m) * G + wi*wi*l*M, kd = 2*zi*wi*l*M;
+  const c = G * kp / (kp - (M + m) * G);
+  const z = Math.sqrt(G / l);                     // X/F 的右半平面零点
+  const wo = state.woFrac * z, zo = 0.9;
+  return { M: M, m: m, l: l, kp: kp, kd: kd, c: c, z: z, wo: wo, kx: wo*wo/c, kv: 2*zo*wo/c };
+}
+function cartTick(S, g) {
+  const xr = S.pos ? 1.5 : 0;
+  const f = s => {
+    const thref = S.pos ? -(g.kx * (s.x - xr) + g.kv * s.v) : 0;
+    const F = g.kp * (s.th - thref) + g.kd * s.om;
+    return [s.v, (F - g.m * G * s.th) / g.M, s.om, ((g.M + g.m) * G * s.th - F) / (g.l * g.M), F];
+  };
+  for (let i = 0; i < SUBN; i++) {
+    const a = f(S);
+    const s2 = { x: S.x + HH/2*a[0], v: S.v + HH/2*a[1], th: S.th + HH/2*a[2], om: S.om + HH/2*a[3], pos: S.pos };
+    const b = f(s2);
+    const s3 = { x: S.x + HH/2*b[0], v: S.v + HH/2*b[1], th: S.th + HH/2*b[2], om: S.om + HH/2*b[3], pos: S.pos };
+    const c = f(s3);
+    const s4 = { x: S.x + HH*c[0], v: S.v + HH*c[1], th: S.th + HH*c[2], om: S.om + HH*c[3], pos: S.pos };
+    const d = f(s4);
+    S.x  += HH/6*(a[0] + 2*b[0] + 2*c[0] + d[0]);
+    S.v  += HH/6*(a[1] + 2*b[1] + 2*c[1] + d[1]);
+    S.th += HH/6*(a[2] + 2*b[2] + 2*c[2] + d[2]);
+    S.om += HH/6*(a[3] + 2*b[3] + 2*c[3] + d[3]);
+    S.F = a[4];
+  }
+  S.minx = Math.min(S.minx, S.x);
+}
+
+function advanceSim(dt) {
+  SIM.acc += dt;
+  let n = 0;
+  while (SIM.acc >= TS && n++ < MAX_TICK) {
+    SIM.acc -= TS;
+    SIM.clock += TS;
+    const Ppd = loopPar(false), Ppid = loopPar(true);
+
+    /* ① 响应小窗：每 RESP_T 秒重新给一个初始倾角，瞬态循环重演 */
+    if (SIM.clock - SIM.A.t0 >= RESP_T || Math.abs(SIM.A.th) > 3) SIM.A = seedPen(0.10);
+    SIM.A.d = 0;
+    penTick(SIM.A, Ppd, { useI: false, useRes: false, wd: 0, umax: 1e9 });
+
+    /* ② 内模：常值扰动 + 正弦扰动，控制器可选 I 与谐振器 */
+    const wd = state.wDist;
+    const tune = state.useRes ? resTune(loopPar(state.useI), wd, state.rhoRes) : { Kr: 0, phi: 0 };
+    const anyD = state.dConst || state.dSin;
+    SIM.B.d = (state.dConst ? state.dAmp : 0) + (state.dSin ? state.dAmp * Math.sin(wd * SIM.clock) : 0)
+            + (anyD ? nzTick(3.0 * state.dAmp) : 0);
+    penTick(SIM.B, loopPar(state.useI), { useI: state.useI, useRes: state.useRes, Kr: tune.Kr, phi: tune.phi, wd: wd, umax: 1e9 });
+    if (!isFinite(SIM.B.th) || Math.abs(SIM.B.th) > 1.4) SIM.B = seedPen(0.03);
+    specPush(-SIM.B.th);
+
+    /* ③ 探测：单频正弦扰动，量出闭环真把它放大还是压小 */
+    SIM.C.d = 1.0 * Math.sin(state.wProbe * SIM.clock);
+    penTick(SIM.C, Ppid, { useI: true, useRes: false, wd: 0, umax: 1e9 });
+    if (!isFinite(SIM.C.th) || Math.abs(SIM.C.th) > 1.4) SIM.C = seedPen(0);
+
+    /* ④ 小车-摆：每 EPI_T 秒重来一次；换控制模式立即重来 */
+    if (SIM.D.pos !== !!state.posCtrl || SIM.clock - SIM.D.t0 >= EPI_T ||
+        !isFinite(SIM.D.x) || Math.abs(SIM.D.x) > 30 || Math.abs(SIM.D.th) > 1.2) SIM.D = seedCart();
+    cartTick(SIM.D, cartGains());
+  }
+}
+
+/* ═══════════════ 场景级绘制部件 ═══════════════
+   本工具的三条轴不是 x / y / t 而是 Re / Im / K、ω / ln|S| …，
+   所以自备带标注的轴与面填充，引擎的 drawAxes / drawGridXY 一行不动（§8）。 */
+function axisSeg(C, p0, p1, text, o) {
+  o = o || {};
+  line3(C, p0, p1, { width: 1.4, color: AXIS });
+  const back = [p1[0] + (p0[0]-p1[0])*0.04, p1[1] + (p0[1]-p1[1])*0.04, p1[2] + (p0[2]-p1[2])*0.04];
+  arrowAt(C, p1, back, AXIS);
+  if (text) label3(C, [p1[0] + (o.dx || 0), p1[1] + (o.dy || 0), p1[2] + (o.dz || 0)], text,
+    { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: o.align || 'center' });
+}
+function tickMark(C, p, d, text, o) {
+  o = o || {};
+  line3(C, [p[0]-d[0], p[1]-d[1], p[2]-d[2]], [p[0]+d[0], p[1]+d[1], p[2]+d[2]], { width: 1.2, color: AXIS_DIM });
+  if (text) label3(C, [p[0] + (o.dx || 0), p[1] + (o.dy || 0), p[2] + (o.dz || 0)], text,
+    { size: 10, color: 'rgba(159,176,200,.6)', align: o.align || 'center' });
+}
+/* 任意平面上的方格网（i 为常量轴：0=x, 1=y, 2=z） */
+function planeGrid(C, axis, at, u0, u1, du, v0, v1, dv, color) {
+  const mk = (u, v) => axis === 0 ? [at, u, v] : axis === 1 ? [u, at, v] : [u, v, at];
+  for (let u = Math.ceil(u0/du)*du; u <= u1 + 1e-9; u += du) line3(C, mk(u, v0), mk(u, v1), { width: 1, color: color });
+  for (let v = Math.ceil(v0/dv)*dv; v <= v1 + 1e-9; v += dv) line3(C, mk(u0, v), mk(u1, v), { width: 1, color: color });
+}
+/* 折线与基线之间填色（页签③ 的水床面积；引擎没有面填充部件） */
+function fillBand(C, pts, baseY, color) {
+  if (pts.length < 2) return;
+  const sp = [];
+  for (const p of pts) { const s = proj(C, p); if (!s) return; sp.push(s); }
+  const b0 = proj(C, [pts[0][0], baseY, pts[0][2]]);
+  const b1 = proj(C, [pts[pts.length-1][0], baseY, pts[pts.length-1][2]]);
+  if (!b0 || !b1) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(b0[0], b0[1]);
+  for (const s of sp) ctx.lineTo(s[0], s[1]);
+  ctx.lineTo(b1[0], b1[1]);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.restore();
+}
+/* 历史曲线的标准双描（辉光 + 头亮尾隐），全工具复用 */
+function traceCurve(C, pts, rgb) {
+  if (pts.length < 2) return;
+  strokePoly(C, pts, { width: 5.5, color: 'rgba(' + rgb + ',0.13)' });
+  strokePoly(C, pts, { width: 2.2, fade: ['rgba(' + rgb + ',1)', 'rgba(' + rgb + ',0.04)'] });
+}
+const RGB = { rose: '251,113,133', violet: '167,139,250', emerald: '52,211,153', orange: '251,146,60', amber: '251,191,36', cyan: '45,212,234' };
+
+/* 从 samples 取一条「沿时间轴流出」的曲线：最新样本贴在 z = 0 */
+function timePoly(C, key, sc, xPlane, y0, clip) {
+  const pts = [];
+  for (let i = samples.length - 1; i >= 0; i--) {
+    const s = samples[i];
+    const z = (state.t - s.t) * WAVE_V;
+    if (z > WAVE_LEN + 0.2) break;
+    const v = s[key];
+    if (v == null || !isFinite(v)) { pts.push(null); continue; }
+    pts.push([xPlane, y0 + clamp(v * sc, -clip, clip), z]);
+  }
+  return pts;
+}
+
+/* 页签① 的世界映射：复平面在 x·y（按 ω₀ 归一），增益 K 沿 z */
+const LOC_S = 0.95, LOC_RE0 = -4.0, LOC_RE1 = 1.75, LOC_IM = 2.9;
+const zOfK  = K  => K / K_MAX * K_LEN;
+const xOfRe = re => clamp(re, LOC_RE0, LOC_RE1) * LOC_S;
+const yOfIm = im => clamp(im, -LOC_IM, LOC_IM) * LOC_S;
+const inBox = (re, im) => re >= LOC_RE0 && re <= LOC_RE1 && Math.abs(im) <= LOC_IM;
+/* 极点跑出画框时折线**断开**（§6 奇点处理），而不是贴着边界画一条假的直线 */
+function locusPoly(br, w0) {
+  const pts = [];
+  for (const q of br) {
+    const re = q.re / w0, im = q.im / w0;
+    if (!inBox(re, im)) { if (pts.length && pts[pts.length - 1] !== null) pts.push(null); continue; }
+    pts.push([re * LOC_S, im * LOC_S, zOfK(q.K)]);
+  }
+  return pts;
+}
+/* 页签① 响应小窗：贴在当前 K 的高度上，摆在复平面**下方**（放右边会被参数面板盖住） */
+const RSP_X0 = -3.7, RSP_X1 = 1.5, RSP_Y = -4.7, RSP_SC = 4.2, RSP_CLIP = 0.78;
+/* 页签②③ 的频率轴 */
+const FRQ_X0 = 0.35, FRQ_LEN = 4.15;
+const xOfW = (w, wmax) => FRQ_X0 + clamp(w / wmax, 0, 1) * FRQ_LEN;
+
+function roHead(extra) {
+  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;' + extra + '</div>';
+}
+function poleText(r) {
+  if (Math.abs(r[1]) < 1e-9) return fmtS(r[0]);
+  return fmtS(r[0]) + (r[1] < 0 ? ' − ' : ' + ') + fmt(Math.abs(r[1])) + 'j';
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ② 场景注册 —— 每个键就是一个页签                           ║
+   ║  必填：label / brand / tips / views(首项即"立体"，双击回正)  ║
+   ║        params(本页签真正读取的滑块 key 数组，决定面板显隐)    ║
+   ║        toggles(曲线按 rose→violet→emerald→orange 取色)     ║
+   ║        draw(C) / readout()                                ║
+   ║  四个页签都不声明 drive：被演示量全部由 pushSample() 里的定    ║
+   ║  步长积分器自走（§8 出路①），场景内各留一行注释说明靠什么在动。 ║
+   ╚══════════════════════════════════════════════════════════╝ */
+const SCENES = {
+
+  /* ─────────── ① 根轨迹：极点在增益里迁移 ─────────── */
+  locus: {
+    label: { zh: '根轨迹', en: 'Root locus' },
+    params: ['L', 'mass', 'K', 'Td', 'tauF'],
+    /* 靠什么在动：右侧响应小窗里跑的是真闭环仿真（SIM.A），每 RESP_T = 6 s
+       重新给一个初始倾角，瞬态循环重演；曲线束本身是当前参数下的几何体。 */
+    brand: { zh: '复平面铺在 x·y，增益 K 沿 z 轴：闭环极点随 K 划出一束三维曲线。倒立摆是反的——曲线从右半平面出发，K 太小才不稳。拖拽旋转，或按 2 沿增益轴俯视。',
+             en: 'The complex plane lies in x·y and the gain K runs along z, so the closed-loop poles sweep out a bundle of 3-D curves. The inverted pendulum is the reverse case: the branch starts in the right half-plane, and too little gain is what kills you. Drag to rotate, or press 2 to look down the gain axis.' },
+    tips: { zh: '提示：按 2「沿增益轴俯视」，你看到的正是教科书那张根轨迹图；转回立体，才知道它一直是一束三维曲线。琥珀色那圈标的是穿越虚轴的临界增益 K_c = mgL——比它小，右半平面那个极点就没走掉。',
+            en: 'Tip: press 2 to look down the gain axis — what you see is exactly the textbook root-locus plot; rotate back and you discover it was a 3-D bundle all along. The amber ring marks the critical gain K_c = mgL where the branch crosses the imaginary axis; below it, the right-half-plane pole never leaves.' },
+    views: {
+      iso:  { label: { zh: '立体',           en: '3D' },            az: -0.95, el: 0.34, dist: 13, tx: -0.9, ty: -0.9, tz: 2.3 },
+      gain: { label: { zh: '沿增益轴俯视',   en: 'Down the gain axis' }, az: 0.001, el: 0.02, dist: 15, tx: -0.9, ty: -1.0, tz: 2.3 },
+      reK:  { label: { zh: '实部·增益 侧视', en: 'Re·K side' },      az: -Math.PI/2, el: 0.001, dist: 11, tx: -1.2, ty: -0.4, tz: 2.3 }
+    },
+    toggles: [
+      { key: 'showB1',    label: { zh: '不稳支（起于 +ω₀）', en: 'Unstable branch (from +ω₀)' }, color: '#fb7185', checked: true },
+      { key: 'showB2',    label: { zh: '稳定支（起于 −ω₀）', en: 'Stable branch (from −ω₀)' },   color: '#a78bfa', checked: true },
+      { key: 'showB3',    label: { zh: '滤波极点支',          en: 'Filter-pole branch' },        color: '#34d399', checked: true },
+      { key: 'showResp',  label: { zh: '当前 K 的 θ(t) 响应', en: 'θ(t) response at this K' },   color: '#fb923c', checked: true },
+      { key: 'showGuides',label: { zh: '度量标注',            en: 'Metrology marks' },           color: '#fbbf24', checked: true },
+      { key: 'showGrid',  label: { zh: '网格',                en: 'Grid' },                      color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => WAVE_LEN / WAVE_V + 0.5,
+    draw(C) {
+      const Kc = Kcrit(), zk = zOfK(clamp(state.K, 0, K_MAX));
+      const X0 = xOfRe(LOC_RE0), X1 = xOfRe(LOC_RE1), Y1 = yOfIm(LOC_IM);
+      const BR = ['#fb7185', '#a78bfa', '#34d399'];
+      const BRRGB = [RGB.rose, RGB.violet, RGB.emerald];
+      const on = [state.showB1, state.showB2, state.showB3];
+
+      if (state.showGrid) planeGrid(C, 2, 0, X0, X1, LOC_S, -Y1, Y1, LOC_S, 'rgba(148,163,184,0.07)');
+      /* 虚轴平面 Re s = 0 就是稳定边界曲面：曲线穿过它的那一刻，杆才站得住 */
+      planeGrid(C, 0, 0, -Y1, Y1, LOC_S, 0, K_LEN, K_LEN/4, 'rgba(45,212,234,0.09)');
+
+      axisSeg(C, [X0 - 0.25, 0, 0], [X1 + 0.3, 0, 0], 'Re', { dx: 0.34, dy: 0.2 });
+      axisSeg(C, [0, -Y1 - 0.2, 0], [0, Y1 + 0.3, 0], 'Im', { dy: 0.24 });
+      axisSeg(C, [0, 0, 0], [0, 0, K_LEN + 0.5], 'K', { dz: 0.38 });
+      for (const k of [-4, -3, -2, -1, 1]) tickMark(C, [k*LOC_S, 0, 0], [0, 0.07, 0], (k < 0 ? '−' : '') + Math.abs(k), { dy: -0.22 });
+      for (const k of [-2, -1, 1, 2]) tickMark(C, [0, k*LOC_S, 0], [0.07, 0, 0], (k < 0 ? '−' : '') + Math.abs(k) + 'j', { dx: -0.26, align: 'right' });
+      for (const k of [10, 20, 30, 40]) tickMark(C, [0, 0, zOfK(k)], [0.07, 0, 0], '' + k, { dx: 0.3, align: 'left' });
+
+      /* 响应小窗：真闭环仿真的 θ(t)，贴在当前 K 的高度上 —— 极点位置与响应一一对应 */
+      if (state.showResp) {
+        const pts = [];
+        let prevAt = -1;
+        for (let i = samples.length - 1; i >= 0; i--) {
+          const s = samples[i];
+          if (s.at == null || s.at > RESP_T) continue;
+          if (prevAt >= 0 && s.at > prevAt) pts.push(null);    // 换了一轮，折线断开
+          prevAt = s.at;
+          pts.push([RSP_X0 + (s.at / RESP_T) * (RSP_X1 - RSP_X0), RSP_Y + clamp(s.ath * RSP_SC, -RSP_CLIP, RSP_CLIP), zk]);
+        }
+        line3(C, [RSP_X0, RSP_Y, zk], [RSP_X1, RSP_Y, zk], { width: 1, dash: [5, 6], color: 'rgba(159,176,200,0.4)' });
+        line3(C, [RSP_X0, RSP_Y - RSP_CLIP - 0.1, zk], [RSP_X0, RSP_Y + RSP_CLIP + 0.1, zk], { width: 1, color: 'rgba(159,176,200,0.35)' });
+        traceCurve(C, pts, RGB.orange);
+        label3(C, [RSP_X1 + 0.12, RSP_Y, zk], t({ zh: 'θ(t) @ 当前 K', en: 'θ(t) at this K' }),
+          { size: 11, color: '#fb923c', align: 'left' });
+      }
+
+      /* 三条支：一条支 = 一种颜色，读数区里同色加粗 */
+      const LD = locusData(), w0 = omega0();
+      for (let j = 0; j < 3; j++) {
+        if (!on[j]) continue;
+        const pts = locusPoly(LD.br[j], w0);
+        strokePoly(C, pts, { width: 5.5, color: 'rgba(' + BRRGB[j] + ',0.13)' });
+        strokePoly(C, pts, { width: 2.2, color: 'rgba(' + BRRGB[j] + ',0.92)' });
+      }
+
+      /* 当前 K 的切片：一个虚线方框 + 三个极点光点 */
+      const fr = [[X0, -Y1, zk], [X1, -Y1, zk], [X1, Y1, zk], [X0, Y1, zk], [X0, -Y1, zk]];
+      strokePoly(C, fr, { width: 1.2, dash: [6, 6], color: 'rgba(45,212,234,0.45)' });
+      const idx = Math.round(clamp(state.K, 0, K_MAX) / K_MAX * (LOC_N - 1));
+      for (let j = 0; j < 3; j++) {
+        if (!on[j]) continue;
+        const q = LD.br[j][idx], re = q.re / w0, im = q.im / w0;
+        if (!inBox(re, im)) continue;
+        const p3 = [xOfRe(re), yOfIm(im), zk];
+        if (state.showGuides) line3(C, p3, [p3[0], 0, zk], { width: 1.5, dash: [7, 7], color: 'rgba(' + BRRGB[j] + ',0.7)' });
+        const sp = proj(C, p3);
+        if (sp) glowDot(sp, 10, '#ffffff', 'rgba(' + BRRGB[j] + ',0.9)');
+      }
+
+      /* 开环极点 ±√(g/L)：K = 0 的起点，右边那个就是「必倒」 */
+      solidDot(C, [xOfRe(1), 0, 0], 3.4, 'rgba(45,212,234,0.95)');
+      solidDot(C, [xOfRe(-1), 0, 0], 3.4, 'rgba(45,212,234,0.95)');
+      label3(C, [xOfRe(1) + 0.1, -0.34, 0], '+√(g/L)', { font: 'italic 12px ' + FONT_MATH, color: '#2dd4ea', align: 'left' });
+      label3(C, [xOfRe(-1), 0.34, 0], '−√(g/L)', { font: 'italic 12px ' + FONT_MATH, color: '#2dd4ea', align: 'center' });
+
+      /* 临界增益 K_c = mgL：曲线穿过虚轴的那一层（琥珀 = 度量注记） */
+      if (state.showGuides && Kc <= K_MAX) {
+        const zc = zOfK(Kc);
+        line3(C, [0, 0, 0], [0, 0, zc], { width: 1.6, color: 'rgba(251,191,36,0.8)' });
+        const ring = [];
+        for (let i = 0; i <= 40; i++) { const a = i / 40 * TAU; ring.push([0.22 * Math.cos(a), 0.22 * Math.sin(a), zc]); }
+        strokePoly(C, ring, { width: 1.6, color: 'rgba(251,191,36,0.9)' });
+        line3(C, [X0, 0, zc], [X1, 0, zc], { width: 1, dash: [4, 5], color: 'rgba(251,191,36,0.3)' });
+        label3(C, [0.35, 0.3, zc], 'K_c = mgL = ' + fmt(Kc),
+          { size: 10.5, color: 'rgba(251,191,36,.95)', align: 'left' });
+      }
+
+      label3(C, [X0 + 0.3, Y1 + 0.6, 0], 'P(s) = b / (s² − a),  a = g/L,  b = 1/mL²',
+        { font: 'italic 13px ' + FONT_MATH, color: '#a78bfa', align: 'left' });
+      label3(C, [X0 + 0.3, -Y1 - 0.34, 0], 'C(s) = K(1 + (τf+Td)s) / (1 + τf s)',
+        { font: 'italic 13px ' + FONT_MATH, color: '#2dd4ea', align: 'left' });
+      label3(C, [X0 + 0.3, -Y1 - 0.72, 0], t({ zh: '两条坐标轴均以 ω₀ = √(g/L) 归一', en: 'both axes normalised by ω₀ = √(g/L)' }),
+        { size: 10.5, color: 'rgba(159,176,200,.6)', align: 'left' });
+    },
+    readout() {
+      const Kc = Kcrit(), w0 = omega0();
+      const LD = locusData();
+      const idx = Math.round(clamp(state.K, 0, K_MAX) / K_MAX * (LOC_N - 1));
+      const q = j => { const r = LD.br[j][idx]; return [r.re, r.im]; };
+      const rr = [q(0), q(1), q(2)];
+      const dom = rr.reduce((a, b) => (b[0] > a[0] ? b : a), rr[0]);
+      const stab = state.K > Kc;
+      return roHead('K = <b>' + fmt(state.K) + '</b> N·m/rad&ensp;·&ensp;K / K_c = <b>' + fmt(state.K / Kc) + '</b>') +
+        '<div class="dim">' + t({ zh: '开环极点 = ±√(g/L) = ±', en: 'open-loop poles = ±√(g/L) = ±' }) + fmt(w0) +
+          t({ zh: ' rad/s（右边那个就是「必倒」）', en: ' rad/s (the right one is why it must fall)' }) + '</div>' +
+        '<div class="sinC">s₁ = <b>' + poleText(rr[0]) + '</b></div>' +
+        '<div class="cosC">s₂ = <b>' + poleText(rr[1]) + '</b></div>' +
+        '<div class="tanC">s₃ = <b>' + poleText(rr[2]) + '</b></div>' +
+        '<div>' + t({ zh: '临界增益 K_c = mgL = ', en: 'critical gain K_c = mgL = ' }) + '<b>' + fmt(Kc) + '</b> N·m/rad&ensp;·&ensp;' +
+          (stab ? t({ zh: '闭环稳定', en: 'closed loop stable' }) : t({ zh: '闭环不稳（K 太小）', en: 'unstable — gain too low' })) + '</div>' +
+        '<div class="dim">' + t({ zh: '主导极点：衰减率 ', en: 'dominant pole: decay ' }) + fmtS(-dom[0]) +
+          t({ zh: ' /s · 振荡 ', en: ' /s · oscillation ' }) + fmt(Math.abs(dom[1])) + ' rad/s</div>';
+    }
+  },
+
+  /* ─────────── ② 内模原理：要消掉什么，就得装什么的模型 ─────────── */
+  imp: {
+    label: { zh: '内模原理', en: 'Internal model' },
+    params: ['L', 'mass', 'K', 'Td', 'tauF', 'Ti', 'wDist', 'dAmp', 'rhoRes'],
+    /* 靠什么在动：SIM.B 是一路不间断的闭环仿真，扰动 d(t) 由引擎时钟驱动，
+       误差 e(t) 沿 +z 流出，误差谱是它最近 16 s 的滑动 DFT。 */
+    brand: { zh: '常值扰动被积分项吃掉，正弦扰动 P+I+D 却压不干净——在回路里装上那个频率的谐振器，误差谱上那根尖峰就被打掉一个洞。按 2 正视误差谱。',
+             en: 'A constant disturbance is annihilated by the integrator, yet a sinusoidal one survives full PID — until you put a resonator at that frequency inside the loop and the spike in the error spectrum is punched out. Press 2 for the spectrum view.' },
+    tips: { zh: '提示：打开「谐振器」开关，看误差谱上 ω_d 那根尖峰塌下去。控制器必须包含它要对抗的那个世界的模型——I 项不是玄学，它就是「常值信号」的模型。',
+            en: 'Tip: switch on the resonator and watch the spike at ω_d collapse. A controller must contain a model of the world it fights — the integral term is not folklore, it is precisely the model of a constant signal.' },
+    views: {
+      iso:  { label: { zh: '立体',            en: '3D' },          az: -0.95, el: 0.30, dist: 13, tx: 0.9, ty: 0.2, tz: 3.2 },
+      spec: { label: { zh: '误差谱 |E|·ω 正视', en: 'Spectrum |E|·ω' }, az: 0.001, el: 0.02, dist: 8.5, tx: 2.2, ty: 0.9, tz: 0 },
+      time: { label: { zh: '误差 e·t 侧视',    en: 'Error e·t side' }, az: -Math.PI/2, el: 0.001, dist: 12.5, tx: 0, ty: 0, tz: 3.6 }
+    },
+    toggles: [
+      { key: 'showErr',  label: { zh: '误差 e(t) 与误差谱', en: 'Error e(t) & spectrum' }, color: '#fb7185', checked: true },
+      { key: 'useI',     label: { zh: '积分项 I（常值的模型）', en: 'Integral I (model of a constant)' }, color: '#a78bfa', checked: true },
+      { key: 'useRes',   label: { zh: '谐振器（正弦的模型）', en: 'Resonator (model of a sinusoid)' }, color: '#34d399', checked: false },
+      { key: 'dConst',   label: { zh: '常值扰动',   en: 'Constant disturbance' }, color: '#fb923c', checked: false },
+      { key: 'dSin',     label: { zh: '正弦扰动',   en: 'Sinusoidal disturbance' }, color: '#fb923c', checked: true },
+      { key: 'showGrid', label: { zh: '网格',       en: 'Grid' }, color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => WAVE_LEN / WAVE_V + 0.5,
+    draw(C) {
+      const TX = -1.85, wd = state.wDist, WMAX = 16;
+      const XA = FRQ_X0, XB = FRQ_X0 + FRQ_LEN;
+
+      if (state.showGrid) {
+        planeGrid(C, 0, TX, -1.5, 1.5, 0.5, 0, WAVE_LEN, 1, 'rgba(148,163,184,0.07)');
+        planeGrid(C, 2, 0, XA, XB, FRQ_LEN / 4, 0, 2.4, 0.6, 'rgba(148,163,184,0.06)');
+      }
+
+      axisSeg(C, [TX, 0, 0], [TX, 0, WAVE_LEN + 0.6], 't', { dz: 0.4 });
+      axisSeg(C, [TX, -1.6, 0], [TX, 1.7, 0], null);
+      for (let k = 1; k * WAVE_V <= WAVE_LEN + 1e-6; k++)
+        tickMark(C, [TX, 0, k * WAVE_V], [0, 0.06, 0], k + 's', { dy: -0.22 });
+      axisSeg(C, [XA - 0.4, 0, 0], [XB + 0.3, 0, 0], 'ω', { dx: 0.3, dy: 0.2 });
+      axisSeg(C, [XA - 0.4, 0, 0], [XA - 0.4, 2.6, 0], null);
+      label3(C, [XA - 0.5, 2.72, 0], '|E(ω)|', { font: 'italic 13px ' + FONT_MATH, color: '#fb7185', align: 'left' });
+      for (const k of [4, 8, 12, 16]) tickMark(C, [xOfW(k, WMAX), 0, 0], [0, 0.06, 0], '' + k, { dy: -0.22 });
+
+      /* 时域：误差、两个控制器分项、扰动，同一块玻璃上四条荧光迹 */
+      if (state.showErr) traceCurve(C, timePoly(C, 'e', 4.0, TX, 0, 1.45), RGB.rose);
+      if (state.useI)    traceCurve(C, timePoly(C, 'uI', 0.05, TX, 0, 1.45), RGB.violet);
+      if (state.useRes)  traceCurve(C, timePoly(C, 'uR', 0.05, TX, 0, 1.45), RGB.emerald);
+      if (state.dConst || state.dSin) traceCurve(C, timePoly(C, 'bd', 0.4, TX, 0, 1.45), RGB.orange);
+      label3(C, [TX, 1.75, 0.2], t({ zh: 'e ×4 · u_I,u_R ×0.05 · d ×0.4', en: 'e ×4 · u_I,u_R ×0.05 · d ×0.4' }),
+        { size: 10.5, color: 'rgba(159,176,200,.6)', align: 'center' });
+
+      /* 频域：最近 16 s 误差的滑动 DFT，按峰值归一到 dB */
+      if (state.showErr) {
+        const mag = specData();
+        const pts = [];
+        for (let k = 1; k < SPEC_BINS; k++) pts.push([xOfW(specOmega(k), WMAX), specY(mag[k]), 0]);
+        strokePoly(C, pts, { width: 5.5, color: 'rgba(' + RGB.rose + ',0.13)' });
+        strokePoly(C, pts, { width: 2.2, color: 'rgba(' + RGB.rose + ',0.95)' });
+        const kd = Math.round(wd * SPEC_N / (TAU * SPEC_FS));
+        if (kd >= 1 && kd < SPEC_BINS) {
+          const sp = proj(C, [xOfW(specOmega(kd), WMAX), specY(mag[kd]), 0]);
+          if (sp) glowDot(sp, 9, '#ffffff', 'rgba(' + RGB.rose + ',0.9)');
+        }
+      }
+      /* 琥珀：扰动频率的标尺 */
+      const xd = xOfW(wd, WMAX);
+      line3(C, [xd, 0, 0], [xd, 2.55, 0], { width: 1.2, dash: [5, 6], color: 'rgba(251,191,36,0.6)' });
+      label3(C, [xd, 2.72, 0], 'ωd = ' + fmt(wd), { font: 'italic 12px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+      label3(C, [XA, -0.3, 0], t({ zh: '（绝对 dB，参考 1 rad，−100 dB 触底；扰动含一撮宽带背景，好让「洞」看得见）',
+                                    en: '(absolute dB re 1 rad, floor −100 dB; the disturbance carries a broadband floor so the hole is visible)' }),
+        { size: 10, color: 'rgba(159,176,200,.5)', align: 'left' });
+    },
+    readout() {
+      const Kc = Kcrit(), wd = state.wDist;
+      /* 从历史采样量出稳态误差与交流残差：均值 = 常值扰动留下的偏置，
+         去均值后的 RMS×√2 = 那根正弦压不掉的部分 */
+      let n = 0, sum = 0, sum2 = 0;
+      const t0 = state.t - 6;
+      for (const s of samples) if (s.t >= t0 && s.e != null) { n++; sum += s.e; sum2 += s.e * s.e; }
+      const mean = n ? sum / n : 0;
+      const ac = n ? Math.sqrt(Math.max(0, sum2 / n - mean * mean)) * Math.SQRT2 : 0;
+      /* e = −θ，故仅 P+D 时的解析稳态**误差**是 −d/(K − mgL)（θ 是正的，e 是负的） */
+      const pred = state.K > Kc ? -(state.dConst ? state.dAmp : 0) / (state.K - Kc) : NaN;
+      const tune = resTune(loopPar(state.useI), wd, state.rhoRes);
+      const P = loopPar(state.useI);
+      const mg = specData(), kd = Math.round(wd * SPEC_N / (TAU * SPEC_FS));
+      const dbAt = (kd >= 1 && kd < SPEC_BINS) ? 20 * Math.log10(Math.max(mg[kd], 1e-18)) : NaN;
+      return roHead('e = <b>' + fmtS(-SIM.B.th) + '</b> rad&ensp;·&ensp;d = <b>' + fmtS(SIM.B.d) + '</b> N·m') +
+        '<div class="sinC">' + t({ zh: '稳态偏置（近 6 s 均值）= ', en: 'steady-state bias (6 s mean) = ' }) + '<b>' + fmtS(mean, 4) + '</b> rad</div>' +
+        '<div class="sinC">' + t({ zh: '交流残差幅值 = ', en: 'AC residual amplitude = ' }) + '<b>' + fmtS(ac, 4) + '</b> rad</div>' +
+        '<div class="sinC">' + t({ zh: '误差谱在 ωd 处 = ', en: 'error spectrum at ωd = ' }) + '<b>' + fmtS(dbAt, 1) + '</b> dB</div>' +
+        '<div class="cosC">' + t({ zh: '仅 P+D 的解析稳态误差 −d/(K − mgL) = ', en: 'P+D analytic offset −d/(K − mgL) = ' }) +
+          '<b>' + (isFinite(pred) ? fmtS(pred, 4) : '—') + '</b></div>' +
+        '<div class="tanC">' + t({ zh: '谐振器 Kr = ', en: 'resonator Kr = ' }) + '<b>' + fmt(tune.Kr) + '</b>&ensp;·&ensp;φ = <b>' +
+          fmt(tune.phi * 180 / Math.PI, 1) + '</b>°</div>' +
+        '<div class="dim">' + (loopStable(P) ? t({ zh: '闭环稳定', en: 'closed loop stable' })
+            : t({ zh: '闭环不稳定：I 项把稳定下界抬到了 K > mgL 之上', en: 'unstable: the integral term raises the stability floor above K > mgL' })) +
+          '&ensp;·&ensp;' + t({ zh: '内模：常值 ↔ 1/s，正弦 ↔ 1/(s²+ω²)', en: 'internal model: constant ↔ 1/s, sinusoid ↔ 1/(s²+ω²)' }) + '</div>';
+    }
+  },
+
+  /* ─────────── ③ 水床效应：灵敏度是守恒的 ─────────── */
+  waterbed: {
+    label: { zh: '水床效应', en: 'Waterbed' },
+    params: ['L', 'mass', 'K', 'Td', 'tauF', 'Ti', 'wProbe'],
+    /* 靠什么在动：SIM.C 是一路真闭环仿真，扰动 sin(ω·t) 由引擎时钟驱动；
+       左边那两条流出的曲线就是它，ln|S| 曲线随滑杆变形。 */
+    brand: { zh: '沿频率轴画 ln|S(jω)| 并把面积填出来：任何一段压下去，别处必然鼓起来。倒立摆有一个右半平面极点 p，于是 ∫₀^∞ ln|S| dω = π·p —— 不是零，是一笔不可讨价还价的税。',
+             en: 'ln|S(jω)| plotted along the frequency axis with its area shaded: press it down anywhere and it must bulge somewhere else. The inverted pendulum has one right-half-plane pole p, so ∫₀^∞ ln|S| dω = π·p — not zero, but a tax you cannot negotiate away.' },
+    tips: { zh: '提示：按 2 正视 ln|S|·ω，然后随便拖 K、Td、Ti —— 曲线形状会大变，填色面积的数字却几乎钉在 π·p 上不动。它的不稳定，给你的水床压了一个固定的代价。',
+            en: 'Tip: press 2 for the ln|S|·ω view, then drag K, Td or Ti — the shape changes wildly while the shaded area stays pinned at π·p. Its instability has pressed a fixed, permanent dent into your waterbed.' },
+    views: {
+      iso:  { label: { zh: '立体',            en: '3D' },        az: -0.9,  el: 0.30, dist: 13, tx: 1.6, ty: 0, tz: 3.0 },
+      lnS:  { label: { zh: 'ln|S| · ω 正视',  en: 'ln|S| · ω' },  az: 0.001, el: 0.02, dist: 8.8, tx: 2.6, ty: 0.1, tz: 0 },
+      prb:  { label: { zh: '探测 d,θ · t 侧视', en: 'Probe d,θ · t' }, az: -Math.PI/2, el: 0.001, dist: 12.5, tx: 0, ty: 0, tz: 3.6 }
+    },
+    toggles: [
+      { key: 'showLnS',   label: { zh: 'ln|S| 曲线与面积', en: 'ln|S| curve & area' }, color: '#fb7185', checked: true },
+      { key: 'showTc',    label: { zh: 'ln|T| 互补灵敏度', en: 'ln|T| complementary' }, color: '#a78bfa', checked: false },
+      { key: 'showProbe', label: { zh: '探测正弦 d → θ',  en: 'Probe sinusoid d → θ' }, color: '#fb923c', checked: true },
+      { key: 'showGuides',label: { zh: '度量标注',        en: 'Metrology marks' },     color: '#fbbf24', checked: true },
+      { key: 'showGrid',  label: { zh: '网格',            en: 'Grid' },                color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => WAVE_LEN / WAVE_V + 0.5,
+    draw(C) {
+      const B = bodeData(), PX = -1.95;
+      const XA = FRQ_X0, XB = FRQ_X0 + FRQ_LEN, YC = 2.55;
+      const yOf = v => clamp(v, -YC, YC);
+
+      if (state.showGrid) {
+        planeGrid(C, 2, 0, XA, XB, FRQ_LEN / 5, -2.4, 2.4, 0.8, 'rgba(148,163,184,0.06)');
+        planeGrid(C, 0, PX, -1.4, 1.4, 0.7, 0, WAVE_LEN, 1, 'rgba(148,163,184,0.07)');
+      }
+
+      /* 水位线 ln|S| = 0：上面是放大，下面是衰减 */
+      line3(C, [XA, 0, 0], [XB + 0.15, 0, 0], { width: 1, dash: [5, 6], color: 'rgba(251,191,36,0.32)' });
+      axisSeg(C, [XA - 0.35, 0, 0], [XB + 0.35, 0, 0], 'ω', { dx: 0.3, dy: 0.22 });
+      axisSeg(C, [XA - 0.35, -YC - 0.15, 0], [XA - 0.35, YC + 0.25, 0], null);
+      label3(C, [XA - 0.28, YC - 0.18, 0], 'ln |S(jω)|', { font: 'italic 13px ' + FONT_MATH, color: '#fb7185', align: 'left' });
+      for (const k of [5, 10, 15, 20]) tickMark(C, [xOfW(k, SP_W), 0, 0], [0, 0.06, 0], '' + k, { dy: -0.24 });
+      for (const k of [-2, -1, 1, 2]) tickMark(C, [XA - 0.35, k, 0], [0.06, 0, 0], (k < 0 ? '−' : '') + Math.abs(k), { dx: -0.14, align: 'right' });
+
+      if (state.showLnS) {
+        const cur = B.curve.map(q => [xOfW(q[0], SP_W), yOf(q[1]), 0]);
+        /* 按正负分段填色：鼓起来的（亮）与被压下去的（暗）是同一条曲线的两侧 */
+        let run = [], sign = 0;
+        const flush = () => {
+          if (run.length > 1) fillBand(C, run, 0, sign > 0 ? 'rgba(251,113,133,0.22)' : 'rgba(251,113,133,0.09)');
+          run = [];
+        };
+        for (const p of cur) {
+          const s = p[1] >= 0 ? 1 : -1;
+          if (s !== sign) { if (run.length) { run.push([p[0], 0, 0]); flush(); } sign = s; run = [[p[0], 0, 0]]; }
+          run.push(p);
+        }
+        flush();
+        strokePoly(C, cur, { width: 5.5, color: 'rgba(' + RGB.rose + ',0.13)' });
+        strokePoly(C, cur, { width: 2.4, color: 'rgba(' + RGB.rose + ',0.95)' });
+      }
+      if (state.showTc) {
+        const tc = B.tcurve.map(q => [xOfW(q[0], SP_W), yOf(q[1]), 0]);
+        strokePoly(C, tc, { width: 1.8, color: 'rgba(' + RGB.violet + ',0.75)' });
+        label3(C, [xOfW(SP_W * 0.62, SP_W), yOf(B.tcurve[186][1]) - 0.3, 0], 'ln |T|',
+          { font: 'italic 12px ' + FONT_MATH, color: '#a78bfa', align: 'center' });
+      }
+
+      /* 探测：真闭环仿真对 sin(ωt) 的响应，沿 +z 流出 —— 曲线上那一点不是画出来的，是量出来的 */
+      if (state.showProbe) {
+        axisSeg(C, [PX, 0, 0], [PX, 0, WAVE_LEN + 0.6], 't', { dz: 0.4 });
+        axisSeg(C, [PX, -1.5, 0], [PX, 1.6, 0], null);
+        traceCurve(C, timePoly(C, 'cd', 0.5, PX, 0, 1.35), RGB.orange);
+        traceCurve(C, timePoly(C, 'cth', 4.0, PX, 0, 1.35), RGB.rose);
+        label3(C, [PX, 1.78, 0.2], t({ zh: 'd(t) ×0.5 → θ(t) ×4', en: 'd(t) ×0.5 → θ(t) ×4' }),
+          { size: 10.5, color: 'rgba(159,176,200,.6)', align: 'center' });
+      }
+
+      /* 琥珀：探测频率的标尺 + 曲线上的读数点 */
+      if (state.showGuides) {
+        const w = state.wProbe, xw = xOfW(w, SP_W);
+        const v = yOf(lnS(w, loopPar(true)));
+        line3(C, [xw, 0, 0], [xw, v, 0], { width: 1.5, dash: [7, 7], color: 'rgba(251,191,36,0.8)' });
+        const sp = proj(C, [xw, v, 0]);
+        if (sp) glowDot(sp, 10, '#ffffff', 'rgba(251,191,36,0.9)');
+        label3(C, [xw, v + (v >= 0 ? 0.34 : -0.34), 0], 'ω = ' + fmt(w),
+          { font: 'italic 12px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+        label3(C, [xOfW(6.5, SP_W), 1.95, 0], '∫₀^∞ ln|S| dω = ' + fmt(B.I) + '   ( π·p = ' + fmt(Math.PI * omega0()) + ' )',
+          { size: 11.5, color: 'rgba(251,191,36,.95)', align: 'left' });
+        /* 画框外还有一条长尾（ln|S| ~ A/ω²）。填色只画到 ω = 20，
+           所以把差额明确标出来 —— 不能让画面上那块面积冒充全区间的积分。 */
+        const tail = B.I - B.vis;
+        line3(C, [xOfW(15.4, SP_W), 0.72, 0], [XB + 0.1, 0.72, 0], { width: 1.2, color: 'rgba(251,191,36,0.7)' });
+        arrowAt(C, [XB + 0.1, 0.72, 0], [XB - 0.05, 0.72, 0], 'rgba(251,191,36,0.7)');
+        label3(C, [xOfW(15.2, SP_W), 1.0, 0], t({ zh: '画框外的尾部 ∫₂₀^∞ = ', en: 'tail beyond the frame ∫₂₀^∞ = ' }) + fmt(tail),
+          { size: 10.5, color: 'rgba(251,191,36,.9)', align: 'right' });
+      }
+      label3(C, [XA, -YC - 0.42, 0], t({ zh: '上方 = 扰动被放大 · 下方 = 被压小', en: 'above = amplified · below = attenuated' }),
+        { size: 10.5, color: 'rgba(159,176,200,.55)', align: 'left' });
+    },
+    readout() {
+      const B = bodeData(), p = omega0(), tgt = Math.PI * p;
+      const P = loopPar(true), w = state.wProbe;
+      const Sm = Math.exp(lnS(w, P));
+      const err = (B.I - tgt) / tgt * 100;
+      return roHead('ω = <b>' + fmt(w) + '</b> rad/s&ensp;·&ensp;|S(jω)| = <b>' + fmt(Sm) + '</b>&ensp;(' + fmtS(20 * Math.log10(Sm), 1) + ' dB)') +
+        '<div class="sinC">' + t({ zh: '放大区面积 A₊ = ', en: 'amplified area A₊ = ' }) + '<b>' + fmt(B.aPlus) + '</b>&ensp;·&ensp;' +
+          t({ zh: '衰减区 A₋ = ', en: 'attenuated A₋ = ' }) + '<b>' + fmt(B.aMinus) + '</b></div>' +
+        '<div class="sinC">∫₀^∞ ln|S| dω = A₊ − A₋ = <b>' + fmt(B.I) + '</b></div>' +
+        '<div class="tanC">π·p = π·√(g/L) = <b>' + fmt(tgt) + '</b>&ensp;·&ensp;' +
+          t({ zh: '相对误差 ', en: 'relative error ' }) + '<b>' + fmtS(err, 3) + '%</b></div>' +
+        '<div class="dim">' + t({ zh: '画面内 [0, 20] 的面积 = ', en: 'area inside the frame [0, 20] = ' }) + fmt(B.vis) +
+          t({ zh: '，尾部还有 ', en: ', tail beyond = ' }) + fmt(B.I - B.vis) + '</div>' +
+        '<div class="dim">' + (B.stable ? t({ zh: '闭环稳定，定理成立', en: 'closed loop stable — the theorem applies' })
+          : t({ zh: '闭环不稳定：S 有右半平面极点，波德积分不适用', en: 'closed loop unstable: S has RHP poles, the integral does not apply' })) + '</div>';
+    }
+  },
+
+  /* ─────────── ④ 必要多样性：一只手，两件事 ─────────── */
+  variety: {
+    label: { zh: '必要多样性', en: 'Requisite variety' },
+    params: ['L', 'mass', 'woFrac'],
+    /* 靠什么在动：SIM.D 是小车-摆闭环仿真，每 EPI_T = 8 s 重做一次实验；
+       换「位置环」开关立即重来，于是两种结局可以反复对照。 */
+    brand: { zh: '换成小车-摆：一个作动器（推小车），两个要管的量（摆角 + 小车位置）。只稳角度，小车就匀速漂走；要管住位置，就必须先把摆推向反方向。按 3 侧视。',
+             en: 'Now a cart-pole: one actuator (push the cart) and two quantities to regulate (pole angle and cart position). Stabilise the angle alone and the cart drifts away at constant speed; command a position and you must first drive the pole the wrong way. Press 3 for the side view.' },
+    tips: { zh: '提示：按 3 侧视看两条曲线——θ 明明归零了，x 却是一条笔直上升的斜线。打开「位置环」，小车要往 +x 走，第一步却先退回去：非最小相位。作动自由度少于被控自由度时，只能交易，不能全要。',
+            en: 'Tip: press 3 and watch the two traces — θ settles to zero while x climbs as a straight ramp. Switch on the position loop and the cart, asked to go forward, first retreats: non-minimum phase. With fewer actuators than regulated quantities you can only trade, never have it all.' },
+    views: {
+      iso:  { label: { zh: '立体',           en: '3D' },          az: -0.9,  el: 0.28, dist: 13, tx: 0, ty: 0.2, tz: 3.2 },
+      cart: { label: { zh: '小车-摆 x·y 正视', en: 'Cart-pole x·y' }, az: 0.001, el: 0.02, dist: 8.0, tx: 0, ty: -0.3, tz: 0 },
+      sig:  { label: { zh: 'θ 与 x · t 侧视',  en: 'θ and x · t' },  az: -Math.PI/2, el: 0.001, dist: 13, tx: 0, ty: 0.7, tz: 3.6 }
+    },
+    toggles: [
+      { key: 'showTh',    label: { zh: '摆角 θ(t)',        en: 'Pole angle θ(t)' },   color: '#fb7185', checked: true },
+      { key: 'showX',     label: { zh: '小车位置 x(t)',    en: 'Cart position x(t)' }, color: '#a78bfa', checked: true },
+      { key: 'showF',     label: { zh: '作动力 F(t)',      en: 'Actuator force F(t)' }, color: '#34d399', checked: false },
+      { key: 'posCtrl',   label: { zh: '位置环（要管住 x）', en: 'Position loop (regulate x)' }, color: '#fb923c', checked: false },
+      { key: 'showGuides',label: { zh: '度量标注',          en: 'Metrology marks' },   color: '#fbbf24', checked: true },
+      { key: 'showGrid',  label: { zh: '网格',              en: 'Grid' },              color: '#64748b', checked: true }
+    ],
+    sampleWindow: () => WAVE_LEN / WAVE_V + 0.5,
+    draw(C) {
+      const D = SIM.D, g = cartGains();
+      const XS = 0.7, RAIL = -2.0, HB = 0.9;                 // 世界尺度 / 轨道高度 / 历史基线
+      const xw = clamp(D.x * XS, -4.3, 4.3);
+      const Lw = state.L * 0.95;
+
+      if (state.showGrid) planeGrid(C, 0, 0, HB - 1.4, HB + 1.4, 0.7, 0, WAVE_LEN, 1, 'rgba(148,163,184,0.07)');
+
+      /* 轨道：小车能去的地方（青 = 源几何） */
+      line3(C, [-4.5, RAIL, 0], [4.5, RAIL, 0], { width: 1.6, color: 'rgba(45,212,234,0.5)' });
+      for (let k = -6; k <= 6; k++) tickMark(C, [k * XS, RAIL, 0], [0, 0.08, 0], k === 0 ? '0' : (k % 2 ? '' : k + 'm'), { dy: -0.24 });
+
+      /* 小车与摆 */
+      const cy = RAIL + 0.16;
+      strokePoly(C, [[xw-0.26, RAIL+0.02, 0], [xw+0.26, RAIL+0.02, 0], [xw+0.26, cy+0.14, 0], [xw-0.26, cy+0.14, 0], [xw-0.26, RAIL+0.02, 0]],
+        { width: 2, color: 'rgba(241,245,249,0.92)' });
+      const tipx = xw + Lw * Math.sin(D.th) * XS / 0.7, tipy = cy + 0.14 + Lw * Math.cos(D.th);
+      line3(C, [xw, cy + 0.14, 0], [tipx, tipy, 0], { width: 2, color: 'rgba(241,245,249,0.92)' });
+      const sp = proj(C, [tipx, tipy, 0]);
+      if (sp) glowDot(sp, 15, '#ffffff', 'rgba(186,240,255,0.9)');
+      line3(C, [xw, cy + 0.14, 0], [xw, cy + 0.14 + Lw, 0], { width: 1, dash: [4, 5], color: 'rgba(159,176,200,0.3)' });
+
+      /* 位置指令与「先反向」的那一段（琥珀 = 度量注记） */
+      if (state.posCtrl) {
+        const xr = 1.5 * XS;
+        line3(C, [xr, RAIL - 0.3, 0], [xr, RAIL + 1.4, 0], { width: 1.4, dash: [6, 6], color: 'rgba(251,146,60,0.8)' });
+        label3(C, [xr, RAIL - 0.46, 0], 'x' + t({ zh: '指令', en: 'ref' }) + ' = 1.50 m', { size: 10.5, color: '#fb923c', align: 'center' });
+        if (state.showGuides && D.minx < -0.001) {
+          const xm = clamp(D.minx * XS, -4.3, 0);
+          line3(C, [0, RAIL - 0.62, 0], [xm, RAIL - 0.62, 0], { width: 1.6, color: 'rgba(251,191,36,0.9)' });
+          line3(C, [xm, RAIL - 0.7, 0], [xm, RAIL - 0.54, 0], { width: 1.4, color: 'rgba(251,191,36,0.9)' });
+          label3(C, [xm / 2, RAIL - 0.82, 0], t({ zh: '先反向 ', en: 'reverse first ' }) + fmtS(D.minx, 3) + ' m',
+            { size: 10.5, color: 'rgba(251,191,36,.95)', align: 'center' });
+        }
+      }
+
+      /* 历史：θ、x、F 沿 +z 流出，基线抬到 HB 以免压在小车上 */
+      axisSeg(C, [0, HB, 0], [0, HB, WAVE_LEN + 0.6], 't', { dz: 0.4 });
+      line3(C, [0, HB, 0], [0, HB, WAVE_LEN], { width: 1, dash: [4, 5], color: 'rgba(159,176,200,0.25)' });
+      for (let k = 1; k * WAVE_V <= WAVE_LEN + 1e-6; k++) tickMark(C, [0, HB, k * WAVE_V], [0.07, 0, 0], k + 's', { dx: 0.26, align: 'left' });
+      if (state.showTh) traceCurve(C, timePoly(C, 'dth', 3.0, 0, HB, 1.3), RGB.rose);
+      if (state.showX)  traceCurve(C, timePoly(C, 'dx', 0.22, 0, HB, 1.3), RGB.violet);
+      if (state.showF)  traceCurve(C, timePoly(C, 'dF', 0.012, 0, HB, 1.3), RGB.emerald);
+      label3(C, [0, HB + 1.5, 0.2], t({ zh: 'θ ×3 · x ×0.22 · F ×0.012', en: 'θ ×3 · x ×0.22 · F ×0.012' }),
+        { size: 10.5, color: 'rgba(159,176,200,.6)', align: 'center' });
+
+      label3(C, [-4.4, HB + 1.5, 0], t({ zh: '一个作动器 F，两个要管的量 θ 与 x', en: 'one actuator F, two regulated quantities θ and x' }),
+        { size: 11, color: 'rgba(159,176,200,.7)', align: 'left' });
+      label3(C, [-4.4, RAIL + 1.55, 0], 'z = +√(g/l) = ' + fmt(g.z) + t({ zh: '（右半平面零点）', en: ' (RHP zero)' }),
+        { font: 'italic 12px ' + FONT_MATH, color: '#fbbf24', align: 'left' });
+    },
+    readout() {
+      const D = SIM.D, g = cartGains();
+      /* 漂移率：对最近 3 s 的 x(t) 做最小二乘直线拟合 —— 报实测值，不报理论值 */
+      let n = 0, st = 0, sx = 0, stt = 0, stx = 0;
+      const t0 = state.t - 3;
+      for (const s of samples) if (s.t >= t0 && s.dx != null) { n++; st += s.t; sx += s.dx; stt += s.t*s.t; stx += s.t*s.dx; }
+      const den = n * stt - st * st;
+      const slope = (n > 8 && Math.abs(den) > 1e-9) ? (n * stx - st * sx) / den : 0;
+      return roHead('θ = <b>' + fmtS(D.th, 3) + '</b> rad&ensp;·&ensp;x = <b>' + fmtS(D.x, 3) + '</b> m') +
+        '<div class="sinC">' + t({ zh: '摆角 θ = ', en: 'pole angle θ = ' }) + '<b>' + fmtS(D.th, 4) + '</b> rad</div>' +
+        '<div class="cosC">' + t({ zh: '漂移率（近 3 s 拟合）= ', en: 'drift rate (3 s fit) = ' }) + '<b>' + fmtS(slope, 4) + '</b> m/s</div>' +
+        '<div class="tanC">' + t({ zh: '作动力 F = ', en: 'actuator force F = ' }) + '<b>' + fmtS(D.F, 2) + '</b> N</div>' +
+        '<div class="cotC">' + t({ zh: '初始反向位移 = ', en: 'initial reverse excursion = ' }) + '<b>' + fmtS(D.minx, 4) + '</b> m</div>' +
+        '<div class="dim">' + t({ zh: '非最小相位零点 z = +√(g/l) = ', en: 'non-minimum-phase zero z = +√(g/l) = ' }) + fmt(g.z) +
+          ' rad/s&ensp;·&ensp;ω' + t({ zh: '位置', en: 'pos' }) + ' = ' + fmt(g.wo) + ' rad/s = ' + fmt(state.woFrac) + '·z</div>' +
+        '<div class="dim">' + t({ zh: '实测带宽上限 ≈ 0.35·z —— 零点就是那堵墙', en: 'measured bandwidth ceiling ≈ 0.35·z — the zero is the wall' }) + '</div>';
+    }
+  }
+};
+
+/* ================= 常量与状态（引擎区，以下一般无需改动） ================= */
+const WAVE_LEN = 8;      // t 轴的世界长度（可视窗口）
+const NEAR = 0.15;       // 近裁剪面
+
+const FONT_CN = 'ui-sans-serif,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif';
+const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
+
+const state = { running: true, t: 0, theta: 0 };  // 参数键与开关键由 ①② 自动注入
+let simClock = 0;                                 // 上一次 pushSample 看到的引擎时钟
+const samples = [];
+let curTab = null;
+const RELABEL = [];
+const cams = {};
+let cam = null;
+let tween = null;
+const lastView = {};
+const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ③ 采样 —— 按你的工具需要扩展字段                           ║
+   ║  原则：记录"当时的真实值"，参数中途改变时历史不重算            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+function pushSample() {
+  /* 本工具没有相位钟：显式把 ω 置 0，防引擎的 theta 积分把 undefined 累成 NaN。
+     pushSample() 在 resetSim() 里先于第一帧被调用，所以这一句总是先生效。 */
+  state.omega = 0;
+  if (!SIM.A) seedAll();
+
+  /* 引擎不给 pushSample 传 dt，这里自己从 state.t 差分出来（引擎已钳在 [0, 0.05]）。
+     state.t 倒退 = 用户按了「重置」/ R —— 四路仿真整体重新播种。 */
+  const dt = clamp(state.t - simClock, 0, 0.05);
+  if (state.t < simClock - 1e-9) { seedAll(); SIM.clock = 0; }
+  simClock = state.t;
+  /* 定步长子步进（§0.3）：控制系统的教学价值全靠数值可信，绝不拿帧 dt 直接积一步。
+     真正的推进在 advanceSim() 里，一格 TS = 2 ms、每格内 4 个 RK4 子步。 */
+  advanceSim(dt);
+
+  const A = SIM.A, B = SIM.B, Cc = SIM.C, D = SIM.D;
+  /* 记录「当时的真实值」：中途拖滑杆改的是往后的控制律，已经画出去的那段
+     历史是当时真实测到的，不重算（§4.6 / §6）。 */
+  samples.push({
+    t: state.t,
+    ath: A.th, at: SIM.clock - A.t0,            /* ① 当前 K 的闭环响应与轮内时刻 */
+    e: -B.th, uI: B.uI, uR: B.uR, bd: B.d,      /* ② 误差、积分项、谐振器、扰动 */
+    cth: Cc.th, cd: Cc.d,                        /* ③ 探测正弦的输入与输出 */
+    dx: D.x, dth: D.th, dF: D.F                  /* ④ 小车位置、摆角、作动力 */
+  });
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  ④ 演算记录与回放（可选）—— 规范 §11                        ║
+   ║  只有「同一次运行不可复得」的工具才需要（混沌、多体、由种子    ║
+   ║  驱动的迭代）。不声明 RECORD 就完全没有录制 UI，行为与体积     ║
+   ║  均不受影响 —— 绝大多数工具应当保持不声明。                   ║
+   ╚══════════════════════════════════════════════════════════╝
+
+   写法（每个可录制页签一份，键名与 SCENES 对应）：
+
+   const RECORD = {
+     lissa: {
+       capture:  () => ({ th: state.theta }),        // 完整状态向量，JSON 可序列化
+       restore:  s  => { state.theta = s.th; },      // 必须与 capture 对称（§8）
+       seed:     () => ({ omega: state.omega }),     // 初值 + 积分参数
+       reseed:   s  => { state.omega = s.omega; resetSim(); },
+       lock:     ['omega'],                          // 回放期间置灰的滑杆
+       roundOf:  () => 0                             // 当前轮次，供「录一轮」判定
+     }
+   };
+
+   本工具不声明：四路仿真都不是「同一次运行不可复得」的对象 —— 它们是确定性
+   的线性系统，同一组滑杆值重开就是同一条曲线，存轨迹没有信息增量。 */
+const RECORD = {};
+
+/* ================= 画布 ================= */
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = 1, FOCAL = 900, CX = 0, CY = 0, bgGrad = null;
+
+function resize() {
+  DPR = Math.min(2.5, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  CX = W / 2; CY = H / 2;
+  FOCAL = 1.2 * Math.min(H, W * 1.1);
+  bgGrad = ctx.createRadialGradient(W*0.5, H*0.3, 0, W*0.5, H*0.42, Math.max(W, H)*0.95);
+  bgGrad.addColorStop(0, '#0c1526');
+  bgGrad.addColorStop(1, '#05070d');
+}
+window.addEventListener('resize', resize);
+
+/* ================= 基础数学 ================= */
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const mod2pi = a => { a %= TAU; if (a < 0) a += TAU; return a; };
+const wrapPI = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
+const ease = k => k < 0.5 ? 4*k*k*k : 1 - Math.pow(-2*k + 2, 3) / 2;
+const fmt = (x, d = 2) => x.toFixed(d);
+const fmtS = (x, d = 2) => (x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
+
+const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+const dot3 = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+
+/* ================= 轨道相机与投影 ================= */
+function makeCam() {
+  const cp = Math.cos(cam.el), sp = Math.sin(cam.el);
+  const eye = [
+    cam.tx + cam.dist * cp * Math.sin(cam.az),
+    cam.ty + cam.dist * sp,
+    cam.tz + cam.dist * cp * Math.cos(cam.az)
+  ];
+  const f = norm(sub([cam.tx, cam.ty, cam.tz], eye));
+  const r = norm(cross(f, [0, 1, 0]));
+  const u = cross(r, f);
+  return { eye, f, r, u };
+}
+function camPt(C, p) {
+  const d = sub(p, C.eye);
+  return [dot3(d, C.r), dot3(d, C.u), dot3(d, C.f)];
+}
+function scr(c) { const s = FOCAL / c[2]; return [CX + c[0]*s, CY - c[1]*s]; }
+function proj(C, p) { const c = camPt(C, p); return c[2] < NEAR ? null : scr(c); }
+function clipNear(a, b) {
+  const t = (NEAR - a[2]) / (b[2] - a[2]);
+  return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, NEAR];
+}
+
+/* 折线路径（支持 null 断点 + 近平面裁剪）；返回 [首点, 末点] 屏幕坐标 */
+function polyPath(C, pts) {
+  if (pts.length < 2) return null;
+  let head = null, tail = null, contin = false, prev = null;
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    const P = pts[i];
+    if (P === null) { prev = null; contin = false; continue; }
+    const cur = camPt(C, P);
+    if (prev !== null) {
+      let a = prev, b = cur;
+      const av = a[2] >= NEAR, bv = b[2] >= NEAR;
+      if (av || bv) {
+        if (!av) a = clipNear(a, b);
+        if (!bv) b = clipNear(b, a);
+        const sA = scr(a), sB = scr(b);
+        if (!contin) ctx.moveTo(sA[0], sA[1]);
+        ctx.lineTo(sB[0], sB[1]);
+        if (!head) head = sA;
+        tail = sB;
+        contin = bv;
+      } else {
+        contin = false;
+      }
+    }
+    prev = cur;
+  }
+  return head ? [head, tail] : null;
+}
+
+function strokePoly(C, pts, o) {
+  const ht = polyPath(C, pts);
+  if (!ht) return;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = o.width || 2;
+  if (o.alpha != null) ctx.globalAlpha = o.alpha;
+  if (o.dash) ctx.setLineDash(o.dash);
+  if (o.fade) {
+    const h = ht[0], t = ht[1];
+    if (Math.hypot(t[0]-h[0], t[1]-h[1]) < 2) {
+      ctx.strokeStyle = o.fade[0];
+    } else {
+      const g = ctx.createLinearGradient(h[0], h[1], t[0], t[1]);
+      g.addColorStop(0, o.fade[0]);
+      g.addColorStop(1, o.fade[1]);
+      ctx.strokeStyle = g;
+    }
+  } else {
+    ctx.strokeStyle = o.color;
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+const line3 = (C, a, b, o) => strokePoly(C, [a, b], o);
+
+function glowDot(s, r, core, mid) {
+  const g = ctx.createRadialGradient(s[0], s[1], 0, s[0], s[1], r);
+  g.addColorStop(0, core);
+  g.addColorStop(0.35, mid);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+function solidDot(C, p, r, color) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], r, 0, TAU);
+  ctx.fill();
+}
+
+function label3(C, p, text, o) {
+  const s = proj(C, p);
+  if (!s) return;
+  ctx.save();
+  ctx.font = o.font || ((o.size || 12) + 'px ' + FONT_CN);
+  ctx.fillStyle = o.color || '#c4d2e6';
+  ctx.textAlign = o.align || 'left';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(3,6,12,.85)';
+  ctx.shadowBlur = 4;
+  ctx.fillText(text, s[0] + (o.dx || 0), s[1] + (o.dy || 0));
+  ctx.restore();
+}
+
+function arrowAt(C, tip3, before3, color) {
+  const t = proj(C, tip3), b = proj(C, before3);
+  if (!t || !b) return;
+  const a = Math.atan2(t[1]-b[1], t[0]-b[0]);
+  const L = 9;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.4;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a-0.42), t[1]-L*Math.sin(a-0.42));
+  ctx.moveTo(t[0], t[1]); ctx.lineTo(t[0]-L*Math.cos(a+0.42), t[1]-L*Math.sin(a+0.42));
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* ================= 常用场景部件 ================= */
+const AXIS = 'rgba(159,176,200,0.9)';
+const AXIS_DIM = 'rgba(159,176,200,0.5)';
+
+/* 坐标轴：o = { ex, ey, yTicks:[], xTicks:[], tAxis:bool, v(秒刻度间距的波速) } */
+function drawAxes(C, o) {
+  const ex = o.ex, ey = o.ey;
+  line3(C, [-ex, 0, 0], [ex, 0, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [ex, 0, 0], [ex - 0.2, 0, 0], AXIS);
+  label3(C, [ex + 0.22, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  line3(C, [0, -ey, 0], [0, ey, 0], { width: 1.4, color: AXIS });
+  arrowAt(C, [0, ey, 0], [0, ey - 0.2, 0], AXIS);
+  label3(C, [0, ey + 0.18, 0], 'y', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+  if (o.tAxis) {
+    line3(C, [0, 0, 0], [0, 0, WAVE_LEN + 0.5], { width: 1.4, color: AXIS });
+    arrowAt(C, [0, 0, WAVE_LEN + 0.5], [0, 0, WAVE_LEN + 0.3], AXIS);
+    label3(C, [0, 0, WAVE_LEN + 0.9], 't', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+    const v = o.v || 1;
+    const every = v < 0.8 ? 2 : 1;
+    for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+      line3(C, [0, -0.06, k*v], [0, 0.06, k*v], { width: 1.2, color: AXIS_DIM });
+      if (k % every === 0) {
+        label3(C, [0, -0.25, k*v], k + 's', { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+      }
+    }
+  }
+  for (const k of (o.yTicks || [])) {
+    for (const yv of [k, -k]) {
+      line3(C, [-0.05, yv, 0], [0.05, yv, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [-0.13, yv, 0], (yv < 0 ? '−' : '') + Math.abs(yv), { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+    }
+  }
+  for (const k of (o.xTicks || [])) {
+    for (const xv of [k, -k]) {
+      line3(C, [xv, -0.05, 0], [xv, 0.05, 0], { width: 1.2, color: AXIS_DIM });
+      label3(C, [xv, -0.24, 0], (xv < 0 ? '−' : '') + Math.abs(xv), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+    }
+  }
+}
+
+/* z=0 平面方格网格（几何类场景） */
+function drawGridXY(C, g, step) {
+  const n = Math.round(g / step);
+  for (let i = -n; i <= n; i++) {
+    if (i === 0) continue;
+    const u = i * step;
+    line3(C, [u, -g, 0], [u, g, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+    line3(C, [-g, u, 0], [g, u, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+  }
+}
+
+/* y–t 时间平面网格（流式波形类场景）：o = { yMax, v } */
+function drawTimeGrid(C, o) {
+  const g = o.yMax, v = o.v;
+  for (let i = Math.round(-g*2); i <= Math.round(g*2); i++) {
+    if (i === 0) continue;
+    line3(C, [0, i/2, 0], [0, i/2, WAVE_LEN], { width: 1, color: 'rgba(148,163,184,0.10)' });
+  }
+  for (let k = 1; k*v <= WAVE_LEN + 1e-6; k++) {
+    line3(C, [0, -g, k*v], [0, g, k*v], { width: 1, color: 'rgba(148,163,184,0.07)' });
+  }
+}
+
+/* 周期标尺（琥珀）：在平面 x=px、高度 yb 处，从 z=0 画到 z=T·v */
+function drawPeriodBracket(C, Tsec, v, px, yb, text) {
+  const zT = Tsec * v;
+  if (zT > WAVE_LEN + 0.01) return;
+  const amber = 'rgba(251,191,36,0.75)';
+  line3(C, [px, yb, 0], [px, yb, zT], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, 0], [px, yb + 0.06, 0], { width: 1.2, color: amber });
+  line3(C, [px, yb - 0.06, zT], [px, yb + 0.06, zT], { width: 1.2, color: amber });
+  label3(C, [px, yb - 0.2, zT/2], text, { size: 10.5, color: 'rgba(251,191,36,.9)', align: 'center' });
+}
+
+/* 单位圆（半径 A，位于 z=0 平面，青色源几何） */
+function drawCircle(C, A) {
+  const cpts = [];
+  for (let i = 0; i <= 72; i++) {
+    const a = i / 72 * TAU;
+    cpts.push([A * Math.cos(a), A * Math.sin(a), 0]);
+  }
+  strokePoly(C, cpts, { width: 6, color: 'rgba(45,212,234,0.13)' });
+  strokePoly(C, cpts, { width: 2, color: 'rgba(45,212,234,0.95)' });
+  for (let q = 0; q < 4; q++) {
+    const a = q * Math.PI / 2;
+    line3(C, [A*0.95*Math.cos(a), A*0.95*Math.sin(a), 0],
+             [A*1.06*Math.cos(a), A*1.06*Math.sin(a), 0],
+             { width: 1, color: 'rgba(45,212,234,0.5)' });
+  }
+  solidDot(C, [0, 0, 0], 2.2, 'rgba(159,176,200,0.9)');
+}
+
+/* 角度弧 θ（琥珀度量注记） */
+function drawAngleArc(C, th, A) {
+  const thm = mod2pi(th);
+  if (thm <= 0.03) return;
+  const r0 = Math.max(0.14, Math.min(0.34, 0.5 * A));
+  const n = Math.max(2, Math.ceil(thm / 0.06));
+  const apts = [];
+  for (let j = 0; j <= n; j++) {
+    const a = thm * j / n;
+    apts.push([r0 * Math.cos(a), r0 * Math.sin(a), 0]);
+  }
+  strokePoly(C, apts, { width: 1.6, color: 'rgba(251,191,36,0.9)' });
+  label3(C, [(r0 + 0.15) * Math.cos(thm/2), (r0 + 0.15) * Math.sin(thm/2), 0], 'θ',
+    { font: 'italic 13px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
+}
+
+/* 读数区固定首两行 */
+function readoutHead() {
+  const th = state.theta;
+  const deg = (mod2pi(th) * 180 / Math.PI).toFixed(0);
+  const lap = fmt(th / TAU);
+  return '<div>t = <b>' + fmt(state.t) + '</b> s&ensp;·&ensp;θ = ωt = <b>' + fmt(th) + '</b> rad</div>' +
+         '<div class="dim">' + t({ zh: '≡ ' + deg + '°（第 ' + lap + ' 圈）', en: '≡ ' + deg + '° (turn ' + lap + ')' }) + '</div>';
+}
+
+/* ================= 主绘制与主循环 ================= */
+function draw() {
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+  const C = makeCam();
+  SCENES[curTab].draw(C);
+}
+
+/* 帧级异常兜底：同一页签的同一条错误只报一次，否则 60 fps 会把控制台刷爆。
+   resetSim() 会清空它——用户主动重置后应当允许重新报。
+   声明必须排在 resetSim() 之前：resetSim() 引用 frameErrSeen，声明留在它下方
+   就只靠「启动序列恰好先求值到这里」躲开 TDZ，是结构性的隐患，而这份 starter
+   会被复制给所有未来工具。 */
+const frameErrSeen = Object.create(null);
+function frameError(err) {
+  const k = curTab + '|' + ((err && err.message) || err);
+  if (frameErrSeen[k]) return;
+  frameErrSeen[k] = 1;
+  console.warn('[frame] 场景「' + curTab + '」抛出异常，已跳过该帧并继续渲染循环：', err);
+}
+
+function resetSim() {
+  /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
+  Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  state.t = 0;
+  state.theta = 0;
+  /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
+     相位上，「重置」就名不副实了 */
+  Object.keys(driveOff).forEach(id => { driveOff[id] = 0; driveOffAt[id] = 0; });
+  samples.length = 0;
+  pushSample();
+}
+
+let lastTs = performance.now(), lastRO = 0;
+function frame(ts) {
+  try {
+    const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
+    lastTs = ts;
+
+    if (tween) {
+      const k = Math.min(1, (ts - tween.t0) / tween.dur);
+      const e = ease(k);
+      const f = tween.from, o = tween.to;
+      cam.az = f.az + wrapPI(o.az - f.az) * e;
+      cam.el = f.el + (o.el - f.el) * e;
+      cam.dist = f.dist + (o.dist - f.dist) * e;
+      cam.tx = f.tx + (o.tx - f.tx) * e;
+      cam.ty = f.ty + (o.ty - f.ty) * e;
+      cam.tz = f.tz + (o.tz - f.tz) * e;
+      if (k >= 1) tween = null;
+    }
+
+    /* 回放冻结的是「演算」，不是「观察」：相机 tween 在上面已经走过了，
+       视角、开关、绘制全部照常 —— 与「暂停只冻结模拟」同一条精神（§11.7）。 */
+    if (recState.mode === 'replay') {
+      recStep(dt);
+    } else if (state.running) {
+      if (recState.mode === 'recording') {
+        /* 录制时把时间量子化成整数个 REC_DT。理由（§11.2）：物理若由变长的
+           帧 dt 推进，轨迹就依赖于帧率抖动，「从同一种子重算」在**本机**都对
+           不上，比对曲线也就失去意义。量子化之后轨迹是种子的确定性函数，
+           本机重算能贴到舍入噪声，跨机器的差别才干净地归因于超越函数实现。 */
+        recState.acc += dt;
+        let guard = 0;
+        while (recState.acc >= REC_DT && guard++ < 64) { recState.acc -= REC_DT; simAdvance(REC_DT); recPush(); }
+      } else {
+        simAdvance(dt);
+      }
+    }
+    const windowSec = (SCENES[curTab].sampleWindow || (() => 10))();
+    while (samples.length && samples[0].t < state.t - windowSec) samples.shift();
+
+    draw();
+    if (ts - lastRO > 120) { lastRO = ts; updateReadout(); refreshRecInfo(); }
+  } catch (err) {
+    frameError(err);
+  } finally {
+    /* rAF 放 finally 是「循环永不断」的机械保证：不依赖 catch 里写对什么。
+       代价是画布可能停在最后一帧好内容而屏幕无提示——这是有意的取舍，
+       「整个工具变砖」比「画面停在错误状态」更不可接受。 */
+    requestAnimationFrame(frame);
+  }
+}
+
+const roEl = document.getElementById('readout');
+function updateReadout() { roEl.innerHTML = SCENES[curTab].readout(); }
+
+/* ================= 场景作用域参数与时间驱动 ================= */
+const paramWraps = {};   // key -> { wrap, input, val, p }
+const autoPlay = {};     // tabId -> 是否自动播放
+const driveMode = {};    // tabId -> 'loop' | 'pingpong'
+const driveOff = {};     // tabId -> 驱动时钟相对引擎时钟的累计偏移（= 自动播放累计关停时长）
+const driveOffAt = {};   // tabId -> 本次关停的起点（引擎时钟读数）
+
+/* 驱动时钟：引擎时钟减去「自动播放关掉的那些时间」。关停期间它不走，
+   所以重新打开时驱动量从原地续上，不跳变。求值仍是纯函数——只是把
+   自变量从 state.t 换成这个校正过的时钟，不做增量积分：既不累积浮点
+   漂移，录制器按固定 dt 离线重放也能复现同一串值（偏移在一次渲染内是常量）。
+   已知语义：偏移只扣「自动播放关停」的时长，不扣「页签没被选中」的时长——
+   离开某页签 10 秒再切回来，它的驱动量会跳到 10 秒后的位置。这与「暂停只冻结
+   模拟、相机照走」是同一族约定（时钟是全局的，页签只是不同的观测口），
+   如需改成每页签独立时钟，得连录制器的离线重放一起改，不要只改这里。 */
+function driveClock(id) { return state.t - (driveOff[id] || 0); }
+
+/* 驱动求值：驱动时钟（见 driveClock）的纯函数，不做增量积分 —— 不累积
+   浮点漂移，暂停恢复不跳变，且录制器按固定 dt 推进 state.t 时可直接复用。 */
+function driveValue(d, tt, mode) {
+  const m = mode || d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+  const u = ((tt / d.period) % 1 + 1) % 1;              // 负时间也落在 [0,1)
+  const s = (m === 'loop') ? u : (u < 0.5 ? 2 * u : 2 - 2 * u);
+  return d.from + (d.to - d.from) * s;
+}
+
+/* 把当前场景的驱动量按引擎时钟写回 state。只动数据、不碰 DOM ——
+   录制器的离线渲染也调它，那条路径上没有面板可同步（见规范 §D1）。 */
+function applyDrive() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return;
+  state[sc.drive.key] = driveValue(sc.drive, driveClock(curTab), driveMode[curTab]);
+}
+
+/* 供录制器判断无缝循环的吸附基准；无驱动或用户关掉自动播放时返回 null */
+function driveInfo() {
+  const sc = SCENES[curTab];
+  if (!sc || !sc.drive || !autoPlay[curTab]) return null;
+  return { key: sc.drive.key, period: sc.drive.period, mode: driveMode[curTab] };
+}
+
+const warnedNoInvMap = {};   // key -> 已就「有 map 没 invMap」告警过
+
+/* 把驱动出的值反算回滑块刻度并回显。带 map 的参数必须提供 invMap，
+   否则只能退回显示映射后的值（规范 §8 已把 invMap 列为硬约束）。 */
+function syncParamSlider(key) {
+  const e = paramWraps[key];
+  if (!e) return;
+  /* 本函数每帧都被调用，所以每个 key 只喊一次，别把控制台刷爆 */
+  if (e.p.map && !e.p.invMap && !warnedNoInvMap[key]) {
+    warnedNoInvMap[key] = true;
+    console.warn('[math-viz] 参数 "' + key + '" 声明了 map 却没有 invMap：' +
+                 '驱动值会被当作滑杆原始值写进量程，回显与 state 会错位（规范 §8）。');
+  }
+  const raw = (e.p.map && e.p.invMap) ? e.p.invMap(state[key]) : state[key];
+  /* 先写进 input，再读回来显示：range 带 step，写进去的值会被吸附到刻度上。
+     若直接显示 raw，读数与滑杆句柄就会对不上；更要命的是下一次 upd() 读的是
+     吸附后的 input.value，会把这点差值永久写回 state —— 暂停时 frame() 不再跑
+     applyDrive()，再也修不回来。upd() 的触发面已经收窄到「用户拖动这根滑杆」
+     一条：语言切换只调 render()（见下方 relabel 注释），不再写 state。 */
+  e.input.value = raw;
+  e.val.textContent = e.p.fmt(parseFloat(e.input.value));
+}
+
+/* 按当前页签的 params 显隐滑块。省略 params = 全部显示（向后兼容）。
+   不复制 DOM：滑块值是跨页签共享的 state，复制会引入多份 DOM 的同步问题。 */
+function syncParamVisibility() {
+  const list = SCENES[curTab] && SCENES[curTab].params;
+  Object.keys(paramWraps).forEach(k => {
+    paramWraps[k].wrap.style.display = (!list || list.indexOf(k) >= 0) ? '' : 'none';
+  });
+}
+
+/* 开关自动播放的唯一入口：复选框与「拖滑块接管」都走这里，驱动时钟的记账
+   才不会漏。关掉时记下停摆起点，打开时把停摆时长补进偏移量。 */
+function setAutoPlayFor(id, on) {
+  on = !!on;
+  if (!!autoPlay[id] === on) return;            // 状态没变就别动时钟，避免重复记账
+  if (on) driveOff[id] += state.t - driveOffAt[id];
+  else driveOffAt[id] = state.t;
+  autoPlay[id] = on;
+  refreshDriveRow(id);
+}
+
+function setAutoPlay(on) { setAutoPlayFor(curTab, on); }
+
+function refreshDriveRow(id) {
+  const row = document.querySelector('.drive[data-tab="' + id + '"]');
+  if (!row) return;
+  row.querySelector('input').checked = !!autoPlay[id];
+  row.querySelectorAll('[data-mode]').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === driveMode[id]);
+  });
+}
+
+function buildDrive() {
+  const host = document.getElementById('driveHost');
+  Object.keys(SCENES).forEach(id => {
+    const d = SCENES[id].drive;
+    if (!d) return;
+    autoPlay[id] = true;
+    driveMode[id] = d.mode || (d.kind === 'circular' ? 'loop' : 'pingpong');
+    driveOff[id] = 0; driveOffAt[id] = 0;      // 先置零，页签才不会把 undefined 读进算式
+    const row = document.createElement('div');
+    row.className = 'drive';
+    row.dataset.tab = id;
+    row.innerHTML = '<label class="tg"><input type="checkbox" checked><span class="autoL"></span></label>' +
+      '<span class="dmode"><button class="btn" data-mode="pingpong"></button>' +
+      '<button class="btn" data-mode="loop"></button></span>';
+    row.querySelector('input').addEventListener('change', e => { setAutoPlayFor(id, e.target.checked); });
+    row.querySelectorAll('[data-mode]').forEach(b => {
+      b.addEventListener('click', () => { driveMode[id] = b.dataset.mode; refreshDriveRow(id); });
+    });
+    host.appendChild(row);
+    const relabel = () => {
+      row.querySelector('.autoL').textContent = t(UI.autoPlay);
+      row.querySelector('[data-mode="pingpong"]').textContent = t(UI.pingpong);
+      row.querySelector('[data-mode="loop"]').textContent = t(UI.loop);
+    };
+    RELABEL.push(relabel);
+    relabel();
+    refreshDriveRow(id);
+  });
+}
+
+/* ================= UI 生成（由 ①② 声明驱动） ================= */
+function buildParams() {
+  const host = document.getElementById('paramsHost');
+  PARAMS.forEach(p => {
+    const wrap = document.createElement('div');
+    wrap.className = 'ctl';
+    wrap.innerHTML = '<div class="top"><label></label><span class="val"></span></div>';
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
+    const val = wrap.querySelector('.val');
+    /* render 只回显滑杆当前刻度；upd 才是「用户动了滑杆」的语义（写 state）。
+       两者分开，语言切换就不会顺手把读数写回 state —— 见下方 relabel 注释。 */
+    const render = () => { val.textContent = p.fmt(parseFloat(input.value)); };
+    const upd = () => {
+      const raw = parseFloat(input.value);
+      state[p.key] = p.map ? p.map(raw) : raw;
+      render();
+    };
+    input.addEventListener('input', upd);
+    wrap.appendChild(input);
+    host.appendChild(wrap);
+    paramWraps[p.key] = { wrap, input, val, p };
+    /* 用户伸手拖被驱动的滑块 = 明确要接管，自动播放当场关闭，
+       否则下一帧就会被驱动值覆盖回去。这是与「暂停只冻结模拟」一致的语义。 */
+    input.addEventListener('input', () => {
+      const d = SCENES[curTab] && SCENES[curTab].drive;
+      if (d && d.key === p.key && autoPlay[curTab]) setAutoPlay(false);
+    });
+    upd();                       // 建面板时用默认刻度初始化 state
+    /* 语言切换只重排文案（fmt 里可能带 t()），绝不能顺手调 upd() 把滑杆刻度
+       写回 state：被 drive 驱动的参数，其 state 值比滑杆 step 精细得多，写回去
+       等于把它永久量化一次；暂停时 frame() 不再跑 applyDrive()，再也修不回来。 */
+    const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); render(); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+function buildToggles() {
+  const host = document.getElementById('togglesHost');
+  Object.keys(SCENES).forEach(id => {
+    const grp = document.createElement('div');
+    grp.className = 'toggles';
+    grp.dataset.tab = id;
+    SCENES[id].toggles.forEach(tg => {
+      if (!(tg.key in state)) state[tg.key] = tg.checked;
+      const lab = document.createElement('label');
+      lab.className = 'tg';
+      lab.innerHTML = '<input type="checkbox" data-key="' + tg.key + '"' + (state[tg.key] ? ' checked' : '') + '>' +
+        '<i class="dot" style="--c:' + tg.color + '"></i><span class="tgl"></span>';
+      const cb = lab.querySelector('input');
+      cb.addEventListener('change', () => {
+        state[tg.key] = cb.checked;
+        document.querySelectorAll('input[data-key="' + tg.key + '"]').forEach(o => { o.checked = cb.checked; });
+      });
+      const relabel = () => { lab.querySelector('.tgl').innerHTML = t(tg.label); };
+      RELABEL.push(relabel);
+      relabel();
+      grp.appendChild(lab);
+    });
+    host.appendChild(grp);
+  });
+}
+
+function buildViews() {
+  const host = document.getElementById('viewsHost');
+  Object.keys(SCENES).forEach(id => {
+    const row = document.createElement('div');
+    row.className = 'views';
+    row.dataset.tab = id;
+    const lab = document.createElement('span');
+    lab.className = 'vlabel';
+    row.appendChild(lab);
+    const labRelabel = () => { lab.textContent = t(UI.views); };
+    RELABEL.push(labRelabel);
+    labRelabel();
+    Object.keys(SCENES[id].views).forEach(name => {
+      const b = document.createElement('button');
+      b.className = 'btn vbtn';
+      b.dataset.view = name;
+      b.addEventListener('click', () => applyView(name));
+      row.appendChild(b);
+      const relabel = () => { b.textContent = t(SCENES[id].views[name].label); };
+      RELABEL.push(relabel);
+      relabel();
+    });
+    host.appendChild(row);
+  });
+}
+
+function buildTabs() {
+  const nav = document.getElementById('tabsNav');
+  Object.keys(SCENES).forEach(id => {
+    const b = document.createElement('button');
+    b.className = 'tab';
+    b.dataset.tab = id;
+    b.addEventListener('click', () => switchTab(id));
+    nav.appendChild(b);
+    const relabel = () => { b.textContent = t(SCENES[id].label); };
+    RELABEL.push(relabel);
+    relabel();
+  });
+}
+
+/* ================= 视角与页签 ================= */
+/* 选择器必须限定在 .views 之内：.vbtn 只是个样式类，工具可能为了复用外观
+   把它挂到别处的按钮上（如文本预设）。不限定的话 closest('.views') 会返回
+   null，这里当场抛错，视角高亮从此再不更新。行为查询不能只认样式类。 */
+function refreshViewButtons() {
+  document.querySelectorAll('.views .vbtn').forEach(b => {
+    const row = b.closest('.views');
+    b.classList.toggle('active', row.dataset.tab === curTab && b.dataset.view === lastView[curTab]);
+  });
+}
+function viewDist(d) { return (W < 820 || W < H) ? d * 1.4 : d; }
+function applyView(name) {
+  const vw = SCENES[curTab].views[name];
+  if (!vw) return;
+  if (vw.onSelect) vw.onSelect();   /* 可选联动：如自动开启该视角对应的曲线开关 */
+  tween = {
+    from: { az: cam.az, el: cam.el, dist: cam.dist, tx: cam.tx, ty: cam.ty, tz: cam.tz },
+    to:   { az: vw.az, el: vw.el, dist: viewDist(vw.dist), tx: vw.tx || 0, ty: vw.ty || 0, tz: vw.tz || 0 },
+    t0: performance.now(),
+    dur: REDUCED ? 1 : 750
+  };
+  lastView[curTab] = name;
+  refreshViewButtons();
+}
+
+const brandDesc = document.getElementById('brandDesc');
+const tipsEl = document.getElementById('tips');
+/* ══════════════ 演算记录与回放（规范 §11）══════════════
+   自成一节，刻意排在所有 UI 构建器之后、switchTab 之前：它与「场景时间
+   驱动」是两个子系统，嵌在后者中间会让 scripts/port_drive_engine.py 把
+   它当成驱动引擎的一部分灌进另外 50 个工具（实测踩过）。 */
+
+/* ══════════════ 演算记录与回放 · 引擎侧（规范 §11） ══════════════
+   工具只提供 RECORD 里的六个钩子；序列化、下载/上传、回放时钟、校验、
+   种子比对全在这里，各工具不得自己再写一份。 */
+const REC_FORMAT = 'mathviz-run';
+const REC_FORMAT_VERSION = 1;
+const REC_DT = 0.02;         // 采样间隔（模拟秒）
+const REC_MAX_ROWS = 20000;  // 行数上限；到顶停录并提示，绝不静默截断（§11.4）
+const REC_PREC = 12;         // 数值有效位；比对基线要把这项舍入计入（§11.4）
+
+const recState = {
+  mode: 'live',              // 'live' | 'recording' | 'replay'
+  rows: [], fields: null, shape: null,
+  seed: null, tab: null, srcName: null,
+  i: 0, playing: true, rate: 1, acc: 0, t0: 0,
+  roundAt: null, note: null,
+  verify: null               // { delta, reproduced } —— §11.2 的种子比对结论
+};
+
+function recHooks(tab) { return RECORD && RECORD[tab || curTab] || null; }
+
+/* 唯一的只读判据访问器。工具的 draw()/readout() 要查模式一律走它，
+   不得自拼判据 —— 理由同 §6「双语义迭代」：同一判据两种写法必然漂移。 */
+function recInfo() {
+  if (!recHooks()) return null;
+  return {
+    mode: recState.mode,
+    rows: recState.rows.length,
+    i: recState.i,
+    playing: recState.playing,
+    srcName: recState.srcName,
+    verify: recState.verify,
+    note: recState.note
+  };
+}
+
+/* capture() 的对象 → 一行数字。展开顺序由第一次调用的结构冻结（§11.6）。 */
+function recShapeOf(o) {
+  const f = [];
+  (function walk(v, path) {
+    if (Array.isArray(v)) v.forEach((x, i) => walk(x, path + '[' + i + ']'));
+    else if (v && typeof v === 'object') Object.keys(v).forEach(k => walk(v[k], path ? path + '.' + k : k));
+    else f.push(path);
+  })(o, '');
+  return f;
+}
+function recFlatten(o) {
+  const out = [];
+  (function walk(v) {
+    if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === 'object') Object.keys(v).forEach(k => walk(v[k]));
+    else out.push(typeof v === 'number' ? +v.toPrecision(REC_PREC) : v);
+  })(o);
+  return out;
+}
+function recUnflatten(row, tmpl) {
+  let i = 0;
+  return (function walk(v) {
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') { const o = {}; Object.keys(v).forEach(k => { o[k] = walk(v[k]); }); return o; }
+    return row[i++];
+  })(tmpl);
+}
+
+/* 推进一步模拟。抽出来是为了让「录制时按 REC_DT 量子化」与「种子重算」
+   走的是同一条代码路径 —— 两边若各写一份，重算就不再是重算了。 */
+function simAdvance(d) {
+  state.t += d;
+  state.theta += state.omega * d;
+  applyDrive();
+  const dv = SCENES[curTab].drive;
+  if (dv && autoPlay[curTab]) syncParamSlider(dv.key);
+  pushSample();
+}
+
+function recStartRecording() {
+  const h = recHooks(); if (!h) return;
+  /* 起录前先把本页签重置到一轮的开头（§11.3）。这一步是引擎的责任，不是各
+     工具在 seed() 里偷偷做 —— 否则 seed() 就成了一个会改状态的取值器，是留给
+     下一个人的陷阱。理由：不重置的话，seed 描述的是这一轮的起点，而第 0 行
+     描述的是「你按下录制的那一刻」，§11.2 的重算于是从头就跟存档不在同一段
+     时间上，比对必然失败，且失败得像一次正常的混沌发散——查都没处查。 */
+  if (h.reseed && h.seed) h.reseed(h.seed());
+  const snap = h.capture();
+  recState.mode = 'recording';
+  recState.rows = []; recState.tab = curTab;
+  recState.shape = snap; recState.fields = recShapeOf(snap);
+  recState.seed = h.seed(); recState.roundAt = h.roundOf();
+  recState.t0 = state.t;          // 录制起点的引擎时钟；回放要照它复原，见 recStep
+  recState.note = null; recState.verify = null; recState.acc = 0;
+  recPush();                                      // 立即记下第 0 行
+  buildRecRow();
+}
+function recStopRecording(note) {
+  if (recState.mode !== 'recording') return;
+  recState.mode = 'live';
+  recState.note = note || null;
+  buildRecRow();
+}
+
+/* 记一行。**不做时间节流** —— 录制态下 frame() 已经把推进量子化成整数个
+   REC_DT，一格一行即可。曾经写成「state.t - lastAt >= REC_DT」的节流：累加出
+   的差常是 0.019999999999999997，于是约一半的行被悄悄丢掉，行号与步数错位，
+   种子重算怎么算都对不上。量子化之后节流就是多余且有害的。 */
+function recPush() {
+  if (recState.mode !== 'recording') return;
+  const h = recHooks(); if (!h) return;
+  if (h.roundOf() !== recState.roundAt) { recStopRecording(UI.recRoundEnd); return; }  // §11.3 录一轮
+  recState.rows.push(recFlatten(h.capture()));
+  if (recState.rows.length >= REC_MAX_ROWS) recStopRecording(UI.recFull);
+}
+
+/* 回放推进：按 rate 走行号，restore 后照常 pushSample()，
+   于是历史曲线、读数、绘制全部沿用实时那一套。 */
+function recStep(dt) {
+  const h = recHooks(); if (!h || !recState.rows.length) return;
+  if (recState.playing) {
+    recState.acc += dt * recState.rate;
+    while (recState.acc >= REC_DT && recState.i < recState.rows.length - 1) { recState.acc -= REC_DT; recState.i++; }
+    if (recState.i >= recState.rows.length - 1) { recState.acc = 0; recState.playing = false; buildRecRow(); }
+  }
+  h.restore(recUnflatten(recState.rows[recState.i], recState.shape));
+  /* 从录制起点算起，不是从 0 —— 录制未必始于 t = 0，凭空归零会让任何把引擎
+     时钟纳入 capture() 的工具在回放时对不上（实测三体差 6.0 s，正是起录前
+     跑过的那段）。 */
+  state.t = recState.t0 + recState.i * REC_DT;
+  pushSample();
+}
+
+function recExitReplay() {
+  if (recState.mode !== 'replay') return;
+  recState.mode = 'live';
+  recState.rows = []; recState.i = 0; recState.srcName = null; recState.verify = null; recState.note = null;
+  resetSim();
+  buildRecRow();
+}
+
+function recSave() {
+  if (!recState.rows.length) return;
+  const doc = {
+    format: REC_FORMAT, formatVersion: REC_FORMAT_VERSION,
+    tool: { id: TOOL.id, version: VERSION, engine: ENGINE_VERSION },
+    tab: recState.tab, recordedAt: new Date().toISOString(),
+    seed: recState.seed,
+    trace: { dt: REC_DT, t0: recState.t0, fields: recState.fields, rows: recState.rows }
+  };
+  const blob = new Blob([JSON.stringify(doc)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = TOOL.id + '-' + recState.tab + '.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/* 加载校验（§11.5）：五步，任一不过即明确拒绝，不做兼容性猜测。 */
+function recValidate(doc) {
+  if (!doc || doc.format !== REC_FORMAT) return { zh: '不是 MathViz 存档文件', en: 'Not a MathViz run file' };
+  if (doc.formatVersion !== REC_FORMAT_VERSION)
+    return { zh: '存档格式版本 ' + doc.formatVersion + ' 本工具不认识', en: 'Unknown archive format version ' + doc.formatVersion };
+  if (!doc.tool || doc.tool.id !== TOOL.id)
+    return { zh: '这份存档属于「' + ((doc.tool && doc.tool.id) || '?') + '」，不是本工具',
+             en: 'This archive belongs to "' + ((doc.tool && doc.tool.id) || '?') + '", not this tool' };
+  const h = recHooks(doc.tab);
+  if (!h) return { zh: '存档的页签「' + doc.tab + '」在本工具中不可录制', en: 'Tab "' + doc.tab + '" is not recordable here' };
+  const want = recShapeOf(h.capture());
+  const got = (doc.trace && doc.trace.fields) || [];
+  if (want.length !== got.length || want.some((k, i) => k !== got[i]))
+    return { zh: '存档的字段与本版本不一致，拒绝载入（字段错位会画出看似合理实则错误的图）',
+             en: 'Field set does not match this version; refusing to load (a mismatch would draw a plausible but wrong picture)' };
+  if (!doc.trace.rows || !doc.trace.rows.length) return { zh: '存档里没有数据行', en: 'Archive contains no rows' };
+  return null;
+}
+
+/* §11.2：用种子在本机重新积分，与记录的轨迹逐点比对。
+   工具没给 reseed/seed 就跳过（返回 null），不阻塞回放。 */
+function recVerify(doc) {
+  const h = recHooks(doc.tab);
+  if (!h || !h.reseed || !doc.seed) return null;
+  /* 重算是一次「离线」推演：它会走 simAdvance，因而动到 state.t 与 samples。
+     全部存下来在 finally 里还原 —— 比对不该在用户的现场留下任何痕迹。 */
+  const keep = h.capture();
+  const keepT = state.t, keepSamples = samples.slice();
+  try {
+    h.reseed(doc.seed);
+    let worst = 0;
+    const n = Math.min(doc.trace.rows.length, 400);
+    for (let k = 0; k < n; k++) {
+      const mine = recFlatten(h.capture()), theirs = doc.trace.rows[k];
+      for (let j = 0; j < mine.length; j++) {
+        const a = +mine[j], b = +theirs[j];
+        if (isFinite(a) && isFinite(b)) worst = Math.max(worst, Math.abs(a - b));
+      }
+      /* 走与录制时完全相同的推进路径（同一个 simAdvance、同一个 REC_DT），
+         否则「重算」就变成了另一条数值轨迹，本机也会报复现失败。 */
+      if (k < n - 1) simAdvance(REC_DT);
+    }
+    /* 阈值要把 toPrecision(REC_PREC) 的舍入算进去（§11.4）：存档只留 12 位
+       有效数字，本机完美复现时 δ 也就落在这个量级，而非 0。 */
+    return { delta: worst, reproduced: worst < 1e-9 };
+  } catch (e) {
+    return null;
+  } finally {
+    h.restore(keep);
+    state.t = keepT;
+    samples.length = 0; keepSamples.forEach(s => samples.push(s));
+  }
+}
+
+function recLoadDoc(doc, name) {
+  const bad = recValidate(doc);
+  if (bad) { recState.note = bad; buildRecRow(); return false; }
+  const h = recHooks(doc.tab);
+  if (doc.tab !== curTab) switchTab(doc.tab);
+  recState.verify = recVerify(doc);
+  recState.mode = 'replay';
+  recState.rows = doc.trace.rows;
+  recState.fields = doc.trace.fields;
+  recState.shape = h.capture();
+  recState.seed = doc.seed; recState.tab = doc.tab; recState.srcName = name;
+  recState.t0 = +doc.trace.t0 || 0;
+  recState.i = 0; recState.acc = 0; recState.playing = true; recState.rate = 1; recState.note = null;
+  samples.length = 0;
+  buildRecRow();
+  return true;
+}
+
+/* 录制 / 回放行（§11）。只在当前页签声明了 RECORD 钩子时出现；
+   整行每次重建 —— 它的状态机只有三态，重建比增量改 DOM 更不容易漂。 */
+function buildRecRow() {
+  const host = document.getElementById('recHost');
+  if (!host) return;
+  host.innerHTML = '';
+  if (!recHooks()) return;
+
+  const row = document.createElement('div');
+  row.className = 'row recrow';
+  const mk = (labObj, fn, cls) => {
+    const b = document.createElement('button');
+    b.className = 'btn' + (cls ? ' ' + cls : '');
+    b.textContent = t(labObj);
+    b.addEventListener('click', fn);
+    return b;
+  };
+
+  if (recState.mode === 'replay') {
+    row.appendChild(mk(recState.playing ? UI.recPause : UI.recPlay,
+      () => { recState.playing = !recState.playing; buildRecRow(); }));
+    row.appendChild(mk(UI.recRewind, () => { recState.i = 0; recState.acc = 0; recState.playing = true; buildRecRow(); }));
+    const rate = document.createElement('button');
+    rate.className = 'btn';
+    rate.textContent = recState.rate + '×';
+    rate.addEventListener('click', () => {
+      const steps = [0.25, 0.5, 1, 2, 4];
+      recState.rate = steps[(steps.indexOf(recState.rate) + 1) % steps.length];
+      buildRecRow();
+    });
+    row.appendChild(rate);
+    row.appendChild(mk(UI.recExit, recExitReplay));
+  } else if (recState.mode === 'recording') {
+    row.appendChild(mk(UI.recStop, () => recStopRecording(null), 'wide'));
+    row.appendChild(mk(UI.recSave, recSave));
+  } else {
+    row.appendChild(mk(UI.recRec, recStartRecording, 'wide'));
+    row.appendChild(mk(UI.recSave, recSave));
+    row.appendChild(mk(UI.recLoad, () => {
+      const inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = 'application/json,.json';
+      inp.addEventListener('change', () => {
+        const f = inp.files && inp.files[0];
+        if (!f) return;
+        const rd = new FileReader();
+        rd.onload = () => {
+          let doc = null;
+          try { doc = JSON.parse(rd.result); }
+          catch (e) { recState.note = { zh: '文件不是合法 JSON', en: 'File is not valid JSON' }; buildRecRow(); return; }
+          recLoadDoc(doc, f.name);
+        };
+        rd.readAsText(f);
+      });
+      inp.click();
+    }));
+  }
+  host.appendChild(row);
+
+  /* 状态行：进度 / 行数 / 存档来源 / 种子比对结论 / 提示 */
+  const info = document.createElement('div');
+  info.className = 'recinfo';
+  const bits = [];
+  if (recState.mode === 'replay') {
+    bits.push(t(UI.recReplay) + ' ' + (recState.i + 1) + ' / ' + recState.rows.length);
+    if (recState.srcName) bits.push(recState.srcName);
+    if (recState.verify) {
+      /* 尾巴「这不是 bug，见提示」只在**复现失败**时才有意义 —— 成功时贴上去
+         会读成「复现了 —— 这不是 bug」，反而让人以为出了事。 */
+      bits.push(t(recState.verify.reproduced ? UI.recVerifyOK : UI.recVerifyNo) +
+                recState.verify.delta.toExponential(1) +
+                (recState.verify.reproduced ? '）' : t(UI.recVerifyTail)));
+    }
+  } else {
+    bits.push(recState.rows.length + t(UI.recRows));
+  }
+  if (recState.note) bits.push(t(recState.note));
+  info.textContent = bits.join(' · ');
+  info.dataset.rec = '1';
+  host.appendChild(info);
+
+  refreshRecLocks();
+}
+
+/* 录制中行数是每帧在长的，而 buildRecRow() 只在状态切换时跑 —— 只改这一行
+   文本，别整行重建（重建会打断按钮的焦点与 hover）。由 frame() 的读数节流
+   一并调用，120 ms 一次足够。 */
+function refreshRecInfo() {
+  if (recState.mode !== 'recording') return;
+  const el = document.querySelector('#recHost .recinfo[data-rec]');
+  if (!el) return;
+  const bits = [recState.rows.length + t(UI.recRows)];
+  if (recState.note) bits.push(t(recState.note));
+  el.textContent = bits.join(' · ');
+}
+
+/* 回放期间种子滑杆置灰 —— 改它们等于改种子，画面与数据会脱节（§11.7）。 */
+function refreshRecLocks() {
+  const h = recHooks();
+  const lock = (recState.mode === 'replay' && h && h.lock) || [];
+  Object.keys(paramWraps).forEach(k => {
+    const e = paramWraps[k];
+    if (!e) return;
+    const on = lock.indexOf(k) >= 0;
+    e.input.disabled = on;
+    e.wrap.style.opacity = on ? '0.45' : '';
+  });
+}
+
+function switchTab(id) {
+  if (id === curTab) return;
+  curTab = id;
+  tween = null;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+  document.querySelectorAll('.toggles[data-tab], .views[data-tab], .drive[data-tab]').forEach(el => {
+    el.style.display = el.dataset.tab === id ? '' : 'none';
+  });
+  cam = cams[id];
+  brandDesc.textContent = t(SCENES[id].brand);
+  tipsEl.textContent = t(SCENES[id].tips);
+  /* 换页签 = 换实验：正在录的那一轮不再对应画面，停录并保留已录数据；
+     回放态则整个退出 —— 存档是绑定页签的（§11.4 的 tab 字段）。 */
+  if (recState.mode === 'recording' && recState.tab !== id) recStopRecording(null);
+  if (recState.mode === 'replay' && recState.tab !== id) recExitReplay();
+  buildRecRow();
+  syncParamVisibility();
+  refreshViewButtons();
+  updateReadout();
+}
+
+/* ================= 播放 / 重置 / 折叠 ================= */
+const btnPlay = document.getElementById('btnPlay');
+function togglePlay() {
+  state.running = !state.running;
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+}
+btnPlay.addEventListener('click', togglePlay);
+document.getElementById('btnReset').addEventListener('click', resetSim);
+
+const panel = document.getElementById('panel');
+const btnFold = document.getElementById('btnFold');
+btnFold.addEventListener('click', () => {
+  const c = panel.classList.toggle('collapsed');
+  btnFold.textContent = c ? '+' : '−';
+});
+if (window.innerWidth < 760) {
+  panel.classList.add('collapsed');
+  btnFold.textContent = '+';
+}
+
+/* ================= 语言切换 ================= */
+function applyLang() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.title = t(TOOL.title);
+  document.querySelector('.brand h1').textContent = t(TOOL.h1);
+  document.getElementById('panelTitle').textContent = t(UI.panelTitle);
+  document.querySelector('.hint').textContent = t(UI.hint);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+  btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+  document.getElementById('btnReset').textContent = t(UI.reset);
+  RELABEL.forEach(f => f());
+  buildRecRow();               // 录制行的文案是建行时取的 t()，整行重建即跟随语言
+  brandDesc.textContent = t(SCENES[curTab].brand);
+  tipsEl.textContent = t(SCENES[curTab].tips);
+  updateReadout();
+}
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('lang', l);
+    history.replaceState(null, '', u);
+  } catch (e) {}
+  applyLang();
+}
+document.getElementById('btnLang').addEventListener('click', () => setLang(LANG === 'zh' ? 'en' : 'zh'));
+document.getElementById('verBadge').textContent = 'v' + VERSION;
+
+/* ================= 交互：旋转 / 平移 / 缩放 ================= */
+const pointers = new Map();
+let pinch = null;
+
+function pan(dx, dy) {
+  const C = makeCam();
+  const s = cam.dist / FOCAL;
+  cam.tx = clamp(cam.tx - C.r[0]*dx*s + C.u[0]*dy*s, -6, 6);
+  cam.ty = clamp(cam.ty - C.r[1]*dx*s + C.u[1]*dy*s, -5, 5);
+  cam.tz = clamp(cam.tz - C.r[2]*dx*s + C.u[2]*dy*s, -3, 11);
+}
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, btn: e.button });
+  tween = null;
+  lastView[curTab] = null;
+  refreshViewButtons();
+  if (pointers.size === 2) {
+    const vs = Array.from(pointers.values());
+    pinch = {
+      gap: Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y),
+      cx: (vs[0].x + vs[1].x) / 2,
+      cy: (vs[0].y + vs[1].y) / 2
+    };
+  }
+  canvas.classList.add('dragging');
+});
+
+canvas.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  p.x = e.clientX;
+  p.y = e.clientY;
+  if (pointers.size === 1) {
+    const panMode = e.shiftKey || (e.buttons & 2) || p.btn === 2 || p.btn === 1;
+    if (panMode) {
+      pan(dx, dy);
+    } else {
+      cam.az -= dx * 0.0055;
+      cam.el = clamp(cam.el + dy * 0.0055, -1.45, 1.53);
+    }
+  } else if (pointers.size === 2 && pinch) {
+    const vs = Array.from(pointers.values());
+    const gap = Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y);
+    const cx = (vs[0].x + vs[1].x) / 2, cy = (vs[0].y + vs[1].y) / 2;
+    if (gap > 1) cam.dist = clamp(cam.dist * pinch.gap / gap, 4.5, 60);
+    pan(cx - pinch.cx, cy - pinch.cy);
+    pinch = { gap: gap, cx: cx, cy: cy };
+  }
+});
+
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+  if (!pointers.size) canvas.classList.remove('dragging');
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  tween = null;
+  cam.dist = clamp(cam.dist * Math.exp(e.deltaY * 0.0012), 4.5, 60);
+}, { passive: false });
+
+canvas.addEventListener('dblclick', () => applyView(Object.keys(SCENES[curTab].views)[0]));
+
+window.addEventListener('keydown', e => {
+  const tg = e.target.tagName;
+  if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || tg === 'BUTTON') return;
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'r' || e.key === 'R') resetSim();
+  else if (e.key === 't' || e.key === 'T') {
+    const keys = Object.keys(SCENES);
+    switchTab(keys[(keys.indexOf(curTab) + 1) % keys.length]);
+  }
+  else if (e.key >= '1' && e.key <= '9') {
+    const names = Object.keys(SCENES[curTab].views);
+    const i = +e.key - 1;
+    if (i < names.length) applyView(names[i]);
+  }
+});
+
+/* ================= 启动 ================= */
+resize();
+buildTabs();
+buildParams();
+buildDrive();
+buildToggles();
+buildViews();
+Object.keys(SCENES).forEach(id => {
+  const first = Object.keys(SCENES[id].views)[0];
+  const v = SCENES[id].views[first];
+  cams[id] = { az: v.az, el: v.el, dist: viewDist(v.dist), tx: v.tx || 0, ty: v.ty || 0, tz: v.tz || 0 };
+  lastView[id] = first;
+});
+switchTab(Object.keys(SCENES)[0]);
+applyLang();
+resetSim();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

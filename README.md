@@ -81,6 +81,10 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 
 | [三体问题 · 一条四维曲线的三个影子 · The Three-Body Problem](outputs/three-body-problem-3d.html) | The real ℝ³ motion plus three time-braids of the same (x, y, z, t) curve, calibrated on a tilted figure-8 whose shadows lie by a measurable amount; the choreography as a knife-edge solution, and close encounters as the amplifier behind every jump in the separation curve |
 
+| [让倒立摆站起来 · 反馈与 PID · Feedback and PID](outputs/ctrl-feedback-pid-3d.html) | The open-loop rod is not uncontrolled, it is controlled without looking; P/I/D as the present, past and future of the error; and the critical gain collapsing fivefold once you add 20 ms of delay — the force is not too strong, it arrives too late |
+| [从根轨迹到守恒律 · From Root Locus to Conservation](outputs/ctrl-locus-limits-3d.html) | Gain as a third axis turns the root locus into a 3-D bundle crossing the imaginary axis at K = mgL; the internal model principle punching a hole in the error spectrum; Bode's integral fixed at π·p so error pushed down here must rise there; and one actuator that cannot hold two things at once |
+| [火箭：会自己变的倒立摆 · Thrust Vector Control](outputs/ctrl-rocket-tvc-3d.html) | A rocket is an inverted pendulum whose plant drifts as it burns — T·ℓ/J more than doubles in a flight, so liftoff gains are wrong later. A sandbox with seeded wind, a zero-order-hold staircase that eats phase margin, and a black box that names why each crash happened |
+
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
 ## Usage
