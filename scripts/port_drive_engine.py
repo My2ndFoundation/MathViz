@@ -135,11 +135,15 @@ def extract_starter():
     #    starter 的 frame() 已加固（函数体整体缩进两格），所以这里切出来的是
     #    **加固后**的 6 空格形态 frame_h；补齐阶段面对的是尚未加固的文件，
     #    需要 4 空格形态，故一并保存一份去掉两格缩进的 frame。
-    i = _one(L, lambda l: l == '      applyDrive();', 'frame 内 applyDrive')
-    g['frame_h'] = L[i:i + 3]
-    assert 'syncParamSlider(dv.key)' in g['frame_h'][2], g['frame_h']
-    assert all(l.startswith('      ') for l in g['frame_h']), g['frame_h']
-    g['frame'] = [l[2:] for l in g['frame_h']]
+    #    starter 1.1.0 起这三行从 frame() 体内搬进了 simAdvance()（录制与种子重算
+    #    必须走同一条推进路径，见设计系统 §11.2），缩进随之从 6 空格变成 2 空格。
+    #    故这里**按内容定位、按需缩进**：目标文件里它仍在 frame() 体内，所以
+    #    frame_h 仍产出 6 空格形态、frame 产出 4 空格形态，与从前逐字一致。
+    i = _one(L, lambda l: l.strip() == 'applyDrive();', 'applyDrive 块')
+    blk = [l.strip() for l in L[i:i + 3]]
+    assert 'syncParamSlider(dv.key)' in blk[2], blk
+    g['frame_h'] = ['      ' + l for l in blk]
+    g['frame'] = ['    ' + l for l in blk]
 
     # ⑦ resetSim() 里对 driveOff / driveOffAt 的归零
     i = _one(L, lambda l: l.startswith('  /* 驱动时钟的偏移一并归零'), 'resetSim 归零注释')
@@ -204,13 +208,19 @@ def extract_starter():
     assert g['resetguard'][0].startswith('  /* 清空帧级异常去重表'), g['resetguard']
     assert 'Object.keys(frameErrSeen)' in g['resetguard'][1], g['resetguard']
 
-    # 自检：把内联的旧文本 A 走一遍机械包裹，必须逐字等于 starter 的现状。
-    # starter 一旦改了 frame() 的措辞或实现，这里当场炸，不会把过期文本铺出去。
+    # 自检：把内联的旧文本 A 走一遍机械包裹，检查产出的**兜底外壳**与 starter
+    # 一致——只比外壳（函数首行 + try 行 + catch/finally/rAF 尾巴），不比循环体。
+    # 设计系统 §6 的原话：「标准件是兜底那一层，不是循环体的形状」。starter
+    # 1.1.0 起循环体里多了回放 / 录制分支（§11），逐字节比对必然误报，而循环体
+    # 恰恰是本脚本不该管的部分——它只负责把兜底那一层铺平。
     got = _wrap_frame(FRAME_OLD_A, g)
-    if got != g['frame_new']:
-        raise SystemExit('frame() 加固自检失败：包裹 FRAME_OLD_A 的结果与 starter 不符\n'
+    n = len(g['frame_tail'])
+    if got[:2] != g['frame_new'][:2] or got[-n:] != g['frame_new'][-n:]:
+        shell = lambda f: f[:2] + ['    …'] + f[-n:]
+        raise SystemExit('frame() 兜底外壳自检失败：包裹结果的外壳与 starter 不符\n'
                          + '\n'.join('  %-2s %s' % ('!' if a != b else ' ', a)
-                                     for a, b in zip(got + [''] * 9, g['frame_new'] + [''] * 9)))
+                                     for a, b in zip(shell(got) + [''] * 9,
+                                                     shell(g['frame_new']) + [''] * 9)))
     return g
 
 
