@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.0">
-<meta name="engine-version" content="1.1.0">
+<meta name="tool-version" content="1.1.1">
+<meta name="engine-version" content="1.1.1">
 <title>三体问题 · 一条四维曲线的三个影子</title>
 <!-- ============================================================
   三体问题：一条四维曲线的三个影子 · 交互式数学可视化
@@ -63,6 +63,7 @@
                顿悟视角：「log δ · t 正视」= 直线段与饱和段
 
   版本记录（changelog，新→旧）：
+    1.1.1  2026-08-02  回放期间面板上的进度数字不再停在「1 / N」：状态行的文案抽成唯一出处 recInfoText()，每 120 ms 与录制行数走同一条刷新路径。回放本身一直是对的，坏的只是那个数字
     1.1.0  2026-08-02  接入引擎的「演算记录与回放」（规范 §11）：真实运动 /
                        三重投影两个页签可录制。按下「● 记录」即回到种子重新
                        播种，一份存档 = 一轮完整的演化（从播种到逃逸或超时），
@@ -2272,6 +2273,31 @@ function recLoadDoc(doc, name) {
   return true;
 }
 
+/* 状态行的文案只有这一处出处。buildRecRow() 在状态切换时重建整行、
+   refreshRecInfo() 每 120 ms 重写这一行，两边都读它。
+   为什么必须只有一处：这一行正是这么坏掉过的 —— 当年 refreshRecInfo() 只认
+   'recording'，文案又只长在 buildRecRow() 里，于是回放期间没有任何代码去改它，
+   进度永远停在「1 / N」，只有按下暂停或整段播完（那两条路径会重建整行）才跳一下。
+   画面在动、数字不动，看上去像回放卡住了，其实回放一直是对的。 */
+function recInfoText() {
+  const bits = [];
+  if (recState.mode === 'replay') {
+    bits.push(t(UI.recReplay) + ' ' + (recState.i + 1) + ' / ' + recState.rows.length);
+    if (recState.srcName) bits.push(recState.srcName);
+    if (recState.verify) {
+      /* 尾巴「这不是 bug，见提示」只在**复现失败**时才有意义 —— 成功时贴上去
+         会读成「复现了 —— 这不是 bug」，反而让人以为出了事。 */
+      bits.push(t(recState.verify.reproduced ? UI.recVerifyOK : UI.recVerifyNo) +
+                recState.verify.delta.toExponential(1) +
+                (recState.verify.reproduced ? '）' : t(UI.recVerifyTail)));
+    }
+  } else {
+    bits.push(recState.rows.length + t(UI.recRows));
+  }
+  if (recState.note) bits.push(t(recState.note));
+  return bits.join(' · ');
+}
+
 /* 录制 / 回放行（§11）。只在当前页签声明了 RECORD 钩子时出现；
    整行每次重建 —— 它的状态机只有三态，重建比增量改 DOM 更不容易漂。 */
 function buildRecRow() {
@@ -2333,38 +2359,22 @@ function buildRecRow() {
   /* 状态行：进度 / 行数 / 存档来源 / 种子比对结论 / 提示 */
   const info = document.createElement('div');
   info.className = 'recinfo';
-  const bits = [];
-  if (recState.mode === 'replay') {
-    bits.push(t(UI.recReplay) + ' ' + (recState.i + 1) + ' / ' + recState.rows.length);
-    if (recState.srcName) bits.push(recState.srcName);
-    if (recState.verify) {
-      /* 尾巴「这不是 bug，见提示」只在**复现失败**时才有意义 —— 成功时贴上去
-         会读成「复现了 —— 这不是 bug」，反而让人以为出了事。 */
-      bits.push(t(recState.verify.reproduced ? UI.recVerifyOK : UI.recVerifyNo) +
-                recState.verify.delta.toExponential(1) +
-                (recState.verify.reproduced ? '）' : t(UI.recVerifyTail)));
-    }
-  } else {
-    bits.push(recState.rows.length + t(UI.recRows));
-  }
-  if (recState.note) bits.push(t(recState.note));
-  info.textContent = bits.join(' · ');
+  info.textContent = recInfoText();
   info.dataset.rec = '1';
   host.appendChild(info);
 
   refreshRecLocks();
 }
 
-/* 录制中行数是每帧在长的，而 buildRecRow() 只在状态切换时跑 —— 只改这一行
-   文本，别整行重建（重建会打断按钮的焦点与 hover）。由 frame() 的读数节流
-   一并调用，120 ms 一次足够。 */
+/* 录制中的行数、回放中的进度都是每帧在变的，而 buildRecRow() 只在状态切换时
+   跑 —— 只改这一行文本，别整行重建（重建会打断按钮的焦点与 hover）。由 frame()
+   的读数节流一并调用，120 ms 一次足够。判据是「不是 live」而不是「是 recording」：
+   回放同样每帧在走，漏掉它就等于让进度数字停在原地。 */
 function refreshRecInfo() {
-  if (recState.mode !== 'recording') return;
+  if (recState.mode === 'live') return;
   const el = document.querySelector('#recHost .recinfo[data-rec]');
   if (!el) return;
-  const bits = [recState.rows.length + t(UI.recRows)];
-  if (recState.note) bits.push(t(recState.note));
-  el.textContent = bits.join(' · ');
+  el.textContent = recInfoText();
 }
 
 /* 回放期间种子滑杆置灰 —— 改它们等于改种子，画面与数据会脱节（§11.7）。 */
