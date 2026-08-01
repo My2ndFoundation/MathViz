@@ -327,10 +327,10 @@ tips：**一段话只讲一个顿悟点**，并指向具体操作（某视角 / 
 
 1. 复制模板，填写 ⓪ `TOOL`（id 与双语标题，运行时驱动 `<title>`/`<h1>`）；
 2. 在 `PARAMS` 数组声明滑杆（key / label / 范围 / 格式化 / 可选映射函数）；
-3. 在 `SCENES` 注册场景：`label`（页签名）、`brand`、`tips`、`views`（首项 iso）、`toggles`（曲线开关按启用顺序取色）、`params`（本页签真正读取的滑块 key 数组）、`drive`（时间驱动声明，无则显式 `null`）、`draw(C)`、`readout()`；
+3. 在 `SCENES` 注册场景：`label`（页签名）、`brand`、`tips`、`views`（首项 iso）、`toggles`（曲线开关按启用顺序取色）、`params`（本页签真正读取的滑块 key 数组）、`drive`（时间驱动声明；正当静止写显式 `null` 并注释理由，已有动画则不写 `drive` 而留一行注释说明它靠什么在动——四条出路见下方自查清单）、`draw(C)`、`readout()`；
 4. 按需扩展 `pushSample` 的采样字段（原则：记录当时真实值）；
 5. 用引擎部件拼场景：`drawAxes / drawGridXY / drawTimeGrid / drawPeriodBracket / drawCircle / drawAngleArc / strokePoly / line3 / glowDot / label3`；
-6. 自查清单：□ 曲线六处同源 □ 有顿悟视角 □ tips 只讲一件事 □ 暂停时相机仍可动 □ 参数中途可调且历史不重算 □ 移动端折叠正常 □ 每个场景声明 params，且与该场景实际读取的 state 键一致（含经模块级辅助函数间接读取的） □ 没有静止页签：每个页签要么由引擎时钟驱动、要么声明 drive，要么显式写 drive: null 并注释理由（静态对照场景合法，但须是有意识的选择） □ 被 drive 驱动的参数若带 map，必须同时提供 invMap（否则滑块无法回显驱动值） □ drive 的 [from, to] 必须落在该参数映射后的 [min, max] 之内（越界会被滑杆钳住：读数与滑杆句柄停在端点上；此后**用户第一次拖动这根滑杆**时 upd() 就把钳过的值写回 state。语言切换不再触发此事——relabel 只调 render()，见 §6「滑杆的两个闭包」） □ 引擎的行为查询不只认样式类：querySelectorAll 限定结构容器（如 .views .vbtn）或改用 data-* 属性 □ `node --check` 通过 □ 双语：全部文案为 `{zh,en}` 对象并经 `t()`；`?lang=en` 直达、切换按钮、记忆、`<html lang>`/`document.title` 跟随均正常（§9）□ 版本：meta 两枚 + 头注释 changelog + 面板角标齐备；已登记 `tools.json` 并同步 `index.html` 内嵌 TOOLS 与 README 工具表（§10）
+6. 自查清单：□ 曲线六处同源 □ 有顿悟视角 □ tips 只讲一件事 □ 暂停时相机仍可动 □ 参数中途可调且历史不重算 □ 移动端折叠正常 □ 每个场景声明 params，且与该场景实际读取的 state 键一致（含经模块级辅助函数间接读取的） □ 没有静止页签：每个页签必须落在**四条出路之一**，且后三条都要留下可核对的痕迹——① 由引擎时钟直接驱动（`theta` / `state.t` 让被演示量自己走，无需任何声明）；② 声明 `drive`；③ 正当静止：显式写 `drive: null` **并在同一处注释写明理由**（静态对照场景合法，但须是有意识的选择）；④ 已有动画、故不声明 `drive`：**必须在场景里留一行注释写明它靠什么机制在动**（哪个量、由谁推进、晚期实测读数）。第 ④ 条不是可选的礼貌——没有这行注释，「已排除」与「漏了」在事后审计里无法区分。判「有没有动」的口径：**一次性演进后永久定格算静止**（喂满 20 s 再推到 t≈200 s 取窗口，不重复帧 = 1 即定格），此时正确的修法通常是让这段演进在工具局部区循环起来，而不是补一条假的 `drive: null` 理由 □ 被 drive 驱动的参数若带 map，必须同时提供 invMap（否则滑块无法回显驱动值） □ drive 的 [from, to] 必须落在该参数映射后的 [min, max] 之内（越界会被滑杆钳住：读数与滑杆句柄停在端点上；此后**用户第一次拖动这根滑杆**时 upd() 就把钳过的值写回 state。语言切换不再触发此事——relabel 只调 render()，见 §6「滑杆的两个闭包」） □ 引擎的行为查询不只认样式类：querySelectorAll 限定结构容器（如 .views .vbtn）或改用 data-* 属性 □ `node --check` 通过 □ 双语：全部文案为 `{zh,en}` 对象并经 `t()`；`?lang=en` 直达、切换按钮、记忆、`<html lang>`/`document.title` 跟随均正常（§9）□ 版本：meta 两枚 + 头注释 changelog + 面板角标齐备；已登记 `tools.json` 并同步 `index.html` 内嵌 TOOLS 与 README 工具表（§10）
 
 ### 给 Claude Code 的任务简报模板
 
