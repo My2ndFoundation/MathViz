@@ -7,140 +7,524 @@
 body{margin:0;padding:20px;background:#05070d;color:#dbe6f5;
   font-family:ui-sans-serif,-apple-system,"PingFang SC",sans-serif;font-size:13px}
 h1{font-size:18px;margin:0 0 4px}
-.note{color:#7d8ca6;font-size:12px;line-height:1.7;margin:0 0 16px;max-width:70em}
+h2{font-size:14px;margin:22px 0 6px;color:#a8b8cf;letter-spacing:.04em}
+.note{color:#7d8ca6;font-size:12px;line-height:1.75;margin:0 0 14px;max-width:78em}
 .note b{color:#ffd7e3}
-button{padding:7px 14px;border-radius:8px;cursor:pointer;
+.note em{color:#a68bff;font-style:normal}
+ol.crit{color:#7d8ca6;font-size:12px;line-height:1.7;max-width:78em;margin:0 0 14px;padding-left:1.6em}
+ol.crit b{color:#dbe6f5}
+button{padding:7px 14px;border-radius:8px;cursor:pointer;margin-right:8px;
   border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.04);color:#dbe6f5}
-#bar{margin:12px 0;color:#7d8ca6}
-table{border-collapse:collapse;width:100%;margin-top:12px}
+button:disabled{opacity:.4;cursor:default}
+input[type=text]{padding:6px 10px;border-radius:8px;width:22em;
+  border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.04);color:#dbe6f5}
+#bar{margin:12px 0;color:#7d8ca6;min-height:1.4em}
+table{border-collapse:collapse;width:100%;margin-top:8px}
 th,td{text-align:left;padding:5px 9px;border-bottom:1px solid rgba(255,255,255,.08);vertical-align:top}
 th{color:#7d8ca6;font-weight:600;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase}
 .bad{color:#ff5a8a;font-weight:600}
 .warn{color:#ffa653}
 .ok{color:#37d9a0}
+.dim{color:#5d6b82}
 code{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#a68bff}
 iframe{position:fixed;left:-9999px;top:0;width:1200px;height:700px;border:0}
 </style>
 </head>
 <body>
 <h1>场景审计 · Scene Audit</h1>
+
 <p class="note">
-逐个载入 <code>outputs/</code> 下的工具，对每个页签：把每个滑块推到量程两端比对画布像素，
-判断它对当前页签<b>是否真的有效</b>；再让引擎时钟前进 0.5 秒，判断该页签<b>有没有时间驱动</b>。<br>
-<b>局限</b>：只能测「改了有没有反应」，测不出「作者本意」。某个滑块本该有效但实现漏读了，这里会报它无效。
-生成的 <code>params</code> 初稿必须人工复核后再用。<br>
-<b>判据</b>：页签一旦声明 <code>params</code>，「展示/有效」按声明数算，通过与否看<b>声明差集</b>——
-<b>漏声明</b>（实测有效却没写进 <code>params</code>，滑块被面板藏起来，最危险）标红，
-<b>多声明</b>（写了却无效，面板白占一格）标橙，差集为空才算迁移到位。<br>
-必须通过本地服务器打开（<code>python3 -m http.server 8777</code>），<code>file://</code> 下受同源限制无法探测。
+逐个载入 <code>outputs/</code> 下的工具。对每个页签测两件事：<br>
+① <b>滑块作用域</b>——把每根滑块推到量程两端比对画布，看它对当前页签是否真的有效，再与 <code>SCENES[x].params</code> 的声明求差集；<br>
+② <b>是否静止</b>——这一列曾经<em>四个方向都会错</em>（步进时钟被当静止、靠 <code>pushSample()</code> 演进的被当静止、<code>ease</code> 驻留段读不出变化、装饰性运动被当动画），
+现按本轮实测裁定的判据重写，判据与其局限逐条列在下面。
 </p>
-<button id="go">开始审计</button>
+
+<ol class="crit">
+<li><b>主判据是数值，不是像素</b>：声明了 <code>drive</code> 的页签，直接读 <code>state[drive.key]</code> 在<em>一个完整 period</em> 上是否取到 ≥2 个不同值。像素只作旁证。</li>
+<li><b>不设绝对像素阈值</b>：12 个驱动页签实测的标定跨度达 <em>38 倍</em>（0.12% ↔ 4.68%），任何统一阈值都会误杀。像素判据只有一条：整周期取 ≥60 帧，<em>不重复帧数 &gt; 1</em>。绝不逐 0.5 秒窗口判零——ω≈1 的步进时钟 0.5 秒跨不过一个整数。</li>
+<li><b>控制组来自页面自身</b>：有 <code>drive</code> 的页签跑两遍——自动播放开 / 关。关掉这一遍就是「没有 drive 的那个世界」，它读出静止，才证明这把尺子抓得住问题。</li>
+<li><b>先喂满 20 秒再测</b>：否则量到的是历史缓冲填充中的瞬态（本轮已因此产生过一次 Critical 误判）。</li>
+<li><b>四通道隔离</b>：分别只推 <code>state.theta</code> / 只推 <code>state.t</code> / 只加推 <code>pushSample()</code>，看被演示量变不变。只推 <code>draw()</code> 会漏掉靠逐项累加演进的页签。</li>
+<li><b>「装饰 vs 被演示量」不能只看画布哈希</b>：装饰常带渲染条件（例如某个 glowDot 只在 <code>|mod2π(rot) − π| &lt; 0.2</code> 时入画），条件不满足时哈希不变，会把「有装饰」误读成「无装饰」。有 <code>drive</code> 时读数值；没有 <code>drive</code> 时本页只给出通道 + 开关消融的证据，<em>结论标「需人工」，不代劳</em>。</li>
+<li><b><code>readout()</code> 文本不作判据</b>：<code>readoutHead()</code> 的 <code>t=</code>/<code>θ=</code> 表头每帧都变，任何页签（含已永久定格的）都会读出「全不重复」。本页完全不使用读数文本。</li>
+<li><b>探针先喂饱画布合成管线</b>（<code>draw();hash();draw();hash();draw();</code>），否则首帧读到的是切页签前的旧帧。</li>
+<li><b>「一次性演进后永久定格」算静止</b>，判据两段式：① 推到 <code>t≈200 s</code> 再取一个窗口，不重复帧 <code>=1</code> → 静止；<code>≥2</code> → 进第二段。② 通道隔离 + 逐开关消融，定位运动来自哪里。</li>
+</ol>
+
+<p class="note">
+<b>已知良性反例（回归用例）</b>：<code>recurrence-iteration-dynamics-3d/newton</code> 的轮长与 <code>period</code> 相位锁定，
+Δ8 s 恰为 0.0000%，但它是<em>无缝循环不是冻结</em>。本页从不做「t 与 t+Δ 两帧对比」，只数窗口内的不重复帧，故不会误判——
+点「已知答案自检」可以随时验证这一条仍然成立。
+</p>
+
+<p class="note">
+<b>局限（请勿当成没有）</b>：<br>
+· <em>无真实 rAF</em>：探针用工具<em>自己的</em> <code>frame()</code> 源码切出的推进块同步推时钟（不手抄一份引擎），
+但每帧耗时是理想 <code>dt</code>，测不出真实掉帧、<code>performance.now()</code> 相关的行为、以及相机 tween。<br>
+· <em>预热用粗 dt</em>：推到 <code>t≈200 s</code> 时前段用 <code>dt=0.05</code>（引擎自己的 dt 上限，合法），最后 15 秒回到 <code>1/60</code>
+把历史缓冲按原生密度重填；对 <code>pushSample()</code> 里做数值积分的工具，粗段的轨迹与实跑不完全相同。<br>
+· <em>测量窗口的 dt 严格均匀，这是有意的</em>：真实 rAF 的 dt 每帧抖动千分之几，历史曲线的采样点阵跟着抖，
+全分辨率下会读出「帧帧不重复」——那是<b>抗锯齿噪声不是内容</b>。实测 <code>forces-free-body-diagrams-3d/normal</code>
+在真实 rAF 下 361/361 帧全不重复，可它的被演示量 <code>R2</code> 十进制展开逐位相同、画面对人眼完全静止；
+换成均匀 dt 立刻读出 1/60，与人眼一致。代价是「内容周期恰好是 dt 整数倍」的页签会混叠自锁，
+所以凡读出定格的页签都会自动换 <code>dt=1/37</code> 再复测一遍（真静止的画面在任何步长下都只有 1 帧）。<br>
+· <em>画布指纹降采样到 <code>CFG.hw×hh</code>（默认 320×180）</em>：这是灵敏度旋钮不是性能旋钮。早期用的 80×45（缩放比 15×）
+会把「细线走了一步」平均成不到 1/255 的差值而彻底消失——蛛网页迭代到不动点附近后每步只挪几个像素，
+80×45 下读出来就是永久定格。<br>
+· <em>通道消融是按行文本切的</em>：从 <code>frame()</code> 的 <code>if (state.running)</code> 块里剔除含
+<code>state.t +=</code> / <code>state.theta +=</code> / <code>pushSample()</code> / <code>applyDrive()</code> 的行。
+工具若在该块里另写了推进语句（现存 1 例：<code>state.kPhase</code>），那几行会留在所有通道里，通道列的解释力相应下降——该行会在结论里标注。<br>
+· <em>只能测「改了有没有反应」，测不出「作者本意」</em>：某根滑块本该有效但实现漏读了，这里会报它无效；生成的 <code>params</code> 初稿必须人工复核。<br>
+· 必须通过本地服务器打开（<code>python3 -m http.server 8860</code>），<code>file://</code> 下受同源限制无法探测。
+</p>
+
+<div>
+  <button id="go">开始审计</button>
+  <button id="known">已知答案自检</button>
+  <input type="text" id="only" placeholder="只测这些工具（逗号分隔的 id 子串，留空=全部）">
+</div>
 <div id="bar"></div>
+
+<h2>逐页签结果</h2>
 <table id="out"><thead><tr>
-<th>工具</th><th>页签</th><th>滑块 展示/有效</th><th>声明差集</th><th>驱动</th><th>已声明 params</th><th>实测 params 初稿</th>
+<th>工具</th><th>页签</th><th>滑块 展示/有效</th><th>声明差集</th>
+<th>drive 声明</th><th>数值判据</th><th>画布 稳态/晚期</th><th>通道 θ/t/push</th><th>控制组</th><th>结论</th>
 </tr></thead><tbody></tbody></table>
+
+<h2>已知答案自检</h2>
+<table id="kn"><thead><tr>
+<th>工具 / 页签</th><th>期望</th><th>实测</th><th>结果</th>
+</tr></thead><tbody></tbody></table>
+
 <iframe id="fr"></iframe>
 <script>
 'use strict';
-var fr = document.getElementById('fr');
-var bar = document.getElementById('bar');
+
+/* ============================ 参数 ============================ */
+var CFG = {
+  dt:        1 / 60,   // 测量窗口的步长（严格均匀，见下方「为什么不抖」）
+  dt2:       1 / 37,   // 混叠自锁排查用的第二步长，与 1/60 不成简单比例
+  coarseDt:  0.05,     // 预热步长；引擎自己就把 dt 钳在 [0, 0.05]，取上限是合法的
+  warmSec:   20,       // 判据④：测「是否静止」前先喂满 20 秒
+  lateSec:   200,      // 判据⑨①：两段式第一段推到的引擎时刻
+  settleSec: 15,       // 粗预热后再用 1/60 走这么久，把历史缓冲按原生密度重填
+  winMin:    10,       // 窗口秒数下限；有 drive 时取 max(winMin, period)
+  winN:      60,       // 判据②：整周期取这么多帧
+  /* 画布指纹的降采样尺寸。这不是「性能旋钮」而是灵敏度旋钮：
+     降得太狠（早期用的 80×45，缩放比 15×）会把「细线走了一步」平均成
+     不到 1/255 的差值而彻底消失——蛛网页迭代到不动点附近后每步只挪几个
+     像素，80×45 下读出来就是「永久定格」，这正是一类假阴性。 */
+  hw: 320, hh: 180
+};
+
+/* 已知答案（本轮实测确认）。auto = 该页签自身的结论；ctl = 关掉 drive 的控制组结论。
+   控制组那几条正是「修复前是静止」的复现——它们同时充当本页的负控制：
+   若控制组读不出静止，说明这把尺子又抓不住问题了。 */
+var KNOWN = [
+  { tool: 'i-essence-3d', tab: 'cubic', auto: '在动', ctl: '静止',
+    why: '修复前被旧审计误判为「在动」（装饰性呼吸光点），实为静止，现已补 drive。'
+       + '控制组必须仍判静止：残余帧全部来自直接读 state.t 的修饰（t 与 push 两通道读数相同）' },
+  { tool: 'algorithmic-complexity-growth-3d', tab: 'race', auto: '在动', ctl: '静止', hardCtl: true,
+    why: '同上，装饰性脉动被当成动画，现已补 drive。控制组应读出硬定格（画面 1 帧）' },
+  { tool: 'recurrence-iteration-dynamics-3d', tab: 'cobweb', auto: '静止',
+    why: '⚠ 与任务简报的清单不一致，故意如此。步进时钟 Math.floor(state.theta) 确实在走，'
+       + '但轨道很快收敛到不动点：t≈20 s 窗口 3/60 帧（在动），t≈200 s 窗口 1/60 帧、'
+       + '换步长复测仍 1 帧。真实 rAF 在 t=200 s 起观察 12 秒 361 帧全同、maxΔ=0，可以确认。'
+       + '按本阶段裁定「一次性演进后永久定格算静止」，此页应判静止（需补 drive 或显式 drive: null）' },
+  { tool: 'recurrence-iteration-dynamics-3d', tab: 'lift', auto: '静止',
+    why: '同 cobweb：t≈20 s 窗口 10/60 帧，t≈200 s 窗口 1/60 帧且换步长复测仍 1 帧' },
+  { tool: 'recurrence-iteration-dynamics-3d', tab: 'newton', auto: '在动', ctl: '静止', hardCtl: true,
+    why: '★ 良性反例：轮长与 period 相位锁定，Δ8 s 恰为 0.0000%，但它是无缝循环不是冻结。'
+       + '本页从不做「t 与 t+Δ 两帧对比」，只数窗口内的不重复帧，故不会误判' },
+  { tool: 'modular-arithmetic-euclid-crt-3d', tab: 'spiral', auto: '在动',
+    why: '共享步进时钟 STEPn = Math.floor(state.theta)；0.5 秒窗口跨不过一个整数（旧假阴性 A）' },
+  { tool: 'modular-arithmetic-euclid-crt-3d', tab: 'euclid', auto: '在动', why: '同上' },
+  { tool: 'modular-arithmetic-euclid-crt-3d', tab: 'crt', auto: '在动', why: '同上' },
+  { tool: 'forces-free-body-diagrams-3d', tab: 'normal', auto: '需人工',
+    why: '⚠ 与任务简报的清单不完全一致。它确实不定格，但「在动」的成分极微妙：'
+       + '被演示量 R2 十进制展开逐位不变，dt=1/60 下画面 1/60 帧（混叠自锁），'
+       + 'dt=1/37 下 44/62 帧。θ 通道不成立、pushSample 也没带来 state.t 之外的变化，'
+       + '按判据⑥不自动下结论，交人工' },
+  { tool: 'forces-free-body-diagrams-3d', tab: 'friction', auto: '需人工', why: '同 normal' },
+  { tool: 'forces-free-body-diagrams-3d', tab: 'incline', auto: '在动', ctl: '静止', hardCtl: true,
+    why: '原本定格，现已补 drive；控制组应复现硬定格（画面 1 帧）' },
+  { tool: 'complex-mult-3d', tab: 'roots', auto: '在动', ctl: '静止',
+    why: '原本被演示量 distinct = 1、画面只有零星装饰帧（3/40）；现已补 drive。'
+       + '控制组必须仍判静止，不能因为那几帧就说它在动（旧假阳性 D）' }
+];
+
+var fr    = document.getElementById('fr');
+var bar   = document.getElementById('bar');
 var tbody = document.querySelector('#out tbody');
+var kbody = document.querySelector('#kn tbody');
 
-/* 缩到 80×45 再取像素做 FNV-1a 哈希：够灵敏，又不至于每帧读全画布 */
-function makeHash(){
-  var pc = document.createElement('canvas'); pc.width = 80; pc.height = 45;
-  var px = pc.getContext('2d', { willReadFrequently: true });
-  return function(cv){
-    /* 先在源画布（隐藏 iframe 里的 canvas）上强制同步一次像素读取，
-       逼 GPU 合成结果落盘到 CPU 侧再 drawImage；不这样做，读到的常是
-       上一帧的陈旧画面（双缓冲/合成延迟），会把"没变"误判成"变了"，
-       即滑块被错误地判定为有效——这行不是多余代码，删掉会引入假阳性。 */
-    cv.getContext('2d').getImageData(0, 0, 1, 1);
-    px.clearRect(0,0,80,45); px.drawImage(cv, 0, 0, 80, 45);
-    var d = px.getImageData(0,0,80,45).data, h = 2166136261;
-    for (var i = 0; i < d.length; i += 7){ h ^= d[i]; h = Math.imul(h, 16777619); }
-    return h >>> 0;
-  };
+window.__AUDIT = { rows: [], known: [], done: false, error: null };
+
+/* ============================ 画布指纹 ============================ */
+/* 缩到 CFG.hw×CFG.hh 再取像素：既做 FNV-1a 哈希（数不重复帧），
+   也留下降采样缓冲，供「相邻帧 max|Δ| > 0」用（判据②）。 */
+var _pc = null, _px = null, _pw = 0, _ph = 0;
+function grab(cv) {
+  if (!_pc || _pw !== CFG.hw || _ph !== CFG.hh) {
+    _pc = document.createElement('canvas');
+    _pw = _pc.width = CFG.hw; _ph = _pc.height = CFG.hh;
+    _px = _pc.getContext('2d', { willReadFrequently: true });
+  }
+  /* 先在源画布（隐藏 iframe 里的 canvas）上强制同步一次像素读取，
+     逼 GPU 合成结果落盘到 CPU 侧再 drawImage；不这样做，读到的常是
+     上一帧的陈旧画面（双缓冲/合成延迟），会把「没变」误判成「变了」。
+     这行不是多余代码，删掉会引入假阳性。 */
+  cv.getContext('2d').getImageData(0, 0, 1, 1);
+  _px.clearRect(0, 0, _pw, _ph); _px.drawImage(cv, 0, 0, _pw, _ph);
+  var d = _px.getImageData(0, 0, _pw, _ph).data, h = 2166136261;
+  for (var i = 0; i < d.length; i += 7) { h ^= d[i]; h = Math.imul(h, 16777619); }
+  return { h: h >>> 0, d: d };
 }
-var hash = makeHash();
+function hash(cv) { return grab(cv).h; }
 
-function load(url){
-  return new Promise(function(res){
+function load(url) {
+  return new Promise(function (res) {
     var done = false;
-    function on(){ if (done) return; done = true; fr.removeEventListener('load', on); setTimeout(res, 300); }
+    function on() { if (done) return; done = true; fr.removeEventListener('load', on); setTimeout(res, 300); }
     fr.addEventListener('load', on);
     fr.src = url;
-    setTimeout(function(){ if (!done){ done = true; res(); } }, 6000);
+    setTimeout(function () { if (!done) { done = true; res(); } }, 8000);
   });
 }
+function yieldToUI() { return new Promise(function (r) { setTimeout(r, 0); }); }
 
-function probe(){
-  var w = fr.contentWindow;
-  function ev(e){ try { return w.eval(e); } catch(x){ return undefined; } }
-  var SCENES = ev('typeof SCENES !== "undefined" ? SCENES : null');
-  var PARAMS = ev('typeof PARAMS !== "undefined" ? PARAMS : null');
-  var state  = ev('typeof state  !== "undefined" ? state  : null');
-  var cv     = ev('typeof canvas !== "undefined" ? canvas : null');
-  var draw   = ev('typeof draw === "function" ? draw : null');
-  var swt    = ev('typeof switchTab === "function" ? switchTab : null');
-  var push   = ev('typeof pushSample === "function" ? pushSample : null');
-  if (!SCENES || !PARAMS || !state || !cv || !draw || !swt) return null;
-  var res = {};
-  Object.keys(SCENES).forEach(function(sk){
-    try { swt(sk); } catch(e){}
-    draw();
-    /* 刚切页签时画布合成管线还没喂饱：即便 hash() 里已经在源画布强制
-       flush，头一两次读到的仍可能是切页签前的旧帧，会把"其实没变"
-       误判成"参数/时间一动画面就变"（假阳性）。这里空转两轮「画 + 读」
-       把管线喂饱，后面的测量才可信——删掉这两行，读数会跟着抖动。 */
-    draw(); hash(cv);
-    draw(); hash(cv);
-    draw();
-    var t0 = state.t, th0 = state.theta;
-    var h0 = hash(cv);
-    for (var i = 0; i < 30; i++){
-      state.t += 1/60; state.theta += (state.omega || 1) * (1/60);
-      if (push) try { push(); } catch(e){}
-    }
-    draw();
-    var anim = hash(cv) !== h0;
-    state.t = t0; state.theta = th0; draw();
-    var live = [];
-    PARAMS.forEach(function(p){
-      var old = state[p.key];
-      var lo = p.map ? p.map(p.min) : p.min, hi = p.map ? p.map(p.max) : p.max;
-      state[p.key] = lo; draw(); var a = hash(cv);
-      state[p.key] = hi; draw(); var b = hash(cv);
-      state[p.key] = old; draw();
-      if (a !== b) live.push(p.key);
-    });
-    /* 真正的判据是「声明集」与「实测有效集」的差，不是跟全局 PARAMS 比：
-       页签声明了 params 之后，面板显示的就只有 declared 这几根滑块，拿
-       PARAMS.length 当分母的话，迁移得再完美读数也永远是红的。
-       over  = 声明了却无效（多声明：面板上白占一格）
-       under = 实测有效却没声明（漏声明：滑块对本页签有用，面板却把它藏了，
-               这一类更危险——用户根本看不到那个旋钮） */
-    var declared = SCENES[sk].params || null;
-    var over = [], under = [];
-    if (declared){
-      declared.forEach(function(k){ if (live.indexOf(k) < 0) over.push(k); });
-      live.forEach(function(k){ if (declared.indexOf(k) < 0) under.push(k); });
-    }
-    /* shown = 面板实际会显示的滑块数；liveShown = 其中真正有效的 */
-    var shown = declared ? declared.length : PARAMS.length;
-    var liveShown = declared ? (declared.length - over.length) : live.length;
-    res[sk] = { live: live, anim: anim, total: PARAMS.length,
-                shown: shown, liveShown: liveShown,
-                declared: declared, over: over, under: under,
-                drive: SCENES[sk].drive ? (SCENES[sk].drive.key + '/' + (SCENES[sk].drive.kind || '?')) : null };
-  });
-  return res;
+/* ============================ 探针 ============================ */
+/* 不手抄引擎：推进块直接从工具自己的 frame() 源码里切出来再 eval 回它的全局
+   词法作用域。工具改了 frame()，探针跟着改；抄一份则会在这里长出第 52 个变体。 */
+function makeEngine(w) {
+  function ev(src) { try { return w.eval(src); } catch (e) { return undefined; } }
+  var E = {
+    ev: ev,
+    SCENES: ev('typeof SCENES !== "undefined" ? SCENES : null'),
+    PARAMS: ev('typeof PARAMS !== "undefined" ? PARAMS : null'),
+    state:  ev('typeof state  !== "undefined" ? state  : null'),
+    cv:     ev('typeof canvas !== "undefined" ? canvas : null'),
+    draw:   ev('typeof draw === "function" ? draw : null'),
+    swt:    ev('typeof switchTab === "function" ? switchTab : null'),
+    reset:  ev('typeof resetSim === "function" ? resetSim : null'),
+    setAP:  ev('typeof setAutoPlayFor === "function" ? setAutoPlayFor : null'),
+    autoPlay: ev('typeof autoPlay !== "undefined" ? autoPlay : null'),
+    curTab: function () { return ev('curTab'); }
+  };
+  if (!E.SCENES || !E.PARAMS || !E.state || !E.cv || !E.draw || !E.swt) return null;
+
+  var fsrc = ev('typeof frame === "function" ? frame.toString() : null');
+  if (!fsrc) return null;
+  var m = /if \(state\.running\) \{\n([\s\S]*?)\n *\}/.exec(fsrc);
+  if (!m) return null;
+  var body = m[1].split('\n');
+
+  /* 该块里除了 t / theta / applyDrive / pushSample 之外还有别的推进语句吗？
+     有的话通道消融解释力下降，结论里要标出来，不能装作没有。 */
+  var KNOWN_LINE = /state\.t \+=|state\.theta \+=|applyDrive\(\)|pushSample\(\)|const dv = SCENES|syncParamSlider\(/;
+  E.extraLines = body.filter(function (l) { return l.trim() && !KNOWN_LINE.test(l); })
+                     .map(function (l) { return l.trim(); });
+
+  function build(drop) {
+    var kept = body.filter(function (l) { return !drop.some(function (re) { return re.test(l); }); });
+    return w.eval('(function(dt){\n' + kept.join('\n') + '\n})');
+  }
+  var RE_T = /state\.t \+=/, RE_TH = /state\.theta \+=/,
+      RE_PUSH = /pushSample\(\)/, RE_DRIVE = /applyDrive\(\)|syncParamSlider\(/;
+
+  E.steppers = {
+    full:  build([]),                                 // 全量：与 frame() 逐字一致
+    theta: build([RE_T, RE_PUSH, RE_DRIVE]),          // 只推 state.theta
+    t:     build([RE_TH, RE_PUSH, RE_DRIVE]),         // 只推 state.t
+    push:  build([RE_TH, RE_DRIVE])                   // 推 t + pushSample()，不推 theta
+  };
+  /* 采样窗口裁剪：frame() 在 running 块之外做，探针要一并复刻，
+     否则 samples 会无限长大，draw() 越跑越慢且画面语义也不对。 */
+  E.trim = ev('(function(){ var ws = (SCENES[curTab].sampleWindow || function(){return 10;})();' +
+              ' while (samples.length && samples[0].t < state.t - ws) samples.shift(); })') ||
+           function () {};
+  return E;
 }
 
-function row(tool, tab, r){
-  var tr = document.createElement('tr');
+function Probe(E) {
+  var st = E.state, cv = E.cv, draw = E.draw;
+
+  function step(mode, dt) { E.steppers[mode](dt); E.trim(); }
+
+  function run(mode, sec, dt) {
+    var n = Math.round(sec / dt);
+    for (var i = 0; i < n; i++) step(mode, dt);
+  }
+
+  /* 判据⑧：先空转两轮「画 + 读」把合成管线喂饱，否则首帧读到的是旧帧 */
+  function flush() { draw(); hash(cv); draw(); hash(cv); draw(); }
+
+  /* 判据④：喂满 warmSec 秒；要推到很晚（lateSec）时前段用粗 dt，
+     最后 settleSec 秒回到 1/60，让历史缓冲按原生密度重填。 */
+  function warm(target) {
+    var need = target - st.t;
+    if (need <= 0) return;
+    var coarse = Math.max(0, need - CFG.settleSec);
+    if (coarse > 0) run('full', coarse, CFG.coarseDt);
+    run('full', target - st.t, CFG.dt);
+  }
+
+  /* 一个测量窗口：走 sec 秒，均匀取 CFG.winN 帧画布指纹。
+     watchKey 非空时顺带记录该 state 键在窗口内的全部取值（判据①）。 */
+  function win(mode, sec, watchKey, dt) {
+    dt = dt || CFG.dt;
+    var total = Math.round(sec / dt);
+    var every = Math.max(1, Math.round(total / CFG.winN));
+    var seen = {}, distinct = 0, adj = 0, taken = 0, prev = null, prevD = null, maxAdj = 0;
+    var vals = {}, vn = 0, vmin = Infinity, vmax = -Infinity;
+    flush();
+    for (var i = 0; i < total; i++) {
+      step(mode, dt);
+      if (watchKey != null) {
+        var v = st[watchKey];
+        if (typeof v === 'number' && isFinite(v)) {
+          var kk = v.toPrecision(12);
+          if (!vals[kk]) { vals[kk] = 1; vn++; }
+          if (v < vmin) vmin = v;
+          if (v > vmax) vmax = v;
+        }
+      }
+      if (i % every === 0) {
+        draw();
+        var g = grab(cv), h = g.h;
+        if (!seen[h]) { seen[h] = 1; distinct++; }
+        if (prev !== null && h !== prev) adj++;
+        /* 判据②：相邻帧的逐字节 max|Δ|。不设阈值，只看它是不是严格 > 0——
+           实测 12 个驱动页签的标定跨度达 38 倍，任何统一阈值都会误杀。 */
+        if (prevD) {
+          var m = 0;
+          for (var k = 0; k < g.d.length; k += 4) {
+            var dd = g.d[k] - prevD[k]; if (dd < 0) dd = -dd;
+            if (dd > m) m = dd;
+          }
+          if (m > maxAdj) maxAdj = m;
+        }
+        prevD = g.d; prev = h; taken++;
+      }
+    }
+    return { distinct: distinct, adj: adj, taken: taken, maxAdj: maxAdj,
+             vn: vn, vspan: (vn ? vmax - vmin : 0) };
+  }
+
+  return { step: step, run: run, flush: flush, warm: warm, win: win };
+}
+
+/* ============================ 单页签审计 ============================ */
+/* 两段式（判据⑨）：稳态窗口 + 晚期窗口。返回结构体，判词在 verdict() 里下。 */
+function measurePass(E, P, sk, winSec, watchKey) {
+  E.reset && E.reset();
+  P.warm(CFG.warmSec);
+  var early = P.win('full', winSec, watchKey);
+  P.warm(CFG.lateSec);
+  var late = P.win('full', winSec, watchKey);
+  /* 混叠自锁排查：测量窗口用严格均匀的 dt，代价是「内容周期恰好是 dt 的整数倍」
+     的页签会帧帧同像素，被读成定格。真正静止的画面在任何步长下都只有 1 帧，
+     所以换一个与 1/60 不成简单比例的步长重测一次就能把两者分开。 */
+  var lock = (late.distinct <= 1) ? P.win('full', winSec, null, CFG.dt2) : null;
+  return { early: early, late: late, lock: lock };
+}
+
+/* 一次 pass 是否在动。判据⑨①：晚期窗口不重复帧 > 1；再加混叠自锁的补测。 */
+function passMoving(pass) {
+  return pass.late.distinct > 1 || !!(pass.lock && pass.lock.distinct > 1);
+}
+function passVerdict(pass) { return passMoving(pass) ? '在动' : '静止'; }
+
+/* 运动来自哪条通道（判据⑤）。只认两条**充分**证据，其余一律交人工：
+     ① 只推 state.theta 就有变化 —— θ 是纯结构相位钟，不牵涉历史滚动，成立即真演进；
+     ② 只推 state.t 毫无变化、加推 pushSample() 才有变化 —— 变化来自逐项累加。
+   为什么不敢只看「push 通道 > 1」：push 通道里 state.t 也在走，直接读 state.t 的
+   装饰会一并被算进去（i-essence/cubic 关掉 drive 后 t 与 push 两条通道读数相同，
+   全部来自呼吸光点）。为什么不敢只看「t 通道 > 1」：剔掉 pushSample() 后历史缓冲
+   会在窗口内被裁空，曲线自己变短，那是消融手法的产物不是页面的运动。
+   两条都不成立时本页不下结论——判据⑥要求直接读被演示量，没有 drive 声明就无从知道它是谁。 */
+function sourceOf(ch) {
+  if (!ch) return null;
+  if (ch.theta > 1) return '引擎相位时钟（θ 通道单独成立）';
+  if (ch.push > 1 && ch.t <= 1) return 'pushSample() 逐帧演进（t 通道单独不成立）';
+  return null;
+}
+
+function channels(E, P, winSec) {
+  var out = {};
+  ['theta', 't', 'push'].forEach(function (m) {
+    /* 每个通道都从头预热：不重置的话，上一通道留下的陈旧内部时刻
+       （典型：forces 的 state._pt）会让本通道第一帧吃到一个巨大 Δt。 */
+    E.reset && E.reset();
+    P.warm(CFG.warmSec);
+    out[m] = P.win(m, winSec).distinct;
+  });
+  return out;
+}
+
+function toggleAblation(E, P, sk, winSec) {
+  var tgs = (E.SCENES[sk].toggles || []).filter(function (g) { return E.state[g.key]; });
+  var out = [];
+  tgs.forEach(function (g) {
+    E.reset && E.reset();
+    P.warm(CFG.warmSec);
+    E.state[g.key] = false;
+    var d = P.win('full', winSec).distinct;
+    E.state[g.key] = true;
+    out.push({ key: g.key, distinct: d });
+  });
+  return out;
+}
+
+function auditTab(E, sk) {
+  var P = Probe(E);
+  var st = E.state, sc = E.SCENES[sk];
+  try { E.swt(sk); } catch (e) {}
+  st.running = false;                       // 页面自己的 rAF 不再推时钟，测量才可复现
+
+  var d = sc.drive || null;
+  var declaredNull = ('drive' in sc) && sc.drive === null;
+  var winSec = d ? Math.max(CFG.winMin, d.period) : CFG.winMin;
+
+  /* ---- ① 滑块作用域（与旧版同口径） ---- */
+  E.reset && E.reset();
+  P.warm(2);
+  P.flush();
+  var live = [];
+  E.PARAMS.forEach(function (p) {
+    var old = st[p.key];
+    var lo = p.map ? p.map(p.min) : p.min, hi = p.map ? p.map(p.max) : p.max;
+    st[p.key] = lo; E.draw(); var a = hash(E.cv);
+    st[p.key] = hi; E.draw(); var b = hash(E.cv);
+    st[p.key] = old; E.draw();
+    if (a !== b) live.push(p.key);
+  });
+  var declared = sc.params || null;
+  var over = [], under = [];
+  if (declared) {
+    declared.forEach(function (k) { if (live.indexOf(k) < 0) over.push(k); });
+    live.forEach(function (k) { if (declared.indexOf(k) < 0) under.push(k); });
+  }
+
+  /* ---- ② 是否静止 ---- */
+  if (d && E.setAP) E.setAP(sk, true);
+  var main = measurePass(E, P, sk, winSec, d ? d.key : null);
+
+  /* 判据③：控制组 = 同一页关掉 autoPlay，并把被驱动的参数放回滑杆默认值，
+     还原「没有 drive 的那个世界」。它读出静止，才证明这把尺子抓得住问题。 */
+  var ctl = null;
+  if (d && E.setAP) {
+    E.setAP(sk, false);
+    var pd = null;
+    E.PARAMS.forEach(function (p) { if (p.key === d.key) pd = p; });
+    if (pd) st[d.key] = pd.map ? pd.map(pd.value) : pd.value;
+    ctl = measurePass(E, P, sk, winSec, d.key);
+    E.setAP(sk, true);
+  }
+
+  /* 判据⑤⑨②：只有「没有 drive 且晚期仍在变」才需要通道 + 开关消融来定位来源 */
+  var ch = null, abl = null;
+  var needDiag = !d && passMoving(main);
+  if (needDiag) {
+    ch = channels(E, P, winSec);
+    if (!sourceOf(ch)) abl = toggleAblation(E, P, sk, winSec);
+  }
+  var ctlCh = null;
+  if (ctl && passMoving(ctl)) {
+    /* 控制组仍在变：可能是装饰，也可能这一页本来就有引擎时钟动画。
+       给出通道证据，别下断言。 */
+    if (E.setAP) E.setAP(sk, false);
+    ctlCh = channels(E, P, winSec);
+    if (E.setAP) E.setAP(sk, true);
+  }
+
+  return {
+    tab: sk, live: live, total: E.PARAMS.length, declared: declared, over: over, under: under,
+    shown: declared ? declared.length : E.PARAMS.length,
+    liveShown: declared ? (declared.length - over.length) : live.length,
+    drive: d ? { key: d.key, kind: d.kind || '?', period: d.period } : null,
+    declaredNull: declaredNull,
+    main: main, ctl: ctl, ch: ch, ctlCh: ctlCh, abl: abl,
+    extraLines: E.extraLines
+  };
+}
+
+/* ============================ 判词 ============================ */
+/* 控制组（关掉自动播放 + 把被驱动参数放回默认刻度）的判词。
+   这一遍还原的是「补 drive 之前的那个世界」，所以它读出静止，
+   才证明这把尺子抓得住问题——它同时是本页的负控制。
+   这里能自动区分装饰：被演示量（drive.key）在控制组里是冻结的，
+   若 θ / pushSample 两条通道又都不成立，剩下的画面变化只能来自直接读时钟的修饰。 */
+function ctlVerdict(r) {
+  if (!r.ctl) return null;
+  /* 判据①：控制组里被演示量（drive.key）被冻结在滑杆默认刻度上，按主判据这一遍就是静止。
+     画面上的残余变化一律只作旁证列出，不改判词——这正是旧版假阳性 D 的根：
+     把呼吸光点、脉动半径这类「直接读 state.t 的修饰」当成了动画。 */
+  if (!passMoving(r.ctl)) return { v: '静止', hard: true, why: '画面同时定格（硬控制组）' };
+  var why = '被演示量冻结；画面残余变化 ' + r.ctl.late.distinct + '/' + r.ctl.late.taken + ' 帧' +
+            (r.ctlCh ? '（通道 θ/t/push = ' + r.ctlCh.theta + '/' + r.ctlCh.t + '/' + r.ctlCh.push + '）' : '');
+  if (r.ctlCh && r.ctlCh.theta > 1)
+    why += '；θ 通道成立 → 该页除 drive 外可能另有引擎时钟运动，请人工确认这残余是不是装饰';
+  return { v: '静止', hard: false, why: why };
+}
+
+function verdict(r) {
+  var v = { text: '', cls: 'ok', tags: [] };
+  var mv = passVerdict(r.main);
+
+  if (r.drive) {
+    if (r.main.early.vn < 2) {
+      v.cls = 'bad';
+      v.text = '驱动失效：整周期内 state.' + r.drive.key + ' 只有 ' + r.main.early.vn + ' 个取值';
+    } else if (mv === '静止') {
+      v.cls = 'bad';
+      v.text = '驱动不改变画面：数值在动（' + r.main.early.vn + ' 值）但晚期窗口只有 1 帧';
+    } else {
+      v.cls = 'ok';
+      v.text = '在动 · drive';
+    }
+    var cvd = ctlVerdict(r);
+    if (cvd) v.tags.push('控制组 ' + cvd.v + (cvd.why ? '：' + cvd.why : '（补 drive 前确为静止页签）'));
+    return v;
+  }
+
+  if (r.declaredNull) {
+    if (mv === '静止') { v.cls = 'ok'; v.text = '静止 · 已显式 drive: null'; }
+    else { v.cls = 'warn'; v.text = '写了 drive: null 却仍在动，请复核注释理由'; }
+    return v;
+  }
+
+  /* 未声明 drive */
+  if (mv === '静止') { v.cls = 'bad'; v.text = '静止 · 未声明 drive'; return v; }
+  var src = sourceOf(r.ch);
+  if (src) { v.cls = 'ok'; v.text = '在动 · ' + src; return v; }
+  /* 画面确实在变，但两条充分证据都不成立。没有 drive 声明就无从知道「被演示量」是谁，
+     判据⑥不允许只凭画布哈希断言它是装饰——所以这里给证据、不给结论。 */
+  v.cls = 'warn';
+  v.text = '需人工：画面在变（晚期 ' + r.main.late.distinct + '/' + r.main.late.taken +
+           ' 帧），但 θ 通道不成立、pushSample() 也没带来 state.t 之外的变化' +
+           '（通道 ' + (r.ch ? r.ch.theta + '/' + r.ch.t + '/' + r.ch.push : '?') +
+           '）。可能是被演示量随 state.t 演进，也可能只是装饰性呼吸/脉动或历史曲线滚动——' +
+           '判据⑥要求直接读被演示量，未声明 drive 的页签本页做不到。';
+  if (r.abl && r.abl.length) {
+    var only = r.abl.filter(function (a) { return a.distinct <= 1; });
+    v.tags.push(only.length
+      ? '关掉开关 ' + only.map(function (a) { return a.key; }).join(' / ') + ' 后画面即定格'
+      : '逐开关消融：关掉任一开关画面仍在变');
+  }
+  return v;
+}
+
+/* ============================ 渲染 ============================ */
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+function row(tool, r) {
+  var v = verdict(r);
+  r.verdict = v.text; r.verdictCls = v.cls; r.verdictTags = v.tags;
+
   var cls, diff;
-  if (r.declared){
+  if (r.declared) {
     /* 漏声明（under）比多声明（over）严重：前者是功能被藏起来，后者只是白占位 */
     cls = r.under.length ? 'bad' : (r.over.length ? 'warn' : 'ok');
     var parts = [];
@@ -148,60 +532,183 @@ function row(tool, tab, r){
     if (r.over.length)  parts.push('<span class="warn">多声明 −' + r.over.join(' −') + '</span>');
     diff = parts.length ? parts.join(' · ') : '<span class="ok">一致</span>';
   } else {
-    /* 没声明 params 的页签：面板显示全部滑块，无从谈漏声明，仍按死滑块数示警 */
     cls = r.live.length === 0 ? 'bad' : (r.live.length < r.total ? 'warn' : 'ok');
     diff = '<span class="bad">未声明 params</span>';
   }
-  var declared = r.declared ? r.declared.join(', ') : '<span class="bad">未声明</span>';
-  var drive = r.drive ? '<span class="ok">' + r.drive + '</span>'
-                      : (r.anim ? '<span class="warn">未声明（有动画）</span>'
-                                : '<span class="bad">无 · 静止</span>');
-  tr.innerHTML = '<td>' + tool + '</td><td>' + tab + '</td>' +
+
+  var drv = r.drive
+    ? '<span class="ok">' + r.drive.key + '/' + r.drive.kind + '·T=' + r.drive.period + 's</span>'
+    : (r.declaredNull ? '<span class="dim">drive: null</span>' : '<span class="warn">未声明</span>');
+
+  var num = r.drive
+    ? (r.main.early.vn >= 2 ? '<span class="ok">' : '<span class="bad">') +
+      r.main.early.vn + ' 值 · 跨度 ' + r.main.early.vspan.toPrecision(3) + '</span>'
+    : '<span class="dim">—</span>';
+
+  var px = r.main.early.distinct + '/' + r.main.early.taken + ' · ' +
+           (passMoving(r.main) ? '<span class="ok">' : '<span class="bad">') +
+           r.main.late.distinct + '/' + r.main.late.taken + '</span>' +
+           (r.main.lock ? '<br><span class="dim">换步长复测 ' + r.main.lock.distinct + '/' +
+                          r.main.lock.taken + '</span>' : '');
+
+  var chs = r.ch ? (r.ch.theta + ' / ' + r.ch.t + ' / ' + r.ch.push)
+                 : '<span class="dim">未跑（无需诊断）</span>';
+  var cvd = ctlVerdict(r);
+  var ctl = cvd ? (cvd.v + ' · ' + r.ctl.late.distinct + '/' + r.ctl.late.taken + ' 帧' +
+                   (r.ctlCh ? ' · 通道 ' + r.ctlCh.theta + '/' + r.ctlCh.t + '/' + r.ctlCh.push : ''))
+                : '<span class="dim">—</span>';
+
+  var tr = document.createElement('tr');
+  tr.innerHTML =
+    '<td>' + tool + '</td><td>' + r.tab + '</td>' +
     '<td class="' + cls + '">' + r.shown + ' / ' + r.liveShown + '</td>' +
     '<td>' + diff + '</td>' +
-    '<td>' + drive + '</td>' +
-    '<td><code>' + declared + '</code></td>' +
-    '<td><code>' + (r.live.length ? "['" + r.live.join("', '") + "']" : '[]') + '</code></td>';
+    '<td>' + drv + '</td>' +
+    '<td>' + num + '</td>' +
+    '<td>' + px + '</td>' +
+    '<td>' + chs + '</td>' +
+    '<td>' + ctl + '</td>' +
+    '<td class="' + v.cls + '">' + esc(v.text) +
+      (v.tags.length ? '<br><span class="dim">' + v.tags.map(esc).join('<br>') + '</span>' : '') +
+      (r.extraLines && r.extraLines.length
+        ? '<br><span class="warn">frame() 另有推进语句：' + esc(r.extraLines.join(' ')) + '</span>' : '') +
+    '</td>';
   tbody.appendChild(tr);
 }
 
-document.getElementById('go').addEventListener('click', function(){
-  this.disabled = true;
-  tbody.innerHTML = '';
-  fetch('../tools.json', { cache: 'no-cache' }).then(function(r){ return r.json(); }).then(function(j){
-    var list = j.tools.slice();
-    var i = 0, statTabs = 0, statStatic = 0, statShown = 0, statLive = 0, statUnder = 0;
-    (function next(){
-      if (i >= list.length){
-        /* 无效率的分母是「面板真会显示的滑块数」，不是全局 PARAMS ——
-           迁移到位的页签应当把这个数压到 0，指标才和 phase 2 的验收口径一致 */
-        bar.innerHTML = '完成：' + statTabs + ' 个页签 · 展示滑块 ' + statShown +
-          ' 根，其中无效 ' + (statShown - statLive) + ' 根（' +
-          Math.round(100 * (statShown - statLive) / Math.max(1, statShown)) + '%）· 漏声明页签 ' +
-          statUnder + ' 个 · 静止页签 ' + statStatic + ' 个';
-        return;
-      }
-      var d = list[i++];
-      bar.textContent = '审计中 ' + i + '/' + list.length + '：' + d.id;
-      load('../' + d.file).then(function(){
-        var res = null;
-        try { res = probe(); } catch(e){ res = null; }
-        if (!res){
-          var tr = document.createElement('tr');
-          tr.innerHTML = '<td>' + d.id + '</td><td colspan="6" class="bad">探测失败（非声明式实现，或页签结构与引擎约定不同）</td>';
-          tbody.appendChild(tr);
-        } else {
-          Object.keys(res).forEach(function(sk){
-            statTabs++; statShown += res[sk].shown; statLive += res[sk].liveShown;
-            if (res[sk].under && res[sk].under.length) statUnder++;
-            if (!res[sk].anim && !res[sk].drive) statStatic++;
-            row(d.id, sk, res[sk]);
-          });
-        }
-        next();
-      });
-    })();
+/* ============================ 已知答案自检 ============================ */
+/* 把结论压成三态标签，供已知答案比对 */
+function tabLabel(r) {
+  var v = r.verdict || '';
+  if (/^需人工/.test(v)) return '需人工';
+  if (/^静止/.test(v)) return '静止';
+  if (/^在动/.test(v)) return '在动';
+  return v;
+}
+
+function checkKnown(rows) {
+  kbody.innerHTML = '';
+  var pass = 0, fail = 0, skip = 0;
+  KNOWN.forEach(function (k) {
+    var r = null;
+    rows.forEach(function (x) { if (x.tool === k.tool && x.tab === k.tab) r = x; });
+    var got, res, cls;
+    if (!r) { got = '（本次未测）'; res = 'SKIP'; cls = 'dim'; skip++; }
+    else {
+      var mv = tabLabel(r);
+      var cvd = ctlVerdict(r);
+      var parts = ['本页 ' + mv];
+      if (cvd) parts.push('控制组 ' + cvd.v + (cvd.hard ? '（硬定格）' : '（残余帧 ' +
+        r.ctl.late.distinct + '/' + r.ctl.late.taken + '）'));
+      got = parts.join(' · ');
+      var ok = (mv === k.auto) &&
+               (!k.ctl || (cvd && cvd.v === k.ctl)) &&
+               (!k.hardCtl || (cvd && cvd.hard));
+      if (ok) { res = 'PASS'; cls = 'ok'; pass++; }
+      else { res = 'FAIL'; cls = 'bad'; fail++; }
+    }
+    var expect = '本页 ' + k.auto + (k.ctl ? ' · 控制组 ' + k.ctl : '') +
+                 (k.hardCtl ? '（必须硬定格）' : '');
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + k.tool + ' / <b>' + k.tab + '</b><br><span class="dim">' + esc(k.why) + '</span></td>' +
+                   '<td>' + esc(expect) + '</td><td>' + esc(got) + '</td>' +
+                   '<td class="' + cls + '">' + res + '</td>';
+    kbody.appendChild(tr);
+    window.__AUDIT.known.push({ tool: k.tool, tab: k.tab, expect: expect, got: got, res: res });
   });
+  return { pass: pass, fail: fail, skip: skip };
+}
+
+/* ============================ 主流程 ============================ */
+function runAudit(filter) {
+  tbody.innerHTML = '';
+  window.__AUDIT = { rows: [], known: [], done: false, error: null };
+  var rows = window.__AUDIT.rows;
+
+  return fetch('../tools.json', { cache: 'no-cache' })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      var list = j.tools.filter(function (d) {
+        return !filter.length || filter.some(function (f) { return d.id.indexOf(f) >= 0; });
+      });
+      var i = 0;
+      function next() {
+        if (i >= list.length) return Promise.resolve();
+        var d = list[i++];
+        bar.textContent = '审计中 ' + i + '/' + list.length + '：' + d.id;
+        return load('../' + d.file).then(function () {
+          var E = null;
+          try { E = makeEngine(fr.contentWindow); } catch (e) { E = null; }
+          if (!E) {
+            var tr = document.createElement('tr');
+            tr.innerHTML = '<td>' + d.id + '</td><td colspan="9" class="bad">' +
+              '探测失败（非声明式实现，或 frame() 结构与引擎约定不同）</td>';
+            tbody.appendChild(tr);
+            rows.push({ tool: d.id, tab: null, probeFailed: true });
+            return yieldToUI().then(next);
+          }
+          var keys = Object.keys(E.SCENES);
+          var ki = 0;
+          function nextTab() {
+            if (ki >= keys.length) return yieldToUI().then(next);
+            var sk = keys[ki++];
+            bar.textContent = '审计中 ' + i + '/' + list.length + '：' + d.id + ' / ' + sk;
+            var r;
+            try { r = auditTab(E, sk); }
+            catch (e) {
+              r = { tab: sk, error: String(e && e.message || e), live: [], total: 0,
+                    declared: null, over: [], under: [], shown: 0, liveShown: 0,
+                    drive: null, declaredNull: false,
+                    main: { early: { distinct: 0, taken: 0, vn: 0, vspan: 0 },
+                            late: { distinct: 0, taken: 0, vn: 0, vspan: 0 } },
+                    ctl: null, ch: null, abl: null, extraLines: [] };
+            }
+            r.tool = d.id;
+            row(d.id, r);
+            rows.push(r);
+            return yieldToUI().then(nextTab);
+          }
+          return nextTab();
+        });
+      }
+      return next().then(function () {
+        var tabs = rows.filter(function (r) { return r.tab; });
+        var still = tabs.filter(function (r) { return /^静止 · 未声明/.test(r.verdict || ''); });
+        var manual = tabs.filter(function (r) { return (r.verdictCls === 'warn'); });
+        var broken = tabs.filter(function (r) { return r.verdictCls === 'bad' && !/未声明 drive/.test(r.verdict || ''); });
+        var kres = checkKnown(rows);
+        bar.innerHTML = '完成：' + tabs.length + ' 个页签 · ' +
+          '<span class="bad">静止且未声明 drive ' + still.length + ' 个</span> · ' +
+          '<span class="bad">驱动异常 ' + broken.length + ' 个</span> · ' +
+          '<span class="warn">需人工 ' + manual.length + ' 个</span> · ' +
+          '已知答案自检 <span class="' + (kres.fail ? 'bad' : 'ok') + '">' +
+          kres.pass + ' PASS / ' + kres.fail + ' FAIL / ' + kres.skip + ' SKIP</span>';
+        window.__AUDIT.done = true;
+        window.__AUDIT.summary = { tabs: tabs.length, still: still.length,
+                                   broken: broken.length, manual: manual.length, known: kres };
+      });
+    })
+    .catch(function (e) {
+      window.__AUDIT.error = String(e && e.stack || e);
+      window.__AUDIT.done = true;
+      bar.innerHTML = '<span class="bad">失败：' + esc(String(e)) + '</span>';
+    });
+}
+
+function filters() {
+  return document.getElementById('only').value.split(',')
+    .map(function (s) { return s.trim(); }).filter(Boolean);
+}
+document.getElementById('go').addEventListener('click', function () {
+  var b = this; b.disabled = true;
+  runAudit(filters()).then(function () { b.disabled = false; });
+});
+document.getElementById('known').addEventListener('click', function () {
+  var b = this; b.disabled = true;
+  var tools = [];
+  KNOWN.forEach(function (k) { if (tools.indexOf(k.tool) < 0) tools.push(k.tool); });
+  document.getElementById('only').value = tools.join(', ');
+  runAudit(tools).then(function () { b.disabled = false; });
 });
 </script>
 </body>
