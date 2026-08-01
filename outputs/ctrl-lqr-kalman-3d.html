@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <meta name="tool-version" content="1.0.0">
-<meta name="engine-version" content="1.1.0">
+<meta name="engine-version" content="1.1.1">
 <title>最优与估计 · LQR 与卡尔曼</title>
 <!-- ============================================================
   最优与估计 —— LQR 与卡尔曼 / Optimal & Estimated — LQR and the Kalman Filter
@@ -812,7 +812,7 @@ const WORLD = {
   o: null, mn: null, tA: 0, JoEnd: null, JmEnd: null,
   /* 页②③ 估计：真实状态由 LQR 状态反馈镇定，滤波器只看得到带噪的 θ */
   bTh: 0, bW: 0, bU: 0, meas: 0,
-  pTh: 0, pW: 0,                       // 纯模型预测（没有测量修正）
+  pTh: 0, pW: 0, tP: 0,                // 纯模型预测（没有测量修正）+ 它的推算窗口计时
   eTh: 0, eW: 0, tB: 0,                // 卡尔曼估计
   /* 页③ 协方差：自带一份状态与 Σ，好让「切断耦合」不影响页② */
   cTh: 0, cW: 0, cETh: 0, cEW: 0, Sm: null, Sp: null, tC: 0, s22Hist: 0,
@@ -828,15 +828,24 @@ function seedLqrDuel() {
 function seedKf() {
   const W = WORLD;
   W.bTh = state.tilt; W.bW = 0; W.bU = 0; W.meas = state.tilt;
-  W.pTh = state.tilt; W.pW = 0;
+  W.pTh = state.tilt; W.pW = 0; W.tP = 0;
   W.eTh = state.tilt; W.eW = 0; W.tB = 0;
+}
+/* 纯模型预测的「推算窗口」：不看测量时，误差按开环不稳定极点 e^{λt} 长大，
+   λ = (−c + √(c²+4a))/2 ≈ 2.9 s⁻¹ —— 一秒多就翻几十倍，拿一整轮去装它只会
+   看到一条贴着裁剪线的直线。取 3 个 1/λ（约 20 倍增长），窗口内正好「起点重合
+   → 悄悄分家 → 明显漂走」而不至于整段压在裁剪边界上，每屏重演七八次。这是诚实
+   的量级，不是为了好看：不看测量，一秒多就找不着北了。 */
+function predWindow() {
+  const lam = (-state.damp + Math.sqrt(state.damp * state.damp + 4 * aOf())) / 2;
+  return clamp(3 / Math.max(0.05, lam), 0.3, demoSpan() * 0.35);
 }
 function seedCov() {
   const W = WORLD;
   W.cTh = state.tilt; W.cW = 0; W.cETh = state.tilt; W.cEW = 0;
   /* 每轮把 Σ 退回一个「什么都不知道」的大先验，收缩过程才反复看得见 */
-  W.Sm = [[0.09, 0], [0, 2.25]];
-  W.Sp = [[0.09, 0], [0, 2.25]];
+  W.Sm = [[0.04, 0], [0, 1.0]];
+  W.Sp = [[0.04, 0], [0, 1.0]];
   W.tC = 0;
 }
 function seedLqg() {
@@ -923,8 +932,11 @@ function subStep(h) {
   W.gETh = clamp(W.gETh + h * dgT, -50, 50);
   W.gEW  = clamp(W.gEW  + h * dgW,  -400, 400);
 
-  W.t += h; W.tA += h; W.tB += h; W.tC += h; W.tD += h;
+  W.t += h; W.tA += h; W.tB += h; W.tC += h; W.tD += h; W.tP += h;
 
+  /* 推算窗口到点：把纯模型预测重新对齐到真值再放手 —— 「不看测量能撑多久」
+     这件事因此每隔 predWindow() 秒就重演一次，而不是一次性冲出量程再也回不来。 */
+  if (W.tP >= predWindow()) { W.pTh = W.bTh; W.pW = W.bW; W.tP = 0; }
   if (W.tA >= roundLqr()) { W.JoEnd = W.o.J; W.JmEnd = W.mn.J; seedLqrDuel(); }
   if (W.tB >= roundKf())  seedKf();
   if (W.tD >= roundLqg()) seedLqg();
@@ -1072,7 +1084,7 @@ function circlePts(cx, cy, r, z, n) {
   return pts;
 }
 /* 协方差椭圆：kσ 等高线 x = k·Σ^{1/2}·[cos t, sin t]，对称 2×2 解析开方 */
-function ellipsePts(Sig, cx, cy, z, sx, sy, k, n) {
+function ellipsePts(Sig, cx, cy, z, sx, sy, k, n, bx, by) {
   const s11 = Sig[0][0], s12 = Sig[0][1], s22 = Sig[1][1];
   const tr = s11 + s22, dt = s11*s22 - s12*s12;
   const disc = Math.max(0, tr*tr/4 - dt);
@@ -1089,7 +1101,10 @@ function ellipsePts(Sig, cx, cy, z, sx, sy, k, n) {
   for (let i = 0; i <= N; i++) {
     const a = i / N * TAU, ca = Math.cos(a), sa = Math.sin(a);
     const dx = r1*ca*v1[0] + r2*sa*v2[0], dy = r1*ca*v1[1] + r2*sa*v2[1];
-    pts.push([cx + dx*sx, cy + dy*sy, z]);
+    /* 越界的先验椭圆裁到画框内（规范 §6 无界值处理）：不裁的话「一无所知」
+       那一枚会大到把整幅画盖住，收缩过程反而看不见 */
+    const X = bx || 1e9, Y = by || 1e9;
+    pts.push([clamp(cx + dx*sx, -X, X), clamp(cy + dy*sy, -Y, Y), z]);
   }
   return pts;
 }
@@ -1185,8 +1200,11 @@ function respHorizon() {
   return clamp(6 / Math.max(0.2, decay), 0.5, roundLqr());
 }
 
-/* 页④ 的奈奎斯特平面：与 s 平面平行，沿 z 拉开一段，两个「正视」是同一方向 */
-const NY_Z = 5.4, NY_S = 1.05, NY_R = 2.6;
+/* 页④ 的奈奎斯特平面：与 s 平面**并排**放在 z = 0 上，不沿 z 叠放 ——
+   两张平面都是复平面，沿深度叠起来后任何一个正视都会把两者画在同一片像素上
+   （实测：极点与奈奎斯特曲线互相穿插，谁也读不出来）。并排则一个立体视角看
+   全局，两个正视各取一张。 */
+const NY_CX = 5.6, NY_S = 1.05, NY_R = 2.6;
 
 /* 最近 win 秒内某个残差的 RMS（页② 用来量化「谁更准」） */
 function rmsOf(sel, win) {
@@ -1435,6 +1453,17 @@ const SCENES = {
       if (state.showPred) curve(C, traceOf(s => s.pTh, 0, TH, LIM), C_VIOLET);
       if (state.showEst)  curve(C, traceOf(s => s.eTh, 0, TH, LIM), C_EMERALD);
 
+      /* 推算窗口的起点（琥珀度量注记）：紫线每次都是从这里与真值重合后放手的 */
+      if (state.showPred && state.showGuides) {
+        const pw = predWindow();
+        for (let k = 0; k * pw <= demoSpan() + pw; k++) {
+          const z = (W.tP + k * pw) * v;
+          if (z <= 0 || z > WAVE_LEN) continue;
+          line3(C, [0, -1.7, z], [0, -1.55, z], { width: 1.4, color: rgba(C_AMBER, 0.7) });
+        }
+        label3(C, [0, -1.9, W.tP * v + 0.4], t({ zh: '↑ 每次在此重新对齐真值', en: '↑ realigned to the truth here' }),
+          { size: 10, color: rgba(C_AMBER, 0.65), align: 'left' });
+      }
       if (state.showGuides) line3(C, [state.len*Math.sin(W.bTh), state.len*Math.cos(W.bTh), PZ],
         [0, clamp(W.bTh*TH, -LIM, LIM), 0], { width: 1.5, dash: [7, 7], color: rgba(C_SLATE, 0.45) });
       if (state.showTrue) headDot(C, 0, W.bTh, TH, LIM, C_SLATE, 8);
@@ -1469,7 +1498,8 @@ const SCENES = {
         '<div class="sinC">' + t({ zh: '含噪测量', en: 'measurement' }) + ' y = <b>' + fmtS(W.meas, 4) + '</b>' +
           '&ensp;<span class="dim">RMS ' + (rm == null ? '—' : fmt(rm, 4)) + '</span></div>' +
         '<div class="cosC">' + t({ zh: '纯模型预测', en: 'model only' }) + ' = <b>' + fmtS(W.pTh, 4) + '</b>' +
-          '&ensp;<span class="dim">RMS ' + (rp == null ? '—' : fmt(rp, 4)) + '</span></div>' +
+          '&ensp;<span class="dim">RMS ' + (rp == null ? '—' : fmt(rp, 4)) +
+          t({ zh: '，每 ', en: ', realigned every ' }) + fmt(predWindow(), 2) + t({ zh: ' s 重新对齐', en: ' s' }) + '</span></div>' +
         '<div class="tanC">' + t({ zh: '卡尔曼融合', en: 'Kalman' }) + ' θ̂ = <b>' + fmtS(W.eTh, 4) + '</b>' +
           '&ensp;<span class="dim">RMS ' + (re == null ? '—' : fmt(re, 4)) + '</span></div>' +
         '<div class="cyaC">L = <b>[' + fmt(F.L[0], 3) + ', ' + fmt(F.L[1], 3) + ']</b>&ensp;<span class="dim">Σ₁₁ = ' +
@@ -1499,8 +1529,8 @@ const SCENES = {
             en: 'Tip: only θ is measured, so the ellipse ought to flatten along θ alone — but the coupling θ̇ = ω propagates that certainty into ω, which is exactly why an unmeasured quantity can still be estimated. Switch on "cut the coupling θ̇ = ω" and ω becomes unobservable at once: the readout σ_ω falls back to the prior and stops contracting.' },
     views: {
       iso:   { label: { zh: '立体', en: '3D' },                az: -0.85, el: 0.32,  dist: 13.5, tx: 0, ty: 0, tz: 2.7 },
-      face:  { label: { zh: '相平面正视 θ·ω', en: 'Phase plane θ·ω' }, az: 0.001, el: 0.02, dist: 7.0, tx: 0, ty: 0, tz: 0 },
-      side:  { label: { zh: '侧视 σ·t', en: 'Side σ·t' },       az: -Math.PI/2, el: 0.001, dist: 12.0, tx: 0, ty: 0, tz: 2.9 }
+      side:  { label: { zh: '侧视 σ·t（呼吸）', en: 'Side σ·t (the breathing)' }, az: -Math.PI/2, el: 0.001, dist: 11.0, tx: 0, ty: 0, tz: 3.2 },
+      face:  { label: { zh: '相平面正视 θ·ω', en: 'Phase plane θ·ω' }, az: 0.001, el: 0.02, dist: 10.5, tx: 0, ty: 0, tz: 3.2 }
     },
     toggles: [
       { key: 'showSm',     label: { zh: '预测后 Σ⁻（长大）', en: 'After predict Σ⁻ (grows)' },   color: '#fb7185', checked: true },
@@ -1537,20 +1567,22 @@ const SCENES = {
         if (s.cS11m == null) continue;
         const z = zAt(s.t);
         if (z > WAVE_LEN) break;
-        if (z - lastZ < 0.26) continue;
+        if (z - lastZ < 0.5) continue;
         lastZ = z;
         const Sm = [[s.cS11m, s.cS12m], [s.cS12m, s.cS22m]];
         const Sp = [[s.cS11p, s.cS12p], [s.cS12p, s.cS22p]];
-        const fade = Math.max(0.1, 1 - z / WAVE_LEN * 0.85);
-        if (state.showSm) strokePoly(C, ellipsePts(Sm, 0, 0, z, SX, SY, EK),
+        /* 老椭圆按 z 平方衰减：透视让远端（= 更老）反而被放大，不压下去就会
+           把最新那一枚盖住 —— 收缩过程恰恰要看最新那几枚 */
+        const fade = 0.06 + 0.8 * Math.pow(Math.max(0, 1 - z / WAVE_LEN), 2);
+        if (state.showSm) strokePoly(C, ellipsePts(Sm, 0, 0, z, SX, SY, EK, 44, EX, EY),
           { width: 1.6, color: rgba(C_ROSE, 0.72 * fade) });
-        if (state.showSp) strokePoly(C, ellipsePts(Sp, 0, 0, z, SX, SY, EK),
+        if (state.showSp) strokePoly(C, ellipsePts(Sp, 0, 0, z, SX, SY, EK, 44, EX, EY),
           { width: 1.6, color: rgba(C_VIOLET, 0.85 * fade) });
       }
       /* 最新那一枚：加粗，并用琥珀量出两个半轴 */
       const Sm0 = W.Sm, Sp0 = W.Sp;
-      if (state.showSm) strokePoly(C, ellipsePts(Sm0, 0, 0, 0, SX, SY, EK, 72), { width: 2.6, color: rgba(C_ROSE, 0.95) });
-      if (state.showSp) strokePoly(C, ellipsePts(Sp0, 0, 0, 0, SX, SY, EK, 72), { width: 2.6, color: rgba(C_VIOLET, 0.98) });
+      if (state.showSm) strokePoly(C, ellipsePts(Sm0, 0, 0, 0, SX, SY, EK, 72, EX, EY), { width: 2.6, color: rgba(C_ROSE, 0.95) });
+      if (state.showSp) strokePoly(C, ellipsePts(Sp0, 0, 0, 0, SX, SY, EK, 72, EX, EY), { width: 2.6, color: rgba(C_VIOLET, 0.98) });
       if (state.showGuides) {
         const sTh = Math.sqrt(Math.max(0, Sp0[0][0])) * EK, sOm = Math.sqrt(Math.max(0, Sp0[1][1])) * EK;
         line3(C, [0, 0, 0], [clamp(sTh*SX, -EX, EX), 0, 0], { width: 2, color: rgba(C_AMBER, 0.9) });
@@ -1630,14 +1662,14 @@ const SCENES = {
     tips: { zh: '提示：状态反馈的 LQR 有保证的裕度（卡尔曼不等式 |1+L(jω)| ≥ 1 ⇒ 相位裕度 ≥ 60°），画面上就是玫红曲线永远绕开以 −1 为心的青色单位圆。串上观测器，保证就没了 —— 按 4 一键套用一组把 LQG 裕度压到 10° 以下的参数（Doyle 1978）。最优不等于稳健。',
             en: 'Tip: LQR state feedback has guaranteed margins — the Kalman inequality |1+L(jω)| ≥ 1 forces a phase margin of at least 60°, which on screen is the rose curve always skirting the cyan unit circle centred at −1. Cascade an observer and the guarantee is gone: press 4 to apply a parameter set that drives the LQG margin below 10° (Doyle 1978). Optimal is not robust.' },
     views: {
-      iso:  { label: { zh: '立体', en: '3D' },                    az: -0.95, el: 0.30, dist: 15, tx: -0.4, ty: 0, tz: 2.6 },
-      pole: { label: { zh: '极点平面正视', en: 'Pole plane' },      az: 0.001, el: 0.02, dist: 9.5, tx: -0.6, ty: 0, tz: 0 },
-      nyq:  { label: { zh: '奈奎斯特正视', en: 'Nyquist plane' },   az: 0.001, el: 0.02, dist: 9.5, tx: -0.6, ty: 0, tz: NY_Z },
+      iso:  { label: { zh: '立体', en: '3D' },                    az: -0.55, el: 0.28, dist: 17, tx: 1.6, ty: -0.6, tz: 0 },
+      pole: { label: { zh: '极点平面正视', en: 'Pole plane' },      az: 0.001, el: 0.02, dist: 9.5, tx: -1.1, ty: -0.6, tz: 0 },
+      nyq:  { label: { zh: '奈奎斯特正视', en: 'Nyquist plane' },   az: 0.001, el: 0.02, dist: 9.0, tx: NY_CX, ty: 0, tz: 0 },
       /* 视角联动（§5.3）：这一格除了换相机，还把滑杆整体套到「裕度崩塌」那一组
          —— Doyle 1978 的结论必须能当场做出来，而不是只在 tips 里被引用。
          滑杆会同步跟着动（syncParamSlider），所以没有隐藏状态。 */
       doyle:{ label: { zh: '裕度崩塌（套用 Doyle 参数组）', en: 'Margin collapse (apply Doyle set)' },
-              az: 0.001, el: 0.02, dist: 9.5, tx: -0.6, ty: 0, tz: NY_Z,
+              az: 0.001, el: 0.02, dist: 9.0, tx: NY_CX, ty: 0, tz: 0,
               onSelect: () => {
                 state.len = 1.0; state.mass = 1.0; state.damp = 0.40;
                 state.qc = 0.01; state.rc = 1; state.sw = 10; state.sv = 0.001; state.psi = 90;
@@ -1700,56 +1732,63 @@ const SCENES = {
           { size: 11, color: '#fb923c', align: 'left' });
       }
 
-      /* ── 奈奎斯特平面（z = NY_Z）：禁区圆是「保证」的几何形状 ── */
+      /* ── 奈奎斯特平面（并排放在 s 平面右侧）：禁区圆是「保证」的几何形状 ── */
       if (state.showNyq) {
-        const nx = v => clamp(v, -NY_R, NY_R) * NY_S, ny = v => clamp(v, -NY_R, NY_R) * NY_S;
-        if (state.showGrid) planeGrid(C, 2, NY_Z, -NY_R*NY_S, NY_R*NY_S, NY_S, -NY_R*NY_S, NY_R*NY_S, NY_S, 'rgba(148,163,184,0.07)');
-        axisSeg(C, [-NY_R*NY_S - 0.25, 0, NY_Z], [NY_R*NY_S + 0.3, 0, NY_Z], 'Re', { dx: 0.34, dy: 0.2 });
-        axisSeg(C, [0, -NY_R*NY_S - 0.2, NY_Z], [0, NY_R*NY_S + 0.3, NY_Z], 'Im', { dy: 0.24 });
-        for (const k of [-2, -1, 1, 2]) tickMark(C, [k*NY_S, 0, NY_Z], [0, 0.07, 0], (k < 0 ? '−' : '') + Math.abs(k), { dy: -0.22 });
+        const NR = NY_R * NY_S;
+        const nx = v => NY_CX + clamp(v, -NY_R, NY_R) * NY_S, ny = v => clamp(v, -NY_R, NY_R) * NY_S;
+        if (state.showGrid) planeGrid(C, 2, 0, NY_CX - NR, NY_CX + NR, NY_S, -NR, NR, NY_S, 'rgba(148,163,184,0.07)');
+        axisSeg(C, [NY_CX - NR - 0.25, 0, 0], [NY_CX + NR + 0.3, 0, 0], 'Re', { dx: 0.34, dy: 0.2 });
+        axisSeg(C, [NY_CX, -NR - 0.2, 0], [NY_CX, NR + 0.3, 0], 'Im', { dy: 0.24 });
+        for (const k of [-2, -1, 1, 2]) tickMark(C, [NY_CX + k*NY_S, 0, 0], [0, 0.07, 0], (k < 0 ? '−' : '') + Math.abs(k), { dy: -0.22 });
         /* 禁区：以 −1 为心的单位圆。卡尔曼不等式 |1 + L| ≥ 1 说 LQR 的曲线进不来 */
-        strokePoly(C, circlePts(-NY_S, 0, NY_S, NY_Z), { width: 1.8, color: rgba(C_CYAN, 0.55) });
-        strokePoly(C, circlePts(0, 0, NY_S, NY_Z, 48), { width: 1, dash: [4, 5], color: rgba(C_SLATE, 0.28) });
-        solidDot(C, [-NY_S, 0, NY_Z], 3.4, rgba(C_CYAN, 0.95));
-        label3(C, [-NY_S, -0.24, NY_Z], '−1', { font: 'italic 12px ' + FONT_MATH, color: '#2dd4ea', align: 'center' });
+        strokePoly(C, circlePts(NY_CX - NY_S, 0, NY_S, 0), { width: 1.8, color: rgba(C_CYAN, 0.55) });
+        strokePoly(C, circlePts(NY_CX, 0, NY_S, 0, 48), { width: 1, dash: [4, 5], color: rgba(C_SLATE, 0.28) });
+        solidDot(C, [NY_CX - NY_S, 0, 0], 3.4, rgba(C_CYAN, 0.95));
+        label3(C, [NY_CX - NY_S, -0.24, 0], '−1', { font: 'italic 12px ' + FONT_MATH, color: '#2dd4ea', align: 'center' });
         const nyqPoly = list => {
           const pts = [];
           for (const p of list) {
             if (!isFinite(p[0]) || !isFinite(p[1])) { pts.push(null); continue; }
             if (Math.abs(p[0]) > NY_R || Math.abs(p[1]) > NY_R) { if (pts.length && pts[pts.length-1] !== null) pts.push(null); continue; }
-            pts.push([nx(p[0]), ny(p[1]), NY_Z]);
+            pts.push([nx(p[0]), ny(p[1]), 0]);
           }
           return pts;
         };
-        /* 共轭对称：负频率那一半镜像画出来，闭合的曲线才是完整的奈奎斯特图 */
+        /* 共轭对称：负频率那一半镜像画出来（虚线），闭合的才是完整的奈奎斯特图 */
         const mirror = list => list.map(p => [p[0], -p[1]]);
         strokePoly(C, nyqPoly(D.nyqLQR), { width: 2.4, color: rgba(C_ROSE, 0.95) });
         strokePoly(C, nyqPoly(mirror(D.nyqLQR)), { width: 1.4, dash: [5, 5], color: rgba(C_ROSE, 0.4) });
         strokePoly(C, nyqPoly(D.nyqLQG), { width: 2.4, color: rgba(C_VIOLET, 0.95) });
         strokePoly(C, nyqPoly(mirror(D.nyqLQG)), { width: 1.4, dash: [5, 5], color: rgba(C_VIOLET, 0.4) });
-        /* 穿越点与相位裕度（琥珀度量注记） */
-        const mkPM = (mm, fn, col) => {
+        /* 穿越点与相位裕度（琥珀度量注记）：从 −1 方向量到穿越点，取短弧 */
+        const mkPM = (mm, fn, col, rr) => {
           if (!mm) return;
           const Lc = fn(mm.w);
           if (Math.abs(Lc[0]) > NY_R || Math.abs(Lc[1]) > NY_R) return;
-          const sp = proj(C, [nx(Lc[0]), ny(Lc[1]), NY_Z]);
+          const sp = proj(C, [nx(Lc[0]), ny(Lc[1]), 0]);
           if (sp) glowDot(sp, 9, '#ffffff', rgba(col, 0.9));
-          const a0 = Math.PI, a1 = Math.atan2(Lc[1], Lc[0]);
+          const a0 = Math.PI;
+          let d = Math.atan2(Lc[1], Lc[0]) - a0;
+          while (d > Math.PI) d -= TAU;
+          while (d < -Math.PI) d += TAU;
           const arc = [];
-          const n = 40;
-          for (let i = 0; i <= n; i++) { const a = a0 + (a1 - a0) * i / n;
-            arc.push([NY_S * 0.62 * Math.cos(a), NY_S * 0.62 * Math.sin(a), NY_Z]); }
+          for (let i = 0; i <= 40; i++) {
+            const a = a0 + d * i / 40;
+            arc.push([NY_CX + rr * NY_S * Math.cos(a), rr * NY_S * Math.sin(a), 0]);
+          }
           strokePoly(C, arc, { width: 1.6, color: rgba(C_AMBER, 0.85) });
+          label3(C, [NY_CX + rr * NY_S * Math.cos(a0 + d/2) * 1.18, rr * NY_S * Math.sin(a0 + d/2) * 1.18 - 0.1, 0],
+            fmt(mm.pm, 1) + '°', { font: 'italic 11px ' + FONT_MATH, color: '#fbbf24', align: 'center' });
         };
-        mkPM(D.pmLQR, w => loopLQR(w, D.K), C_ROSE);
-        mkPM(D.pmLQG, w => loopLQG(w, D.K, D.L), C_VIOLET);
-        label3(C, [-NY_R*NY_S, NY_R*NY_S + 0.6, NY_Z],
+        mkPM(D.pmLQR, w => loopLQR(w, D.K), C_ROSE, 0.72);
+        mkPM(D.pmLQG, w => loopLQG(w, D.K, D.L), C_VIOLET, 0.44);
+        label3(C, [NY_CX - NR, NR + 0.6, 0],
           t({ zh: '奈奎斯特：玫红 = LQR 状态反馈，紫 = LQG（串上观测器）',
               en: 'Nyquist: rose = LQR state feedback, violet = LQG (observer in the loop)' }),
           { size: 11.5, color: 'rgba(159,176,200,.85)', align: 'left' });
-        label3(C, [-NY_R*NY_S, NY_R*NY_S + 0.26, NY_Z], '|1 + L(jω)| ≥ 1  ⇒  PM ≥ 60°,  GM ∈ [0.5, ∞)',
+        label3(C, [NY_CX - NR, NR + 0.26, 0], '|1 + L(jω)| ≥ 1  ⇒  PM ≥ 60°,  GM ∈ [0.5, ∞)',
           { font: 'italic 12px ' + FONT_MATH, color: rgba(C_CYAN, 0.9), align: 'left' });
-        label3(C, [-NY_R*NY_S, -NY_R*NY_S - 0.35, NY_Z],
+        label3(C, [NY_CX - NR, -NR - 0.35, 0],
           t({ zh: '青圈 = 禁区（以 −1 为心的单位圆）：状态反馈永远进不去',
               en: 'cyan circle = the forbidden unit disc centred at −1: state feedback never enters it' }),
           { size: 10.5, color: rgba(C_CYAN, 0.7), align: 'left' });
@@ -2697,6 +2736,31 @@ function recLoadDoc(doc, name) {
   return true;
 }
 
+/* 状态行的文案只有这一处出处。buildRecRow() 在状态切换时重建整行、
+   refreshRecInfo() 每 120 ms 重写这一行，两边都读它。
+   为什么必须只有一处：这一行正是这么坏掉过的 —— 当年 refreshRecInfo() 只认
+   'recording'，文案又只长在 buildRecRow() 里，于是回放期间没有任何代码去改它，
+   进度永远停在「1 / N」，只有按下暂停或整段播完（那两条路径会重建整行）才跳一下。
+   画面在动、数字不动，看上去像回放卡住了，其实回放一直是对的。 */
+function recInfoText() {
+  const bits = [];
+  if (recState.mode === 'replay') {
+    bits.push(t(UI.recReplay) + ' ' + (recState.i + 1) + ' / ' + recState.rows.length);
+    if (recState.srcName) bits.push(recState.srcName);
+    if (recState.verify) {
+      /* 尾巴「这不是 bug，见提示」只在**复现失败**时才有意义 —— 成功时贴上去
+         会读成「复现了 —— 这不是 bug」，反而让人以为出了事。 */
+      bits.push(t(recState.verify.reproduced ? UI.recVerifyOK : UI.recVerifyNo) +
+                recState.verify.delta.toExponential(1) +
+                (recState.verify.reproduced ? '）' : t(UI.recVerifyTail)));
+    }
+  } else {
+    bits.push(recState.rows.length + t(UI.recRows));
+  }
+  if (recState.note) bits.push(t(recState.note));
+  return bits.join(' · ');
+}
+
 /* 录制 / 回放行（§11）。只在当前页签声明了 RECORD 钩子时出现；
    整行每次重建 —— 它的状态机只有三态，重建比增量改 DOM 更不容易漂。 */
 function buildRecRow() {
@@ -2758,38 +2822,22 @@ function buildRecRow() {
   /* 状态行：进度 / 行数 / 存档来源 / 种子比对结论 / 提示 */
   const info = document.createElement('div');
   info.className = 'recinfo';
-  const bits = [];
-  if (recState.mode === 'replay') {
-    bits.push(t(UI.recReplay) + ' ' + (recState.i + 1) + ' / ' + recState.rows.length);
-    if (recState.srcName) bits.push(recState.srcName);
-    if (recState.verify) {
-      /* 尾巴「这不是 bug，见提示」只在**复现失败**时才有意义 —— 成功时贴上去
-         会读成「复现了 —— 这不是 bug」，反而让人以为出了事。 */
-      bits.push(t(recState.verify.reproduced ? UI.recVerifyOK : UI.recVerifyNo) +
-                recState.verify.delta.toExponential(1) +
-                (recState.verify.reproduced ? '）' : t(UI.recVerifyTail)));
-    }
-  } else {
-    bits.push(recState.rows.length + t(UI.recRows));
-  }
-  if (recState.note) bits.push(t(recState.note));
-  info.textContent = bits.join(' · ');
+  info.textContent = recInfoText();
   info.dataset.rec = '1';
   host.appendChild(info);
 
   refreshRecLocks();
 }
 
-/* 录制中行数是每帧在长的，而 buildRecRow() 只在状态切换时跑 —— 只改这一行
-   文本，别整行重建（重建会打断按钮的焦点与 hover）。由 frame() 的读数节流
-   一并调用，120 ms 一次足够。 */
+/* 录制中的行数、回放中的进度都是每帧在变的，而 buildRecRow() 只在状态切换时
+   跑 —— 只改这一行文本，别整行重建（重建会打断按钮的焦点与 hover）。由 frame()
+   的读数节流一并调用，120 ms 一次足够。判据是「不是 live」而不是「是 recording」：
+   回放同样每帧在走，漏掉它就等于让进度数字停在原地。 */
 function refreshRecInfo() {
-  if (recState.mode !== 'recording') return;
+  if (recState.mode === 'live') return;
   const el = document.querySelector('#recHost .recinfo[data-rec]');
   if (!el) return;
-  const bits = [recState.rows.length + t(UI.recRows)];
-  if (recState.note) bits.push(t(recState.note));
-  el.textContent = bits.join(' · ');
+  el.textContent = recInfoText();
 }
 
 /* 回放期间种子滑杆置灰 —— 改它们等于改种子，画面与数据会脱节（§11.7）。 */
