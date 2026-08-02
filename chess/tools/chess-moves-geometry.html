@@ -1,0 +1,2972 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<!-- 占位符，复制本骨架时必须改掉：<title>、下面这条 tool-version 的
+     content（新工具从 1.0.0 起），以及工具脚本里 TOOL 声明的 id / title / h1。
+     engine-version 反映的是四个 core 模块的版本，不是工具自己的版本，
+     一般不必跟着改。 -->
+<meta name="tool-version" content="1.0.0">
+<meta name="engine-version" content="chess-0.1.0">
+<title>Geometry of Movement</title>
+<!-- 样式令牌与组件整体搬运自 design-system/math-viz-starter.html 的 <style> 块，
+     只做两处子项目专属调整：① canvas 是唯一主角，本子项目工具①②不分屏（分屏
+     只属于阶段 2 之后的调试类工具）；② 默认英文——面板里没有任何硬编码中文，
+     文案一律由引擎的 t() 在运行时从工具声明的 {zh,en} 对象里取。 -->
+<style>
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  --angle-amber:#fbbf24;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none}
+body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)}
+/* canvas 是主角：全屏置底，其余一切 UI 浮在其上，永不分屏 */
+#scene{position:fixed;inset:0;display:block;touch-action:none;cursor:grab}
+#scene.dragging{cursor:grabbing}
+
+/* ---- 标题区 ---- */
+.brand{position:fixed;top:20px;left:24px;pointer-events:none;user-select:none;max-width:min(520px,42vw)}
+.brand .eyebrow{font-size:10px;letter-spacing:.22em;color:rgba(159,176,200,.72);margin-bottom:6px}
+.brand h1{margin:0;font-family:var(--font-math);font-weight:600;font-size:26px;letter-spacing:.08em;
+  color:#eef3fa;text-shadow:0 2px 20px rgba(45,212,234,.20)}
+.brand p{margin:7px 0 0;font-size:12.5px;line-height:1.65;color:rgba(159,176,200,.85)}
+
+/* ---- 页签 ---- */
+.tabs{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:5;
+  display:flex;gap:4px;padding:4px;border-radius:999px;
+  background:var(--panel-bg);border:1px solid var(--panel-line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
+.tab{border:1px solid transparent;background:transparent;color:#b8c6da;
+  font-size:12.5px;font-family:var(--font-cn);padding:6px 15px;border-radius:999px;cursor:pointer;
+  transition:color .15s,border-color .15s,background .15s}
+.tab:hover{color:#e8f2fb}
+.tab:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.tab.active{background:rgba(45,212,234,.13);border-color:rgba(45,212,234,.55);color:#9be8f7}
+
+/* ---- 底部提示 ---- */
+.hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);pointer-events:none;user-select:none;
+  font-size:11px;letter-spacing:.05em;color:rgba(159,176,200,.6);white-space:nowrap}
+
+/* ---- 控制面板 ---- */
+.panel{position:fixed;top:14px;right:14px;width:304px;max-height:calc(100vh - 28px);overflow-y:auto;
+  background:var(--panel-bg);border:1px solid var(--panel-line);border-radius:16px;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 18px 50px rgba(0,0,0,.45);user-select:none}
+.panel::-webkit-scrollbar{width:6px}
+.panel::-webkit-scrollbar-thumb{background:rgba(148,163,184,.25);border-radius:3px}
+.panel-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px 10px;
+  font-size:13px;font-weight:600;letter-spacing:.06em;color:#dbe6f5}
+.panel:not(.collapsed) .panel-head{border-bottom:1px solid var(--panel-line)}
+.ph-right{display:flex;align-items:center;gap:7px}
+.ver{font-family:var(--font-mono);font-size:10px;color:rgba(159,176,200,.55)}
+.lang{padding:3px 8px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:11px;cursor:pointer}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.fold{width:24px;height:24px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:14px;line-height:1;cursor:pointer}
+.fold:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.panel.collapsed .panel-body{display:none}
+.panel-body{padding:6px 14px 14px}
+
+/* 滑杆 */
+.ctl{margin:11px 0 3px}
+.ctl .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.ctl label{font-size:12px;color:#c6d2e4}
+.ctl label i{font-family:var(--font-math);font-style:italic;font-size:13px}
+.ctl .val{font-family:var(--font-mono);font-size:11.5px;color:#7dd3fc}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;cursor:pointer;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--trace-cyan);margin-top:-5px;border:2px solid #0b1220;box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-moz-range-thumb{width:11px;height:11px;border:2px solid #0b1220;border-radius:50%;
+  background:var(--trace-cyan);box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-offset:2px;border-radius:4px}
+
+/* 按钮 */
+.row{display:flex;gap:8px;margin:13px 0 4px}
+.btn{padding:6px 10px;border-radius:9px;border:1px solid rgba(148,163,184,.25);
+  background:rgba(30,41,59,.55);color:#d7e2f2;font-size:12px;font-family:var(--font-cn);cursor:pointer;
+  transition:border-color .15s,color .15s,background .15s}
+.btn:hover{border-color:rgba(45,212,234,.55)}
+.btn:focus-visible,.fold:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.btn.wide{flex:1}
+.btn.active{border-color:rgba(45,212,234,.8);background:rgba(45,212,234,.12);color:#9be8f7}
+.views{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 2px}
+.views .vlabel{font-size:11.5px;color:rgba(159,176,200,.8);margin-right:2px}
+.vbtn{padding:5px 9px;font-size:11.5px}
+
+/* 开关 */
+.toggles{display:flex;flex-wrap:wrap;gap:7px 12px;margin:12px 0 2px}
+.tg{display:flex;align-items:center;gap:6px;font-size:12px;color:#c6d2e4;cursor:pointer}
+.tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
+.tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
+
+/* 录制 / 回放行（§11）；未声明 RECORD 的工具里 #recHost 始终为空 */
+.recrow{display:flex;flex-wrap:wrap;gap:6px;margin:11px 0 2px}
+.recrow .btn{padding:5px 9px;font-size:11.5px}
+.recinfo{font-family:var(--font-mono);font-size:11px;line-height:1.6;
+  color:var(--ui-slate);margin:2px 0 2px;word-break:break-word}
+
+/* 读数与提示 */
+.readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
+  font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
+/* 读数区的粗体值不再照抄 starter 的 sinC/cosC/tanC/cotC 四个三角专属类名——
+   工具自己在行内写 style="--c:var(--trace-xxx)"，与 .tg .dot 用的是同一个
+   自定义属性；没设 --c 时退化为 inherit，跟随 .readout 的默认字色。 */
+.readout b{font-weight:600;color:var(--c, inherit)}
+.readout .dim{color:rgba(159,176,200,.6)}
+.tips{margin-top:11px;font-size:11px;line-height:1.65;color:rgba(159,176,200,.72)}
+
+@media (max-width:760px){
+  .brand{top:12px;left:14px;max-width:70vw}
+  .brand h1{font-size:20px}
+  .brand p{display:none}
+  .tabs{top:52px;left:14px;transform:none}
+  .panel{left:10px;right:10px;top:auto;bottom:10px;width:auto;max-height:62vh}
+  .hint{display:none}
+}
+</style>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+
+<div class="brand">
+  <div class="eyebrow">INTERACTIVE CHESS · 交互式国际象棋</div>
+  <h1></h1>
+  <p id="brandDesc"></p>
+</div>
+
+<nav class="tabs" id="tabsNav"></nav>
+
+<aside class="panel" id="panel">
+  <div class="panel-head">
+    <span id="panelTitle">Parameters &amp; Views</span>
+    <span class="ph-right">
+      <span class="ver" id="verBadge"></span>
+      <button class="lang" id="btnLang" title="切换语言 / Switch language">中</button>
+      <button class="fold" id="btnFold" title="收起 / 展开 · Collapse / expand">−</button>
+    </span>
+  </div>
+  <div class="panel-body">
+    <div id="paramsHost"></div>
+    <div class="row">
+      <button class="btn wide" id="btnPlay">⏸ Pause</button>
+      <button class="btn" id="btnReset">↺ Reset</button>
+    </div>
+    <div id="recHost"></div>
+    <div id="togglesHost"></div>
+    <div id="viewsHost"></div>
+    <div class="readout" id="readout"></div>
+    <div class="tips" id="tips"></div>
+  </div>
+</aside>
+
+<div class="hint">Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · 1–9 views · T to switch tabs</div>
+
+<script>
+/* >>> GENERATED:VIZ-ENGINE */
+/* 3D 渲染引擎 —— 由 design-system/math-viz-starter.html 裁剪而来。
+   保留：轨道相机、透视投影与近裁剪、绘图原语、设计令牌、UI 组件、
+         i18n、录制回放骨架。
+   删除：连续时间积分、历史样本环形缓冲、三角函数专用部件。
+   编辑源，运行时被内联进 tools/*.html。
+
+   模块顶层绝不触碰 document / window.matchMedia / localStorage / location ——
+   这样 `require('./viz-engine.js')` 在没有 DOM 的 node 环境里也能装载
+   （见 task-12 的 Step 5 导出检查）。任何要碰 DOM 的东西都挪进 init() /
+   bindOrbit() / 事件回调里，只有真正在浏览器里调用它们时才会执行。
+
+   SCENES / PARAMS / RECORD / TOOL 等「工具专属声明」不在这里假定成同名全局——
+   那样在 node 下 require，或在没有声明它们的最小页面里调用 init()，会在
+   第一次访问处直接 ReferenceError。这里把它们做成 init() 的可选参数，
+   默认是空容器，未提供时相关机制安静地不生效（与 starter 里「不声明 RECORD
+   就完全没有录制 UI」是同一条精神）。 */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.VizEngine = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  /* ================= i18n 核心（引擎区） ================= */
+  const LANG_KEY = 'chess-lang';
+  function resolveLang() {
+    try {
+      const q = new URLSearchParams(location.search).get('lang');
+      if (q === 'en' || q === 'zh') return q;
+      const s = localStorage.getItem(LANG_KEY);
+      if (s === 'en' || s === 'zh') return s;
+    } catch (e) { /* file:// 下 localStorage 可能不可用，或运行在无 DOM 环境（node） */ }
+    return 'en';                       // 本子项目默认英文（规格 §1.6）
+  }
+  /* 默认值先摆一个字面量，真正的解析（碰 location / localStorage）延后到
+     init() 才做——调用点是惰性的，模块顶层不触发它。 */
+  let LANG = 'en';
+  function t(s) { return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.en) : s; }
+  // t() 的兜底是 s.en（与默认语言一致），不是 s.zh —— 否则缺 en 键时英文界面会突然冒出中文。
+
+  const TAU = Math.PI * 2;
+
+  /* 引擎级 UI 文案（英文默认；与 math-viz 的中文默认版本区分开）。
+     这些是「按钮上写什么」层面的通用词汇，不属于任何单个工具，所以留在引擎里，
+     不必由 init() 注入。 */
+  const UI = {
+    panelTitle: { zh: '参数与视角', en: 'Parameters & Views' },
+    pause:  { zh: '⏸ 暂停', en: '⏸ Pause' },
+    resume: { zh: '▶ 继续', en: '▶ Resume' },
+    reset:  { zh: '↺ 重置', en: '↺ Reset' },
+    views:  { zh: '视角', en: 'View' },
+    /* 演算记录与回放（§11）。仅当调用方在 init() 里提供 RECORD 钩子时才出现。 */
+    recRec:    { zh: '● 记录',   en: '● Record' },
+    recStop:   { zh: '■ 停止',   en: '■ Stop' },
+    recSave:   { zh: '⬇ 保存',   en: '⬇ Save' },
+    recLoad:   { zh: '⬆ 载入',   en: '⬆ Load' },
+    recExit:   { zh: '✕ 退出回放', en: '✕ Exit replay' },
+    recPlay:   { zh: '▶',        en: '▶' },
+    recPause:  { zh: '⏸',        en: '⏸' },
+    recRewind: { zh: '⏮',        en: '⏮' },
+    recRows:   { zh: ' 行',      en: ' rows' },
+    recFull:   { zh: '已达行数上限，录制停止（数据完整，未截断）',
+                 en: 'Row limit reached, recording stopped (data complete, not truncated)' },
+    recRoundEnd: { zh: '本轮结束，录制自动停止', en: 'Round complete, recording stopped' },
+    recReplay: { zh: '回放中', en: 'Replaying' },
+    recVerifyOK: { zh: '种子比对：本机复现（δ = ', en: 'Seed check: reproduced here (δ = ' },
+    recVerifyNo: { zh: '种子比对：本机复现不了（δ = ', en: 'Seed check: not reproducible here (δ = ' },
+    recVerifyTail: { zh: '）—— 这不是 bug，见提示', en: ') — not a bug, see the tip' },
+    /* 手势由 bindOrbit(canvas) 绑定，快捷键由 bindKeyboard() 绑定（见「交互」
+       一节）——两组都是 init() 会自动接好的，提示语把它们列在一起。 */
+    hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 1–9 视角 · T 切换页签',
+              en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · 1–9 views · T to switch tabs' }
+  };
+
+  /* ================= 常量与状态（引擎区，以下一般无需改动） ================= */
+  const NEAR = 0.15;       // 近裁剪面
+
+  const FONT_CN = 'ui-sans-serif,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif';
+  const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
+
+  /* window.matchMedia 的结果；只在 init() 里读一次（硬约束：模块顶层不碰 window）。 */
+  let REDUCED = false;
+
+  /* state.t 保留给录制骨架当「引擎时钟」用；state 里的连续相位（θ 积分）已删除——
+     棋没有连续时间驱动，参见 task-12 brief 的删除表。 */
+  const state = { running: true, t: 0 };
+  let curTab = null;
+  const RELABEL = [];        // 语言切换时需要重新取文案的回调列表
+  const cams = {};           // tabId -> 该页签「首视角」对应的相机参数（启动 / 双击回正用）
+  /* cam 是「唯一一份」可变对象：往后任何「换页签因而换相机」都用 Object.assign(cam, ...)
+     原地改写，绝不 `cam = 别的对象`——否则导出的 VizEngine.cam 会在换页签后指向一个
+     没人再更新的旧对象。默认值给一个通用的三视角，供没有 SCENES 的最小用法直接可用。 */
+  let cam = { az: -0.6, el: 0.32, dist: 10, tx: 0, ty: 0, tz: 0 };
+  let tween = null;
+  const lastView = {};
+
+  /* SCENES / PARAMS / RECORD / TOOL / 版本号：工具专属声明，由 init() 可选注入。
+     默认给空容器而不是假定同名全局已存在——这样 require() 或在没提供它们的
+     最小页面上调用 init() 都不会在访问处抛 ReferenceError，机制只是安静地不生效。 */
+  let SCENES = {};
+  let PARAMS = [];
+  let RECORD = {};
+  let TOOL = { id: null, title: { zh: '', en: '' }, h1: { zh: '', en: '' } };
+  let VERSION = '0.0.0';
+  let ENGINE_VERSION = '0.0.0';
+
+  /* ================= 画布 ================= */
+  let canvas = null, ctx = null;
+  let W = 0, H = 0, DPR = 1, FOCAL = 900, CX = 0, CY = 0, bgGrad = null;
+
+  function resize() {
+    if (!canvas) return;
+    DPR = Math.min(2.5, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    CX = W / 2; CY = H / 2;
+    FOCAL = 1.2 * Math.min(H, W * 1.1);
+    bgGrad = ctx.createRadialGradient(W*0.5, H*0.3, 0, W*0.5, H*0.42, Math.max(W, H)*0.95);
+    bgGrad.addColorStop(0, '#0c1526');
+    bgGrad.addColorStop(1, '#05070d');
+  }
+
+  /* ================= 基础数学 ================= */
+  const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+  const wrapPI = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
+  const ease = k => k < 0.5 ? 4*k*k*k : 1 - Math.pow(-2*k + 2, 3) / 2;
+  const fmt = (x, d = 2) => x.toFixed(d);
+  const fmtS = (x, d = 2) => (x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
+
+  const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+  const dot3 = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+  const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+  const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+
+  /* ================= 轨道相机与投影 ================= */
+  function makeCam() {
+    const cp = Math.cos(cam.el), sp = Math.sin(cam.el);
+    const eye = [
+      cam.tx + cam.dist * cp * Math.sin(cam.az),
+      cam.ty + cam.dist * sp,
+      cam.tz + cam.dist * cp * Math.cos(cam.az)
+    ];
+    const f = norm(sub([cam.tx, cam.ty, cam.tz], eye));
+    const r = norm(cross(f, [0, 1, 0]));
+    const u = cross(r, f);
+    return { eye, f, r, u };
+  }
+  function camPt(C, p) {
+    const d = sub(p, C.eye);
+    return [dot3(d, C.r), dot3(d, C.u), dot3(d, C.f)];
+  }
+  function scr(c) { const s = FOCAL / c[2]; return [CX + c[0]*s, CY - c[1]*s]; }
+  function proj(C, p) { const c = camPt(C, p); return c[2] < NEAR ? null : scr(c); }
+  function clipNear(a, b) {
+    const tt = (NEAR - a[2]) / (b[2] - a[2]);
+    return [a[0] + (b[0]-a[0])*tt, a[1] + (b[1]-a[1])*tt, NEAR];
+  }
+
+  /* proj() 的反方向：给一个屏幕点，把「相机 eye 出发经过该像素的那条射线」
+     与世界平面 z = planeZ 求交，返回世界坐标 [x, y, planeZ]，射线与平面
+     平行（或恰好落在平面内，同样无唯一解）或交点落在相机之后都返回 null。
+     推导：scr() 是 cz=1 那层的仿射投影，把它反过来，屏幕点 (sx,sy) 对应
+     相机空间方向 (cx, cy, 1)（cx=(sx-CX)/FOCAL, cy=(CY-sy)/FOCAL），
+     camPt() 的基是正交的 {r,u,f}，所以世界方向就是 cx·r + cy·u + 1·f——
+     和 camPt() 互为逆变换，同一份 FOCAL/CX/CY 用两次，谁都不用再猜一遍。
+     这是 BoardRender.pickSquare（点击选子）能成立的唯一依据。 */
+  function unproject(C, screenXY, planeZ) {
+    if (planeZ == null) planeZ = 0;
+    const cx = (screenXY[0] - CX) / FOCAL;
+    const cy = (CY - screenXY[1]) / FOCAL;
+    const dir = [
+      cx * C.r[0] + cy * C.u[0] + C.f[0],
+      cx * C.r[1] + cy * C.u[1] + C.f[1],
+      cx * C.r[2] + cy * C.u[2] + C.f[2]
+    ];
+    if (Math.abs(dir[2]) < 1e-9) return null;             // 射线与平面平行（或共面），无唯一交点
+    const tt = (planeZ - C.eye[2]) / dir[2];
+    if (tt <= 0) return null;                              // 交点在相机之后（或恰在相机上）
+    return [C.eye[0] + dir[0]*tt, C.eye[1] + dir[1]*tt, planeZ];
+  }
+
+  /* 投影常量的只读访问器——FOCAL/CX/CY/W/H 是模块私有的，之前每个消费方
+     只能各自重新推一遍 FOCAL = 1.2·min(H, W·1.1) 的公式；棋子预览页就吃过
+     这个亏（算错一次，全部棋子跟着错位）。往后任何要自己做投影相关计算
+     的调用方，都从这里取权威值，不再重新推导。 */
+  function viewInfo() { return { FOCAL: FOCAL, CX: CX, CY: CY, W: W, H: H }; }
+
+  /* 让「ctx 参数」名副其实：drawBoard/drawPiece 这类跨模块的绘制函数把
+     ctx 当参数注入，是为了能在 node 下装载、能给第二块画布画图（如规则
+     工具要并排画伪合法/合法两块棋盘）。但 strokePoly/label3 等图元一直画
+     在本模块 init() 时钉死的模块私有 ctx 上，从不重新指向别的画布——于是
+     drawBoard(someOtherCanvas, …) 的输出会被悄悄劈成两半。withContext()
+     在 fn() 执行期间把私有 ctx 换成调用方给的目标画布，结束后原样复原；
+     选它而不是给每个图元加 ctx 形参，是因为改动只集中在一处，图元本身、
+     调用点都不用逐个改签名。 */
+  function withContext(targetCtx, fn) {
+    const prev = ctx;
+    ctx = targetCtx;
+    try { return fn(); }
+    finally { ctx = prev; }
+  }
+
+  /* 折线路径（支持 null 断点 + 近平面裁剪）；返回 [首点, 末点] 屏幕坐标 */
+  function polyPath(C, pts) {
+    if (pts.length < 2) return null;
+    let head = null, tail = null, contin = false, prev = null;
+    ctx.beginPath();
+    for (let i = 0; i < pts.length; i++) {
+      const P = pts[i];
+      if (P === null) { prev = null; contin = false; continue; }
+      const cur = camPt(C, P);
+      if (prev !== null) {
+        let a = prev, b = cur;
+        const av = a[2] >= NEAR, bv = b[2] >= NEAR;
+        if (av || bv) {
+          if (!av) a = clipNear(a, b);
+          if (!bv) b = clipNear(b, a);
+          const sA = scr(a), sB = scr(b);
+          if (!contin) ctx.moveTo(sA[0], sA[1]);
+          ctx.lineTo(sB[0], sB[1]);
+          if (!head) head = sA;
+          tail = sB;
+          contin = bv;
+        } else {
+          contin = false;
+        }
+      }
+      prev = cur;
+    }
+    return head ? [head, tail] : null;
+  }
+
+  function strokePoly(C, pts, o) {
+    const ht = polyPath(C, pts);
+    if (!ht) return;
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = o.width || 2;
+    if (o.alpha != null) ctx.globalAlpha = o.alpha;
+    if (o.dash) ctx.setLineDash(o.dash);
+    if (o.fade) {
+      const h = ht[0], tt = ht[1];
+      if (Math.hypot(tt[0]-h[0], tt[1]-h[1]) < 2) {
+        ctx.strokeStyle = o.fade[0];
+      } else {
+        const g = ctx.createLinearGradient(h[0], h[1], tt[0], tt[1]);
+        g.addColorStop(0, o.fade[0]);
+        g.addColorStop(1, o.fade[1]);
+        ctx.strokeStyle = g;
+      }
+    } else {
+      ctx.strokeStyle = o.color;
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+  const line3 = (C, a, b, o) => strokePoly(C, [a, b], o);
+
+  function glowDot(s, r, core, mid) {
+    const g = ctx.createRadialGradient(s[0], s[1], 0, s[0], s[1], r);
+    g.addColorStop(0, core);
+    g.addColorStop(0.35, mid);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(s[0], s[1], r, 0, TAU);
+    ctx.fill();
+  }
+  function solidDot(C, p, r, color) {
+    const s = proj(C, p);
+    if (!s) return;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(s[0], s[1], r, 0, TAU);
+    ctx.fill();
+  }
+
+  function label3(C, p, text, o) {
+    const s = proj(C, p);
+    if (!s) return;
+    ctx.save();
+    ctx.font = o.font || ((o.size || 12) + 'px ' + FONT_CN);
+    ctx.fillStyle = o.color || '#c4d2e6';
+    ctx.textAlign = o.align || 'left';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(3,6,12,.85)';
+    ctx.shadowBlur = 4;
+    ctx.fillText(text, s[0] + (o.dx || 0), s[1] + (o.dy || 0));
+    ctx.restore();
+  }
+
+  function arrowAt(C, tip3, before3, color) {
+    const tp = proj(C, tip3), b = proj(C, before3);
+    if (!tp || !b) return;
+    const a = Math.atan2(tp[1]-b[1], tp[0]-b[0]);
+    const L = 9;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(tp[0], tp[1]); ctx.lineTo(tp[0]-L*Math.cos(a-0.42), tp[1]-L*Math.sin(a-0.42));
+    ctx.moveTo(tp[0], tp[1]); ctx.lineTo(tp[0]-L*Math.cos(a+0.42), tp[1]-L*Math.sin(a+0.42));
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* ================= 常用场景部件 ================= */
+  const AXIS = 'rgba(159,176,200,0.9)';
+  const AXIS_DIM = 'rgba(159,176,200,0.5)';
+
+  /* 坐标轴：o = { ex, ey, yTicks:[], xTicks:[] }。
+     starter 版本还有个 tAxis（z 轴当连续时间轴用，靠一个「波形可视长度」常量定长、
+     按秒打刻度）——棋没有连续时间驱动，这条分支随那个时间长度常量一起删掉了，
+     只留平面上的 x/y 两轴。 */
+  function drawAxes(C, o) {
+    const ex = o.ex, ey = o.ey;
+    line3(C, [-ex, 0, 0], [ex, 0, 0], { width: 1.4, color: AXIS });
+    arrowAt(C, [ex, 0, 0], [ex - 0.2, 0, 0], AXIS);
+    label3(C, [ex + 0.22, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+    line3(C, [0, -ey, 0], [0, ey, 0], { width: 1.4, color: AXIS });
+    arrowAt(C, [0, ey, 0], [0, ey - 0.2, 0], AXIS);
+    label3(C, [0, ey + 0.18, 0], 'y', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+    for (const k of (o.yTicks || [])) {
+      for (const yv of [k, -k]) {
+        line3(C, [-0.05, yv, 0], [0.05, yv, 0], { width: 1.2, color: AXIS_DIM });
+        label3(C, [-0.13, yv, 0], (yv < 0 ? '−' : '') + Math.abs(yv), { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+      }
+    }
+    for (const k of (o.xTicks || [])) {
+      for (const xv of [k, -k]) {
+        line3(C, [xv, -0.05, 0], [xv, 0.05, 0], { width: 1.2, color: AXIS_DIM });
+        label3(C, [xv, -0.24, 0], (xv < 0 ? '−' : '') + Math.abs(xv), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+      }
+    }
+  }
+
+  /* z=0 平面方格网格（几何类场景） */
+  function drawGridXY(C, g, step) {
+    const n = Math.round(g / step);
+    for (let i = -n; i <= n; i++) {
+      if (i === 0) continue;
+      const u = i * step;
+      line3(C, [u, -g, 0], [u, g, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+      line3(C, [-g, u, 0], [g, u, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+    }
+  }
+
+  /* ================= 主绘制与主循环 ================= */
+  function draw() {
+    if (!ctx) return;
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+    const C = makeCam();
+    if (curTab != null && SCENES[curTab] && typeof SCENES[curTab].draw === 'function') {
+      SCENES[curTab].draw(C);
+    }
+  }
+
+  function updateReadout() {
+    if (!roEl || curTab == null || !SCENES[curTab] || typeof SCENES[curTab].readout !== 'function') return;
+    roEl.innerHTML = SCENES[curTab].readout();
+  }
+
+  /* 帧级异常兜底：同一页签的同一条错误只报一次，否则 60 fps 会把控制台刷爆。
+     resetSim() 会清空它——用户主动重置后应当允许重新报。 */
+  const frameErrSeen = Object.create(null);
+  function frameError(err) {
+    const k = curTab + '|' + ((err && err.message) || err);
+    if (frameErrSeen[k]) return;
+    frameErrSeen[k] = 1;
+    console.warn('[frame] 场景「' + curTab + '」抛出异常，已跳过该帧并继续渲染循环：', err);
+  }
+
+  function resetSim() {
+    Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+    state.t = 0;
+  }
+
+  /* 推进一步「引擎时钟」。starter 版本这里还会积分连续相位、驱动场景滑杆、
+     记一条历史采样——三样棋都用不上，删掉后只剩 state.t 前进，供录制骨架的
+     固定步长回放使用。真正的棋局推演（落子、算法单步）由消费方在
+     draw() / 自己的钩子里做。
+     现状记录：state.t 眼下除了录制/回放子系统（recPush 起点、recStep 回放
+     时钟、recVerify 的核对与复原）之外没有别的读者——键盘不再驱动它
+     （见 bindKeyboard 处的说明），也没有任何 draw()/readout() 在读它。
+     是否整体拿掉这份「引擎时钟」是阶段 2 接 PGN 回放时才能定的架构决定，
+     这里先如实记一笔，不做改动。 */
+  function simAdvance(d) {
+    state.t += d;
+  }
+
+  let lastTs = 0, lastRO = 0;
+  function frame(ts) {
+    try {
+      if (!lastTs) lastTs = ts;
+      const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
+      lastTs = ts;
+
+      if (tween) {
+        const k = Math.min(1, (ts - tween.t0) / tween.dur);
+        const e = ease(k);
+        const f = tween.from, o = tween.to;
+        cam.az = f.az + wrapPI(o.az - f.az) * e;
+        cam.el = f.el + (o.el - f.el) * e;
+        cam.dist = f.dist + (o.dist - f.dist) * e;
+        cam.tx = f.tx + (o.tx - f.tx) * e;
+        cam.ty = f.ty + (o.ty - f.ty) * e;
+        cam.tz = f.tz + (o.tz - f.tz) * e;
+        if (k >= 1) tween = null;
+      }
+
+      /* 回放冻结的是「演算」，不是「观察」：相机 tween 在上面已经走过了，
+         视角、开关、绘制全部照常——与「暂停只冻结模拟」同一条精神（§11.7）。 */
+      if (recState.mode === 'replay') {
+        recStep(dt);
+      } else if (state.running) {
+        if (recState.mode === 'recording') {
+          recState.acc += dt;
+          let guard = 0;
+          while (recState.acc >= REC_DT && guard++ < 64) { recState.acc -= REC_DT; simAdvance(REC_DT); recPush(); }
+        } else {
+          simAdvance(dt);
+        }
+      }
+
+      draw();
+      if (ts - lastRO > 120) { lastRO = ts; updateReadout(); refreshRecInfo(); }
+    } catch (err) {
+      frameError(err);
+    } finally {
+      requestAnimationFrame(frame);
+    }
+  }
+
+  /* ================= UI 生成（由消费方通过 init() 提供的 PARAMS / SCENES 声明驱动） ================= */
+  const paramWraps = {};   // key -> { wrap, input, val, p }
+
+  function buildParams() {
+    const host = document.getElementById('paramsHost');
+    if (!host || !PARAMS) return;
+    PARAMS.forEach(p => {
+      const wrap = document.createElement('div');
+      wrap.className = 'ctl';
+      wrap.innerHTML = '<div class="top"><label></label><span class="val"></span></div>';
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
+      const val = wrap.querySelector('.val');
+      const render = () => { val.textContent = p.fmt(parseFloat(input.value)); };
+      const upd = () => {
+        const raw = parseFloat(input.value);
+        state[p.key] = p.map ? p.map(raw) : raw;
+        render();
+      };
+      input.addEventListener('input', upd);
+      wrap.appendChild(input);
+      host.appendChild(wrap);
+      paramWraps[p.key] = { wrap, input, val, p };
+      upd();                       // 建面板时用默认刻度初始化 state
+      const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); render(); };
+      RELABEL.push(relabel);
+      relabel();
+    });
+  }
+
+  /* 按当前页签的 params 显隐滑块。省略 params = 全部显示（向后兼容）。 */
+  function syncParamVisibility() {
+    const list = SCENES[curTab] && SCENES[curTab].params;
+    Object.keys(paramWraps).forEach(k => {
+      paramWraps[k].wrap.style.display = (!list || list.indexOf(k) >= 0) ? '' : 'none';
+    });
+  }
+
+  function buildToggles() {
+    const host = document.getElementById('togglesHost');
+    if (!host) return;
+    Object.keys(SCENES).forEach(id => {
+      const grp = document.createElement('div');
+      grp.className = 'toggles';
+      grp.dataset.tab = id;
+      (SCENES[id].toggles || []).forEach(tg => {
+        if (!(tg.key in state)) state[tg.key] = tg.checked;
+        const lab = document.createElement('label');
+        lab.className = 'tg';
+        lab.innerHTML = '<input type="checkbox" data-key="' + tg.key + '"' + (state[tg.key] ? ' checked' : '') + '>' +
+          '<i class="dot" style="--c:' + tg.color + '"></i><span class="tgl"></span>';
+        const cb = lab.querySelector('input');
+        cb.addEventListener('change', () => {
+          state[tg.key] = cb.checked;
+          document.querySelectorAll('input[data-key="' + tg.key + '"]').forEach(o => { o.checked = cb.checked; });
+        });
+        const relabel = () => { lab.querySelector('.tgl').innerHTML = t(tg.label); };
+        RELABEL.push(relabel);
+        relabel();
+        grp.appendChild(lab);
+      });
+      host.appendChild(grp);
+    });
+  }
+
+  function buildViews() {
+    const host = document.getElementById('viewsHost');
+    if (!host) return;
+    Object.keys(SCENES).forEach(id => {
+      const row = document.createElement('div');
+      row.className = 'views';
+      row.dataset.tab = id;
+      const lab = document.createElement('span');
+      lab.className = 'vlabel';
+      row.appendChild(lab);
+      const labRelabel = () => { lab.textContent = t(UI.views); };
+      RELABEL.push(labRelabel);
+      labRelabel();
+      Object.keys(SCENES[id].views || {}).forEach(name => {
+        const b = document.createElement('button');
+        b.className = 'btn vbtn';
+        b.dataset.view = name;
+        b.addEventListener('click', () => applyView(name));
+        row.appendChild(b);
+        const relabel = () => { b.textContent = t(SCENES[id].views[name].label); };
+        RELABEL.push(relabel);
+        relabel();
+      });
+      host.appendChild(row);
+    });
+  }
+
+  function buildTabs() {
+    const nav = document.getElementById('tabsNav');
+    if (!nav) return;
+    Object.keys(SCENES).forEach(id => {
+      const b = document.createElement('button');
+      b.className = 'tab';
+      b.dataset.tab = id;
+      b.addEventListener('click', () => switchTab(id));
+      nav.appendChild(b);
+      const relabel = () => { b.textContent = t(SCENES[id].label); };
+      RELABEL.push(relabel);
+      relabel();
+    });
+  }
+
+  /* ================= 视角与页签 ================= */
+  /* 选择器必须限定在 .views 之内：.vbtn 只是个样式类，工具可能为了复用外观
+     把它挂到别处的按钮上。不限定的话 closest('.views') 会返回 null，这里
+     当场抛错，视角高亮从此再不更新。 */
+  function refreshViewButtons() {
+    document.querySelectorAll('.views .vbtn').forEach(b => {
+      const row = b.closest('.views');
+      b.classList.toggle('active', row.dataset.tab === curTab && b.dataset.view === lastView[curTab]);
+    });
+  }
+  function viewDist(d) { return (W < 820 || W < H) ? d * 1.4 : d; }
+  function applyView(name) {
+    const sc = SCENES[curTab];
+    const vw = sc && sc.views && sc.views[name];
+    if (!vw) return;
+    if (vw.onSelect) vw.onSelect();   /* 可选联动：如自动开启该视角对应的曲线开关 */
+    tween = {
+      from: { az: cam.az, el: cam.el, dist: cam.dist, tx: cam.tx, ty: cam.ty, tz: cam.tz },
+      to:   { az: vw.az, el: vw.el, dist: viewDist(vw.dist), tx: vw.tx || 0, ty: vw.ty || 0, tz: vw.tz || 0 },
+      t0: performance.now(),
+      dur: REDUCED ? 1 : 750
+    };
+    lastView[curTab] = name;
+    refreshViewButtons();
+  }
+
+  let brandDescEl = null, tipsEl = null, roEl = null;
+
+  /* ══════════════ 演算记录与回放（规范 §11）══════════════
+     整体搬运自 starter：序列化 / 下载上传 / 回放时钟 / 校验 / 种子比对全在这里，
+     消费方只提供 RECORD 里的六个钩子。「存档格式」的序列化细节留成钩子——
+     阶段 2 会把它接到 PGN 上（规格 §1.3）。这里只搬骨架，并确认在没有
+     RECORD 声明时（默认 RECORD = {}）完全静默——recHooks() 恒为 null，
+     所有 rec* 函数第一行就 early-return。 */
+  const REC_FORMAT = 'chess-viz-run';
+  const REC_FORMAT_VERSION = 1;
+  const REC_DT = 0.02;         // 采样间隔（模拟秒）
+  const REC_MAX_ROWS = 20000;  // 行数上限；到顶停录并提示，绝不静默截断（§11.4）
+  const REC_PREC = 12;         // 数值有效位；比对基线要把这项舍入计入（§11.4）
+
+  const recState = {
+    mode: 'live',              // 'live' | 'recording' | 'replay'
+    rows: [], fields: null, shape: null,
+    seed: null, tab: null, srcName: null,
+    i: 0, playing: true, rate: 1, acc: 0, t0: 0,
+    roundAt: null, note: null,
+    verify: null               // { delta, reproduced } —— §11.2 的种子比对结论
+  };
+
+  function recHooks(tab) { return (RECORD && RECORD[tab || curTab]) || null; }
+
+  /* 唯一的只读判据访问器。工具的 draw()/readout() 要查模式一律走它，不得自己
+     伸手进 recState 拼一份判据——那是留给下一个人的陷阱（同一判据两种写法
+     必然漂移）。导出为 VizEngine.recInfo：SCENES 现在由消费方在另一个作用域
+     声明，不再和这份引擎代码共享同一个顶层作用域，裸标识符 recInfo 够不着，
+     必须真正跨过模块边界才能履行这份对录制感知场景的承诺。 */
+  function recInfo() {
+    if (!recHooks()) return null;
+    return {
+      mode: recState.mode,
+      rows: recState.rows.length,
+      i: recState.i,
+      playing: recState.playing,
+      srcName: recState.srcName,
+      verify: recState.verify,
+      note: recState.note
+    };
+  }
+
+  /* capture() 的对象 → 一行数字。展开顺序由第一次调用的结构冻结（§11.6）。 */
+  function recShapeOf(o) {
+    const f = [];
+    (function walk(v, path) {
+      if (Array.isArray(v)) v.forEach((x, i) => walk(x, path + '[' + i + ']'));
+      else if (v && typeof v === 'object') Object.keys(v).forEach(k => walk(v[k], path ? path + '.' + k : k));
+      else f.push(path);
+    })(o, '');
+    return f;
+  }
+  function recFlatten(o) {
+    const out = [];
+    (function walk(v) {
+      if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v === 'object') Object.keys(v).forEach(k => walk(v[k]));
+      else out.push(typeof v === 'number' ? +v.toPrecision(REC_PREC) : v);
+    })(o);
+    return out;
+  }
+  function recUnflatten(row, tmpl) {
+    let i = 0;
+    return (function walk(v) {
+      if (Array.isArray(v)) return v.map(walk);
+      if (v && typeof v === 'object') { const o = {}; Object.keys(v).forEach(k => { o[k] = walk(v[k]); }); return o; }
+      return row[i++];
+    })(tmpl);
+  }
+
+  function recStartRecording() {
+    const h = recHooks(); if (!h) return;
+    /* 起录前先把本页签重置到一轮的开头（§11.3）——引擎的责任，不是消费方
+       在 seed() 里偷偷做。 */
+    if (h.reseed && h.seed) h.reseed(h.seed());
+    const snap = h.capture();
+    recState.mode = 'recording';
+    recState.rows = []; recState.tab = curTab;
+    recState.shape = snap; recState.fields = recShapeOf(snap);
+    recState.seed = h.seed(); recState.roundAt = h.roundOf();
+    recState.t0 = state.t;          // 录制起点的引擎时钟；回放要照它复原，见 recStep
+    recState.note = null; recState.verify = null; recState.acc = 0;
+    recPush();                                      // 立即记下第 0 行
+    buildRecRow();
+  }
+  function recStopRecording(note) {
+    if (recState.mode !== 'recording') return;
+    recState.mode = 'live';
+    recState.note = note || null;
+    buildRecRow();
+  }
+
+  /* 记一行。不做时间节流——录制态下 frame() 已经把推进量子化成整数个
+     REC_DT，一格一行即可。 */
+  function recPush() {
+    if (recState.mode !== 'recording') return;
+    const h = recHooks(); if (!h) return;
+    if (h.roundOf() !== recState.roundAt) { recStopRecording(UI.recRoundEnd); return; }  // §11.3 录一轮
+    recState.rows.push(recFlatten(h.capture()));
+    if (recState.rows.length >= REC_MAX_ROWS) recStopRecording(UI.recFull);
+  }
+
+  /* 回放推进：按 rate 走行号，restore 后照常推进读数与绘制。 */
+  function recStep(dt) {
+    const h = recHooks(); if (!h || !recState.rows.length) return;
+    if (recState.playing) {
+      recState.acc += dt * recState.rate;
+      while (recState.acc >= REC_DT && recState.i < recState.rows.length - 1) { recState.acc -= REC_DT; recState.i++; }
+      if (recState.i >= recState.rows.length - 1) { recState.acc = 0; recState.playing = false; buildRecRow(); }
+    }
+    h.restore(recUnflatten(recState.rows[recState.i], recState.shape));
+    /* 从录制起点算起，不是从 0——录制未必始于 t = 0。 */
+    state.t = recState.t0 + recState.i * REC_DT;
+  }
+
+  function recExitReplay() {
+    if (recState.mode !== 'replay') return;
+    recState.mode = 'live';
+    recState.rows = []; recState.i = 0; recState.srcName = null; recState.verify = null; recState.note = null;
+    resetSim();
+    buildRecRow();
+  }
+
+  function recSave() {
+    if (!recState.rows.length) return;
+    const doc = {
+      format: REC_FORMAT, formatVersion: REC_FORMAT_VERSION,
+      tool: { id: TOOL.id, version: VERSION, engine: ENGINE_VERSION },
+      tab: recState.tab, recordedAt: new Date().toISOString(),
+      seed: recState.seed,
+      trace: { dt: REC_DT, t0: recState.t0, fields: recState.fields, rows: recState.rows }
+    };
+    const blob = new Blob([JSON.stringify(doc)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = (TOOL.id || 'run') + '-' + recState.tab + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  /* 加载校验（§11.5）：任一不过即明确拒绝，不做兼容性猜测。 */
+  function recValidate(doc) {
+    if (!doc || doc.format !== REC_FORMAT) return { zh: '不是本引擎的存档文件', en: 'Not a valid run file for this engine' };
+    if (doc.formatVersion !== REC_FORMAT_VERSION)
+      return { zh: '存档格式版本 ' + doc.formatVersion + ' 本工具不认识', en: 'Unknown archive format version ' + doc.formatVersion };
+    if (!doc.tool || doc.tool.id !== TOOL.id)
+      return { zh: '这份存档属于「' + ((doc.tool && doc.tool.id) || '?') + '」，不是本工具',
+               en: 'This archive belongs to "' + ((doc.tool && doc.tool.id) || '?') + '", not this tool' };
+    const h = recHooks(doc.tab);
+    if (!h) return { zh: '存档的页签「' + doc.tab + '」在本工具中不可录制', en: 'Tab "' + doc.tab + '" is not recordable here' };
+    const want = recShapeOf(h.capture());
+    const got = (doc.trace && doc.trace.fields) || [];
+    if (want.length !== got.length || want.some((k, i) => k !== got[i]))
+      return { zh: '存档的字段与本版本不一致，拒绝载入（字段错位会画出看似合理实则错误的图）',
+               en: 'Field set does not match this version; refusing to load (a mismatch would draw a plausible but wrong picture)' };
+    if (!doc.trace.rows || !doc.trace.rows.length) return { zh: '存档里没有数据行', en: 'Archive contains no rows' };
+    return null;
+  }
+
+  /* §11.2：用种子在本机重新推演，与记录的轨迹逐点比对。
+     工具没给 reseed/seed 就跳过（返回 null），不阻塞回放。 */
+  function recVerify(doc) {
+    const h = recHooks(doc.tab);
+    if (!h || !h.reseed || !doc.seed) return null;
+    /* 重算是一次「离线」推演：它会走 simAdvance，因而动到 state.t。
+       全部存下来在 finally 里还原——比对不该在用户的现场留下任何痕迹。 */
+    const keep = h.capture();
+    const keepT = state.t;
+    try {
+      h.reseed(doc.seed);
+      let worst = 0;
+      const n = Math.min(doc.trace.rows.length, 400);
+      for (let k = 0; k < n; k++) {
+        const mine = recFlatten(h.capture()), theirs = doc.trace.rows[k];
+        for (let j = 0; j < mine.length; j++) {
+          const a = +mine[j], b = +theirs[j];
+          if (isFinite(a) && isFinite(b)) worst = Math.max(worst, Math.abs(a - b));
+        }
+        /* 走与录制时完全相同的推进路径（同一个 simAdvance、同一个 REC_DT）。 */
+        if (k < n - 1) simAdvance(REC_DT);
+      }
+      /* 阈值要把 toPrecision(REC_PREC) 的舍入算进去（§11.4）。 */
+      return { delta: worst, reproduced: worst < 1e-9 };
+    } catch (e) {
+      return null;
+    } finally {
+      h.restore(keep);
+      state.t = keepT;
+    }
+  }
+
+  function recLoadDoc(doc, name) {
+    const bad = recValidate(doc);
+    if (bad) { recState.note = bad; buildRecRow(); return false; }
+    const h = recHooks(doc.tab);
+    if (doc.tab !== curTab) switchTab(doc.tab);
+    recState.verify = recVerify(doc);
+    recState.mode = 'replay';
+    recState.rows = doc.trace.rows;
+    recState.fields = doc.trace.fields;
+    recState.shape = h.capture();
+    recState.seed = doc.seed; recState.tab = doc.tab; recState.srcName = name;
+    recState.t0 = +doc.trace.t0 || 0;
+    recState.i = 0; recState.acc = 0; recState.playing = true; recState.rate = 1; recState.note = null;
+    buildRecRow();
+    return true;
+  }
+
+  /* 状态行的文案只有这一处出处（buildRecRow 建行、refreshRecInfo 每 120ms 刷新，
+     两边都读它）——曾经因为两处各写一份文案，导致回放进度停在「1 / N」不动。 */
+  function recInfoText() {
+    const bits = [];
+    if (recState.mode === 'replay') {
+      bits.push(t(UI.recReplay) + ' ' + (recState.i + 1) + ' / ' + recState.rows.length);
+      if (recState.srcName) bits.push(recState.srcName);
+      if (recState.verify) {
+        bits.push(t(recState.verify.reproduced ? UI.recVerifyOK : UI.recVerifyNo) +
+                  recState.verify.delta.toExponential(1) +
+                  (recState.verify.reproduced ? '）' : t(UI.recVerifyTail)));
+      }
+    } else {
+      bits.push(recState.rows.length + t(UI.recRows));
+    }
+    if (recState.note) bits.push(t(recState.note));
+    return bits.join(' · ');
+  }
+
+  /* 录制 / 回放行（§11）。只在当前页签声明了 RECORD 钩子时出现。 */
+  function buildRecRow() {
+    const host = document.getElementById('recHost');
+    if (!host) return;
+    host.innerHTML = '';
+    if (!recHooks()) return;
+
+    const row = document.createElement('div');
+    row.className = 'row recrow';
+    const mk = (labObj, fn, cls) => {
+      const b = document.createElement('button');
+      b.className = 'btn' + (cls ? ' ' + cls : '');
+      b.textContent = t(labObj);
+      b.addEventListener('click', fn);
+      return b;
+    };
+
+    if (recState.mode === 'replay') {
+      row.appendChild(mk(recState.playing ? UI.recPause : UI.recPlay,
+        () => { recState.playing = !recState.playing; buildRecRow(); }));
+      row.appendChild(mk(UI.recRewind, () => { recState.i = 0; recState.acc = 0; recState.playing = true; buildRecRow(); }));
+      const rate = document.createElement('button');
+      rate.className = 'btn';
+      rate.textContent = recState.rate + '×';
+      rate.addEventListener('click', () => {
+        const steps = [0.25, 0.5, 1, 2, 4];
+        recState.rate = steps[(steps.indexOf(recState.rate) + 1) % steps.length];
+        buildRecRow();
+      });
+      row.appendChild(rate);
+      row.appendChild(mk(UI.recExit, recExitReplay));
+    } else if (recState.mode === 'recording') {
+      row.appendChild(mk(UI.recStop, () => recStopRecording(null), 'wide'));
+      row.appendChild(mk(UI.recSave, recSave));
+    } else {
+      row.appendChild(mk(UI.recRec, recStartRecording, 'wide'));
+      row.appendChild(mk(UI.recSave, recSave));
+      row.appendChild(mk(UI.recLoad, () => {
+        const inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = 'application/json,.json';
+        inp.addEventListener('change', () => {
+          const f = inp.files && inp.files[0];
+          if (!f) return;
+          const rd = new FileReader();
+          rd.onload = () => {
+            let doc = null;
+            try { doc = JSON.parse(rd.result); }
+            catch (e) { recState.note = { zh: '文件不是合法 JSON', en: 'File is not valid JSON' }; buildRecRow(); return; }
+            recLoadDoc(doc, f.name);
+          };
+          rd.readAsText(f);
+        });
+        inp.click();
+      }));
+    }
+    host.appendChild(row);
+
+    const info = document.createElement('div');
+    info.className = 'recinfo';
+    info.textContent = recInfoText();
+    info.dataset.rec = '1';
+    host.appendChild(info);
+
+    refreshRecLocks();
+  }
+
+  /* 录制中的行数、回放中的进度都是每帧在变的，而 buildRecRow() 只在状态切换时
+     跑——只改这一行文本，别整行重建。判据是「不是 live」而不是「是 recording」：
+     回放同样每帧在走，漏掉它就等于让进度数字停在原地。 */
+  function refreshRecInfo() {
+    if (recState.mode === 'live') return;
+    const el = document.querySelector('#recHost .recinfo[data-rec]');
+    if (!el) return;
+    el.textContent = recInfoText();
+  }
+
+  /* 回放期间种子滑杆置灰——改它们等于改种子，画面与数据会脱节（§11.7）。 */
+  function refreshRecLocks() {
+    const h = recHooks();
+    const lock = (recState.mode === 'replay' && h && h.lock) || [];
+    Object.keys(paramWraps).forEach(k => {
+      const e = paramWraps[k];
+      if (!e) return;
+      const on = lock.indexOf(k) >= 0;
+      e.input.disabled = on;
+      e.wrap.style.opacity = on ? '0.45' : '';
+    });
+  }
+
+  function switchTab(id) {
+    if (id === curTab) return;
+    curTab = id;
+    tween = null;
+    document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+    document.querySelectorAll('.toggles[data-tab], .views[data-tab]').forEach(el => {
+      el.style.display = el.dataset.tab === id ? '' : 'none';
+    });
+    if (cams[id]) Object.assign(cam, cams[id]);   // 原地改写，VizEngine.cam 引用不变
+    const sc = SCENES[id];
+    if (brandDescEl && sc) brandDescEl.textContent = t(sc.brand);
+    if (tipsEl && sc) tipsEl.textContent = t(sc.tips);
+    /* 换页签 = 换实验：正在录的那一轮不再对应画面，停录并保留已录数据；
+       回放态则整个退出——存档是绑定页签的（§11.4 的 tab 字段）。 */
+    if (recState.mode === 'recording' && recState.tab !== id) recStopRecording(null);
+    if (recState.mode === 'replay' && recState.tab !== id) recExitReplay();
+    buildRecRow();
+    syncParamVisibility();
+    refreshViewButtons();
+    updateReadout();
+  }
+
+  /* ================= 播放 / 重置 / 折叠 ================= */
+  let btnPlay = null, btnFold = null, panelEl = null;
+  function togglePlay() {
+    state.running = !state.running;
+    if (btnPlay) btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+  }
+
+  /* ================= 语言切换 ================= */
+  function applyLang() {
+    if (typeof document === 'undefined') return;
+    document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+    document.title = t(TOOL.title);
+    const h1 = document.querySelector('.brand h1');
+    if (h1) h1.textContent = t(TOOL.h1);
+    const panelTitleEl = document.getElementById('panelTitle');
+    if (panelTitleEl) panelTitleEl.textContent = t(UI.panelTitle);
+    const hintEl = document.querySelector('.hint');
+    if (hintEl) hintEl.textContent = t(UI.hint);
+    const btnLangEl = document.getElementById('btnLang');
+    if (btnLangEl) btnLangEl.textContent = LANG === 'zh' ? 'EN' : '中';
+    if (btnPlay) btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+    const btnResetEl = document.getElementById('btnReset');
+    if (btnResetEl) btnResetEl.textContent = t(UI.reset);
+    RELABEL.forEach(f => f());
+    buildRecRow();               // 录制行的文案是建行时取的 t()，整行重建即跟随语言
+    const sc = SCENES[curTab];
+    if (brandDescEl && sc) brandDescEl.textContent = t(sc.brand);
+    if (tipsEl && sc) tipsEl.textContent = t(sc.tips);
+    updateReadout();
+  }
+  function setLang(l) {
+    LANG = l;
+    try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+    try {
+      const u = new URL(location.href);
+      u.searchParams.set('lang', l);
+      history.replaceState(null, '', u);
+    } catch (e) {}
+    applyLang();
+  }
+
+  /* ================= 交互：旋转 / 平移 / 缩放 ================= */
+  function pan(dx, dy) {
+    const C = makeCam();
+    const s = cam.dist / FOCAL;
+    cam.tx = clamp(cam.tx - C.r[0]*dx*s + C.u[0]*dy*s, -6, 6);
+    cam.ty = clamp(cam.ty - C.r[1]*dx*s + C.u[1]*dy*s, -5, 5);
+    cam.tz = clamp(cam.tz - C.r[2]*dx*s + C.u[2]*dy*s, -3, 11);
+  }
+
+  /* 绑定拖拽旋转 / 右键或 Shift 拖拽平移 / 滚轮或双指缩放 / 双击回正到给定 canvas。
+     只在浏览器里调用才会碰 DOM 事件，模块顶层不会自动执行这段。
+     双击回正：若当前页签在 SCENES 里声明了 views，就补间回它的第一个视角
+     （规范里「首视角即双击回正的家」）；没有 SCENES 的最小用法里则安静地不做事。 */
+  function bindOrbit(canvasEl) {
+    const pointers = new Map();
+    let pinch = null;
+
+    canvasEl.addEventListener('pointerdown', e => {
+      canvasEl.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, btn: e.button });
+      tween = null;
+      lastView[curTab] = null;
+      refreshViewButtons();
+      if (pointers.size === 2) {
+        const vs = Array.from(pointers.values());
+        pinch = {
+          gap: Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y),
+          cx: (vs[0].x + vs[1].x) / 2,
+          cy: (vs[0].y + vs[1].y) / 2
+        };
+      }
+      canvasEl.classList.add('dragging');
+    });
+
+    canvasEl.addEventListener('pointermove', e => {
+      const p = pointers.get(e.pointerId);
+      if (!p) return;
+      const dx = e.clientX - p.x, dy = e.clientY - p.y;
+      p.x = e.clientX;
+      p.y = e.clientY;
+      if (pointers.size === 1) {
+        const panMode = e.shiftKey || (e.buttons & 2) || p.btn === 2 || p.btn === 1;
+        if (panMode) {
+          pan(dx, dy);
+        } else {
+          cam.az -= dx * 0.0055;
+          cam.el = clamp(cam.el + dy * 0.0055, -1.45, 1.53);
+        }
+      } else if (pointers.size === 2 && pinch) {
+        const vs = Array.from(pointers.values());
+        const gap = Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y);
+        const cx = (vs[0].x + vs[1].x) / 2, cy = (vs[0].y + vs[1].y) / 2;
+        if (gap > 1) cam.dist = clamp(cam.dist * pinch.gap / gap, 4.5, 60);
+        pan(cx - pinch.cx, cy - pinch.cy);
+        pinch = { gap: gap, cx: cx, cy: cy };
+      }
+    });
+
+    function endPointer(e) {
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinch = null;
+      if (!pointers.size) canvasEl.classList.remove('dragging');
+    }
+    canvasEl.addEventListener('pointerup', endPointer);
+    canvasEl.addEventListener('pointercancel', endPointer);
+    canvasEl.addEventListener('contextmenu', e => e.preventDefault());
+
+    canvasEl.addEventListener('wheel', e => {
+      e.preventDefault();
+      tween = null;
+      cam.dist = clamp(cam.dist * Math.exp(e.deltaY * 0.0012), 4.5, 60);
+    }, { passive: false });
+
+    canvasEl.addEventListener('dblclick', () => {
+      const sc = SCENES[curTab];
+      const names = sc && sc.views && Object.keys(sc.views);
+      if (names && names.length) applyView(names[0]);
+    });
+  }
+
+  /* 全局键盘快捷键：T 切换页签、1–9 选视角。这两组快捷键都只驱动引擎本体
+     已经实现、且已经接在按钮上的函数（switchTab / applyView），不需要
+     消费方提供任何东西，所以放在这里而不是要求每个工具各自重新接一遍。
+     绑在 window 上，不是 canvas 上——这是键盘事件，和 bindOrbit() 的
+     canvas 指针事件是两回事，混在一起会把两者都说不清楚。
+
+     Space 与 r 不在这里绑定——它们属于工具，不属于引擎。math-viz 的设计
+     规格把 Space 定为所有五个棋类工具的播放/暂停/单步这枚统一的传输键
+     （阶段 3 的复盘工具还要用它当「下一步」），r 同理是工具自己的重置键；
+     若引擎在这里先用 preventDefault() 抢注，工具将来接自己的处理器时
+     只会和引擎打架，而不是真正拿到这个键。resetSim()/togglePlay() 本身
+     没有删——它们仍然接在面板的按钮上，只是不再从键盘直接触发。
+     （state.t 目前只有录制子系统在读，见 simAdvance 处的说明。） */
+  function bindKeyboard() {
+    window.addEventListener('keydown', e => {
+      const el = document.activeElement;
+      const tag = el && el.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el && el.isContentEditable)) return;
+
+      if (e.key === 't' || e.key === 'T') {
+        const keys = Object.keys(SCENES);
+        if (keys.length) switchTab(keys[(keys.indexOf(curTab) + 1) % keys.length]);
+      } else if (e.key >= '1' && e.key <= '9') {
+        const sc = SCENES[curTab];
+        const names = sc && sc.views && Object.keys(sc.views);
+        if (!names) return;
+        const i = +e.key - 1;
+        if (i < names.length) applyView(names[i]);   // 越界就什么也不做，不抛也不落到 undefined
+      }
+    });
+  }
+
+  /* ================= 启动 ================= */
+  /* VizEngine.init({ canvas, SCENES, PARAMS, RECORD, TOOL, VERSION, ENGINE_VERSION }) ——
+     只有 canvas 是必需的。其余都是「工具专属声明」，省略时对应机制安静地不生效
+     （与 starter「不声明 RECORD 就没有录制 UI」同一条精神），这样本模块既可以
+     被最小页面（如棋子预览页）直接用来拿相机与绘图原语，也能在将来的算法工具里
+     接上完整的滑杆 / 页签 / 录制机制。 */
+  function init(opts) {
+    opts = opts || {};
+    canvas = opts.canvas;
+    if (!canvas) throw new Error('VizEngine.init({ canvas }) 需要一个 canvas 元素');
+    ctx = canvas.getContext('2d');
+
+    if (opts.SCENES) SCENES = opts.SCENES;
+    if (opts.PARAMS) PARAMS = opts.PARAMS;
+    if (opts.RECORD) RECORD = opts.RECORD;
+    if (opts.TOOL) TOOL = opts.TOOL;
+    if (opts.VERSION) VERSION = opts.VERSION;
+    if (opts.ENGINE_VERSION) ENGINE_VERSION = opts.ENGINE_VERSION;
+
+    try {
+      REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch (e) { REDUCED = false; }
+    LANG = resolveLang();   // 惰性求值：只在这里才碰 location / localStorage
+
+    resize();
+    window.addEventListener('resize', resize);
+
+    brandDescEl = document.getElementById('brandDesc');
+    tipsEl = document.getElementById('tips');
+    roEl = document.getElementById('readout');
+    btnPlay = document.getElementById('btnPlay');
+    panelEl = document.getElementById('panel');
+    btnFold = document.getElementById('btnFold');
+
+    if (btnPlay) btnPlay.addEventListener('click', togglePlay);
+    const btnResetEl = document.getElementById('btnReset');
+    if (btnResetEl) btnResetEl.addEventListener('click', resetSim);
+    if (btnFold && panelEl) {
+      btnFold.addEventListener('click', () => {
+        const c = panelEl.classList.toggle('collapsed');
+        btnFold.textContent = c ? '+' : '−';
+      });
+      if (window.innerWidth < 760) {
+        panelEl.classList.add('collapsed');
+        btnFold.textContent = '+';
+      }
+    }
+    const btnLangEl = document.getElementById('btnLang');
+    if (btnLangEl) btnLangEl.addEventListener('click', () => setLang(LANG === 'zh' ? 'en' : 'zh'));
+    const verBadge = document.getElementById('verBadge');
+    if (verBadge) verBadge.textContent = 'v' + VERSION;
+
+    buildTabs();
+    buildParams();
+    buildToggles();
+    buildViews();
+
+    Object.keys(SCENES).forEach(id => {
+      const views = SCENES[id].views || {};
+      const first = Object.keys(views)[0];
+      if (!first) return;
+      const v = views[first];
+      cams[id] = { az: v.az, el: v.el, dist: viewDist(v.dist), tx: v.tx || 0, ty: v.ty || 0, tz: v.tz || 0 };
+      lastView[id] = first;
+    });
+    const firstTab = Object.keys(SCENES)[0];
+    if (firstTab) {
+      curTab = null;           // 让 switchTab 的 `id === curTab` 短路检查失效，确保首次真正执行
+      switchTab(firstTab);
+    }
+
+    bindOrbit(canvas);
+    bindKeyboard();
+    applyLang();
+    resetSim();
+    /* autoLoop 默认 true——数学可视化工具的动画从一个持续运行的时钟驱动，
+       "每个 vsync 都重画" 是它们的常态，引擎自带循环因此默认开启。
+       棋类不是这个模型：棋是离散的——重画只该发生在一步棋、一次相机拖拽、
+       或一次显式动画之后，从不该有一个"正在跑的时钟"替它决定何时重画。
+       task-14 的 32 子帧率探针踩过这个坑：_piece-preview.html 自己起了
+       第二条 rAF 循环（drawHarness），engine 的 frame() 同时也在跑——
+       两条循环每个 vsync 都各画一次同一块 canvas：engine 先铺一层昂贵的
+       径向渐变背景（SCENES 为空，铺完就没别的可画），harness 紧接着用
+       一次纯色 fill 把它整个盖掉再画棋盘和棋子。径向渐变因此是纯浪费
+       （量过：1.03ms vs 纯色 fill 的 0.07ms，15 倍开销，且立刻被覆盖）。
+       给 init() 加这个开关，让像 _piece-preview.html 这样自己驱动循环的
+       调用方能关掉引擎自己的循环——以后棋类工具大概率都要这个开关，
+       所以放在引擎里而不是让每个工具各自想办法绕开它。 */
+    if (opts.autoLoop !== false) requestAnimationFrame(frame);
+  }
+
+  return {
+    makeCam, proj, unproject, viewInfo, withContext, strokePoly, line3,
+    glowDot, solidDot, label3, arrowAt,
+    drawAxes, drawGridXY,
+    clamp, fmt, fmtS, t,
+    init, bindOrbit,
+    cam, recInfo
+  };
+});
+/* <<< GENERATED:VIZ-ENGINE */
+/* >>> GENERATED:CHESS-CORE */
+/* 国际象棋内核 —— 0x88 表示、走法生成、FEN/SAN/UCI/PGN。
+   零依赖；node 与浏览器双用。编辑源，运行时被内联进 tools/*.html。 */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.ChessCore = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  const WHITE = 1, BLACK = -1;
+  const EMPTY = 0, P = 1, N = 2, B = 3, R = 4, Q = 5, K = 6;
+
+  // 标准初始局面的 FEN —— PGN 在没有 [FEN] 标签时以此为起点。
+  const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+
+  // 0x88：索引 = rank * 16 + file。盘内格的第 4、7 位必为 0，
+  // 所以越界检测是一次按位与，不需要两次范围比较。
+  function SQ(file, rank) { return rank * 16 + file; }
+  function fileOf(s) { return s & 7; }
+  function rankOf(s) { return s >> 4; }
+  function offBoard(s) { return (s & 0x88) !== 0; }
+
+  function toAlg(s) {
+    return String.fromCharCode(97 + fileOf(s)) + (rankOf(s) + 1);
+  }
+
+  function fromAlg(a) {
+    if (typeof a !== 'string' || a.length !== 2) throw new Error('Bad square: ' + a);
+    const f = a.charCodeAt(0) - 97, r = a.charCodeAt(1) - 49;
+    if (f < 0 || f > 7 || r < 0 || r > 7) throw new Error('Bad square: ' + a);
+    return SQ(f, r);
+  }
+
+  const FEN_TO_CODE = { p: P, n: N, b: B, r: R, q: Q, k: K };
+  const CODE_TO_FEN = { [P]: 'p', [N]: 'n', [B]: 'b', [R]: 'r', [Q]: 'q', [K]: 'k' };
+
+  function Position() {
+    this.board = new Int8Array(128);
+    this.turn = WHITE;
+    this.castling = 0;      // 1=K 2=Q 4=k 8=q
+    this.ep = -1;
+    this.half = 0;
+    this.full = 1;
+    this.kingW = -1;
+    this.kingB = -1;
+  }
+
+  Position.prototype.kingSq = function (colour) {
+    return colour === WHITE ? this.kingW : this.kingB;
+  };
+
+  Position.prototype.clone = function () {
+    const p = new Position();
+    p.board.set(this.board);
+    p.turn = this.turn; p.castling = this.castling; p.ep = this.ep;
+    p.half = this.half; p.full = this.full;
+    p.kingW = this.kingW; p.kingB = this.kingB;
+    return p;
+  };
+
+  Position.fromFEN = function (fen, opts) {
+    const requireKings = !opts || opts.requireKings !== false;
+    const parts = String(fen).trim().split(/\s+/);
+    if (parts.length < 4) throw new Error('Bad FEN: expected at least 4 fields, got ' + parts.length);
+    const rows = parts[0].split('/');
+    if (rows.length !== 8) throw new Error('Bad FEN: expected 8 ranks, got ' + rows.length);
+
+    const p = new Position();
+    let wKings = 0, bKings = 0;
+    for (let r = 0; r < 8; r++) {
+      const row = rows[7 - r];          // FEN 从第 8 横行开始写
+      let f = 0;
+      for (let i = 0; i < row.length; i++) {
+        const ch = row[i];
+        if (ch >= '1' && ch <= '8') { f += +ch; continue; }
+        const lower = ch.toLowerCase();
+        const code = FEN_TO_CODE[lower];
+        if (!code) throw new Error('Bad FEN: unknown piece "' + ch + '"');
+        if (f > 7) throw new Error('Bad FEN: rank ' + (r + 1) + ' overflows');
+        const s = SQ(f, r);
+        const signed = (ch === lower) ? -code : code;
+        p.board[s] = signed;
+        if (code === K) {
+          if (signed > 0) { p.kingW = s; wKings++; } else { p.kingB = s; bKings++; }
+        }
+        f++;
+      }
+      if (f !== 8) throw new Error('Bad FEN: rank ' + (r + 1) + ' has ' + f + ' squares, expected 8');
+    }
+    // 没有王、或某一方不止一个王，都不是一个真实的国际象棋局面 ——
+    // 放任它通过会让 legalMoves/inCheck 在下游悄悄地对着 −1 出错。
+    // 但这条护栏只对"对局"场景成立：有些教学用途（例如孤马 BFS 到
+    // 每格最短步数场）就是要表示没有王的局面，所以留一个显式的
+    // opt-out —— { requireKings: false }，默认仍为 true。
+    if (requireKings) {
+      if (wKings !== 1) throw new Error('Bad FEN: white must have exactly one king, found ' + wKings);
+      if (bKings !== 1) throw new Error('Bad FEN: black must have exactly one king, found ' + bKings);
+    }
+
+    if (parts[1] !== 'w' && parts[1] !== 'b') {
+      throw new Error('Bad FEN: side to move must be "w" or "b", got "' + parts[1] + '"');
+    }
+    p.turn = parts[1] === 'b' ? BLACK : WHITE;
+    if (parts[2] !== '-') {
+      if (parts[2].indexOf('K') >= 0) p.castling |= 1;
+      if (parts[2].indexOf('Q') >= 0) p.castling |= 2;
+      if (parts[2].indexOf('k') >= 0) p.castling |= 4;
+      if (parts[2].indexOf('q') >= 0) p.castling |= 8;
+    }
+    p.ep = parts[3] === '-' ? -1 : fromAlg(parts[3]);
+    if (parts.length > 4 && !/^\d+$/.test(parts[4])) {
+      throw new Error('Bad FEN: half-move clock must be a non-negative integer, got "' + parts[4] + '"');
+    }
+    if (parts.length > 5 && !/^\d+$/.test(parts[5])) {
+      throw new Error('Bad FEN: full-move number must be a non-negative integer, got "' + parts[5] + '"');
+    }
+    p.half = parts.length > 4 ? parseInt(parts[4], 10) : 0;
+    p.full = parts.length > 5 ? parseInt(parts[5], 10) : 1;
+    return p;
+  };
+
+  Position.prototype.toFEN = function () {
+    const rows = [];
+    for (let r = 7; r >= 0; r--) {
+      let row = '', gap = 0;
+      for (let f = 0; f < 8; f++) {
+        const v = this.board[SQ(f, r)];
+        if (v === EMPTY) { gap++; continue; }
+        if (gap) { row += gap; gap = 0; }
+        const ch = CODE_TO_FEN[Math.abs(v)];
+        row += v > 0 ? ch.toUpperCase() : ch;
+      }
+      if (gap) row += gap;
+      rows.push(row);
+    }
+    let cast = '';
+    if (this.castling & 1) cast += 'K';
+    if (this.castling & 2) cast += 'Q';
+    if (this.castling & 4) cast += 'k';
+    if (this.castling & 8) cast += 'q';
+    return rows.join('/') + ' ' + (this.turn === WHITE ? 'w' : 'b') +
+           ' ' + (cast || '-') +
+           ' ' + (this.ep < 0 ? '-' : toAlg(this.ep)) +
+           ' ' + this.half + ' ' + this.full;
+  };
+
+  const FLAG = { CAPTURE: 1, EP: 2, CASTLE_K: 4, CASTLE_Q: 8, DOUBLE: 16, PROMO: 32 };
+
+  // 0x88 下的方向偏移：+16 是往上一横行，+1 是往右一直列。
+  const OFF_N = [33, 31, 18, 14, -33, -31, -18, -14];
+  const OFF_B = [17, 15, -17, -15];
+  const OFF_R = [16, 1, -16, -1];
+  // 八个方向的并集：斜线（象）∪ 直线（车）= 后的射线表，也恰好是王走一步
+  // 能到的八个方向——王与后共享这张表纯属几何巧合（王只走一步，后可以
+  // 滑到底），二者语义并不相同，所以用 OFF_K 只作为"王用这张表"的别名，
+  // 不要把它当成"王专属"的表来读。
+  const OFF_ALL8 = [17, 16, 15, 1, -17, -16, -15, -1];
+  const OFF_K = OFF_ALL8;
+  const SLIDE = { [B]: OFF_B, [R]: OFF_R, [Q]: OFF_ALL8 };   // B / R / Q 共用射线表
+  const PROMO_PIECES = [Q, R, B, N];
+
+  function mk(from, to, piece, captured, promo, flags) {
+    return { from: from, to: to, piece: piece,
+             captured: captured || 0, promo: promo || 0, flags: flags || 0 };
+  }
+
+  // Move 是每次调用现造的新对象，没有稳定恒等性——工具代码（例如用
+  // pseudoLegalMoves() 减 legalMoves() 求"被别住的子"）需要按值比较两步棋
+  // 是否是同一步。在同一局面内，from/to/promo 三项已完全确定一步棋
+  // （piece/captured/flags 都能从局面 + from/to/promo 推出，不需要参与比较）。
+  function sameMove(a, b) {
+    return a.from === b.from && a.to === b.to && a.promo === b.promo;
+  }
+
+  Position.prototype.pseudoLegalMoves = function () {
+    const out = [];
+    const me = this.turn, bd = this.board;
+
+    for (let s = 0; s < 128; s++) {
+      if (s & 0x88) { s += 7; continue; }        // 跳过越界半区
+      const v = bd[s];
+      if (v === EMPTY || (v > 0 ? WHITE : BLACK) !== me) continue;
+      const type = Math.abs(v);
+
+      if (type === P) { pawnMoves(this, s, me, out); continue; }
+
+      if (type === N || type === K) {
+        const offs = type === N ? OFF_N : OFF_K;
+        for (let i = 0; i < offs.length; i++) {
+          const to = s + offs[i];
+          if (to & 0x88) continue;
+          const tv = bd[to];
+          if (tv !== EMPTY && (tv > 0 ? WHITE : BLACK) === me) continue;
+          out.push(mk(s, to, v, tv, 0, tv === EMPTY ? 0 : FLAG.CAPTURE));
+        }
+        continue;
+      }
+
+      const offs = SLIDE[type];
+      for (let i = 0; i < offs.length; i++) {
+        let to = s + offs[i];
+        while (!(to & 0x88)) {
+          const tv = bd[to];
+          if (tv === EMPTY) { out.push(mk(s, to, v, 0, 0, 0)); to += offs[i]; continue; }
+          if ((tv > 0 ? WHITE : BLACK) !== me) out.push(mk(s, to, v, tv, 0, FLAG.CAPTURE));
+          break;                                  // 无论敌我，射线到此为止
+        }
+      }
+    }
+    castleMoves(this, me, out);
+    return out;
+  };
+
+  function castleMoves(pos, me, out) {
+    const bd = pos.board;
+    const home = me === WHITE ? SQ(4, 0) : SQ(4, 7);
+    if (bd[home] !== (me === WHITE ? K : -K)) return;
+    if (pos.isAttacked(home, -me)) return;          // 被将军时不能易位
+
+    const kBit = me === WHITE ? 1 : 4;
+    const qBit = me === WHITE ? 2 : 8;
+    const rookK = home + 3, rookQ = home - 4;
+
+    if ((pos.castling & kBit) && bd[rookK] === (me === WHITE ? R : -R) &&
+        bd[home + 1] === EMPTY && bd[home + 2] === EMPTY &&
+        !pos.isAttacked(home + 1, -me) && !pos.isAttacked(home + 2, -me)) {
+      out.push(mk(home, home + 2, bd[home], 0, 0, FLAG.CASTLE_K));
+    }
+    // 长易位：b 列（home−3）必须为空，但王不经过它，所以不检查它是否被攻击
+    if ((pos.castling & qBit) && bd[rookQ] === (me === WHITE ? R : -R) &&
+        bd[home - 1] === EMPTY && bd[home - 2] === EMPTY && bd[home - 3] === EMPTY &&
+        !pos.isAttacked(home - 1, -me) && !pos.isAttacked(home - 2, -me)) {
+      out.push(mk(home, home - 2, bd[home], 0, 0, FLAG.CASTLE_Q));
+    }
+  }
+
+  function pawnMoves(pos, s, me, out) {
+    const bd = pos.board;
+    const dir = me === WHITE ? 16 : -16;
+    const startRank = me === WHITE ? 1 : 6;
+    const lastRank = me === WHITE ? 7 : 0;
+    const piece = me === WHITE ? P : -P;
+
+    const one = s + dir;
+    if (!(one & 0x88) && bd[one] === EMPTY) {
+      pushPawn(out, s, one, piece, 0, lastRank, 0);
+      const two = s + dir * 2;
+      if (rankOf(s) === startRank && !(two & 0x88) && bd[two] === EMPTY) {
+        out.push(mk(s, two, piece, 0, 0, FLAG.DOUBLE));
+      }
+    }
+    const caps = [dir + 1, dir - 1];
+    for (let i = 0; i < 2; i++) {
+      const to = s + caps[i];
+      if (to & 0x88) continue;
+      const tv = bd[to];
+      if (tv === EMPTY) {
+        if (to === pos.ep && pos.ep >= 0) {
+          // 被吃的兵不在落点格，而在落点格的"身后"一格
+          const victim = to - dir;
+          out.push(mk(s, to, piece, bd[victim], 0, FLAG.CAPTURE | FLAG.EP));
+        }
+        continue;
+      }
+      if ((tv > 0 ? WHITE : BLACK) === me) continue;
+      pushPawn(out, s, to, piece, tv, lastRank, FLAG.CAPTURE);
+    }
+  }
+
+  function pushPawn(out, from, to, piece, captured, lastRank, flags) {
+    if (rankOf(to) !== lastRank) { out.push(mk(from, to, piece, captured, 0, flags)); return; }
+    for (let i = 0; i < PROMO_PIECES.length; i++) {
+      out.push(mk(from, to, piece, captured, PROMO_PIECES[i], flags | FLAG.PROMO));
+    }
+  }
+
+  // 易位权掩码：某格一旦被"离开或被占据"，对应的权利就消失。
+  // 例如 a1 既是白后翼车的家，也是黑车吃过来时会落到的格，两种情况都该清 Q。
+  const CASTLE_MASK = new Int8Array(128).fill(15);
+  CASTLE_MASK[SQ(4, 0)] = 12;   // e1：白王一动，K 与 Q 全没
+  CASTLE_MASK[SQ(0, 0)] = 13;   // a1：清 Q
+  CASTLE_MASK[SQ(7, 0)] = 14;   // h1：清 K
+  CASTLE_MASK[SQ(4, 7)] = 3;    // e8：清 k 与 q
+  CASTLE_MASK[SQ(0, 7)] = 7;    // a8：清 q
+  CASTLE_MASK[SQ(7, 7)] = 11;   // h8：清 k
+
+  Position.prototype._make = function (m) {
+    const undo = { castling: this.castling, ep: this.ep, half: this.half,
+                   kingW: this.kingW, kingB: this.kingB };
+    const bd = this.board;
+
+    if (m.flags & FLAG.EP) {
+      bd[m.to - (this.turn === WHITE ? 16 : -16)] = EMPTY;   // 被吃的兵不在落点格
+    } else if (m.flags & FLAG.CASTLE_K) {
+      bd[m.to + 1] = EMPTY; bd[m.to - 1] = this.turn === WHITE ? R : -R;
+    } else if (m.flags & FLAG.CASTLE_Q) {
+      bd[m.to - 2] = EMPTY; bd[m.to + 1] = this.turn === WHITE ? R : -R;
+    }
+
+    bd[m.from] = EMPTY;
+    bd[m.to] = m.promo ? (this.turn === WHITE ? m.promo : -m.promo) : m.piece;
+
+    if (Math.abs(m.piece) === K) {
+      if (this.turn === WHITE) this.kingW = m.to; else this.kingB = m.to;
+    }
+
+    this.castling &= CASTLE_MASK[m.from] & CASTLE_MASK[m.to];
+    this.ep = (m.flags & FLAG.DOUBLE)
+      ? m.from + (this.turn === WHITE ? 16 : -16)
+      : -1;
+    this.half = (Math.abs(m.piece) === P || m.captured) ? 0 : this.half + 1;
+    if (this.turn === BLACK) this.full++;
+    this.turn = -this.turn;
+    return undo;
+  };
+
+  Position.prototype._unmake = function (m, undo) {
+    const bd = this.board;
+    this.turn = -this.turn;
+    if (this.turn === BLACK) this.full--;
+    bd[m.from] = m.piece;
+    bd[m.to] = m.captured;
+    if (m.flags & FLAG.EP) {
+      bd[m.to] = EMPTY;                                       // 落点本来是空的
+      bd[m.to - (this.turn === WHITE ? 16 : -16)] = m.captured;
+    } else if (m.flags & FLAG.CASTLE_K) {
+      bd[m.to - 1] = EMPTY; bd[m.to + 1] = this.turn === WHITE ? R : -R;
+    } else if (m.flags & FLAG.CASTLE_Q) {
+      bd[m.to + 1] = EMPTY; bd[m.to - 2] = this.turn === WHITE ? R : -R;
+    }
+    this.castling = undo.castling; this.ep = undo.ep; this.half = undo.half;
+    this.kingW = undo.kingW; this.kingB = undo.kingB;
+  };
+
+  Position.prototype.make = function (m) {
+    const p = this.clone();
+    p._make(m);
+    return p;
+  };
+
+  // 从被攻击格反向扫射线：与其枚举所有敌子的走法，不如站在目标格上
+  // 沿八个方向看出去，遇到的第一颗子是不是"能这样打过来"的类型。
+  Position.prototype.isAttacked = function (target, by) {
+    const bd = this.board;
+
+    for (let i = 0; i < OFF_N.length; i++) {
+      const s = target + OFF_N[i];
+      if (s & 0x88) continue;
+      const v = bd[s];
+      if (v !== EMPTY && (v > 0 ? WHITE : BLACK) === by && Math.abs(v) === N) return true;
+    }
+
+    for (let i = 0; i < OFF_K.length; i++) {
+      const dir = OFF_K[i];
+      const diagonal = (dir === 17 || dir === 15 || dir === -17 || dir === -15);
+      let s = target + dir, dist = 1;
+      while (!(s & 0x88)) {
+        const v = bd[s];
+        if (v !== EMPTY) {
+          if ((v > 0 ? WHITE : BLACK) === by) {
+            const t = Math.abs(v);
+            if (t === Q) return true;
+            if (t === (diagonal ? B : R)) return true;
+            if (dist === 1) {
+              if (t === K) return true;
+              // 兵只在"从目标格反过来看"的对应斜方向才构成攻击：
+              // 白兵攻击的是它前方（+16 方向）两侧的格，所以反过来从
+              // 目标格看，白兵攻击者应在 −17 / −15 方向（黑兵则相反，
+              // 在 +17 / +15 方向）。
+              if (t === P && diagonal) {
+                if (by === WHITE && (dir === -17 || dir === -15)) return true;
+                if (by === BLACK && (dir === 17 || dir === 15)) return true;
+              }
+            }
+          }
+          break;                      // 无论敌我，这条射线到此为止
+        }
+        s += dir; dist++;
+      }
+    }
+    return false;
+  };
+
+  Position.prototype.inCheck = function (colour) {
+    const k = this.kingSq(colour);
+    return k < 0 ? false : this.isAttacked(k, -colour);
+  };
+
+  // 攻击 ≠ 走法：这两个函数回答"棋盘几何上谁打到了谁"，与"谁能合法地走
+  // 到哪"是两个不同的问题——被己方子占据的格仍然"被攻击"（这正是"保护"
+  // 的定义），兵的正前方推进与易位落点则从不算攻击。早先版本借道
+  // pseudoLegalMoves() 实现，那只回答"能走到哪"，会把己方占据的格与
+  // 未被防守的兵前方漏掉，导致 attackedBy 与 isAttacked 在同一局面上矛盾。
+  // 现在与 isAttacked 共用同一套反向射线/马步/兵步几何，只是不提前
+  // return，而是把每个方向命中的攻击方棋子收集起来。
+  Position.prototype.attackedBy = function (target, by) {
+    const bd = this.board;
+    const out = [];
+
+    for (let i = 0; i < OFF_N.length; i++) {
+      const s = target + OFF_N[i];
+      if (s & 0x88) continue;
+      const v = bd[s];
+      if (v !== EMPTY && (v > 0 ? WHITE : BLACK) === by && Math.abs(v) === N) out.push(s);
+    }
+
+    for (let i = 0; i < OFF_K.length; i++) {
+      const dir = OFF_K[i];
+      const diagonal = (dir === 17 || dir === 15 || dir === -17 || dir === -15);
+      let s = target + dir, dist = 1;
+      while (!(s & 0x88)) {
+        const v = bd[s];
+        if (v !== EMPTY) {
+          if ((v > 0 ? WHITE : BLACK) === by) {
+            const t = Math.abs(v);
+            let hit = false;
+            if (t === Q) hit = true;
+            else if (t === (diagonal ? B : R)) hit = true;
+            else if (dist === 1) {
+              if (t === K) hit = true;
+              else if (t === P && diagonal) {
+                if (by === WHITE && (dir === -17 || dir === -15)) hit = true;
+                if (by === BLACK && (dir === 17 || dir === 15)) hit = true;
+              }
+            }
+            if (hit) out.push(s);
+          }
+          break;                      // 无论敌我，这条射线到此为止
+        }
+        s += dir; dist++;
+      }
+    }
+    return out;
+  };
+
+  // 该格棋子的攻击范围：从棋子出发沿几何看能打到哪些格，
+  // 与 isAttacked/attackedBy 是同一套几何的正向版本。包含被己方子
+  // 占据的格（防守也是攻击），不含兵的正前方推进与易位落点
+  // （那些是走法，不是攻击）。
+  Position.prototype.attacksFrom = function (from) {
+    const v = this.board[from];
+    if (v === EMPTY) return [];
+    const bd = this.board;
+    const type = Math.abs(v);
+    const colour = v > 0 ? WHITE : BLACK;
+    const out = [];
+
+    if (type === P) {
+      const dir = colour === WHITE ? 16 : -16;
+      const caps = [dir + 1, dir - 1];
+      for (let i = 0; i < 2; i++) {
+        const to = from + caps[i];
+        if (!(to & 0x88)) out.push(to);
+      }
+      return out;
+    }
+
+    if (type === N || type === K) {
+      const offs = type === N ? OFF_N : OFF_K;
+      for (let i = 0; i < offs.length; i++) {
+        const to = from + offs[i];
+        if (!(to & 0x88)) out.push(to);
+      }
+      return out;
+    }
+
+    const offs = SLIDE[type];
+    for (let i = 0; i < offs.length; i++) {
+      let to = from + offs[i];
+      while (!(to & 0x88)) {
+        out.push(to);
+        if (bd[to] !== EMPTY) break;   // 遇子（不论敌我）即为攻击范围的边界
+        to += offs[i];
+      }
+    }
+    return out;
+  };
+
+  Position.prototype.legalMoves = function () {
+    const me = this.turn, out = [];
+    const ms = this.pseudoLegalMoves();
+    for (let i = 0; i < ms.length; i++) {
+      const m = ms[i];
+      const undo = this._make(m);
+      // 与 inCheck 保持一致：找不到王（k < 0）视为"不构成将军"，
+      // 而不是让 isAttacked(-1, …) 悄悄给出未定义的答案。
+      // 这不是漏洞，是有意为之：没有王的局面（fromFEN(fen, {requireKings:false})
+      // 构造出来的教学局面，例如孤马 BFS 场）根本没有"将军"这回事可暴露，
+      // 所以 k < 0 时直接放行——legalMoves() 在此退化为 pseudoLegalMoves()，
+      // 全部走法都算合法。调用方如果依赖"合法性过滤"这一行为，
+      // 需要自己先确认局面里有王。
+      const k = this.kingSq(me);
+      if (k < 0 || !this.isAttacked(k, -me)) out.push(m);
+      this._unmake(m, undo);
+    }
+    return out;
+  };
+
+  // 保守规则：只有"双方都不可能强制将死"才判子力不足。任何一方达到
+  // 两个轻子（无论颜色组合）就已经存在理论杀法（KNN 对 K 也算，尽管
+  // 实战极难逼出），所以立即返回 false。
+  // 已知的不完整之处（有意为之，不是漏了）：同色格象分居两侧属于死局，
+  // 但本函数把它算作"进行中"——要判定这种死局需要比较象所在格的颜色，
+  // 这里没有做，读者不要以为这条规则是完整的。
+  function insufficientMaterial(pos) {
+    let minors = 0;
+    for (let s = 0; s < 128; s++) {
+      if (s & 0x88) { s += 7; continue; }
+      const t = Math.abs(pos.board[s]);
+      if (t === EMPTY || t === K) continue;
+      if (t === P || t === R || t === Q) return false;
+      minors++;
+      if (minors > 1) return false;      // 两个轻子起就可能杀（含异色象）
+    }
+    return true;
+  }
+
+  Position.prototype.status = function () {
+    const has = this.legalMoves().length > 0;
+    const chk = this.inCheck(this.turn);
+    if (!has) return chk ? 'checkmate' : 'stalemate';
+    // 这条排在 chk 判断之前是刻意的：即使 this.turn 一方正被将军，只要子力
+    // 不足，也报告 'insufficient' 而不是 'check'——checkmate 已经在上面的
+    // !has 分支被排除了，所以这里不会掩盖任何将死；FIDE 的死局规则本就
+    // 不区分"死局时是否被将军"。想单独知道"当下是否被将军"这个盘面事实
+    // 的调用方，应该直接调 inCheck()，不要依赖 status() 的优先级。
+    if (insufficientMaterial(this)) return 'insufficient';   // 死局自动成立，优先于一切
+    // 将军是当下必须回应的事实；五十步规则只是"可主张"而非自动生效，
+    // 棋局仍在进行中，所以将军排在五十步之前——这个顺序不是随意的。
+    if (chk) return 'check';
+    if (this.half >= 100) return 'fifty';
+    return 'ongoing';
+  };
+
+  function perft(pos, depth) {
+    if (depth <= 0) return 1;
+    const ms = pos.legalMoves();
+    if (depth === 1) return ms.length;     // 叶子层不必真的走一遍
+    let n = 0;
+    for (let i = 0; i < ms.length; i++) {
+      const undo = pos._make(ms[i]);
+      n += perft(pos, depth - 1);
+      pos._unmake(ms[i], undo);
+    }
+    return n;
+  }
+
+  // 分支计数：某个 depth 的总数对不上时，用它逐支比对，
+  // 一层一层缩小范围直到定位到具体是哪个走法算错了。
+  function perftDivide(pos, depth) {
+    const out = {};
+    const ms = pos.legalMoves();
+    for (let i = 0; i < ms.length; i++) {
+      const undo = pos._make(ms[i]);
+      out[moveToUCI(ms[i])] = perft(pos, depth - 1);
+      pos._unmake(ms[i], undo);
+    }
+    return out;
+  }
+
+  // 与文件里其它查表一样提到模块层：先前是函数内的字面量，每次调用
+  // moveToUCI() 都要重新分配一次——perft 的热路径里 moveToUCI 调用量
+  // 很大（例如 perftDivide），没必要每次都重建这张表。
+  const PROMO_CH = { [N]: 'n', [B]: 'b', [R]: 'r', [Q]: 'q' };
+
+  function moveToUCI(m) {
+    return toAlg(m.from) + toAlg(m.to) + (m.promo ? PROMO_CH[m.promo] : '');
+  }
+
+  const SAN_CH = { 1: '', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K' };
+  const SAN_TO_CODE = { N: N, B: B, R: R, Q: Q, K: K };
+
+  function moveToSAN(pos, m) {
+    if (!m) throw new Error('moveToSAN: move is required');
+    let s;
+    if (m.flags & FLAG.CASTLE_K) s = 'O-O';
+    else if (m.flags & FLAG.CASTLE_Q) s = 'O-O-O';
+    else {
+      const type = Math.abs(m.piece);
+      if (type === P) {
+        s = (m.flags & FLAG.CAPTURE) ? toAlg(m.from)[0] + 'x' : '';
+        s += toAlg(m.to);
+        if (m.promo) s += '=' + SAN_CH[m.promo];
+      } else {
+        s = SAN_CH[type] + disambiguate(pos, m) +
+            ((m.flags & FLAG.CAPTURE) ? 'x' : '') + toAlg(m.to);
+      }
+    }
+    const after = pos.make(m);
+    if (after.inCheck(after.turn)) s += after.legalMoves().length ? '+' : '#';
+    return s;
+  }
+
+  // 消歧规则：先试直列，不够再试横行，还不够就写全格。
+  function disambiguate(pos, m) {
+    const type = Math.abs(m.piece);
+    const rivals = pos.legalMoves().filter(x =>
+      x.to === m.to && x.from !== m.from && Math.abs(x.piece) === type);
+    if (!rivals.length) return '';
+    const sameFile = rivals.some(x => fileOf(x.from) === fileOf(m.from));
+    const sameRank = rivals.some(x => rankOf(x.from) === rankOf(m.from));
+    if (!sameFile) return toAlg(m.from)[0];
+    if (!sameRank) return toAlg(m.from)[1];
+    return toAlg(m.from);
+  }
+
+  const SAN_RE = /^([NBRQK])?([a-h])?([1-8])?(x)?([a-h][1-8])(?:=?([NBRQ]))?[+#]?$/;
+
+  function parseSAN(pos, text) {
+    const s = String(text).trim().replace(/[!?]+$/, '');
+    const legal = pos.legalMoves();
+
+    if (s === 'O-O' || s === '0-0') {
+      const m = legal.find(x => x.flags & FLAG.CASTLE_K);
+      if (!m) throw new Error('Illegal SAN "' + text + '": kingside castling is not available');
+      return m;
+    }
+    if (s === 'O-O-O' || s === '0-0-0') {
+      const m = legal.find(x => x.flags & FLAG.CASTLE_Q);
+      if (!m) throw new Error('Illegal SAN "' + text + '": queenside castling is not available');
+      return m;
+    }
+
+    const g = SAN_RE.exec(s);
+    if (!g) throw new Error('Bad SAN syntax: "' + text + '"');
+    const type = g[1] ? SAN_TO_CODE[g[1]] : P;
+    const hintF = g[2] ? g[2].charCodeAt(0) - 97 : -1;
+    const hintR = g[3] ? g[3].charCodeAt(0) - 49 : -1;
+    const to = fromAlg(g[5]);
+    const promo = g[6] ? SAN_TO_CODE[g[6]] : 0;
+
+    const hits = legal.filter(x =>
+      Math.abs(x.piece) === type && x.to === to &&
+      (promo ? x.promo === promo : !x.promo) &&
+      (hintF < 0 || fileOf(x.from) === hintF) &&
+      (hintR < 0 || rankOf(x.from) === hintR));
+
+    if (hits.length === 1) return hits[0];
+    if (!hits.length) throw new Error('Illegal SAN "' + text + '" in position ' + pos.toFEN());
+    throw new Error('Ambiguous SAN "' + text + '": ' + hits.length + ' moves match');
+  }
+
+  const UCI_RE = /^([a-h][1-8])([a-h][1-8])([nbrq])?$/;
+  const UCI_TO_CODE = { n: N, b: B, r: R, q: Q };
+
+  function parseUCI(pos, text) {
+    const g = UCI_RE.exec(String(text).trim());
+    if (!g) throw new Error('Bad UCI syntax: "' + text + '" (expected e.g. e2e4 or e7e8q)');
+    const from = fromAlg(g[1]), to = fromAlg(g[2]);
+    const promo = g[3] ? UCI_TO_CODE[g[3]] : 0;
+    const m = pos.legalMoves().find(x =>
+      x.from === from && x.to === to && (promo ? x.promo === promo : !x.promo));
+    if (!m) throw new Error('Illegal UCI move "' + text + '" in position ' + pos.toFEN());
+    return m;
+  }
+
+  const TAG_RE = /\[\s*(\w+)\s*"((?:[^"\\]|\\.)*)"\s*\]/g;
+  const RESULTS = ['1-0', '0-1', '1/2-1/2', '*'];
+
+  function parsePGN(text) {
+    const src = String(text);
+    const headers = {};
+    let m, tagEnd = 0;
+    TAG_RE.lastIndex = 0;
+    // 注意：exec 返回 null 时 lastIndex 会被重置为 0，所以必须在循环里
+    // 自己记住最后一个标签的结束位置，不能循环结束后再读 lastIndex。
+    while ((m = TAG_RE.exec(src))) {
+      headers[m[1]] = m[2].replace(/\\(.)/g, '$1');
+      tagEnd = TAG_RE.lastIndex;
+    }
+    const body = src.slice(tagEnd);      // 无标签时 tagEnd 为 0，即全文
+
+    let skipped = 0;
+    // 逐层剥掉 { } 注释与 ( ) 变着（可嵌套）
+    let clean = '', depth = 0;
+    for (let i = 0; i < body.length; i++) {
+      const ch = body[i];
+      if (ch === '{' || ch === '(') { depth++; if (depth === 1) skipped++; continue; }
+      if (ch === '}' || ch === ')') { if (depth > 0) depth--; continue; }
+      if (depth === 0) clean += ch;
+    }
+    clean = clean.replace(/;[^\n]*/g, '')          // 行注释
+                 .replace(/\$\d+/g, '')            // NAG
+                 .replace(/\d+\s*\.(\.\.)?/g, ' ') // 回合编号
+                 .replace(/\s+/g, ' ').trim();
+
+    // PGN 标准规定 [SetUp "1"] 才"授权" [FEN] 标签生效，但这里刻意从宽：
+    // 只要携带了 [FEN] 就采信，不论有没有 [SetUp]——后续阶段要加载来源各异
+    // 的历史棋谱，不少真实存在的 PGN 只写 FEN 不写 SetUp，严格按标准拒绝
+    // 这些合法数据只是在满足形式主义，对下游没有好处。
+    const startFEN = headers.FEN || null;
+    let pos = startFEN ? Position.fromFEN(startFEN) : Position.fromFEN(START_FEN);
+
+    const moves = [], positions = [pos];
+    let result = '*';
+    const tokens = clean ? clean.split(' ') : [];
+    for (let i = 0; i < tokens.length; i++) {
+      const tk = tokens[i];
+      if (!tk) continue;
+      if (RESULTS.indexOf(tk) >= 0) { result = tk; break; }
+      let mv;
+      try {
+        mv = parseSAN(pos, tk);
+      } catch (e) {
+        throw new Error('PGN move ' + (moves.length + 1) + ' ("' + tk + '") is illegal: ' + e.message);
+      }
+      moves.push(mv);
+      pos = pos.make(mv);
+      positions.push(pos);
+    }
+    if (headers.Result && RESULTS.indexOf(headers.Result) >= 0 && result === '*') {
+      result = headers.Result;
+    }
+    return { headers: headers, moves: moves, positions: positions,
+             result: result, skipped: skipped, startFEN: startFEN };
+  }
+
+  function writePGN(headers, moves, startFEN) {
+    const out = [];
+    const seven = ['Event', 'Site', 'Date', 'Round', 'White', 'Black', 'Result'];
+    for (let i = 0; i < seven.length; i++) {
+      const k = seven[i];
+      const v = (headers && headers[k] != null) ? String(headers[k]) : '?';
+      out.push('[' + k + ' "' + v.replace(/["\\]/g, '\\$&') + '"]');
+    }
+    for (const k in headers) {
+      if (seven.indexOf(k) >= 0) continue;
+      out.push('[' + k + ' "' + String(headers[k]).replace(/["\\]/g, '\\$&') + '"]');
+    }
+    out.push('');
+
+    let pos = startFEN ? Position.fromFEN(startFEN) : Position.fromFEN(START_FEN);
+    const toks = [];
+    for (let i = 0; i < moves.length; i++) {
+      if (pos.turn === WHITE) toks.push(pos.full + '.');
+      // 只有白方走动才带回合号是不够的：如果棋谱本身从黑方先行的局面
+      // 开始（[FEN]/[SetUp] 起点，或历史棋谱的中局切片），第一个黑方
+      // 半步也必须标出回合号，写成 "N..." 形式，否则输出的 PGN 丢了
+      // 回合号，不是合法 PGN。只有序列的第一个半步需要这样补——此后
+      // 黑方的半步照常紧跟在同一回合的白方半步之后，不需要回合号。
+      else if (i === 0) toks.push(pos.full + '...');
+      toks.push(moveToSAN(pos, moves[i]));
+      pos = pos.make(moves[i]);
+    }
+    const res = (headers && headers.Result) || '*';
+    toks.push(res);
+
+    // 按 80 列折行，这是 PGN 的通行写法
+    let line = '';
+    for (let i = 0; i < toks.length; i++) {
+      if (line && line.length + 1 + toks[i].length > 80) { out.push(line); line = ''; }
+      line = line ? line + ' ' + toks[i] : toks[i];
+    }
+    if (line) out.push(line);
+    return out.join('\n') + '\n';
+  }
+
+  return { WHITE, BLACK, EMPTY, P, N, B, R, Q, K,
+           SQ, fileOf, rankOf, offBoard, toAlg, fromAlg, Position, FLAG,
+           perft, perftDivide, moveToUCI, moveToSAN, parseSAN, parseUCI,
+           parsePGN, writePGN, START_FEN, sameMove };
+});
+/* <<< GENERATED:CHESS-CORE */
+/* >>> GENERATED:INTERACT */
+/* 交互内核：选择、高亮层、走法栈、非法走法的理由。
+   纯逻辑、零 DOM —— 工具负责画，本模块负责「现在该高亮哪些格」。
+   零依赖；node 与浏览器双用。编辑源，运行时被内联进 tools/*.html。 */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./chess-core.js'));
+  else root.Interact = factory(root.ChessCore);
+})(typeof self !== 'undefined' ? self : this, function (C) {
+  'use strict';
+
+  function create(opts) {
+    return {
+      pos: opts.position,
+      stack: [opts.position],   // 局面栈，stack[i] 是走完第 i 步之后的局面
+      moves: [null],            // moves[i] 是产生 stack[i] 的那一步；moves[0] 恒为 null
+      idx: 0,
+      sel: -1,
+      selMoves: [],             // 选中格的合法走法
+      selPseudo: [],            // 选中格的伪合法走法
+      lastMove: null,
+    };
+  }
+
+  function clear(st) { st.sel = -1; st.selMoves = []; st.selPseudo = []; }
+
+  function select(st, sq) {
+    const v = st.pos.board[sq];
+    // 空格、或对方的子：一律清空。教学工具里「点错了」应当无声复位，
+    // 而不是给一个需要再点一次才能消掉的半选中状态。
+    if (v === C.EMPTY || (v > 0 ? C.WHITE : C.BLACK) !== st.pos.turn) { clear(st); return false; }
+    st.sel = sq;
+    st.selMoves = st.pos.legalMoves().filter(function (m) { return m.from === sq; });
+    st.selPseudo = st.pos.pseudoLegalMoves().filter(function (m) { return m.from === sq; });
+    return true;
+  }
+
+  function highlights(st) {
+    const targets = st.selMoves.map(function (m) { return m.to; });
+    const pseudoOnly = [];
+    for (let i = 0; i < st.selPseudo.length; i++) {
+      const to = st.selPseudo[i].to;
+      if (targets.indexOf(to) < 0 && pseudoOnly.indexOf(to) < 0) pseudoOnly.push(to);
+    }
+    const me = st.pos.turn;
+    const k = st.pos.kingSq(me);
+    return {
+      selected: st.sel,
+      targets: dedupe(targets),
+      pseudoOnly: pseudoOnly,
+      lastMove: st.lastMove ? [st.lastMove.from, st.lastMove.to] : [],
+      check: (k >= 0 && st.pos.inCheck(me)) ? k : -1,
+    };
+  }
+
+  function dedupe(a) {
+    const out = [];
+    for (let i = 0; i < a.length; i++) if (out.indexOf(a[i]) < 0) out.push(a[i]);
+    return out;
+  }
+
+  const PROMO_CHOICES = [C.Q, C.R, C.B, C.N];
+
+  function tryMove(st, from, to, promo) {
+    const legal = st.pos.legalMoves().filter(function (m) {
+      return m.from === from && m.to === to;
+    });
+    if (!legal.length) return { ok: false, reason: explain(st.pos, from, to) };
+
+    // 同一 from/to 有多条走法，只可能是升变（四选一）。
+    // 没指定就不猜——猜成后是最常见的默认，但那样 underpromotion 永远走不出来。
+    if (legal.length > 1 || (legal[0].flags & C.FLAG.PROMO)) {
+      if (!promo) {
+        // needsPromotion 不是错误，是「还需要你选一个」——不填 reason。
+        return { ok: false, needsPromotion: true, choices: PROMO_CHOICES.slice(), reason: null };
+      }
+    }
+    const m = promo
+      ? legal.filter(function (x) { return x.promo === promo; })[0]
+      : legal[0];
+    if (!m) {
+      // 走法本身（忽略 promo）是合法的——explain() 只看 from/to，会在这里
+      // 判它「合法」而沉默地返回 null。真正的问题是 promo 给的不是四个
+      // 待选项之一，必须给一个诚实的理由，而不是让调用方拿到一个 null。
+      return {
+        ok: false,
+        reason: msg('bad-promotion',
+          'That is not a valid promotion choice — choose queen, rook, bishop or knight.',
+          '那不是有效的升变选择 —— 请选后、车、象或马。'),
+      };
+    }
+
+    const san = C.moveToSAN(st.pos, m);
+    st.stack.length = st.idx + 1;      // 截断旧分支
+    st.moves.length = st.idx + 1;      // moves 与 stack 同步截断，旧分支不能靠 redo 复活
+    st.pos = st.pos.make(m);
+    st.stack.push(st.pos);
+    st.moves.push(m);
+    st.idx = st.stack.length - 1;
+    st.lastMove = m;
+    clear(st);
+    return { ok: true, move: m, san: san };
+  }
+
+  function canUndo(st) { return st.idx > 0; }
+  function canRedo(st) { return st.idx < st.stack.length - 1; }
+
+  function undo(st) {
+    if (!canUndo(st)) return false;
+    // lastMove 不清空——回退到的这个局面本身就是由 moves[idx] 走出来的，
+    // 这正是「你现在停在哪一步」的定向线索，撤销不该把它抹掉。
+    st.idx--; st.pos = st.stack[st.idx]; st.lastMove = st.moves[st.idx]; clear(st);
+    return true;
+  }
+
+  function redo(st) {
+    if (!canRedo(st)) return false;
+    // 同理：redo 刚刚重放的正是 moves[idx] 这一步，信息已经在手，不该丢掉。
+    st.idx++; st.pos = st.stack[st.idx]; st.lastMove = st.moves[st.idx]; clear(st);
+    return true;
+  }
+
+  const PIECE_EN = { 1: 'pawn', 2: 'knight', 3: 'bishop', 4: 'rook', 5: 'queen', 6: 'king' };
+  const PIECE_ZH = { 1: '兵', 2: '马', 3: '象', 4: '车', 5: '后', 6: '王' };
+
+  function explain(pos, from, to) {
+    if (pos.legalMoves().some(function (m) { return m.from === from && m.to === to; })) return null;
+
+    const v = pos.board[from];
+    if (v === C.EMPTY) {
+      return msg('empty', 'There is no piece on ' + C.toAlg(from) + '.',
+                          C.toAlg(from) + ' 上没有棋子。');
+    }
+    const mine = v > 0 ? C.WHITE : C.BLACK;
+    if (mine !== pos.turn) {
+      const side = pos.turn === C.WHITE ? ['White', '白方'] : ['Black', '黑方'];
+      return msg('not-your-piece', 'It is ' + side[0] + " to move; that piece is not yours.",
+                                   '现在轮到' + side[1] + '走，那不是你的子。');
+    }
+    const tv = pos.board[to];
+    if (tv !== C.EMPTY && (tv > 0 ? C.WHITE : C.BLACK) === mine) {
+      return msg('own-piece', 'Your own ' + PIECE_EN[Math.abs(tv)] + ' already stands on ' + C.toAlg(to) + '.',
+                              C.toAlg(to) + ' 上是你自己的' + PIECE_ZH[Math.abs(tv)] + '。');
+    }
+
+    const pseudo = pos.pseudoLegalMoves().some(function (m) { return m.from === from && m.to === to; });
+    if (!pseudo) {
+      // 兵必须单独判断：attacksFrom 是「攻击域」，故意不含兵的直进（兵不吃
+      // 正前方），也永远含它的两个斜前方（不论是否真能吃子）。用它给兵的
+      // shape/blocked 分类会两头都判错——直进被挡说成「形状不对」，斜走到
+      // 空格却说成「被挡住」。兵的可达性单独按方向/步数/是否吃子判断。
+      if (Math.abs(v) === C.P) return explainPawn(pos, from, to, v, mine);
+
+      // 其余棋子：走法形状对不对，与路上有没有挡子，是两件事——
+      // 空盘上重算一次同一颗子的攻击域，够得着就说明是被挡住，够不着才是走法不对。
+      const bare = new C.Position();
+      bare.board[from] = v;
+      const reach = bare.attacksFrom(from).indexOf(to) >= 0;
+      const name = PIECE_EN[Math.abs(v)], nameZh = PIECE_ZH[Math.abs(v)];
+      if (reach) {
+        return msg('blocked', 'The ' + name + ' on ' + C.toAlg(from) + ' is blocked before it reaches ' + C.toAlg(to) + '.',
+                              C.toAlg(from) + ' 的' + nameZh + '到 ' + C.toAlg(to) + ' 的路上有子挡着。');
+      }
+      return msg('shape', 'A ' + name + ' cannot move from ' + C.toAlg(from) + ' to ' + C.toAlg(to) + '.',
+                          nameZh + '不能从 ' + C.toAlg(from) + ' 走到 ' + C.toAlg(to) + '。');
+    }
+
+    // 伪合法但不合法 —— 只可能是王被暴露。走一步看看谁在打王。
+    // 必须用生成器产出的那个 Move 对象，不能手搓一个：吃过路兵的被吃兵不在落点格，
+    // 手搓的对象缺 FLAG.EP，_make 就不会把它移走，于是攻击者名单会算错。
+    const pm = pos.pseudoLegalMoves().filter(function (m) {
+      return m.from === from && m.to === to;
+    })[0];
+    const after = pos.make(pm);
+    const k = after.kingSq(mine);
+    const attackers = k >= 0 ? after.attackedBy(k, -mine) : [];
+    // 每个攻击者各自带一个 "the"——join(' and ') 只会把外层套一次 "the"
+    // 用到第一个名词短语头上，多攻击者（双将）时第二个就没了冠词。
+    const desc = attackers.map(function (sq) {
+      return 'the ' + PIECE_EN[Math.abs(after.board[sq])] + ' on ' + C.toAlg(sq);
+    }).join(' and ');
+    const descZh = attackers.map(function (sq) {
+      return C.toAlg(sq) + ' 的' + PIECE_ZH[Math.abs(after.board[sq])];
+    }).join('、');
+
+    if (pos.inCheck(mine)) {
+      return msg('still-in-check', 'You are in check; after ' + C.toAlg(from) + C.toAlg(to) +
+                 ' your king is still attacked by ' + desc + '.',
+                 '你正被将军；走 ' + C.toAlg(from) + C.toAlg(to) + ' 之后，王仍被' + descZh + '攻击。');
+    }
+    return msg('exposes-king', 'Illegal: after ' + C.toAlg(from) + C.toAlg(to) +
+               ' your king would be attacked by ' + desc + '.',
+               '不合法：走 ' + C.toAlg(from) + C.toAlg(to) + ' 之后，你的王会被' + descZh + '攻击。');
+  }
+
+  // 兵在「伪合法为假」时的具体理由：走法形状（直进/斜走）先判，
+  // 是否被挡、是否缺目标，取决于走的是哪一种形状。
+  function explainPawn(pos, from, to, v, mine) {
+    const fwd = mine === C.WHITE ? 1 : -1;         // 前进方向：白 +1 横行，黑 −1 横行
+    const startRank = mine === C.WHITE ? 1 : 6;
+    const df = C.fileOf(to) - C.fileOf(from);
+    const dr = C.rankOf(to) - C.rankOf(from);
+
+    if (df === 0 && dr === fwd) {
+      // 单步直进，形状对——伪合法为假只可能是因为挡住了（pushPawn 生成
+      // 单步直进的唯一前提就是目标格为空）。
+      return msg('blocked', 'The pawn on ' + C.toAlg(from) + ' is blocked before it reaches ' + C.toAlg(to) + '.',
+                            C.toAlg(from) + ' 的兵到 ' + C.toAlg(to) + ' 的路上有子挡着。');
+    }
+    if (df === 0 && dr === fwd * 2 && C.rankOf(from) === startRank) {
+      // 双步直进，起始格也对——伪合法为假必是中间格或落点格有子挡着。
+      return msg('blocked', 'The pawn on ' + C.toAlg(from) + ' is blocked before it reaches ' + C.toAlg(to) + '.',
+                            C.toAlg(from) + ' 的兵到 ' + C.toAlg(to) + ' 的路上有子挡着。');
+    }
+    if (Math.abs(df) === 1 && dr === fwd) {
+      // 斜走一格，形状对——伪合法为假意味着落点既非对方棋子也非吃过路兵
+      // 的目标格，即「斜走到空格」。兵只有吃子才能斜走，这里没有子可吃。
+      return msg('no-capture', 'A pawn only moves diagonally when it captures — ' + C.toAlg(to) + ' is empty.',
+                               '兵只有吃子时才走斜线 —— ' + C.toAlg(to) + ' 上没有可吃的子。');
+    }
+    // 其余：距离/方向不对（倒退、一次走三格等）——形状本身就不成立。
+    return msg('shape', 'A pawn cannot move from ' + C.toAlg(from) + ' to ' + C.toAlg(to) + '.',
+                        '兵不能从 ' + C.toAlg(from) + ' 走到 ' + C.toAlg(to) + '。');
+  }
+
+  function msg(code, en, zh) { return { code: code, en: en, zh: zh }; }
+
+  return {
+    create: create, select: select, clear: clear, highlights: highlights,
+    tryMove: tryMove, undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo,
+    PROMO_CHOICES: PROMO_CHOICES, explain: explain,
+  };
+});
+/* <<< GENERATED:INTERACT */
+/* >>> GENERATED:BOARD-RENDER */
+/* 参数化棋盘与棋子渲染。棋盘躺在 z=0 平面、以原点为中心。
+   算法工具与规则工具共用同一套 —— 八皇后摆的是真正的后。
+   零依赖；node 与浏览器双用。编辑源，运行时被内联。 */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.BoardRender = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  function layout(spec) {
+    const files = (spec && spec.files) || 8;
+    const ranks = (spec && spec.ranks) || 8;
+    const cell = (spec && spec.cell) || 1;
+    const w = files * cell, h = ranks * cell;
+    const x0 = -w / 2, y0 = -h / 2;
+
+    return {
+      files: files, ranks: ranks, cell: cell, w: w, h: h,
+      squareCenter: function (f, r) {
+        return [x0 + (f + 0.5) * cell, y0 + (r + 0.5) * cell, 0];
+      },
+      squareCorners: function (f, r) {
+        const x = x0 + f * cell, y = y0 + r * cell;
+        return [[x, y, 0], [x + cell, y, 0], [x + cell, y + cell, 0], [x, y + cell, 0]];
+      },
+    };
+  }
+
+  function fileLabel(i) { return String.fromCharCode(97 + i); }
+
+  // a1 是深色格。第 0 列第 0 行 → (0+0)%2===0 → 深。
+  function isLight(f, r) { return ((f + r) & 1) === 1; }
+
+  const SQ_DARK = 'rgba(30,41,59,0.55)';
+  const SQ_LIGHT = 'rgba(148,163,184,0.16)';
+  const EDGE = 'rgba(159,176,200,0.55)';
+  const COORD = 'rgba(159,176,200,0.75)';
+
+  // a–h/1–8 坐标标签离棋盘外框的偏移，按格宽的比例算。
+  const COORD_LABEL_OFFSET = 0.42;
+
+  /* ctx: CanvasRenderingContext2D；C: 相机；E: VizEngine（注入而非全局引用，
+     这样本模块在 node 里可加载、可测，不需要 DOM）。
+
+     ctx 参数名副其实：格子填色本就全程用它。但外框与坐标标签走的是
+     E.strokePoly / E.label3——这两个图元一直画在 VizEngine.init() 时钉死
+     的模块私有画布上，从不理会调用方传进来的 ctx，于是 drawBoard(其他画布, …)
+     的输出会被悄悄劈成两半（详见 viz-engine.js 的 withContext 注释）。
+     这里用 E.withContext(ctx, fn) 把私有画布临时换成调用方给的这块，
+     执行完自动换回去——阶段 1 规则工具要并排画「伪合法 / 合法」两块棋盘，
+     就是靠这行才不会串到同一块画布上。 */
+  /* a–h/1–8 坐标标签，从 drawBoard 里拆出来的独立入口。存在的唯一理由是
+     task-14 perf-gate 的 draw-cost 面板要把「文字渲染」和「格子填色 + 外框」
+     分开计时——第一轮 draw-cost 读数（6ms，远高于诊断阶段量到的 ~1.2ms）
+     没法只靠一个不透明的总数判断超出的部分是不是文字渲染，所以拆开让
+     每一项都能单独测。drawBoard(spec) 在 spec.coords !== false 时原样调用
+     这个函数，因此默认行为、绘制顺序、坐标计算都和拆分之前逐字节一致，
+     不是重新实现一遍。 */
+  function drawCoordLabels(ctx, C, E, spec) {
+    const L = spec.layout || layout(spec);
+    const o = L.squareCorners(0, 0)[0];
+    E.withContext(ctx, function () {
+      for (let f = 0; f < L.files; f++) {
+        const c = L.squareCenter(f, 0);
+        E.label3(C, [c[0], o[1] - COORD_LABEL_OFFSET * L.cell, 0], fileLabel(f),
+                 { color: COORD, size: 12, align: 'center' });
+      }
+      for (let r = 0; r < L.ranks; r++) {
+        const c = L.squareCenter(0, r);
+        E.label3(C, [o[0] - COORD_LABEL_OFFSET * L.cell, c[1], 0], String(r + 1),
+                 { color: COORD, size: 12, align: 'center' });
+      }
+    });
+  }
+
+  function drawBoard(ctx, C, E, spec) {
+    const L = spec.layout || layout(spec);
+    const mask = spec.mask || null;
+
+    for (let r = 0; r < L.ranks; r++) {
+      for (let f = 0; f < L.files; f++) {
+        if (mask && mask(f, r) === false) continue;
+        const cs = L.squareCorners(f, r);
+        const pts = cs.map(function (p) { return E.proj(C, p); });
+        if (pts.some(function (p) { return !p; })) continue;   // 近裁剪掉的格不画
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < 4; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+        ctx.closePath();
+        ctx.fillStyle = isLight(f, r) ? SQ_LIGHT : SQ_DARK;
+        ctx.fill();
+      }
+    }
+
+    const o = L.squareCorners(0, 0)[0];
+    E.withContext(ctx, function () {
+      // 外框
+      const frame = [o, [o[0] + L.w, o[1], 0], [o[0] + L.w, o[1] + L.h, 0], [o[0], o[1] + L.h, 0], o];
+      E.strokePoly(C, frame, { color: EDGE, width: 1.4 });
+    });
+
+    if (spec.coords !== false) drawCoordLabels(ctx, C, E, { layout: L });
+
+    return L;
+  }
+
+  /* 反向查询：屏幕坐标 → 棋盘格。是「点击选子」这枚阶段 1 头号交互
+     （点棋子→高亮合法目标→点目标→落子）唯一需要的引擎入口。
+     用 E.unproject 把射线与棋盘所在的 z=0 平面求交，再按 layout 的格距换算
+     成 file/rank；落在相机之后、或点在棋盘外框之外都返回 null。 */
+  function pickSquare(C, E, screenXY, L) {
+    const p = E.unproject(C, screenXY, 0);
+    if (!p) return null;
+    const o = L.squareCorners(0, 0)[0];   // 棋盘左下角，和 drawBoard 的外框基准一致
+    const f = Math.floor((p[0] - o[0]) / L.cell);
+    const r = Math.floor((p[1] - o[1]) / L.cell);
+    if (f < 0 || f >= L.files || r < 0 || r >= L.ranks) return null;
+    return { file: f, rank: r };
+  }
+
+  /* 棋子写成 SVG 路径（0..100 方框，y 向下，底座压在 y≈98）。
+     运行时用 Path2D 交给 Canvas 2D 绘制 —— 保留 SVG 的作者体验，
+     又不引入任何外部文件或加载器。将来若上 3D，替换 drawPiece 即可，
+     路径数据可作为旋转体的侧影复用（马除外）。
+
+     六子结构互异，避免小尺寸下认错：
+     - 兵 P：整圆头（半径 11 的正圆）+ 单层衣领，轮廓最简单。
+     - 象 B：尖顶泪滴形主教冠（非正圆，顶端收成一点）+ 冠上十字形裂口，
+       与兵的正圆头一望可辨。
+     - 后 Q：冠部是 5 齿锯齿状皇冠，齿尖各顶一颗小圆珠。
+     - 王 K：冠部是单拱形冠带（无锯齿），冠上另立一个十字架，
+       与后的锯齿皇冠在剪影上明显不同。 */
+  const PIECE_PATHS = {
+    P: [
+      'M39 24 A11 11 0 1 0 61 24 A11 11 0 1 0 39 24 z',
+      'M40 37 H60 L63 45 H37 z',
+      'M44 47 H56 L63 78 H37 z',
+      'M28 78 H72 V88 H28 z',
+      'M24 88 H76 V98 H24 z',
+    ],
+    N: [
+      'M32 88 C30 61 41 47 53 39 C50 33 46 31 42 31 L49 20 C56 21 62 26 66 32 ' +
+      'C73 44 74 63 72 88 z',
+      'M44 26 A3 3 0 1 0 50 26 A3 3 0 1 0 44 26 z',
+      'M24 88 H76 V98 H24 z',
+    ],
+    B: [
+      'M50 10 C59 17 65 27 65 37 C65 46 58 52 50 52 C42 52 35 46 35 37 ' +
+      'C35 27 41 17 50 10 z',
+      'M46 22 H54 V28 H60 V36 H54 V42 H46 V36 H40 V28 H46 z',
+      'M40 54 H60 L65 78 H35 z',
+      'M28 78 H72 V88 H28 z',
+      'M24 88 H76 V98 H24 z',
+    ],
+    R: [
+      'M28 14 H37 V21 H45 V14 H55 V21 H63 V14 H72 V34 H66 V66 H74 V78 H26 V66 H34 V34 H28 z',
+      'M24 88 H76 V98 H24 z',
+    ],
+    Q: [
+      'M24 32 L31 66 H69 L76 32 L64 48 L56 24 L49 48 L42 24 L34 48 z',
+      'M22 28 A4 4 0 1 0 30 28 A4 4 0 1 0 22 28 z',
+      'M70 28 A4 4 0 1 0 78 28 A4 4 0 1 0 70 28 z',
+      'M46 18 A4 4 0 1 0 54 18 A4 4 0 1 0 46 18 z',
+      'M31 66 H69 L73 78 H27 z',
+      'M24 88 H76 V98 H24 z',
+    ],
+    K: [
+      'M46 6 H54 V15 H63 V23 H54 V34 H46 V23 H37 V15 H46 z',
+      'M30 36 C37 28 63 28 70 36 L65 66 H35 z',
+      'M31 66 H69 L73 78 H27 z',
+      'M24 88 H76 V98 H24 z',
+    ],
+  };
+
+  const CODE_KEY = { 1: 'P', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K' };
+
+  const WHITE_FILL = 'rgba(226,232,240,0.94)';
+  const WHITE_EDGE = 'rgba(15,23,42,0.85)';
+  const BLACK_FILL = 'rgba(15,23,42,0.90)';
+  const BLACK_EDGE = 'rgba(148,163,184,0.90)';
+
+  /* 棋子路径的设计框契约：PIECE_PATHS 的坐标都画在一个 0..100 的方框里
+     （PIECE_BOX），底座中点钉在 (50, 88)（PIECE_ANCHOR）——drawPiece 用它们
+     把设计框换算成屏幕像素、再把底座对准格心。这两个数不是随手写的裁剪值，
+     导出它们是因为将来「按深度算一个合适的 scale」这类计算离不开设计框
+     本身的尺寸与锚点，不该让调用方去反猜 /100 和 (50,88) 是什么。 */
+  const PIECE_BOX = 100;
+  const PIECE_ANCHOR = [50, 88];
+
+  const pathCache = Object.create(null);
+  function path2d(d) {
+    if (!pathCache[d]) pathCache[d] = new Path2D(d);
+    return pathCache[d];
+  }
+
+  /* 棋子画成朝向相机的剪影：把它的世界坐标投影成屏幕点，
+     然后在屏幕空间里以该点为基准绘制。这样任意相机角度下都读得清。 */
+  function drawPiece(ctx, C, E, o) {
+    const s = E.proj(C, o.center);
+    if (!s) return;
+    const key = CODE_KEY[Math.abs(o.code)];
+    if (!key) return;
+    const white = o.code > 0;
+    const k = (o.scale || 1) / PIECE_BOX;
+
+    ctx.save();
+    ctx.globalAlpha = o.alpha == null ? 1 : o.alpha;
+    ctx.translate(s[0], s[1]);
+    ctx.scale(k, k);
+    ctx.translate(-PIECE_ANCHOR[0], -PIECE_ANCHOR[1]);   // 以底座中点对齐格心
+    ctx.fillStyle = white ? WHITE_FILL : BLACK_FILL;
+    ctx.strokeStyle = white ? WHITE_EDGE : BLACK_EDGE;
+    ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
+    const ds = PIECE_PATHS[key];
+    for (let i = 0; i < ds.length; i++) {
+      const p = path2d(ds[i]);
+      ctx.fill(p);
+      ctx.stroke(p);
+    }
+    ctx.restore();
+  }
+
+  return {
+    layout: layout, fileLabel: fileLabel, isLight: isLight,
+    drawBoard: drawBoard, drawCoordLabels: drawCoordLabels, pickSquare: pickSquare,
+    PIECE_PATHS: PIECE_PATHS, drawPiece: drawPiece,
+    PIECE_BOX: PIECE_BOX, PIECE_ANCHOR: PIECE_ANCHOR, CODE_KEY: CODE_KEY,
+  };
+});
+/* <<< GENERATED:BOARD-RENDER */
+</script>
+<script>
+/* 工具① Geometry of Movement —— 走法的几何本质。
+   顿悟（规格 §4①）：每个棋子就是一组向量规则；「控制中心」是可以量出来的数，
+   不是口号——马在 d4 攻击 8 格、在 a1 只有 2 格。field 页把最少步数场立成
+   高度，让人看见这个场不是平移不变的：8×8 的边界把马的场从中心到角落
+   活活掰断（正相邻恒 3 步；对角相邻中心 2 步、角上 4 步）。
+
+   本工具只放子、不走棋——没有对手，因此 Interact 模块在此不使用
+   （不调用 tryMove；点击只是 BoardRender.pickSquare + 直接改 G.placedSq）。 */
+
+const E = VizEngine, CC = ChessCore, BR = BoardRender;
+const ctx = document.getElementById('scene').getContext('2d');
+const BOARD = BR.layout({ files: 8, ranks: 8, cell: 1 });
+
+/* ---- 配色：本工具主色 rose；metric 页王/车对照时才用到 violet ---- */
+const ROSE = '#fb7185', ROSE_MID = 'rgba(251,113,133,0.85)';
+const VIOLET = '#a78bfa', VIOLET_MID = 'rgba(167,139,250,0.85)';
+const AMBER = '#fbbf24';
+
+/* ---- 六种棋子：滑杆的 0..5 档与棋子代码的对照 ---- */
+const PIECE_CODES = [CC.P, CC.N, CC.B, CC.R, CC.Q, CC.K];
+const PIECE_NAME = {
+  [CC.P]: { zh: '兵', en: 'Pawn' },
+  [CC.N]: { zh: '马', en: 'Knight' },
+  [CC.B]: { zh: '象', en: 'Bishop' },
+  [CC.R]: { zh: '车', en: 'Rook' },
+  [CC.Q]: { zh: '后', en: 'Queen' },
+  [CC.K]: { zh: '王', en: 'King' },
+};
+
+/* ---- 工具自己的可变状态（引擎的 PARAMS/toggles 把值写进它私有、未导出的
+   state[key]，工具这一侧够不着——见下方 pieceSliderEl 的说明）。 ---- */
+const G = { placedSq: CC.SQ(3, 3) };   // 默认 d4：顿悟从这里开始
+let pieceIdx = 1;                       // 默认马（PIECE_CODES 的下标 1）
+function currentPieceCode() { return PIECE_CODES[pieceIdx]; }
+
+/* ---- 最少步数场（BFS，§Task5 Step1 给定算法，逐字节保留以确保与
+   node 复算一致）与机动性场（每格攻击格数）；按 (棋子,起点) / 棋子 记忆化，
+   因为它们只是棋盘几何的纯函数，与 placedSq 之外的任何状态无关。 ---- */
+function minMoveField(code, fromSq) {
+  const dist = {};
+  dist[fromSq] = 0;
+  let frontier = [fromSq];
+  while (frontier.length) {
+    const next = [];
+    for (let i = 0; i < frontier.length; i++) {
+      const s = frontier[i];
+      const bare = new CC.Position();
+      bare.board[s] = code;
+      const reach = bare.attacksFrom(s);
+      for (let j = 0; j < reach.length; j++) {
+        const t = reach[j];
+        if (dist[t] === undefined) { dist[t] = dist[s] + 1; next.push(t); }
+      }
+    }
+    frontier = next;
+  }
+  return dist;
+}
+function mobilityField(code) {
+  const out = {};
+  for (let f = 0; f < 8; f++) for (let r = 0; r < 8; r++) {
+    const s = CC.SQ(f, r);
+    const bare = new CC.Position();
+    bare.board[s] = code;
+    out[s] = bare.attacksFrom(s).length;
+  }
+  return out;
+}
+const fieldCache = {};
+function getField(code, originSq) {
+  const key = code + '@' + originSq;
+  if (!fieldCache[key]) fieldCache[key] = minMoveField(code, originSq);
+  return fieldCache[key];
+}
+const mobCache = {};
+function getMobility(code) {
+  if (!mobCache[code]) mobCache[code] = mobilityField(code);
+  return mobCache[code];
+}
+function forEachSquare(fn) {
+  for (let f = 0; f < 8; f++) for (let r = 0; r < 8; r++) fn(f, r, CC.SQ(f, r));
+}
+
+/* ---- 绘制部件 ---- */
+function fillSquare(Cam, f, r, rgba) {
+  const cs = BOARD.squareCorners(f, r);
+  const pts = cs.map(function (p) { return E.proj(Cam, p); });
+  if (pts.some(function (p) { return !p; })) return;
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < 4; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath();
+  ctx.fillStyle = rgba;
+  ctx.fill();
+}
+function outlineSquare(Cam, f, r, color) {
+  const cs = BOARD.squareCorners(f, r);
+  E.strokePoly(Cam, cs.concat([cs[0]]), { width: 2.2, color: color });
+}
+
+/* 高度场：每格竖一根到 z = k·value 的细线 + 顶端辉光点 + 数字，
+   同排/同列的顶点再用 strokePoly 连成网格（null 断点跳过不可达格——
+   象只能踏同色格，场在异色格上必须可见地「断开」，而不是悄悄记成 0）。 */
+function drawHeightField(Cam, fieldObj, color, mid, k) {
+  forEachSquare(function (f, r, sq) {
+    const d = fieldObj[sq];
+    const base = BOARD.squareCenter(f, r);
+    if (d === undefined) { E.solidDot(Cam, base, 2.5, 'rgba(148,163,184,0.45)'); return; }
+    const top = [base[0], base[1], k * d];
+    E.line3(Cam, base, top, { width: 1.3, color: color, alpha: 0.82 });
+    const s = E.proj(Cam, top);
+    if (s) {
+      E.glowDot(s, 4.5, '#ffffff', mid);
+      E.label3(Cam, top, String(d), { size: 10, color: '#e7edf6', align: 'center', dy: -11 });
+    }
+  });
+  function topOf(f, r) {
+    const d = fieldObj[CC.SQ(f, r)];
+    if (d === undefined) return null;
+    const c = BOARD.squareCenter(f, r);
+    return [c[0], c[1], k * d];
+  }
+  for (let r = 0; r < 8; r++) {
+    const pts = [];
+    for (let f = 0; f < 8; f++) pts.push(topOf(f, r));
+    E.strokePoly(Cam, pts, { width: 1, color: color, alpha: 0.26 });
+  }
+  for (let f = 0; f < 8; f++) {
+    const pts = [];
+    for (let r = 0; r < 8; r++) pts.push(topOf(f, r));
+    E.strokePoly(Cam, pts, { width: 1, color: color, alpha: 0.26 });
+  }
+}
+
+const K_FIELD = 0.35;   // Task5 给定：8 步的场高约 2.8，与棋盘边长 8 比例协调
+/* 机动性的量纲是「攻击格数」，后在中心可到 27——若仍用 0.35，塔高会到 9.45，
+   三倍于棋盘边长，视觉比例失衡（Task5 的 0.35 是照 8 步距离场推的，没有
+   照顾到机动性最高到 27 这一档）。这里改用 2.8 / 27 ≈ 0.1 的量纲，让后在
+   中心的塔顶（≈2.7）与 field 页的场高上限（8×0.35=2.8）视觉同一量级，
+   两页可以直接对照——这是设计判断，不是国际象棋事实，与 Task5 的文字不同,
+   在此记一笔。 */
+const K_MOBILITY = 0.1;
+
+/* ---- 自动演示：依次巡回六种棋子，~2.5s 一档；用户一点棋盘就暂停，
+   停在他点的那一步（不跳回巡回位置）。按 dt 累加，不按帧计数——开发机
+   30Hz，按帧计数会让巡回速度慢一半。 ---- */
+let pieceSliderEl = null, btnPlayEl = null;
+let demoRunning = true, demoAcc = 0, lastDemoTs = null;
+function setPieceIdx(i) {
+  pieceIdx = ((i % 6) + 6) % 6;
+  if (pieceSliderEl) { pieceSliderEl.value = String(pieceIdx); pieceSliderEl.dispatchEvent(new Event('input', { bubbles: true })); }
+}
+function advanceDemo() {
+  const now = performance.now();
+  if (lastDemoTs == null) lastDemoTs = now;
+  let dt = (now - lastDemoTs) / 1000;
+  lastDemoTs = now;
+  dt = E.clamp(dt, 0, 0.05);
+  if (!demoRunning) return;
+  demoAcc += dt;
+  if (demoAcc >= 2.5) { demoAcc -= 2.5; setPieceIdx(pieceIdx + 1); }
+}
+
+function getCurTab() {
+  const el = document.querySelector('#tabsNav .tab.active');
+  return el ? el.dataset.tab : 'piece';
+}
+
+/* ---- PARAMS：唯一的滑杆——选棋种。工具自己再挂一份 'input' 监听
+   （见 init() 之后的接线）：引擎的 buildParams() 把映射后的值写进它自己
+   私有、未导出的 state[key]，本工具的 draw()/readout() 够不着那个对象，
+   所以另挂一份监听，直接维护 pieceIdx。 ---- */
+const PARAMS = [
+  {
+    key: 'pieceIdx', min: 0, max: 5, step: 1, value: 1,
+    label: { zh: '棋种', en: 'Piece' },
+    fmt: function (v) { return E.t(PIECE_NAME[PIECE_CODES[Math.round(v)]]); },
+    map: function (v) { return Math.round(v); },
+  },
+];
+
+const VIEW_ISO = { az: -0.68, el: 0.5, dist: 13 };
+/* BoardRender 把棋盘铺在世界的 x-y 平面（squareCenter 返回 [x,y,0]），
+   而本工具把场的高度立在 z 轴上（top=[x,y,k·d]）——这与该引擎「z=0 平面
+   放几何、z 是深度/时间轴」的既有约定一致，但也意味着「真正的俯视」
+   不是 el→90°（那会让棋盘自己所在的 x-y 平面side-on，边界拉成一条线，
+   实测过：见下方 side 的手感），而是 az=0, el=0——沿棋盘的法线（z 轴，
+   恰好也是高度轴）正对看过去，高度被压缩成看不见的一个点，露出的正是
+   「覆盖形状」这个俯视要看的东西。 */
+const VIEW_TOP = { az: 0, el: 0, dist: 10 };
+const VIEW_SIDE = { az: -1.5708, el: 0.14, dist: 13 };
+
+const SCENES = {
+  piece: {
+    label: { zh: '棋子', en: 'Piece' },
+    brand: { zh: '棋子的攻击域——放一颗子，看它打到哪里。', en: 'A piece’s attack domain — place it anywhere, see everything it hits.' },
+    tips: {
+      zh: '点击任意格，把所选棋种放到那里。高亮的格子就是 attacksFrom() 给出的攻击域。提示：兵在这里只显示斜前方的攻击格——直行一步不算攻击，那是走法，不是攻击。先试试马放在 d4，再挪到角落 a1。',
+      en: 'Click any square to place the selected piece there. The highlighted squares are exactly what attacksFrom() reports. Note: a pawn’s forward step is not shown here — it isn’t an attack, only the diagonal captures are. Try the knight on d4, then move it to the corner a1.',
+    },
+    params: ['pieceIdx'],
+    views: {
+      iso: Object.assign({ label: { zh: '轴测', en: 'Iso' } }, VIEW_ISO),
+      top: Object.assign({ label: { zh: '俯视', en: 'Top' } }, VIEW_TOP),
+    },
+    draw: function (Cam) {
+      advanceDemo();
+      BR.drawBoard(ctx, Cam, E, { layout: BOARD });
+      const code = currentPieceCode();
+      const f0 = CC.fileOf(G.placedSq), r0 = CC.rankOf(G.placedSq);
+      const bare = new CC.Position();
+      bare.board[G.placedSq] = code;
+      const reach = bare.attacksFrom(G.placedSq);
+      reach.forEach(function (sq) { fillSquare(Cam, CC.fileOf(sq), CC.rankOf(sq), 'rgba(251,113,133,0.32)'); });
+      outlineSquare(Cam, f0, r0, AMBER);
+      BR.drawPiece(ctx, Cam, E, { code: code, center: BOARD.squareCenter(f0, r0), scale: 42 });
+    },
+    readout: function () {
+      const code = currentPieceCode();
+      const bare = new CC.Position();
+      bare.board[G.placedSq] = code;
+      const n = bare.attacksFrom(G.placedSq).length;
+      return '<div>' + E.t({ zh: '棋子', en: 'Piece' }) + ': <b style="--c:var(--trace-rose)">' + E.t(PIECE_NAME[code]) +
+        '</b> @ <b style="--c:var(--trace-rose)">' + CC.toAlg(G.placedSq) + '</b></div>' +
+        '<div class="dim">' + E.t({ zh: '攻击格数', en: 'squares attacked' }) + ' = <b style="--c:var(--trace-rose)">' + n + '</b></div>';
+    },
+  },
+
+  field: {
+    label: { zh: '步数场', en: 'Field' },
+    brand: { zh: '最少步数场——把马的步数立成高度。', en: 'Minimum-move field — stand the distances up as height.' },
+    tips: {
+      zh: '切到侧视：马的场不是平的。正相邻（同行或同列）全盘恒为 3 步；对角相邻在盘中心是 2 步，在角落却要 4 步——8×8 的边界打破了平移不变性。无限棋盘上这个场本会处处一样。',
+      en: 'Switch to the side view: the knight’s field is not flat. Orthogonally adjacent squares are always 3 moves away; diagonally adjacent ones are 2 moves in the centre but 4 in the corner — the 8×8 edge breaks translation invariance. On an infinite board this field would look identical everywhere.',
+    },
+    params: ['pieceIdx'],
+    views: {
+      iso: Object.assign({ label: { zh: '轴测', en: 'Iso' } }, VIEW_ISO),
+      top: Object.assign({ label: { zh: '俯视·看覆盖形状', en: 'Top · shape' } }, VIEW_TOP),
+      side: Object.assign({ label: { zh: '侧视·看阶梯', en: 'Side · steps' } }, VIEW_SIDE),
+    },
+    draw: function (Cam) {
+      advanceDemo();
+      BR.drawBoard(ctx, Cam, E, { layout: BOARD });
+      const code = currentPieceCode();
+      const field = getField(code, G.placedSq);
+      drawHeightField(Cam, field, ROSE, ROSE_MID, K_FIELD);
+      outlineSquare(Cam, CC.fileOf(G.placedSq), CC.rankOf(G.placedSq), AMBER);
+    },
+    readout: function () {
+      const code = currentPieceCode();
+      const field = getField(code, G.placedSq);
+      let maxD = -1, maxSq = -1, unreach = 0;
+      forEachSquare(function (f, r, sq) {
+        if (field[sq] === undefined) unreach++;
+        else if (field[sq] > maxD) { maxD = field[sq]; maxSq = sq; }
+      });
+      const a1 = CC.fromAlg('a1'), h8 = CC.fromAlg('h8'), a2 = CC.fromAlg('a2');
+      const d4 = CC.fromAlg('d4'), e5 = CC.fromAlg('e5'), b2 = CC.fromAlg('b2');
+      const knA1 = getField(CC.N, a1), knD4 = getField(CC.N, d4);
+      return '<div>' + E.t({ zh: '从', en: 'From' }) + ' <b style="--c:var(--trace-rose)">' + E.t(PIECE_NAME[code]) +
+        '</b> @ <b style="--c:var(--trace-rose)">' + CC.toAlg(G.placedSq) + '</b>: ' + E.t({ zh: '最远', en: 'farthest' }) +
+        ' <b style="--c:var(--trace-rose)">' + (maxSq >= 0 ? CC.toAlg(maxSq) : '—') + '</b> = <b style="--c:var(--trace-rose)">' +
+        (maxD >= 0 ? maxD : '—') + '</b>' + (unreach ? ' · ' + unreach + ' ' + E.t({ zh: '格不可达', en: 'unreachable' }) : '') + '</div>' +
+        '<div class="dim">' + E.t({ zh: '马 a1→h8', en: 'knight a1→h8' }) + ' = <b style="--c:var(--trace-rose)">' + knA1[h8] +
+        '</b> · ' + E.t({ zh: '正相邻恒为', en: 'orthogonal always' }) + ' <b style="--c:var(--trace-rose)">' + knA1[a2] + '</b></div>' +
+        '<div class="dim">' + E.t({ zh: '对角相邻：中心', en: 'diagonal: centre' }) + ' <b style="--c:var(--trace-rose)">' + knD4[e5] +
+        '</b> · ' + E.t({ zh: '角落', en: 'corner' }) + ' <b style="--c:var(--trace-rose)">' + knA1[b2] + '</b></div>';
+    },
+  },
+
+  mobility: {
+    label: { zh: '机动性', en: 'Mobility' },
+    brand: { zh: '机动性——每种棋子在每一格能攻击多少格。', en: 'Mobility — how many squares each piece attacks from every square.' },
+    tips: {
+      zh: '「占据中心」是一个数字：马在 d4 攻击 8 格，在 a1 只有 2 格。后从中心的 27 格降到角落的 21 格——坡度平缓得多，这就是为什么后没那么依赖占据中心。',
+      en: '“Control the centre” is a number: the knight attacks 8 squares from d4 but only 2 from a1. The queen goes from 27 in the centre to 21 in the corner — a much gentler slope, which is why the queen cares less about centralisation.',
+    },
+    params: ['pieceIdx'],
+    views: {
+      iso: Object.assign({ label: { zh: '轴测', en: 'Iso' } }, VIEW_ISO),
+      top: Object.assign({ label: { zh: '俯视', en: 'Top' } }, VIEW_TOP),
+    },
+    draw: function (Cam) {
+      advanceDemo();
+      BR.drawBoard(ctx, Cam, E, { layout: BOARD });
+      const mob = getMobility(currentPieceCode());
+      drawHeightField(Cam, mob, ROSE, ROSE_MID, K_MOBILITY);
+    },
+    readout: function () {
+      const code = currentPieceCode();
+      const mob = getMobility(code);
+      const d4 = CC.fromAlg('d4'), a1 = CC.fromAlg('a1');
+      const qMob = getMobility(CC.Q), nMob = getMobility(CC.N);
+      let mn = 999, mx = -1;
+      forEachSquare(function (f, r, sq) { if (mob[sq] < mn) mn = mob[sq]; if (mob[sq] > mx) mx = mob[sq]; });
+      return '<div>' + E.t(PIECE_NAME[code]) + ': d4 = <b style="--c:var(--trace-rose)">' + mob[d4] + '</b> · a1 = <b style="--c:var(--trace-rose)">' +
+        mob[a1] + '</b> · [' + mn + ', ' + mx + ']</div>' +
+        '<div class="dim">' + E.t({ zh: '马', en: 'knight' }) + ' d4/a1 = <b style="--c:var(--trace-rose)">' + nMob[d4] + '</b> / <b style="--c:var(--trace-rose)">' +
+        nMob[a1] + '</b> · ' + E.t({ zh: '后', en: 'queen' }) + ' d4/a1 = <b style="--c:var(--trace-rose)">' + qMob[d4] + '</b> / <b style="--c:var(--trace-rose)">' +
+        qMob[a1] + '</b></div>';
+    },
+  },
+
+  metric: {
+    label: { zh: '距离度量', en: 'Metric' },
+    brand: { zh: '距离度量——王是具象化的 L∞ 范数；车两步就能覆盖全盘。', en: 'Distance metrics — the king is the L∞ norm made visible; the rook covers the board in two moves.' },
+    tips: {
+      zh: '玫瑰色的环是王到放置格的切比雪夫距离 max(|Δ列|, |Δ行|)——A-level 范数的具象版。更平坦的紫色场是车的最少步数：车最多两步就能到任何地方，且这个「2」几乎不随起点变化——车的场几乎是平移不变的，正好和 field 页里马的场相反。',
+      en: 'The rose rings are the king’s Chebyshev distance from the placed square, max(|Δfile|, |Δrank|) — the L∞ norm made concrete. The flatter violet field is the rook: at most two moves to reach anywhere, and that “2” barely depends on where you start — nearly translation-invariant, the opposite of the knight’s field on the Field tab.',
+    },
+    params: [],
+    views: {
+      iso: Object.assign({ label: { zh: '轴测', en: 'Iso' } }, VIEW_ISO),
+      top: Object.assign({ label: { zh: '俯视', en: 'Top' } }, VIEW_TOP),
+    },
+    draw: function (Cam) {
+      advanceDemo();
+      BR.drawBoard(ctx, Cam, E, { layout: BOARD });
+      const kf = getField(CC.K, G.placedSq);
+      const rf = getField(CC.R, G.placedSq);
+      drawHeightField(Cam, rf, VIOLET, VIOLET_MID, K_FIELD);
+      drawHeightField(Cam, kf, ROSE, ROSE_MID, K_FIELD);
+      outlineSquare(Cam, CC.fileOf(G.placedSq), CC.rankOf(G.placedSq), AMBER);
+    },
+    readout: function () {
+      const kf = getField(CC.K, G.placedSq), rf = getField(CC.R, G.placedSq);
+      let maxK = -1, maxR = -1;
+      forEachSquare(function (f, r, sq) { if (kf[sq] > maxK) maxK = kf[sq]; if (rf[sq] > maxR) maxR = rf[sq]; });
+      return '<div>' + E.t({ zh: '原点', en: 'origin' }) + ' <b style="--c:var(--trace-rose)">' + CC.toAlg(G.placedSq) + '</b> · ' +
+        E.t({ zh: '王最远', en: 'king farthest' }) + ' = <b style="--c:var(--trace-rose)">' + maxK + '</b></div>' +
+        '<div class="dim">' + E.t({ zh: '车的最大步数（几乎不变）', en: 'rook’s max moves (nearly constant)' }) + ' = <b style="--c:var(--trace-violet)">' + maxR + '</b></div>';
+    },
+  },
+};
+
+const TOOL = {
+  id: 'chess-moves-geometry',
+  title: { zh: '走法的几何本质 · MathViz', en: 'Geometry of Movement · MathViz' },
+  h1: { zh: '走法的几何本质', en: 'Geometry of Movement' },
+};
+const VERSION = '1.0.0';
+const ENGINE_VERSION = 'chess-0.1.0';
+
+E.init({
+  canvas: document.getElementById('scene'),
+  SCENES: SCENES, PARAMS: PARAMS, TOOL: TOOL,
+  VERSION: VERSION, ENGINE_VERSION: ENGINE_VERSION,
+  autoLoop: true,
+});
+
+/* ---- 接线：滑杆的第二份监听（见 PARAMS 上方注释）；播放键驱动的是
+   本工具自己的 demoRunning，不是引擎私有的 state.running——棋没有连续
+   模拟可言，「播放」在这里的唯一含义就是「自动巡回六种棋子」。 ---- */
+pieceSliderEl = document.querySelector('#paramsHost input[type=range]');
+if (pieceSliderEl) {
+  pieceSliderEl.addEventListener('input', function () { pieceIdx = Math.round(parseFloat(pieceSliderEl.value)); });
+}
+btnPlayEl = document.getElementById('btnPlay');
+if (btnPlayEl) btnPlayEl.addEventListener('click', function () { demoRunning = !demoRunning; });
+
+/* ---- 点击棋盘放子：只在有「放置」意义的页签生效（mobility 页没有起点可放）。
+   用位移 + 耗时区分「点」与 bindOrbit 的拖拽旋转/平移，二者都挂在同一个
+   canvas 上、互不干扰。用户一放子就让自动巡回暂停，停在他放的这一步。 ---- */
+(function bindBoardTap() {
+  const canvasEl = document.getElementById('scene');
+  let down = null;
+  canvasEl.addEventListener('pointerdown', function (e) {
+    if (!e.isPrimary) return;
+    down = { x: e.clientX, y: e.clientY, t: performance.now(), btn: e.button };
+  });
+  canvasEl.addEventListener('pointerup', function (e) {
+    if (!e.isPrimary || !down) return;
+    const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+    const dt = performance.now() - down.t, btn = down.btn;
+    down = null;
+    if (btn !== 0 || moved > 6 || dt > 600) return;
+    const tab = getCurTab();
+    if (tab === 'mobility') return;
+    const Cam = E.makeCam();
+    const pick = BR.pickSquare(Cam, E, [e.clientX, e.clientY], BOARD);
+    if (!pick) return;
+    G.placedSq = CC.SQ(pick.file, pick.rank);
+    if (demoRunning && btnPlayEl) btnPlayEl.click();
+  });
+})();
+</script>
+</body>
+</html>
