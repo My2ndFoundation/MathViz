@@ -12,6 +12,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOURCES = {
     'VIZ-ENGINE': ROOT / 'core' / 'viz-engine.js',
     'CHESS-CORE': ROOT / 'core' / 'chess-core.js',
+    'INTERACT': ROOT / 'core' / 'interact.js',
     'BOARD-RENDER': ROOT / 'core' / 'board-render.js',
 }
 
