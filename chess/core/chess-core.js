@@ -168,8 +168,32 @@
         }
       }
     }
+    castleMoves(this, me, out);
     return out;
   };
+
+  function castleMoves(pos, me, out) {
+    const bd = pos.board;
+    const home = me === WHITE ? SQ(4, 0) : SQ(4, 7);
+    if (bd[home] !== (me === WHITE ? K : -K)) return;
+    if (pos.isAttacked(home, -me)) return;          // 被将军时不能易位
+
+    const kBit = me === WHITE ? 1 : 4;
+    const qBit = me === WHITE ? 2 : 8;
+    const rookK = home + 3, rookQ = home - 4;
+
+    if ((pos.castling & kBit) && bd[rookK] === (me === WHITE ? R : -R) &&
+        bd[home + 1] === EMPTY && bd[home + 2] === EMPTY &&
+        !pos.isAttacked(home + 1, -me) && !pos.isAttacked(home + 2, -me)) {
+      out.push(mk(home, home + 2, bd[home], 0, 0, FLAG.CASTLE_K));
+    }
+    // 长易位：b 列（home−3）必须为空，但王不经过它，所以不检查它是否被攻击
+    if ((pos.castling & qBit) && bd[rookQ] === (me === WHITE ? R : -R) &&
+        bd[home - 1] === EMPTY && bd[home - 2] === EMPTY && bd[home - 3] === EMPTY &&
+        !pos.isAttacked(home - 1, -me) && !pos.isAttacked(home - 2, -me)) {
+      out.push(mk(home, home - 2, bd[home], 0, 0, FLAG.CASTLE_Q));
+    }
+  }
 
   function pawnMoves(pos, s, me, out) {
     const bd = pos.board;
@@ -191,7 +215,15 @@
       const to = s + caps[i];
       if (to & 0x88) continue;
       const tv = bd[to];
-      if (tv === EMPTY || (tv > 0 ? WHITE : BLACK) === me) continue;
+      if (tv === EMPTY) {
+        if (to === pos.ep && pos.ep >= 0) {
+          // 被吃的兵不在落点格，而在落点格的"身后"一格
+          const victim = to - dir;
+          out.push(mk(s, to, piece, bd[victim], 0, FLAG.CAPTURE | FLAG.EP));
+        }
+        continue;
+      }
+      if ((tv > 0 ? WHITE : BLACK) === me) continue;
       pushPawn(out, s, to, piece, tv, lastRank, FLAG.CAPTURE);
     }
   }
@@ -218,6 +250,14 @@
                    kingW: this.kingW, kingB: this.kingB };
     const bd = this.board;
 
+    if (m.flags & FLAG.EP) {
+      bd[m.to - (this.turn === WHITE ? 16 : -16)] = EMPTY;   // 被吃的兵不在落点格
+    } else if (m.flags & FLAG.CASTLE_K) {
+      bd[m.to + 1] = EMPTY; bd[m.to - 1] = this.turn === WHITE ? R : -R;
+    } else if (m.flags & FLAG.CASTLE_Q) {
+      bd[m.to - 2] = EMPTY; bd[m.to + 1] = this.turn === WHITE ? R : -R;
+    }
+
     bd[m.from] = EMPTY;
     bd[m.to] = m.promo ? (this.turn === WHITE ? m.promo : -m.promo) : m.piece;
 
@@ -241,6 +281,14 @@
     if (this.turn === BLACK) this.full--;
     bd[m.from] = m.piece;
     bd[m.to] = m.captured;
+    if (m.flags & FLAG.EP) {
+      bd[m.to] = EMPTY;                                       // 落点本来是空的
+      bd[m.to - (this.turn === WHITE ? 16 : -16)] = m.captured;
+    } else if (m.flags & FLAG.CASTLE_K) {
+      bd[m.to - 1] = EMPTY; bd[m.to + 1] = this.turn === WHITE ? R : -R;
+    } else if (m.flags & FLAG.CASTLE_Q) {
+      bd[m.to + 1] = EMPTY; bd[m.to - 2] = this.turn === WHITE ? R : -R;
+    }
     this.castling = undo.castling; this.ep = undo.ep; this.half = undo.half;
     this.kingW = undo.kingW; this.kingB = undo.kingB;
   };

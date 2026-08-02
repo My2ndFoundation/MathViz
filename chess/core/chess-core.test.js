@@ -229,4 +229,86 @@ const lone = C.Position.fromFEN('8/8/8/8/3N4/8/8/K6k w - - 0 1');
 T.eq(lone.attacksFrom(C.fromAlg('d4')).length, 8, '空旷处的马攻击 8 格');
 T.eq(lone.attacksFrom(C.fromAlg('e5')), [], '空格没有攻击范围');
 
+// ---- 易位 ----
+const cst = C.Position.fromFEN('r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1');
+T.eq(movesFrom(cst, 'e1').sort(), ['c1','d1','d2','e2','f1','f2','g1'].sort(),
+     '两侧易位权俱全时白王有 7 个走法（含 c1 与 g1）');
+
+const cstAfter = cst.make(cst.pseudoLegalMoves().find(m => m.flags & C.FLAG.CASTLE_K));
+T.eq(cstAfter.board[C.fromAlg('g1')], C.K, '短易位后王在 g1');
+T.eq(cstAfter.board[C.fromAlg('f1')], C.R, '短易位后车在 f1');
+T.eq(cstAfter.board[C.fromAlg('e1')], C.EMPTY, '短易位后 e1 为空');
+T.eq(cstAfter.board[C.fromAlg('h1')], C.EMPTY, '短易位后 h1 为空');
+T.eq(cstAfter.kingW, C.fromAlg('g1'), '短易位后 kingW 更新');
+T.eq(cstAfter.castling, 12, '短易位后白方失去全部易位权');
+
+const cstQ = cst.make(cst.pseudoLegalMoves().find(m => m.flags & C.FLAG.CASTLE_Q));
+T.eq(cstQ.board[C.fromAlg('c1')], C.K, '长易位后王在 c1');
+T.eq(cstQ.board[C.fromAlg('d1')], C.R, '长易位后车在 d1');
+T.eq(cstQ.board[C.fromAlg('a1')], C.EMPTY, '长易位后 a1 为空');
+
+// 易位的四个前提，逐条测
+const occupied = C.Position.fromFEN('r3k2r/8/8/8/8/8/8/R3KB1R w KQkq - 0 1');
+T.ok(!occupied.pseudoLegalMoves().some(m => m.flags & C.FLAG.CASTLE_K),
+     '王与车之间有子时不能短易位');
+
+const bOccupied = C.Position.fromFEN('r3k2r/8/8/8/8/8/8/RN2K2R w KQkq - 0 1');
+T.ok(!bOccupied.pseudoLegalMoves().some(m => m.flags & C.FLAG.CASTLE_Q),
+     '长易位路径上 b1 有子时不能长易位（b1 必须为空，尽管王不经过它）');
+
+const noRight = C.Position.fromFEN('r3k2r/8/8/8/8/8/8/R3K2R w Qkq - 0 1');
+T.ok(!noRight.pseudoLegalMoves().some(m => m.flags & C.FLAG.CASTLE_K),
+     '没有 K 权时不能短易位');
+
+const inChk = C.Position.fromFEN('r3k2r/8/8/8/8/8/4r3/R3K2R w KQkq - 0 1');
+T.ok(!inChk.pseudoLegalMoves().some(m => m.flags & (C.FLAG.CASTLE_K | C.FLAG.CASTLE_Q)),
+     '被将军时不能易位');
+
+const throughChk = C.Position.fromFEN('r3k2r/8/8/8/8/8/5r2/R3K2R w KQkq - 0 1');
+T.ok(!throughChk.pseudoLegalMoves().some(m => m.flags & C.FLAG.CASTLE_K),
+     'f1 受攻击时不能短易位（王不能穿过被攻击的格）');
+T.ok(throughChk.pseudoLegalMoves().some(m => m.flags & C.FLAG.CASTLE_Q),
+     'f1 受攻击不影响长易位');
+
+const landChk = C.Position.fromFEN('r3k2r/8/8/8/8/8/6r1/R3K2R w KQkq - 0 1');
+T.ok(!landChk.pseudoLegalMoves().some(m => m.flags & C.FLAG.CASTLE_K),
+     'g1 受攻击时不能短易位（落点也不能被攻击）');
+
+// b1 被攻击不妨碍长易位 —— 王不经过 b1
+const b1Atk = C.Position.fromFEN('r3k2r/8/8/8/8/8/1r6/R3K2R w KQkq - 0 1');
+T.ok(b1Atk.pseudoLegalMoves().some(m => m.flags & C.FLAG.CASTLE_Q),
+     'b1 被攻击不影响长易位，因为王不经过 b1');
+
+// ---- 吃过路兵 ----
+const ep = C.Position.fromFEN('rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3');
+const epMove = ep.pseudoLegalMoves().find(m => m.flags & C.FLAG.EP);
+T.ok(epMove, '存在吃过路兵走法');
+T.eq(C.toAlg(epMove.from), 'e5', '吃过路兵的起点是 e5');
+T.eq(C.toAlg(epMove.to), 'f6', '吃过路兵的落点是 f6');
+const epAfter = ep.make(epMove);
+T.eq(epAfter.board[C.fromAlg('f6')], C.P, '吃过路兵后 f6 是白兵');
+T.eq(epAfter.board[C.fromAlg('f5')], C.EMPTY, '被吃的黑兵在 f5 被移走，不在落点格');
+T.eq(epAfter.board[C.fromAlg('e5')], C.EMPTY, 'e5 为空');
+T.eq(epAfter.ep, -1, '吃过路兵后 ep 目标格清空');
+
+// ep 只在紧接的那一步有效
+const epGone = ep.make(findMove(ep, 'd2', 'd3'));
+T.eq(epGone.ep, -1, '走了别的棋之后 ep 目标格消失');
+
+// unmake 必须把被吃的过路兵放回它原来的格，而不是落点格
+const epRT = C.Position.fromFEN('rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3');
+const epBefore = epRT.toFEN();
+const undoEp = epRT._make(epMove);
+epRT._unmake(epMove, undoEp);
+T.eq(epRT.toFEN(), epBefore, '吃过路兵的 make/unmake 精确还原');
+
+// 易位的 unmake 也要把车放回去
+const cRT = C.Position.fromFEN('r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1');
+const cBefore = cRT.toFEN();
+for (const m of cRT.pseudoLegalMoves()) {
+  const u = cRT._make(m);
+  cRT._unmake(m, u);
+}
+T.eq(cRT.toFEN(), cBefore, '含易位的全部走法 make/unmake 后局面不变');
+
 T.report();
