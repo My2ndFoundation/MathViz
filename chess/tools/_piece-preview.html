@@ -47,6 +47,9 @@
   .budget { font-size: 11px; color: rgba(196, 210, 230, 0.55); }
   .badge-ok { color: #34d399; }
   .badge-bad { color: #fb7185; }
+  .contextRow { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(148, 163, 184, 0.15); font-size: 11px; color: rgba(196, 210, 230, 0.55); }
+  .contextRow .contextVal { color: rgba(196, 210, 230, 0.85); font-weight: 600; }
+  .contextNote { margin-top: 4px; font-size: 10px; font-style: italic; color: rgba(196, 210, 230, 0.42); }
 </style>
 </head>
 <body>
@@ -57,15 +60,20 @@
   <h1>Task 14 &middot; Piece Preview (Steps 5&ndash;7)</h1>
   <div class="modes">
     <button id="btnGrid" class="active">Legibility grid (24px / 96px)</button>
-    <button id="btnHarness">32-piece fps harness</button>
+    <button id="btnHarness">32-piece draw-cost harness</button>
   </div>
   <p id="gridNote">All six piece types &times; both colours, at 24px (the size that decides legibility) and 96px. Same-size pieces sit side by side.</p>
   <p id="harnessNote" style="display:none">Full 8&times;8 starting position, 32 pieces, camera rotating continuously (az += 0.006/frame) to sample the worst case.</p>
   <div class="fpsRow">
-    <span class="fps" id="fps">&mdash;</span>
-    <span class="fpsLabel">rolling 1s window</span>
+    <span class="fps" id="drawCost">&mdash;</span>
+    <span class="fpsLabel">draw cost &middot; median, rolling window</span>
   </div>
-  <div class="budget">Budget: 60 fps &middot; pass threshold: &ge;55 fps</div>
+  <div class="budget">Gate: per-frame draw cost for 32 pieces, with rasterization forced (getImageData) &middot; pass threshold: &le;4&nbsp;ms</div>
+  <div class="contextRow">
+    <span class="contextVal" id="refreshRate">&mdash;</span> host refresh &middot;
+    <span class="contextVal" id="achievedFps">&mdash;</span> achieved fps
+    <div class="contextNote">Context only, not graded — these describe this display/host, not this page's code. A 30&nbsp;Hz host makes a 55&nbsp;fps gate unpassable no matter how fast the drawing is; a 144&nbsp;Hz host would pass it trivially no matter how slow.</div>
+  </div>
 </div>
 
 <script>
@@ -1210,7 +1218,20 @@
     bindKeyboard();
     applyLang();
     resetSim();
-    requestAnimationFrame(frame);
+    /* autoLoop 默认 true——数学可视化工具的动画从一个持续运行的时钟驱动，
+       "每个 vsync 都重画" 是它们的常态，引擎自带循环因此默认开启。
+       棋类不是这个模型：棋是离散的——重画只该发生在一步棋、一次相机拖拽、
+       或一次显式动画之后，从不该有一个"正在跑的时钟"替它决定何时重画。
+       task-14 的 32 子帧率探针踩过这个坑：_piece-preview.html 自己起了
+       第二条 rAF 循环（drawHarness），engine 的 frame() 同时也在跑——
+       两条循环每个 vsync 都各画一次同一块 canvas：engine 先铺一层昂贵的
+       径向渐变背景（SCENES 为空，铺完就没别的可画），harness 紧接着用
+       一次纯色 fill 把它整个盖掉再画棋盘和棋子。径向渐变因此是纯浪费
+       （量过：1.03ms vs 纯色 fill 的 0.07ms，15 倍开销，且立刻被覆盖）。
+       给 init() 加这个开关，让像 _piece-preview.html 这样自己驱动循环的
+       调用方能关掉引擎自己的循环——以后棋类工具大概率都要这个开关，
+       所以放在引擎里而不是让每个工具各自想办法绕开它。 */
+    if (opts.autoLoop !== false) requestAnimationFrame(frame);
   }
 
   return {
@@ -1455,8 +1476,15 @@
   var canvas = document.getElementById('canvas');
   // TOOL 只为了让 document.title 有意义；本页没有 SCENES/PARAMS，
   // init() 在没有它们时会安静跳过对应机制（见 viz-engine.js 顶部注释）。
+  // autoLoop: false — this page drives its own rAF loop (tick() below) to draw
+  // the grid or the harness; the engine's own loop would otherwise repaint the
+  // same canvas every vsync with an expensive radial-gradient background that
+  // SCENES-less init() has nothing else to draw, and that this page's flat
+  // fill immediately paints over anyway. See viz-engine.js init() for the
+  // full rationale (chess is discrete; there is no running clock to redraw from).
   E.init({
     canvas: canvas,
+    autoLoop: false,
     TOOL: { id: 'piece-preview', title: { en: 'Chess Piece Preview', zh: '棋子预览' },
             h1: { en: 'Chess Piece Preview', zh: '棋子预览' } }
   });
@@ -1467,7 +1495,9 @@
   var btnHarness = document.getElementById('btnHarness');
   var gridNote = document.getElementById('gridNote');
   var harnessNote = document.getElementById('harnessNote');
-  var fpsEl = document.getElementById('fps');
+  var drawCostEl = document.getElementById('drawCost');
+  var refreshRateEl = document.getElementById('refreshRate');
+  var achievedFpsEl = document.getElementById('achievedFps');
   var panelEl = document.querySelector('.panel');
   var gridWrap = document.getElementById('gridWrap');
 
@@ -1625,28 +1655,75 @@
     gridWrap.classList.toggle('hidden', mode !== 'grid');
     if (mode === 'harness') enterHarness(); else drawGrid();
     frames = 0; t0 = performance.now();
-    if (mode !== 'harness') fpsEl.textContent = '—';
+    drawSamples.length = 0; rafSamples.length = 0; lastTickTs = 0;
+    if (mode !== 'harness') {
+      drawCostEl.textContent = '—';
+      refreshRateEl.textContent = '—';
+      achievedFpsEl.textContent = '—';
+    }
   }
   btnGrid.addEventListener('click', function () { setMode('grid'); });
   btnHarness.addEventListener('click', function () { setMode('harness'); });
   window.addEventListener('resize', function () { if (mode === 'grid') drawGrid(); });
 
-  /* ---------------- 主循环（独立于引擎自带的空场景循环） ----------------
-     brief Step 5 给的探针写法：整秒窗口内计帧，窗口到点就把计数写进 fps。
-     cam.az 只在 harness 模式下推进——网格模式的相机是静态直视相机，且画在
-     另一块不参与动画循环开销的画布上，只在切换模式/窗口尺寸变化时重画。 */
-  var frames = 0, t0 = performance.now(), fps = 0;
-  function tick() {
+  /* ---------------- 主循环：draw-cost 门（Task 14 perf-gate 修正） ----------------
+     旧版本的探针只数「一秒里 rAF 回调跑了几次」——这其实是在测宿主的显示器
+     刷新率，不是测本页的绘制代码：见 chess-perf-gate-report.md 里记的四组
+     测量，开发机稳定读到 33.3ms 的 rAF 间隔（30Hz），空转什么都不画的页面
+     同样是 33.3ms——上限来自宿主，不来自绘制。"预算 60fps / 阈值 ≥55fps"
+     在 30Hz 宿主上永远不可能过，在 144Hz 宿主上不管代码多烂都会轻松过，
+     两个方向都测不出真实回归。
+
+     新门改测「drawHarness() 这一次调用本身花了多少时间」，且用一次
+     ctx.getImageData(0,0,1,1) 强制光栅化——只提交绘制命令而不强制其执行，
+     测出来的是「命令入队多快」而不是「像素真被画出来多快」，这正是
+     诊断阶段第一次量出 1.2ms（远低于预算）时踩过的陷阱；getImageData
+     每份样本只调一次，不在每条 ctx 调用后都调一次，否则本身的开销会
+     淹没被测的东西。
+
+     rAF 间隔仍然记录，但只作为「宿主刷新率」这一条上下文展示，明确
+     标成「不计入门槛」——它是显示器的属性，不是这份代码的属性。 */
+  function median(samples) {
+    if (!samples.length) return 0;
+    var sorted = samples.slice().sort(function (a, b) { return a - b; });
+    var mid = sorted.length >> 1;
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+
+  var SAMPLE_WINDOW = 90;   // 滚动窗口的样本数上限（约 1.5–3s，取决于宿主刷新率）
+  var DRAW_COST_BUDGET_MS = 4;   // 32 子的通过阈值——见 chess-perf-gate-report.md 的推导
+  var drawSamples = [], rafSamples = [];
+  var frames = 0, t0 = performance.now(), fps = 0, lastTickTs = 0;
+
+  function tick(ts) {
     if (mode === 'harness') {
+      if (lastTickTs) {
+        rafSamples.push(ts - lastTickTs);
+        if (rafSamples.length > SAMPLE_WINDOW) rafSamples.shift();
+      }
+      lastTickTs = ts;
+
+      E.cam.az += 0.006;
+      var d0 = performance.now();
+      drawHarness();
+      ctx.getImageData(0, 0, 1, 1);   // 强制光栅化，逼真实像素被画出来，不只是命令入队
+      var d1 = performance.now();
+      drawSamples.push(d1 - d0);
+      if (drawSamples.length > SAMPLE_WINDOW) drawSamples.shift();
+
       frames++;
       var now = performance.now();
       if (now - t0 >= 1000) {
         fps = frames; frames = 0; t0 = now;
-        fpsEl.textContent = fps + ' fps';
-        fpsEl.className = 'fps ' + (fps >= 55 ? 'badge-ok' : 'badge-bad');
+
+        var drawMs = median(drawSamples);
+        drawCostEl.textContent = drawMs.toFixed(2) + ' ms';
+        drawCostEl.className = 'fps ' + (drawMs <= DRAW_COST_BUDGET_MS ? 'badge-ok' : 'badge-bad');
+
+        var rafMs = median(rafSamples);
+        refreshRateEl.textContent = rafMs > 0 ? (1000 / rafMs).toFixed(1) + ' Hz' : '—';
+        achievedFpsEl.textContent = fps + ' fps';
       }
-      E.cam.az += 0.006;
-      drawHarness();
     }
     requestAnimationFrame(tick);
   }
