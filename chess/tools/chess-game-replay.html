@@ -142,6 +142,22 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 .readout .dim{color:rgba(159,176,200,.6)}
 .tips{margin-top:11px;font-size:11px;line-height:1.65;color:rgba(159,176,200,.72)}
 
+/* eval 页：三条曲线的图例行 + 可折叠的「它粗糙在哪」说明块（规格 §4③）。
+   图例行自己画一个彩色圆点——不复用 .tg .dot，那个类名绑定的是开关行的
+   语义，这里没有开关，只是纯展示。说明块默认收起，点 ⓘ 展开/收起；
+   展开状态存在 evalCaveatOpen（模块级变量）里，不是元素自身的状态——
+   readout() 的 innerHTML 每 120ms 整体重建一次，DOM 节点活不过下一次
+   重建，状态必须存在别处，下一次重建时读回来。 */
+.evalRow{display:flex;align-items:baseline;gap:6px;margin:2px 0}
+.evalDot{display:inline-block;width:8px;height:8px;border-radius:50%;
+  background:var(--c);box-shadow:0 0 6px var(--c);flex:none}
+.evalInfo{background:none;border:none;color:rgba(159,176,200,.75);cursor:pointer;
+  font-size:11px;padding:0 2px;font-family:inherit}
+.evalInfo:hover{color:#dbe6f5}
+.evalCaveat{display:none;margin:2px 0 6px 14px;padding:6px 8px;border-radius:7px;
+  background:rgba(148,163,184,.08);font-size:10.5px;line-height:1.55;color:rgba(207,216,230,.85)}
+.evalCaveat.show{display:block}
+
 /* 关键步说明卡片：挂在 #tips 正上方，rs.note 非空时才出现（规格 §5 的
    「关键步自动暂停 + 弹出说明」）。与 .tips 同一份视觉语言（面板内嵌读数），
    但加一条左边框强调「这是这一步特有的旁白」，不是常驻的通用提示。 */
@@ -4618,6 +4634,113 @@ function drawTraces(camC) {
   }
 }
 
+/* ================= eval 页：三条评估曲线（Task 15） ================= */
+/* viz-engine.js 内部有一份同样的 FONT_MATH，但它是模块私有常量，没有导出
+   （引擎的 label3 自己画坐标轴文字时用得到，工具够不着）——设计系统第 4 条
+   原则要求数学符号一律衬线斜体，这里在工具自己的作用域里原样复制一份
+   字面量，与 fourier-essence-3d.html 等既有工具同一种写法。 */
+var FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
+
+function hexA(hex, a) {
+  var r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+}
+
+var EVAL_META = [
+  { key: 'material', color: ROSE, cssVar: 'var(--trace-rose)', sym: 'ΔM',
+    label: { zh: '子力差', en: 'Material' } },
+  { key: 'control', color: VIOLET, cssVar: 'var(--trace-violet)', sym: 'ΔC',
+    label: { zh: '控制格数', en: 'Control' } },
+  { key: 'safety', color: EMERALD, cssVar: 'var(--trace-emerald)', sym: 'S',
+    label: { zh: '王的安全度', en: 'King safety' } },
+];
+var EVAL_Y_MAX = 3.4;   // 三条曲线各自独立归一化后共用的屏高（世界单位）
+
+/* 规格 §4③ 要求「工具内会说明它粗糙在哪」——不是 tips 里一句带过，是
+   readout 下方一个可折叠的说明块，三条各一段，内容取自 Task 5 表格的
+   第四列，双语，逐字采用。 */
+var EVAL_CAVEATS = {
+  material: {
+    en: 'Material: P=1 N=3 B=3 R=5 Q=9, king 0. Those numbers are a convention that works, not a theorem. Position, pawn structure and king safety are all outside this count — which is exactly why a game can be won while this curve says you are losing.',
+    zh: '子力差：兵 1、马 3、象 3、车 5、后 9，王计 0。这套数字是行之有效的约定，不是定理。位置、兵形、王的安全全都不在这个计数里——正因如此，一局棋完全可能在这条曲线说你落后的时候被你赢下来。',
+  },
+  control: {
+    en: 'Control: the number of distinct squares each side attacks, counted from the attack geometry. It includes squares occupied by your own pieces (that is defence, not occupation) and excludes pawn pushes (a pawn does not attack the square in front of it). So it measures reach, not safe occupation.',
+    zh: '控制格数：每方攻击到的不同格子数，从攻击几何直接数出来。它把己方棋子占据的格也算进去（那是保护，不是占领），也不含兵的前进（兵不攻击正前方）。所以它量的是火力覆盖，不是安全占据。',
+  },
+  safety: {
+    en: 'King safety: minus the number of squares next to your king that the opponent attacks (only squares actually on the board, so a king in the corner has fewer than eight neighbours). It does not care who is attacking, whether anything is in the way, or whether the attack can ever be delivered. It is deliberately crude, and it is most informative in the middlegame.',
+    zh: '王的安全度：己方王的邻格中被对方攻击的格数，取负（只数盘内的格，所以角落里的王邻格不足八个）。它不管攻击者是谁、路上有没有挡子、这攻势能不能真的兑现。它是刻意粗糙的，在中局最有参考价值。',
+  },
+};
+
+/* 每条曲线各自的实际量程（整局的 min..max），只算一次并缓存在 rs 上——
+   量程不该随 upto 变化：拖时间轴时曲线的竖直比例尺必须是固定的，只有
+   曲线画到多远、glowDot 停在哪儿在变，否则同一个子力差在不同 ply 会
+   被画成不同高度，没法读。三条各自独立归一化——量纲差得远（子力差
+   ±9 量级、控制格数 ±30 量级、王安全 ±8），硬塞进同一把尺子会让子力差
+   看起来是一条直线；不标注实际量程就归一化，又会让人以为三条曲线可比。 */
+function evalExtent(rs) {
+  if (rs._evalExtent) return rs._evalExtent;
+  var S = RP.series(rs);
+  var ext = {};
+  EVAL_META.forEach(function (m) {
+    var arr = S[m.key], mn = arr[0], mx = arr[0];
+    for (var i = 1; i < arr.length; i++) { if (arr[i] < mn) mn = arr[i]; if (arr[i] > mx) mx = arr[i]; }
+    ext[m.key] = { min: mn, max: mx, scale: Math.max(Math.abs(mn), Math.abs(mx), 1e-6) };
+  });
+  rs._evalExtent = ext;
+  return ext;
+}
+
+/* 只画到当前 ply 为止——与 trace 页同一条纪律：z=0 是「现在」，历史沿 -z
+   后退，头部（glowDot 落点）就是最新采样，这正是设计系统第 3 条原则里
+   「头部辉光点」的字面含义，只有在曲线随 ply progressively 生长时才成立。
+   曲线立在世界 x=0 平面上——棋盘中线——iso 视角看到的是「曲线从棋盘里
+   长出去」，side 视角看到的是一张标准折线图。 */
+function evalCurvePoints(rs, key, ext) {
+  var S = RP.series(rs), zs = rs.zStep, upto = rs.ply;
+  var scale = ext[key].scale;
+  var pts = [];
+  for (var ply = 0; ply <= upto; ply++) pts.push([0, (S[key][ply] / scale) * EVAL_Y_MAX, -(upto - ply) * zs]);
+  return pts;
+}
+
+function drawEvalCurves(camC) {
+  var ext = evalExtent(rs);
+  EVAL_META.forEach(function (m) {
+    var pts = evalCurvePoints(rs, m.key, ext);
+    if (pts.length < 2) return;
+    E.strokePoly(camC, pts, { color: m.color, width: 2.2, alpha: 0.9 });
+    var head = pts[pts.length - 1];
+    // 投影虚线：头部落到 y=0（棋盘平面）——三色六处复用的第三处
+    E.line3(camC, head, [head[0], 0, head[2]], { color: m.color, width: 1, alpha: 0.35, dash: [4, 4] });
+    // 头部辉光点：glowDot 收屏幕坐标，不是世界点——引擎里唯一一个这样的图元
+    var s = E.proj(camC, head);
+    if (s) E.glowDot(s, 9, '#ffffff', hexA(m.color, 0.85));
+    // 公式标签：贴着曲线头部，衬线斜体（设计系统第 4 条原则）
+    E.label3(camC, [head[0], head[1], head[2]], m.sym,
+      { font: 'italic 13px ' + FONT_MATH, color: m.color, align: 'left', dx: 12, dy: -8 });
+  });
+}
+
+/* readout 里三条曲线当前值各配一个 ⓘ，点开显示 EVAL_CAVEATS 对应段落。
+   展开状态存在这个模块级对象里，不是 DOM 节点自己的状态——readout()
+   的 innerHTML 每 120ms 整体重建一次，DOM 节点活不过下一次重建。 */
+var evalCaveatOpen = { material: false, control: false, safety: false };
+(function bindEvalCaveatToggle() {
+  var el = document.getElementById('readout');
+  if (!el) return;
+  el.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('[data-caveat]');
+    if (!btn) return;
+    var k = btn.getAttribute('data-caveat');
+    evalCaveatOpen[k] = !evalCaveatOpen[k];
+  });
+})();
+
+function signed(v) { return (v > 0 ? '+' : '') + v; }
+
 /* ================= 传输控件（挂进 #recHost） ================= */
 var transportEls = null;   // { play, scrub, speed, counter }
 var btnPlayTop = null;     // 面板顶部复用的 Play 按钮（bindTopButtons 里赋值），syncTransport() 里同步文案
@@ -4865,9 +4988,10 @@ var SCENES = {
 
   eval: {
     label: { zh: '评估', en: 'Eval' },
-    brand: { zh: '子力 / 控制 / 王安全三条曲线——占位页，见 Task 15。', en: 'Material / control / king-safety — three curves, placeholder, see Task 15.' },
-    tips: { zh: '（占位）这一页之后会把三条评估曲线沿回合轴画出来；现在只显示当前局面。',
-            en: '(placeholder) This tab will plot three evaluation curves along the ply axis; for now it just shows the current position.' },
+    brand: { zh: '子力 / 控制 / 王安全三条曲线——各自归一化，量纲不同不能直接比较。',
+             en: 'Material / control / king-safety — three curves, each normalised on its own scale; they are not directly comparable.' },
+    tips: { zh: '侧视下三条曲线读起来像一张标准折线图；轴测下能看到它们从棋盘中线长出去。三条各自独立归一化，图例里的实际量程才是它们真正的单位。',
+            en: 'In Side view the three curves read like a standard line chart; in Iso they visibly grow out of the board\'s centre line. Each is normalised on its own scale — the real units are the ranges shown in the legend.' },
     presetsLabel: { en: 'Game', zh: '棋局' },
     presets: PRESETS,
     views: { iso: VIEW_ISO, side: VIEW_SIDE },
@@ -4876,13 +5000,24 @@ var SCENES = {
       advanceReplay();
       if (!rs) { BR.drawBoard(ctx, camC, E, { layout: L }); return; }
       drawHistory(camC);
+      drawEvalCurves(camC);
       drawPosition(camC);
     },
     readout: function () {
-      syncKeyNote();
+      syncTransport();
       if (!rs) return '';
-      return '<div class="dim">' + E.t({ zh: '占位页 · 见 Task 15', en: 'placeholder · see Task 15' }) + '</div>' +
-        '<div class="dim">' + E.t({ zh: '半步', en: 'ply' }) + ' ' + rs.ply + ' / ' + rs.maxPly + '</div>';
+      var S = RP.series(rs), ext = evalExtent(rs), ply = rs.ply;
+      var rows = EVAL_META.map(function (m) {
+        var v = S[m.key][ply];
+        var open = evalCaveatOpen[m.key];
+        return '<div class="evalRow"><i class="evalDot" style="--c:' + m.cssVar + '"></i>' +
+          '<span>' + E.t(m.label) + '</span>' +
+          '<b style="--c:' + m.cssVar + '">' + signed(v) + '</b>' +
+          '<span class="dim">[' + signed(ext[m.key].min) + ' .. ' + signed(ext[m.key].max) + ']</span>' +
+          '<button class="evalInfo" data-caveat="' + m.key + '" title="' + E.t({ zh: '这条曲线粗糙在哪', en: 'Where this curve is crude' }) + '">ⓘ</button></div>' +
+          '<div class="evalCaveat' + (open ? ' show' : '') + '">' + E.t(EVAL_CAVEATS[m.key]) + '</div>';
+      }).join('');
+      return '<div class="dim">' + E.t({ zh: '半步', en: 'ply' }) + ' <b style="--c:var(--trace-cyan)">' + rs.ply + '</b> / ' + rs.maxPly + '</div>' + rows;
     },
   },
 
