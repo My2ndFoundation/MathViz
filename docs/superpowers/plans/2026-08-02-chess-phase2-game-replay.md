@@ -1047,7 +1047,15 @@ T.eq(eP.capturedAt, null, '它没被吃');
 T.eq(findFrom(t0, 'b1').points.length, 1, 'b1 的马一步没动 —— 只有起点一个点');
 
 // 易位：一步动两颗子
-const cas = tracesOf('[FEN "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1"]\n1. O-O Rd8 2. Kh1 O-O-O 1/2-1/2');
+// 易位 fixture 必须同时满足两个约束，缺一个整段就跑不通：
+//   h8 的车要让开 h 线 —— 白方短易位之后 h1 空了，h 线全开，
+//     否则第 3 个半步 Kh1 是走进将军；
+//   a8 的车必须留在原地 —— 第 4 个半步的 O-O-O 要用它，
+//     任何让 a8 车离家的走法都会当场毁掉黑方的长易位权。
+// Rg8 同时满足两条（它顺带将了一军，白方 Kh1 正是应将）。
+// 计划原稿写的是 Rd8：h8 的车被 e8 的王挡着到不了 d8，实际走的是
+// a8 的车 —— 那个 fixture 先毁掉后面要测的东西，再去测它。
+const cas = tracesOf('[FEN "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1"]\n1. O-O Rg8 2. Kh1 O-O-O 1/2-1/2');
 T.eq(findFrom(cas, 'e1').points.map(function (p) { return C.toAlg(p.sq); }), ['e1', 'g1', 'h1'],
      '白王短易位到 g1，再走 h1');
 T.eq(findFrom(cas, 'h1').points.map(function (p) { return [p.ply, C.toAlg(p.sq)]; }),
