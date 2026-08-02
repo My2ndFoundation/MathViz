@@ -483,4 +483,72 @@ const divideSum = Object.values(C.perftDivide(C.Position.fromFEN(START), 2))
   .reduce((a, b) => a + b, 0);
 T.eq(divideSum, C.perft(C.Position.fromFEN(START), 2), 'perftDivide 各分支之和应等于 perft(depth 2)');
 
+// ---- SAN ----
+function san(fen, from, to, promo) {
+  const p = C.Position.fromFEN(fen);
+  const f = C.fromAlg(from), t = C.fromAlg(to);
+  const m = p.legalMoves().find(x => x.from === f && x.to === t && (promo ? x.promo === promo : !x.promo));
+  return C.moveToSAN(p, m);
+}
+
+T.eq(san(START, 'e2', 'e4'), 'e4', '兵推进只写落点');
+T.eq(san(START, 'g1', 'f3'), 'Nf3', '子力走动写棋子字母 + 落点');
+T.eq(san('8/8/8/3r4/8/8/3R4/K6k w - - 0 1', 'd2', 'd5'), 'Rxd5', '吃子用 x');
+// 原始简报此处的 FEN 没有黑王（'8/8/8/8/8/8/4p3/3P3K'），
+// 会被已合并的 FEN 校验拒绝（黑方必须恰好一个王）。
+// 已在 h8（与 e 列/第一横行的战术无关）补上黑王，语义不变。
+T.eq(san('7k/8/8/8/8/8/4p3/3P3K b - - 0 1', 'e2', 'e1', C.Q), 'e1=Q+', '升变写 =Q，并带将军号');
+T.eq(san('r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1', 'e1', 'g1'), 'O-O', '短易位');
+T.eq(san('r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1', 'e1', 'c1'), 'O-O-O', '长易位');
+T.eq(san('4k3/8/8/8/8/8/8/4R2K w - - 0 1', 'e1', 'e7'), 'Re7+', '将军加 +');
+T.eq(san('4k3/8/4Q3/8/8/8/8/4K3 w - - 0 1', 'e6', 'e7'), 'Qe7+', '后将军');
+// 后落 g7 与黑王贴身，且被 g6 的白王保护 —— 这才是真将死。
+// （若白王不在 g6，黑王可以 Kxg7，就只是将军而非将死。）
+T.eq(san('7k/Q7/6K1/8/8/8/8/8 w - - 0 1', 'a7', 'g7'), 'Qg7#', '将死加 #');
+
+// 兵吃子写起始直列
+T.eq(san('8/8/8/3p4/4P3/8/8/K6k w - - 0 1', 'e4', 'd5'), 'exd5', '兵吃子写 e 列 + x');
+
+// 消歧：两颗同种子都能到同一格
+// 以下几处原始简报的 FEN（'8/8/8/8/8/8/8/R6R'、'R7/8/8/8/8/8/8/R7'、
+// 'Q6Q/8/8/8/8/8/8/Q6Q'）都没有王，会被已合并的 FEN 校验拒绝
+// （双方必须各恰好一个王）。已在不影响消歧几何的角落补上双王。
+T.eq(san('3K1k2/8/8/8/8/8/8/R6R w - - 0 1', 'a1', 'd1'), 'Rad1', '同一横行两车 —— 用直列消歧');
+T.eq(san('3K1k2/8/8/8/8/8/8/R6R w - - 0 1', 'h1', 'd1'), 'Rhd1', '另一侧同理');
+T.eq(san('R7/8/8/8/4k3/8/4K3/R7 w - - 0 1', 'a1', 'a5'), 'R1a5', '同一直列两车 —— 用横行消歧');
+T.eq(san('R7/8/8/8/4k3/8/4K3/R7 w - - 0 1', 'a8', 'a5'), 'R8a5', '另一侧同理');
+// 简报另有一处不只是缺王，逻辑本身就错了：'Q6Q/8/8/8/8/8/8/Q6Q'（角上四后）
+// 从 a1 出发时，a8 与 h1 两后都无法用一步走到 d4（既不同列同行也不同斜线），
+// 唯一能到 d4 的对手只有 h8（斜线），而 h8 与 a1 不同列——按简报自己给出的
+// disambiguate() 算法，这只需要"直列"就够消歧（"Qad4"），并不需要写全格。
+// 换成一个真正需要"直列与横行都不足"的局面：a7（与 a1 同列）和 g1（与 a1
+// 同行）都能斜线走到 d4，这样两条消歧线索都被占用，才真的需要 'Qa1d4'。
+T.eq(san('4k3/Q7/8/8/8/8/8/Q5QK w - - 0 1', 'a1', 'd4'), 'Qa1d4', '直列与横行都不足以消歧时写全格');
+// h1 车沿第一横行到 b1 的路上只有空格（a1 在 b1 更左侧，挡不住），
+// 所以两车都能到 b1，仍需消歧。
+T.eq(san('3K1k2/8/8/8/8/8/8/R6R w - - 0 1', 'a1', 'b1'), 'Rab1', 'b1 两车皆可达，用直列消歧');
+T.eq(san('3K1k2/8/8/8/8/8/8/R6R w - - 0 1', 'h1', 'g1'), 'Rhg1', 'g1 同理');
+
+// 解析：SAN 往返
+const sanCases = [
+  [START, 'e4'], [START, 'Nf3'], [START, 'd4'],
+  ['r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1', 'O-O'],
+  ['r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1', 'O-O-O'],
+  ['8/8/8/3r4/8/8/3R4/K6k w - - 0 1', 'Rxd5'],
+  ['3K1k2/8/8/8/8/8/8/R6R w - - 0 1', 'Rad1'],
+  ['8/8/8/3p4/4P3/8/8/K6k w - - 0 1', 'exd5'],
+  ['7k/8/8/8/8/8/4p3/3P3K b - - 0 1', 'e1=Q+'],
+];
+for (const [fen, s] of sanCases) {
+  const p = C.Position.fromFEN(fen);
+  T.eq(C.moveToSAN(p, C.parseSAN(p, s)), s, 'SAN 往返一致：' + s);
+}
+
+// 宽容解析：带不带 +/# 都应该认
+const relaxed = C.Position.fromFEN('4k3/8/8/8/8/8/8/4R2K w - - 0 1');
+T.eq(C.moveToSAN(relaxed, C.parseSAN(relaxed, 'Re7')), 'Re7+', '省略 + 也能解析');
+
+T.throws(() => C.parseSAN(C.Position.fromFEN(START), 'Qh5'), 'SAN 指向非法走法应抛错');
+T.throws(() => C.parseSAN(C.Position.fromFEN(START), 'zz9'), 'SAN 语法错误应抛错');
+
 T.report();

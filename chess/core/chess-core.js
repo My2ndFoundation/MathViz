@@ -530,7 +530,80 @@
     return toAlg(m.from) + toAlg(m.to) + (m.promo ? PROMO_CH[m.promo] : '');
   }
 
+  const SAN_CH = { 1: '', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K' };
+  const SAN_TO_CODE = { N: N, B: B, R: R, Q: Q, K: K };
+
+  function moveToSAN(pos, m) {
+    if (!m) throw new Error('moveToSAN: move is required');
+    let s;
+    if (m.flags & FLAG.CASTLE_K) s = 'O-O';
+    else if (m.flags & FLAG.CASTLE_Q) s = 'O-O-O';
+    else {
+      const type = Math.abs(m.piece);
+      if (type === P) {
+        s = (m.flags & FLAG.CAPTURE) ? toAlg(m.from)[0] + 'x' : '';
+        s += toAlg(m.to);
+        if (m.promo) s += '=' + SAN_CH[m.promo];
+      } else {
+        s = SAN_CH[type] + disambiguate(pos, m) +
+            ((m.flags & FLAG.CAPTURE) ? 'x' : '') + toAlg(m.to);
+      }
+    }
+    const after = pos.make(m);
+    if (after.inCheck(after.turn)) s += after.legalMoves().length ? '+' : '#';
+    return s;
+  }
+
+  // 消歧规则：先试直列，不够再试横行，还不够就写全格。
+  function disambiguate(pos, m) {
+    const type = Math.abs(m.piece);
+    const rivals = pos.legalMoves().filter(x =>
+      x.to === m.to && x.from !== m.from && Math.abs(x.piece) === type);
+    if (!rivals.length) return '';
+    const sameFile = rivals.some(x => fileOf(x.from) === fileOf(m.from));
+    const sameRank = rivals.some(x => rankOf(x.from) === rankOf(m.from));
+    if (!sameFile) return toAlg(m.from)[0];
+    if (!sameRank) return toAlg(m.from)[1];
+    return toAlg(m.from);
+  }
+
+  const SAN_RE = /^([NBRQK])?([a-h])?([1-8])?(x)?([a-h][1-8])(?:=?([NBRQ]))?[+#]?$/;
+
+  function parseSAN(pos, text) {
+    const s = String(text).trim().replace(/[!?]+$/, '');
+    const legal = pos.legalMoves();
+
+    if (s === 'O-O' || s === '0-0') {
+      const m = legal.find(x => x.flags & FLAG.CASTLE_K);
+      if (!m) throw new Error('Illegal SAN "' + text + '": kingside castling is not available');
+      return m;
+    }
+    if (s === 'O-O-O' || s === '0-0-0') {
+      const m = legal.find(x => x.flags & FLAG.CASTLE_Q);
+      if (!m) throw new Error('Illegal SAN "' + text + '": queenside castling is not available');
+      return m;
+    }
+
+    const g = SAN_RE.exec(s);
+    if (!g) throw new Error('Bad SAN syntax: "' + text + '"');
+    const type = g[1] ? SAN_TO_CODE[g[1]] : P;
+    const hintF = g[2] ? g[2].charCodeAt(0) - 97 : -1;
+    const hintR = g[3] ? g[3].charCodeAt(0) - 49 : -1;
+    const to = fromAlg(g[5]);
+    const promo = g[6] ? SAN_TO_CODE[g[6]] : 0;
+
+    const hits = legal.filter(x =>
+      Math.abs(x.piece) === type && x.to === to &&
+      (promo ? x.promo === promo : !x.promo) &&
+      (hintF < 0 || fileOf(x.from) === hintF) &&
+      (hintR < 0 || rankOf(x.from) === hintR));
+
+    if (hits.length === 1) return hits[0];
+    if (!hits.length) throw new Error('Illegal SAN "' + text + '" in position ' + pos.toFEN());
+    throw new Error('Ambiguous SAN "' + text + '": ' + hits.length + ' moves match');
+  }
+
   return { WHITE, BLACK, EMPTY, P, N, B, R, Q, K,
            SQ, fileOf, rankOf, offBoard, toAlg, fromAlg, Position, FLAG,
-           perft, perftDivide, moveToUCI };
+           perft, perftDivide, moveToUCI, moveToSAN, parseSAN };
 });
