@@ -28,7 +28,7 @@
 
 > **如果本计划里某条国际象棋事实是错的、或某个测试断言了一件事实上错误的事，停下来报告，不许改代码或改测试去迁就它。计划是记录，不是权威。**
 
-这条在阶段 0 与阶段 1 里抓出了 13 处计划缺陷。同样适用于棋谱：**任何一局棋谱都不许凭记忆敲**（详见 Task 7 的取谱协议）。
+这条在阶段 0 与阶段 1 里抓出了 13 处计划缺陷。同样适用于棋谱：**任何一局棋谱都不许凭记忆敲**——取一份真实的 PGN，让走法生成器逐步重放通过（见 Task 8–12 的取谱协议）。
 
 ---
 
@@ -52,11 +52,13 @@
 
 **决定：引擎每帧把 `dt` 写进 `state.dt`，工具①② 的 `frameDt()` 改成读它。** 一处出口。
 
-### 决定 3：`games.js` 是棋谱的唯一副本，不另存 `*.pgn` 原始文件
+### 决定 3：PGN 原文就是数据，不再另抄一份元数据字段
 
-规格 §2 的目录树里列了 `games/*.pgn`（30 个原始文件）+ `games.js`。**本阶段不建那 30 个文件**：它们会是同一份数据的第二副本，且没有任何运行时消费方（工具是内联的，node 测试直接读 `games.js`），只会制造又一处需要 `check.py` 去守的漂移。
+规格 §2 的目录树里列了 `games/*.pgn` + `games.js` 两份东西。**合成一份**：每条记录的 `pgn` 字段直接放**整份 PGN 原文（含标签对）**，也就是你拿到的那个 `.pgn` 文件的内容。棋手、赛事、日期、结果、半步数全部在载入时从它读出来，**一个都不另抄成字段**。
 
-**取而代之**：每条棋谱记录自带 `source: { a: '<URL>', b: '<URL>' }` 两个取谱来源，provenance 留在数据里；导出 PGN 由运行时 `writePGN` 现生成。**这是对规格 §2 的一处明文偏离，理由如上。**
+理由很直接：抄下来的字段只会有两种命运——与 PGN 一致（那它是冗余），或与 PGN 不一致（那它是 bug）。既然 `parsePGN` 已经把标签对解析出来了，让它做这件事。
+
+**这也意味着本阶段不做棋谱版本考据。** 同一局棋在不同来源可能有长短不一的记谱，我们**不判定哪一版是"真的"**：取一份能重放的，把来源 URL 记在 `source` 里，故事按这一份写。这个工具是用来看懂一局棋怎么下的，不是做记谱考古的。
 
 ---
 
@@ -1221,13 +1223,18 @@ ChessGames = {
   GROUP_LABEL,        // { teaching: {en,zh}, … }
   LEARNING_ROUTE,     // string[]（11 个 id，规格 §6.3）
   TAGS,               // 允许出现在 game.tags 里的全部值
+  headersOf(game),    // → { Event, Site, Date, White, Black, Result, … }
+                      //   只正则扫标签对、不重放走法（列表页要给 30 局各画一张卡，
+                      //   为了显示两个名字去把三十局棋全走一遍是没必要的）
 }
-// Game = { id, group, white, black, event, site, date, result, plies,
-//          tags: string[], difficulty: 1|2|3,
+// Game = { id, group, tags: string[], difficulty: 1|2|3,
 //          story: {en,zh}, why: {en,zh},
-//          keyMoves: [{ ply, note: {en,zh} }],
-//          source: { a: url, b: url },
-//          pgn: '1. e4 …' }
+//          keyMoves: [{ ply, san, note: {en,zh} }],
+//          source: url,
+//          pgn: '[Event "…"]\n…\n\n1. e4 …' }   ← 整份 PGN 原文，含标签对
+//
+// 棋手 / 赛事 / 日期 / 结果 / 半步数都不是字段：它们在 PGN 里，用
+// headersOf(game) 取标签对、用 Replay.load(game.pgn) 取走法与半步数。
 ```
 
 ### 数据契约（Task 8–12 逐字遵守）
@@ -1235,40 +1242,30 @@ ChessGames = {
 | 字段 | 规则 |
 |---|---|
 | `id` | 小写连字符，`/^[a-z0-9-]+$/`；本计划已给出全部 30 个，**不得改名** |
-| `white` / `black` | 棋手姓名，**以取得的 PGN 为准**。`Kasparov–Polgar 2002`、`Deep Fritz–Kramnik 2006` 这类最容易记反先后手 |
-| `result` | `'1-0'` / `'0-1'` / `'1/2-1/2'`，**从第二个来源独立抄来**，不是从 PGN 尾巴上读的 |
-| `plies` | 半步总数，**从第二个来源独立数来**（多数来源写的是回合数：`N 回合、黑方最后落子` = `2N` 半步；`N 回合、白方最后落子` = `2N−1` 半步）。它与 `result` 是「合法但抄成了另一局」的唯一防线 |
+| `pgn` | **整份 PGN 原文，含标签对**——就是你取到的那个 `.pgn` 文件的内容，原样放进来。棋手、赛事、日期、结果、半步数全部从这里读，**不另抄成字段**。至少要有 `White` / `Black` / `Result` 三个标签对（多数来源给的 PGN 都是七标签齐全的） |
+| `source` | 一个 URL，写明这份记谱从哪儿来。**只为标注出处，不用来做版本核对** |
 | `tags` | 取自 `TAGS`；至少一个 |
 | `difficulty` | 1（零基础第一天能看懂）/ 2 / 3（需要一点棋感） |
 | `story` | 双语各 2–3 段（每段 2–4 句）。写**为什么这局重要、当时发生了什么**，不逐步讲解棋 |
 | `why` | 双语各**一句话**。它是列表页上唯一显示的那行字 |
-| `keyMoves` | 3–6 条，`ply` 严格递增且 ∈ `[1, plies]`。`note` 双语各 1–3 句，说明**这一步为什么是转折**。回放到这里会自动暂停 |
-| `keyMoves[].san` | 该 ply 那一步的 SAN，**由 `moveToSAN` 生成后抄进来**，不是手写的。它存在的唯一理由是：将来换一份更完整的 PGN 时，全部 `ply` 会整体平移，而平移后的 ply 多半仍落在 `[1, plies]` 里——校验门会照常通过，说明却已经指向了另一步棋。有了 `san`，换谱当场报错，报的还是「第几条 keyMove 对不上、期望什么、实际什么」 |
-| `source` | `{ a, b }` 两个不同站点的 URL。`a` 是走法的来源，`b` 是核对步数与结果的来源 |
-| `pgn` | 只含走法与结果的主线字符串（如 `'1. e4 e5 … 1-0'`）。**不写标签对**——`Event`/`Site`/`Date`/`White`/`Black`/`Result` 已经是记录的字段，导出时由 `writePGN` 现拼 |
+| `keyMoves` | 3–6 条，`ply` 严格递增且在这份 PGN 的半步数以内。`note` 双语各 1–3 句，说明**这一步为什么是转折**。回放到这里会自动暂停 |
+| `keyMoves[].san` | 该 ply 那一步的 SAN，**由 `moveToSAN` 生成后抄进来**，不是手写的。这是全套里唯一保留的一致性检查，理由见下一节末尾 |
 
-### 棋谱数据存在哪里，以后怎么换一份更好的
+### 棋谱数据存在哪里，以后怎么导入新的
 
-**存在哪里**：唯一编辑源是 `chess/games/games-<group>.js` 里那条记录的 `pgn` 字段（一串 SAN 主线，不带标签对）。运行时 `inline_core.py` 把七个 `games/*.js` 拼进 `chess/tools/chess-game-replay.html` 的 `/* >>> GENERATED:GAMES */` 区间——那是**副本，不是编辑源**，改它会被下一次内联覆盖，`check.py --check` 也会当场报出不一致。
+**存在哪里**：`chess/games/games-<group>.js` 里那条记录的 `pgn` 字段，内容就是一份 PGN 原文。运行时 `inline_core.py` 把七个 `games/*.js` 拼进 `chess/tools/chess-game-replay.html` 的 `/* >>> GENERATED:GAMES */` 区间——那是**副本，不是编辑源**，改它会被下一次内联覆盖，`check.py --check` 会当场报出不一致。
 
-**三种「导入」是三件不同的事，不要混**：
+**三种「导入」是三件不同的事**：
 
-| 我想…… | 怎么做 | 代价 |
-|---|---|---|
-| 现在就看一眼手上这份 PGN | 直接把 `.pgn` 拖进画布（Task 17） | 零。四个页签全部照常工作，但**不留存**——没有故事、没有 keyMoves，刷新即失 |
-| 把一局**新棋**加进内置清单 | 挑一个分组文件，照数据契约加一条记录；跑 `inline_core.py` + `check.py` | 五分钟。不用改 `games.js`、不用改工具、不用改注册表。**唯一要顺手改的是 `games.test.js` 里 `GAMES.length` 那个数字**——它是故意设成会拦你一下的：加棋谱是要过脑子的事，不该悄悄溜进去 |
-| 把某局**换成更完整/更权威的一份** | 见下 | 需要重新核 `plies` / `result` / 全部 `keyMoves` |
+| 我想…… | 怎么做 |
+|---|---|
+| 现在就看一眼手上这份 PGN | 把 `.pgn` 拖进画布（Task 17）。四个页签全部照常工作，但**不留存**——没有故事、没有 keyMoves，刷新即失 |
+| 把一局**新棋**加进内置清单 | 挑一个分组文件，加一条记录（PGN 原文 + 来源 URL + 故事 + keyMoves），跑 `inline_core.py` + `check.py`。不用改 `games.js`、工具或注册表；顺手把 `games.test.js` 里 `EXPECTED_GAME_COUNT` 加一 |
+| 把某局**换成另一份记谱** | 替换 `pgn`，然后**重算 `keyMoves` 的 ply**，跑 `check.py` |
 
-**换谱的完整流程**（这是最容易出事的一种，因为它看起来只是替换一个字符串）：
+第三种是唯一需要多想一步的：换一份补了开头几步、或多录了几步的记谱，会让后面每一条 keyMove 整体平移。`plies` 之类的字段已经不存在了（都从 PGN 现读），所以不会有元数据对不上的问题；**唯一会静默出错的是 keyMove 的说明指向了另一步棋**——ply 平移之后多半仍在合法区间内。
 
-1. 新 PGN 走一遍上面的取谱协议第 1–5 步（逐步重放 + 第二来源核对）。
-2. 替换 `pgn`，同时更新 `plies` 与 `result`。
-3. **重算全部 `keyMoves[].ply`**。换一份更完整的记谱——补上了开头几步、或接上了赛后演示的杀法——会让后面每一条 keyMove 整体平移。
-4. 跑 `node chess/games/games.test.js`。
-
-第 3 步是这条流程的全部风险所在，也正是 `keyMoves[].san` 存在的理由：平移之后的 ply **多半仍然落在 `[1, plies]` 区间里**，只查范围的校验门会全绿通过，而回放到那一步弹出的说明已经在讲另一步棋了。加上 `san` 锚点之后，换谱会当场报出「第几条 keyMove 期望 `Qg3+`、实际 `Rxd4`」，你按报错逐条修完就对了。
-
-> 这条与本仓库的一贯做法同源：`plies`/`result` 防的是「合法但抄成了另一局」，`san` 防的是「同一局但对齐错位」。两者都是「让机器去查人查不出来的那部分」。
+这就是 `keyMoves[].san` 保留下来的唯一理由：它让换谱当场报出「第 3 条 keyMove 期望 `Qg3+`、实际 `Rxd4`」，你照着报错逐条修完就对了。它锚的是**内部一致性**（我写的这段话还指着我写它时那一步棋吗），不是史实——一个字段、一行断言，而且那个字段是脚本打印出来抄的，不用动脑子。**觉得这一条也多余就砍掉它，代价是换谱时说明会悄悄错位。**
 
 ### 全部 30 个 id（分组即文件归属）
 
@@ -1313,6 +1310,9 @@ for (const g of G.GAMES) {
   T.ok(g.tags.every(x => G.TAGS.indexOf(x) >= 0), at + 'tag 都在词表里：' + g.tags.join(','));
   T.ok([1, 2, 3].indexOf(g.difficulty) >= 0, at + 'difficulty ∈ {1,2,3}');
 
+  // ---- 来源：只标注出处，不做版本核对（本工具不做记谱考古）----
+  T.ok(/^https?:\/\//.test(g.source), at + 'source 是一个 URL');
+
   // ---- 双语完整 ----
   for (const k of ['story', 'why']) {
     T.ok(g[k] && g[k].en && g[k].en.trim().length > 0, at + k + ' 有英文');
@@ -1323,34 +1323,35 @@ for (const g of G.GAMES) {
   T.ok(g.why.en.length <= 160, at + 'why 的英文不超过 160 字符（卡片放得下一行）');
   T.ok(g.why.zh.length <= 70, at + 'why 的中文不超过 70 字');
 
-  // ---- 规格 §7 门 2：逐步重放 + 步数与结果双校验 ----
+  /* ---- 唯一真正的门：这份 PGN 能不能逐步重放 ----
+     抄错的一步会当场走不通。这不是「核实史实」，是「这份数据能不能渲染」——
+     走不通的棋谱在工具里就是一块白屏。 */
   let parsed = null;
   try { parsed = C.parsePGN(g.pgn); }
   catch (e) { T.ok(false, at + 'PGN 逐步重放失败 —— ' + e.message); continue; }
-  T.eq(parsed.moves.length, g.plies, at + '半步数与公认记录一致');
-  T.eq(parsed.result, g.result, at + '结果与公认记录一致');
-  T.ok(RESULTS.indexOf(g.result) >= 0, at + 'result 是三种之一');
-  T.eq(parsed.skipped, 0, at + 'pgn 字段是干净主线，不含变着与注释');
+  T.ok(parsed.moves.length > 0, at + 'PGN 里有走法');
+  T.ok(RESULTS.indexOf(parsed.result) >= 0, at + '结果是三种之一（从 PGN 读，不另抄字段）');
 
-  // ---- 来源 ----
-  T.ok(/^https?:\/\//.test(g.source.a), at + '来源 a 是 URL');
-  T.ok(/^https?:\/\//.test(g.source.b), at + '来源 b 是 URL');
-  T.ok(new URL(g.source.a).host !== new URL(g.source.b).host,
-       at + '两个来源不是同一个站点 —— 同源双查等于没查');
+  // 标签对：列表卡片要靠它显示，缺了就是一张空卡
+  const H = G.headersOf(g);
+  for (const tag of ['White', 'Black', 'Result']) {
+    T.ok(H[tag] && H[tag].trim() && H[tag] !== '?', at + 'PGN 有 ' + tag + ' 标签对');
+  }
+  T.eq(H.Result, parsed.result, at + 'Result 标签对与走法末尾的结果一致');
 
   // ---- keyMoves ----
   T.ok(g.keyMoves.length >= 3 && g.keyMoves.length <= 6, at + 'keyMoves 有 3–6 条');
   let last = 0;
   for (const k of g.keyMoves) {
-    T.ok(Number.isInteger(k.ply) && k.ply >= 1 && k.ply <= g.plies,
-         at + 'keyMove 的 ply ' + k.ply + ' 落在 [1, ' + g.plies + ']');
+    T.ok(Number.isInteger(k.ply) && k.ply >= 1 && k.ply <= parsed.moves.length,
+         at + 'keyMove 的 ply ' + k.ply + ' 落在 [1, ' + parsed.moves.length + ']');
     T.ok(k.ply > last, at + 'keyMove 的 ply 严格递增');
     last = k.ply;
     T.ok(k.note && k.note.en && k.note.en.trim(), at + 'keyMove@' + k.ply + ' 有英文说明');
     T.ok(k.note && k.note.zh && k.note.zh.trim(), at + 'keyMove@' + k.ply + ' 有中文说明');
-    /* 锚在走法上，不只锚在序号上。换一份更完整的 PGN 时 ply 会整体平移，
-       而平移后的 ply 多半仍落在 [1, plies] 里 —— 只查范围的话，说明会
-       悄悄指向另一步棋而校验门全绿。这一条让它当场报错。 */
+    /* 锚在走法上，不只锚在序号上。换一份记谱时 ply 会整体平移，而平移后的
+       ply 多半仍在合法区间里 —— 只查范围的话，说明会悄悄指向另一步棋而
+       校验门全绿。这是全套里唯一保留的一致性检查。 */
     T.eq(C.moveToSAN(parsed.positions[k.ply - 1], parsed.moves[k.ply - 1]), k.san,
          at + 'keyMove@' + k.ply + ' 指向的仍然是它当初标注的那一步');
   }
@@ -1425,16 +1426,9 @@ Expected: FAIL —— `Cannot find module './games.js'`
     {
       id: 'fools-mate',
       group: 'teaching',
-      white: 'White', black: 'Black',
-      event: 'Constructed position', site: '—', date: '—',
-      result: '0-1',
-      plies: 4,
       tags: ['teaching', 'constructed'],
       difficulty: 1,
-      source: {
-        a: 'https://en.wikipedia.org/wiki/Fool%27s_mate',
-        b: 'https://www.chess.com/terms/fools-mate-chess',
-      },
+      source: 'https://en.wikipedia.org/wiki/Fool%27s_mate',
       story: {
         en: 'This is not a game anyone played. It is the shortest possible checkmate, four half-moves long, and it exists in this collection for one reason: it is the smallest object that shows what checkmate actually is.\n\nWhite opens two pawns in front of the king — f3 and g4 — and by the second of them the diagonal h4–e1 is a clear road. The black queen walks down it and the game is over. Nothing was captured. No piece was even threatened until the last move.\n\nThat is the point. Checkmate is not a special kind of capture, and the king is never taken off the board. It is a purely logical condition: the king is attacked, and every legal move still leaves it attacked. Here White has one attacked king and zero legal moves, and the game ends mid-development with almost every piece still at home.',
         zh: '这不是任何人下过的一局棋。它是可能存在的最短将死，只有四个半步，收进这套工具里只为一个理由：它是能说明「将死到底是什么」的最小对象。\n\n白方在自己王的门前推开两个兵——f3 与 g4——第二个兵一动，h4–e1 这条斜线就成了一条通途。黑后沿着它走下来，棋局就结束了。全程没有任何子被吃，直到最后一步之前也没有任何子被威胁。\n\n这正是重点。将死不是某种特殊的吃子，王自始至终没有被拿下棋盘。它是一个纯逻辑的条件：王正被攻击，而所有合法走法都无法让它脱离攻击。这里白方有一个被攻击的王和零个合法走法，棋局在几乎全部棋子还没出动的时候就结束了。',
@@ -1454,21 +1448,26 @@ Expected: FAIL —— `Cannot find module './games.js'`
           en: 'Qh4#. Count White\'s legal moves: zero. Count the attackers on the king: one, and nothing can capture it, block it, or run. That triple is the whole definition.',
           zh: 'Qh4#。数一数白方的合法走法：零。数一数攻击王的子：一个，而白方吃不掉它、挡不住它、也躲不开。这三件事同时成立，就是将死的全部定义。' } },
       ],
-      pgn: '1. f3 e5 2. g4 Qh4# 0-1',
+      /* 构造局面同样走 PGN 原文这条路 —— 让「一局棋 = 一份 PGN」在数据里
+         没有例外，工具就不必为教学局另开一条分支。 */
+      pgn: [
+        '[Event "Constructed position"]',
+        '[Site "—"]',
+        '[Date "????.??.??"]',
+        '[Round "-"]',
+        '[White "White"]',
+        '[Black "Black"]',
+        '[Result "0-1"]',
+        '',
+        '1. f3 e5 2. g4 Qh4# 0-1',
+      ].join('\n'),
     },
     {
       id: 'scholars-mate',
       group: 'teaching',
-      white: 'White', black: 'Black',
-      event: 'Constructed position', site: '—', date: '—',
-      result: '1-0',
-      plies: 7,
       tags: ['teaching', 'constructed', 'trap'],
       difficulty: 1,
-      source: {
-        a: 'https://en.wikipedia.org/wiki/Scholar%27s_mate',
-        b: 'https://www.chess.com/terms/scholars-mate-chess',
-      },
+      source: 'https://en.wikipedia.org/wiki/Scholar%27s_mate',
       story: {
         en: 'The four-move mate is the first complete game most beginners see, and the first trap most beginners lose to. White aims two pieces — the bishop on c4 and the queen on h5 — at a single square, f7, and Black does not notice that the square is defended only by the king.\n\nf7 (and f2 for White) is the weakest square in the starting position, and the reason is structural rather than tactical: it is the only square in each camp that no piece defends. Every other pawn has a knight, a rook or a queen behind it. That one hole is enough for two attackers to be one more than the defence.\n\nIt is worth learning from both sides. As the attacker it works exactly once against any given opponent. As the defender the answer is unglamorous and permanent: develop a piece that covers f7, and the whole idea evaporates.',
         zh: '四步杀是多数初学者看到的第一局完整的棋，也是多数初学者第一次栽的跟头。白方把两个子——c4 的象与 h5 的后——同时对准一个格子 f7，而黑方没有注意到那一格只有王在守。\n\nf7（对白方来说是 f2）是初始局面里最弱的一格，原因是结构性的而非战术性的：它是各自阵营里唯一没有任何棋子保护的格。其余每个兵背后都站着马、车或后。就这一个洞，足以让两个攻击者比防守方多出一个。\n\n这局棋值得从两边各学一遍。当攻方，它对同一个对手只灵一次；当守方，答案朴素但一劳永逸：出一个能罩住 f7 的子，整个构想立刻蒸发。',
@@ -1491,13 +1490,23 @@ Expected: FAIL —— `Cannot find module './games.js'`
           en: 'Qxf7#. The queen is protected by the bishop on c4, so the king cannot take it — and no other piece can reach f7.',
           zh: 'Qxf7#。这个后有 c4 的象保护，所以黑王吃不掉它——而黑方再没有别的子够得到 f7。' } },
       ],
-      pgn: '1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6 4. Qxf7# 1-0',
+      pgn: [
+        '[Event "Constructed position"]',
+        '[Site "—"]',
+        '[Date "????.??.??"]',
+        '[Round "-"]',
+        '[White "White"]',
+        '[Black "Black"]',
+        '[Result "1-0"]',
+        '',
+        '1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6 4. Qxf7# 1-0',
+      ].join('\n'),
     },
   ];
 });
 ```
 
-> 这两局的 `plies`（4 / 7）与 `result` 已在本机用 `parsePGN` 逐步重放核对过，末局面 `status()` 都是 `checkmate`。
+> 这两局的走法已在本机用 `parsePGN` 逐步重放过：4 / 7 个半步，末局面 `status()` 都是 `checkmate`，`keyMoves[].san` 是 `moveToSAN` 打印出来抄的。
 
 - [ ] **Step 5: 写汇总器 `games.js`**
 
@@ -1569,8 +1578,23 @@ Expected: FAIL —— `Cannot find module './games.js'`
   const byId = {};
   for (let i = 0; i < GAMES.length; i++) byId[GAMES[i].id] = GAMES[i];
 
+  /* 标签对：只正则扫，不重放走法。列表页要给 30 局各画一张卡，为了显示
+     两个名字去把三十局棋全走一遍是没必要的（真要走法时用 Replay.load）。
+     结果缓存在记录上——同一局的卡片会被重绘很多次。 */
+  const TAG_RE = /\[\s*(\w+)\s*"((?:[^"\\]|\\.)*)"\s*\]/g;
+  function headersOf(game) {
+    if (game.__headers) return game.__headers;
+    const h = {};
+    let m;
+    TAG_RE.lastIndex = 0;
+    while ((m = TAG_RE.exec(game.pgn))) h[m[1]] = m[2].replace(/\\(.)/g, '$1');
+    game.__headers = h;
+    return h;
+  }
+
   return { GAMES: GAMES, byId: byId, GROUPS: GROUPS, GROUP_ORDER: GROUP_ORDER,
-           GROUP_LABEL: GROUP_LABEL, LEARNING_ROUTE: LEARNING_ROUTE, TAGS: TAGS };
+           GROUP_LABEL: GROUP_LABEL, LEARNING_ROUTE: LEARNING_ROUTE, TAGS: TAGS,
+           headersOf: headersOf };
 });
 ```
 
@@ -1599,11 +1623,13 @@ git commit -m "feat(chess): 棋谱数据契约、六分组骨架、汇总器与�
 - Consumes: Task 7 的数据契约与 `games-teaching.js` 的样板
 - Produces: 该文件导出的数组由 N 局构成，`node chess/games/games.test.js` 中属于本组的断言全部通过
 
-### 取谱协议（每一局都要走完，一步不能省）
+### 取谱协议
 
-1. **取走法（来源 a）**。可用的公开来源举例：`en.wikipedia.org` 的对局条目（正文里给出完整走法表的那些）、`www.chessgames.com`、`lichess.org` 的公开 study、`www.chess.com` 的名局文章。取到的是 SAN 主线。
-2. **落地成候选 `pgn` 字符串**，去掉全部标签对、注释、变着与 NAG，只留 `1. e4 e5 … 结果`。
-3. **逐步重放**：
+**这不是考据。** 取一份能重放的 PGN、记下它从哪儿来、按它写故事，就够了。同一局棋在不同来源可能有长短不一的记谱，**不去判定哪一版是「真的」**——本工具是用来看懂一局棋怎么下的。
+
+1. **取一份 PGN**。可用的公开来源举例：`en.wikipedia.org` 的对局条目、`www.chessgames.com`、`lichess.org` 的公开 study、`www.chess.com` 的名局文章。优先取**带标签对的完整 PGN**；只拿到走法表时，自己按七标签补齐 `Event` / `Site` / `Date` / `Round` / `White` / `Black` / `Result`（不知道的写 `?`），棋手先后手**照来源写的填**。
+2. **去掉注释、变着与 NAG**，只留标签对 + 主线走法 + 结果。
+3. **逐步重放**——这是唯一的硬门，因为走不通的棋谱在工具里就是一块白屏：
 
 ```bash
 node -e "
@@ -1618,10 +1644,8 @@ console.log('last 6 SAN:', g.moves.slice(-6).map((m,i)=>C.moveToSAN(g.positions[
 ```
 任何抄错的一步会当场抛 `PGN move N ("Nf3") is illegal` —— **报错就回去重取，不要「猜一步能走通的」**。
 
-4. **独立核对步数与结果（来源 b，必须是与 a 不同的站点）**。这一步挡的是「合法但抄成了另一局」，也是 §7.2 唯一能挡它的手段。把两个 URL 写进 `source`。
-   - 多数来源写的是回合数：`N 回合、黑方最后落子` = `2N` 半步；`N 回合、白方最后落子`（含以将死结束的局）= `2N−1` 半步。
-   - **两个来源对不上就停下报告**，不要选一个信。
-5. **末局面自检**：以将死结束的局，`status()` 必须是 `'checkmate'`；认输结束的局通常是 `'ongoing'` 或 `'check'`——这不是错误，但如果一局标称「将死」而 `status()` 不是 `checkmate`，说明抄少了或抄多了。
+4. **把来源 URL 写进 `source`**，一个就够。
+5. **末局面粗看一眼**：以将死结束的局，`status()` 应该是 `'checkmate'`；认输或和棋结束的局通常是 `'ongoing'` 或 `'check'`，都正常。**如果你打算在故事里写「XX 将死了 YY」，那就顺手确认一下 `status()` 真的是 `checkmate`**——只核实你要写进文案的那部分，别的不用管。
 6. **写文案**（见下）。
 7. **`keyMoves` 的 ply 换算与 `san` 锚点**：白方第 N 回合的走法是第 `2N−1` 个半步，黑方第 N 回合是第 `2N`。`23...Qg3` 这样的记法是**黑方**第 23 回合 → ply = 46。换算完跑一次，把打印出来的 SAN **原样抄进 `san` 字段**（不要手写——手写的 `Qg3` 与 `moveToSAN` 生成的 `Qg3+` 差一个字符，校验门会当场拒绝，那正是它该做的）：
 
@@ -1641,7 +1665,7 @@ for(const p of plies) console.log(p, '→', C.moveToSAN(g.positions[p-1], g.move
 - **`why`**：双语各一句话，是列表页上唯一显示的那行字。
 - **`keyMoves`**：3–6 条。每条说明**这一步为什么是转折**，而不是复述走法。回放到这里会自动暂停——所以它要值得被打断一次。
 - **中文界面下战术术语并列英文**（规格 §3.2）：`弃后 queen sacrifice`、`别子 pin`、`双叉 fork`、`闷杀 smothered mate`。
-- **不许写没有核实过的事**。§6.2 的「故事要点」是**任务简报，不是史料来源**：里面每一条具体断言（年份、届次、比分、名次、谁说了什么）都要在你取谱时顺手核实；核实不了的，改写成你能核实的说法，或者去掉。**发现简报本身写错了，停下来报告。**
+- **别把没把握的事写成断言**。§6.2 的「故事要点」是任务简报，不是史料来源。具体的数字与名次（比分、届次、多少人参与投票）顺手扫一眼来源；扫不到的就换个说法或去掉，流传的说法写成「据说」。这不是要你去考据，是别让一句可有可无的细节把整段话变成假话。**发现简报本身写错了，停下来报告。**
 
 ### Task 8: `games-machine.js` — 人机对抗（5 局）
 
@@ -1653,8 +1677,7 @@ for(const p of plies) console.log(p, '→', C.moveToSAN(g.positions[p-1], g.move
 | `alphazero-stockfish-2017-g10` | AlphaZero – Stockfish, 第 10 局 | 2017 | 自学 4 小时的神经网络对手工评估函数；长期弃子换压制 |
 | `hydra-adams-2005` | Hydra – Adams | 2005 | Deep Blue 十年后，人类顶尖棋手 5.5–0.5 落败 |
 
-> **本组两处最容易记反先后手**：`deep-blue-kasparov-1997-g2` 与 `hydra-adams-2005`。以取得的 PGN 为准，不以本表的排列为准。
-> **AlphaZero–Stockfish 的「第 10 局」**：2017 年那批公开对局的编号在不同来源里并不统一。取谱时以来源 a 标注的编号为准，并在 `story` 里写清楚你取的是哪一批（DeepMind 2017 年 12 月预印本公开的 10 局，还是 2018 年论文附带的那批）。**编号对不上就停下报告，不要凑一局上去。**
+> 先后手照 PGN 的标签对填，不照本表的排列填（本表只是任务简报）。AlphaZero–Stockfish 那批公开对局的编号在不同来源里不统一——取一局能重放的，在 `story` 里说明你取的是哪一批就行，不必去判定哪个编号是权威的。
 
 ### Task 9: `games-romantic.js` — 浪漫时代（6 局）
 
@@ -1667,14 +1690,22 @@ for(const p of plies) console.log(p, '→', C.moveToSAN(g.positions[p-1], g.move
 | `legal-saint-brie-1750` | Légal – Saint Brie「勒加尔杀法」 | 1750 | 现存最早的名局之一，最经典的弃后陷阱 |
 | `levitsky-marshall-1912` | Levitsky – Marshall | 1912 | 23...Qg3!!；「观众往棋盘上撒金币」的传说 —— **写故事时必须写明这是流传的说法而非确证** |
 
-**`morphy-opera-1858` 的走法已核实，直接用**（`plies: 33`，`result: '1-0'`，末局面 `checkmate`）：
+**`morphy-opera-1858` 的走法已在本机重放核实，直接用**（33 个半步，1-0，末局面 `checkmate`）——把它按七标签补成完整 PGN：
 
 ```
+[Event "Casual game"]
+[Site "Paris FRA"]
+[Date "1858.??.??"]
+[Round "-"]
+[White "Paul Morphy"]
+[Black "Duke Karl / Count Isouard"]
+[Result "1-0"]
+
 1. e4 e5 2. Nf3 d6 3. d4 Bg4 4. dxe5 Bxf3 5. Qxf3 dxe5 6. Bc4 Nf6 7. Qb3 Qe7
 8. Nc3 c6 9. Bg5 b5 10. Nxb5 cxb5 11. Bxb5+ Nbd7 12. O-O-O Rd8 13. Rxd7 Rxd7
 14. Rd1 Qe6 15. Bxd7+ Nxd7 16. Qb8+ Nxb8 17. Rd8# 1-0
 ```
-它的 `source.a` 用 `https://en.wikipedia.org/wiki/Opera_Game`，`source.b` 另找一个站点核对 17 回合 / 1-0。其余五局照协议自行取谱。
+`source` 用 `https://en.wikipedia.org/wiki/Opera_Game`。其余五局照协议自行取谱。
 
 ### Task 10: `games-coldwar.js` — 冷战与世界冠军战（7 局）
 
@@ -1685,7 +1716,7 @@ for(const p of plies) console.log(p, '→', C.moveToSAN(g.positions[p-1], g.move
 | `fischer-spassky-1972-g6` | Fischer – Spassky, 第 6 局 | 1972 | Spassky 起立为对手鼓掌 |
 | `tal-botvinnik-1960-g6` | Tal – Botvinnik, 第 6 局 | 1960 | 「魔术师」塔尔的弃子无法用穷举证明，只能用直觉——工具④ 的反面教材 |
 | `karpov-kasparov-1985-g16` | Karpov – Kasparov, 第 16 局 | 1985 | d3 上的「章鱼骑士」；22 岁的卡斯帕罗夫夺冠 |
-| `karpov-kasparov-1985-g48` | Karpov – Kasparov, 第 48 局 | 1985 | 比赛在 5–3 时被 FIDE 主席无理由中止，史上唯一一次 —— **注意这是 1984–85 那场（第一次交锋、48 局后中止），与上一行的 1985 年第二次交锋不是同一场比赛，`event` 字段必须分清** |
+| `karpov-kasparov-1985-g48` | Karpov – Kasparov, 第 48 局 | 1985 | 比赛在 5–3 时被 FIDE 主席无理由中止 —— **这是 1984–85 那场（第一次交锋、48 局后中止），与上一行的第二次交锋不是同一场比赛；写故事时别把两场混着说** |
 | `carlsen-nepomniachtchi-2021-g6` | Carlsen – Nepomniachtchi, 第 6 局 | 2021 | 136 回合、近 8 小时，世界冠军赛史上最长一局 |
 
 > `carlsen-nepomniachtchi-2021-g6` 是本工具里最长的一局（约 272 个半步）。它同时是 `Replay.zStep()` 自适应跨度的真实压力测试——加进去之后，务必在浏览器里切到 `trace` 页看它，别只看短棋局。
@@ -1698,9 +1729,9 @@ for(const p of plies) console.log(p, '→', C.moveToSAN(g.positions[p-1], g.move
 | `botvinnik-capablanca-1938` | Botvinnik – Capablanca | 1938 | 30.Ba3!! 被引用最多的弃象之一 |
 | `steinitz-bardeleben-1895` | Steinitz – von Bardeleben | 1895 | 白方连续多步将军的强制杀；黑方直接离场，从未认输 |
 | `kasparov-topalov-1999` | Kasparov – Topalov | 1999 | 「卡氏不朽」：24.Rxd4 弃车，白王一路走进对方阵地 |
-| `capablanca-marshall-1918` | Capablanca – Marshall | 1918 | Marshall 新变例首演，卡帕布兰卡当场从零算翻 —— **「憋了八年」是流传的说法，核实不了就不要写成事实** |
+| `capablanca-marshall-1918` | Capablanca – Marshall | 1918 | Marshall 新变例首演，卡帕布兰卡当场从零算翻。「憋了八年」是流传的说法，写成「据说」即可 |
 
-> `steinitz-bardeleben-1895` 的记谱在不同来源里长度不一：有的到黑方离场为止（白方最后一步之后），有的把 Steinitz 事后演示的强制杀法接在后面。**这两种不是同一局，`plies` 会差好几步。** 取「实际下到的那一步为止」的版本，并在 `story` 里说明后面那段强制杀是赛后演示的。
+> `steinitz-bardeleben-1895` 的记谱在不同来源里长度不一：有的到黑方离场为止，有的把 Steinitz 事后演示的强制杀法接在后面。两种都可以用——**挑一份，然后让故事和 keyMoves 与你挑的那份一致**。若用了含演示杀法的版本，在 `story` 里说一句后半段是赛后演示的。
 
 ### Task 12: `games-human.js` — 争议与人性（5 局）
 
@@ -1708,9 +1739,9 @@ for(const p of plies) console.log(p, '→', C.moveToSAN(g.positions[p-1], g.move
 |---|---|---|---|
 | `kasparov-polgar-2002` | Kasparov – Polgar | 2002 | Judit Polgar 击败在位世界第一 |
 | `deep-fritz-kramnik-2006-g2` | Deep Fritz – Kramnik, 第 2 局 | 2006 | 34...Qe3?? 直接送一步杀，史上最著名的漏着 |
-| `carlsen-niemann-2022` | Carlsen – Niemann, Sinquefield Cup | 2022 | 作弊风波与次日退赛。棋不精彩，它是这项运动信任危机的标本 —— **只陈述可核实的公开事实（哪一天、谁做了什么、官方后来说了什么），不复述任何未经证实的指控** |
-| `kasparov-world-1999` | Kasparov vs The World | 1999 | 一人对数万名网民投票；互联网时代的集体决策实验 —— **注意：维基百科条目只有夹在正文里的片段走法，必须另找完整棋谱** |
-| `menchik-euwe-1930` | Menchik – Euwe, Hastings | 1930/31 | Vera Menchik 击败未来世界冠军；「门契克俱乐部」 —— **`date` 字段写实际对局日期，Hastings 跨年赛横跨 1930 与 1931 两年** |
+| `carlsen-niemann-2022` | Carlsen – Niemann, Sinquefield Cup | 2022 | 作弊风波与次日退赛。棋不精彩，它是这项运动信任危机的标本 —— **只写公开事实（哪一天、谁做了什么、官方后来说了什么），不复述未经证实的指控**。这一条不是考据洁癖，是不给一个在世的人扣帽子 |
+| `kasparov-world-1999` | Kasparov vs The World | 1999 | 一人对数万名网民投票；互联网时代的集体决策实验 —— 维基百科条目只有夹在正文里的片段走法，得另找完整棋谱 |
+| `menchik-euwe-1930` | Menchik – Euwe, Hastings | 1930/31 | Vera Menchik 击败未来世界冠军；「门契克俱乐部」。Hastings 跨年赛横跨两年，PGN 的 `Date` 照来源填 |
 
 ### 每个 Task 的步骤（8–12 各自照做）
 
@@ -1723,22 +1754,23 @@ node chess/games/games.test.js 2>&1 | grep -E "^FAIL|passed"
 ```
 Expected: 属于本组 id 的断言全部通过（其余组尚未填的会因为 `一共 30 局` 等数量断言而失败，那不是你的问题）。
 
-- [ ] **Step 4: 逐局眼看一遍最后 6 步**
+- [ ] **Step 4: 逐局眼看一遍**
 
 ```bash
 node -e "
 const C=require('./chess/core/chess-core.js');
+const G=require('./chess/games/games.js');
 const list=require('./chess/games/games-<group>.js');
 for(const g of list){
-  const p=C.parsePGN(g.pgn);
-  const n=p.moves.length;
+  const p=C.parsePGN(g.pgn), h=G.headersOf(g), n=p.moves.length;
   const tail=p.moves.slice(-6).map((m,i)=>C.moveToSAN(p.positions[n-6+i],m)).join(' ');
-  console.log(g.id.padEnd(32), String(n).padStart(3)+' plies', g.result.padEnd(8),
+  console.log(g.id.padEnd(32), (h.White+'–'+h.Black).padEnd(28),
+              String(n).padStart(3)+' plies', p.result.padEnd(8),
               p.positions[n].status().padEnd(10), tail);
 }
 "
 ```
-一局一局对着来源 b 看：步数、结果、末局面状态、最后几步的记谱。**这一步是给人看的，不是给机器看的**——机器已经在 Step 3 看过了，它看不出「这是另一局棋」。
+扫一眼：先后手的名字对不对、结果与你写的故事一致不一致、末局面状态与故事里的说法对不对。**这一步是给人看的**——机器只能保证这些走法合法，看不出你把故事写在了另一局棋上。
 
 - [ ] **Step 5: 提交**
 
@@ -1984,8 +2016,7 @@ cp chess/tools/_skeleton.html chess/tools/chess-game-replay.html
   presetsLabel: { en: 'Game', zh: '棋局' },
   presets: GM.LEARNING_ROUTE.map(function (id) {
     return { key: id,
-             label: { en: GM.byId[id].white + '–' + GM.byId[id].black,
-                      zh: GM.byId[id].white + '–' + GM.byId[id].black },
+             label: (function (h) { var s = h.White + '–' + h.Black; return { en: s, zh: s }; })(GM.headersOf(GM.byId[id])),
              onSelect: function () { loadGame(id); } };
   }),
 ```
@@ -2003,7 +2034,6 @@ for(const id of G.LEARNING_ROUTE){
   const g=G.byId[id];
   const rs=R.load({pgn:g.pgn,keyMoves:g.keyMoves});
   const zSpan=rs.zStep*rs.maxPly;
-  if(rs.maxPly!==g.plies){console.error(id+' maxPly 与 plies 不符');bad++;}
   if(zSpan>R.Z_SPAN_MAX+1e-9){console.error(id+' 的 z 跨度 '+zSpan+' 超过上限');bad++;}
   console.log(id.padEnd(32), String(rs.maxPly).padStart(3)+' plies',
               'zStep='+rs.zStep.toFixed(4), 'zSpan='+zSpan.toFixed(2),
@@ -2304,7 +2334,7 @@ git commit -m "feat(chess): heat 页 —— 累计落子热力，冷格不填色
 - [ ] **Step 1: PGN 文件拖入**
 
 - 在 canvas 上监听 `dragover` / `drop`（`preventDefault`），`FileReader.readAsText`，交给 `CC.parsePGN`。
-- 成功 → `RP.load({ pgn: text })`，`rs.meta` 置为一个最小记录（从 PGN 的标签对里取 `White`/`Black`/`Event`/`Date`，没有 `story`/`keyMoves`）。步表、曲线、轨迹、热力全部照常工作。
+- 成功 → `RP.load({ pgn: text })`，`rs.meta = null`（拖进来的棋没有故事与 keyMoves）。**显示用的棋手与赛事直接读 `rs.headers`**——`parsePGN` 已经把标签对给出来了，与内置的 30 局走的是同一条路，不需要为拖入另造一份元数据。步表、曲线、轨迹、热力全部照常工作。
 - **失败要说清楚是哪一步坏了**：`parsePGN` 抛的错本来就带着 `PGN move 23 ("Nf3") is illegal: …`，原样显示在 tips 区，不要吞成「文件无效」。
 - `parsed.skipped > 0` 时显示提示（规格 §9：遇到变着时跳过并提示，而不是报错退出）：
 
@@ -2325,7 +2355,7 @@ git commit -m "feat(chess): heat 页 —— 累计落子热力，冷格不填色
 - [ ] **Step 3: PGN 导出**
 
 - 传输条上一个 `⬇ PGN` 按钮：`CC.writePGN(headers, rs.moves)` → `Blob` → `<a download>`。
-- `headers` 从 `rs.meta` 拼：`Event` / `Site` / `Date` / `Round`（没有就 `'?'`）/ `White` / `Black` / `Result`。
+- `headers` 直接用 `rs.headers`（`parsePGN` 解析出来的那一份，内置棋谱与拖入棋谱同源）。`writePGN` 自己会把缺的七标签补成 `'?'`。
 - 文件名：`<id>.pgn`，拖入来的用原文件名，FEN 来的用 `position.pgn`。
 - **导出的档案要能被 lichess 打开**（规格 §1.3）。
 
@@ -2340,12 +2370,12 @@ const G=require('./chess/games/games.js');
 let bad=0;
 for(const g of G.GAMES){
   const p1=C.parsePGN(g.pgn);
-  const out=C.writePGN({Event:g.event,Site:g.site,Date:g.date,White:g.white,Black:g.black,Result:g.result}, p1.moves);
+  const out=C.writePGN(p1.headers, p1.moves);       // 标签对原样带出去
   const p2=C.parsePGN(out);
   if(p2.moves.length!==p1.moves.length){console.error(g.id+' 往返后半步数变了');bad++;continue;}
   for(let i=0;i<p1.moves.length;i++) if(!C.sameMove(p1.moves[i],p2.moves[i])){
     console.error(g.id+' 往返后第 '+(i+1)+' 个半步不同');bad++;break;}
-  if(p2.result!==g.result){console.error(g.id+' 往返后结果变了');bad++;}
+  if(p2.result!==p1.result){console.error(g.id+' 往返后结果变了');bad++;}
 }
 console.log(bad?('✗ '+bad+' 局往返不一致'):'✓ 30 局 PGN 往返逐步一致');
 process.exit(bad?1:0);
@@ -2387,7 +2417,7 @@ git commit -m "feat(chess): PGN 拖入 / FEN 粘贴 / PGN 导出 —— 存档�
 
 - 面板上一个 `⊞ All 30 games / 全部 30 局` 按钮打开浮层。
 - 浮层内容：先是「学习路线」一节（11 张卡片，按 `LEARNING_ROUTE` 顺序，标 1–11），然后按 `GROUP_ORDER` 分六节，每节标题用 `GROUP_LABEL`。
-- 每张卡片：`white – black`、`event, date`、`why`（一句话）、`difficulty` 的三点指示、`tags`。
+- 每张卡片：`White – Black`、`Event, Date`（三者都从 `GM.headersOf(game)` 取，不是记录上的字段）、`why`（一句话）、`difficulty` 的三点指示、`tags`。
 - 点卡片 → `loadGame(id)`、关浮层、并把 `presets` 的高亮同步掉（不在路线里的局面则清掉 preset 高亮，不要让按钮组停在一个已经不成立的选中态）。
 - 浮层里给一个搜索框（按棋手名、赛事、tag 过滤，纯前端 `indexOf`）。
 
@@ -2475,7 +2505,7 @@ git commit -m "feat(chess): 棋局浏览器、工具③ 注册与导航页入口
 - [ ] `python3 chess/scripts/check.py` exit 0（内联一致性 + `node --check` + `core/*.test.js` + `games/*.test.js`）
 - [ ] `python3 scripts/sync_registry.py --check` exit 0（主站注册表未被打破）
 - [ ] `node chess/core/replay.test.js` 通过
-- [ ] `node chess/games/games.test.js` 通过 —— **30 局全部逐步重放成功，且步数与结果与第二来源一致**
+- [ ] `node chess/games/games.test.js` 通过 —— **30 局全部逐步重放成功，标签对齐全，keyMoves 都指向它们标注的那一步**
 - [ ] 30 局 PGN 往返（`parsePGN → writePGN → parsePGN`）逐步一致
 - [ ] F4 录制骨架已从引擎与全部内联副本中删净；`VizEngine.state.dt` 是帧时钟的唯一出处
 - [ ] 工具①② 仍然正常（预置局面巡回、播放/暂停），版本已按 §10 升到 1.0.1 / `chess-1.1.0`
@@ -2483,6 +2513,6 @@ git commit -m "feat(chess): 棋局浏览器、工具③ 注册与导航页入口
 - [ ] 三个规模的棋局绘制耗时均 ≤4ms（分项探针，强制光栅化每帧一次，探针开销单列排除）
 - [ ] 默认语言是 EN，切换与 `?lang=` 均生效
 - [ ] `chess/index.html` 在 `http://` 与 `file://` 下都能列出三个工具
-- [ ] 30 局的 `story` / `why` / `keyMoves` 双语齐全，每一局都有两个**不同站点**的来源 URL
+- [ ] 30 局的 `story` / `why` / `keyMoves` 双语齐全，每一局都记了来源 URL
 
 **下一阶段**：阶段 3（`interp.js` + `interp.test.js` + `debugger.js` + `editor.js`——算法线的地基，本身不产出可见工具，是全项目风险最集中的一段）。
