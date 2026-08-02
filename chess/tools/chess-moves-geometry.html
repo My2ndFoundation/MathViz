@@ -177,7 +177,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   <div class="panel-body">
     <div id="paramsHost"></div>
     <div class="row">
-      <button class="btn wide" id="btnPlay">⏸ Pause</button>
+      <button class="btn wide" id="btnPlay">▶ Resume</button>
       <button class="btn" id="btnReset">↺ Reset</button>
     </div>
     <div id="recHost"></div>
@@ -279,8 +279,16 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   let REDUCED = false;
 
   /* state.t 保留给录制骨架当「引擎时钟」用；state 里的连续相位（θ 积分）已删除——
-     棋没有连续时间驱动，参见 task-12 brief 的删除表。 */
-  const state = { running: true, t: 0 };
+     棋没有连续时间驱动，参见 task-12 brief 的删除表。
+     running 默认 false（暂停），不是继承自 math-viz 引擎的 true——那边的工具
+     天生是一段持续运行的连续模拟，「打开就在动」是常态；棋类工具没有连续模拟，
+     running 目前唯一的效果是喂给（本来就哑的）simAdvance 和播放按钮的文案，
+     真正的「自动巡回演示」是每个工具自己的 demoRunning/demoPlaying 在管。
+     默认给 true 会让按钮在打开页面的瞬间就显示「暂停」，暗示着有什么正在跑，
+     这正是用户在两个棋类工具上报的体验问题的根——用户到达页面时演示已经在切换，
+     第一件事却要去找暂停键。默认 false 让「打开 = 静止，播放是你主动要的」
+     对每一个未来要接这份引擎的棋类工具都成立，不必每个工具各自记得覆盖它。 */
+  const state = { running: false, t: 0 };
   let curTab = null;
   const RELABEL = [];        // 语言切换时需要重新取文案的回调列表
   const cams = {};           // tabId -> 该页签「首视角」对应的相机参数（启动 / 双击回正用）
@@ -2957,9 +2965,15 @@ const K_MOBILITY = 0.1;
 
 /* ---- 自动演示：依次巡回六种棋子，~2.5s 一档；用户一点棋盘就暂停，
    停在他点的那一步（不跳回巡回位置）。按 dt 累加，不按帧计数——开发机
-   30Hz，按帧计数会让巡回速度慢一半。 ---- */
+   30Hz，按帧计数会让巡回速度慢一半。
+   demoRunning 默认 false——打开页面先停在默认棋子上，演示是用户点了播放
+   才开始的动作，不是打开页面就替他决定的动作。播放键的点击监听器（下面，
+   E.init() 之后接线）与引擎自己的 togglePlay() 监听器绑在同一个按钮上，
+   每次点击两个监听器都会各翻一次自己的旗标——两者只要「出发时同步」就会
+   一直保持同步（engine 的 state.running 现在也默认 false，见
+   viz-engine.js 里对应的注释），所以这里改默认值不需要跟着改点击逻辑。 ---- */
 let btnPlayEl = null;
-let demoRunning = true, demoAcc = 0, lastDemoTs = null;
+let demoRunning = false, demoAcc = 0, lastDemoTs = null;
 /* setPieceIdx() 复用真实的预置按钮点击路径（applyPreset()），不是直接
    改 E.state.pieceIdx 再自己想办法同步按钮高亮——这样自动演示与用户
    手动点棋种按钮永远是同一条代码路径，不会漂移（与 chess-rules-check-mate.html
