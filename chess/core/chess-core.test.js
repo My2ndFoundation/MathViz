@@ -483,4 +483,208 @@ const divideSum = Object.values(C.perftDivide(C.Position.fromFEN(START), 2))
   .reduce((a, b) => a + b, 0);
 T.eq(divideSum, C.perft(C.Position.fromFEN(START), 2), 'perftDivide 各分支之和应等于 perft(depth 2)');
 
+// ---- SAN ----
+function san(fen, from, to, promo) {
+  const p = C.Position.fromFEN(fen);
+  const f = C.fromAlg(from), t = C.fromAlg(to);
+  const m = p.legalMoves().find(x => x.from === f && x.to === t && (promo ? x.promo === promo : !x.promo));
+  return C.moveToSAN(p, m);
+}
+
+T.eq(san(START, 'e2', 'e4'), 'e4', '兵推进只写落点');
+T.eq(san(START, 'g1', 'f3'), 'Nf3', '子力走动写棋子字母 + 落点');
+T.eq(san('8/8/8/3r4/8/8/3R4/K6k w - - 0 1', 'd2', 'd5'), 'Rxd5', '吃子用 x');
+// 原始简报此处的 FEN 没有黑王（'8/8/8/8/8/8/4p3/3P3K'），
+// 会被已合并的 FEN 校验拒绝（黑方必须恰好一个王）。
+// 已在 h8（与 e 列/第一横行的战术无关）补上黑王，语义不变。
+T.eq(san('7k/8/8/8/8/8/4p3/3P3K b - - 0 1', 'e2', 'e1', C.Q), 'e1=Q+', '升变写 =Q，并带将军号');
+T.eq(san('r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1', 'e1', 'g1'), 'O-O', '短易位');
+T.eq(san('r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1', 'e1', 'c1'), 'O-O-O', '长易位');
+T.eq(san('4k3/8/8/8/8/8/8/4R2K w - - 0 1', 'e1', 'e7'), 'Re7+', '将军加 +');
+T.eq(san('4k3/8/4Q3/8/8/8/8/4K3 w - - 0 1', 'e6', 'e7'), 'Qe7+', '后将军');
+// 后落 g7 与黑王贴身，且被 g6 的白王保护 —— 这才是真将死。
+// （若白王不在 g6，黑王可以 Kxg7，就只是将军而非将死。）
+T.eq(san('7k/Q7/6K1/8/8/8/8/8 w - - 0 1', 'a7', 'g7'), 'Qg7#', '将死加 #');
+
+// 兵吃子写起始直列
+T.eq(san('8/8/8/3p4/4P3/8/8/K6k w - - 0 1', 'e4', 'd5'), 'exd5', '兵吃子写 e 列 + x');
+
+// 消歧：两颗同种子都能到同一格
+// 以下几处原始简报的 FEN（'8/8/8/8/8/8/8/R6R'、'R7/8/8/8/8/8/8/R7'、
+// 'Q6Q/8/8/8/8/8/8/Q6Q'）都没有王，会被已合并的 FEN 校验拒绝
+// （双方必须各恰好一个王）。已在不影响消歧几何的角落补上双王。
+T.eq(san('3K1k2/8/8/8/8/8/8/R6R w - - 0 1', 'a1', 'd1'), 'Rad1', '同一横行两车 —— 用直列消歧');
+T.eq(san('3K1k2/8/8/8/8/8/8/R6R w - - 0 1', 'h1', 'd1'), 'Rhd1', '另一侧同理');
+T.eq(san('R7/8/8/8/4k3/8/4K3/R7 w - - 0 1', 'a1', 'a5'), 'R1a5', '同一直列两车 —— 用横行消歧');
+T.eq(san('R7/8/8/8/4k3/8/4K3/R7 w - - 0 1', 'a8', 'a5'), 'R8a5', '另一侧同理');
+// 简报另有一处不只是缺王，逻辑本身就错了：'Q6Q/8/8/8/8/8/8/Q6Q'（角上四后）
+// 从 a1 出发时，a8 与 h1 两后都无法用一步走到 d4（既不同列同行也不同斜线），
+// 唯一能到 d4 的对手只有 h8（斜线），而 h8 与 a1 不同列——按简报自己给出的
+// disambiguate() 算法，这只需要"直列"就够消歧（"Qad4"），并不需要写全格。
+// 换成一个真正需要"直列与横行都不足"的局面：a7（与 a1 同列）和 g1（与 a1
+// 同行）都能斜线走到 d4，这样两条消歧线索都被占用，才真的需要 'Qa1d4'。
+T.eq(san('4k3/Q7/8/8/8/8/8/Q5QK w - - 0 1', 'a1', 'd4'), 'Qa1d4', '直列与横行都不足以消歧时写全格');
+// h1 车沿第一横行到 b1 的路上只有空格（a1 在 b1 更左侧，挡不住），
+// 所以两车都能到 b1，仍需消歧。
+T.eq(san('3K1k2/8/8/8/8/8/8/R6R w - - 0 1', 'a1', 'b1'), 'Rab1', 'b1 两车皆可达，用直列消歧');
+T.eq(san('3K1k2/8/8/8/8/8/8/R6R w - - 0 1', 'h1', 'g1'), 'Rhg1', 'g1 同理');
+
+// 消歧的对手必须来自 legalMoves()，不能来自 pseudoLegalMoves()——
+// 被别住的同类子虽然伪合法地"够得着"目标格，但走不了，不该参与消歧。
+// 这条不是普通的覆盖率空白：如果未来有人为了"效率"把 disambiguate()
+// 里的 legalMoves() 换成 pseudoLegalMoves()，其余全部测试仍会通过，
+// 只有这一条能当场抓住——那之后错误的记谱会一路写进导出的棋谱里。
+// 局面：白后 a4 与 e4 都能一步到 d4；e4 被 e8 车沿 e 列牵制，别住时
+// 走不了 d4（但仍能沿 e 列本身移动，证明这确实是"别住"而非别的限制）。
+const pinBase = '1k2r3/8/8/8/Q3Q3/8/8/4K3 w - - 0 1';
+const pinPos = C.Position.fromFEN(pinBase);
+T.eq(pinPos.legalMoves().filter(m => m.from === C.fromAlg('e4') && m.to === C.fromAlg('d4')).length, 0,
+     '被牵制的 e4 后没有到 d4 的合法走法（伪合法走法里有，合法走法里没有）');
+T.ok(pinPos.legalMoves().some(m => m.from === C.fromAlg('e4') && m.to === C.fromAlg('e5')),
+     '被牵制的 e4 后仍能沿 e 列移动——证明这确实是"别住"而不是别的原因走不了');
+T.eq(san(pinBase, 'a4', 'd4'), 'Qd4',
+     '别住的 e4 后被 legalMoves() 正确排除在消歧对手之外，a4 到 d4 不需要消歧');
+// 抽掉牵制的车，e4 后解放，重新成为合法对手（与 a4 不同列，直列消歧即可）
+const unpinBase = '1k6/8/8/8/Q3Q3/8/8/4K3 w - - 0 1';
+T.eq(san(unpinBase, 'a4', 'd4'), 'Qad4',
+     '去掉牵制后 e4 后重新参与消歧，需要写直列——证明上一条不是巧合通过');
+
+// 吃过路兵的 SAN：用起始直列 + x，落点写吃过路兵的目标格（不是被吃的子所在格）
+T.eq(san('rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3', 'e5', 'f6'), 'exf6',
+     '吃过路兵写起始直列 + x + 目标格');
+T.eq(san('rnbqkbnr/ppp1pppp/8/8/3pP3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 3', 'd4', 'e3'), 'dxe3',
+     '黑方吃过路兵同理，方向相反');
+
+// 解析：SAN 往返
+const sanCases = [
+  [START, 'e4'], [START, 'Nf3'], [START, 'd4'],
+  ['r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1', 'O-O'],
+  ['r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1', 'O-O-O'],
+  ['8/8/8/3r4/8/8/3R4/K6k w - - 0 1', 'Rxd5'],
+  ['3K1k2/8/8/8/8/8/8/R6R w - - 0 1', 'Rad1'],
+  ['8/8/8/3p4/4P3/8/8/K6k w - - 0 1', 'exd5'],
+  ['7k/8/8/8/8/8/4p3/3P3K b - - 0 1', 'e1=Q+'],
+];
+for (const [fen, s] of sanCases) {
+  const p = C.Position.fromFEN(fen);
+  T.eq(C.moveToSAN(p, C.parseSAN(p, s)), s, 'SAN 往返一致：' + s);
+}
+
+// 宽容解析：带不带 +/# 都应该认
+const relaxed = C.Position.fromFEN('4k3/8/8/8/8/8/8/4R2K w - - 0 1');
+T.eq(C.moveToSAN(relaxed, C.parseSAN(relaxed, 'Re7')), 'Re7+', '省略 + 也能解析');
+
+T.throws(() => C.parseSAN(C.Position.fromFEN(START), 'Qh5'), 'SAN 指向非法走法应抛错');
+T.throws(() => C.parseSAN(C.Position.fromFEN(START), 'zz9'), 'SAN 语法错误应抛错');
+
+// ---- UCI ----
+const u0 = C.Position.fromFEN(START);
+T.eq(C.moveToUCI(C.parseSAN(u0, 'e4')), 'e2e4', 'SAN e4 的 UCI 是 e2e4');
+T.eq(C.moveToUCI(C.parseSAN(u0, 'Nf3')), 'g1f3', 'SAN Nf3 的 UCI 是 g1f3');
+T.eq(C.moveToSAN(u0, C.parseUCI(u0, 'e2e4')), 'e4', 'UCI e2e4 的 SAN 是 e4');
+
+const uc = C.Position.fromFEN('r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1');
+T.eq(C.moveToUCI(C.parseSAN(uc, 'O-O')), 'e1g1', '短易位的 UCI 记王的起讫格');
+T.eq(C.moveToSAN(uc, C.parseUCI(uc, 'e1c1')), 'O-O-O', 'UCI e1c1 解析回长易位');
+
+// 同 Task 9 处的缺陷：原始简报 FEN 没有黑王，在 h8 补上。
+const up = C.Position.fromFEN('7k/8/8/8/8/8/4p3/3P3K b - - 0 1');
+T.eq(C.moveToUCI(C.parseUCI(up, 'e2e1q')), 'e2e1q', '升变的 UCI 带小写棋子字母');
+T.eq(C.moveToSAN(up, C.parseUCI(up, 'e2e1n')), 'e1=N', 'underpromotion 也能解析');
+
+T.throws(() => C.parseUCI(u0, 'e2e5'), 'UCI 指向非法走法应抛错');
+T.throws(() => C.parseUCI(u0, 'xx'), 'UCI 语法错误应抛错');
+
+// ---- PGN ----
+const FOOLS = [
+  '[Event "Fool\'s Mate"]',
+  '[Site "?"]',
+  '[Date "????.??.??"]',
+  '[White "?"]',
+  '[Black "?"]',
+  '[Result "0-1"]',
+  '',
+  '1. f3 e5 2. g4 Qh4# 0-1',
+].join('\n');
+
+const g1 = C.parsePGN(FOOLS);
+T.eq(g1.headers.Event, "Fool's Mate", 'PGN 标签解析正确');
+T.eq(g1.headers.Result, '0-1', 'Result 标签解析正确');
+T.eq(g1.result, '0-1', '棋谱结果解析正确');
+T.eq(g1.moves.length, 4, 'Fool\'s Mate 共 4 个半步');
+T.eq(g1.positions.length, 5, 'positions 比 moves 多一个起始局面');
+T.eq(g1.positions[0].toFEN(), START, 'positions[0] 是初始局面');
+T.eq(g1.positions[4].status(), 'checkmate', '最后一个局面是将死');
+
+// 走法逐步重放 —— 抄错一步就会在这里当场走不通
+const replayed = g1.moves.map((m, i) => C.moveToSAN(g1.positions[i], m));
+T.eq(replayed, ['f3', 'e5', 'g4', 'Qh4#'], '逐步重放得到原样的 SAN 序列');
+
+// 归一化往返
+const written = C.writePGN(g1.headers, g1.moves);
+T.eq(C.parsePGN(written).moves.length, 4, 'writePGN 的输出能被 parsePGN 读回');
+T.ok(written.indexOf('1. f3 e5 2. g4 Qh4#') >= 0, 'writePGN 输出标准的回合编号格式');
+
+// Scholar's Mate
+const SCHOLARS = '1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6?? 4. Qxf7# 1-0';
+const g2 = C.parsePGN(SCHOLARS);
+T.eq(g2.moves.length, 7, 'Scholar\'s Mate 共 7 个半步');
+T.eq(g2.result, '1-0', '无标签时也能从结果标记读出胜负');
+T.eq(g2.positions[7].status(), 'checkmate', 'Scholar\'s Mate 结尾是将死');
+
+// 逐步重放的 SAN 序列，而不只是数个数——数目对但内容错的棋谱不该被放过
+const replayed2 = g2.moves.map((m, i) => C.moveToSAN(g2.positions[i], m));
+T.eq(replayed2, ['e4', 'e5', 'Bc4', 'Nc6', 'Qh5', 'Nf6', 'Qxf7#'],
+     'Scholar\'s Mate 逐步重放得到原样的 SAN 序列（?? 注解已被剥离）');
+
+// writePGN 往返：读回后的走法序列必须与原棋谱一致，而不只是数目一致
+const written2 = C.writePGN(g2.headers, g2.moves);
+const reread2 = C.parsePGN(written2);
+T.eq(reread2.moves.map((m, i) => C.moveToSAN(reread2.positions[i], m)), replayed2,
+     'Scholar\'s Mate 的 writePGN 输出被 parsePGN 读回后 SAN 序列不变');
+
+// 注释与变着被跳过而非报错
+const WITH_NOISE = '1. e4 {好棋} e5 2. Nf3 (2. f4 exf4) Nc6 *';
+const g3 = C.parsePGN(WITH_NOISE);
+T.eq(g3.moves.length, 4, '注释与变着被跳过，主线 4 个半步');
+T.ok(g3.skipped > 0, '跳过的内容被计数，不静默');
+
+const replayed3 = g3.moves.map((m, i) => C.moveToSAN(g3.positions[i], m));
+T.eq(replayed3, ['e4', 'e5', 'Nf3', 'Nc6'], '注释/变着跳过后主线 SAN 序列正确');
+
+// writePGN 往返：被剥离的注释 {好棋} 与变着 (2. f4 exf4) 不应该在输出里重新出现
+const written3 = C.writePGN(g3.headers, g3.moves);
+T.ok(written3.indexOf('好棋') < 0, 'writePGN 输出不应包含已剥离的注释');
+T.ok(written3.indexOf('f4') < 0, 'writePGN 输出不应包含已剥离的变着');
+const reread3 = C.parsePGN(written3);
+T.eq(reread3.moves.map((m, i) => C.moveToSAN(reread3.positions[i], m)), replayed3,
+     '剥离注释/变着后的棋谱 writePGN 往返 SAN 序列不变');
+
+// 从非初始局面开始
+const FROM_FEN = '[FEN "4k3/8/8/8/8/8/8/4K2R w K - 0 1"]\n[SetUp "1"]\n\n1. O-O *';
+const g4 = C.parsePGN(FROM_FEN);
+T.eq(g4.positions[0].toFEN(), '4k3/8/8/8/8/8/8/4K2R w K - 0 1', 'FEN 标签作为起始局面');
+T.eq(C.moveToSAN(g4.positions[0], g4.moves[0]), 'O-O', '从自定义局面开始的走法解析正确');
+
+// 刻意宽容：有 [FEN] 没有 [SetUp "1"] 也照样采信起始局面。PGN 标准里
+// SetUp 才"授权"FEN 生效，但真实世界里不少棋谱只写 FEN 不写 SetUp，
+// 严格按标准拒绝这些数据没有好处（这是本项目对 Task 11 简报的修正，
+// 不是简报原文）。
+const NO_SETUP = '[FEN "4k3/8/8/8/8/8/8/4K2R w K - 0 1"]\n\n1. O-O *';
+T.eq(C.parsePGN(NO_SETUP).positions[0].toFEN(), '4k3/8/8/8/8/8/8/4K2R w K - 0 1',
+     '没有 [SetUp "1"] 时仍采信 [FEN] 标签作为起始局面');
+
+// writePGN(headers, moves, startFEN) 往返：自定义起始局面也要能原样收回，
+// 不能只测默认起点——这是 writePGN 第三个参数唯一的测试
+const written4 = C.writePGN(g4.headers, g4.moves, g4.startFEN);
+const reread4 = C.parsePGN(written4);
+T.eq(reread4.positions[0].toFEN(), g4.startFEN, 'writePGN 往返后起始局面 FEN 不变');
+T.eq(reread4.moves.map((m, i) => C.moveToSAN(reread4.positions[i], m)),
+     g4.moves.map((m, i) => C.moveToSAN(g4.positions[i], m)),
+     'writePGN 往返后 SAN 序列不变（自定义起点）');
+
+// 抄错的棋谱必须报错，且指明第几步
+T.throws(() => C.parsePGN('1. e4 e5 2. Qh5 Qh4 3. Nf7 *'),
+         '非法走法应抛错（Nf7 在该局面下走不通）');
+
 T.report();
