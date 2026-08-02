@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Chess teaching tools · 国际象棋教学工具 —— single-file interactive visualizations that teach how the pieces move and how the rules of check and mate work.">
+<title>Chess Teaching Tools · 国际象棋教学工具</title>
+<!-- 子项目导航页。不内联整个 VizEngine —— 这是一张落地页，不是工具本身。
+     只从 chess/core/viz-engine.js 抄了 resolveLang() / t() 两个函数（见下方脚本），
+     语义必须与引擎一致：存储键 chess-lang，两处兜底都是 en 不是 zh。
+     视觉语言沿用 design-system/math-viz-starter.html 的设计令牌，
+     卡片网格布局沿用主站 index.html 的写法（见该文件的 .card / .grid 规则）。 -->
+<style>
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;min-height:100%}
+body{background:radial-gradient(ellipse 90% 55% at 50% 18%, var(--bg-mid), var(--bg-deep) 70%);
+  color:var(--ui-bright);font-family:var(--font-cn);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+
+.wrap{position:relative;max-width:1000px;margin:0 auto;
+  padding:clamp(40px,8vh,96px) clamp(20px,5vw,48px) 56px}
+
+.back{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:rgba(159,176,200,.75);
+  text-decoration:none;margin-bottom:24px;border-bottom:1px solid transparent;transition:color .15s,border-color .15s}
+.back:hover{color:#bfefff;border-color:rgba(45,212,234,.5)}
+.back:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:2px}
+
+.eyebrow-row{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px}
+.eyebrow{font-size:11px;letter-spacing:.24em;color:rgba(159,176,200,.72);text-transform:uppercase}
+.lang{font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;color:rgba(159,176,200,.8);
+  background:rgba(13,20,36,.6);border:1px solid var(--panel-line);border-radius:7px;
+  padding:5px 11px;cursor:pointer;transition:border-color .15s,color .15s}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:2px}
+
+h1{margin:0;font-family:var(--font-math);font-weight:600;font-size:clamp(30px,5.5vw,48px);
+  letter-spacing:.05em;color:#eef3fa;text-shadow:0 2px 28px rgba(45,212,234,.2)}
+.lead{margin:16px 0 0;max-width:62ch;font-size:clamp(14px,2.1vw,16px);line-height:1.7;color:rgba(159,176,200,.9)}
+
+.sect{display:flex;align-items:baseline;gap:12px;margin:44px 0 16px}
+.sect .lbl{font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:rgba(159,176,200,.7)}
+.sect .rule{flex:1;height:1px;background:linear-gradient(90deg,var(--panel-line),transparent)}
+.sect .count{font-family:var(--font-mono);font-size:11px;color:rgba(159,176,200,.5)}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(272px,1fr));gap:16px}
+.card{position:relative;display:flex;flex-direction:column;gap:11px;
+  padding:20px 20px 18px;border-radius:16px;overflow:hidden;
+  background:var(--panel-bg);border:1px solid var(--panel-line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 18px 50px rgba(0,0,0,.28);text-decoration:none;color:inherit;
+  transition:border-color .18s,transform .18s,box-shadow .18s}
+.card::before{content:"";position:absolute;left:0;top:0;height:2px;width:100%;
+  background:linear-gradient(90deg,var(--c),transparent 72%);opacity:.75}
+.card:hover{border-color:rgba(45,212,234,.5);transform:translateY(-3px);box-shadow:0 26px 62px rgba(0,0,0,.42)}
+.card:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:2px}
+.k{display:flex;align-items:center;gap:8px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--c);box-shadow:0 0 10px var(--c);flex:none}
+.kicker{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:rgba(159,176,200,.7)}
+.card h2{margin:2px 0 0;font-family:var(--font-math);font-weight:600;font-size:19px;letter-spacing:.02em;color:#eaf1fb}
+.card p{margin:0;font-size:13px;line-height:1.65;color:rgba(159,176,200,.82)}
+.foot{display:flex;align-items:center;justify-content:space-between;margin-top:auto;padding-top:6px}
+.tag{font-family:var(--font-mono);font-size:10.5px;color:rgba(159,176,200,.6)}
+.open{font-size:12.5px;color:#9be8f7;display:inline-flex;align-items:center;gap:5px}
+.arw{transition:transform .18s}
+.card:hover .arw{transform:translateX(3px)}
+
+.ghost{background:rgba(13,20,36,.4);border-style:dashed;border-color:rgba(148,163,184,.22);
+  box-shadow:none;cursor:default}
+.ghost::before{display:none}
+.ghost:hover{transform:none;box-shadow:none;border-color:rgba(148,163,184,.3)}
+.ghost .dot{background:transparent;border:1.5px dashed rgba(159,176,200,.5);box-shadow:none;width:10px;height:10px}
+.ghost h2{color:rgba(226,232,240,.75)}
+.ghost p{color:rgba(159,176,200,.6)}
+
+footer{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;
+  margin-top:48px;padding-top:20px;border-top:1px solid var(--panel-line);
+  font-size:12px;color:rgba(159,176,200,.6)}
+
+@media (max-width:520px){ h1{font-size:30px} }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <a class="back" href="../index.html" id="backLink">← MathViz</a>
+
+  <div class="eyebrow-row">
+    <div class="eyebrow" id="eyebrow">Chess</div>
+    <button class="lang" id="btnLang" type="button" title="Switch language / 切换语言">中</button>
+  </div>
+  <h1 id="h1">Chess Teaching Tools</h1>
+  <p class="lead" id="lead"></p>
+
+  <div id="phases"></div>
+
+  <footer>
+    <span id="footLeft"></span>
+  </footer>
+</main>
+
+<script>
+'use strict';
+
+/* ================= i18n（抄自 chess/core/viz-engine.js，约 15 行） =================
+   语义必须与引擎一致：存储键 chess-lang；resolveLang() 与 t() 的兜底都是 en，
+   不是 zh —— 否则缺 key 时英文页面会突然冒出中文。本页不需要整个引擎，
+   所以不 fetch/inline viz-engine.js，只抄这两个函数。 */
+var LANG_KEY = 'chess-lang';
+function resolveLang() {
+  try {
+    var q = new URLSearchParams(location.search).get('lang');
+    if (q === 'en' || q === 'zh') return q;
+    var s = localStorage.getItem(LANG_KEY);
+    if (s === 'en' || s === 'zh') return s;
+  } catch (e) { /* file:// 下 localStorage 可能不可用 */ }
+  return 'en';                         // 子项目默认英文
+}
+var LANG = resolveLang();
+function t(s) { return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.en) : s; }
+
+/* ================= 回退列表 =================
+   运行时优先 fetch('chess-tools.json')；file:// 下 fetch 会失败（同源限制），
+   这里内嵌一份最小副本静默回落 —— 与主站 app.html 的做法一致（读 app.html
+   的 GENERATED:TOOLS 段：id / file / cat|accent / title / kicker，本页同理，
+   只是把 cat 换成子项目自己的 phase）。 */
+var FALLBACK = [
+  {
+    id: 'chess-moves-geometry', file: 'tools/chess-moves-geometry.html', accent: 'rose', phase: 1,
+    kicker: { en: 'Rules', zh: '规则' },
+    title: { en: 'Geometry of Movement', zh: '走法的几何本质' },
+    tag: { en: 'attack domain · min-move field · mobility', zh: '攻击域 · 最少步数场 · 机动性' }
+  },
+  {
+    id: 'chess-rules-check-mate', file: 'tools/chess-rules-check-mate.html', accent: 'violet', phase: 1,
+    kicker: { en: 'Rules', zh: '规则' },
+    title: { en: 'Rules, Legality and Mate', zh: '规则、合法性与将杀' },
+    tag: { en: 'pseudo-legal minus legal · castling · mate', zh: '伪合法减合法 · 易位 · 将杀' }
+  }
+];
+var TOOLS = FALLBACK;
+
+/* 阶段标签：阶段 1 是本次交付；阶段 2（棋谱回放）是计划文档里写明的下一步，
+   在没有工具落地之前先占位，让用户知道这不是全部。 */
+var PHASE_LABELS = {
+  1: { en: 'Phase 1 · Rules Crash Course', zh: '阶段 1 · 规则速成' },
+  2: { en: 'Phase 2 · Game Replay', zh: '阶段 2 · 棋谱回放' }
+};
+function phaseLabel(n) { return PHASE_LABELS[n] || { en: 'Phase ' + n, zh: '阶段 ' + n }; }
+
+var L = {
+  title: { en: 'Chess Teaching Tools · MathViz', zh: '国际象棋教学工具 · MathViz' },
+  eyebrow: { en: 'Chess', zh: '国际象棋' },
+  h1: { en: 'Chess Teaching Tools', zh: '国际象棋教学工具' },
+  lead: {
+    en: 'Two interactive, single-file tools that turn chess rules into something you click through rather than memorise. Start with how the pieces move, then learn legality, check and mate — no chess experience required.',
+    zh: '两个可交互的单文件工具，把国际象棋规则变成能点着学会的东西，而不是死记硬背。先看棋子怎么走，再学合法性、将军与将杀——不需要任何棋艺基础。'
+  },
+  footLeft: { en: 'Single file · Zero dependencies · Works offline', zh: '单文件 · 零依赖 · 可离线' },
+  open: { en: 'Open', zh: '打开' },
+  soonKicker: { en: 'Coming later', zh: '稍后上线' },
+  soonDesc: {
+    en: 'Replay real games move by move and build board sense from history.',
+    zh: '逐步回放真实棋谱，从历史对局里养成棋感。'
+  },
+  back: { en: '← MathViz', zh: '← MathViz' }
+};
+
+function render() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.title = t(L.title);
+  document.getElementById('eyebrow').textContent = t(L.eyebrow);
+  document.getElementById('h1').textContent = t(L.h1);
+  document.getElementById('lead').textContent = t(L.lead);
+  document.getElementById('footLeft').textContent = t(L.footLeft);
+  document.getElementById('backLink').textContent = t(L.back);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+
+  function kickerText(d) {
+    return LANG === 'zh' ? (t(d.kicker) + ' · ' + (d.kicker.en || '')) : t(d.kicker);
+  }
+  function card(d) {
+    var descHtml = d.desc ? '<p>' + t(d.desc) + '</p>' : '';
+    return '<a class="card" style="--c:var(--trace-' + d.accent + ')" href="' + d.file + '?lang=' + LANG + '">' +
+      '<div class="k"><span class="dot"></span><span class="kicker">' + kickerText(d) + '</span></div>' +
+      '<h2>' + t(d.title) + '</h2>' + descHtml +
+      '<div class="foot"><span class="tag">' + t(d.tag) + '</span>' +
+      '<span class="open">' + t(L.open) + '<span class="arw">→</span></span></div>' +
+    '</a>';
+  }
+
+  var phases = [];
+  TOOLS.forEach(function (d) {
+    var p = d.phase || 1;
+    if (phases.indexOf(p) < 0) phases.push(p);
+  });
+  phases.sort(function (a, b) { return a - b; });
+
+  var html = '';
+  phases.forEach(function (p) {
+    var items = TOOLS.filter(function (d) { return (d.phase || 1) === p; });
+    html += '<div class="sect"><span class="lbl">' + t(phaseLabel(p)) + '</span><span class="rule"></span>' +
+      '<span class="count">' + items.length + '</span></div>' +
+      '<div class="grid">' + items.map(card).join('') + '</div>';
+  });
+  // 阶段 2 尚未落地时，用一张 ghost 卡片占位，呼应主站 index.html 的「敬请期待」写法。
+  if (phases.indexOf(2) < 0) {
+    html += '<div class="sect"><span class="lbl">' + t(phaseLabel(2)) + '</span><span class="rule"></span></div>' +
+      '<div class="grid"><div class="card ghost">' +
+      '<div class="k"><span class="dot"></span><span class="kicker">' + t(L.soonKicker) + '</span></div>' +
+      '<h2>' + t(phaseLabel(2)) + '</h2><p>' + t(L.soonDesc) + '</p>' +
+      '<div class="foot"><span class="tag">building…</span></div></div></div>';
+  }
+  document.getElementById('phases').innerHTML = html;
+}
+
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  try { var u = new URL(location.href); u.searchParams.set('lang', l); history.replaceState(null, '', u); } catch (e) {}
+  render();
+}
+document.getElementById('btnLang').addEventListener('click', function () {
+  setLang(LANG === 'zh' ? 'en' : 'zh');
+});
+
+render();
+
+/* 优先取 chess-tools.json（有服务器时永远最新）；file:// 或离线时 fetch 失败，
+   静默沿用上面内嵌的 FALLBACK，不弹错误、不阻塞渲染（上面已经先渲染过一次）。 */
+(function () {
+  try {
+    fetch('chess-tools.json', { cache: 'no-cache' }).then(function (r) {
+      return r.ok ? r.json() : null;
+    }).then(function (j) {
+      if (j && j.tools && j.tools.length) { TOOLS = j.tools; render(); }
+    })['catch'](function () {});
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>
