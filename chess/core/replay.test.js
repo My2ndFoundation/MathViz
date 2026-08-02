@@ -149,4 +149,75 @@ T.eq(S.material[20], -2, '10...cxb5 吃回马之后，白方净落后 2（马换
 T.ok(S.material[33] < 0, '莫菲最后是在子力落后的情况下将死的');
 T.eq(R.series(srs), S, 'series 结果被缓存，第二次调用返回同一个对象');
 
+// ---- 子力轨迹 ----
+function tracesOf(pgn) { return R.traces(R.load({ pgn: pgn })); }
+function findFrom(list, alg) { return list.filter(function (t) { return t.from === C.fromAlg(alg); })[0]; }
+
+const t0 = tracesOf('1. e4 e5 1/2-1/2');
+T.eq(t0.length, 32, '开局 32 颗子各一条轨迹');
+const eP = findFrom(t0, 'e2');
+T.eq(eP.points.map(function (p) { return [p.ply, C.toAlg(p.sq)]; }),
+     [[0, 'e2'], [1, 'e4']], 'e2 的兵走了一步：起点在第 0 步，落点在第 1 步');
+T.eq(eP.capturedAt, null, '它没被吃');
+T.eq(findFrom(t0, 'b1').points.length, 1, 'b1 的马一步没动 —— 只有起点一个点');
+
+// 易位：一步动两颗子
+// 易位 fixture 必须同时满足两个约束，缺一个整段就跑不通：
+//   h8 的车要让开 h 线 —— 白方短易位之后 h1 空了，h 线全开，
+//     否则第 3 个半步 Kh1 是走进将军；
+//   a8 的车必须留在原地 —— 第 4 个半步的 O-O-O 要用它，
+//     任何让 a8 车离家的走法都会当场毁掉黑方的长易位权。
+// Rg8 同时满足两条（它顺带将了一军，白方 Kh1 正是应将）。
+// 计划原稿写的是 Rd8：h8 的车被 e8 的王挡着到不了 d8，实际走的是
+// a8 的车 —— 那个 fixture 先毁掉后面要测的东西，再去测它。
+const cas = tracesOf('[FEN "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1"]\n1. O-O Rg8 2. Kh1 O-O-O 1/2-1/2');
+T.eq(findFrom(cas, 'e1').points.map(function (p) { return C.toAlg(p.sq); }), ['e1', 'g1', 'h1'],
+     '白王短易位到 g1，再走 h1');
+T.eq(findFrom(cas, 'h1').points.map(function (p) { return [p.ply, C.toAlg(p.sq)]; }),
+     [[0, 'h1'], [1, 'f1']], '短易位同一步里 h1 的车到了 f1');
+T.eq(findFrom(cas, 'e8').points.map(function (p) { return C.toAlg(p.sq); }), ['e8', 'c8'],
+     '黑王长易位到 c8');
+T.eq(findFrom(cas, 'a8').points.map(function (p) { return [p.ply, C.toAlg(p.sq)]; }),
+     [[0, 'a8'], [4, 'd8']], '长易位同一步里 a8 的车到了 d8');
+
+// 吃过路兵：被吃的兵不在落点格上
+const ep = tracesOf('[FEN "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3"]\n1. exf6 1-0');
+const victim = findFrom(ep, 'f5');
+T.eq(victim.capturedAt, 1, 'f5 的黑兵在第 1 个半步被吃');
+T.eq(C.toAlg(victim.points[victim.points.length - 1].sq), 'f5',
+     '它最后停在 f5 —— 吃它的兵落在 f6，别把尸体挪到落点格去');
+T.eq(C.toAlg(findFrom(ep, 'e5').points[1].sq), 'f6', '吃过路兵的白兵落在 f6');
+
+// 升变：同一颗子换了身份，不是新长出一颗
+const pr = tracesOf('[FEN "8/4P3/8/8/8/8/8/4K2k w - - 0 1"]\n1. e8=N 1-0');
+const promoted = findFrom(pr, 'e7');
+T.eq(promoted.code, C.N, '升变后这条轨迹的身份变成马');
+T.eq(promoted.promotedAt, 1, '记下在第几步升的变');
+T.eq(promoted.points.length, 2, '还是同一条轨迹，不是新建一条');
+T.eq(pr.length, 3, '盘上原本 3 颗子，升变没有让轨迹数变多');
+
+// 守恒：活着的 + 被吃的 = 开局子数
+const opera = tracesOf(OPERA);
+const dead = opera.filter(function (t) { return t.capturedAt != null; }).length;
+T.eq(opera.length, 32, '歌剧院局从满盘开始');
+T.eq(opera.filter(function (t) { return t.capturedAt == null; }).length + dead, 32, '不多不少');
+
+// ---- 累计热力 ----
+const h2 = R.heat(R.load({ pgn: '1. e4 e5 1/2-1/2' }), 2);
+T.eq(h2.counts[C.fromAlg('e4')], 1, 'e4 被落子一次');
+T.eq(h2.counts[C.fromAlg('e5')], 1, 'e5 被落子一次');
+T.eq(Object.keys(h2.counts).length, 2, '其余 62 格从头到尾没人碰');
+T.eq(h2.max, 1, '最热的格是 1');
+T.eq(h2.landings, 2, '两个半步 = 两次落子');
+
+const hcas = R.heat(R.load({ pgn: '[FEN "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1"]\n1. O-O 1-0' }), 1);
+T.eq(hcas.counts[C.fromAlg('g1')], 1, '易位：王的落点算一次');
+T.eq(hcas.counts[C.fromAlg('f1')], 1, '易位：车的落点也算一次');
+T.eq(hcas.landings, 2, '一步易位是两次落子 —— 落子数不等于半步数');
+
+const hpartial = R.load({ pgn: OPERA });
+T.eq(R.heat(hpartial, 0).landings, 0, '第 0 步时热力全空');
+T.ok(R.heat(hpartial, 33).landings >= 33, '整局的落子数至少等于半步数');
+T.ok(R.heat(hpartial, 10).landings < R.heat(hpartial, 33).landings, '热力随时间轴增长');
+
 T.report();
