@@ -16,6 +16,16 @@ T.eq(C.toAlg(C.fromAlg('h8')), 'h8', 'h8 往返一致');
 T.eq(C.toAlg(C.fromAlg('a1')), 'a1', 'a1 往返一致');
 T.throws(() => C.fromAlg('z9'), 'fromAlg 对非法坐标应抛错');
 
+// ---- 棋子编码约定（修复轮次 · Phase 0 review 项 4）----
+// board-render.js 故意不 import chess-core.js（解耦是有意的），而是自己
+// 定义了一份 { 1:'P', 2:'N', ... } 的镜像映射（那边的 CODE_KEY）。
+// 两边今天一致，但没有任何机制强制它们保持一致——这里改一个常量，
+// board-render.js 会照旧渲染，406 条断言全绿，棋子却画错了。
+// 这条测试把约定钉在这一侧（board-render.js 的 CODE_KEY 是它的镜像，
+// 另一位 agent 正在那边加对应断言）。
+T.ok(C.P === 1 && C.N === 2 && C.B === 3 && C.R === 4 && C.Q === 5 && C.K === 6,
+     '棋子数字编码必须是 P=1 N=2 B=3 R=4 Q=5 K=6 —— board-render.js 的 CODE_KEY 依赖这个约定');
+
 // ---- FEN ----
 const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 const p0 = C.Position.fromFEN(START);
@@ -64,6 +74,31 @@ T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/4K3 w - - 0 yy'), '回合数�
 T.throws(() => C.Position.fromFEN('8/8/8/8/8/8/8/4K3 w - - 0 1'), '没有黑王应抛错');
 T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/8 w - - 0 1'), '没有白王应抛错');
 T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/K3K3 w - - 0 1'), '白方两个王应抛错');
+
+// ---- 无王局面（修复轮次 · Phase 0 review 项 1）----
+// 教学用途（例如"孤马 BFS 到每格最短步数场"）需要能表示没有王的局面。
+// 默认仍要求恰好一王一王，游戏代码的护栏不变；显式传 { requireKings: false } 才放行。
+const LONE_KNIGHT_FEN = '8/8/8/3N4/8/8/8/8 w - - 0 1';
+T.throws(() => C.Position.fromFEN(LONE_KNIGHT_FEN), '不传选项时孤马局面仍应抛错（默认要求双王）');
+const loneKnightPos = C.Position.fromFEN(LONE_KNIGHT_FEN, { requireKings: false });
+T.eq(loneKnightPos.board[C.fromAlg('d5')], C.N, 'requireKings:false 时孤马局面正常解析');
+T.eq(loneKnightPos.toFEN(), LONE_KNIGHT_FEN, '孤马局面 FEN 往返一致');
+
+// 手搭一个无王局面：toFEN() 产出的字符串必须能被 fromFEN(..., {requireKings:false}) 读回，
+// 否则模块自己违反了自己的往返不变量。
+const handBuilt = new C.Position();
+handBuilt.board[C.SQ(3, 4)] = C.N;   // d5 白马
+handBuilt.turn = C.WHITE;
+const handBuiltFEN = handBuilt.toFEN();
+T.throws(() => C.Position.fromFEN(handBuiltFEN), '手搭无王局面的 FEN 不传选项时应抛错');
+T.eq(C.Position.fromFEN(handBuiltFEN, { requireKings: false }).toFEN(), handBuiltFEN,
+     '手搭无王局面：toFEN() 的输出能被 fromFEN(fen, {requireKings:false}) 读回');
+
+// legalMoves() 在无王局面上：k < 0 时不做合法性过滤（没有王可暴露），
+// 直接返回 pseudoLegalMoves()——这是刻意的静默路径，此处钉住其行为。
+T.eq(loneKnightPos.legalMoves().map(C.moveToUCI).sort(),
+     loneKnightPos.pseudoLegalMoves().map(C.moveToUCI).sort(),
+     '无王局面的 legalMoves() 与 pseudoLegalMoves() 完全一致（不做合法性过滤）');
 
 // ---- 伪合法走法生成 ----
 function movesFrom(pos, from) {
@@ -595,6 +630,31 @@ T.eq(C.moveToSAN(up, C.parseUCI(up, 'e2e1n')), 'e1=N', 'underpromotion 也能解
 T.throws(() => C.parseUCI(u0, 'e2e5'), 'UCI 指向非法走法应抛错');
 T.throws(() => C.parseUCI(u0, 'xx'), 'UCI 语法错误应抛错');
 
+// ---- sameMove ----
+// Move 是每次调用现造的新对象，pseudoLegalMoves() 减 legalMoves()（规则工具
+// 用来画"被别住的子"高亮的算法）没法靠对象恒等来比较。moveToUCI(m) 碰巧
+// 在实践中唯一，但没有任何声明或测试保证这一点——所以显式提供 sameMove(a, b)，
+// 只比较 from/to/promo：在同一局面内，这三项已经完全确定一步棋。
+const sameMoveFEN = START;
+const sameMovePosA = C.Position.fromFEN(sameMoveFEN);
+const sameMovePosB = C.Position.fromFEN(sameMoveFEN);
+const e4A = sameMovePosA.pseudoLegalMoves().find(m => C.moveToUCI(m) === 'e2e4');
+const e4B = sameMovePosB.legalMoves().find(m => C.moveToUCI(m) === 'e2e4');
+T.ok(e4A !== e4B, '两次生成的走法对象在对象恒等意义上是不同的对象（前提条件）');
+T.ok(C.sameMove(e4A, e4B), '两个分别生成、代表同一步棋的 Move 对象应 sameMove 判定相等');
+
+const nf3 = sameMovePosA.pseudoLegalMoves().find(m => C.moveToUCI(m) === 'g1f3');
+T.ok(!C.sameMove(e4A, nf3), 'from/to 都不同的两步棋不应 sameMove 判定相等');
+
+const promoPosForSame = C.Position.fromFEN('8/4P3/8/8/8/8/8/K6k w - - 0 1');
+const promoToQueen = promoPosForSame.pseudoLegalMoves().find(m =>
+  m.from === C.fromAlg('e7') && m.to === C.fromAlg('e8') && m.promo === C.Q);
+const promoToKnight = promoPosForSame.pseudoLegalMoves().find(m =>
+  m.from === C.fromAlg('e7') && m.to === C.fromAlg('e8') && m.promo === C.N);
+T.ok(!C.sameMove(promoToQueen, promoToKnight),
+     '同一 from/to 但升变棋子不同（后 vs 马）不应 sameMove 判定相等');
+T.ok(C.sameMove(promoToQueen, promoToQueen), '同一个 Move 对象自身 sameMove 判定相等');
+
 // ---- PGN ----
 const FOOLS = [
   '[Event "Fool\'s Mate"]',
@@ -686,5 +746,22 @@ T.eq(reread4.moves.map((m, i) => C.moveToSAN(reread4.positions[i], m)),
 // 抄错的棋谱必须报错，且指明第几步
 T.throws(() => C.parsePGN('1. e4 e5 2. Qh5 Qh4 3. Nf7 *'),
          '非法走法应抛错（Nf7 在该局面下走不通）');
+
+// writePGN：起始局面轮到黑方时，第一个记谱必须带 "N..." 而不是省略回合号
+// （修复轮次 · Phase 0 review 项 2）。既有往返测试都从白方先行的 FEN 起步，
+// 从未走到过这条路径；Phase 2 要加载的历史棋谱里不少是从中局（可能黑先）
+// 开始的，这条必须补上。
+const BLACK_TO_MOVE_FEN = '4k3/8/8/8/8/8/8/4K2R b K - 0 1';
+const BLACK_START_PGN = '[FEN "' + BLACK_TO_MOVE_FEN + '"]\n[SetUp "1"]\n\n1... Ke7 *';
+const g5 = C.parsePGN(BLACK_START_PGN);
+const writtenBlackStart = C.writePGN(g5.headers, g5.moves, g5.startFEN);
+T.ok(/(^|\s)1\.\.\.\s*Ke7(\s|$)/.test(writtenBlackStart),
+     'writePGN 从黑方先行的局面写出时，第一步应为 "1... Ke7" 而非省略回合号的 "Ke7"');
+const rereadBlackStart = C.parsePGN(writtenBlackStart);
+T.eq(rereadBlackStart.moves.length, 1, '黑方先行棋谱 writePGN → parsePGN 往返走法数不变');
+T.eq(C.moveToSAN(rereadBlackStart.positions[0], rereadBlackStart.moves[0]), 'Ke7',
+     '黑方先行棋谱 writePGN → parsePGN 往返 SAN 不变');
+T.eq(rereadBlackStart.positions[0].toFEN(), BLACK_TO_MOVE_FEN,
+     '黑方先行棋谱 writePGN → parsePGN 往返起始局面不变');
 
 T.report();
