@@ -77,5 +77,103 @@
     return L;
   }
 
-  return { layout: layout, fileLabel: fileLabel, isLight: isLight, drawBoard: drawBoard };
+  /* 棋子写成 SVG 路径（0..100 方框，y 向下，底座压在 y≈98）。
+     运行时用 Path2D 交给 Canvas 2D 绘制 —— 保留 SVG 的作者体验，
+     又不引入任何外部文件或加载器。将来若上 3D，替换 drawPiece 即可，
+     路径数据可作为旋转体的侧影复用（马除外）。
+
+     六子结构互异，避免小尺寸下认错：
+     - 兵 P：整圆头（半径 11 的正圆）+ 单层衣领，轮廓最简单。
+     - 象 B：尖顶泪滴形主教冠（非正圆，顶端收成一点）+ 冠上十字形裂口，
+       与兵的正圆头一望可辨。
+     - 后 Q：冠部是 5 齿锯齿状皇冠，齿尖各顶一颗小圆珠。
+     - 王 K：冠部是单拱形冠带（无锯齿），冠上另立一个十字架，
+       与后的锯齿皇冠在剪影上明显不同。 */
+  const PIECE_PATHS = {
+    P: [
+      'M39 24 A11 11 0 1 0 61 24 A11 11 0 1 0 39 24 z',
+      'M40 37 H60 L63 45 H37 z',
+      'M44 47 H56 L63 78 H37 z',
+      'M28 78 H72 V88 H28 z',
+      'M24 88 H76 V98 H24 z',
+    ],
+    N: [
+      'M32 88 C30 61 41 47 53 39 C50 33 46 31 42 31 L49 20 C56 21 62 26 66 32 ' +
+      'C73 44 74 63 72 88 z',
+      'M44 26 A3 3 0 1 0 50 26 A3 3 0 1 0 44 26 z',
+      'M24 88 H76 V98 H24 z',
+    ],
+    B: [
+      'M50 10 C59 17 65 27 65 37 C65 46 58 52 50 52 C42 52 35 46 35 37 ' +
+      'C35 27 41 17 50 10 z',
+      'M46 22 H54 V28 H60 V36 H54 V42 H46 V36 H40 V28 H46 z',
+      'M40 54 H60 L65 78 H35 z',
+      'M28 78 H72 V88 H28 z',
+      'M24 88 H76 V98 H24 z',
+    ],
+    R: [
+      'M28 14 H37 V21 H45 V14 H55 V21 H63 V14 H72 V34 H66 V66 H74 V78 H26 V66 H34 V34 H28 z',
+      'M24 88 H76 V98 H24 z',
+    ],
+    Q: [
+      'M24 32 L31 66 H69 L76 32 L64 48 L56 24 L49 48 L42 24 L34 48 z',
+      'M22 28 A4 4 0 1 0 30 28 A4 4 0 1 0 22 28 z',
+      'M70 28 A4 4 0 1 0 78 28 A4 4 0 1 0 70 28 z',
+      'M46 18 A4 4 0 1 0 54 18 A4 4 0 1 0 46 18 z',
+      'M31 66 H69 L73 78 H27 z',
+      'M24 88 H76 V98 H24 z',
+    ],
+    K: [
+      'M46 6 H54 V15 H63 V23 H54 V34 H46 V23 H37 V15 H46 z',
+      'M30 36 C37 28 63 28 70 36 L65 66 H35 z',
+      'M31 66 H69 L73 78 H27 z',
+      'M24 88 H76 V98 H24 z',
+    ],
+  };
+
+  const CODE_KEY = { 1: 'P', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K' };
+
+  const WHITE_FILL = 'rgba(226,232,240,0.94)';
+  const WHITE_EDGE = 'rgba(15,23,42,0.85)';
+  const BLACK_FILL = 'rgba(15,23,42,0.90)';
+  const BLACK_EDGE = 'rgba(148,163,184,0.90)';
+
+  const pathCache = Object.create(null);
+  function path2d(d) {
+    if (!pathCache[d]) pathCache[d] = new Path2D(d);
+    return pathCache[d];
+  }
+
+  /* 棋子画成朝向相机的剪影：把它的世界坐标投影成屏幕点，
+     然后在屏幕空间里以该点为基准绘制。这样任意相机角度下都读得清。 */
+  function drawPiece(ctx, C, E, o) {
+    const s = E.proj(C, o.center);
+    if (!s) return;
+    const key = CODE_KEY[Math.abs(o.code)];
+    if (!key) return;
+    const white = o.code > 0;
+    const k = (o.scale || 1) / 100;
+
+    ctx.save();
+    ctx.globalAlpha = o.alpha == null ? 1 : o.alpha;
+    ctx.translate(s[0], s[1]);
+    ctx.scale(k, k);
+    ctx.translate(-50, -88);            // 以底座中点对齐格心
+    ctx.fillStyle = white ? WHITE_FILL : BLACK_FILL;
+    ctx.strokeStyle = white ? WHITE_EDGE : BLACK_EDGE;
+    ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
+    const ds = PIECE_PATHS[key];
+    for (let i = 0; i < ds.length; i++) {
+      const p = path2d(ds[i]);
+      ctx.fill(p);
+      ctx.stroke(p);
+    }
+    ctx.restore();
+  }
+
+  return {
+    layout: layout, fileLabel: fileLabel, isLight: isLight, drawBoard: drawBoard,
+    PIECE_PATHS: PIECE_PATHS, drawPiece: drawPiece,
+  };
 });

@@ -45,4 +45,20 @@ T.eq(BR.isLight(0, 0), false, 'a1 是深色格（国际象棋惯例：右下角�
 T.eq(BR.isLight(7, 0), true, 'h1 是浅色格');
 T.eq(BR.isLight(0, 7), true, 'a8 是浅色格');
 
+// ---- 棋子路径 ----
+const KEYS = ['P', 'N', 'B', 'R', 'Q', 'K'];
+for (const k of KEYS) {
+  T.ok(Array.isArray(BR.PIECE_PATHS[k]), k + ' 有路径数组');
+  T.ok(BR.PIECE_PATHS[k].length > 0, k + ' 的路径数组非空');
+  for (const d of BR.PIECE_PATHS[k]) {
+    T.ok(typeof d === 'string' && d.length > 0, k + ' 的每条路径都是非空字符串');
+    T.ok(/^M/.test(d.trim()), k + ' 的路径以 M 开头');
+    T.ok(/[zZ]\s*$/.test(d.trim()), k + ' 的路径以 z 闭合');
+    // 坐标必须落在 0..100 的设计框内，否则缩放会串位
+    const nums = d.match(/-?\d+(\.\d+)?/g).map(Number);
+    T.ok(nums.every(n => n >= -10 && n <= 110), k + ' 的坐标在设计框范围内');
+  }
+}
+T.eq(Object.keys(BR.PIECE_PATHS).sort(), KEYS.slice().sort(), '六种棋子齐全，无多余键');
+
 T.report();
