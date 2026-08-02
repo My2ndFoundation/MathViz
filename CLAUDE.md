@@ -41,6 +41,18 @@ There is no build/lint/test toolchain. To develop:
   awk '/<script>/{f=1;next}/<\/script>/{f=0}f' outputs/FILE.html | node --check /dev/stdin
   ```
 
+## Parallel work discipline
+
+Multiple sessions and multiple build agents routinely run against this repo at once. Three rules, each earned the hard way:
+
+1. **Give every parallel builder its own worktree.** Launch build subagents with `isolation: "worktree"` so each gets an isolated copy of the repo. Distinct `outputs/*.html` files do *not* make concurrent work safe — the collisions happen through shared state, not shared files.
+
+2. **Never `git add -A` / `git commit -a` while other work may be in flight. Stage explicit paths.** A blanket stage sweeps up whatever another session happens to have half-written. This actually happened: a replay-progress fix committed an unrelated tool's mid-build snapshot, and that unfinished file rode a PR onto `main` unregistered. Cheap to avoid, tedious to unpick.
+
+3. **Always pass an explicit `tabId` to browser tools.** Untargeted `javascript_exec` lands on whatever tab is fronted — which may be another agent's page. Two agents have silently driven each other's tools, producing verification numbers attributed to the wrong file. When it matters, assert `TOOL.id` in the probe itself before trusting a measurement.
+
+Before committing, `git status --short` and confirm every listed path is yours.
+
 ## Design-system-first discipline
 
 The markdown spec governs the code. When changing a design token, **change the doc first, then the code** (per the spec's footer). Every tool must honor the five non-negotiable principles and pass the §8 self-check.
