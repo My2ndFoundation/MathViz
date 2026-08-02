@@ -64,6 +64,14 @@
   function goto(rs, ply) {
     const target = Math.max(0, Math.min(rs.maxPly, ply | 0));
     if (target === rs.ply) return false;
+    /* 往回拖时间轴要把「身后」（> target）已经触发过的关键步重新武装，
+       否则「播放→在关键步暂停→拖回去重看→再播放」这条最典型的教学动线
+       会在第二遍失效：使用者往回拖恰恰是因为没看懂想重看，一个只响一次
+       的自动暂停等于告诉她「你已经看过了」。往前拖不清——身后已经触发
+       过的不需要重新武装，否则会在还没走到的地方也保留旧状态。 */
+    if (target < rs.ply) {
+      for (const p in rs.fired) if (+p > target) delete rs.fired[p];
+    }
     rs.ply = target;
     /* 说明随「当前停在哪一步」走，与「是不是自动暂停过」无关：手动拖时间轴
        到关键步同样该看到说明，只是不需要再拦一次播放。 */
@@ -94,7 +102,11 @@
   function tick(rs, dt) {
     if (!rs.playing || rs.maxPly === 0) return false;
     const interval = 1 / Math.max(0.01, rs.speed);
-    rs.acc += Math.max(0, dt);
+    /* Math.max(0, dt) 钳不住 NaN —— Math.max(0, NaN) 还是 NaN，一次 NaN 的 dt
+       就会永久毒化 acc，此后 acc >= interval 恒为 false：回放不报错、不停止，
+       就是静默地再也不前进。NaN / Infinity / undefined 一律当成 0 丢弃。 */
+    const step = +dt;
+    rs.acc += (step > 0 && isFinite(step)) ? step : 0;
     let moved = false;
     let guard = 0;
     while (rs.acc >= interval && guard++ < 4096) {
