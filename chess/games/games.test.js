@@ -77,7 +77,13 @@ for (const id of G.LEARNING_ROUTE) {
   T.ok(G.EXPECTED_IDS.indexOf(id) >= 0, '学习路线里的 ' + id + ' 在预期清单里');
 }
 T.eq(G.LEARNING_ROUTE[0], 'fools-mate', '路线从最短的将死开始');
-T.eq(G.byId[G.LEARNING_ROUTE[0]].difficulty, 1, '第一站必须是 difficulty 1');
+// 判空不是形式主义：这一行如果直接解引用，恰好是路线第一站的 id 被拼错时
+// 会抛未捕获 TypeError，在 T.report() 之前崩掉 —— 于是本轮所有已缓冲的
+// FAIL（包括那几条精确指出「id 不在清单里」的）一条都印不出来，只剩堆栈。
+// 门照样是红的，但它不再说明哪里红 —— 而说明哪里红正是它存在的理由。
+const first = G.byId[G.LEARNING_ROUTE[0]];
+T.ok(first, '学习路线第一站 ' + G.LEARNING_ROUTE[0] + ' 已载入');
+if (first) T.eq(first.difficulty, 1, '第一站必须是 difficulty 1');
 
 // ---- 分组与总表一致 ----
 let sum = 0;
