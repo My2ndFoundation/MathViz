@@ -1,6 +1,7 @@
 'use strict';
 const T = require('./_test.js');
 const BR = require('./board-render.js');
+const E = require('./viz-engine.js');
 
 // ---- 布局 ----
 const L8 = BR.layout({ files: 8, ranks: 8, cell: 1 });
@@ -60,5 +61,53 @@ for (const k of KEYS) {
   }
 }
 T.eq(Object.keys(BR.PIECE_PATHS).sort(), KEYS.slice().sort(), '六种棋子齐全，无多余键');
+
+// CODE_KEY 是 chess-core.js 编码约定的镜像，不是这里凭空定义的。
+// chess-core.js（本次修改范围之外）第 10 行：
+//   const EMPTY = 0, P = 1, N = 2, B = 3, R = 4, Q = 5, K = 6;
+// 两边一旦漂移，drawPiece 会认错子却不报错——所以在这里钉死这份映射关系。
+T.eq(BR.CODE_KEY, { 1: 'P', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K' },
+     'CODE_KEY 与 chess-core.js 的棋子编码常量一一对应');
+
+// ---- pickSquare：屏幕坐标 → 棋盘格（点击选子的唯一入口） ----
+// 用 proj 把每个格心投影到屏幕，再用 pickSquare 挑回来，必须得到同一格。
+// 覆盖默认 8×8、非默认 12×12、非方形 5×8 —— 尺寸是参数化的，不能只测一种。
+function assertPickRoundTrip(files, ranks, label) {
+  const L = BR.layout({ files: files, ranks: ranks, cell: 1 });
+  const C = E.makeCam();
+  for (let r = 0; r < ranks; r++) {
+    for (let f = 0; f < files; f++) {
+      const center = L.squareCenter(f, r);
+      const s = E.proj(C, center);
+      T.ok(s, label + '：格心 ' + f + ',' + r + ' 不应被近裁剪掉');
+      if (!s) continue;
+      const picked = BR.pickSquare(C, E, s, L);
+      T.eq(picked, { file: f, rank: r }, label + '：' + f + ',' + r + ' 投影再挑回应得同一格');
+    }
+  }
+  // 棋盘外的一点必须挑不到格：把屏幕中心大幅偏移，落到棋盘范围之外
+  const vi = E.viewInfo();
+  T.eq(BR.pickSquare(C, E, [vi.CX + 5000, vi.CY + 5000], L), null,
+       label + '：棋盘外的点应返回 null');
+}
+assertPickRoundTrip(8, 8, '8×8');
+assertPickRoundTrip(12, 12, '12×12');
+assertPickRoundTrip(5, 8, '5×8 非方形');
+
+// ---- unproject 的两种退化情形：与平面平行、交点落在相机之后 ----
+// 用手搭的相机基而不是 makeCam()，把边界条件摆得干净：
+// eye 在 z=5 处，朝 -z 方向看（f=[0,0,-1]），r/u 是标准的右/上。
+const flatCam = { eye: [0, 0, 5], f: [0, 0, -1], r: [1, 0, 0], u: [0, 1, 0] };
+const vi = E.viewInfo();
+T.eq(E.unproject(flatCam, [vi.CX, vi.CY], 0), [0, 0, 0],
+     'unproject：屏幕正中心的射线应落在棋盘平面原点');
+T.eq(E.unproject(flatCam, [vi.CX, vi.CY], 10), null,
+     'unproject：z=10 的平面在相机之后（眼在 z=5 朝 -z 看），应返回 null');
+
+// 与平面平行：相机沿世界 X 轴看（forward 的 z 分量为 0），
+// 正对屏幕中心的那条射线永远停在同一个 z，不会与 z=0 平面相交。
+const sidewaysCam = { eye: [10, 0, 0], f: [-1, 0, 0], r: [0, 0, -1], u: [0, 1, 0] };
+T.eq(E.unproject(sidewaysCam, [vi.CX, vi.CY], 0), null,
+     'unproject：射线与平面平行（forward 无 z 分量）应返回 null，而不是抛错或除零结果');
 
 T.report();
