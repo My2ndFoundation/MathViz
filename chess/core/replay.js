@@ -114,9 +114,91 @@
     return moved;
   }
 
+  /* 子力价值：一套约定俗成的近似，不是定理。工具的说明区必须写明这一点。
+     王取 0 —— 王不会被吃，给它任何有限值都只会让曲线在残局里失真。 */
+  const PIECE_VALUE = { 1: 1, 2: 3, 3: 3, 4: 5, 5: 9, 6: 0 };
+
+  /* 0x88 的 128 格里只有 64 格在盘内。这张表只算一次，之后所有遍历都走它——
+     每次现算 offBoard 在 series() 里会被跑上百次 × 64 格。 */
+  const SQUARES = (function () {
+    const a = [];
+    for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) a.push(C.SQ(f, r));
+    return a;
+  })();
+
+  const KING_STEPS = [1, -1, 16, -16, 17, -17, 15, -15];
+
+  function materialOf(pos) {
+    let s = 0;
+    for (let i = 0; i < SQUARES.length; i++) {
+      const v = pos.board[SQUARES[i]];
+      if (v === C.EMPTY) continue;
+      s += (v > 0 ? 1 : -1) * PIECE_VALUE[Math.abs(v)];
+    }
+    return s;
+  }
+
+  /* 「控制」= 被该方任一子攻击到的不同格子数。attacksFrom 含被己方子占据的
+     格（那是保护），且不含兵的前进（兵不攻击正前方）——所以这个数量的是
+     火力覆盖，不是安全占据。工具的说明区必须写明这一点。 */
+  function controlOf(pos, colour) {
+    const seen = {};
+    let n = 0;
+    for (let i = 0; i < SQUARES.length; i++) {
+      const sq = SQUARES[i];
+      const v = pos.board[sq];
+      if (v === C.EMPTY) continue;
+      if ((v > 0 ? C.WHITE : C.BLACK) !== colour) continue;
+      const hits = pos.attacksFrom(sq);
+      for (let j = 0; j < hits.length; j++) {
+        if (!seen[hits[j]]) { seen[hits[j]] = 1; n++; }
+      }
+    }
+    return n;
+  }
+
+  /* 王的安全度（规格 §4③ 给定）：己方王周围「在盘内的」格中被对方攻击的
+     格数，取负。王在边角时邻格不足 8 —— 只数盘内的，因此范围是 [−8, 0]。
+     粗糙之处：只数邻格，不看攻击者是谁、路上有没有挡子、能不能真的杀过来。 */
+  function safetyOf(pos, colour) {
+    const k = pos.kingSq(colour);
+    if (k < 0) return 0;
+    let n = 0;
+    for (let i = 0; i < KING_STEPS.length; i++) {
+      const t = k + KING_STEPS[i];
+      if (C.offBoard(t)) continue;
+      if (pos.isAttacked(t, -colour)) n++;
+    }
+    return n === 0 ? 0 : -n;      // 别让 −0 漏进读数
+  }
+
+  function evalAt(pos) {
+    const cw = controlOf(pos, C.WHITE), cb = controlOf(pos, C.BLACK);
+    const sw = safetyOf(pos, C.WHITE), sb = safetyOf(pos, C.BLACK);
+    return {
+      material: materialOf(pos),
+      control: cw - cb, controlW: cw, controlB: cb,
+      safety: sw - sb, safetyW: sw, safetyB: sb,
+    };
+  }
+
+  /* 整局一次算完并缓存在 rs 上：每帧重算 34～273 个局面的攻击域会吃掉整个
+     4ms 绘制预算。载入一局是一次性成本（最长的棋局约 273 个局面 × 32 子）。 */
+  function series(rs) {
+    if (rs.series) return rs.series;
+    const material = [], control = [], safety = [];
+    for (let i = 0; i < rs.positions.length; i++) {
+      const e = evalAt(rs.positions[i]);
+      material.push(e.material); control.push(e.control); safety.push(e.safety);
+    }
+    rs.series = { material: material, control: control, safety: safety };
+    return rs.series;
+  }
+
   return {
     load: load, position: position, goto: goto, step: step,
     setPlaying: setPlaying, rewind: rewind, tick: tick,
     zStep: zStep, Z_SPAN_MAX: Z_SPAN_MAX, Z_STEP_DEFAULT: Z_STEP_DEFAULT,
+    evalAt: evalAt, series: series, PIECE_VALUE: PIECE_VALUE,
   };
 });
