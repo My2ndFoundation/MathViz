@@ -67,8 +67,8 @@
     recVerifyTail: { zh: '）—— 这不是 bug，见提示', en: ') — not a bug, see the tip' },
     /* 手势由 bindOrbit(canvas) 绑定，快捷键由 bindKeyboard() 绑定（见「交互」
        一节）——两组都是 init() 会自动接好的，提示语把它们列在一起。 */
-    hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
-              en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
+    hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 1–9 视角 · T 切换页签',
+              en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · 1–9 views · T to switch tabs' }
   };
 
   /* ================= 常量与状态（引擎区，以下一般无需改动） ================= */
@@ -157,6 +157,50 @@
   function clipNear(a, b) {
     const tt = (NEAR - a[2]) / (b[2] - a[2]);
     return [a[0] + (b[0]-a[0])*tt, a[1] + (b[1]-a[1])*tt, NEAR];
+  }
+
+  /* proj() 的反方向：给一个屏幕点，把「相机 eye 出发经过该像素的那条射线」
+     与世界平面 z = planeZ 求交，返回世界坐标 [x, y, planeZ]，射线与平面
+     平行（或恰好落在平面内，同样无唯一解）或交点落在相机之后都返回 null。
+     推导：scr() 是 cz=1 那层的仿射投影，把它反过来，屏幕点 (sx,sy) 对应
+     相机空间方向 (cx, cy, 1)（cx=(sx-CX)/FOCAL, cy=(CY-sy)/FOCAL），
+     camPt() 的基是正交的 {r,u,f}，所以世界方向就是 cx·r + cy·u + 1·f——
+     和 camPt() 互为逆变换，同一份 FOCAL/CX/CY 用两次，谁都不用再猜一遍。
+     这是 BoardRender.pickSquare（点击选子）能成立的唯一依据。 */
+  function unproject(C, screenXY, planeZ) {
+    if (planeZ == null) planeZ = 0;
+    const cx = (screenXY[0] - CX) / FOCAL;
+    const cy = (CY - screenXY[1]) / FOCAL;
+    const dir = [
+      cx * C.r[0] + cy * C.u[0] + C.f[0],
+      cx * C.r[1] + cy * C.u[1] + C.f[1],
+      cx * C.r[2] + cy * C.u[2] + C.f[2]
+    ];
+    if (Math.abs(dir[2]) < 1e-9) return null;             // 射线与平面平行（或共面），无唯一交点
+    const tt = (planeZ - C.eye[2]) / dir[2];
+    if (tt <= 0) return null;                              // 交点在相机之后（或恰在相机上）
+    return [C.eye[0] + dir[0]*tt, C.eye[1] + dir[1]*tt, planeZ];
+  }
+
+  /* 投影常量的只读访问器——FOCAL/CX/CY/W/H 是模块私有的，之前每个消费方
+     只能各自重新推一遍 FOCAL = 1.2·min(H, W·1.1) 的公式；棋子预览页就吃过
+     这个亏（算错一次，全部棋子跟着错位）。往后任何要自己做投影相关计算
+     的调用方，都从这里取权威值，不再重新推导。 */
+  function viewInfo() { return { FOCAL: FOCAL, CX: CX, CY: CY, W: W, H: H }; }
+
+  /* 让「ctx 参数」名副其实：drawBoard/drawPiece 这类跨模块的绘制函数把
+     ctx 当参数注入，是为了能在 node 下装载、能给第二块画布画图（如规则
+     工具要并排画伪合法/合法两块棋盘）。但 strokePoly/label3 等图元一直画
+     在本模块 init() 时钉死的模块私有 ctx 上，从不重新指向别的画布——于是
+     drawBoard(someOtherCanvas, …) 的输出会被悄悄劈成两半。withContext()
+     在 fn() 执行期间把私有 ctx 换成调用方给的目标画布，结束后原样复原；
+     选它而不是给每个图元加 ctx 形参，是因为改动只集中在一处，图元本身、
+     调用点都不用逐个改签名。 */
+  function withContext(targetCtx, fn) {
+    const prev = ctx;
+    ctx = targetCtx;
+    try { return fn(); }
+    finally { ctx = prev; }
   }
 
   /* 折线路径（支持 null 断点 + 近平面裁剪）；返回 [首点, 末点] 屏幕坐标 */
@@ -340,7 +384,12 @@
   /* 推进一步「引擎时钟」。starter 版本这里还会积分连续相位、驱动场景滑杆、
      记一条历史采样——三样棋都用不上，删掉后只剩 state.t 前进，供录制骨架的
      固定步长回放使用。真正的棋局推演（落子、算法单步）由消费方在
-     draw() / 自己的钩子里做。 */
+     draw() / 自己的钩子里做。
+     现状记录：state.t 眼下除了录制/回放子系统（recPush 起点、recStep 回放
+     时钟、recVerify 的核对与复原）之外没有别的读者——键盘不再驱动它
+     （见 bindKeyboard 处的说明），也没有任何 draw()/readout() 在读它。
+     是否整体拿掉这份「引擎时钟」是阶段 2 接 PGN 回放时才能定的架构决定，
+     这里先如实记一笔，不做改动。 */
   function simAdvance(d) {
     state.t += d;
   }
@@ -982,21 +1031,26 @@
     });
   }
 
-  /* 全局键盘快捷键：Space 暂停/继续、r 重置、T 切换页签、1–9 选视角。
-     这四组快捷键都只驱动引擎本体已经实现、且已经接在按钮上的函数
-     （togglePlay / resetSim / switchTab / applyView），不需要消费方提供任何
-     东西，所以放在这里而不是要求每个工具各自重新接一遍。
+  /* 全局键盘快捷键：T 切换页签、1–9 选视角。这两组快捷键都只驱动引擎本体
+     已经实现、且已经接在按钮上的函数（switchTab / applyView），不需要
+     消费方提供任何东西，所以放在这里而不是要求每个工具各自重新接一遍。
      绑在 window 上，不是 canvas 上——这是键盘事件，和 bindOrbit() 的
-     canvas 指针事件是两回事，混在一起会把两者都说不清楚。 */
+     canvas 指针事件是两回事，混在一起会把两者都说不清楚。
+
+     Space 与 r 不在这里绑定——它们属于工具，不属于引擎。math-viz 的设计
+     规格把 Space 定为所有五个棋类工具的播放/暂停/单步这枚统一的传输键
+     （阶段 3 的复盘工具还要用它当「下一步」），r 同理是工具自己的重置键；
+     若引擎在这里先用 preventDefault() 抢注，工具将来接自己的处理器时
+     只会和引擎打架，而不是真正拿到这个键。resetSim()/togglePlay() 本身
+     没有删——它们仍然接在面板的按钮上，只是不再从键盘直接触发。
+     （state.t 目前只有录制子系统在读，见 simAdvance 处的说明。） */
   function bindKeyboard() {
     window.addEventListener('keydown', e => {
       const el = document.activeElement;
       const tag = el && el.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el && el.isContentEditable)) return;
 
-      if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
-      else if (e.key === 'r' || e.key === 'R') { resetSim(); }
-      else if (e.key === 't' || e.key === 'T') {
+      if (e.key === 't' || e.key === 'T') {
         const keys = Object.keys(SCENES);
         if (keys.length) switchTab(keys[(keys.indexOf(curTab) + 1) % keys.length]);
       } else if (e.key >= '1' && e.key <= '9') {
@@ -1088,7 +1142,7 @@
   }
 
   return {
-    makeCam, proj, strokePoly, line3,
+    makeCam, proj, unproject, viewInfo, withContext, strokePoly, line3,
     glowDot, solidDot, label3, arrowAt,
     drawAxes, drawGridXY,
     clamp, fmt, fmtS, t,

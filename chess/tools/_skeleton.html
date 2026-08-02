@@ -75,8 +75,8 @@
     recVerifyTail: { zh: '）—— 这不是 bug，见提示', en: ') — not a bug, see the tip' },
     /* 手势由 bindOrbit(canvas) 绑定，快捷键由 bindKeyboard() 绑定（见「交互」
        一节）——两组都是 init() 会自动接好的，提示语把它们列在一起。 */
-    hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
-              en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
+    hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 1–9 视角 · T 切换页签',
+              en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · 1–9 views · T to switch tabs' }
   };
 
   /* ================= 常量与状态（引擎区，以下一般无需改动） ================= */
@@ -165,6 +165,50 @@
   function clipNear(a, b) {
     const tt = (NEAR - a[2]) / (b[2] - a[2]);
     return [a[0] + (b[0]-a[0])*tt, a[1] + (b[1]-a[1])*tt, NEAR];
+  }
+
+  /* proj() 的反方向：给一个屏幕点，把「相机 eye 出发经过该像素的那条射线」
+     与世界平面 z = planeZ 求交，返回世界坐标 [x, y, planeZ]，射线与平面
+     平行（或恰好落在平面内，同样无唯一解）或交点落在相机之后都返回 null。
+     推导：scr() 是 cz=1 那层的仿射投影，把它反过来，屏幕点 (sx,sy) 对应
+     相机空间方向 (cx, cy, 1)（cx=(sx-CX)/FOCAL, cy=(CY-sy)/FOCAL），
+     camPt() 的基是正交的 {r,u,f}，所以世界方向就是 cx·r + cy·u + 1·f——
+     和 camPt() 互为逆变换，同一份 FOCAL/CX/CY 用两次，谁都不用再猜一遍。
+     这是 BoardRender.pickSquare（点击选子）能成立的唯一依据。 */
+  function unproject(C, screenXY, planeZ) {
+    if (planeZ == null) planeZ = 0;
+    const cx = (screenXY[0] - CX) / FOCAL;
+    const cy = (CY - screenXY[1]) / FOCAL;
+    const dir = [
+      cx * C.r[0] + cy * C.u[0] + C.f[0],
+      cx * C.r[1] + cy * C.u[1] + C.f[1],
+      cx * C.r[2] + cy * C.u[2] + C.f[2]
+    ];
+    if (Math.abs(dir[2]) < 1e-9) return null;             // 射线与平面平行（或共面），无唯一交点
+    const tt = (planeZ - C.eye[2]) / dir[2];
+    if (tt <= 0) return null;                              // 交点在相机之后（或恰在相机上）
+    return [C.eye[0] + dir[0]*tt, C.eye[1] + dir[1]*tt, planeZ];
+  }
+
+  /* 投影常量的只读访问器——FOCAL/CX/CY/W/H 是模块私有的，之前每个消费方
+     只能各自重新推一遍 FOCAL = 1.2·min(H, W·1.1) 的公式；棋子预览页就吃过
+     这个亏（算错一次，全部棋子跟着错位）。往后任何要自己做投影相关计算
+     的调用方，都从这里取权威值，不再重新推导。 */
+  function viewInfo() { return { FOCAL: FOCAL, CX: CX, CY: CY, W: W, H: H }; }
+
+  /* 让「ctx 参数」名副其实：drawBoard/drawPiece 这类跨模块的绘制函数把
+     ctx 当参数注入，是为了能在 node 下装载、能给第二块画布画图（如规则
+     工具要并排画伪合法/合法两块棋盘）。但 strokePoly/label3 等图元一直画
+     在本模块 init() 时钉死的模块私有 ctx 上，从不重新指向别的画布——于是
+     drawBoard(someOtherCanvas, …) 的输出会被悄悄劈成两半。withContext()
+     在 fn() 执行期间把私有 ctx 换成调用方给的目标画布，结束后原样复原；
+     选它而不是给每个图元加 ctx 形参，是因为改动只集中在一处，图元本身、
+     调用点都不用逐个改签名。 */
+  function withContext(targetCtx, fn) {
+    const prev = ctx;
+    ctx = targetCtx;
+    try { return fn(); }
+    finally { ctx = prev; }
   }
 
   /* 折线路径（支持 null 断点 + 近平面裁剪）；返回 [首点, 末点] 屏幕坐标 */
@@ -348,7 +392,12 @@
   /* 推进一步「引擎时钟」。starter 版本这里还会积分连续相位、驱动场景滑杆、
      记一条历史采样——三样棋都用不上，删掉后只剩 state.t 前进，供录制骨架的
      固定步长回放使用。真正的棋局推演（落子、算法单步）由消费方在
-     draw() / 自己的钩子里做。 */
+     draw() / 自己的钩子里做。
+     现状记录：state.t 眼下除了录制/回放子系统（recPush 起点、recStep 回放
+     时钟、recVerify 的核对与复原）之外没有别的读者——键盘不再驱动它
+     （见 bindKeyboard 处的说明），也没有任何 draw()/readout() 在读它。
+     是否整体拿掉这份「引擎时钟」是阶段 2 接 PGN 回放时才能定的架构决定，
+     这里先如实记一笔，不做改动。 */
   function simAdvance(d) {
     state.t += d;
   }
@@ -990,21 +1039,26 @@
     });
   }
 
-  /* 全局键盘快捷键：Space 暂停/继续、r 重置、T 切换页签、1–9 选视角。
-     这四组快捷键都只驱动引擎本体已经实现、且已经接在按钮上的函数
-     （togglePlay / resetSim / switchTab / applyView），不需要消费方提供任何
-     东西，所以放在这里而不是要求每个工具各自重新接一遍。
+  /* 全局键盘快捷键：T 切换页签、1–9 选视角。这两组快捷键都只驱动引擎本体
+     已经实现、且已经接在按钮上的函数（switchTab / applyView），不需要
+     消费方提供任何东西，所以放在这里而不是要求每个工具各自重新接一遍。
      绑在 window 上，不是 canvas 上——这是键盘事件，和 bindOrbit() 的
-     canvas 指针事件是两回事，混在一起会把两者都说不清楚。 */
+     canvas 指针事件是两回事，混在一起会把两者都说不清楚。
+
+     Space 与 r 不在这里绑定——它们属于工具，不属于引擎。math-viz 的设计
+     规格把 Space 定为所有五个棋类工具的播放/暂停/单步这枚统一的传输键
+     （阶段 3 的复盘工具还要用它当「下一步」），r 同理是工具自己的重置键；
+     若引擎在这里先用 preventDefault() 抢注，工具将来接自己的处理器时
+     只会和引擎打架，而不是真正拿到这个键。resetSim()/togglePlay() 本身
+     没有删——它们仍然接在面板的按钮上，只是不再从键盘直接触发。
+     （state.t 目前只有录制子系统在读，见 simAdvance 处的说明。） */
   function bindKeyboard() {
     window.addEventListener('keydown', e => {
       const el = document.activeElement;
       const tag = el && el.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el && el.isContentEditable)) return;
 
-      if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
-      else if (e.key === 'r' || e.key === 'R') { resetSim(); }
-      else if (e.key === 't' || e.key === 'T') {
+      if (e.key === 't' || e.key === 'T') {
         const keys = Object.keys(SCENES);
         if (keys.length) switchTab(keys[(keys.indexOf(curTab) + 1) % keys.length]);
       } else if (e.key >= '1' && e.key <= '9') {
@@ -1096,7 +1150,7 @@
   }
 
   return {
-    makeCam, proj, strokePoly, line3,
+    makeCam, proj, unproject, viewInfo, withContext, strokePoly, line3,
     glowDot, solidDot, label3, arrowAt,
     drawAxes, drawGridXY,
     clamp, fmt, fmtS, t,
@@ -1139,7 +1193,7 @@
   }
 
   const FEN_TO_CODE = { p: P, n: N, b: B, r: R, q: Q, k: K };
-  const CODE_TO_FEN = { 1: 'p', 2: 'n', 3: 'b', 4: 'r', 5: 'q', 6: 'k' };
+  const CODE_TO_FEN = { [P]: 'p', [N]: 'n', [B]: 'b', [R]: 'r', [Q]: 'q', [K]: 'k' };
 
   function Position() {
     this.board = new Int8Array(128);
@@ -1165,7 +1219,8 @@
     return p;
   };
 
-  Position.fromFEN = function (fen) {
+  Position.fromFEN = function (fen, opts) {
+    const requireKings = !opts || opts.requireKings !== false;
     const parts = String(fen).trim().split(/\s+/);
     if (parts.length < 4) throw new Error('Bad FEN: expected at least 4 fields, got ' + parts.length);
     const rows = parts[0].split('/');
@@ -1195,8 +1250,13 @@
     }
     // 没有王、或某一方不止一个王，都不是一个真实的国际象棋局面 ——
     // 放任它通过会让 legalMoves/inCheck 在下游悄悄地对着 −1 出错。
-    if (wKings !== 1) throw new Error('Bad FEN: white must have exactly one king, found ' + wKings);
-    if (bKings !== 1) throw new Error('Bad FEN: black must have exactly one king, found ' + bKings);
+    // 但这条护栏只对"对局"场景成立：有些教学用途（例如孤马 BFS 到
+    // 每格最短步数场）就是要表示没有王的局面，所以留一个显式的
+    // opt-out —— { requireKings: false }，默认仍为 true。
+    if (requireKings) {
+      if (wKings !== 1) throw new Error('Bad FEN: white must have exactly one king, found ' + wKings);
+      if (bKings !== 1) throw new Error('Bad FEN: black must have exactly one king, found ' + bKings);
+    }
 
     if (parts[1] !== 'w' && parts[1] !== 'b') {
       throw new Error('Bad FEN: side to move must be "w" or "b", got "' + parts[1] + '"');
@@ -1251,13 +1311,26 @@
   const OFF_N = [33, 31, 18, 14, -33, -31, -18, -14];
   const OFF_B = [17, 15, -17, -15];
   const OFF_R = [16, 1, -16, -1];
-  const OFF_K = [17, 16, 15, 1, -17, -16, -15, -1];
-  const SLIDE = { 3: OFF_B, 4: OFF_R, 5: OFF_K };   // B / R / Q 共用射线表
+  // 八个方向的并集：斜线（象）∪ 直线（车）= 后的射线表，也恰好是王走一步
+  // 能到的八个方向——王与后共享这张表纯属几何巧合（王只走一步，后可以
+  // 滑到底），二者语义并不相同，所以用 OFF_K 只作为"王用这张表"的别名，
+  // 不要把它当成"王专属"的表来读。
+  const OFF_ALL8 = [17, 16, 15, 1, -17, -16, -15, -1];
+  const OFF_K = OFF_ALL8;
+  const SLIDE = { [B]: OFF_B, [R]: OFF_R, [Q]: OFF_ALL8 };   // B / R / Q 共用射线表
   const PROMO_PIECES = [Q, R, B, N];
 
   function mk(from, to, piece, captured, promo, flags) {
     return { from: from, to: to, piece: piece,
              captured: captured || 0, promo: promo || 0, flags: flags || 0 };
+  }
+
+  // Move 是每次调用现造的新对象，没有稳定恒等性——工具代码（例如用
+  // pseudoLegalMoves() 减 legalMoves() 求"被别住的子"）需要按值比较两步棋
+  // 是否是同一步。在同一局面内，from/to/promo 三项已完全确定一步棋
+  // （piece/captured/flags 都能从局面 + from/to/promo 推出，不需要参与比较）。
+  function sameMove(a, b) {
+    return a.from === b.from && a.to === b.to && a.promo === b.promo;
   }
 
   Position.prototype.pseudoLegalMoves = function () {
@@ -1572,6 +1645,11 @@
       const undo = this._make(m);
       // 与 inCheck 保持一致：找不到王（k < 0）视为"不构成将军"，
       // 而不是让 isAttacked(-1, …) 悄悄给出未定义的答案。
+      // 这不是漏洞，是有意为之：没有王的局面（fromFEN(fen, {requireKings:false})
+      // 构造出来的教学局面，例如孤马 BFS 场）根本没有"将军"这回事可暴露，
+      // 所以 k < 0 时直接放行——legalMoves() 在此退化为 pseudoLegalMoves()，
+      // 全部走法都算合法。调用方如果依赖"合法性过滤"这一行为，
+      // 需要自己先确认局面里有王。
       const k = this.kingSq(me);
       if (k < 0 || !this.isAttacked(k, -me)) out.push(m);
       this._unmake(m, undo);
@@ -1602,6 +1680,11 @@
     const has = this.legalMoves().length > 0;
     const chk = this.inCheck(this.turn);
     if (!has) return chk ? 'checkmate' : 'stalemate';
+    // 这条排在 chk 判断之前是刻意的：即使 this.turn 一方正被将军，只要子力
+    // 不足，也报告 'insufficient' 而不是 'check'——checkmate 已经在上面的
+    // !has 分支被排除了，所以这里不会掩盖任何将死；FIDE 的死局规则本就
+    // 不区分"死局时是否被将军"。想单独知道"当下是否被将军"这个盘面事实
+    // 的调用方，应该直接调 inCheck()，不要依赖 status() 的优先级。
     if (insufficientMaterial(this)) return 'insufficient';   // 死局自动成立，优先于一切
     // 将军是当下必须回应的事实；五十步规则只是"可主张"而非自动生效，
     // 棋局仍在进行中，所以将军排在五十步之前——这个顺序不是随意的。
@@ -1636,8 +1719,12 @@
     return out;
   }
 
+  // 与文件里其它查表一样提到模块层：先前是函数内的字面量，每次调用
+  // moveToUCI() 都要重新分配一次——perft 的热路径里 moveToUCI 调用量
+  // 很大（例如 perftDivide），没必要每次都重建这张表。
+  const PROMO_CH = { [N]: 'n', [B]: 'b', [R]: 'r', [Q]: 'q' };
+
   function moveToUCI(m) {
-    const PROMO_CH = { 2: 'n', 3: 'b', 4: 'r', 5: 'q' };
     return toAlg(m.from) + toAlg(m.to) + (m.promo ? PROMO_CH[m.promo] : '');
   }
 
@@ -1807,6 +1894,12 @@
     const toks = [];
     for (let i = 0; i < moves.length; i++) {
       if (pos.turn === WHITE) toks.push(pos.full + '.');
+      // 只有白方走动才带回合号是不够的：如果棋谱本身从黑方先行的局面
+      // 开始（[FEN]/[SetUp] 起点，或历史棋谱的中局切片），第一个黑方
+      // 半步也必须标出回合号，写成 "N..." 形式，否则输出的 PGN 丢了
+      // 回合号，不是合法 PGN。只有序列的第一个半步需要这样补——此后
+      // 黑方的半步照常紧跟在同一回合的白方半步之后，不需要回合号。
+      else if (i === 0) toks.push(pos.full + '...');
       toks.push(moveToSAN(pos, moves[i]));
       pos = pos.make(moves[i]);
     }
@@ -1826,7 +1919,7 @@
   return { WHITE, BLACK, EMPTY, P, N, B, R, Q, K,
            SQ, fileOf, rankOf, offBoard, toAlg, fromAlg, Position, FLAG,
            perft, perftDivide, moveToUCI, moveToSAN, parseSAN, parseUCI,
-           parsePGN, writePGN, START_FEN };
+           parsePGN, writePGN, START_FEN, sameMove };
 });
 /* <<< GENERATED:CHESS-CORE */
 /* >>> GENERATED:BOARD-RENDER */
@@ -1868,8 +1961,19 @@
   const EDGE = 'rgba(159,176,200,0.55)';
   const COORD = 'rgba(159,176,200,0.75)';
 
+  // a–h/1–8 坐标标签离棋盘外框的偏移，按格宽的比例算。
+  const COORD_LABEL_OFFSET = 0.42;
+
   /* ctx: CanvasRenderingContext2D；C: 相机；E: VizEngine（注入而非全局引用，
-     这样本模块在 node 里可加载、可测，不需要 DOM）。 */
+     这样本模块在 node 里可加载、可测，不需要 DOM）。
+
+     ctx 参数名副其实：格子填色本就全程用它。但外框与坐标标签走的是
+     E.strokePoly / E.label3——这两个图元一直画在 VizEngine.init() 时钉死
+     的模块私有画布上，从不理会调用方传进来的 ctx，于是 drawBoard(其他画布, …)
+     的输出会被悄悄劈成两半（详见 viz-engine.js 的 withContext 注释）。
+     这里用 E.withContext(ctx, fn) 把私有画布临时换成调用方给的这块，
+     执行完自动换回去——阶段 1 规则工具要并排画「伪合法 / 合法」两块棋盘，
+     就是靠这行才不会串到同一块画布上。 */
   function drawBoard(ctx, C, E, spec) {
     const L = spec.layout || layout(spec);
     const mask = spec.mask || null;
@@ -1889,24 +1993,40 @@
       }
     }
 
-    // 外框
     const o = L.squareCorners(0, 0)[0];
-    const frame = [o, [o[0] + L.w, o[1], 0], [o[0] + L.w, o[1] + L.h, 0], [o[0], o[1] + L.h, 0], o];
-    E.strokePoly(C, frame, { color: EDGE, width: 1.4 });
+    E.withContext(ctx, function () {
+      // 外框
+      const frame = [o, [o[0] + L.w, o[1], 0], [o[0] + L.w, o[1] + L.h, 0], [o[0], o[1] + L.h, 0], o];
+      E.strokePoly(C, frame, { color: EDGE, width: 1.4 });
 
-    if (spec.coords !== false) {
-      for (let f = 0; f < L.files; f++) {
-        const c = L.squareCenter(f, 0);
-        E.label3(C, [c[0], o[1] - 0.42 * L.cell, 0], fileLabel(f),
-                 { color: COORD, size: 12, align: 'center' });
+      if (spec.coords !== false) {
+        for (let f = 0; f < L.files; f++) {
+          const c = L.squareCenter(f, 0);
+          E.label3(C, [c[0], o[1] - COORD_LABEL_OFFSET * L.cell, 0], fileLabel(f),
+                   { color: COORD, size: 12, align: 'center' });
+        }
+        for (let r = 0; r < L.ranks; r++) {
+          const c = L.squareCenter(0, r);
+          E.label3(C, [o[0] - COORD_LABEL_OFFSET * L.cell, c[1], 0], String(r + 1),
+                   { color: COORD, size: 12, align: 'center' });
+        }
       }
-      for (let r = 0; r < L.ranks; r++) {
-        const c = L.squareCenter(0, r);
-        E.label3(C, [o[0] - 0.42 * L.cell, c[1], 0], String(r + 1),
-                 { color: COORD, size: 12, align: 'center' });
-      }
-    }
+    });
     return L;
+  }
+
+  /* 反向查询：屏幕坐标 → 棋盘格。是「点击选子」这枚阶段 1 头号交互
+     （点棋子→高亮合法目标→点目标→落子）唯一需要的引擎入口。
+     用 E.unproject 把射线与棋盘所在的 z=0 平面求交，再按 layout 的格距换算
+     成 file/rank；落在相机之后、或点在棋盘外框之外都返回 null。 */
+  function pickSquare(C, E, screenXY, L) {
+    const p = E.unproject(C, screenXY, 0);
+    if (!p) return null;
+    const o = L.squareCorners(0, 0)[0];   // 棋盘左下角，和 drawBoard 的外框基准一致
+    const f = Math.floor((p[0] - o[0]) / L.cell);
+    const r = Math.floor((p[1] - o[1]) / L.cell);
+    if (f < 0 || f >= L.files || r < 0 || r >= L.ranks) return null;
+    return { file: f, rank: r };
   }
 
   /* 棋子写成 SVG 路径（0..100 方框，y 向下，底座压在 y≈98）。
@@ -1970,6 +2090,14 @@
   const BLACK_FILL = 'rgba(15,23,42,0.90)';
   const BLACK_EDGE = 'rgba(148,163,184,0.90)';
 
+  /* 棋子路径的设计框契约：PIECE_PATHS 的坐标都画在一个 0..100 的方框里
+     （PIECE_BOX），底座中点钉在 (50, 88)（PIECE_ANCHOR）——drawPiece 用它们
+     把设计框换算成屏幕像素、再把底座对准格心。这两个数不是随手写的裁剪值，
+     导出它们是因为将来「按深度算一个合适的 scale」这类计算离不开设计框
+     本身的尺寸与锚点，不该让调用方去反猜 /100 和 (50,88) 是什么。 */
+  const PIECE_BOX = 100;
+  const PIECE_ANCHOR = [50, 88];
+
   const pathCache = Object.create(null);
   function path2d(d) {
     if (!pathCache[d]) pathCache[d] = new Path2D(d);
@@ -1984,13 +2112,13 @@
     const key = CODE_KEY[Math.abs(o.code)];
     if (!key) return;
     const white = o.code > 0;
-    const k = (o.scale || 1) / 100;
+    const k = (o.scale || 1) / PIECE_BOX;
 
     ctx.save();
     ctx.globalAlpha = o.alpha == null ? 1 : o.alpha;
     ctx.translate(s[0], s[1]);
     ctx.scale(k, k);
-    ctx.translate(-50, -88);            // 以底座中点对齐格心
+    ctx.translate(-PIECE_ANCHOR[0], -PIECE_ANCHOR[1]);   // 以底座中点对齐格心
     ctx.fillStyle = white ? WHITE_FILL : BLACK_FILL;
     ctx.strokeStyle = white ? WHITE_EDGE : BLACK_EDGE;
     ctx.lineWidth = 3;
@@ -2005,8 +2133,10 @@
   }
 
   return {
-    layout: layout, fileLabel: fileLabel, isLight: isLight, drawBoard: drawBoard,
+    layout: layout, fileLabel: fileLabel, isLight: isLight,
+    drawBoard: drawBoard, pickSquare: pickSquare,
     PIECE_PATHS: PIECE_PATHS, drawPiece: drawPiece,
+    PIECE_BOX: PIECE_BOX, PIECE_ANCHOR: PIECE_ANCHOR, CODE_KEY: CODE_KEY,
   };
 });
 /* <<< GENERATED:BOARD-RENDER */
