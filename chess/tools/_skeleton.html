@@ -1987,6 +1987,30 @@
      这里用 E.withContext(ctx, fn) 把私有画布临时换成调用方给的这块，
      执行完自动换回去——阶段 1 规则工具要并排画「伪合法 / 合法」两块棋盘，
      就是靠这行才不会串到同一块画布上。 */
+  /* a–h/1–8 坐标标签，从 drawBoard 里拆出来的独立入口。存在的唯一理由是
+     task-14 perf-gate 的 draw-cost 面板要把「文字渲染」和「格子填色 + 外框」
+     分开计时——第一轮 draw-cost 读数（6ms，远高于诊断阶段量到的 ~1.2ms）
+     没法只靠一个不透明的总数判断超出的部分是不是文字渲染，所以拆开让
+     每一项都能单独测。drawBoard(spec) 在 spec.coords !== false 时原样调用
+     这个函数，因此默认行为、绘制顺序、坐标计算都和拆分之前逐字节一致，
+     不是重新实现一遍。 */
+  function drawCoordLabels(ctx, C, E, spec) {
+    const L = spec.layout || layout(spec);
+    const o = L.squareCorners(0, 0)[0];
+    E.withContext(ctx, function () {
+      for (let f = 0; f < L.files; f++) {
+        const c = L.squareCenter(f, 0);
+        E.label3(C, [c[0], o[1] - COORD_LABEL_OFFSET * L.cell, 0], fileLabel(f),
+                 { color: COORD, size: 12, align: 'center' });
+      }
+      for (let r = 0; r < L.ranks; r++) {
+        const c = L.squareCenter(0, r);
+        E.label3(C, [o[0] - COORD_LABEL_OFFSET * L.cell, c[1], 0], String(r + 1),
+                 { color: COORD, size: 12, align: 'center' });
+      }
+    });
+  }
+
   function drawBoard(ctx, C, E, spec) {
     const L = spec.layout || layout(spec);
     const mask = spec.mask || null;
@@ -2011,20 +2035,10 @@
       // 外框
       const frame = [o, [o[0] + L.w, o[1], 0], [o[0] + L.w, o[1] + L.h, 0], [o[0], o[1] + L.h, 0], o];
       E.strokePoly(C, frame, { color: EDGE, width: 1.4 });
-
-      if (spec.coords !== false) {
-        for (let f = 0; f < L.files; f++) {
-          const c = L.squareCenter(f, 0);
-          E.label3(C, [c[0], o[1] - COORD_LABEL_OFFSET * L.cell, 0], fileLabel(f),
-                   { color: COORD, size: 12, align: 'center' });
-        }
-        for (let r = 0; r < L.ranks; r++) {
-          const c = L.squareCenter(0, r);
-          E.label3(C, [o[0] - COORD_LABEL_OFFSET * L.cell, c[1], 0], String(r + 1),
-                   { color: COORD, size: 12, align: 'center' });
-        }
-      }
     });
+
+    if (spec.coords !== false) drawCoordLabels(ctx, C, E, { layout: L });
+
     return L;
   }
 
@@ -2147,7 +2161,7 @@
 
   return {
     layout: layout, fileLabel: fileLabel, isLight: isLight,
-    drawBoard: drawBoard, pickSquare: pickSquare,
+    drawBoard: drawBoard, drawCoordLabels: drawCoordLabels, pickSquare: pickSquare,
     PIECE_PATHS: PIECE_PATHS, drawPiece: drawPiece,
     PIECE_BOX: PIECE_BOX, PIECE_ANCHOR: PIECE_ANCHOR, CODE_KEY: CODE_KEY,
   };

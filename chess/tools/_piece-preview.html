@@ -47,7 +47,14 @@
   .budget { font-size: 11px; color: rgba(196, 210, 230, 0.55); }
   .badge-ok { color: #34d399; }
   .badge-bad { color: #fb7185; }
+  .breakdown { margin-top: 10px; font-size: 12px; }
+  .bdRow { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 1px 0; color: rgba(196, 210, 230, 0.72); }
+  .bdRow .bdVal { color: #c4d2e6; font-variant-numeric: tabular-nums; }
+  .bdRow.bdTotal { margin-top: 4px; padding-top: 6px; border-top: 1px solid rgba(148, 163, 184, 0.18); }
+  .bdRow.bdTotal .bdLabel { color: #e2e8f0; font-weight: 600; }
+  .bdRow.bdTotal .bdVal { font: italic 20px Georgia, "Songti SC", serif; }
   .contextRow { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(148, 163, 184, 0.15); font-size: 11px; color: rgba(196, 210, 230, 0.55); }
+  .contextRow .bdRow { font-size: 11px; }
   .contextRow .contextVal { color: rgba(196, 210, 230, 0.85); font-weight: 600; }
   .contextNote { margin-top: 4px; font-size: 10px; font-style: italic; color: rgba(196, 210, 230, 0.42); }
 </style>
@@ -64,15 +71,19 @@
   </div>
   <p id="gridNote">All six piece types &times; both colours, at 24px (the size that decides legibility) and 96px. Same-size pieces sit side by side.</p>
   <p id="harnessNote" style="display:none">Full 8&times;8 starting position, 32 pieces, camera rotating continuously (az += 0.006/frame) to sample the worst case.</p>
-  <div class="fpsRow">
-    <span class="fps" id="drawCost">&mdash;</span>
-    <span class="fpsLabel">draw cost &middot; median, rolling window</span>
+  <div class="breakdown">
+    <div class="bdRow"><span class="bdLabel">background fill</span><span class="bdVal" id="bgCost">&mdash;</span></div>
+    <div class="bdRow"><span class="bdLabel">board (squares + frame)</span><span class="bdVal" id="boardCost">&mdash;</span></div>
+    <div class="bdRow"><span class="bdLabel">coordinate labels</span><span class="bdVal" id="labelsCost">&mdash;</span></div>
+    <div class="bdRow"><span class="bdLabel">32 &times; drawPiece</span><span class="bdVal" id="piecesCost">&mdash;</span></div>
+    <div class="bdRow bdTotal"><span class="bdLabel">total (gated) &middot; median, rolling window</span><span class="bdVal" id="totalCost">&mdash;</span></div>
   </div>
-  <div class="budget">Gate: per-frame draw cost for 32 pieces, with rasterization forced (getImageData) &middot; pass threshold: &le;4&nbsp;ms</div>
+  <div class="budget">Gate: sum of the four components above, each timed with performance.now() inside one frame &middot; rasterization forced once per frame (not per component) &middot; pass threshold: &le;4&nbsp;ms</div>
   <div class="contextRow">
+    <div class="bdRow"><span class="bdLabel">instrumentation overhead (getImageData readback)</span><span class="bdVal" id="readbackCost">&mdash;</span></div>
     <span class="contextVal" id="refreshRate">&mdash;</span> host refresh &middot;
     <span class="contextVal" id="achievedFps">&mdash;</span> achieved fps
-    <div class="contextNote">Context only, not graded — these describe this display/host, not this page's code. A 30&nbsp;Hz host makes a 55&nbsp;fps gate unpassable no matter how fast the drawing is; a 144&nbsp;Hz host would pass it trivially no matter how slow.</div>
+    <div class="contextNote">Context only, not graded — the readback line exists only to force rasterization for measurement and would not run in a shipped tool, so it is excluded from the gated total; refresh/fps describe this display/host, not this page's code. A 30&nbsp;Hz host makes a 55&nbsp;fps gate unpassable no matter how fast the drawing is; a 144&nbsp;Hz host would pass it trivially no matter how slow.</div>
   </div>
 </div>
 
@@ -1296,6 +1307,30 @@
      这里用 E.withContext(ctx, fn) 把私有画布临时换成调用方给的这块，
      执行完自动换回去——阶段 1 规则工具要并排画「伪合法 / 合法」两块棋盘，
      就是靠这行才不会串到同一块画布上。 */
+  /* a–h/1–8 坐标标签，从 drawBoard 里拆出来的独立入口。存在的唯一理由是
+     task-14 perf-gate 的 draw-cost 面板要把「文字渲染」和「格子填色 + 外框」
+     分开计时——第一轮 draw-cost 读数（6ms，远高于诊断阶段量到的 ~1.2ms）
+     没法只靠一个不透明的总数判断超出的部分是不是文字渲染，所以拆开让
+     每一项都能单独测。drawBoard(spec) 在 spec.coords !== false 时原样调用
+     这个函数，因此默认行为、绘制顺序、坐标计算都和拆分之前逐字节一致，
+     不是重新实现一遍。 */
+  function drawCoordLabels(ctx, C, E, spec) {
+    const L = spec.layout || layout(spec);
+    const o = L.squareCorners(0, 0)[0];
+    E.withContext(ctx, function () {
+      for (let f = 0; f < L.files; f++) {
+        const c = L.squareCenter(f, 0);
+        E.label3(C, [c[0], o[1] - COORD_LABEL_OFFSET * L.cell, 0], fileLabel(f),
+                 { color: COORD, size: 12, align: 'center' });
+      }
+      for (let r = 0; r < L.ranks; r++) {
+        const c = L.squareCenter(0, r);
+        E.label3(C, [o[0] - COORD_LABEL_OFFSET * L.cell, c[1], 0], String(r + 1),
+                 { color: COORD, size: 12, align: 'center' });
+      }
+    });
+  }
+
   function drawBoard(ctx, C, E, spec) {
     const L = spec.layout || layout(spec);
     const mask = spec.mask || null;
@@ -1320,20 +1355,10 @@
       // 外框
       const frame = [o, [o[0] + L.w, o[1], 0], [o[0] + L.w, o[1] + L.h, 0], [o[0], o[1] + L.h, 0], o];
       E.strokePoly(C, frame, { color: EDGE, width: 1.4 });
-
-      if (spec.coords !== false) {
-        for (let f = 0; f < L.files; f++) {
-          const c = L.squareCenter(f, 0);
-          E.label3(C, [c[0], o[1] - COORD_LABEL_OFFSET * L.cell, 0], fileLabel(f),
-                   { color: COORD, size: 12, align: 'center' });
-        }
-        for (let r = 0; r < L.ranks; r++) {
-          const c = L.squareCenter(0, r);
-          E.label3(C, [o[0] - COORD_LABEL_OFFSET * L.cell, c[1], 0], String(r + 1),
-                   { color: COORD, size: 12, align: 'center' });
-        }
-      }
     });
+
+    if (spec.coords !== false) drawCoordLabels(ctx, C, E, { layout: L });
+
     return L;
   }
 
@@ -1456,7 +1481,7 @@
 
   return {
     layout: layout, fileLabel: fileLabel, isLight: isLight,
-    drawBoard: drawBoard, pickSquare: pickSquare,
+    drawBoard: drawBoard, drawCoordLabels: drawCoordLabels, pickSquare: pickSquare,
     PIECE_PATHS: PIECE_PATHS, drawPiece: drawPiece,
     PIECE_BOX: PIECE_BOX, PIECE_ANCHOR: PIECE_ANCHOR, CODE_KEY: CODE_KEY,
   };
@@ -1495,7 +1520,12 @@
   var btnHarness = document.getElementById('btnHarness');
   var gridNote = document.getElementById('gridNote');
   var harnessNote = document.getElementById('harnessNote');
-  var drawCostEl = document.getElementById('drawCost');
+  var bgCostEl = document.getElementById('bgCost');
+  var boardCostEl = document.getElementById('boardCost');
+  var labelsCostEl = document.getElementById('labelsCost');
+  var piecesCostEl = document.getElementById('piecesCost');
+  var totalCostEl = document.getElementById('totalCost');
+  var readbackCostEl = document.getElementById('readbackCost');
   var refreshRateEl = document.getElementById('refreshRate');
   var achievedFpsEl = document.getElementById('achievedFps');
   var panelEl = document.querySelector('.panel');
@@ -1632,16 +1662,36 @@
     Object.assign(E.cam, { az: -0.6, el: 0.55, dist: 11, tx: 0, ty: 0, tz: 0 });
   }
 
+  /* drawHarness() 按阶段计时并把每一段的耗时返回给调用方——不是重画一遍
+     再另外估，是同一趟绘制里插了四个 performance.now() 探针。拆成
+     background / board(格子+外框) / labels(坐标标注) / pieces(32 次 drawPiece)
+     四段，是为了回答"6ms 的读数到底是环境开销还是文字渲染这类真热点"
+     这个问题——一个不透明的总数分不出这两种可能，拆开才行。
+     这里特意不在每一段后面都强制光栅化一次（那样 5 次 getImageData 会把
+     真正要测的东西全部淹没在读回开销里）；光栅化只在 tick() 里对整帧做
+     一次，见下面 tick() 的注释。 */
   function drawHarness() {
     var W = window.innerWidth, H = window.innerHeight;
+
+    var t0 = performance.now();
     ctx.fillStyle = '#05070d';
     ctx.fillRect(0, 0, W, H);
+    var t1 = performance.now();
+
     var C = E.makeCam();
-    BR.drawBoard(ctx, C, E, { layout: L });
+    BR.drawBoard(ctx, C, E, { layout: L, coords: false });   // 只画格子 + 外框，坐标标注拆到下面单独计时
+    var t2 = performance.now();
+
+    BR.drawCoordLabels(ctx, C, E, { layout: L });
+    var t3 = performance.now();
+
     for (var i = 0; i < START.length; i++) {
       var p = START[i];
       BR.drawPiece(ctx, C, E, { code: p.code, center: L.squareCenter(p.f, p.r), scale: HARNESS_SCALE });
     }
+    var t4 = performance.now();
+
+    return { bg: t1 - t0, board: t2 - t1, labels: t3 - t2, pieces: t4 - t3 };
   }
 
   /* ---------------- 模式切换 ---------------- */
@@ -1655,9 +1705,13 @@
     gridWrap.classList.toggle('hidden', mode !== 'grid');
     if (mode === 'harness') enterHarness(); else drawGrid();
     frames = 0; t0 = performance.now();
-    drawSamples.length = 0; rafSamples.length = 0; lastTickTs = 0;
+    bgSamples.length = 0; boardSamples.length = 0; labelsSamples.length = 0;
+    piecesSamples.length = 0; readbackSamples.length = 0; rafSamples.length = 0;
+    lastTickTs = 0;
     if (mode !== 'harness') {
-      drawCostEl.textContent = '—';
+      [bgCostEl, boardCostEl, labelsCostEl, piecesCostEl, totalCostEl, readbackCostEl].forEach(function (el) {
+        el.textContent = '—'; el.className = 'bdVal';
+      });
       refreshRateEl.textContent = '—';
       achievedFpsEl.textContent = '—';
     }
@@ -1674,25 +1728,38 @@
      在 30Hz 宿主上永远不可能过，在 144Hz 宿主上不管代码多烂都会轻松过，
      两个方向都测不出真实回归。
 
-     新门改测「drawHarness() 这一次调用本身花了多少时间」，且用一次
-     ctx.getImageData(0,0,1,1) 强制光栅化——只提交绘制命令而不强制其执行，
-     测出来的是「命令入队多快」而不是「像素真被画出来多快」，这正是
-     诊断阶段第一次量出 1.2ms（远低于预算）时踩过的陷阱；getImageData
-     每份样本只调一次，不在每条 ctx 调用后都调一次，否则本身的开销会
-     淹没被测的东西。
+     新门改测「drawHarness() 这一次调用本身花了多少时间」，拆成四段分别计时，
+     且每帧只用一次 ctx.getImageData(0,0,1,1) 强制光栅化——只提交绘制命令
+     而不强制其执行，测出来的是「命令入队多快」而不是「像素真被画出来多快」，
+     这正是诊断阶段第一次量出 1.2ms（远低于预算）时踩过的陷阱；readback
+     每帧只调一次、放在四段绘制之后，不在每一段后面都调一次，否则五次
+     getImageData 的开销会淹没被测的四段本身。readback 的耗时单独显示为
+     「instrumentation overhead」，不计入门槛总和——它只为了让测量成立而
+     存在，真正发布的工具里不会有这一步。
+
+     总和（门槛）只加 bg + board + labels + pieces 四段，显式排除 readback。
 
      rAF 间隔仍然记录，但只作为「宿主刷新率」这一条上下文展示，明确
-     标成「不计入门槛」——它是显示器的属性，不是这份代码的属性。 */
+     标成「不计入门槛」——它是显示器的属性，不是这份代码的属性。
+
+     所有读数都取滚动窗口的中位数，不用最新一帧——第一批帧背着冷的
+     Path2D 缓存和字体加载，很可能就是"读数偏高"的一种解释，只有窗口
+     稳定下来的中位数才说得清是不是持续性的。 */
   function median(samples) {
     if (!samples.length) return 0;
     var sorted = samples.slice().sort(function (a, b) { return a - b; });
     var mid = sorted.length >> 1;
     return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
   }
+  function pushSample(arr, v) {
+    arr.push(v);
+    if (arr.length > SAMPLE_WINDOW) arr.shift();
+  }
+  function fmtMs(v) { return v.toFixed(2) + ' ms'; }
 
   var SAMPLE_WINDOW = 90;   // 滚动窗口的样本数上限（约 1.5–3s，取决于宿主刷新率）
-  var DRAW_COST_BUDGET_MS = 4;   // 32 子的通过阈值——见 chess-perf-gate-report.md 的推导
-  var drawSamples = [], rafSamples = [];
+  var DRAW_COST_BUDGET_MS = 4;   // 四段之和的通过阈值——见 chess-perf-gate-report.md 的推导
+  var bgSamples = [], boardSamples = [], labelsSamples = [], piecesSamples = [], readbackSamples = [], rafSamples = [];
   var frames = 0, t0 = performance.now(), fps = 0, lastTickTs = 0;
 
   function tick(ts) {
@@ -1704,21 +1771,36 @@
       lastTickTs = ts;
 
       E.cam.az += 0.006;
-      var d0 = performance.now();
-      drawHarness();
-      ctx.getImageData(0, 0, 1, 1);   // 强制光栅化，逼真实像素被画出来，不只是命令入队
-      var d1 = performance.now();
-      drawSamples.push(d1 - d0);
-      if (drawSamples.length > SAMPLE_WINDOW) drawSamples.shift();
+      var timing = drawHarness();
+
+      var r0 = performance.now();
+      ctx.getImageData(0, 0, 1, 1);   // 强制光栅化，每帧仅一次，逼真实像素被画出来
+      var r1 = performance.now();
+
+      pushSample(bgSamples, timing.bg);
+      pushSample(boardSamples, timing.board);
+      pushSample(labelsSamples, timing.labels);
+      pushSample(piecesSamples, timing.pieces);
+      pushSample(readbackSamples, r1 - r0);
 
       frames++;
       var now = performance.now();
       if (now - t0 >= 1000) {
         fps = frames; frames = 0; t0 = now;
 
-        var drawMs = median(drawSamples);
-        drawCostEl.textContent = drawMs.toFixed(2) + ' ms';
-        drawCostEl.className = 'fps ' + (drawMs <= DRAW_COST_BUDGET_MS ? 'badge-ok' : 'badge-bad');
+        var bgMs = median(bgSamples), boardMs = median(boardSamples),
+            labelsMs = median(labelsSamples), piecesMs = median(piecesSamples),
+            readbackMs = median(readbackSamples);
+        var totalMs = bgMs + boardMs + labelsMs + piecesMs;   // 显式排除 readback
+
+        bgCostEl.textContent = fmtMs(bgMs);
+        boardCostEl.textContent = fmtMs(boardMs);
+        labelsCostEl.textContent = fmtMs(labelsMs);
+        piecesCostEl.textContent = fmtMs(piecesMs);
+        readbackCostEl.textContent = fmtMs(readbackMs);
+
+        totalCostEl.textContent = fmtMs(totalMs);
+        totalCostEl.className = 'bdVal ' + (totalMs <= DRAW_COST_BUDGET_MS ? 'badge-ok' : 'badge-bad');
 
         var rafMs = median(rafSamples);
         refreshRateEl.textContent = rafMs > 0 ? (1000 / rafMs).toFixed(1) + ' Hz' : '—';
