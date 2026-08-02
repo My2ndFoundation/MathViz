@@ -1,9 +1,178 @@
 <!doctype html>
+<html lang="en">
+<head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
 <meta name="tool-version" content="0.0.0">
 <meta name="engine-version" content="chess-0.1.0">
-<title>Chess subproject skeleton</title>
+<title>Chess Tool Skeleton</title>
+<!-- 样式令牌与组件整体搬运自 design-system/math-viz-starter.html 的 <style> 块，
+     只做两处子项目专属调整：① canvas 是唯一主角，本子项目工具①②不分屏（分屏
+     只属于阶段 2 之后的调试类工具）；② 默认英文——面板里没有任何硬编码中文，
+     文案一律由引擎的 t() 在运行时从工具声明的 {zh,en} 对象里取。 -->
+<style>
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  --angle-amber:#fbbf24;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none}
+body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)}
+/* canvas 是主角：全屏置底，其余一切 UI 浮在其上，永不分屏 */
+#scene{position:fixed;inset:0;display:block;touch-action:none;cursor:grab}
+#scene.dragging{cursor:grabbing}
+
+/* ---- 标题区 ---- */
+.brand{position:fixed;top:20px;left:24px;pointer-events:none;user-select:none;max-width:min(520px,42vw)}
+.brand h1{margin:0;font-family:var(--font-math);font-weight:600;font-size:26px;letter-spacing:.08em;
+  color:#eef3fa;text-shadow:0 2px 20px rgba(45,212,234,.20)}
+.brand p{margin:7px 0 0;font-size:12.5px;line-height:1.65;color:rgba(159,176,200,.85)}
+
+/* ---- 页签 ---- */
+.tabs{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:5;
+  display:flex;gap:4px;padding:4px;border-radius:999px;
+  background:var(--panel-bg);border:1px solid var(--panel-line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
+.tab{border:1px solid transparent;background:transparent;color:#b8c6da;
+  font-size:12.5px;font-family:var(--font-cn);padding:6px 15px;border-radius:999px;cursor:pointer;
+  transition:color .15s,border-color .15s,background .15s}
+.tab:hover{color:#e8f2fb}
+.tab:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.tab.active{background:rgba(45,212,234,.13);border-color:rgba(45,212,234,.55);color:#9be8f7}
+
+/* ---- 底部提示 ---- */
+.hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);pointer-events:none;user-select:none;
+  font-size:11px;letter-spacing:.05em;color:rgba(159,176,200,.6);white-space:nowrap}
+
+/* ---- 控制面板 ---- */
+.panel{position:fixed;top:14px;right:14px;width:304px;max-height:calc(100vh - 28px);overflow-y:auto;
+  background:var(--panel-bg);border:1px solid var(--panel-line);border-radius:16px;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 18px 50px rgba(0,0,0,.45);user-select:none}
+.panel::-webkit-scrollbar{width:6px}
+.panel::-webkit-scrollbar-thumb{background:rgba(148,163,184,.25);border-radius:3px}
+.panel-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px 10px;
+  font-size:13px;font-weight:600;letter-spacing:.06em;color:#dbe6f5}
+.panel:not(.collapsed) .panel-head{border-bottom:1px solid var(--panel-line)}
+.ph-right{display:flex;align-items:center;gap:7px}
+.ver{font-family:var(--font-mono);font-size:10px;color:rgba(159,176,200,.55)}
+.lang{padding:3px 8px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:11px;cursor:pointer}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.fold{width:24px;height:24px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:14px;line-height:1;cursor:pointer}
+.fold:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.panel.collapsed .panel-body{display:none}
+.panel-body{padding:6px 14px 14px}
+
+/* 滑杆 */
+.ctl{margin:11px 0 3px}
+.ctl .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.ctl label{font-size:12px;color:#c6d2e4}
+.ctl label i{font-family:var(--font-math);font-style:italic;font-size:13px}
+.ctl .val{font-family:var(--font-mono);font-size:11.5px;color:#7dd3fc}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;cursor:pointer;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--trace-cyan);margin-top:-5px;border:2px solid #0b1220;box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-moz-range-thumb{width:11px;height:11px;border:2px solid #0b1220;border-radius:50%;
+  background:var(--trace-cyan);box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-offset:2px;border-radius:4px}
+
+/* 按钮 */
+.row{display:flex;gap:8px;margin:13px 0 4px}
+.btn{padding:6px 10px;border-radius:9px;border:1px solid rgba(148,163,184,.25);
+  background:rgba(30,41,59,.55);color:#d7e2f2;font-size:12px;font-family:var(--font-cn);cursor:pointer;
+  transition:border-color .15s,color .15s,background .15s}
+.btn:hover{border-color:rgba(45,212,234,.55)}
+.btn:focus-visible,.fold:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.btn.wide{flex:1}
+.btn.active{border-color:rgba(45,212,234,.8);background:rgba(45,212,234,.12);color:#9be8f7}
+.views{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 2px}
+.views .vlabel{font-size:11.5px;color:rgba(159,176,200,.8);margin-right:2px}
+.vbtn{padding:5px 9px;font-size:11.5px}
+
+/* 开关 */
+.toggles{display:flex;flex-wrap:wrap;gap:7px 12px;margin:12px 0 2px}
+.tg{display:flex;align-items:center;gap:6px;font-size:12px;color:#c6d2e4;cursor:pointer}
+.tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
+.tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
+
+/* 录制 / 回放行（§11）；未声明 RECORD 的工具里 #recHost 始终为空 */
+.recrow{display:flex;flex-wrap:wrap;gap:6px;margin:11px 0 2px}
+.recrow .btn{padding:5px 9px;font-size:11.5px}
+.recinfo{font-family:var(--font-mono);font-size:11px;line-height:1.6;
+  color:var(--ui-slate);margin:2px 0 2px;word-break:break-word}
+
+/* 读数与提示 */
+.readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
+  font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
+.readout b{font-weight:600;color:#e8eef7}
+.tips{margin-top:11px;font-size:11px;line-height:1.65;color:rgba(159,176,200,.72)}
+
+@media (max-width:760px){
+  .brand{top:12px;left:14px;max-width:70vw}
+  .brand h1{font-size:20px}
+  .brand p{display:none}
+  .tabs{top:52px;left:14px;transform:none}
+  .panel{left:10px;right:10px;top:auto;bottom:10px;width:auto;max-height:62vh}
+  .hint{display:none}
+}
+</style>
+</head>
+<body>
+
 <canvas id="scene"></canvas>
+
+<div class="brand">
+  <h1></h1>
+  <p id="brandDesc"></p>
+</div>
+
+<nav class="tabs" id="tabsNav"></nav>
+
+<aside class="panel" id="panel">
+  <div class="panel-head">
+    <span id="panelTitle">Parameters &amp; Views</span>
+    <span class="ph-right">
+      <span class="ver" id="verBadge"></span>
+      <button class="lang" id="btnLang" title="切换语言 / Switch language">中</button>
+      <button class="fold" id="btnFold" title="收起 / 展开 · Collapse / expand">−</button>
+    </span>
+  </div>
+  <div class="panel-body">
+    <div id="paramsHost"></div>
+    <div class="row">
+      <button class="btn wide" id="btnPlay">⏸ Pause</button>
+      <button class="btn" id="btnReset">↺ Reset</button>
+    </div>
+    <div id="recHost"></div>
+    <div id="togglesHost"></div>
+    <div id="viewsHost"></div>
+    <div class="readout" id="readout"></div>
+    <div class="tips" id="tips"></div>
+  </div>
+</aside>
+
+<div class="hint">Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · 1–9 views · T to switch tabs</div>
+
 <script>
 /* >>> GENERATED:VIZ-ENGINE */
 /* 3D 渲染引擎 —— 由 design-system/math-viz-starter.html 裁剪而来。
@@ -1935,6 +2104,8 @@
            parsePGN, writePGN, START_FEN, sameMove };
 });
 /* <<< GENERATED:CHESS-CORE */
+/* >>> GENERATED:INTERACT */
+/* <<< GENERATED:INTERACT */
 /* >>> GENERATED:BOARD-RENDER */
 /* 参数化棋盘与棋子渲染。棋盘躺在 z=0 平面、以原点为中心。
    算法工具与规则工具共用同一套 —— 八皇后摆的是真正的后。
@@ -2168,3 +2339,11 @@
 });
 /* <<< GENERATED:BOARD-RENDER */
 </script>
+<script>
+/* 工具专属声明写这里，在 GENERATED 区之外——复制本骨架的工具在此声明 TOOL /
+   PARAMS / SCENES，并在末尾调用 VizEngine.init({ canvas, SCENES, PARAMS, TOOL,
+   VERSION, ENGINE_VERSION })。骨架本身不声明它们，因此直接打开时面板留空、
+   canvas 只画背景——这是预期行为，不是 bug。 */
+</script>
+</body>
+</html>
