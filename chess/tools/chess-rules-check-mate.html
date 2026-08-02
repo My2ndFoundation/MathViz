@@ -2682,6 +2682,16 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       tips: { en: 'Black just played …f5, and only on this very move White may capture it en passant, landing on f6 as if that pawn had stopped one square early. Wait one move and the option disappears forever.',
               zh: '黑方刚走了 …f5，只有这一步白方才能吃过路兵，落到 f6 就像那个兵只走了一步一样。晚一步，这个机会就永远消失。' },
     },
+    // 白 Ka1、兵 e7；黑 Kg7、后 c7。e8=Q/R/B 三者都不将军、也够不着黑后；
+    // 只有 e8=N 同时做到两件事——将军 g7 的王，又叉住 c7 的后（e8 到 g7、e8 到
+    // c7 都是马步）。九个预置局面原来一个能走到升变都没有：special tab 讲了
+    // 升变规则却没有任何一步棋能真的弹出四选一。这枚局面把「为什么规则给你
+    // 选择权」压缩进一步棋——升变成后是废棋，升变成马是双叉。
+    promo: {
+      fen: '8/2q1P1k1/8/8/8/8/8/K7 w - - 0 1',
+      tips: { en: 'Promoting to a queen achieves nothing here — the king simply steps aside. A knight checks the king and attacks the queen at the same time: e8=N+ forks both. This is why the rules let you choose.',
+              zh: '在这里升变成后毫无用处——王一步就躲开了。升变成马则同时将军又叉住黑后：e8=N+ 双叉。这正是规则允许你选择升变棋子的原因。' },
+    },
     foolsMate: {
       fen: 'rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3',
       tips: { en: 'White has zero legal moves and is in check — that combination, and only that combination, is checkmate.',
@@ -2841,7 +2851,10 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     promoLabelEl.classList.add('hidden');
   }
   function showPromoPicker(tabId, st, from, to, choices) {
-    pendingPromo = { tabId: tabId, st: st, from: from, to: to };
+    // choices is kept on pendingPromo (not just closed over by the buttons below)
+    // so syncPromoLabels() can re-derive each button's tooltip after a language
+    // switch without needing to re-read it back out of the DOM/glyphs.
+    pendingPromo = { tabId: tabId, st: st, from: from, to: to, choices: choices };
     var whiteMover = st.pos.turn === CC.WHITE;
     var glyphs = whiteMover ? GLYPH_WHITE : GLYPH_BLACK;
     promoPickerEl.innerHTML = '';
@@ -2852,12 +2865,12 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       b.addEventListener('click', function () {
         var res = I.tryMove(st, from, to, code);
         hidePromoPicker();
-        if (res.ok) { reasonMsg[tabId] = null; demoPlaying = false; afterMove(tabId); }
-        else reasonMsg[tabId] = res.reason;
+        if (res.ok) { reasonMsg[tabId] = null; pauseDemo(); afterMove(tabId); }
+        else { reasonMsg[tabId] = res.reason; pauseDemo(); }
       });
       promoPickerEl.appendChild(b);
     });
-    promoLabelEl.textContent = E.t({ en: 'Choose a piece for the pawn to promote to', zh: '选择兵要升变成的棋子' });
+    promoLabelEl.textContent = E.t(PROMO_LABEL_TEXT);
     promoPickerEl.classList.remove('hidden');
     promoLabelEl.classList.remove('hidden');
   }
@@ -2871,10 +2884,10 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 
   function attemptMove(tabId, st, from, to) {
     var res = I.tryMove(st, from, to);
-    if (res.ok) { reasonMsg[tabId] = null; demoPlaying = false; afterMove(tabId); return; }
+    if (res.ok) { reasonMsg[tabId] = null; pauseDemo(); afterMove(tabId); return; }
     if (res.needsPromotion) { showPromoPicker(tabId, st, from, to, res.choices); return; }
     reasonMsg[tabId] = res.reason;
-    demoPlaying = false;
+    pauseDemo();
   }
 
   // ================= 点击选子 / 落子（拖拽相机与点击选子共用同一批指针事件，
@@ -2899,11 +2912,15 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     var picked = BR.pickSquare(camC, E, [sx, sy], L);
     if (!picked) return;
     var sq = CC.SQ(picked.file, picked.rank);
-    if (st.sel === -1) { I.select(st, sq); return; }
+    // Selecting IS engaging, not just looking: the instant she picks up a piece
+    // and sees the rose/emerald split, the demo must hold still under it rather
+    // than swap the position out from under her ~3s later (round 1 review —
+    // traced to I.select() touching nothing that stopped the auto-demo timer).
+    if (st.sel === -1) { I.select(st, sq); pauseDemo(); return; }
     if (st.sel === sq) { I.clear(st); return; }
     var v = pos.board[sq];
     var mine = v !== CC.EMPTY && ((v > 0 ? CC.WHITE : CC.BLACK) === pos.turn);
-    if (mine) { I.select(st, sq); return; }
+    if (mine) { I.select(st, sq); pauseDemo(); return; }
     attemptMove(tabId, st, st.sel, sq);
   }
 
@@ -2921,7 +2938,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       if (e.shiftKey) I.redo(g.st); else I.undo(g.st);
       reasonMsg[myCurTab] = null;
       hidePromoPicker();
-      demoPlaying = false;
+      pauseDemo();
       return;
     }
     if (e.key === 'f' || e.key === 'F') {
@@ -2944,6 +2961,53 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     if (tipsEl.textContent !== want) tipsEl.textContent = want;
   }
 
+  // 每帧调用一次，把三处「按需覆盖」的自愈都收在一起：tips 文案、升变浮层的
+  // tooltip/提示行、Play 按钮的 Pause/Resume 文案。三者都是同一套手法
+  // （目标值算出来跟当前 DOM 比一比，不同才写），凑到一起调用只是省得每个
+  // draw() 自己重复三行。
+  function syncDynamicUI(tabId) {
+    syncTips(tabId);
+    syncPromoLabels();
+    syncPlayButton();
+  }
+
+  // ================= 升变浮层的语言自愈：tooltip 与提示行只在 build 时用 E.t() 取过
+  // 一次，语言切换不会自动重取。与 tips 同一套「每帧比对目标值再决定要不要写」的
+  // 自愈手法，代价是每帧一次廉价的字符串比较，换来的是不用在切语言的回调里单独
+  // 记一条「还要记得刷新升变浮层」。pendingPromo.choices 是浮层还开着时唯一需要
+  // 重新取文案的数据源，未升变时 promoPickerEl 为空、循环不做任何事。 =================
+  var PROMO_LABEL_TEXT = { en: 'Choose a piece for the pawn to promote to', zh: '选择兵要升变成的棋子' };
+  function syncPromoLabels() {
+    if (!pendingPromo) return;
+    var wantLabel = E.t(PROMO_LABEL_TEXT);
+    if (promoLabelEl.textContent !== wantLabel) promoLabelEl.textContent = wantLabel;
+    var buttons = promoPickerEl.children;
+    for (var i = 0; i < buttons.length && i < pendingPromo.choices.length; i++) {
+      var want = E.t(PIECE_NAME[pendingPromo.choices[i]]);
+      if (buttons[i].title !== want) buttons[i].title = want;
+    }
+  }
+
+  // ================= Play/Pause 按钮：demoPlaying 的可见状态，不是 state.running 的 =================
+  // 引擎自己的 togglePlay() 只会在按钮真被点击时才跑，且驱动的是 state.running——
+  // 那是录制子系统的时钟，本工具不用它。demoPlaying 才是这里唯一有意义的「播放中/
+  // 已暂停」，选中棋子、落子成功、落子被拒、撤销/重做都会让它静默变为 false；
+  // pauseDemo() 把「置为 false」与「立刻同步按钮文案」绑成一个动作，任何调用点
+  // 都不会出现「状态变了但按钮没跟着说」的哑巴暂停。draw() 里另有一份每帧自愈
+  // （同 syncTips/syncPromoLabels），把语言切换这类没人主动调用 pauseDemo() 的
+  // 情况也接住。
+  var PLAY_LABEL = { en: '⏸ Pause', zh: '⏸ 暂停' };
+  var RESUME_LABEL = { en: '▶ Resume', zh: '▶ 继续' };
+  var btnPlayEl = document.getElementById('btnPlay');
+  function syncPlayButton() {
+    var want = E.t(demoPlaying ? PLAY_LABEL : RESUME_LABEL);
+    if (btnPlayEl.textContent !== want) btnPlayEl.textContent = want;
+  }
+  function pauseDemo() {
+    demoPlaying = false;
+    syncPlayButton();
+  }
+
   // ================= 自动演示：按 dt 累加，巡回本 tab 的视角按钮（=预置局面）=================
   // 复用真实的视角按钮点击路径（tween + onSelect），不是另起一套局面加载逻辑——
   // 这样自动演示与手动点视角按钮永远是同一条代码路径，不会漂移。
@@ -2952,7 +3016,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   var DEMO_INTERVAL = 3;
   var DEMO_KEYS = {
     legal: ['iso', 'pin'],
-    special: ['iso', 'castleThrough', 'castleB1', 'ep'],
+    special: ['iso', 'castleThrough', 'castleB1', 'ep', 'promo'],
     check: ['iso', 'stalemate'],
     mate: ['iso', 'mateKR'],
   };
@@ -2978,9 +3042,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     return dt;
   }
 
-  // btnPlay 已由引擎接了 state.running 的图标切换；这里叠加一路自己的监听器，
-  // 复用同一枚按钮驱动 demoPlaying——「全交互与自动演示是同一条时间轴」的字面实现。
-  document.getElementById('btnPlay').addEventListener('click', function () { demoPlaying = !demoPlaying; });
+  // btnPlay 的监听器绑在 E.init() 之后（见下方），不在这里——原因见那处的注释。
   // btnReset：回到本 tab 的 iso 视角按钮，与双击画布回正走同一条路径（tween + onSelect）。
   document.getElementById('btnReset').addEventListener('click', function () {
     var btn = document.querySelector('.views[data-tab="' + myCurTab + '"] .vbtn[data-view="iso"]');
@@ -3076,6 +3138,15 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     var epTxt = pos.ep >= 0 ? CC.toAlg(pos.ep) : E.t({ en: 'none right now', zh: '此刻没有' });
     html += '<div style="margin-top:5px">' + E.t({ en: 'En passant target', zh: '吃过路兵目标格' }) +
             ': <b style="--c:' + CSS_ORANGE + '">' + epTxt + '</b></div>';
+    // 第三条规则（升变）没有像易位那样的四盏灯可画——它不是「满足/不满足」的
+    // 前提集合，而是「够不着 / 够得着，够得着时给不给你选」。这里只答「现在
+    // 够不够得着」，具体的选择本身由弹出的四选一浮层与其 tips 说明。
+    var hasPromo = pos.legalMoves().some(function (m) { return m.flags & CC.FLAG.PROMO; });
+    var promoTxt = hasPromo
+      ? { en: 'yes — try all four choices', zh: '是——四个选项都试试' }
+      : { en: 'not in this position', zh: '当前局面没有' };
+    html += '<div>' + E.t({ en: 'Promotion available', zh: '可升变' }) +
+            ': <b style="--c:' + (hasPromo ? CSS_EMERALD : CSS_SLATE) + '">' + E.t(promoTxt) + '</b></div>';
     return html + fenLine(pos);
   }
   function renderCheckReadout() {
@@ -3124,15 +3195,15 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
         myCurTab = 'legal';
         var dt = frameDt();
         advanceDemo(dt);
-        syncTips('legal');
+        syncDynamicUI('legal');
         drawBoardCore(camC, 'legal');
       },
       readout: renderLegalReadout,
     },
     special: {
       label: { en: 'Special', zh: '特殊规则' },
-      brand: { en: 'Castling has four independent preconditions; en passant only exists for one move.',
-               zh: '易位有四个各自独立的前提；吃过路兵只在那一步棋里存在。' },
+      brand: { en: 'Castling has four independent preconditions; en passant only exists for one move; promotion is a choice, not just a queen.',
+               zh: '易位有四个各自独立的前提；吃过路兵只在那一步棋里存在；升变是一次选择，不只是变后。' },
       tips: PRESETS.castleOk.tips,
       views: (function () {
         var v = {};
@@ -3144,13 +3215,15 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
         v.castleB1.onSelect = function () { loadPreset('special', 'castleB1'); };
         v.ep = viewSpec(CAM_BASE, { en: 'En passant', zh: '过路兵' });
         v.ep.onSelect = function () { loadPreset('special', 'ep'); };
+        v.promo = viewSpec(CAM_BASE, { en: 'Promotion', zh: '升变' });
+        v.promo.onSelect = function () { loadPreset('special', 'promo'); };
         return v;
       })(),
       draw: function (camC) {
         myCurTab = 'special';
         var dt = frameDt();
         advanceDemo(dt);
-        syncTips('special');
+        syncDynamicUI('special');
         drawBoardCore(camC, 'special');
       },
       readout: renderSpecialReadout,
@@ -3172,7 +3245,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
         myCurTab = 'check';
         var dt = frameDt();
         advanceDemo(dt);
-        syncTips('check');
+        syncDynamicUI('check');
         var res = drawBoardCore(camC, 'check');
         drawReplyTree(camC, res.pos);
       },
@@ -3195,7 +3268,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
         myCurTab = 'mate';
         var dt = frameDt();
         advanceDemo(dt);
-        syncTips('mate');
+        syncDynamicUI('mate');
         drawBoardCore(camC, 'mate');
       },
       readout: renderMateReadout,
@@ -3226,6 +3299,43 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   // declaration above).
   document.querySelectorAll('#tabsNav .tab').forEach(function (btn) {
     btn.addEventListener('click', function () { myCurTab = btn.dataset.tab; });
+  });
+
+  // btnPlay: attached here, after E.init(), so ours runs AFTER the engine's own
+  // click listener (registration order = firing order for the same event on the
+  // same element). The engine's listener toggles its own state.running and writes
+  // btnPlay.textContent from that; state.running only ever changes on a manual
+  // click, while demoPlaying also changes silently on auto-pause (selecting a
+  // piece, a move, undo/redo), so the two can be out of phase by the time a
+  // manual click lands. Firing after the engine means our write — from
+  // demoPlaying, the boolean that is actually true for this tool — is the one
+  // that sticks. (Attaching this before E.init(), as the first cut of this fix
+  // did, meant the engine's own listener ran second and silently overwrote our
+  // "Pause" back to "Resume" on the very next manual click after an auto-pause —
+  // caught by testing the actual resume click, not by re-reading the code.)
+  document.getElementById('btnPlay').addEventListener('click', function () {
+    demoPlaying = !demoPlaying;
+    syncPlayButton();
+  });
+
+  // btnLang: same lesson as btnPlay above, found the same way — round 2 review
+  // asked me to actually drive the promotion picker and switch language while
+  // it was open, rather than trust syncPromoLabels()'s per-frame self-heal in
+  // syncDynamicUI(). In this session that self-heal never fires at all (the
+  // shared browser tab is throttled the same way it was for the round-1 fix),
+  // and re-reading the code, it would be just as fragile in a real browser: a
+  // tab that's merely been backgrounded and refocused has requestAnimationFrame
+  // throttled too, and there is no reason a learner's first look at the reason
+  // her tooltip is stale should depend on how fast the next frame happens to
+  // land. So this listener updates the picker immediately and synchronously,
+  // the same way the engine's own applyLang() immediately rewrites tips/brand/
+  // hint text — the per-frame call inside draw() stays only as a safety net
+  // for the (functionally impossible without this listener) case of the
+  // picker still being open across a frame it didn't cover.
+  document.getElementById('btnLang').addEventListener('click', function () {
+    syncPromoLabels();
+    syncTips(myCurTab);
+    syncPlayButton();
   });
 })();
 </script>
