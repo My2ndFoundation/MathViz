@@ -4437,10 +4437,25 @@ var myCurTab = 'board';
 
 /* 棋盘视角翻转（规格 §5.3 的棋盘专属键 F）：不是把棋盘数据翻过来，
    只是把相机绕 z 轴转半圈——数据翻转会让 pickSquare、坐标标签、轨迹
-   全部要各自记得翻一次，转相机则一处收口。 */
-var flipped = false;
+   全部要各自记得翻一次，转相机则一处收口。
+   不留一个 flipped 旗标——双击画布回 iso 视角会把相机角度直接改回去，
+   而 F 键只改 cam.az，旗标和真实相机角度是两份独立数据，早晚会漂移
+   （复现路径：按 F 翻转 → 双击回 iso → 旗标仍是 true，但相机已经不再
+   翻转）。改成从 cam.az 现算：单一出处，不会漂移。 */
 var TAU = Math.PI * 2;
 function wrapPI(a) { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; }
+var CAM_BASE_AZ = [CAM_ISO.az, CAM_SIDE.az, CAM_TOP.az];
+function isFlipped() {
+  var az = wrapPI(E.cam.az);
+  var bestDelta = Infinity, bestFlip = false;
+  CAM_BASE_AZ.forEach(function (base) {
+    [0, Math.PI].forEach(function (add) {
+      var d = Math.abs(wrapPI(az - wrapPI(base + add)));
+      if (d < bestDelta) { bestDelta = d; bestFlip = add !== 0; }
+    });
+  });
+  return bestFlip;
+}
 
 function fillSquare(camC, sq, style) {
   var cs = L.squareCorners(CC.fileOf(sq), CC.rankOf(sq));
@@ -4520,6 +4535,87 @@ function drawPosition(camC) {
 function advanceReplay() {
   if (!rs) return;
   if (RP.tick(rs, E.state.dt)) syncTransport();
+}
+
+/* ================= trace 页：子力轨迹（Task 14） ================= */
+/* 一颗子的一生 = 一条三维折线：x/y 是它站过的格，z 是那一步的回合数。
+   只画到当前 ply 为止——回放到一半时把整局的轨迹全画出来等于剧透。 */
+function tracePoints(tr, upto, zs) {
+  var pts = [];
+  for (var i = 0; i < tr.points.length; i++) {
+    var p = tr.points[i];
+    if (p.ply > upto) break;
+    var c = L.squareCenter(CC.fileOf(p.sq), CC.rankOf(p.sq));
+    pts.push([c[0], c[1], -(upto - p.ply) * zs]);
+  }
+  return pts;
+}
+
+var PIECE_LETTER = {};
+PIECE_LETTER[CC.P] = 'P'; PIECE_LETTER[CC.N] = 'N'; PIECE_LETTER[CC.B] = 'B';
+PIECE_LETTER[CC.R] = 'R'; PIECE_LETTER[CC.Q] = 'Q'; PIECE_LETTER[CC.K] = 'K';
+function pieceLetter(code) { return PIECE_LETTER[Math.abs(code)] || '?'; }
+
+/* 截至当前 ply 的轨迹统计，用于 readout。「visible」= tr.points 里 ply<=upto
+   的个数，不是整条 trace 的真实长度——理由与 tracePoints() 一样：回放到
+   一半时不能提前告诉使用者「这颗马这局一共走了 9 步」，那是还没发生的
+   未来。upto === rs.maxPly 时，这里三个数与 traces(rs) 在整局上直接算出的
+   结果完全相等——task-14-brief 的 node 校验脚本用的正是那种全局算法，
+   等价性在这里成立是因为「全局」正是 upto 取到头的特例。 */
+function traceStats(list, upto) {
+  var busiest = null, neverMoved = 0, alive = 0;
+  for (var i = 0; i < list.length; i++) {
+    var tr = list[i];
+    var visible = 0;
+    for (var j = 0; j < tr.points.length; j++) {
+      if (tr.points[j].ply > upto) break;
+      visible++;
+    }
+    var steps = visible - 1;
+    if (visible === 1) neverMoved++;
+    if (!busiest || steps > busiest.steps) busiest = { code: tr.code, from: tr.from, steps: steps };
+    if (tr.capturedAt == null || tr.capturedAt > upto) alive++;
+  }
+  return { busiest: busiest, neverMoved: neverMoved, alive: alive };
+}
+
+/* 画全部轨迹。dead（已被吃）的子整条线降到 alpha 0.25 并在末端画一个
+   solidDot（死亡点）。「一步没动」用的是 tr.points.length === 1 这个
+   整局静态事实（不是按 upto 现算的 visible），与 brief 原文一致——它
+   只轻微提前透露「这颗子这局再也不会动了」，比透露它具体去哪儿的代价
+   小得多。
+
+   一个例外：如果这颗静止的子后来被吃了（在从未挪动过的情况下被吃，
+   罕见但合法——例如慢一点的弃兵局面），直线的近端不能无条件钉在 z=0。
+   z=0 是「现在」，一个已经死掉的子不该看起来好像还在棋盘上存在到现在——
+   它应该像所有历史一样，随 upto 增长同步后退，近端停在它被吃的那个
+   ply，而不是继续伸到 0。这是对 tracePoints() 里「被吃的子不再新增
+   采样点，端点自然随 upto 后退」那条既有行为的类比延伸，brief 原文的
+   「到 z=0」只覆盖了它没写出来的隐含前提——这颗子还活着。 */
+function drawTraces(camC) {
+  var list = RP.traces(rs);
+  var zs = rs.zStep, upto = rs.ply, onlyMoved = !!E.state.onlyMoved;
+  for (var i = 0; i < list.length; i++) {
+    var tr = list[i];
+    if (onlyMoved && tr.points.length === 1) continue;
+    var color = tr.code > 0 ? CYAN : ORANGE;
+    var dead = tr.capturedAt != null && tr.capturedAt <= upto;
+    var alpha = dead ? 0.25 : 0.85;
+    if (tr.points.length === 1) {
+      var p0 = tr.points[0];
+      var c = L.squareCenter(CC.fileOf(p0.sq), CC.rankOf(p0.sq));
+      var topPly = dead ? tr.capturedAt : upto;
+      var zFar = -(upto - 0) * zs;
+      var zNear = -(upto - topPly) * zs;
+      E.line3(camC, [c[0], c[1], zFar], [c[0], c[1], zNear], { color: color, width: 2, alpha: alpha });
+      if (dead) E.solidDot(camC, [c[0], c[1], zNear], 4, color);
+      continue;
+    }
+    var pts = tracePoints(tr, upto, zs);
+    if (pts.length < 2) continue;
+    E.strokePoly(camC, pts, { color: color, width: 2, alpha: alpha });
+    if (dead) E.solidDot(camC, pts[pts.length - 1], 4, color);
+  }
 }
 
 /* ================= 传输控件（挂进 #recHost） ================= */
@@ -4674,7 +4770,6 @@ window.addEventListener('keydown', function (e) {
   var tag = el && el.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el && el.isContentEditable)) return;
   if (e.key === 'f' || e.key === 'F') {
-    flipped = !flipped;
     E.cam.az = wrapPI(E.cam.az + Math.PI);
   }
 });
@@ -4711,7 +4806,13 @@ var SCENES = {
       drawPosition(camC);
     },
     readout: function () {
-      syncKeyNote();
+      /* syncTransport() 而不是只 syncKeyNote()：纯语言切换只走 applyLang() →
+         updateReadout() → 这里，不经过传输条的任何按钮点击。之前只同步了
+         关键步卡片，顶部 Play 按钮的文案（读 rs.playing，见 syncTransport()
+         末尾）就漏了这条路径——「播放中撞上关键步自动暂停 → 切语言」会让
+         按钮显示「暂停」而回放其实已经停了。syncTransport() 内部本就会调
+         syncKeyNote()，这里不用再重复调用。 */
+      syncTransport();
       if (!rs) return '';
       var h = GM.headersOf(rs.meta);
       return '<div>' + h.White + ' <span class="dim">' + E.t({ zh: '对', en: 'vs' }) + '</span> ' + h.Black + '</div>' +
@@ -4720,29 +4821,45 @@ var SCENES = {
     },
   },
 
-  /* trace/eval/heat：最小可用占位——共享同一份 rs、同一个 drawPosition，
-     暂不画各自的曲线/热力（Task 14/15/16），但绝不 throw，且都能正常
+  /* eval/heat 眼下仍是最小可用占位——共享同一份 rs、同一个 drawPosition，
+     暂不画各自的曲线/热力（Task 15/16），但绝不 throw，且都能正常
      切换、显示当前局面。 */
   trace: {
     label: { zh: '轨迹', en: 'Trace' },
-    brand: { zh: '子力轨迹——占位页，见 Task 14。', en: 'Piece trajectories — placeholder, see Task 14.' },
-    tips: { zh: '（占位）这一页之后会把每颗子的一生画成一条线；现在只显示当前局面。',
-            en: '(placeholder) This tab will turn each piece’s life into a line; for now it just shows the current position.' },
+    brand: { zh: '子力轨迹——每颗子的一生是一条线：x/y 是它站过的格，z 是回合数。',
+             en: "Piece trajectories — each piece's life is one line: x/y is the square it stood on, z is the move number." },
+    tips: {
+      en: 'Switch to the Side view: the horizontal axis is now the move number, so every piece\'s whole life is one line. The knight that zig-zags across nine moves and the bishop that never left its square are the same object seen along time.',
+      zh: '切到「侧视」：水平轴就是回合数，于是每颗子的一生都成了一条线。那只来回折了九步的马，和那只一步没离开原格的象，是同一件东西沿时间轴的两种样子。',
+    },
     presetsLabel: { en: 'Game', zh: '棋局' },
     presets: PRESETS,
     views: { iso: VIEW_ISO, side: VIEW_SIDE, top: VIEW_TOP },
+    toggles: [
+      { key: 'onlyMoved', label: { zh: '只看走过的子', en: 'Moved only' }, color: CYAN, checked: false },
+    ],
     draw: function (camC) {
       myCurTab = 'trace';
       advanceReplay();
       if (!rs) { BR.drawBoard(ctx, camC, E, { layout: L }); return; }
       drawHistory(camC);
+      drawTraces(camC);
       drawPosition(camC);
     },
     readout: function () {
-      syncKeyNote();
+      syncTransport();
       if (!rs) return '';
-      return '<div class="dim">' + E.t({ zh: '占位页 · 见 Task 14', en: 'placeholder · see Task 14' }) + '</div>' +
-        '<div class="dim">' + E.t({ zh: '半步', en: 'ply' }) + ' ' + rs.ply + ' / ' + rs.maxPly + '</div>';
+      var list = RP.traces(rs);
+      var st = traceStats(list, rs.ply);
+      var busiestC = st.busiest && st.busiest.code > 0 ? 'var(--trace-cyan)' : 'var(--trace-orange)';
+      var busiestTxt = st.busiest && st.busiest.steps > 0
+        ? '<b style="--c:' + busiestC + '">' + pieceLetter(st.busiest.code) + CC.toAlg(st.busiest.from) + '</b> · ' +
+          st.busiest.steps + ' ' + E.t({ zh: '步', en: (st.busiest.steps === 1 ? 'move' : 'moves') })
+        : E.t({ zh: '（尚无）', en: '(none yet)' });
+      return '<div class="dim">' + E.t({ zh: '半步', en: 'ply' }) + ' <b style="--c:var(--trace-cyan)">' + rs.ply + '</b> / ' + rs.maxPly + '</div>' +
+        '<div class="dim">' + E.t({ zh: '尚存', en: 'alive' }) + ' <b>' + st.alive + '</b> / 32</div>' +
+        '<div class="dim">' + E.t({ zh: '走得最多', en: 'busiest' }) + ' ' + busiestTxt + '</div>' +
+        '<div class="dim">' + E.t({ zh: '一步没动', en: 'never moved' }) + ' <b>' + st.neverMoved + '</b></div>';
     },
   },
 
@@ -4843,7 +4960,7 @@ window.__replayProbe = function () {
   return { tool: 'chess-game-replay', tab: myCurTab, gameId: currentId,
            ply: rs && rs.ply, maxPly: rs && rs.maxPly, playing: rs && rs.playing,
            speed: rs && rs.speed, note: rs && rs.note && rs.note.en,
-           flipped: flipped, dt: E.state.dt, fen: rs && RP.position(rs).toFEN() };
+           flipped: isFlipped(), dt: E.state.dt, fen: rs && RP.position(rs).toFEN() };
 };
 /* 直接推时序用的把手：面板的 rAF 被节流到约十二秒一帧，等它自己走完
    一段是不可行的验收方式。给回放态一个出口，验收时直接喂 dt。 */
