@@ -323,8 +323,20 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
 
   /* ================= 轨道相机与投影 ================= */
+  // 仰角安全范围：world up 取的是 (0,1,0)，el 趋近 ±π/2 时 forward 与它共线，
+  // 下面 cross(f, [0,1,0]) 会退化成一个接近零的向量——右/上手基就此失定，
+  // 不会报错，是整块画面悄悄塌缩成屏幕正中的一个点（norm() 对零向量的
+  // 兜底是 0/1=0，不是抛异常）。bindOrbit() 里鼠标拖拽早就把 el 夹在这个
+  // 范围内（见下面 pointermove 的 clamp），但那只管交互拖拽——SCENES 里
+  // 声明的视角预设（tools/*.html 的 CAM_TOP 之类）是直接把 el 写进
+  // tween.to 再原样赋给 cam.el 的，不经过那处 clamp。这里把同一对边界
+  // 值搬到相机基本身的计算里，保证不管 cam.el 是被拖出来的还是被某个
+  // 视角预设直接赋值出来的，算出来的基永远不会撞上这个奇点——单一出口，
+  // 以后任何新工具写一个贴着 ±π/2 的 el 都不会把渲染悄悄弄坏。
+  const EL_MIN = -1.45, EL_MAX = 1.53;
   function makeCam() {
-    const cp = Math.cos(cam.el), sp = Math.sin(cam.el);
+    const elC = clamp(cam.el, EL_MIN, EL_MAX);
+    const cp = Math.cos(elC), sp = Math.sin(elC);
     const eye = [
       cam.tx + cam.dist * cp * Math.sin(cam.az),
       cam.ty + cam.dist * sp,
@@ -1184,7 +1196,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
           pan(dx, dy);
         } else {
           cam.az -= dx * 0.0055;
-          cam.el = clamp(cam.el + dy * 0.0055, -1.45, 1.53);
+          cam.el = clamp(cam.el + dy * 0.0055, EL_MIN, EL_MAX);   // 与 makeCam() 共用同一对边界，见那里的注释
         }
       } else if (pointers.size === 2 && pinch) {
         const vs = Array.from(pointers.values());
@@ -2395,7 +2407,35 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   const COORD = 'rgba(159,176,200,0.75)';
 
   // a–h/1–8 坐标标签离棋盘外框的偏移，按格宽的比例算。
+  // 导出它是因为调用方（如需要按视口算合适相机距离的顶视角）要知道
+  // 「标了坐标的棋盘」比棋盘本身的世界半径多出多少，不能自己再猜一遍。
   const COORD_LABEL_OFFSET = 0.42;
+
+  // 坐标标签字号：不再写死成常量。12×12 的算法棋盘（如八皇后）和 8×8 的
+  // 经典棋盘用同一套相机距离时，前者每格在屏幕上投影出的像素本就更小——
+  // 写死 12px 会让 8×8 棋盘上的字显小（用户报告的 defect），而反过来把
+  // 12px 调大又会让 12×12 棋盘的字挤成一团。这里改成按「投影后一个格子
+  // 有多大」换算：格子越大（相机越近/棋盘越少），字号跟着变大；格子越小，
+  // 字号跟着变小。地板/天花板防止近裁剪或极端缩放把字变得读不出来或荒谬。
+  const COORD_LABEL_SIZE_FACTOR = 0.34;
+  const COORD_LABEL_SIZE_MIN = 12;
+  const COORD_LABEL_SIZE_MAX = 26;
+
+  /* 量出「一个格子投影到屏幕上有多大」，用来把坐标标签的字号和它挂靠的
+     格子大小挂钩（见上面 COORD_LABEL_SIZE_* 的注释）。用 a1 角上那格的
+     两条边（沿 x、沿 y 各一条)分别投影量一次再取平均，而不是只量一条边——
+     顶视角之外的角度下，两个方向的投影长度并不总相等（透视 + 旋转）。
+     任一角点被近裁剪掉（E.proj 返回 null）时退回地板值，总比整体不画字好。 */
+  function coordLabelSize(C, E, L) {
+    const o = L.squareCorners(0, 0)[0];
+    const p0 = E.proj(C, o);
+    const px = E.proj(C, [o[0] + L.cell, o[1], 0]);
+    const py = E.proj(C, [o[0], o[1] + L.cell, 0]);
+    if (!p0 || !px || !py) return COORD_LABEL_SIZE_MIN;
+    const cellPx = (Math.hypot(px[0] - p0[0], px[1] - p0[1]) +
+                    Math.hypot(py[0] - p0[0], py[1] - p0[1])) / 2;
+    return Math.max(COORD_LABEL_SIZE_MIN, Math.min(COORD_LABEL_SIZE_MAX, cellPx * COORD_LABEL_SIZE_FACTOR));
+  }
 
   /* ctx: CanvasRenderingContext2D；C: 相机；E: VizEngine（注入而非全局引用，
      这样本模块在 node 里可加载、可测，不需要 DOM）。
@@ -2417,16 +2457,17 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   function drawCoordLabels(ctx, C, E, spec) {
     const L = spec.layout || layout(spec);
     const o = L.squareCorners(0, 0)[0];
+    const size = coordLabelSize(C, E, L);
     E.withContext(ctx, function () {
       for (let f = 0; f < L.files; f++) {
         const c = L.squareCenter(f, 0);
         E.label3(C, [c[0], o[1] - COORD_LABEL_OFFSET * L.cell, 0], fileLabel(f),
-                 { color: COORD, size: 12, align: 'center' });
+                 { color: COORD, size: size, align: 'center' });
       }
       for (let r = 0; r < L.ranks; r++) {
         const c = L.squareCenter(0, r);
         E.label3(C, [o[0] - COORD_LABEL_OFFSET * L.cell, c[1], 0], String(r + 1),
-                 { color: COORD, size: 12, align: 'center' });
+                 { color: COORD, size: size, align: 'center' });
       }
     });
   }
@@ -2582,6 +2623,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   return {
     layout: layout, fileLabel: fileLabel, isLight: isLight,
     drawBoard: drawBoard, drawCoordLabels: drawCoordLabels, pickSquare: pickSquare,
+    coordLabelSize: coordLabelSize, COORD_LABEL_OFFSET: COORD_LABEL_OFFSET,
     PIECE_PATHS: PIECE_PATHS, drawPiece: drawPiece,
     PIECE_BOX: PIECE_BOX, PIECE_ANCHOR: PIECE_ANCHOR, CODE_KEY: CODE_KEY,
   };
@@ -2783,8 +2825,45 @@ const VIEW_ISO = { az: -0.68, el: 0.5, dist: 13 };
    实测过：见下方 side 的手感），而是 az=0, el=0——沿棋盘的法线（z 轴，
    恰好也是高度轴）正对看过去，高度被压缩成看不见的一个点，露出的正是
    「覆盖形状」这个俯视要看的东西。 */
+/* dist:10 在这里只是个占位初值——真正的距离由 computeTopDist() 按当前
+   视口现算，见下面的定义与 refreshTopDist() 的调用点。写死一个数只是把
+   「在这台机器这扇窗口下不裁标签」的问题挪到另一个窗口尺寸上而已：棋盘
+   本身的世界半径是 BOARD.w/2（4），但真正决定裁不裁得到的是坐标标签，
+   它们探到 BOARD.w/2 + BR.COORD_LABEL_OFFSET·cell（board-render.js 的
+   drawCoordLabels 就是这么算标签位置的，这里必须用同一个常量，不能自己
+   再猜一份）之外。 */
 const VIEW_TOP = { az: 0, el: 0, dist: 10 };
 const VIEW_SIDE = { az: -1.5708, el: 0.14, dist: 13 };
+
+// 顶视角要塞下的世界半径：棋盘半边长 + 坐标标签探出的偏移。8×8、cell=1
+// 时两个方向（文件方向/行方向）半边长相等，用 max() 是为了这段代码将来
+// 换成非方形棋盘时仍然成立，不必再改一遍。
+const TOP_HALF_EXTENT = Math.max(BOARD.w, BOARD.h) / 2 + BR.COORD_LABEL_OFFSET * BOARD.cell;
+// 留一点边距，别让标签正好贴着画布边缘——「装得下」不等于「舒服」。
+const TOP_VIEW_MARGIN = 0.85;
+/* 按当前视口反解出「刚好装下带坐标标签的棋盘、且留有边距」的相机距离。
+   投影公式是 screen = FOCAL·world/depth（VizEngine.proj 的 scr()），
+   顶视角下 world 半径在屏幕上的半程正是 TOP_HALF_EXTENT·FOCAL/dist，
+   要让它落进 min(W,H)/2 的舒适范围内，反解 dist 即可——这三个量
+   （FOCAL/W/H）随窗口 resize 变化，所以这个距离必须现算，不能常量化。 */
+function computeTopDist() {
+  const info = E.viewInfo();
+  if (!info.W || !info.H) return VIEW_TOP.dist;   // resize() 还没跑过时的兜底，理论上不会发生
+  const halfScreen = Math.min(info.W, info.H) / 2;
+  return TOP_HALF_EXTENT * info.FOCAL / (halfScreen * TOP_VIEW_MARGIN);
+}
+/* VIEW_TOP 在下面被 Object.assign 进四个 tab 各自的 views.top——那是按值
+   拷贝，之后再改 VIEW_TOP.dist 不会传播过去。所以每次要生效，都得把这份
+   新距离重新写回每个 tab 已经拷贝出去的 views.top.dist，而不是只改
+   VIEW_TOP 本身。 */
+function refreshTopDist() {
+  const d = computeTopDist();
+  VIEW_TOP.dist = d;
+  Object.keys(SCENES).forEach(function (id) {
+    const v = SCENES[id].views && SCENES[id].views.top;
+    if (v) v.dist = d;
+  });
+}
 
 const SCENES = {
   piece: {
@@ -2944,6 +3023,14 @@ E.init({
   VERSION: VERSION, ENGINE_VERSION: ENGINE_VERSION,
   autoLoop: true,
 });
+
+/* E.init() 内部同步跑过一次 resize()，FOCAL/W/H 这时才第一次有真实值——
+   在那之前 computeTopDist() 只能拿到兜底值。这里补一次现算，把「顶视角」
+   在四个 tab 里已经拷贝出去的 views.top.dist 全部纠正成当前窗口算出来的
+   距离；随后每次 resize，FOCAL/W/H 跟着变，同一份距离也要跟着重算——
+   否则窗口一变，刚修好的「装得下」又会失效。 */
+refreshTopDist();
+window.addEventListener('resize', refreshTopDist);
 
 /* ---- 接线：只需拿到滑杆的 DOM 引用给 setPieceIdx() 在自动演示时改它
    （滑杆本身的值已经就是 E.state.pieceIdx，不需要工具自己再维护一份）。
