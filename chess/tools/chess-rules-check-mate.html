@@ -2682,6 +2682,16 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       tips: { en: 'Black just played …f5, and only on this very move White may capture it en passant, landing on f6 as if that pawn had stopped one square early. Wait one move and the option disappears forever.',
               zh: '黑方刚走了 …f5，只有这一步白方才能吃过路兵，落到 f6 就像那个兵只走了一步一样。晚一步，这个机会就永远消失。' },
     },
+    // 白 Ka1、兵 e7；黑 Kg7、后 c7。e8=Q/R/B 三者都不将军、也够不着黑后；
+    // 只有 e8=N 同时做到两件事——将军 g7 的王，又叉住 c7 的后（e8 到 g7、e8 到
+    // c7 都是马步）。九个预置局面原来一个能走到升变都没有：special tab 讲了
+    // 升变规则却没有任何一步棋能真的弹出四选一。这枚局面把「为什么规则给你
+    // 选择权」压缩进一步棋——升变成后是废棋，升变成马是双叉。
+    promo: {
+      fen: '8/2q1P1k1/8/8/8/8/8/K7 w - - 0 1',
+      tips: { en: 'Promoting to a queen achieves nothing here — the king simply steps aside. A knight checks the king and attacks the queen at the same time: e8=N+ forks both. This is why the rules let you choose.',
+              zh: '在这里升变成后毫无用处——王一步就躲开了。升变成马则同时将军又叉住黑后：e8=N+ 双叉。这正是规则允许你选择升变棋子的原因。' },
+    },
     foolsMate: {
       fen: 'rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3',
       tips: { en: 'White has zero legal moves and is in check — that combination, and only that combination, is checkmate.',
@@ -3006,7 +3016,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   var DEMO_INTERVAL = 3;
   var DEMO_KEYS = {
     legal: ['iso', 'pin'],
-    special: ['iso', 'castleThrough', 'castleB1', 'ep'],
+    special: ['iso', 'castleThrough', 'castleB1', 'ep', 'promo'],
     check: ['iso', 'stalemate'],
     mate: ['iso', 'mateKR'],
   };
@@ -3128,6 +3138,15 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     var epTxt = pos.ep >= 0 ? CC.toAlg(pos.ep) : E.t({ en: 'none right now', zh: '此刻没有' });
     html += '<div style="margin-top:5px">' + E.t({ en: 'En passant target', zh: '吃过路兵目标格' }) +
             ': <b style="--c:' + CSS_ORANGE + '">' + epTxt + '</b></div>';
+    // 第三条规则（升变）没有像易位那样的四盏灯可画——它不是「满足/不满足」的
+    // 前提集合，而是「够不着 / 够得着，够得着时给不给你选」。这里只答「现在
+    // 够不够得着」，具体的选择本身由弹出的四选一浮层与其 tips 说明。
+    var hasPromo = pos.legalMoves().some(function (m) { return m.flags & CC.FLAG.PROMO; });
+    var promoTxt = hasPromo
+      ? { en: 'yes — try all four choices', zh: '是——四个选项都试试' }
+      : { en: 'not in this position', zh: '当前局面没有' };
+    html += '<div>' + E.t({ en: 'Promotion available', zh: '可升变' }) +
+            ': <b style="--c:' + (hasPromo ? CSS_EMERALD : CSS_SLATE) + '">' + E.t(promoTxt) + '</b></div>';
     return html + fenLine(pos);
   }
   function renderCheckReadout() {
@@ -3183,8 +3202,8 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     },
     special: {
       label: { en: 'Special', zh: '特殊规则' },
-      brand: { en: 'Castling has four independent preconditions; en passant only exists for one move.',
-               zh: '易位有四个各自独立的前提；吃过路兵只在那一步棋里存在。' },
+      brand: { en: 'Castling has four independent preconditions; en passant only exists for one move; promotion is a choice, not just a queen.',
+               zh: '易位有四个各自独立的前提；吃过路兵只在那一步棋里存在；升变是一次选择，不只是变后。' },
       tips: PRESETS.castleOk.tips,
       views: (function () {
         var v = {};
@@ -3196,6 +3215,8 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
         v.castleB1.onSelect = function () { loadPreset('special', 'castleB1'); };
         v.ep = viewSpec(CAM_BASE, { en: 'En passant', zh: '过路兵' });
         v.ep.onSelect = function () { loadPreset('special', 'ep'); };
+        v.promo = viewSpec(CAM_BASE, { en: 'Promotion', zh: '升变' });
+        v.promo.onSelect = function () { loadPreset('special', 'promo'); };
         return v;
       })(),
       draw: function (camC) {
@@ -3294,6 +3315,26 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   // caught by testing the actual resume click, not by re-reading the code.)
   document.getElementById('btnPlay').addEventListener('click', function () {
     demoPlaying = !demoPlaying;
+    syncPlayButton();
+  });
+
+  // btnLang: same lesson as btnPlay above, found the same way — round 2 review
+  // asked me to actually drive the promotion picker and switch language while
+  // it was open, rather than trust syncPromoLabels()'s per-frame self-heal in
+  // syncDynamicUI(). In this session that self-heal never fires at all (the
+  // shared browser tab is throttled the same way it was for the round-1 fix),
+  // and re-reading the code, it would be just as fragile in a real browser: a
+  // tab that's merely been backgrounded and refocused has requestAnimationFrame
+  // throttled too, and there is no reason a learner's first look at the reason
+  // her tooltip is stale should depend on how fast the next frame happens to
+  // land. So this listener updates the picker immediately and synchronously,
+  // the same way the engine's own applyLang() immediately rewrites tips/brand/
+  // hint text — the per-frame call inside draw() stays only as a safety net
+  // for the (functionally impossible without this listener) case of the
+  // picker still being open across a frame it didn't cover.
+  document.getElementById('btnLang').addEventListener('click', function () {
+    syncPromoLabels();
+    syncTips(myCurTab);
     syncPlayButton();
   });
 })();
