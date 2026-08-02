@@ -55,6 +55,16 @@ R.tick(auto, 10);
 T.eq(auto.ply, 33, '推进到末尾就停住');
 T.eq(auto.playing, false, '到末尾自动取消播放');
 
+// 一次 NaN 的 dt 不该永久毒化 acc —— Math.max(0, NaN) 还是 NaN，
+// 之后 acc 就再也追不上 interval，回放会静默地永远卡住，不报错也不停止。
+const nanGuard = R.load({ pgn: OPERA });
+nanGuard.speed = 2;
+R.setPlaying(nanGuard, true);
+R.tick(nanGuard, NaN);
+T.eq(nanGuard.ply, 0, 'NaN dt 不推进，但也不该是别的坏结果');
+R.tick(nanGuard, 0.6);
+T.eq(nanGuard.ply, 1, 'NaN 之后正常 dt 照常推进 —— acc 没有被 NaN 污染');
+
 // ---- keyMoves：自动暂停 + 说明 ----
 const KM = [
   { ply: 10, note: { en: '5…dxe5 recaptures; material is level again.', zh: '5…dxe5 吃回来，子力重新持平。' } },
@@ -87,6 +97,20 @@ R.setPlaying(key, true);
 R.tick(key, 1);
 T.eq(key.ply, 10, 'rewind 之后关键步重新生效');
 
+// 往回拖时间轴（不是 rewind）也要让身后已经触发过的关键步重新武装：
+// 播放 → 在关键步暂停 → 拖回去重看 → 再播放 → 应该再次拦住。使用者往回拖
+// 恰恰是因为没看懂想重看，一个只响一次的自动暂停等于告诉她"你已经看过了"。
+const key3 = R.load({ pgn: OPERA, keyMoves: KM });
+key3.speed = 100;
+R.setPlaying(key3, true);
+R.tick(key3, 1);
+T.eq(key3.ply, 10, '第一次播放在关键步 10 停住');
+R.goto(key3, 5);
+T.eq(key3.ply, 5, '拖回到第 5 步（越过了已触发的 ply 10）');
+R.setPlaying(key3, true);
+R.tick(key3, 1);
+T.eq(key3.ply, 10, '拖回去之后再播放，关键步 10 会再次拦住');
+
 // ---- zStep：任意长度的棋局都塞进同一段 z ----
 T.eq(R.zStep(0), 0, '零步棋（纯 FEN）不需要 z 跨度');
 T.ok(R.zStep(33) <= 0.12 + 1e-9, '短棋局用默认间距上限');
@@ -105,7 +129,10 @@ const e0 = R.evalAt(C.Position.fromFEN(C.START_FEN));
 T.eq(e0.material, 0, '初始局面子力差为 0');
 T.eq(e0.control, 0, '初始局面控制格差为 0');
 T.eq(e0.safety, 0, '初始局面王的安全度差为 0');
-T.eq(e0.controlW, 22, '初始局面白方控制 22 格（16 兵斜攻 + 马 + 后翼展开的格）');
+// 22 = 8（兵的斜线攻击格，a3~h3；边翼兵各只有 1 条斜线且互相重叠，
+//        去重后是 8 格，不是「16 格」——去重前的攻击实例数才是 14）
+//    + 14（车/马/象/后/王能摸到的 1、2 线格，含彼此重叠去重之后的并集）
+T.eq(e0.controlW, 22, '初始局面白方控制 22 格');
 T.eq(e0.controlB, 22, '黑方同为 22 —— 对称');
 
 // 白 Ke1 + Re7，黑 Ke8。手推：
@@ -147,7 +174,9 @@ T.eq(S.material[20], -2, '10...cxb5 吃回马之后，白方净落后 2（马换
 // 末局面：白方以少得多的子力将死 —— 断言符号而不是具体数字，
 // 具体数字取决于双方各剩什么，改棋谱就会变，断言符号才是真意图
 T.ok(S.material[33] < 0, '莫菲最后是在子力落后的情况下将死的');
-T.eq(R.series(srs), S, 'series 结果被缓存，第二次调用返回同一个对象');
+// T.eq 是 JSON 比较：两个内容相同的不同对象也会通过，测不出缓存有没有真的生效。
+// 缓存要测的是同一个对象引用，必须用 T.ok(... === ...)。
+T.ok(R.series(srs) === S, 'series 缓存的是同一个对象（不是内容相等的新对象）');
 
 // ---- 子力轨迹 ----
 function tracesOf(pgn) { return R.traces(R.load({ pgn: pgn })); }
@@ -160,6 +189,9 @@ T.eq(eP.points.map(function (p) { return [p.ply, C.toAlg(p.sq)]; }),
      [[0, 'e2'], [1, 'e4']], 'e2 的兵走了一步：起点在第 0 步，落点在第 1 步');
 T.eq(eP.capturedAt, null, '它没被吃');
 T.eq(findFrom(t0, 'b1').points.length, 1, 'b1 的马一步没动 —— 只有起点一个点');
+const trs = R.load({ pgn: '1. e4 e5 1/2-1/2' });
+const TR = R.traces(trs);
+T.ok(R.traces(trs) === TR, 'traces 缓存的是同一个对象（不是内容相等的新数组）');
 
 // 易位：一步动两颗子
 // 易位 fixture 必须同时满足两个约束，缺一个整段就跑不通：
@@ -188,6 +220,17 @@ T.eq(C.toAlg(victim.points[victim.points.length - 1].sq), 'f5',
      '它最后停在 f5 —— 吃它的兵落在 f6，别把尸体挪到落点格去');
 T.eq(C.toAlg(findFrom(ep, 'e5').points[1].sq), 'f6', '吃过路兵的白兵落在 f6');
 
+// 吃过路兵（黑方视角）：上面那组测的是白方吃，FLAG.EP 分支里
+// m.piece > 0 ? -16 : 16 这条正负号只有黑方吃的时候才会走到另一半，
+// 不补黑方就等于只测了一半的分支。白方兵 d2 走 d4（双步），
+// 黑方兵 c4 提子 cxd3——被吃的白兵停在自己原来所在的 d4，不是 d3。
+const epBlack = tracesOf('[FEN "4k3/8/8/8/2p5/8/3P4/4K3 w - - 0 1"]\n1. d4 cxd3 1/2-1/2');
+const victimBlack = findFrom(epBlack, 'd2');
+T.eq(victimBlack.capturedAt, 2, 'd2 的白兵在第 2 个半步被黑方吃过路兵吃掉');
+T.eq(C.toAlg(victimBlack.points[victimBlack.points.length - 1].sq), 'd4',
+     '它最后停在 d4（双步兵落点，也是它自己站的格）——吃它的黑兵落在 d3，别把尸体挪过去');
+T.eq(C.toAlg(findFrom(epBlack, 'c4').points[1].sq), 'd3', '吃过路兵的黑兵落在 d3');
+
 // 升变：同一颗子换了身份，不是新长出一颗
 const pr = tracesOf('[FEN "8/4P3/8/8/8/8/8/4K2k w - - 0 1"]\n1. e8=N 1-0');
 const promoted = findFrom(pr, 'e7');
@@ -196,11 +239,26 @@ T.eq(promoted.promotedAt, 1, '记下在第几步升的变');
 T.eq(promoted.points.length, 2, '还是同一条轨迹，不是新建一条');
 T.eq(pr.length, 3, '盘上原本 3 颗子，升变没有让轨迹数变多');
 
-// 守恒：活着的 + 被吃的 = 开局子数
+// 升变（黑方视角）：tr.code = m.piece > 0 ? m.promo : -m.promo 这一行的
+// 负号分支只有黑方升变才会走到，不补黑方等于只测了三元表达式的一半。
+// 黑兵 d2 走到 d1 升变为马——身份必须是负的马（-N），不是正的。
+const prBlack = tracesOf('[FEN "4k3/8/8/8/8/8/3p4/7K b - - 0 1"]\n1... d1=N 1/2-1/2');
+const promotedBlack = findFrom(prBlack, 'd2');
+T.eq(promotedBlack.code, -C.N, '黑方升变后这条轨迹的身份是负的马（−N），不是正的');
+T.eq(promotedBlack.promotedAt, 1, '记下在第几步升的变');
+T.eq(promotedBlack.points.length, 2, '还是同一条轨迹，不是新建一条');
+T.eq(prBlack.length, 3, '盘上原本 3 颗子，升变没有让轨迹数变多');
+
+// 守恒：活着的 + 被吃的 = 开局子数。断言真实数值，不要断言
+// 「alive + dead === 32」这种恒等式 —— dead 就是按 capturedAt != null 数出来的，
+// alive 就是按 capturedAt == null 数出来的，两者相加对任何实现都恒等于 32，
+// 这条式子本身测不出任何东西。
 const opera = tracesOf(OPERA);
 const dead = opera.filter(function (t) { return t.capturedAt != null; }).length;
+const alive = opera.filter(function (t) { return t.capturedAt == null; }).length;
 T.eq(opera.length, 32, '歌剧院局从满盘开始');
-T.eq(opera.filter(function (t) { return t.capturedAt == null; }).length + dead, 32, '不多不少');
+T.eq(dead, 12, '歌剧院局吃掉了 12 颗子');
+T.eq(alive, 20, '终局还剩 20 颗子');
 
 // ---- 累计热力 ----
 const h2 = R.heat(R.load({ pgn: '1. e4 e5 1/2-1/2' }), 2);
