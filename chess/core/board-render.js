@@ -65,8 +65,8 @@
   function coordLabelSize(C, E, L) {
     const o = L.squareCorners(0, 0)[0];
     const p0 = E.proj(C, o);
-    const px = E.proj(C, [o[0] + L.cell, o[1], 0]);
-    const py = E.proj(C, [o[0], o[1] + L.cell, 0]);
+    const px = E.proj(C, [o[0] + L.cell, o[1], L.z]);
+    const py = E.proj(C, [o[0], o[1] + L.cell, L.z]);
     if (!p0 || !px || !py) return COORD_LABEL_SIZE_MIN;
     const cellPx = (Math.hypot(px[0] - p0[0], px[1] - p0[1]) +
                     Math.hypot(py[0] - p0[0], py[1] - p0[1])) / 2;
@@ -97,12 +97,12 @@
     E.withContext(ctx, function () {
       for (let f = 0; f < L.files; f++) {
         const c = L.squareCenter(f, 0);
-        E.label3(C, [c[0], o[1] - COORD_LABEL_OFFSET * L.cell, 0], fileLabel(f),
+        E.label3(C, [c[0], o[1] - COORD_LABEL_OFFSET * L.cell, L.z], fileLabel(f),
                  { color: COORD, size: size, align: 'center' });
       }
       for (let r = 0; r < L.ranks; r++) {
         const c = L.squareCenter(0, r);
-        E.label3(C, [o[0] - COORD_LABEL_OFFSET * L.cell, c[1], 0], String(r + 1),
+        E.label3(C, [o[0] - COORD_LABEL_OFFSET * L.cell, c[1], L.z], String(r + 1),
                  { color: COORD, size: size, align: 'center' });
       }
     });
@@ -130,7 +130,7 @@
     const o = L.squareCorners(0, 0)[0];
     E.withContext(ctx, function () {
       // 外框
-      const frame = [o, [o[0] + L.w, o[1], 0], [o[0] + L.w, o[1] + L.h, 0], [o[0], o[1] + L.h, 0], o];
+      const frame = [o, [o[0] + L.w, o[1], L.z], [o[0] + L.w, o[1] + L.h, L.z], [o[0], o[1] + L.h, L.z], o];
       E.strokePoly(C, frame, { color: EDGE, width: 1.4 });
     });
 

@@ -222,4 +222,48 @@ T.eq(Estub.lastPlaneZ, -2.5, 'pickSquare 在 L.z 那个平面上求交，不是�
 BR.pickSquare(null, Estub, [0, 0], L0);
 T.eq(Estub.lastPlaneZ, 0, 'z=0 的棋盘照旧在 z=0 求交');
 
+// ---- drawBoard / drawCoordLabels / coordLabelSize 在 z≠0 的 layout 上 ----
+// defect：外框 frame 数组的三个中间点（旧代码手拼字面量）、坐标标签的
+// 定位点、coordLabelSize 探测格宽用的两个点，都曾经把第三分量写死成 0——
+// 棋盘挪到 L.z≠0 后，这些点仍然停在 z=0，跟它们框住/标注的格子（真正在
+// L.z）错层，透视下外框会歪斜地脱离格子。用一个只记录「E.proj / E.strokePoly
+// / E.label3 见过哪些 z」的桩，断言三者在 layout({z:-3}) 上用到的 z
+// 只能有一个值：-3。
+function makeZSpyE() {
+  const zs = [];
+  const fakeCtx = {
+    beginPath: function () {}, moveTo: function () {}, lineTo: function () {}, closePath: function () {}, fill: function () {},
+  };
+  return {
+    zs: zs,
+    ctx: fakeCtx,
+    proj: function (C, p) { zs.push(p[2]); return [0, 0]; },
+    withContext: function (targetCtx, fn) { return fn(); },
+    strokePoly: function (C, pts) { pts.forEach(function (p) { if (p) zs.push(p[2]); }); },
+    label3: function (C, p) { zs.push(p[2]); },
+  };
+}
+
+{
+  const Lm3 = BR.layout({ files: 8, ranks: 8, cell: 1, z: -3 });
+
+  const spyBoard = makeZSpyE();
+  BR.drawBoard(spyBoard.ctx, null, spyBoard, { layout: Lm3 });
+  T.ok(spyBoard.zs.length > 0, 'drawBoard 应该真的调用过 proj/strokePoly/label3（否则下面的判据没有验证力度）');
+  T.eq(Array.from(new Set(spyBoard.zs)), [-3],
+       'drawBoard 在 z=-3 的 layout 上，投影用到的 z 只能有一个值（外框/坐标标签不该停在 z=0）');
+
+  const spyCoords = makeZSpyE();
+  BR.drawCoordLabels(spyCoords.ctx, null, spyCoords, { layout: Lm3 });
+  T.ok(spyCoords.zs.length > 0, 'drawCoordLabels 应该真的调用过 proj/label3');
+  T.eq(Array.from(new Set(spyCoords.zs)), [-3],
+       'drawCoordLabels 在 z=-3 的 layout 上，投影用到的 z 只能有一个值');
+
+  const spySize = makeZSpyE();
+  BR.coordLabelSize(null, spySize, Lm3);
+  T.ok(spySize.zs.length > 0, 'coordLabelSize 应该真的调用过 proj');
+  T.eq(Array.from(new Set(spySize.zs)), [-3],
+       'coordLabelSize 在 z=-3 的 layout 上，探测格宽用到的两个点只能落在同一个 z');
+}
+
 T.report();
