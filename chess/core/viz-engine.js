@@ -1160,6 +1160,14 @@
     drawAxes, drawGridXY,
     clamp, fmt, fmtS, t,
     init, bindOrbit,
-    cam, recInfo
+    cam, recInfo,
+    // buildParams()/buildToggles() write PARAMS/toggle values onto this same
+    // object (state[p.key] = ..., state[tg.key] = cb.checked) — it was never
+    // exported, so a tool could declare sliders/toggles and see the engine
+    // render them, but draw()/readout() had no way to read what the user set.
+    // Exporting the object itself (not a copy) is deliberate: scenes are meant
+    // to read AND write it, same as cam above, so a snapshot would silently
+    // diverge from what the engine keeps advancing.
+    state
   };
 });

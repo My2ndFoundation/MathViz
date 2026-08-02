@@ -8,9 +8,9 @@
      content（新工具从 1.0.0 起），以及工具脚本里 TOOL 声明的 id / title / h1。
      engine-version 反映的是四个 core 模块的版本，不是工具自己的版本，
      一般不必跟着改。 -->
-<meta name="tool-version" content="0.0.0">
+<meta name="tool-version" content="1.0.0">
 <meta name="engine-version" content="chess-0.1.0">
-<title>Chess Tool Skeleton</title>
+<title>Rules, Legality and Mate</title>
 <!-- 样式令牌与组件整体搬运自 design-system/math-viz-starter.html 的 <style> 块，
      只做两处子项目专属调整：① canvas 是唯一主角，本子项目工具①②不分屏（分屏
      只属于阶段 2 之后的调试类工具）；② 默认英文——面板里没有任何硬编码中文，
@@ -144,6 +144,33 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   .panel{left:10px;right:10px;top:auto;bottom:10px;width:auto;max-height:62vh}
   .hint{display:none}
 }
+
+/* ---- 工具②专属：升变四选一浮层 / 易位四盏指示灯 ---- */
+/* 升变弹层浮在 canvas 之上（原则②：canvas 是主角，弹层只是临时的必要交互，
+   不分屏、不遮挡整个画面）。四个按钮固定横排，键盘不可达时也能用鼠标点。 */
+.promo{position:fixed;left:50%;bottom:120px;transform:translateX(-50%);z-index:8;
+  display:flex;gap:8px;padding:10px;border-radius:14px;
+  background:var(--panel-bg);border:1px solid var(--panel-line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 18px 50px rgba(0,0,0,.5)}
+.promo.hidden{display:none}
+.promo button{width:52px;height:52px;border-radius:10px;cursor:pointer;
+  border:1px solid rgba(148,163,184,.3);background:rgba(30,41,59,.6);
+  color:#e8f2fb;font-family:var(--font-math);font-style:italic;font-size:22px;
+  transition:border-color .15s,background .15s}
+.promo button:hover{border-color:rgba(45,212,234,.7);background:rgba(45,212,234,.14)}
+.promo-label{position:fixed;left:50%;bottom:178px;transform:translateX(-50%);z-index:8;
+  font-size:11.5px;color:rgba(159,176,200,.85);background:var(--panel-bg);
+  padding:4px 10px;border-radius:8px;border:1px solid var(--panel-line)}
+.promo-label.hidden{display:none}
+
+/* 易位四盏灯：special tab 的读数区里用，绿=满足、红=不满足 */
+.lights{display:flex;flex-direction:column;gap:3px;margin:6px 0}
+.light-row{display:flex;align-items:center;gap:7px;font-size:11.5px;color:#c6d2e4}
+.light-dot{width:9px;height:9px;border-radius:50%;flex:none;
+  background:rgba(148,163,184,.4);box-shadow:none;transition:background .15s,box-shadow .15s}
+.light-dot.on{background:var(--trace-emerald);box-shadow:0 0 7px var(--trace-emerald)}
+.light-dot.off{background:var(--trace-rose);box-shadow:0 0 7px var(--trace-rose)}
 </style>
 </head>
 <body>
@@ -181,7 +208,10 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   </div>
 </aside>
 
-<div class="hint">Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · 1–9 views · T to switch tabs</div>
+<div class="hint">Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · 1–9 views · T to switch tabs · F flip board · Ctrl/Cmd+Z undo</div>
+
+<div class="promo-label hidden" id="promoLabel">Choose a piece for the pawn to promote to</div>
+<div class="promo hidden" id="promoPicker"></div>
 
 <script>
 /* >>> GENERATED:VIZ-ENGINE */
@@ -2589,10 +2619,615 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 /* <<< GENERATED:BOARD-RENDER */
 </script>
 <script>
-/* 工具专属声明写这里，在 GENERATED 区之外——复制本骨架的工具在此声明 TOOL /
-   PARAMS / SCENES，并在末尾调用 VizEngine.init({ canvas, SCENES, PARAMS, TOOL,
-   VERSION, ENGINE_VERSION })。骨架本身不声明它们，因此直接打开时面板留空、
-   canvas 只画背景——这是预期行为，不是 bug。 */
+/* ============================================================================
+   工具② Rules, Legality and Mate —— 顿悟：合法走法 = 伪合法 ∩ 不自杀；
+   将死不是一种特殊状态，是「合法走法集合为空且正被将军」。
+
+   本文件只消费 GENERATED 区导出的 VizEngine / ChessCore / Interact /
+   BoardRender 四个模块，不改动其中任何一行。四个 tab 共用同一块棋盘几何
+   （BoardRender.layout 8×8、cell=1、原点居中），各自维护一份独立的
+   Interact 状态（games[tabId]），这样切换 tab 不会丢失你在另一个 tab
+   里下到一半的棋——与 math-viz「单一共享 state」不同，是刻意的选择：
+   四个 tab 展示的是四个不同的教学场景，而不是同一个连续量的四种测量。
+   ========================================================================= */
+(function () {
+  'use strict';
+  var E = window.VizEngine;
+  var CC = window.ChessCore;      // 避开 draw(C) 里相机参数名 C 的冲突
+  var I = window.Interact;
+  var BR = window.BoardRender;
+
+  var canvas = document.getElementById('scene');
+  var ctx = canvas.getContext('2d');   // 与引擎内部同一个 context（getContext 幂等）
+
+  var L = BR.layout({ files: 8, ranks: 8, cell: 1 });
+
+  // ---- 画布字面量色值（与 :root 的 --trace-* 令牌同源，Canvas 里不能用 var()）----
+  var ROSE = '#fb7185', VIOLET = '#a78bfa', EMERALD = '#34d399', ORANGE = '#fb923c', CYAN = '#2dd4ea';
+  var CSS_ROSE = 'var(--trace-rose)', CSS_VIOLET = 'var(--trace-violet)',
+      CSS_EMERALD = 'var(--trace-emerald)', CSS_ORANGE = 'var(--trace-orange)',
+      CSS_CYAN = 'var(--trace-cyan)', CSS_SLATE = 'var(--ui-slate)';
+
+  var PIECE_SCALE = 46;   // 与 _piece-preview.html 的 32 子探针同一个尺度（dist=11 时验证过好看）
+
+  // ================= 预置局面（Task 6 Step 2 已用 node 逐条核对，见提交说明） =================
+  var PRESETS = {
+    start: {
+      fen: CC.START_FEN,
+      tips: { en: 'Click any piece to see where it can legally go (emerald) — once something is pinned, you will also see where it could go if the rules stopped at movement shape (rose).',
+              zh: '点任意棋子，看它能合法走到哪里（翠绿）——一旦有子被别住，你还会看到「如果规则只管走法形状」它本可以去哪里（玫红）。' },
+    },
+    pin: {
+      fen: '4k3/8/8/8/8/8/8/4KN1r w - - 0 1',
+      tips: { en: 'The knight on f1 is pinned. Rose shows where it could go if we only checked movement shape. Every rose square is forbidden for exactly one reason — it would expose the king to the rook on h1.',
+              zh: 'f1 的马被别住了。玫红显示的是「只看走法形状」时它本可以去的格子。每个玫红格被禁止只有一个原因——那样走会让王暴露在 h1 车的攻击下。' },
+    },
+    castleOk: {
+      fen: 'r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1',
+      tips: { en: 'All four castling preconditions are met — all lights green: king and rook untouched, the squares between are empty, and the king’s start, path and landing square are all safe.',
+              zh: '易位的四个前提全部满足——四灯全绿：王车未动、之间格子为空，且王的起点、路径与落点都安全。' },
+    },
+    castleThrough: {
+      fen: 'r3k2r/8/8/8/8/8/5r2/R3K2R w KQkq - 0 1',
+      tips: { en: 'f1 is attacked by the rook on f2 — the king would pass through check, so kingside castling is forbidden. This has nothing to do with queenside, which stays legal.',
+              zh: 'f1 被 f2 的车攻击——王会「经过」被将军的格子，短易位因此不合法。这与长易位无关，长易位仍然合法。' },
+    },
+    castleB1: {
+      fen: 'r3k2r/8/8/8/8/8/1r6/R3K2R w KQkq - 0 1',
+      tips: { en: 'A rook attacks b1 — and it changes nothing. Queenside castling only requires b1 to be empty, not safe, because the king travels e1→d1→c1 and never sets foot on b1.',
+              zh: '一个车正在攻击 b1——但这毫无影响。长易位只要求 b1 为空、不要求它安全，因为王走的是 e1→d1→c1，根本不经过 b1。' },
+    },
+    ep: {
+      fen: 'rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3',
+      tips: { en: 'Black just played …f5, and only on this very move White may capture it en passant, landing on f6 as if that pawn had stopped one square early. Wait one move and the option disappears forever.',
+              zh: '黑方刚走了 …f5，只有这一步白方才能吃过路兵，落到 f6 就像那个兵只走了一步一样。晚一步，这个机会就永远消失。' },
+    },
+    foolsMate: {
+      fen: 'rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3',
+      tips: { en: 'White has zero legal moves and is in check — that combination, and only that combination, is checkmate.',
+              zh: '白方合法走法为零，且正被将军——只有这两条同时成立，才是将死。' },
+    },
+    stalemate: {
+      fen: '7k/5Q2/6K1/8/8/8/8/8 b - - 0 1',
+      tips: { en: 'Black has zero legal moves too — but the king is not attacked. Zero moves without check is stalemate: a draw, not a loss.',
+              zh: '黑方合法走法同样为零——但王没有被攻击。没有合法走法却未被将军，是逼和：和棋，不是输棋。' },
+    },
+    mateKQ: {
+      fen: '4k3/8/8/8/8/8/8/3QK3 w - - 0 1',
+      tips: { en: 'King and queen against a lone king. Drive the king to the edge, keep your own king close, and deliver mate — the first checkmate you can actually force.',
+              zh: '王后配王，对单王。把对方王逼到边上，自己的王靠近协助，然后将死——这是你第一个能真正强制做到的将杀。' },
+    },
+    mateKR: {
+      fen: '4k3/8/8/8/8/8/8/3RK3 w - - 0 1',
+      tips: { en: 'King and rook against a lone king — the classic box/ladder method. A touch more technique than K+Q, but just as forced.',
+              zh: '车王配单王——经典的「梯子 / box」杀法。比车后杀法稍需技巧，但同样是强制的。' },
+    },
+  };
+
+  // ================= 每个 tab 一份独立的 Interact 状态 =================
+  var games = {
+    legal:   { st: null, presetKey: null },
+    special: { st: null, presetKey: null },
+    check:   { st: null, presetKey: null },
+    mate:    { st: null, presetKey: null },
+  };
+  var reasonMsg = { legal: null, special: null, check: null, mate: null };   // 非法走法的理由，覆盖 tips 直到下一次交互
+  var pendingPromo = null;   // { tabId, st, from, to } —— 升变四选一待定时非空
+
+  // loadPreset() 调用 hidePromoPicker()，后者要用到 promoPickerEl/promoLabelEl——
+  // 那两个 DOM 引用在下面「升变四选一浮层」一节才声明。四个 tab 的启动加载
+  // 因此挪到本文件最末尾、就在 E.init() 之前——那时全部辅助函数与 DOM 引用
+  // 都已经就绪，不必让 loadPreset() 自己再去猜调用者有没有把它调早了。
+  function loadPreset(tabId, key) {
+    var preset = PRESETS[key];
+    games[tabId].st = I.create({ position: CC.Position.fromFEN(preset.fen) });
+    games[tabId].presetKey = key;
+    reasonMsg[tabId] = null;
+    hidePromoPicker();
+  }
+
+  // ================= 易位四前提（规格 §4②，node 已核对 castleOk/Through/B1 三例） =================
+  function castlingChecks(pos, side, kingside) {
+    var home = side === CC.WHITE ? CC.fromAlg('e1') : CC.fromAlg('e8');
+    var rookSq = home + (kingside ? 3 : -4);
+    var step = kingside ? 1 : -1;
+    var bit = side === CC.WHITE ? (kingside ? 1 : 2) : (kingside ? 4 : 8);
+    var between = kingside ? [home + 1, home + 2] : [home - 1, home - 2, home - 3];
+    return [
+      { key: 'rights', ok: !!(pos.castling & bit) },
+      { key: 'rook',   ok: pos.board[rookSq] === (side === CC.WHITE ? CC.R : -CC.R) },
+      { key: 'empty',  ok: between.every(function (s) { return pos.board[s] === CC.EMPTY; }) },
+      // 只查王的起点/路径/终点三格——长易位的 b 列格必须为空但不必安全，
+      // 因为王走 e1→d1→c1，根本不经过 b1（castleB1 预置局面专门验证这一条）。
+      { key: 'safe',   ok: !pos.isAttacked(home, -side) &&
+                           !pos.isAttacked(home + step, -side) &&
+                           !pos.isAttacked(home + step * 2, -side) },
+    ];
+  }
+
+  // ================= 文案 =================
+  var STATUS_LABEL = {
+    ongoing:      { en: 'ongoing', zh: '进行中' },
+    check:        { en: 'check', zh: '将军' },
+    checkmate:    { en: 'checkmate', zh: '将死' },
+    stalemate:    { en: 'stalemate', zh: '逼和' },
+    insufficient: { en: 'draw — insufficient material', zh: '和棋 — 子力不足' },
+    fifty:        { en: 'draw — 50-move rule available', zh: '和棋 — 可主张 50 步规则' },
+  };
+  function statusLabel(s) { return E.t(STATUS_LABEL[s] || { en: s, zh: s }); }
+  function statusCss(s) {
+    if (s === 'checkmate' || s === 'check') return CSS_ROSE;
+    if (s === 'stalemate') return CSS_VIOLET;
+    if (s === 'insufficient' || s === 'fifty') return CSS_SLATE;
+    return CSS_EMERALD;
+  }
+  var LIGHT_LABEL = {
+    rights: { en: 'king & rook unmoved', zh: '王车未动过' },
+    rook:   { en: 'rook still on its square', zh: '车仍在原位' },
+    empty:  { en: 'squares between are empty', zh: '之间格子为空' },
+    safe:   { en: 'king’s start / path / end not attacked', zh: '王的起点 / 路径 / 终点未被攻击' },
+  };
+  var PIECE_NAME = { 5: { en: 'Queen', zh: '后' }, 4: { en: 'Rook', zh: '车' },
+                     3: { en: 'Bishop', zh: '象' }, 2: { en: 'Knight', zh: '马' } };
+  var GLYPH_WHITE = {}; GLYPH_WHITE[CC.Q] = '♕'; GLYPH_WHITE[CC.R] = '♖';
+  GLYPH_WHITE[CC.B] = '♗'; GLYPH_WHITE[CC.N] = '♘';
+  var GLYPH_BLACK = {}; GLYPH_BLACK[CC.Q] = '♛'; GLYPH_BLACK[CC.R] = '♜';
+  GLYPH_BLACK[CC.B] = '♝'; GLYPH_BLACK[CC.N] = '♞';
+
+  // ================= 画布绘制辅助 =================
+  function fillSquare(camC, f, r, color, alpha) {
+    var pts = L.squareCorners(f, r).map(function (p) { return E.proj(camC, p); });
+    if (pts.some(function (p) { return !p; })) return;
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (var i = 1; i < 4; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.restore();
+  }
+  function strokeSquare(camC, sq, color, width) {
+    var f = CC.fileOf(sq), r = CC.rankOf(sq);
+    var cs = L.squareCorners(f, r);
+    E.strokePoly(camC, cs.concat([cs[0]]), { color: color, width: width });
+  }
+  function glowAt(camC, worldPt, r, core, mid) {
+    var s = E.proj(camC, worldPt);
+    if (!s) return;
+    E.glowDot(s, r, core, mid);
+  }
+  function drawPieces(camC, pos) {
+    for (var r = 0; r < 8; r++) {
+      for (var f = 0; f < 8; f++) {
+        var v = pos.board[CC.SQ(f, r)];
+        if (v === CC.EMPTY) continue;
+        BR.drawPiece(ctx, camC, E, { code: v, center: L.squareCenter(f, r), scale: PIECE_SCALE });
+      }
+    }
+  }
+
+  // 四色高亮 + 棋子：四个可交互 tab 共用的核心绘制。lastMove 淡紫、legal 目标翠绿、
+  // pin 差集（伪合法减合法）玫红、选中格青色描边、被将军的王玫红辉光——
+  // 顺序照抄仓库画序惯例：格子 → 结构（高亮/描边）→ 辉光点 → 主体（棋子）。
+  function drawBoardCore(camC, tabId) {
+    var g = games[tabId];
+    var pos = g.st.pos;
+    var hl = I.highlights(g.st);
+
+    BR.drawBoard(ctx, camC, E, { layout: L });
+
+    if (hl.lastMove.length === 2) {
+      hl.lastMove.forEach(function (sq) { fillSquare(camC, CC.fileOf(sq), CC.rankOf(sq), VIOLET, 0.16); });
+    }
+    hl.targets.forEach(function (sq) { fillSquare(camC, CC.fileOf(sq), CC.rankOf(sq), EMERALD, 0.38); });
+    hl.pseudoOnly.forEach(function (sq) { fillSquare(camC, CC.fileOf(sq), CC.rankOf(sq), ROSE, 0.30); });
+    if (hl.selected >= 0) strokeSquare(camC, hl.selected, CYAN, 2.4);
+    if (hl.check >= 0) {
+      glowAt(camC, L.squareCenter(CC.fileOf(hl.check), CC.rankOf(hl.check)), 34,
+             'rgba(251,113,133,0.85)', 'rgba(251,113,133,0.30)');
+    }
+    drawPieces(camC, pos);
+    return { pos: pos, hl: hl };
+  }
+
+  // ================= 升变四选一浮层 =================
+  var promoPickerEl = document.getElementById('promoPicker');
+  var promoLabelEl = document.getElementById('promoLabel');
+  function hidePromoPicker() {
+    pendingPromo = null;
+    promoPickerEl.classList.add('hidden');
+    promoLabelEl.classList.add('hidden');
+  }
+  function showPromoPicker(tabId, st, from, to, choices) {
+    pendingPromo = { tabId: tabId, st: st, from: from, to: to };
+    var whiteMover = st.pos.turn === CC.WHITE;
+    var glyphs = whiteMover ? GLYPH_WHITE : GLYPH_BLACK;
+    promoPickerEl.innerHTML = '';
+    choices.forEach(function (code) {
+      var b = document.createElement('button');
+      b.textContent = glyphs[code] || '?';
+      b.title = E.t(PIECE_NAME[code]);
+      b.addEventListener('click', function () {
+        var res = I.tryMove(st, from, to, code);
+        hidePromoPicker();
+        if (res.ok) { reasonMsg[tabId] = null; demoPlaying = false; afterMove(tabId); }
+        else reasonMsg[tabId] = res.reason;
+      });
+      promoPickerEl.appendChild(b);
+    });
+    promoLabelEl.textContent = E.t({ en: 'Choose a piece for the pawn to promote to', zh: '选择兵要升变成的棋子' });
+    promoPickerEl.classList.remove('hidden');
+    promoLabelEl.classList.remove('hidden');
+  }
+
+  function afterMove(tabId) {
+    if (tabId === 'mate' && games[tabId].st.pos.status() === 'checkmate') {
+      reasonMsg[tabId] = { en: 'Checkmate — well played. Click a view button (or Reset) to try the other basic mate.',
+                            zh: '将死——漂亮。点一个视角按钮（或「重置」）试试另一种基本杀法。' };
+    }
+  }
+
+  function attemptMove(tabId, st, from, to) {
+    var res = I.tryMove(st, from, to);
+    if (res.ok) { reasonMsg[tabId] = null; demoPlaying = false; afterMove(tabId); return; }
+    if (res.needsPromotion) { showPromoPicker(tabId, st, from, to, res.choices); return; }
+    reasonMsg[tabId] = res.reason;
+    demoPlaying = false;
+  }
+
+  // ================= 点击选子 / 落子（拖拽相机与点击选子共用同一批指针事件，
+  // 用「起止点距离很小」区分「点」与「拖」；右键/Shift 拖拽留给相机平移） =================
+  var pdown = null;
+  canvas.addEventListener('pointerdown', function (e) {
+    if (e.button !== 0 || e.shiftKey) return;
+    pdown = { x: e.clientX, y: e.clientY, t: performance.now() };
+  });
+  canvas.addEventListener('pointerup', function (e) {
+    if (!pdown) return;
+    var dx = e.clientX - pdown.x, dy = e.clientY - pdown.y;
+    var dt = performance.now() - pdown.t;
+    pdown = null;
+    if (Math.hypot(dx, dy) < 6 && dt < 500) handleBoardClick(myCurTab, e.clientX, e.clientY);
+  });
+  function handleBoardClick(tabId, sx, sy) {
+    if (pendingPromo || !tabId || !games[tabId]) return;
+    var g = games[tabId];
+    var st = g.st, pos = st.pos;
+    var camC = E.makeCam();
+    var picked = BR.pickSquare(camC, E, [sx, sy], L);
+    if (!picked) return;
+    var sq = CC.SQ(picked.file, picked.rank);
+    if (st.sel === -1) { I.select(st, sq); return; }
+    if (st.sel === sq) { I.clear(st); return; }
+    var v = pos.board[sq];
+    var mine = v !== CC.EMPTY && ((v > 0 ? CC.WHITE : CC.BLACK) === pos.turn);
+    if (mine) { I.select(st, sq); return; }
+    attemptMove(tabId, st, st.sel, sq);
+  }
+
+  // ================= 键盘：Ctrl/Cmd+Z 撤销、+Shift 重做、F 翻转棋盘视角 =================
+  // 复用引擎焦点保护判据（bindKeyboard 同款）：面板里的输入控件获得焦点时不响应。
+  // 引擎自己没绑 Z / F（阶段 0 PR #68 已摘掉 Space 与 r），这里接的是空位，不会打架。
+  window.addEventListener('keydown', function (e) {
+    var el = document.activeElement, tag = el && el.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el && el.isContentEditable)) return;
+    var meta = e.ctrlKey || e.metaKey;
+    if (meta && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      var g = games[myCurTab];
+      if (!g) return;
+      if (e.shiftKey) I.redo(g.st); else I.undo(g.st);
+      reasonMsg[myCurTab] = null;
+      hidePromoPicker();
+      demoPlaying = false;
+      return;
+    }
+    if (e.key === 'f' || e.key === 'F') {
+      E.cam.az += Math.PI;   // 纯相机翻转：白方 ⇄ 黑方视角，世界坐标与走法逻辑都不变
+    }
+  });
+
+  // ================= tips：reasonMsg 覆盖 > 当前预置局面的说明 > tab 静态兜底 =================
+  // 引擎在切 tab / 切语言时会把 tipsEl 写回 SCENES[id].tips 这个静态兜底——每帧在这里
+  // 用「目标文本」与当前 DOM 内容比较后自愈，两者都不冲突：读数区正是「按需覆盖」
+  // 而不是「谁最后写谁赢」，这样语言切换、reason 消失、预置局面切换都各自即时生效。
+  var tipsEl = document.getElementById('tips');
+  function desiredTips(tabId) {
+    if (reasonMsg[tabId]) return E.t(reasonMsg[tabId]);
+    var g = games[tabId], preset = g && PRESETS[g.presetKey];
+    return preset ? E.t(preset.tips) : E.t(SCENES[tabId].tips);
+  }
+  function syncTips(tabId) {
+    var want = desiredTips(tabId);
+    if (tipsEl.textContent !== want) tipsEl.textContent = want;
+  }
+
+  // ================= 自动演示：按 dt 累加，巡回本 tab 的视角按钮（=预置局面）=================
+  // 复用真实的视角按钮点击路径（tween + onSelect），不是另起一套局面加载逻辑——
+  // 这样自动演示与手动点视角按钮永远是同一条代码路径，不会漂移。
+  var demoPlaying = true;
+  var demoAcc = 0;
+  var DEMO_INTERVAL = 3;
+  var DEMO_KEYS = {
+    legal: ['iso', 'pin'],
+    special: ['iso', 'castleThrough', 'castleB1', 'ep'],
+    check: ['iso', 'stalemate'],
+    mate: ['iso', 'mateKR'],
+  };
+  var lastDemoView = { legal: 'iso', special: 'iso', check: 'iso', mate: 'iso' };
+  function advanceDemo(dt) {
+    if (!demoPlaying) return;
+    demoAcc += dt;
+    if (demoAcc < DEMO_INTERVAL) return;
+    demoAcc = 0;
+    var keys = DEMO_KEYS[myCurTab];
+    if (!keys) return;
+    var idx = keys.indexOf(lastDemoView[myCurTab]);
+    var next = keys[(idx + 1) % keys.length];
+    lastDemoView[myCurTab] = next;
+    var btn = document.querySelector('.views[data-tab="' + myCurTab + '"] .vbtn[data-view="' + next + '"]');
+    if (btn) btn.click();
+  }
+  var __lastTs = null;
+  function frameDt() {
+    var now = performance.now();
+    var dt = __lastTs == null ? 0 : Math.min(0.05, Math.max(0, (now - __lastTs) / 1000));
+    __lastTs = now;
+    return dt;
+  }
+
+  // btnPlay 已由引擎接了 state.running 的图标切换；这里叠加一路自己的监听器，
+  // 复用同一枚按钮驱动 demoPlaying——「全交互与自动演示是同一条时间轴」的字面实现。
+  document.getElementById('btnPlay').addEventListener('click', function () { demoPlaying = !demoPlaying; });
+  // btnReset：回到本 tab 的 iso 视角按钮，与双击画布回正走同一条路径（tween + onSelect）。
+  document.getElementById('btnReset').addEventListener('click', function () {
+    var btn = document.querySelector('.views[data-tab="' + myCurTab + '"] .vbtn[data-view="iso"]');
+    if (btn) btn.click();
+  });
+
+  // myCurTab 的权威来源是 tab 按钮的 click 监听器（见 E.init() 之后的绑定），
+  // 不是每个 scene 的 draw() 首行——draw() 只由引擎自带的 rAF 循环驱动，而那条
+  // 循环在浏览器把本页判定为不可见时会被大幅节流甚至停摆（真实发生过：一次
+  // 手工验证里，标签页切换后台导致 draw() 长时间不再执行，click→draw() 同步
+  // myCurTab 的旧写法让棋盘点击持续作用在上一个可见的 tab 上）。draw() 里仍然
+  // 保留同一行赋值作为无害的双保险，但点击监听器才是唯一必须可靠的一份。
+  var myCurTab = 'legal';
+
+  // ================= check tab：z = ply 的应手展开（本工具唯一的非纯棋盘绘制）=================
+  var PLY_Z = 1.7;
+  function drawPlyPlane(camC) {
+    var h = 4;
+    var pts = [[-h, -h, PLY_Z], [h, -h, PLY_Z], [h, h, PLY_Z], [-h, h, PLY_Z], [-h, -h, PLY_Z]];
+    E.strokePoly(camC, pts, { color: 'rgba(148,163,184,0.22)', width: 1, dash: [3, 5] });
+  }
+  function drawReplyTree(camC, pos) {
+    drawPlyPlane(camC);
+    var moves = pos.legalMoves();
+    var n = moves.length;
+    if (n === 0) {
+      var status = pos.status();   // 'checkmate' 或 'stalemate'——此时 draw() 之前已确认 legalMoves() 为空
+      var label = status === 'checkmate'
+        ? { en: 'CHECKMATE — the reply layer is empty', zh: '将死 — 应手层是空的' }
+        : { en: 'STALEMATE — empty, but the king is not attacked', zh: '逼和 — 是空的，但王没有被攻击' };
+      E.label3(camC, [0, 0, PLY_Z], E.t(label),
+                { size: 14, color: status === 'checkmate' ? ROSE : VIOLET, align: 'center' });
+      return;
+    }
+    var spacing = Math.min(0.85, 7 / n);
+    for (var i = 0; i < n; i++) {
+      var m = moves[i];
+      var x = (i - (n - 1) / 2) * spacing;
+      var nodePt = [x, 0, PLY_Z];
+      var fromPt = L.squareCenter(CC.fileOf(m.from), CC.rankOf(m.from));
+      E.line3(camC, fromPt, nodePt, { color: 'rgba(167,139,250,0.42)', width: 1 });
+      glowAt(camC, nodePt, 7, EMERALD, 'rgba(52,211,153,0.22)');
+      var san;
+      try { san = CC.moveToSAN(pos, m); } catch (e) { san = CC.toAlg(m.from) + CC.toAlg(m.to); }
+      E.label3(camC, nodePt, san, { size: 10.5, color: '#dbe6f5', align: 'center', dy: -12 });
+    }
+  }
+
+  // ================= 读数 =================
+  function turnStatusLine(pos) {
+    var turnLabel = pos.turn === CC.WHITE ? { en: 'White', zh: '白方' } : { en: 'Black', zh: '黑方' };
+    var status = pos.status();
+    return '<div>' + E.t(turnLabel) + ' ' + E.t({ en: 'to move', zh: '走棋' }) +
+           ' — <b style="--c:' + statusCss(status) + '">' + statusLabel(status) + '</b></div>';
+  }
+  function fenLine(pos) {
+    return '<div class="dim" style="font-family:var(--font-mono);font-size:10.5px;word-break:break-all">' +
+           pos.toFEN() + '</div>';
+  }
+  function renderLegalReadout() {
+    var g = games.legal, pos = g.st.pos, hl = I.highlights(g.st);
+    var html = turnStatusLine(pos);
+    if (hl.selected >= 0) {
+      html += '<div>' + E.t({ en: 'Selected', zh: '选中' }) + ': <b style="--c:' + CSS_CYAN + '">' +
+              CC.toAlg(hl.selected) + '</b> — <b style="--c:' + CSS_EMERALD + '">' + hl.targets.length +
+              '</b> ' + E.t({ en: 'legal', zh: '合法' });
+      if (hl.pseudoOnly.length) {
+        html += ', <b style="--c:' + CSS_ROSE + '">' + hl.pseudoOnly.length + '</b> ' +
+                E.t({ en: 'pinned (pseudo-legal only)', zh: '被别住（仅伪合法）' });
+      }
+      html += '</div>';
+    } else {
+      html += '<div class="dim">' + E.t({ en: 'Click any piece to see its moves.', zh: '点任意棋子查看其走法。' }) + '</div>';
+    }
+    return html + fenLine(pos);
+  }
+  function lightsBlock(pos, side, kingside, title) {
+    var rows = castlingChecks(pos, side, kingside);
+    var allOk = rows.every(function (r) { return r.ok; });
+    var html = '<div class="light-row" style="color:#dbe6f5;margin-top:5px"><b style="--c:' +
+               (allOk ? CSS_EMERALD : CSS_ROSE) + '">' + E.t(title) + '</b></div>';
+    rows.forEach(function (r) {
+      html += '<div class="light-row"><span class="light-dot ' + (r.ok ? 'on' : 'off') + '"></span>' +
+              E.t(LIGHT_LABEL[r.key]) + '</div>';
+    });
+    return html;
+  }
+  function renderSpecialReadout() {
+    var g = games.special, pos = g.st.pos;
+    var html = turnStatusLine(pos);
+    html += '<div class="lights">' + lightsBlock(pos, CC.WHITE, true, { en: 'Kingside (O-O)', zh: '短易位 (O-O)' }) + '</div>';
+    html += '<div class="lights">' + lightsBlock(pos, CC.WHITE, false, { en: 'Queenside (O-O-O)', zh: '长易位 (O-O-O)' }) + '</div>';
+    var epTxt = pos.ep >= 0 ? CC.toAlg(pos.ep) : E.t({ en: 'none right now', zh: '此刻没有' });
+    html += '<div style="margin-top:5px">' + E.t({ en: 'En passant target', zh: '吃过路兵目标格' }) +
+            ': <b style="--c:' + CSS_ORANGE + '">' + epTxt + '</b></div>';
+    return html + fenLine(pos);
+  }
+  function renderCheckReadout() {
+    var g = games.check, pos = g.st.pos;
+    var n = pos.legalMoves().length;
+    var html = turnStatusLine(pos);
+    html += '<div>' + E.t({ en: 'Legal replies', zh: '合法应手' }) + ': <b style="--c:' +
+            (n ? CSS_EMERALD : CSS_ROSE) + '">' + n + '</b></div>';
+    html += '<div class="dim">' + E.t({ en: 'Checkmate = this is 0 while in check. Stalemate = 0 without check.',
+                                          zh: '将死 = 这个数为 0 且正被将军。逼和 = 为 0 但未被将军。' }) + '</div>';
+    return html + fenLine(pos);
+  }
+  function renderMateReadout() {
+    var g = games.mate, pos = g.st.pos;
+    return turnStatusLine(pos) + fenLine(pos);
+  }
+
+  // ================= SCENES =================
+  var CAM_BASE = { az: -0.6, el: 0.55, dist: 11 };
+  var CAM_ZOOM = { az: -0.3, el: 0.62, dist: 9 };
+  var CAM_TOP  = { az: 0, el: 1.45, dist: 14 };
+  var CAM_KING = { az: 0.25, el: 0.55, dist: 10.5 };
+  var CAM_QUEEN = { az: -1.15, el: 0.55, dist: 10.5 };
+  var CAM_CHECK = { az: -0.5, el: 0.42, dist: 13.5 };
+
+  function viewSpec(cam, label) {
+    return { label: label, az: cam.az, el: cam.el, dist: cam.dist, tx: cam.tx || 0, ty: cam.ty || 0, tz: cam.tz || 0 };
+  }
+
+  var SCENES = {
+    legal: {
+      label: { en: 'Legal', zh: '合法性' },
+      brand: { en: 'A legal move is a pseudo-legal move that does not expose your own king.',
+               zh: '合法走法就是不让自己的王暴露的伪合法走法。' },
+      tips: PRESETS.start.tips,
+      views: (function () {
+        var v = {};
+        v.iso = viewSpec(CAM_BASE, { en: 'Start', zh: '初始' });
+        v.iso.onSelect = function () { loadPreset('legal', 'start'); };
+        v.pin = viewSpec(CAM_ZOOM, { en: 'Pin', zh: '别子' });
+        v.pin.onSelect = function () { loadPreset('legal', 'pin'); };
+        v.top = viewSpec(CAM_TOP, { en: 'Top (epiphany)', zh: '俯视（顿悟）' });
+        return v;
+      })(),
+      draw: function (camC) {
+        myCurTab = 'legal';
+        var dt = frameDt();
+        advanceDemo(dt);
+        syncTips('legal');
+        drawBoardCore(camC, 'legal');
+      },
+      readout: renderLegalReadout,
+    },
+    special: {
+      label: { en: 'Special', zh: '特殊规则' },
+      brand: { en: 'Castling has four independent preconditions; en passant only exists for one move.',
+               zh: '易位有四个各自独立的前提；吃过路兵只在那一步棋里存在。' },
+      tips: PRESETS.castleOk.tips,
+      views: (function () {
+        var v = {};
+        v.iso = viewSpec(CAM_BASE, { en: 'OK', zh: '全绿' });
+        v.iso.onSelect = function () { loadPreset('special', 'castleOk'); };
+        v.castleThrough = viewSpec(CAM_KING, { en: 'Through check', zh: '经过被将' });
+        v.castleThrough.onSelect = function () { loadPreset('special', 'castleThrough'); };
+        v.castleB1 = viewSpec(CAM_QUEEN, { en: 'b1 unsafe', zh: 'b1 不安全' });
+        v.castleB1.onSelect = function () { loadPreset('special', 'castleB1'); };
+        v.ep = viewSpec(CAM_BASE, { en: 'En passant', zh: '过路兵' });
+        v.ep.onSelect = function () { loadPreset('special', 'ep'); };
+        return v;
+      })(),
+      draw: function (camC) {
+        myCurTab = 'special';
+        var dt = frameDt();
+        advanceDemo(dt);
+        syncTips('special');
+        drawBoardCore(camC, 'special');
+      },
+      readout: renderSpecialReadout,
+    },
+    check: {
+      label: { en: 'Check', zh: '将死' },
+      brand: { en: 'Checkmate is not a special state — it is the legal-move list going empty while the king is attacked.',
+               zh: '将死不是一种特殊状态——它就是合法走法列表空掉，而王正被攻击。' },
+      tips: PRESETS.foolsMate.tips,
+      views: (function () {
+        var v = {};
+        v.iso = viewSpec(CAM_CHECK, { en: 'Fool’s mate', zh: '愚人将杀' });
+        v.iso.onSelect = function () { loadPreset('check', 'foolsMate'); };
+        v.stalemate = viewSpec(CAM_CHECK, { en: 'Stalemate', zh: '逼和' });
+        v.stalemate.onSelect = function () { loadPreset('check', 'stalemate'); };
+        return v;
+      })(),
+      draw: function (camC) {
+        myCurTab = 'check';
+        var dt = frameDt();
+        advanceDemo(dt);
+        syncTips('check');
+        var res = drawBoardCore(camC, 'check');
+        drawReplyTree(camC, res.pos);
+      },
+      readout: renderCheckReadout,
+    },
+    mate: {
+      label: { en: 'Mate', zh: '基本杀法' },
+      brand: { en: 'The first checkmate a beginner can force on purpose, not stumble into.',
+               zh: '初学者第一个能刻意强制做到、而不是误打误撞碰上的将死。' },
+      tips: PRESETS.mateKQ.tips,
+      views: (function () {
+        var v = {};
+        v.iso = viewSpec(CAM_BASE, { en: 'K+Q', zh: '车后' });
+        v.iso.onSelect = function () { loadPreset('mate', 'mateKQ'); };
+        v.mateKR = viewSpec(CAM_BASE, { en: 'K+R', zh: '车杀' });
+        v.mateKR.onSelect = function () { loadPreset('mate', 'mateKR'); };
+        return v;
+      })(),
+      draw: function (camC) {
+        myCurTab = 'mate';
+        var dt = frameDt();
+        advanceDemo(dt);
+        syncTips('mate');
+        drawBoardCore(camC, 'mate');
+      },
+      readout: renderMateReadout,
+    },
+  };
+
+  var PARAMS = [];
+  var TOOL = {
+    id: 'chess-rules-check-mate',
+    title: { en: 'Rules, Legality and Mate', zh: '规则、合法性与将杀' },
+    h1: { en: 'Rules, Legality and Mate', zh: '规则、合法性与将杀' },
+  };
+  var VERSION = document.querySelector('meta[name="tool-version"]').content;
+  var ENGINE_VERSION = document.querySelector('meta[name="engine-version"]').content;
+
+  // 四个 tab 的起始局面：所有辅助函数与 DOM 引用（尤其是升变浮层）都已就绪，
+  // 现在调用 loadPreset() 是安全的（见函数定义处的说明）。
+  loadPreset('legal', 'start');
+  loadPreset('special', 'castleOk');
+  loadPreset('check', 'foolsMate');
+  loadPreset('mate', 'mateKQ');
+
+  E.init({ canvas: canvas, SCENES: SCENES, PARAMS: PARAMS, TOOL: TOOL, VERSION: VERSION, ENGINE_VERSION: ENGINE_VERSION });
+
+  // buildTabs() (inside E.init(), just above) has now created one <button class="tab">
+  // per SCENES key. Attach our own click listener alongside the engine's own — this is
+  // the reliable, synchronous source of truth for myCurTab (see the comment at its
+  // declaration above).
+  document.querySelectorAll('#tabsNav .tab').forEach(function (btn) {
+    btn.addEventListener('click', function () { myCurTab = btn.dataset.tab; });
+  });
+})();
 </script>
 </body>
 </html>
