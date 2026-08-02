@@ -4741,6 +4741,35 @@ var evalCaveatOpen = { material: false, control: false, safety: false };
 
 function signed(v) { return (v > 0 ? '+' : '') + v; }
 
+/* ================= heat 页：累计落子热力（Task 16） ================= */
+/* 不复用 drawPosition()：它会把上一步的起讫格也刷成半透明橙——热力页
+   的格子填色本身就是橙（ORANGE），两层橙叠在一起会让人分不清哪层是
+   「累计热力」、哪层是「上一步」，这里干脆不画后者。BR.drawBoard 与
+   逐子 BR.drawPiece 仍然复用，只是省掉那两行 fillSquare 高亮。 */
+function drawHeat(camC) {
+  var upto = E.state.wholeGame ? rs.maxPly : rs.ply;
+  var h = RP.heat(rs, upto);
+  BR.drawBoard(ctx, camC, E, { layout: L });
+  // 计数为 0 的格不填色——counts 里本来就只有落过子的格，天然满足这一条。
+  for (var sqKey in h.counts) {
+    var sq = +sqKey;
+    var ratio = h.counts[sq] / h.max;
+    fillSquare(camC, sq, hexA(ORANGE, 0.08 + 0.62 * ratio));
+  }
+  var pos = RP.position(rs);
+  for (var r = 0; r < 8; r++) for (var f = 0; f < 8; f++) {
+    var v = pos.board[CC.SQ(f, r)];
+    if (v === CC.EMPTY) continue;
+    var c = L.squareCenter(f, r);
+    BR.drawPiece(ctx, camC, E, { code: v, center: c, cell: L.cell });
+  }
+  for (var sqKey2 in h.counts) {
+    var sq2 = +sqKey2;
+    var c2 = L.squareCenter(CC.fileOf(sq2), CC.rankOf(sq2));
+    E.label3(camC, c2, String(h.counts[sq2]), { size: 11, color: '#fde8d2', align: 'center' });
+  }
+}
+
 /* ================= 传输控件（挂进 #recHost） ================= */
 var transportEls = null;   // { play, scrub, speed, counter }
 var btnPlayTop = null;     // 面板顶部复用的 Play 按钮（bindTopButtons 里赋值），syncTransport() 里同步文案
@@ -5023,23 +5052,39 @@ var SCENES = {
 
   heat: {
     label: { zh: '热力', en: 'Heat' },
-    brand: { zh: '累计落子热力——占位页，见 Task 16。', en: 'Cumulative landing heat — placeholder, see Task 16.' },
-    tips: { zh: '（占位）这一页之后会把每格被落子的累计次数画成高度；现在只显示当前局面。',
-            en: '(placeholder) This tab will stand cumulative landings up as height per square; for now it just shows the current position.' },
+    brand: { zh: '累计落子热力——冷格（从没人碰过）与热格一样有信息量。',
+             en: 'Cumulative landing heat — the squares nobody ever touched carry as much information as the hot ones.' },
+    tips: {
+      en: 'Look from the Top view and read the map: the squares nobody ever touched are as informative as the hot ones. In most games a whole wing stays cold — that is a decision both players made, move after move, without ever discussing it.',
+      zh: '切到「俯视」读这张图：从头到尾没人碰过的格子，与最热的格子一样有信息量。多数棋局里整整一翼是冷的——那是双方一步一步共同做出的决定，从没商量过。',
+    },
     presetsLabel: { en: 'Game', zh: '棋局' },
     presets: PRESETS,
     views: { iso: VIEW_ISO, top: VIEW_TOP },
+    toggles: [
+      { key: 'wholeGame', label: { zh: '看全局', en: 'Whole game' }, color: ORANGE, checked: false },
+    ],
     draw: function (camC) {
       myCurTab = 'heat';
       advanceReplay();
       if (!rs) { BR.drawBoard(ctx, camC, E, { layout: L }); return; }
-      drawPosition(camC);
+      drawHeat(camC);
     },
     readout: function () {
-      syncKeyNote();
+      syncTransport();
       if (!rs) return '';
-      return '<div class="dim">' + E.t({ zh: '占位页 · 见 Task 16', en: 'placeholder · see Task 16' }) + '</div>' +
-        '<div class="dim">' + E.t({ zh: '半步', en: 'ply' }) + ' ' + rs.ply + ' / ' + rs.maxPly + '</div>';
+      var upto = E.state.wholeGame ? rs.maxPly : rs.ply;
+      var h = RP.heat(rs, upto);
+      var top = Object.keys(h.counts).map(Number)
+        .sort(function (a, b) { return h.counts[b] - h.counts[a]; }).slice(0, 3);
+      var topTxt = top.map(function (sq) { return CC.toAlg(sq) + '×' + h.counts[sq]; }).join(' · ');
+      var touched = Object.keys(h.counts).length;
+      return '<div class="dim">' + E.t({ zh: '半步', en: 'ply' }) + ' <b style="--c:var(--trace-cyan)">' + rs.ply + '</b> / ' + rs.maxPly + '</div>' +
+        '<div class="dim">' + E.t({ zh: '最热三格', en: 'hottest' }) + ' <b style="--c:var(--trace-orange)">' +
+          (topTxt || E.t({ zh: '（无）', en: '(none)' })) + '</b></div>' +
+        '<div class="dim">' + E.t({ zh: '被碰过', en: 'touched' }) + ' <b>' + touched + '</b> / 64</div>' +
+        '<div class="dim">' + E.t({ zh: '落子', en: 'landings' }) + ' <b>' + h.landings + '</b> · ' +
+          E.t({ zh: '易位一步算两次落子，所以它不等于半步数', en: "castling counts as two landings, so it isn't equal to the ply count" }) + '</div>';
     },
   },
 };
