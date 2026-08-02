@@ -57,6 +57,14 @@ T.throws(() => C.Position.fromFEN('rnbqkbnr/pppppppp/8/8 w - -'), 'FEN 横行数
 T.throws(() => C.Position.fromFEN('rnbqkbnr/ppppXppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1'), 'FEN 未知棋子字符应抛错');
 T.throws(() => C.Position.fromFEN('rnbqkbnr/ppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1'), 'FEN 某横行格数不足 8 应抛错');
 
+// ---- FEN 校验（修复轮次 1 · I1）----
+T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/4K3 z - - 0 1'), '轮次字段非 w/b 应抛错');
+T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/4K3 w - - xx 1'), '半步计数非数字应抛错');
+T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/4K3 w - - 0 yy'), '回合数非数字应抛错');
+T.throws(() => C.Position.fromFEN('8/8/8/8/8/8/8/4K3 w - - 0 1'), '没有黑王应抛错');
+T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/8 w - - 0 1'), '没有白王应抛错');
+T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/K3K3 w - - 0 1'), '白方两个王应抛错');
+
 // ---- 伪合法走法生成 ----
 function movesFrom(pos, from) {
   return pos.pseudoLegalMoves()
@@ -106,7 +114,7 @@ T.eq(movesFrom(blackPawn, 'e7'), ['d6','e5','e6','f6'], '黑兵方向相反，�
 const promo = C.Position.fromFEN('8/4P3/8/8/8/8/8/K6k w - - 0 1');
 const promoMoves = promo.pseudoLegalMoves().filter(m => m.from === C.fromAlg('e7'));
 T.eq(promoMoves.length, 4, '兵到底排产生四条升变走法');
-T.eq(promoMoves.map(m => m.promo).sort(), [C.N, C.B, C.R, C.Q].sort(), '四种升变棋子齐全');
+T.eq(promoMoves.map(m => m.promo).sort((a, b) => a - b), [C.N, C.B, C.R, C.Q].sort((a, b) => a - b), '四种升变棋子齐全');
 T.ok(promoMoves.every(m => m.flags & C.FLAG.PROMO), '升变走法都带 PROMO 标志');
 
 // 只生成当前一方的走法
@@ -224,10 +232,54 @@ T.eq(multi.attackedBy(C.fromAlg('c6'), C.WHITE).map(C.toAlg).sort(), ['c2','d4']
 T.eq(multi.attackedBy(C.fromAlg('c4'), C.WHITE).map(C.toAlg), ['c2'],
      'c4 只被车攻击 —— d4 到 c4 是一格，不是马步');
 
-// attacksFrom：盘上不能有己方子占住跳点，否则会被走法生成器过滤掉
+// attacksFrom：与走法不同，跳点上有己方子也不影响"攻击"这件事本身
 const lone = C.Position.fromFEN('8/8/8/8/3N4/8/8/K6k w - - 0 1');
 T.eq(lone.attacksFrom(C.fromAlg('d4')).length, 8, '空旷处的马攻击 8 格');
 T.eq(lone.attacksFrom(C.fromAlg('e5')), [], '空格没有攻击范围');
+
+// ---- 攻击几何修复（修复轮次 1 · CRITICAL）----
+// 原实现借道 pseudoLegalMoves()，只回答"能走到哪"：
+// 空盘上孤立的兵不攻击任何格（因为兵前方没有可吃的子）、
+// 己方棋子占据的格不算被攻击（因为走法生成器不会生成"吃自己"的着）。
+// 这两条都与"攻击"的国际象棋定义矛盾，已改为独立于走法生成的几何扫描。
+
+// 孤立兵攻击的是它斜前方两格，无论那里有没有子
+const loneWP = C.Position.fromFEN('8/8/8/8/4P3/8/8/K6k w - - 0 1');
+T.eq(loneWP.attacksFrom(C.fromAlg('e4')).map(C.toAlg).sort(), ['d5', 'f5'].sort(),
+     '空盘上孤立的白兵仍攻击 d5 与 f5 —— 与"能走到哪"无关');
+
+const loneBP = C.Position.fromFEN('8/8/8/4p3/8/8/8/K6k w - - 0 1');
+T.eq(loneBP.attacksFrom(C.fromAlg('e5')).map(C.toAlg).sort(), ['d4', 'f4'].sort(),
+     '空盘上孤立的黑兵攻击 d4 与 f4（方向相反）');
+
+// 被己方棋子占据的格仍然"被攻击"——这正是"防守"的定义
+const defend = C.Position.fromFEN('k7/8/2P5/8/8/8/2R5/K7 w - - 0 1');
+T.eq(defend.isAttacked(C.fromAlg('c6'), C.WHITE), true, 'c2 车攻击着己方在 c6 的兵（即在防守它）');
+T.eq(defend.attackedBy(C.fromAlg('c6'), C.WHITE).map(C.toAlg), ['c2'],
+     'attackedBy 与 isAttacked 在"己方子被攻击"这件事上必须一致');
+
+// 被 8 颗己方兵包围的马仍攻击全部 8 格 —— 跳点有没有子不影响马的攻击范围
+const ringed = C.Position.fromFEN('k7/8/2P1P3/1P3P2/3N4/1P3P2/2P1P3/K7 w - - 0 1');
+T.eq(ringed.attacksFrom(C.fromAlg('d4')).length, 8, '被己方兵包围的马仍攻击 8 格');
+
+// 不变量：attackedBy(s, c).length > 0 当且仅当 isAttacked(s, c) —— 这正是本 bug 违反的性质。
+// 在一批已有局面上，对全部 64 格逐一核对两者是否一致。
+function checkAgreement(pos) {
+  for (const c of [C.WHITE, C.BLACK]) {
+    for (let f = 0; f < 8; f++) {
+      for (let r = 0; r < 8; r++) {
+        const s = C.SQ(f, r);
+        if ((pos.attackedBy(s, c).length > 0) !== pos.isAttacked(s, c)) return false;
+      }
+    }
+  }
+  return true;
+}
+for (const pos of [atk, blockAtk, knightAtk, pawnAtk, wPawnAtk, multi, lone, defend, ringed,
+                    C.Position.fromFEN(START), C.Position.fromFEN(KIWI),
+                    C.Position.fromFEN('r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1')]) {
+  T.ok(checkAgreement(pos), 'attackedBy 与 isAttacked 在全部 64 格上必须一致：' + pos.toFEN());
+}
 
 // ---- 易位 ----
 const cst = C.Position.fromFEN('r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1');
@@ -279,6 +331,22 @@ const b1Atk = C.Position.fromFEN('r3k2r/8/8/8/8/8/1r6/R3K2R w KQkq - 0 1');
 T.ok(b1Atk.pseudoLegalMoves().some(m => m.flags & C.FLAG.CASTLE_Q),
      'b1 被攻击不影响长易位，因为王不经过 b1');
 
+// 黑方易位（修复轮次 1 · M8）：此前只有 Kiwipete perft 间接覆盖了黑方易位，
+// 补上直接测试，短易位与长易位各一个。
+const cstB = C.Position.fromFEN('r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1');
+const cstBAfterK = cstB.make(cstB.pseudoLegalMoves().find(m => m.flags & C.FLAG.CASTLE_K));
+T.eq(cstBAfterK.board[C.fromAlg('g8')], -C.K, '黑方短易位后王在 g8');
+T.eq(cstBAfterK.board[C.fromAlg('f8')], -C.R, '黑方短易位后车在 f8');
+T.eq(cstBAfterK.board[C.fromAlg('e8')], C.EMPTY, '黑方短易位后 e8 为空');
+T.eq(cstBAfterK.board[C.fromAlg('h8')], C.EMPTY, '黑方短易位后 h8 为空');
+T.eq(cstBAfterK.kingB, C.fromAlg('g8'), '黑方短易位后 kingB 更新');
+T.eq(cstBAfterK.castling, 3, '黑方短易位后黑方失去全部易位权（保留白方 KQ）');
+
+const cstBAfterQ = cstB.make(cstB.pseudoLegalMoves().find(m => m.flags & C.FLAG.CASTLE_Q));
+T.eq(cstBAfterQ.board[C.fromAlg('c8')], -C.K, '黑方长易位后王在 c8');
+T.eq(cstBAfterQ.board[C.fromAlg('d8')], -C.R, '黑方长易位后车在 d8');
+T.eq(cstBAfterQ.board[C.fromAlg('a8')], C.EMPTY, '黑方长易位后 a8 为空');
+
 // ---- 吃过路兵 ----
 const ep = C.Position.fromFEN('rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3');
 const epMove = ep.pseudoLegalMoves().find(m => m.flags & C.FLAG.EP);
@@ -329,11 +397,23 @@ T.ok(pinned.pseudoLegalMoves().filter(m => m.from === C.fromAlg('f1')).length > 
 const pinLine = C.Position.fromFEN('4r2k/8/8/8/8/8/4R3/4K3 w - - 0 1');
 T.ok(pinLine.legalMoves().some(m => m.from === C.fromAlg('e2') && m.to === C.fromAlg('e3')),
      '被沿直列别住的车仍可沿该直列移动');
+// 反面断言（修复轮次 1 · M6）：光测"沿线可动"测不出别子逻辑本身 ——
+// 一个完全不做合法性过滤的实现也会让这条断言通过。必须同时证明
+// "离开这条线"是非法的。
+T.ok(!pinLine.legalMoves().some(m => m.from === C.fromAlg('e2') && m.to === C.fromAlg('b2')),
+     '被沿直列别住的车不能离开该直列（否则暴露王）');
 
-// 被将军时只能应将
-const mustBlock = C.Position.fromFEN('4k3/8/8/8/8/8/8/r3K3 w - - 0 1');
-T.ok(mustBlock.legalMoves().every(m => !mustBlock.make(m).inCheck(C.WHITE)),
-     '所有合法走法走完之后白王都不再被将军');
+// 被将军时只能应将（修复轮次 1 · I4）
+// 原断言 `legalMoves().every(...)` 在 legalMoves() 返回空数组时也为真，
+// 且用同一个 legalMoves() 的产物去验证 legalMoves() 本身，是同义反复。
+// 换成一个三种应将方式（走王、吃将军子、挡将）都存在的局面，用
+// 恰好一致的走法全集来断言：白王 e1 被 e8 车将军，
+// 白车 a8 可吃掉 e8 车，白马 f2 可跳到 e4 挡住将军线，
+// 王本身可走到 d1/d2/f1（未被攻击）。
+const mustBlock = C.Position.fromFEN('R3r2k/8/8/8/8/8/5N2/4K3 w - - 0 1');
+T.eq(mustBlock.legalMoves().map(C.moveToUCI).sort(),
+     ['a8e8', 'e1d1', 'e1d2', 'e1f1', 'f2e4'].sort(),
+     '将军时的合法走法恰好是：吃掉将军车（a8e8）、挡将（f2e4）、走王三格（e1d1/e1d2/e1f1）');
 
 // 王不能走到被攻击的格
 const kingSafe = C.Position.fromFEN('4k3/8/8/8/8/8/8/4K2r w - - 0 1');
@@ -357,6 +437,17 @@ T.eq(C.Position.fromFEN('4k3/8/8/8/8/8/8/4KR2 w - - 0 1').status(), 'ongoing',
      '王车对王不是子力不足');
 T.eq(C.Position.fromFEN('4k3/8/8/8/8/8/8/R3K3 w - - 100 60').status(), 'fifty',
      '半步计数达到 100 触发五十步规则');
+
+// 子力不足的两个陷阱（修复轮次 1 · I3）：这两条不该被一次天真的重写误伤。
+T.eq(C.Position.fromFEN('k7/8/8/8/8/8/8/NNK5 w - - 0 1').status(), 'ongoing',
+     '王双马对王不是子力不足——理论上仍存在杀法（尽管实战极难逼出）');
+T.eq(C.Position.fromFEN('k7/8/8/5b2/8/8/8/K1B5 w - - 0 1').status(), 'ongoing',
+     '异色格象对异色格象不是子力不足（本函数不比较象所在格颜色，见源码注释）');
+
+// check 必须排在 fifty 之前（修复轮次 1 · 判断调用）：五十步规则是"可申明"而非
+// 自动生效，被将军是当下正在发生的事实，棋局仍然"活着"。
+T.eq(C.Position.fromFEN('4k3/4R3/8/8/8/8/8/4K3 b - - 100 60').status(), 'check',
+     '半步计数达到 100 但正被将军时，应报告 check 而非 fifty');
 
 // ---- perft ----
 // 参考值取自国际象棋编程社区的公认定值。任何一处对不上，
@@ -384,5 +475,12 @@ for (const c of PERFT) {
     T.eq(got, c.counts[d - 1], 'perft ' + c.name + ' depth ' + d + '（用时 ' + ms + 'ms）');
   }
 }
+
+// perftDivide 的分支总和必须等于 perft 本身（修复轮次 1 · M3）——
+// 近乎零成本的一致性检查，能在 Task 9 依赖 moveToUCI 之前
+// 就抓住例如 PROMO_CH 拼错这类问题。
+const divideSum = Object.values(C.perftDivide(C.Position.fromFEN(START), 2))
+  .reduce((a, b) => a + b, 0);
+T.eq(divideSum, C.perft(C.Position.fromFEN(START), 2), 'perftDivide 各分支之和应等于 perft(depth 2)');
 
 T.report();

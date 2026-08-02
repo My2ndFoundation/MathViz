@@ -61,6 +61,7 @@
     if (rows.length !== 8) throw new Error('Bad FEN: expected 8 ranks, got ' + rows.length);
 
     const p = new Position();
+    let wKings = 0, bKings = 0;
     for (let r = 0; r < 8; r++) {
       const row = rows[7 - r];          // FEN 从第 8 横行开始写
       let f = 0;
@@ -74,12 +75,21 @@
         const s = SQ(f, r);
         const signed = (ch === lower) ? -code : code;
         p.board[s] = signed;
-        if (code === K) { if (signed > 0) p.kingW = s; else p.kingB = s; }
+        if (code === K) {
+          if (signed > 0) { p.kingW = s; wKings++; } else { p.kingB = s; bKings++; }
+        }
         f++;
       }
       if (f !== 8) throw new Error('Bad FEN: rank ' + (r + 1) + ' has ' + f + ' squares, expected 8');
     }
+    // 没有王、或某一方不止一个王，都不是一个真实的国际象棋局面 ——
+    // 放任它通过会让 legalMoves/inCheck 在下游悄悄地对着 −1 出错。
+    if (wKings !== 1) throw new Error('Bad FEN: white must have exactly one king, found ' + wKings);
+    if (bKings !== 1) throw new Error('Bad FEN: black must have exactly one king, found ' + bKings);
 
+    if (parts[1] !== 'w' && parts[1] !== 'b') {
+      throw new Error('Bad FEN: side to move must be "w" or "b", got "' + parts[1] + '"');
+    }
     p.turn = parts[1] === 'b' ? BLACK : WHITE;
     if (parts[2] !== '-') {
       if (parts[2].indexOf('K') >= 0) p.castling |= 1;
@@ -88,6 +98,12 @@
       if (parts[2].indexOf('q') >= 0) p.castling |= 8;
     }
     p.ep = parts[3] === '-' ? -1 : fromAlg(parts[3]);
+    if (parts.length > 4 && !/^\d+$/.test(parts[4])) {
+      throw new Error('Bad FEN: half-move clock must be a non-negative integer, got "' + parts[4] + '"');
+    }
+    if (parts.length > 5 && !/^\d+$/.test(parts[5])) {
+      throw new Error('Bad FEN: full-move number must be a non-negative integer, got "' + parts[5] + '"');
+    }
     p.half = parts.length > 4 ? parseInt(parts[4], 10) : 0;
     p.full = parts.length > 5 ? parseInt(parts[5], 10) : 1;
     return p;
@@ -324,8 +340,10 @@
             if (t === (diagonal ? B : R)) return true;
             if (dist === 1) {
               if (t === K) return true;
-              // 兵只在"从目标格看出去的斜前方"才构成攻击：
-              // 白兵攻击的是它上方两格，所以从目标格看应在 +17 / +15 方向。
+              // 兵只在"从目标格反过来看"的对应斜方向才构成攻击：
+              // 白兵攻击的是它前方（+16 方向）两侧的格，所以反过来从
+              // 目标格看，白兵攻击者应在 −17 / −15 方向（黑兵则相反，
+              // 在 +17 / +15 方向）。
               if (t === P && diagonal) {
                 if (by === WHITE && (dir === -17 || dir === -15)) return true;
                 if (by === BLACK && (dir === 17 || dir === 15)) return true;
@@ -345,40 +363,92 @@
     return k < 0 ? false : this.isAttacked(k, -colour);
   };
 
+  // 攻击 ≠ 走法：这两个函数回答"棋盘几何上谁打到了谁"，与"谁能合法地走
+  // 到哪"是两个不同的问题——被己方子占据的格仍然"被攻击"（这正是"保护"
+  // 的定义），兵的正前方推进与易位落点则从不算攻击。早先版本借道
+  // pseudoLegalMoves() 实现，那只回答"能走到哪"，会把己方占据的格与
+  // 未被防守的兵前方漏掉，导致 attackedBy 与 isAttacked 在同一局面上矛盾。
+  // 现在与 isAttacked 共用同一套反向射线/马步/兵步几何，只是不提前
+  // return，而是把每个方向命中的攻击方棋子收集起来。
   Position.prototype.attackedBy = function (target, by) {
-    const out = [], saved = this.turn;
-    this.turn = by;
-    const ms = this.pseudoLegalMoves();
-    this.turn = saved;
-    for (let i = 0; i < ms.length; i++) {
-      const m = ms[i];
-      if (m.to !== target) continue;
-      if (!isAttackingMove(m)) continue;
-      if (out.indexOf(m.from) < 0) out.push(m.from);
+    const bd = this.board;
+    const out = [];
+
+    for (let i = 0; i < OFF_N.length; i++) {
+      const s = target + OFF_N[i];
+      if (s & 0x88) continue;
+      const v = bd[s];
+      if (v !== EMPTY && (v > 0 ? WHITE : BLACK) === by && Math.abs(v) === N) out.push(s);
+    }
+
+    for (let i = 0; i < OFF_K.length; i++) {
+      const dir = OFF_K[i];
+      const diagonal = (dir === 17 || dir === 15 || dir === -17 || dir === -15);
+      let s = target + dir, dist = 1;
+      while (!(s & 0x88)) {
+        const v = bd[s];
+        if (v !== EMPTY) {
+          if ((v > 0 ? WHITE : BLACK) === by) {
+            const t = Math.abs(v);
+            let hit = false;
+            if (t === Q) hit = true;
+            else if (t === (diagonal ? B : R)) hit = true;
+            else if (dist === 1) {
+              if (t === K) hit = true;
+              else if (t === P && diagonal) {
+                if (by === WHITE && (dir === -17 || dir === -15)) hit = true;
+                if (by === BLACK && (dir === 17 || dir === 15)) hit = true;
+              }
+            }
+            if (hit) out.push(s);
+          }
+          break;                      // 无论敌我，这条射线到此为止
+        }
+        s += dir; dist++;
+      }
     }
     return out;
   };
 
-  // 走法 ≠ 攻击：兵的正前方推进不吃子，易位也不是"攻击落点"。
-  // Task 6 加入易位后这条过滤才真正生效，但先写在这里免得日后忘。
-  function isAttackingMove(m) {
-    if (m.flags & (FLAG.CASTLE_K | FLAG.CASTLE_Q)) return false;
-    if (Math.abs(m.piece) === P && fileOf(m.from) === fileOf(m.to)) return false;
-    return true;
-  }
-
+  // 该格棋子的攻击范围：从棋子出发沿几何看能打到哪些格，
+  // 与 isAttacked/attackedBy 是同一套几何的正向版本。包含被己方子
+  // 占据的格（防守也是攻击），不含兵的正前方推进与易位落点
+  // （那些是走法，不是攻击）。
   Position.prototype.attacksFrom = function (from) {
     const v = this.board[from];
     if (v === EMPTY) return [];
-    const out = [], saved = this.turn;
-    this.turn = v > 0 ? WHITE : BLACK;
-    const ms = this.pseudoLegalMoves();
-    this.turn = saved;
-    for (let i = 0; i < ms.length; i++) {
-      const m = ms[i];
-      if (m.from !== from) continue;
-      if (!isAttackingMove(m)) continue;
-      if (out.indexOf(m.to) < 0) out.push(m.to);
+    const bd = this.board;
+    const type = Math.abs(v);
+    const colour = v > 0 ? WHITE : BLACK;
+    const out = [];
+
+    if (type === P) {
+      const dir = colour === WHITE ? 16 : -16;
+      const caps = [dir + 1, dir - 1];
+      for (let i = 0; i < 2; i++) {
+        const to = from + caps[i];
+        if (!(to & 0x88)) out.push(to);
+      }
+      return out;
+    }
+
+    if (type === N || type === K) {
+      const offs = type === N ? OFF_N : OFF_K;
+      for (let i = 0; i < offs.length; i++) {
+        const to = from + offs[i];
+        if (!(to & 0x88)) out.push(to);
+      }
+      return out;
+    }
+
+    const offs = SLIDE[type];
+    for (let i = 0; i < offs.length; i++) {
+      let to = from + offs[i];
+      while (!(to & 0x88)) {
+        out.push(to);
+        if (bd[to] !== EMPTY) break;   // 遇子（不论敌我）即为攻击范围的边界
+        to += offs[i];
+      }
     }
     return out;
   };
@@ -389,12 +459,21 @@
     for (let i = 0; i < ms.length; i++) {
       const m = ms[i];
       const undo = this._make(m);
-      if (!this.isAttacked(this.kingSq(me), -me)) out.push(m);
+      // 与 inCheck 保持一致：找不到王（k < 0）视为"不构成将军"，
+      // 而不是让 isAttacked(-1, …) 悄悄给出未定义的答案。
+      const k = this.kingSq(me);
+      if (k < 0 || !this.isAttacked(k, -me)) out.push(m);
       this._unmake(m, undo);
     }
     return out;
   };
 
+  // 保守规则：只有"双方都不可能强制将死"才判子力不足。任何一方达到
+  // 两个轻子（无论颜色组合）就已经存在理论杀法（KNN 对 K 也算，尽管
+  // 实战极难逼出），所以立即返回 false。
+  // 已知的不完整之处（有意为之，不是漏了）：同色格象分居两侧属于死局，
+  // 但本函数把它算作"进行中"——要判定这种死局需要比较象所在格的颜色，
+  // 这里没有做，读者不要以为这条规则是完整的。
   function insufficientMaterial(pos) {
     let minors = 0;
     for (let s = 0; s < 128; s++) {
@@ -412,9 +491,12 @@
     const has = this.legalMoves().length > 0;
     const chk = this.inCheck(this.turn);
     if (!has) return chk ? 'checkmate' : 'stalemate';
-    if (insufficientMaterial(this)) return 'insufficient';
+    if (insufficientMaterial(this)) return 'insufficient';   // 死局自动成立，优先于一切
+    // 将军是当下必须回应的事实；五十步规则只是"可主张"而非自动生效，
+    // 棋局仍在进行中，所以将军排在五十步之前——这个顺序不是随意的。
+    if (chk) return 'check';
     if (this.half >= 100) return 'fifty';
-    return chk ? 'check' : 'ongoing';
+    return 'ongoing';
   };
 
   function perft(pos, depth) {
