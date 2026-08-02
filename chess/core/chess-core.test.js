@@ -182,4 +182,51 @@ const takeA8 = rookTaken.pseudoLegalMoves().find(m =>
 // a1 车离家清 Q(2)，a8 车被吃清 q(8)：15 − 2 − 8 = 5（剩 K 与 k）
 T.eq(rookTaken.make(takeA8).castling, 5, 'a1 车吃掉 a8 车后，双方各失一项后翼易位权');
 
+// ---- 攻击检测 ----
+const atk = C.Position.fromFEN('8/8/8/3q4/8/8/8/K6k w - - 0 1');
+T.eq(atk.isAttacked(C.fromAlg('d1'), C.BLACK), true, '黑后沿直列攻击 d1');
+T.eq(atk.isAttacked(C.fromAlg('h1'), C.BLACK), true, '黑后沿斜线攻击 h1');
+T.eq(atk.isAttacked(C.fromAlg('e3'), C.BLACK), false, 'e3 不在黑后的任一射线上');
+
+const blockAtk = C.Position.fromFEN('8/8/8/3q4/8/3P4/8/K6k w - - 0 1');
+T.eq(blockAtk.isAttacked(C.fromAlg('d1'), C.BLACK), false, '中间有子挡住时不算攻击');
+T.eq(blockAtk.isAttacked(C.fromAlg('d3'), C.BLACK), true, '挡路的那颗子本身是被攻击的');
+
+const knightAtk = C.Position.fromFEN('8/8/8/3n4/8/8/8/K6k w - - 0 1');
+T.eq(knightAtk.isAttacked(C.fromAlg('c3'), C.BLACK), true, '马攻击 c3');
+T.eq(knightAtk.isAttacked(C.fromAlg('d3'), C.BLACK), false, '马不攻击同一直列的 d3');
+
+// 兵的攻击是斜的，不是正前方 —— 最常写错的一处
+const pawnAtk = C.Position.fromFEN('8/8/8/8/8/4p3/8/K6k w - - 0 1');
+T.eq(pawnAtk.isAttacked(C.fromAlg('d2'), C.BLACK), true, '黑兵斜向攻击 d2');
+T.eq(pawnAtk.isAttacked(C.fromAlg('f2'), C.BLACK), true, '黑兵斜向攻击 f2');
+T.eq(pawnAtk.isAttacked(C.fromAlg('e2'), C.BLACK), false, '黑兵不攻击正前方的 e2');
+T.eq(pawnAtk.isAttacked(C.fromAlg('e4'), C.BLACK), false, '黑兵不向后攻击');
+
+const wPawnAtk = C.Position.fromFEN('8/8/8/8/4P3/8/8/K6k w - - 0 1');
+T.eq(wPawnAtk.isAttacked(C.fromAlg('d5'), C.WHITE), true, '白兵向上斜攻 d5');
+T.eq(wPawnAtk.isAttacked(C.fromAlg('d3'), C.WHITE), false, '白兵不向下攻击');
+
+// 将军
+T.eq(C.Position.fromFEN('4k3/8/8/8/8/8/8/4K2R b K - 0 1').inCheck(C.BLACK), false,
+     '车与黑王不同列时未将军');
+T.eq(C.Position.fromFEN('4k3/8/8/8/8/8/8/4K2R w K - 0 1').inCheck(C.WHITE), false,
+     '白方未被将军');
+T.eq(C.Position.fromFEN('4k3/8/8/8/8/8/8/R3K3 b Q - 0 1').inCheck(C.BLACK), false,
+     'a1 车不攻击 e8');
+T.eq(C.Position.fromFEN('4k3/4R3/8/8/8/8/8/4K3 b - - 0 1').inCheck(C.BLACK), true,
+     'e7 车将军 e8 的黑王');
+
+// attackedBy：c6 同时在 c2 车的直列上、又是 d4 马的跳点
+const multi = C.Position.fromFEN('8/8/2p5/8/3N4/8/2R5/K6k w - - 0 1');
+T.eq(multi.attackedBy(C.fromAlg('c6'), C.WHITE).map(C.toAlg).sort(), ['c2','d4'].sort(),
+     'c6 同时被 c2 的车与 d4 的马攻击');
+T.eq(multi.attackedBy(C.fromAlg('c4'), C.WHITE).map(C.toAlg), ['c2'],
+     'c4 只被车攻击 —— d4 到 c4 是一格，不是马步');
+
+// attacksFrom：盘上不能有己方子占住跳点，否则会被走法生成器过滤掉
+const lone = C.Position.fromFEN('8/8/8/8/3N4/8/8/K6k w - - 0 1');
+T.eq(lone.attacksFrom(C.fromAlg('d4')).length, 8, '空旷处的马攻击 8 格');
+T.eq(lone.attacksFrom(C.fromAlg('e5')), [], '空格没有攻击范围');
+
 T.report();

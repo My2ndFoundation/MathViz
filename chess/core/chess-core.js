@@ -251,6 +251,90 @@
     return p;
   };
 
+  // 从被攻击格反向扫射线：与其枚举所有敌子的走法，不如站在目标格上
+  // 沿八个方向看出去，遇到的第一颗子是不是"能这样打过来"的类型。
+  Position.prototype.isAttacked = function (target, by) {
+    const bd = this.board;
+
+    for (let i = 0; i < OFF_N.length; i++) {
+      const s = target + OFF_N[i];
+      if (s & 0x88) continue;
+      const v = bd[s];
+      if (v !== EMPTY && (v > 0 ? WHITE : BLACK) === by && Math.abs(v) === N) return true;
+    }
+
+    for (let i = 0; i < OFF_K.length; i++) {
+      const dir = OFF_K[i];
+      const diagonal = (dir === 17 || dir === 15 || dir === -17 || dir === -15);
+      let s = target + dir, dist = 1;
+      while (!(s & 0x88)) {
+        const v = bd[s];
+        if (v !== EMPTY) {
+          if ((v > 0 ? WHITE : BLACK) === by) {
+            const t = Math.abs(v);
+            if (t === Q) return true;
+            if (t === (diagonal ? B : R)) return true;
+            if (dist === 1) {
+              if (t === K) return true;
+              // 兵只在"从目标格看出去的斜前方"才构成攻击：
+              // 白兵攻击的是它上方两格，所以从目标格看应在 +17 / +15 方向。
+              if (t === P && diagonal) {
+                if (by === WHITE && (dir === -17 || dir === -15)) return true;
+                if (by === BLACK && (dir === 17 || dir === 15)) return true;
+              }
+            }
+          }
+          break;                      // 无论敌我，这条射线到此为止
+        }
+        s += dir; dist++;
+      }
+    }
+    return false;
+  };
+
+  Position.prototype.inCheck = function (colour) {
+    const k = this.kingSq(colour);
+    return k < 0 ? false : this.isAttacked(k, -colour);
+  };
+
+  Position.prototype.attackedBy = function (target, by) {
+    const out = [], saved = this.turn;
+    this.turn = by;
+    const ms = this.pseudoLegalMoves();
+    this.turn = saved;
+    for (let i = 0; i < ms.length; i++) {
+      const m = ms[i];
+      if (m.to !== target) continue;
+      if (!isAttackingMove(m)) continue;
+      if (out.indexOf(m.from) < 0) out.push(m.from);
+    }
+    return out;
+  };
+
+  // 走法 ≠ 攻击：兵的正前方推进不吃子，易位也不是"攻击落点"。
+  // Task 6 加入易位后这条过滤才真正生效，但先写在这里免得日后忘。
+  function isAttackingMove(m) {
+    if (m.flags & (FLAG.CASTLE_K | FLAG.CASTLE_Q)) return false;
+    if (Math.abs(m.piece) === P && fileOf(m.from) === fileOf(m.to)) return false;
+    return true;
+  }
+
+  Position.prototype.attacksFrom = function (from) {
+    const v = this.board[from];
+    if (v === EMPTY) return [];
+    const out = [], saved = this.turn;
+    this.turn = v > 0 ? WHITE : BLACK;
+    const ms = this.pseudoLegalMoves();
+    this.turn = saved;
+    for (let i = 0; i < ms.length; i++) {
+      const m = ms[i];
+      if (m.from !== from) continue;
+      if (!isAttackingMove(m)) continue;
+      if (out.indexOf(m.to) < 0) out.push(m.to);
+    }
+    return out;
+  };
+
   return { WHITE, BLACK, EMPTY, P, N, B, R, Q, K,
            SQ, fileOf, rankOf, offBoard, toAlg, fromAlg, Position, FLAG };
 });
