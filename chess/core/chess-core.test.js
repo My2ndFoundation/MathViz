@@ -358,4 +358,31 @@ T.eq(C.Position.fromFEN('4k3/8/8/8/8/8/8/4KR2 w - - 0 1').status(), 'ongoing',
 T.eq(C.Position.fromFEN('4k3/8/8/8/8/8/8/R3K3 w - - 100 60').status(), 'fifty',
      '半步计数达到 100 触发五十步规则');
 
+// ---- perft ----
+// 参考值取自国际象棋编程社区的公认定值。任何一处对不上，
+// 都说明走法生成器在某个边界上错了 —— 而人眼查不出这类错。
+const PERFT = [
+  { name: '初始局面', fen: START,
+    counts: [20, 400, 8902, 197281, 4865609] },
+  { name: 'Kiwipete', fen: KIWI,
+    counts: [48, 2039, 97862, 4085603] },
+  { name: '位置3（兵与车的边界）', fen: '8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1',
+    counts: [14, 191, 2812, 43238, 674624] },
+  { name: '位置4（升变与别子）', fen: 'r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1',
+    counts: [6, 264, 9467, 422333] },
+  { name: '位置5', fen: 'rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8',
+    counts: [44, 1486, 62379, 2103487] },
+  { name: '位置6', fen: 'r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10',
+    counts: [46, 2079, 89890, 3894594] },
+];
+
+for (const c of PERFT) {
+  for (let d = 1; d <= c.counts.length; d++) {
+    const t0 = Date.now();
+    const got = C.perft(C.Position.fromFEN(c.fen), d);
+    const ms = Date.now() - t0;
+    T.eq(got, c.counts[d - 1], 'perft ' + c.name + ' depth ' + d + '（用时 ' + ms + 'ms）');
+  }
+}
+
 T.report();

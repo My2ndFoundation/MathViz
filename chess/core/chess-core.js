@@ -417,6 +417,38 @@
     return chk ? 'check' : 'ongoing';
   };
 
+  function perft(pos, depth) {
+    if (depth <= 0) return 1;
+    const ms = pos.legalMoves();
+    if (depth === 1) return ms.length;     // 叶子层不必真的走一遍
+    let n = 0;
+    for (let i = 0; i < ms.length; i++) {
+      const undo = pos._make(ms[i]);
+      n += perft(pos, depth - 1);
+      pos._unmake(ms[i], undo);
+    }
+    return n;
+  }
+
+  // 分支计数：某个 depth 的总数对不上时，用它逐支比对，
+  // 一层一层缩小范围直到定位到具体是哪个走法算错了。
+  function perftDivide(pos, depth) {
+    const out = {};
+    const ms = pos.legalMoves();
+    for (let i = 0; i < ms.length; i++) {
+      const undo = pos._make(ms[i]);
+      out[moveToUCI(ms[i])] = perft(pos, depth - 1);
+      pos._unmake(ms[i], undo);
+    }
+    return out;
+  }
+
+  function moveToUCI(m) {
+    const PROMO_CH = { 2: 'n', 3: 'b', 4: 'r', 5: 'q' };
+    return toAlg(m.from) + toAlg(m.to) + (m.promo ? PROMO_CH[m.promo] : '');
+  }
+
   return { WHITE, BLACK, EMPTY, P, N, B, R, Q, K,
-           SQ, fileOf, rankOf, offBoard, toAlg, fromAlg, Position, FLAG };
+           SQ, fileOf, rankOf, offBoard, toAlg, fromAlg, Position, FLAG,
+           perft, perftDivide, moveToUCI };
 });
