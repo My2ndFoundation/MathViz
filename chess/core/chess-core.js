@@ -118,6 +118,91 @@
            ' ' + this.half + ' ' + this.full;
   };
 
+  const FLAG = { CAPTURE: 1, EP: 2, CASTLE_K: 4, CASTLE_Q: 8, DOUBLE: 16, PROMO: 32 };
+
+  // 0x88 下的方向偏移：+16 是往上一横行，+1 是往右一直列。
+  const OFF_N = [33, 31, 18, 14, -33, -31, -18, -14];
+  const OFF_B = [17, 15, -17, -15];
+  const OFF_R = [16, 1, -16, -1];
+  const OFF_K = [17, 16, 15, 1, -17, -16, -15, -1];
+  const SLIDE = { 3: OFF_B, 4: OFF_R, 5: OFF_K };   // B / R / Q 共用射线表
+  const PROMO_PIECES = [Q, R, B, N];
+
+  function mk(from, to, piece, captured, promo, flags) {
+    return { from: from, to: to, piece: piece,
+             captured: captured || 0, promo: promo || 0, flags: flags || 0 };
+  }
+
+  Position.prototype.pseudoLegalMoves = function () {
+    const out = [];
+    const me = this.turn, bd = this.board;
+
+    for (let s = 0; s < 128; s++) {
+      if (s & 0x88) { s += 7; continue; }        // 跳过越界半区
+      const v = bd[s];
+      if (v === EMPTY || (v > 0 ? WHITE : BLACK) !== me) continue;
+      const type = Math.abs(v);
+
+      if (type === P) { pawnMoves(this, s, me, out); continue; }
+
+      if (type === N || type === K) {
+        const offs = type === N ? OFF_N : OFF_K;
+        for (let i = 0; i < offs.length; i++) {
+          const to = s + offs[i];
+          if (to & 0x88) continue;
+          const tv = bd[to];
+          if (tv !== EMPTY && (tv > 0 ? WHITE : BLACK) === me) continue;
+          out.push(mk(s, to, v, tv, 0, tv === EMPTY ? 0 : FLAG.CAPTURE));
+        }
+        continue;
+      }
+
+      const offs = SLIDE[type];
+      for (let i = 0; i < offs.length; i++) {
+        let to = s + offs[i];
+        while (!(to & 0x88)) {
+          const tv = bd[to];
+          if (tv === EMPTY) { out.push(mk(s, to, v, 0, 0, 0)); to += offs[i]; continue; }
+          if ((tv > 0 ? WHITE : BLACK) !== me) out.push(mk(s, to, v, tv, 0, FLAG.CAPTURE));
+          break;                                  // 无论敌我，射线到此为止
+        }
+      }
+    }
+    return out;
+  };
+
+  function pawnMoves(pos, s, me, out) {
+    const bd = pos.board;
+    const dir = me === WHITE ? 16 : -16;
+    const startRank = me === WHITE ? 1 : 6;
+    const lastRank = me === WHITE ? 7 : 0;
+    const piece = me === WHITE ? P : -P;
+
+    const one = s + dir;
+    if (!(one & 0x88) && bd[one] === EMPTY) {
+      pushPawn(out, s, one, piece, 0, lastRank, 0);
+      const two = s + dir * 2;
+      if (rankOf(s) === startRank && !(two & 0x88) && bd[two] === EMPTY) {
+        out.push(mk(s, two, piece, 0, 0, FLAG.DOUBLE));
+      }
+    }
+    const caps = [dir + 1, dir - 1];
+    for (let i = 0; i < 2; i++) {
+      const to = s + caps[i];
+      if (to & 0x88) continue;
+      const tv = bd[to];
+      if (tv === EMPTY || (tv > 0 ? WHITE : BLACK) === me) continue;
+      pushPawn(out, s, to, piece, tv, lastRank, FLAG.CAPTURE);
+    }
+  }
+
+  function pushPawn(out, from, to, piece, captured, lastRank, flags) {
+    if (rankOf(to) !== lastRank) { out.push(mk(from, to, piece, captured, 0, flags)); return; }
+    for (let i = 0; i < PROMO_PIECES.length; i++) {
+      out.push(mk(from, to, piece, captured, PROMO_PIECES[i], flags | FLAG.PROMO));
+    }
+  }
+
   return { WHITE, BLACK, EMPTY, P, N, B, R, Q, K,
-           SQ, fileOf, rankOf, offBoard, toAlg, fromAlg, Position };
+           SQ, fileOf, rankOf, offBoard, toAlg, fromAlg, Position, FLAG };
 });
