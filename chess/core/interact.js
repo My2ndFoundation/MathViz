@@ -56,5 +56,54 @@
     return out;
   }
 
-  return { create: create, select: select, clear: clear, highlights: highlights };
+  const PROMO_CHOICES = [C.Q, C.R, C.B, C.N];
+
+  function tryMove(st, from, to, promo) {
+    const legal = st.pos.legalMoves().filter(function (m) {
+      return m.from === from && m.to === to;
+    });
+    if (!legal.length) return { ok: false, reason: null };
+
+    // 同一 from/to 有多条走法，只可能是升变（四选一）。
+    // 没指定就不猜——猜成后是最常见的默认，但那样 underpromotion 永远走不出来。
+    if (legal.length > 1 || (legal[0].flags & C.FLAG.PROMO)) {
+      if (!promo) {
+        return { ok: false, needsPromotion: true, choices: PROMO_CHOICES.slice(), reason: null };
+      }
+    }
+    const m = promo
+      ? legal.filter(function (x) { return x.promo === promo; })[0]
+      : legal[0];
+    if (!m) return { ok: false, reason: null };
+
+    const san = C.moveToSAN(st.pos, m);
+    st.stack.length = st.idx + 1;      // 截断旧分支
+    st.pos = st.pos.make(m);
+    st.stack.push(st.pos);
+    st.idx = st.stack.length - 1;
+    st.lastMove = m;
+    clear(st);
+    return { ok: true, move: m, san: san };
+  }
+
+  function canUndo(st) { return st.idx > 0; }
+  function canRedo(st) { return st.idx < st.stack.length - 1; }
+
+  function undo(st) {
+    if (!canUndo(st)) return false;
+    st.idx--; st.pos = st.stack[st.idx]; st.lastMove = null; clear(st);
+    return true;
+  }
+
+  function redo(st) {
+    if (!canRedo(st)) return false;
+    st.idx++; st.pos = st.stack[st.idx]; st.lastMove = null; clear(st);
+    return true;
+  }
+
+  return {
+    create: create, select: select, clear: clear, highlights: highlights,
+    tryMove: tryMove, undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo,
+    PROMO_CHOICES: PROMO_CHOICES,
+  };
 });

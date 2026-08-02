@@ -45,4 +45,54 @@ const chk = I.create({ position: C.Position.fromFEN('4k3/4R3/8/8/8/8/8/4K3 b - -
 T.eq(I.highlights(chk).check, at('e8'), '被将军时高亮己方王的格');
 T.eq(I.highlights(free).check, -1, '未被将军时不高亮');
 
+// ---- 走法栈 ----
+const s2 = I.create({ position: C.Position.fromFEN(START) });
+T.eq(I.canUndo(s2), false, '初始不能撤销');
+T.eq(I.canRedo(s2), false, '初始不能重做');
+
+const r1 = I.tryMove(s2, at('e2'), at('e4'));
+T.eq(r1.ok, true, 'e2e4 是合法走法');
+T.eq(r1.san, 'e4', '返回 SAN');
+T.eq(s2.pos.turn, C.BLACK, '走完轮到黑方');
+T.eq(I.highlights(s2).lastMove.map(C.toAlg), ['e2', 'e4'], 'lastMove 记录起讫格');
+T.eq(I.highlights(s2).selected, -1, '走完自动清空选择');
+T.eq(I.canUndo(s2), true, '走过一步后可以撤销');
+
+I.tryMove(s2, at('e7'), at('e5'));
+T.eq(I.canUndo(s2), true, '两步后仍可撤销');
+
+T.eq(I.undo(s2), true, '撤销成功');
+T.eq(s2.pos.turn, C.BLACK, '撤销一步后轮回黑方');
+T.eq(I.canRedo(s2), true, '撤销后可以重做');
+T.eq(I.redo(s2), true, '重做成功');
+T.eq(s2.pos.turn, C.WHITE, '重做后轮回白方');
+
+// 回退后走新棋 = 开新分支，旧分支被截断
+I.undo(s2);
+I.undo(s2);
+T.eq(s2.pos.toFEN(), START, '连撤两步回到初始局面');
+T.eq(I.canRedo(s2), true, '此时可以重做');
+I.tryMove(s2, at('d2'), at('d4'));
+T.eq(I.canRedo(s2), false, '走了新棋之后旧分支被截断，不能再重做');
+T.eq(I.canUndo(s2), true, '新分支上仍可撤销');
+
+// 非法走法不进栈
+const before = s2.stack.length;
+const bad = I.tryMove(s2, at('d4'), at('d8'));
+T.eq(bad.ok, false, 'd4d8 不是合法走法');
+T.eq(s2.stack.length, before, '非法走法不改变走法栈');
+
+// 升变必须指定棋子，否则拒绝并给出待选项
+// 注：计划原稿把黑王放在 e8——正是白兵唯一的升变格，导致白兵在 e7
+// 一步棋都走不出（既不能推进，也无斜吃可用）。这不是实现问题，是
+// FEN 摆错了；黑王挪到 h8，其余不变，白兵才有路可升变。
+const pr = I.create({ position: C.Position.fromFEN('7k/4P3/8/8/8/8/8/4K3 w - - 0 1') });
+const need = I.tryMove(pr, at('e7'), at('e8'));
+T.eq(need.ok, false, '未指定升变棋子时不落子');
+T.eq(need.needsPromotion, true, '而是要求先选升变棋子');
+T.eq(need.choices.sort(), [C.Q, C.R, C.B, C.N].sort(), '给出四个待选项');
+const done = I.tryMove(pr, at('e7'), at('e8'), C.N);
+T.eq(done.ok, true, '指定马之后落子成功');
+T.eq(done.san, 'e8=N', 'underpromotion 的 SAN 正确');
+
 T.report();
