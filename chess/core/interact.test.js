@@ -95,4 +95,35 @@ const done = I.tryMove(pr, at('e7'), at('e8'), C.N);
 T.eq(done.ok, true, '指定马之后落子成功');
 T.eq(done.san, 'e8=N', 'underpromotion 的 SAN 正确');
 
+// ---- 非法走法的理由 ----
+function why(fen, from, to) { return I.explain(C.Position.fromFEN(fen), at(from), at(to)); }
+
+T.eq(why(START, 'e4', 'e5').code, 'empty', '起点是空格');
+T.eq(why(START, 'e7', 'e6').code, 'not-your-piece', '轮到白方时动黑子');
+T.eq(why(START, 'a1', 'a3').code, 'blocked', '车被自家兵挡住');
+T.eq(why(START, 'b1', 'd2').code, 'own-piece', '落点是己方棋子');
+T.eq(why(START, 'g1', 'g3').code, 'shape', '马不这么走');
+
+// 被别住：走完自己的王会被将
+const pinFen = '4k3/8/8/8/8/8/8/4KN1r w - - 0 1';
+const ex = why(pinFen, 'f1', 'd2');
+T.eq(ex.code, 'exposes-king', '被别住的马一动，王就暴露');
+T.ok(/rook on h1/.test(ex.en), '英文理由点名了攻击者及其所在格：' + ex.en);
+T.ok(/h1/.test(ex.zh), '中文理由同样点名格子：' + ex.zh);
+
+// 正被将军，走一步不相干的棋
+const inChk = '4k3/4r3/8/8/8/8/8/4K1N1 w - - 0 1';
+const ex2 = why(inChk, 'g1', 'f3');
+T.eq(ex2.code, 'still-in-check', '被将军时走别处仍是将军');
+T.ok(/e7/.test(ex2.en), '点名将军的子在 e7：' + ex2.en);
+
+// 合法走法返回 null
+T.eq(I.explain(C.Position.fromFEN(START), at('e2'), at('e4')), null, '合法走法没有理由');
+
+// tryMove 失败时把理由带出来
+const s3 = I.create({ position: C.Position.fromFEN(pinFen) });
+const bad3 = I.tryMove(s3, at('f1'), at('d2'));
+T.eq(bad3.ok, false, '被别住的走法失败');
+T.eq(bad3.reason.code, 'exposes-king', '失败结果里带着理由');
+
 T.report();
