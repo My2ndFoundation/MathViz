@@ -86,6 +86,8 @@ Each tool is a **single, zero-dependency `.html` file** — open it and it runs.
 | [火箭：会自己变的倒立摆 · Thrust Vector Control](outputs/ctrl-rocket-tvc-3d.html) | A rocket is an inverted pendulum whose plant drifts as it burns — T·ℓ/J more than doubles in a flight, so liftoff gains are wrong later. A sandbox with seeded wind, a zero-order-hold staircase that eats phase margin, and a black box that names why each crash happened |
 | [陀螺仪的原理 · 角动量与姿态控制 · How a Gyroscope Works](outputs/gyroscope-angular-momentum-3d.html) | Spin compressed into one vector whose length never changes; three gimbals reading a carrier's three rotations while its three translations register nothing, up to gimbal lock at ±90° pitch; a real symmetric-top integration where τ ⊥ L makes it circle rather than fall; and the same vector steering spacecraft — mirror-image momenta and wheel saturation, then τ = −Ω × Lw amplifying a tiny gimbal motor |
 
+| [最优与估计 · LQR 与卡尔曼 · LQR and Kalman](outputs/ctrl-lqr-kalman-3d.html) | You stop tuning the controller and start declaring what you want and whom you trust: cost ratio as a third axis over the complex plane, the Kalman gain as a weighting of two uncertainties, a breathing covariance ellipse, and the separation principle together with its price — LQR's guaranteed 60° margin does not survive the observer |
+
 *The original hand-written `trig-essence-3d` has been archived to `archive/`.*
 
 ## Usage
