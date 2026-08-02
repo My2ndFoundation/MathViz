@@ -7,31 +7,43 @@
 #
 # 临时跳过：git commit --no-verify
 
-# 只在注册表或其镜像被改动时才跑，避免拖慢无关提交
-if ! git diff --cached --name-only | grep -qE '^(tools\.json|app\.html|index\.html)$'; then
-  exit 0
-fi
-
 if ! command -v python3 >/dev/null 2>&1; then
   echo "pre-commit: 未找到 python3，跳过注册表同步检查" >&2
   exit 0
 fi
 
-# 写模式：app.html 能自动修就自动修；index.html 是手写文案，只报告
-SYNC_FAILED=
-python3 scripts/sync_registry.py || SYNC_FAILED=1
+# 只在注册表或其镜像被改动时才跑，避免拖慢无关提交
+# 注：不能在此提前 exit —— 下面的 chess 子项目检查要在同一次提交里独立触发
+if git diff --cached --name-only | grep -qE '^(tools\.json|app\.html|index\.html)$'; then
+  # 写模式：app.html 能自动修就自动修；index.html 是手写文案，只报告
+  SYNC_FAILED=
+  python3 scripts/sync_registry.py || SYNC_FAILED=1
 
-# app.html 若被脚本改写，连同本次提交一起入栈，避免提交出一个半同步的状态
-if ! git diff --quiet -- app.html; then
-  git add app.html
-  echo "pre-commit: app.html 内嵌清单已按 tools.json 重新生成并加入本次提交"
+  # app.html 若被脚本改写，连同本次提交一起入栈，避免提交出一个半同步的状态
+  if ! git diff --quiet -- app.html; then
+    git add app.html
+    echo "pre-commit: app.html 内嵌清单已按 tools.json 重新生成并加入本次提交"
+  fi
+
+  if [ -n "$SYNC_FAILED" ]; then
+    echo "" >&2
+    echo "pre-commit: 注册表镜像仍不同步（多半是 index.html 的 TOOLS 需要手工补文案）。" >&2
+    echo "            修好后重新提交，或用 git commit --no-verify 跳过。" >&2
+    exit 1
+  fi
 fi
 
-if [ -n "$SYNC_FAILED" ]; then
-  echo "" >&2
-  echo "pre-commit: 注册表镜像仍不同步（多半是 index.html 的 TOOLS 需要手工补文案）。" >&2
-  echo "            修好后重新提交，或用 git commit --no-verify 跳过。" >&2
-  exit 1
+# ---- chess 子项目 ----
+if git diff --cached --name-only | grep -qE '^chess/(core|tools|scripts)/'; then
+  if ! python3 chess/scripts/inline_core.py; then
+    echo "chess: inline_core.py 失败，提交中止" >&2
+    exit 1
+  fi
+  git add chess/tools/*.html 2>/dev/null || true
+  if ! python3 chess/scripts/check.py; then
+    echo "chess: check.py 未通过，提交中止" >&2
+    exit 1
+  fi
 fi
 
 exit 0
