@@ -142,4 +142,58 @@ const sidewaysCam = { eye: [10, 0, 0], f: [-1, 0, 0], r: [0, 0, -1], u: [0, 1, 0
 T.eq(E.unproject(sidewaysCam, [vi.CX, vi.CY], 0), null,
      'unproject：射线与平面平行（forward 无 z 分量）应返回 null，而不是抛错或除零结果');
 
+// ---- 棋子自动缩放：defect —— 棋子曾经吃 o.scale 这个写死的像素数，
+// 不随相机远近 / 景深一起变，缩远了溢出格线、缩近了小得像丢在格子里。
+// 现在默认（省略 o.scale）按「这枚子自己所在格」的投影边长现算。
+// 核心不变量：scale / 那一格自己的投影边长 恒等于 PIECE_SQUARE_FRACTION——
+// 不论相机拉多远、不论棋子在近排还是远排。这正是修复的证明：旧代码里这个
+// 比值会随相机和深度到处漂移（因为分子是写死的常量），新代码里它是个常数。
+{
+  const board = BR.layout({ files: 8, ranks: 8, cell: 1 });
+  const savedCam = { az: E.cam.az, el: E.cam.el, dist: E.cam.dist, tx: E.cam.tx, ty: E.cam.ty, tz: E.cam.tz };
+  E.cam.az = -0.6; E.cam.el = 0.5; E.cam.tx = 0; E.cam.ty = 0; E.cam.tz = 0;
+
+  const seenSquarePx = [];   // 用来断言「近排/远排」在不同相机距离下确实量出不同的格宽——
+                              // 不然下面的比值不变断言会显得像是凑巧过的空判据。
+  [8, 13, 20].forEach(dist => {
+    E.cam.dist = dist;
+    const cam = E.makeCam();
+    [{ r: 0, tag: 'rank0' }, { r: 7, tag: 'rank7' }].forEach(({ r, tag }) => {
+      const center = board.squareCenter(3, r);
+      const sqPx = BR.pieceSquarePx(cam, E, center, 1);
+      const scale = BR.pieceAutoScale(cam, E, center, 1);
+      T.ok(sqPx > 0, 'dist=' + dist + ' ' + tag + '：格宽应量出正数');
+      T.ok(Math.abs(scale / sqPx - BR.PIECE_SQUARE_FRACTION) < 1e-9,
+           'dist=' + dist + ' ' + tag + '：scale/格宽 应恒等于 PIECE_SQUARE_FRACTION（' + BR.PIECE_SQUARE_FRACTION + '）');
+      seenSquarePx.push(sqPx);
+    });
+  });
+  // 至少要有明显不同的格宽读数——否则上面的「恒等」断言只是在重复量同一个数。
+  T.ok(Math.max(...seenSquarePx) / Math.min(...seenSquarePx) > 1.5,
+       '不同相机距离 / 不同排之间，量出的格宽应有显著差异（否则下面的恒等式没有验证力度）');
+
+  // ---- 退化情形 1：棋盘角格（a1）没有 -x/-y 方向的邻格，必须退化到 +x/+y ----
+  E.cam.dist = 13;
+  const camCorner = E.makeCam();
+  const a1 = board.squareCenter(0, 0);
+  const cornerPx = BR.pieceSquarePx(camCorner, E, a1, 1);
+  T.ok(cornerPx > 0, 'a1（棋盘角格）应能退化到 +x/+y 方向量出格宽');
+  const d4Px = BR.pieceSquarePx(camCorner, E, board.squareCenter(3, 3), 1);
+  T.ok(Math.abs(cornerPx - d4Px) / d4Px < 0.05,
+       'a1 退化后量出的格宽应与盘中心格接近（同一相机下，格宽本身不该因为退化探测方向而失真）');
+
+  // ---- 退化情形 2：这一格的两个方向都探不到（邻格被近裁剪 / 落在相机之后）——
+  // 必须安静地退回 PIECE_SCALE_FALLBACK 那个量级的常量，而不是返回 NaN 或抛错。
+  const degenerateCam = { eye: [-2.5, -3.5, 0.1], f: [1, 0, 0], r: [0, 0, -1], u: [0, 1, 0] };
+  T.eq(BR.pieceSquarePx(degenerateCam, E, [-3.5, -3.5, 0], 1), null,
+       '两个方向的邻格都探不到时，pieceSquarePx 应返回 null');
+  const fallbackScale = BR.pieceAutoScale(degenerateCam, E, [-3.5, -3.5, 0], 1);
+  T.ok(fallbackScale > 0 && isFinite(fallbackScale),
+       'pieceSquarePx 返回 null 时，pieceAutoScale 应退回一个有限的正数兜底，而不是 NaN');
+
+  // ---- o.scale 显式覆盖仍然优先——_piece-preview.html 的合法性网格要保留
+  // 这个逃生舱口，摆出彼此可比、不随相机变化的固定尺寸。 ----
+  Object.assign(E.cam, savedCam);
+}
+
 T.report();

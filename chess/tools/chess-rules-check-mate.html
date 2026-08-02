@@ -114,6 +114,13 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 .views .vlabel{font-size:11.5px;color:rgba(159,176,200,.8);margin-right:2px}
 .vbtn{padding:5px 9px;font-size:11.5px}
 
+/* 预置内容（局面 / 棋种……）：与 .views 同一套外观，但语义上是独立控件——
+   见 viz-engine.js「预置内容」一节的注释：视角回答「从哪儿看」，这里回答
+   「看什么」，两者不再共用同一行按钮。 */
+.presets{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 2px}
+.presets .plabel{font-size:11.5px;color:rgba(159,176,200,.8);margin-right:2px}
+.pbtn{padding:5px 9px;font-size:11.5px}
+
 /* 开关 */
 .toggles{display:flex;flex-wrap:wrap;gap:7px 12px;margin:12px 0 2px}
 .tg{display:flex;align-items:center;gap:6px;font-size:12px;color:#c6d2e4;cursor:pointer}
@@ -202,6 +209,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     </div>
     <div id="recHost"></div>
     <div id="togglesHost"></div>
+    <div id="presetsHost"></div>
     <div id="viewsHost"></div>
     <div class="readout" id="readout"></div>
     <div class="tips" id="tips"></div>
@@ -265,6 +273,9 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     resume: { zh: '▶ 继续', en: '▶ Resume' },
     reset:  { zh: '↺ 重置', en: '↺ Reset' },
     views:  { zh: '视角', en: 'View' },
+    /* 预置局面/预置内容的默认标签——场景可以用 SCENES[id].presetsLabel 覆盖它
+       （如「棋种」而不是通用的「预置」），省略时退回这个通用词。 */
+    presets: { zh: '预置', en: 'Preset' },
     /* 演算记录与回放（§11）。仅当调用方在 init() 里提供 RECORD 钩子时才出现。 */
     recRec:    { zh: '● 记录',   en: '● Record' },
     recStop:   { zh: '■ 停止',   en: '■ Stop' },
@@ -309,6 +320,11 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   let cam = { az: -0.6, el: 0.32, dist: 10, tx: 0, ty: 0, tz: 0 };
   let tween = null;
   const lastView = {};
+  /* tabId -> 当前选中的预置内容 key（见「预置内容」一节）。与 lastView 同一手法：
+     views 是相机角度的单选记忆，lastPreset 是内容（局面/棋种/……）的单选记忆——
+     两者过去被 Task 6 误合并进同一份 views（onSelect 里塞内容加载），这里把它们
+     拆成两份独立状态，谁也不再替谁背锅。 */
+  const lastPreset = {};
 
   /* SCENES / PARAMS / RECORD / TOOL / 版本号：工具专属声明，由 init() 可选注入。
      默认给空容器而不是假定同名全局已存在——这样 require() 或在没提供它们的
@@ -759,6 +775,55 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     });
   }
 
+  /* ================= 预置内容（局面 / 棋种……）================= */
+  /* Task 6 的原话是「预置局面（views 的 onSelect 里加载）」——把内容选择塞进
+     相机角度控件里。这两件事其实互不相干：相机角度回答「从哪儿看」，预置
+     内容回答「看什么」。合并的后果是两头都坏：选了某个局面，相机会跟着
+     跳；想从顶视角看某个局面，view 一栏根本没有这个组合按钮。这里补一个
+     独立控件——buildParams / buildToggles / buildViews 之外的第四种——
+     专门表示「离散的、有名字的内容」：一组按钮，互斥选中，选中的 key 写进
+     导出的 state，并调用调用方给的 onSelect（真正去加载那份内容，如
+     Interact.create(FEN) 或切换 E.state 里的棋种索引）。
+
+     声明形状：SCENES[id].presets = [{ key, label, onSelect }, ...]，
+     可选 SCENES[id].presetsLabel 覆盖分组标签（省略时用通用的 UI.presets——
+     「预置/Preset」——见上面的声明）。没有声明 presets 的场景，#presetsHost
+     里对应那一行不会出现，与 toggles/views 的既有习惯一致。 */
+  function buildPresets() {
+    const host = document.getElementById('presetsHost');
+    if (!host) return;
+    Object.keys(SCENES).forEach(id => {
+      const list = SCENES[id].presets;
+      if (!list || !list.length) return;
+      const row = document.createElement('div');
+      row.className = 'presets';
+      row.dataset.tab = id;
+      const lab = document.createElement('span');
+      lab.className = 'plabel';
+      row.appendChild(lab);
+      const labRelabel = () => { lab.textContent = t(SCENES[id].presetsLabel || UI.presets); };
+      RELABEL.push(labRelabel);
+      labRelabel();
+      list.forEach(pr => {
+        const b = document.createElement('button');
+        b.className = 'btn pbtn';
+        b.dataset.preset = pr.key;
+        b.addEventListener('click', () => applyPreset(id, pr.key));
+        row.appendChild(b);
+        const relabel = () => { b.textContent = t(pr.label); };
+        RELABEL.push(relabel);
+        relabel();
+      });
+      host.appendChild(row);
+      /* 建面板时就选中第一项——与 buildParams() 对滑杆默认值的处理同一条
+         精神：面板刚搭好、用户还没机会点任何按钮之前，就该有一份确定的
+         初始内容，而不是留白等第一次点击。传显式 id，不依赖 curTab——
+         这时候 switchTab() 还没跑过，curTab 仍是 null，且这里本就是在给
+         *每一个* tab（不只是即将成为首个可见 tab 的那个）建立初始状态。 */
+      applyPreset(id, list[0].key);
+    });
+  }
+
   function buildTabs() {
     const nav = document.getElementById('tabsNav');
     if (!nav) return;
@@ -798,6 +863,40 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     };
     lastView[curTab] = name;
     refreshViewButtons();
+  }
+
+  /* 选择器同样必须限定在 .presets 之内，理由与 refreshViewButtons() 一致。 */
+  function refreshPresetButtons() {
+    document.querySelectorAll('.presets .pbtn').forEach(b => {
+      const row = b.closest('.presets');
+      b.classList.toggle('active', b.dataset.preset === lastPreset[row.dataset.tab]);
+    });
+  }
+  /* 显式接受 tabId，不像 applyView() 那样隐式用 curTab——预置内容的
+     初始化（buildPresets() 建面板时、以及工具可能想在页面加载时就把
+     几个不可见 tab 都摆到各自的默认局面）必须能在切到那个 tab 之前
+     就把它的内容选好，等真正切过去时画面已经是对的，不需要「先切 tab
+     再选内容」这道额外的手续。 */
+  function applyPreset(tabId, key) {
+    const sc = SCENES[tabId];
+    const list = sc && sc.presets;
+    const pr = list && list.find(p => p.key === key);
+    if (!pr) return;
+    if (pr.onSelect) pr.onSelect();
+    lastPreset[tabId] = key;
+    /* 若还有别的 tab 声明的 presets 是同一个数组引用（同一个对象，不是内容碰巧
+       相等）——这就是「跨 tab 共享的同一份选择」（例如 chess-moves-geometry.html
+       的六种棋子：piece/field/mobility 三个 tab 都读写同一份 E.state.pieceIdx，
+       presets 声明也故意用的是同一个数组常量）。这些 tab 的按钮高亮要跟着同步，
+       否则切到另一个 tab 会看见按钮组还停在初始项，尽管实际选择早已跟着共享
+       状态变了。onSelect 不重复调用——它已经在上面跑过一次，副作用只与
+       「选了哪个 key」有关，与是哪个 tab 触发的无关，重复调用不会更对，
+       只会更容易踩到调用方自己没预料到的重入。 */
+    Object.keys(SCENES).forEach(otherId => {
+      if (otherId !== tabId && SCENES[otherId].presets === list) lastPreset[otherId] = key;
+    });
+    if (tabId === curTab) state.preset = key;
+    refreshPresetButtons();
   }
 
   let brandDescEl = null, tipsEl = null, roEl = null;
@@ -1122,7 +1221,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     curTab = id;
     tween = null;
     document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
-    document.querySelectorAll('.toggles[data-tab], .views[data-tab]').forEach(el => {
+    document.querySelectorAll('.toggles[data-tab], .views[data-tab], .presets[data-tab]').forEach(el => {
       el.style.display = el.dataset.tab === id ? '' : 'none';
     });
     if (cams[id]) Object.assign(cam, cams[id]);   // 原地改写，VizEngine.cam 引用不变
@@ -1136,6 +1235,13 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     buildRecRow();
     syncParamVisibility();
     refreshViewButtons();
+    /* 换 tab 时把导出的 state.preset 同步成这个 tab 自己记住的那一个——
+       lastPreset[id] 在 buildPresets() 建面板时已经对每个声明了 presets
+       的 tab 都填过一次（选中第一项），没声明 presets 的 tab 这里是
+       undefined，state.preset 也就诚实地变成 undefined，不留一份别的
+       tab 的陈旧数据。 */
+    state.preset = lastPreset[id];
+    refreshPresetButtons();
     updateReadout();
   }
 
@@ -1348,6 +1454,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     buildParams();
     buildToggles();
     buildViews();
+    buildPresets();   // 在 switchTab(firstTab) 之前——它要读 lastPreset[id] 同步 state.preset
 
     Object.keys(SCENES).forEach(id => {
       const views = SCENES[id].views || {};
@@ -2622,15 +2729,75 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     return pathCache[d];
   }
 
+  /* defect：drawPiece 曾经把 o.scale（一个原始像素数）直接当 k 用，两个消费
+     工具各自手写死了一个常量（chess-moves-geometry.html 用 42，
+     chess-rules-check-mate.html 用 46）。相机怎么缩放、棋子都是这么大——
+     缩远了棋子溢出格线，缩近了棋子小得像丢在格子里。用户拿着两种失败模式
+     的截图报告过这个问题；这是我（任务下发者）的漏项，Phase 1 评审时就
+     记过、却没有真正排进任何一个任务，不是两个实现者的偏差。
+
+     修法：省略 o.scale 时，按「这枚棋子自己所在格」投影到屏幕的边长现算
+     scale，而不是吃调用方写死的像素数——这样近大远小（透视景深）和相机
+     远近（整体缩放）两件事都被同一个量自然吃掉了。
+
+     PIECE_SQUARE_FRACTION 不是拍脑袋定的：两位实现者互不知情地为各自的
+     工具手调过一个固定像素常量——46px（chess-rules-check-mate.html，
+     dist=11 附近调的）、42px（chess-moves-geometry.html，dist=13 附近调的）。
+     换算成「scale ÷ 当时那格的投影边长」，分别是 0.543 与 0.588——两次独立
+     的手感调校收敛到同一个窄区间。这里取区间中段的 0.58，直接复用两人已经
+     验证过「棋子读得清楚、又不会越出格线蹭到邻居」的手感，而不是重新发明
+     一个数字。 */
+  const PIECE_SQUARE_FRACTION = 0.58;
+  // 量不出格宽时（近裁剪、相机异常）的地板——退回旧手感的量级，
+  // 好过整帧不画这枚子。
+  const PIECE_SCALE_FALLBACK = 46;
+
+  /* 量出「一枚棋子自己所在格」投影到屏幕上的边长：从格心沿 +x/+y 各探一步
+     （世界坐标，步长 = cell），退化到 -x/-y（棋盘外沿一侧没有邻格——例如
+     a1 的左边和下边都探不到东西），两个方向都探不到时（例如整块画面被
+     近裁剪，或调用方给了一个退化的相机）返回 null，交给 pieceAutoScale
+     兜底，而不是在这里悄悄吐出一个编造的数字。按这枚子自己的格心探测、
+     不是量一次全棋盘——否则透视下远排的棋子会被按近排的格宽现算，反而
+     放大了「近大远小」本该消除的错觉（这正是 coordLabelSize() 量整块棋盘
+     一次就够用、而这里不能照抄的原因：坐标标签只有一处，棋子却排布在
+     不同深度）。两个方向都探到时取平均，同一手法 coordLabelSize() 已经在
+     用——顶视角之外，x/y 两个方向的投影步长本就不总相等（透视 + 旋转）。 */
+  function pieceSquarePx(C, E, center, cell) {
+    const s0 = E.proj(C, center);
+    if (!s0) return null;
+    function probe(dx, dy) {
+      const p = E.proj(C, [center[0] + dx, center[1] + dy, center[2]]);
+      return p ? Math.hypot(p[0] - s0[0], p[1] - s0[1]) : null;
+    }
+    const dx = probe(cell, 0) != null ? probe(cell, 0) : probe(-cell, 0);
+    const dy = probe(0, cell) != null ? probe(0, cell) : probe(0, -cell);
+    const parts = [dx, dy].filter(function (v) { return v != null; });
+    if (!parts.length) return null;
+    return parts.reduce(function (a, b) { return a + b; }, 0) / parts.length;
+  }
+
+  /* drawPiece 的默认缩放：cell 省略时按 1（本子项目目前所有棋盘都是
+     cell=1），仍然可覆盖——留给将来 cell 更小的算法棋盘（如八皇后的
+     12×12）一个入口，不必回头改这里的签名。 */
+  function pieceAutoScale(C, E, center, cell) {
+    const px = pieceSquarePx(C, E, center, cell == null ? 1 : cell);
+    return px == null ? PIECE_SCALE_FALLBACK : px * PIECE_SQUARE_FRACTION;
+  }
+
   /* 棋子画成朝向相机的剪影：把它的世界坐标投影成屏幕点，
-     然后在屏幕空间里以该点为基准绘制。这样任意相机角度下都读得清。 */
+     然后在屏幕空间里以该点为基准绘制。这样任意相机角度下都读得清。
+
+     o.scale 仍然是可选的显式覆盖——_piece-preview.html 的合法性网格要给
+     32 颗子摆一个刻意固定、彼此可比的尺寸做视觉核验，那里不该跟着相机
+     距离自动变化，必须原样保留这个逃生舱口。省略 o.scale 时才现算。 */
   function drawPiece(ctx, C, E, o) {
     const s = E.proj(C, o.center);
     if (!s) return;
     const key = CODE_KEY[Math.abs(o.code)];
     if (!key) return;
     const white = o.code > 0;
-    const k = (o.scale || 1) / PIECE_BOX;
+    const scale = o.scale != null ? o.scale : pieceAutoScale(C, E, o.center, o.cell);
+    const k = (scale || 1) / PIECE_BOX;
 
     ctx.save();
     ctx.globalAlpha = o.alpha == null ? 1 : o.alpha;
@@ -2656,6 +2823,8 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     coordLabelSize: coordLabelSize, COORD_LABEL_OFFSET: COORD_LABEL_OFFSET,
     PIECE_PATHS: PIECE_PATHS, drawPiece: drawPiece,
     PIECE_BOX: PIECE_BOX, PIECE_ANCHOR: PIECE_ANCHOR, CODE_KEY: CODE_KEY,
+    pieceSquarePx: pieceSquarePx, pieceAutoScale: pieceAutoScale,
+    PIECE_SQUARE_FRACTION: PIECE_SQUARE_FRACTION,
   };
 });
 /* <<< GENERATED:BOARD-RENDER */
@@ -2689,8 +2858,6 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   var CSS_ROSE = 'var(--trace-rose)', CSS_VIOLET = 'var(--trace-violet)',
       CSS_EMERALD = 'var(--trace-emerald)', CSS_ORANGE = 'var(--trace-orange)',
       CSS_CYAN = 'var(--trace-cyan)', CSS_SLATE = 'var(--ui-slate)';
-
-  var PIECE_SCALE = 46;   // 与 _piece-preview.html 的 32 子探针同一个尺度（dist=11 时验证过好看）
 
   // ================= 预置局面（Task 6 Step 2 已用 node 逐条核对，见提交说明） =================
   var PRESETS = {
@@ -2855,7 +3022,9 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       for (var f = 0; f < 8; f++) {
         var v = pos.board[CC.SQ(f, r)];
         if (v === CC.EMPTY) continue;
-        BR.drawPiece(ctx, camC, E, { code: v, center: L.squareCenter(f, r), scale: PIECE_SCALE });
+        // scale 省略：defect 修好后交给 BR.drawPiece 按这枚子自己所在格的
+        // 投影边长现算，不再吃写死的 PIECE_SCALE=46——那正是本次要修的 bug。
+        BR.drawPiece(ctx, camC, E, { code: v, center: L.squareCenter(f, r) });
       }
     }
   }
@@ -3050,30 +3219,32 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     syncPlayButton();
   }
 
-  // ================= 自动演示：按 dt 累加，巡回本 tab 的视角按钮（=预置局面）=================
-  // 复用真实的视角按钮点击路径（tween + onSelect），不是另起一套局面加载逻辑——
-  // 这样自动演示与手动点视角按钮永远是同一条代码路径，不会漂移。
+  // ================= 自动演示：按 dt 累加，巡回本 tab 的预置局面按钮 =================
+  // defect（Task 6 的原话「预置局面（views 的 onSelect 里加载）」）：局面曾经
+  // 挂在视角按钮上，巡回时点的是 .vbtn——选一个局面，相机会跟着跳，反过来
+  // 切相机也会静默换局面。现在局面是独立的 .pbtn（见 SCENES 里的 presets），
+  // 巡回改点这一组按钮；相机（views/.vbtn）完全不再参与巡回，用户随时能在
+  // 巡回途中把相机切到俯视，局面照常继续巡回、不受影响。
+  // 复用真实的预置局面按钮点击路径（applyPreset() + onSelect），不是另起一套
+  // 局面加载逻辑——这样自动演示与手动点局面按钮永远是同一条代码路径。
+  // 巡回的 key 列表直接读 SCENES[tab].presets，不再另外手维护一份 DEMO_KEYS——
+  // 那曾经是与 views 平行的第二份「这个 tab 有哪些局面」的列表，两份列表
+  // 一旦漂移（加了一个局面却忘了加进 DEMO_KEYS），巡回就会悄悄漏掉它。
   var demoPlaying = true;
   var demoAcc = 0;
   var DEMO_INTERVAL = 3;
-  var DEMO_KEYS = {
-    legal: ['iso', 'pin'],
-    special: ['iso', 'castleThrough', 'castleB1', 'ep', 'promo'],
-    check: ['iso', 'stalemate'],
-    mate: ['iso', 'mateKR'],
-  };
-  var lastDemoView = { legal: 'iso', special: 'iso', check: 'iso', mate: 'iso' };
+  var lastDemoPreset = { legal: null, special: null, check: null, mate: null };
   function advanceDemo(dt) {
     if (!demoPlaying) return;
     demoAcc += dt;
     if (demoAcc < DEMO_INTERVAL) return;
     demoAcc = 0;
-    var keys = DEMO_KEYS[myCurTab];
-    if (!keys) return;
-    var idx = keys.indexOf(lastDemoView[myCurTab]);
-    var next = keys[(idx + 1) % keys.length];
-    lastDemoView[myCurTab] = next;
-    var btn = document.querySelector('.views[data-tab="' + myCurTab + '"] .vbtn[data-view="' + next + '"]');
+    var list = SCENES[myCurTab] && SCENES[myCurTab].presets;
+    if (!list || !list.length) return;
+    var idx = list.findIndex(function (p) { return p.key === lastDemoPreset[myCurTab]; });
+    var next = list[(idx + 1) % list.length];
+    lastDemoPreset[myCurTab] = next.key;
+    var btn = document.querySelector('.presets[data-tab="' + myCurTab + '"] .pbtn[data-preset="' + next.key + '"]');
     if (btn) btn.click();
   }
   var __lastTs = null;
@@ -3207,8 +3378,19 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   }
 
   // ================= SCENES =================
+  // defect（Task 6 的原话「预置局面（views 的 onSelect 里加载）」）：局面
+  // （初始/别子/易位变体/……）与相机角度曾经合并进同一份 views——选局面会
+  // 悄悄带着相机跳，切相机也会悄悄换局面。两件事其实互不相干：views 回答
+  // 「从哪儿看」，下面的 PRESETS/games[tab].presetKey 回答「看什么」。这里
+  // 把 views 收窄成纯相机角度（每个 tab 至少 iso + 顶视，check tab 另加一个
+  // 侧视——它的应手层沿 z 轴立起来，侧视能看清那个「立起来的薄层」，其余
+  // 三个 tab 没有这类沿 z 抬升的结构，不需要额外角度）。局面选择完全移到
+  // 下面 SCENES 声明里的 presets。CAM_KING/CAM_QUEEN/CAM_ZOOM 这几个曾经
+  // 专为某个局面调的机位（易位经过被将、b1 不安全、别子特写）随着「局面
+  // 不再驱动相机」一起退休——统一用每个 tab 自己的 iso 机位，不再为单个
+  // 局面另调一个只服务于它的镜头，这正是「两者其实互不相干」这条修复的
+  // 直接体现，不是漏做。
   var CAM_BASE = { az: -0.6, el: 0.55, dist: 11 };
-  var CAM_ZOOM = { az: -0.3, el: 0.62, dist: 9 };
   /* 「俯视（顿悟）」的机位：BoardRender 把棋盘铺在世界的 x-y 平面
      （squareCenter 返回 [x,y,0]），法线是 z 轴，而 makeCam() 的
      world-up 取 (0,1,0)——沿棋盘法线正对看过去，是 az=0, el=0（工具①
@@ -3218,9 +3400,12 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
      写的 el:1.45 正是这个错误——算出来的 eye 离棋盘法线有 83°，几乎
      边看。dist 同理不再写死，见 computeTopDist() 的推导。 */
   var CAM_TOP  = { az: 0, el: 0, dist: 14 };
-  var CAM_KING = { az: 0.25, el: 0.55, dist: 10.5 };
-  var CAM_QUEEN = { az: -1.15, el: 0.55, dist: 10.5 };
   var CAM_CHECK = { az: -0.5, el: 0.42, dist: 13.5 };
+  // check tab 专属的侧视——drawReplyTree() 把候选应手摆在 z = PLY_Z 抬起的
+  // 一层薄面上（见下方 PLY_Z），低仰角、side-on 的机位能看清这层「悬浮在
+  // 棋盘上方」的结构本身，与 chess-moves-geometry.html 用 side 视角看马的
+  // 步数场「立起来的阶梯」是同一条设计理由。
+  var CAM_CHECK_SIDE = { az: -1.45, el: 0.14, dist: 15 };
 
   // 顶视角要塞下的世界半径：棋盘半边长 + 坐标标签探出的偏移（与
   // chess-moves-geometry.html 的 TOP_HALF_EXTENT 同一份推导，8×8、cell=1
@@ -3238,19 +3423,26 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     var halfScreen = Math.min(info.W, info.H) / 2;
     return TOP_HALF_EXTENT * info.FOCAL / (halfScreen * TOP_VIEW_MARGIN);
   }
-  /* CAM_TOP 只被 viewSpec() 拷贝进了 SCENES.legal.views.top 这一处（v.top，
-     见下方 SCENES 定义），但拷贝终究是按值拷贝——之后单独改 CAM_TOP.dist
-     不会传播过去，必须把新距离也写回那份拷贝。 */
+  /* CAM_TOP 现在被四个 tab 的 views.top 各拷贝了一份（v.top，见下方 SCENES
+     定义），拷贝终究是按值拷贝——之后单独改 CAM_TOP.dist 不会传播过去，
+     必须把新距离写回每一份拷贝，不能只改 legal 一个 tab（这曾经是唯一
+     声明了 top 视角的 tab；现在四个 tab 都有，这里跟着改成遍历全部）。 */
   function refreshTopDist() {
     var d = computeTopDist();
     CAM_TOP.dist = d;
-    if (SCENES.legal && SCENES.legal.views && SCENES.legal.views.top) {
-      SCENES.legal.views.top.dist = d;
-    }
+    Object.keys(SCENES).forEach(function (id) {
+      var v = SCENES[id].views && SCENES[id].views.top;
+      if (v) v.dist = d;
+    });
   }
 
   function viewSpec(cam, label) {
     return { label: label, az: cam.az, el: cam.el, dist: cam.dist, tx: cam.tx || 0, ty: cam.ty || 0, tz: cam.tz || 0 };
+  }
+  /* presets 数组条目：key 对应 PRESETS 里的局面，label 是按钮文案，onSelect
+     只做一件事——加载那份局面（不碰相机，见上面的说明）。 */
+  function presetSpec(tabId, key, label) {
+    return { key: key, label: label, onSelect: function () { loadPreset(tabId, key); } };
   }
 
   var SCENES = {
@@ -3259,15 +3451,17 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       brand: { en: 'A legal move is a pseudo-legal move that does not expose your own king.',
                zh: '合法走法就是不让自己的王暴露的伪合法走法。' },
       tips: PRESETS.start.tips,
-      views: (function () {
-        var v = {};
-        v.iso = viewSpec(CAM_BASE, { en: 'Start', zh: '初始' });
-        v.iso.onSelect = function () { loadPreset('legal', 'start'); };
-        v.pin = viewSpec(CAM_ZOOM, { en: 'Pin', zh: '别子' });
-        v.pin.onSelect = function () { loadPreset('legal', 'pin'); };
-        v.top = viewSpec(CAM_TOP, { en: 'Top (epiphany)', zh: '俯视（顿悟）' });
-        return v;
-      })(),
+      // views：纯相机角度——iso（双击回正的家）+ 顶视（顿悟视角）。
+      views: {
+        iso: viewSpec(CAM_BASE, { en: 'Iso', zh: '轴测' }),
+        top: viewSpec(CAM_TOP, { en: 'Top (epiphany)', zh: '俯视（顿悟）' }),
+      },
+      // presets：局面——从相机角度里搬出来的内容选择。
+      presetsLabel: { en: 'Position', zh: '局面' },
+      presets: [
+        presetSpec('legal', 'start', { en: 'Start', zh: '初始' }),
+        presetSpec('legal', 'pin', { en: 'Pin', zh: '别子' }),
+      ],
       draw: function (camC) {
         myCurTab = 'legal';
         var dt = frameDt();
@@ -3282,20 +3476,18 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       brand: { en: 'Castling has four independent preconditions; en passant only exists for one move; promotion is a choice, not just a queen.',
                zh: '易位有四个各自独立的前提；吃过路兵只在那一步棋里存在；升变是一次选择，不只是变后。' },
       tips: PRESETS.castleOk.tips,
-      views: (function () {
-        var v = {};
-        v.iso = viewSpec(CAM_BASE, { en: 'OK', zh: '全绿' });
-        v.iso.onSelect = function () { loadPreset('special', 'castleOk'); };
-        v.castleThrough = viewSpec(CAM_KING, { en: 'Through check', zh: '经过被将' });
-        v.castleThrough.onSelect = function () { loadPreset('special', 'castleThrough'); };
-        v.castleB1 = viewSpec(CAM_QUEEN, { en: 'b1 unsafe', zh: 'b1 不安全' });
-        v.castleB1.onSelect = function () { loadPreset('special', 'castleB1'); };
-        v.ep = viewSpec(CAM_BASE, { en: 'En passant', zh: '过路兵' });
-        v.ep.onSelect = function () { loadPreset('special', 'ep'); };
-        v.promo = viewSpec(CAM_BASE, { en: 'Promotion', zh: '升变' });
-        v.promo.onSelect = function () { loadPreset('special', 'promo'); };
-        return v;
-      })(),
+      views: {
+        iso: viewSpec(CAM_BASE, { en: 'Iso', zh: '轴测' }),
+        top: viewSpec(CAM_TOP, { en: 'Top (epiphany)', zh: '俯视（顿悟）' }),
+      },
+      presetsLabel: { en: 'Position', zh: '局面' },
+      presets: [
+        presetSpec('special', 'castleOk', { en: 'OK', zh: '全绿' }),
+        presetSpec('special', 'castleThrough', { en: 'Through check', zh: '经过被将' }),
+        presetSpec('special', 'castleB1', { en: 'b1 unsafe', zh: 'b1 不安全' }),
+        presetSpec('special', 'ep', { en: 'En passant', zh: '过路兵' }),
+        presetSpec('special', 'promo', { en: 'Promotion', zh: '升变' }),
+      ],
       draw: function (camC) {
         myCurTab = 'special';
         var dt = frameDt();
@@ -3310,14 +3502,18 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       brand: { en: 'Checkmate is not a special state — it is the legal-move list going empty while the king is attacked.',
                zh: '将死不是一种特殊状态——它就是合法走法列表空掉，而王正被攻击。' },
       tips: PRESETS.foolsMate.tips,
-      views: (function () {
-        var v = {};
-        v.iso = viewSpec(CAM_CHECK, { en: 'Fool’s mate', zh: '愚人将杀' });
-        v.iso.onSelect = function () { loadPreset('check', 'foolsMate'); };
-        v.stalemate = viewSpec(CAM_CHECK, { en: 'Stalemate', zh: '逼和' });
-        v.stalemate.onSelect = function () { loadPreset('check', 'stalemate'); };
-        return v;
-      })(),
+      // 这个 tab 的应手层沿 z 轴抬起（drawReplyTree()），side 视角能看清那层
+      // 「悬浮的薄面」本身——其余三个 tab 没有这类结构，不需要这个额外角度。
+      views: {
+        iso: viewSpec(CAM_CHECK, { en: 'Iso', zh: '轴测' }),
+        top: viewSpec(CAM_TOP, { en: 'Top (epiphany)', zh: '俯视（顿悟）' }),
+        side: viewSpec(CAM_CHECK_SIDE, { en: 'Side · reply layer', zh: '侧视·应手层' }),
+      },
+      presetsLabel: { en: 'Position', zh: '局面' },
+      presets: [
+        presetSpec('check', 'foolsMate', { en: 'Fool’s mate', zh: '愚人将杀' }),
+        presetSpec('check', 'stalemate', { en: 'Stalemate', zh: '逼和' }),
+      ],
       draw: function (camC) {
         myCurTab = 'check';
         var dt = frameDt();
@@ -3333,14 +3529,15 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       brand: { en: 'The first checkmate a beginner can force on purpose, not stumble into.',
                zh: '初学者第一个能刻意强制做到、而不是误打误撞碰上的将死。' },
       tips: PRESETS.mateKQ.tips,
-      views: (function () {
-        var v = {};
-        v.iso = viewSpec(CAM_BASE, { en: 'K+Q', zh: '车后' });
-        v.iso.onSelect = function () { loadPreset('mate', 'mateKQ'); };
-        v.mateKR = viewSpec(CAM_BASE, { en: 'K+R', zh: '车杀' });
-        v.mateKR.onSelect = function () { loadPreset('mate', 'mateKR'); };
-        return v;
-      })(),
+      views: {
+        iso: viewSpec(CAM_BASE, { en: 'Iso', zh: '轴测' }),
+        top: viewSpec(CAM_TOP, { en: 'Top (epiphany)', zh: '俯视（顿悟）' }),
+      },
+      presetsLabel: { en: 'Position', zh: '局面' },
+      presets: [
+        presetSpec('mate', 'mateKQ', { en: 'K+Q', zh: '车后' }),
+        presetSpec('mate', 'mateKR', { en: 'K+R', zh: '车杀' }),
+      ],
       draw: function (camC) {
         myCurTab = 'mate';
         var dt = frameDt();
@@ -3361,13 +3558,13 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   var VERSION = document.querySelector('meta[name="tool-version"]').content;
   var ENGINE_VERSION = document.querySelector('meta[name="engine-version"]').content;
 
-  // 四个 tab 的起始局面：所有辅助函数与 DOM 引用（尤其是升变浮层）都已就绪，
-  // 现在调用 loadPreset() 是安全的（见函数定义处的说明）。
-  loadPreset('legal', 'start');
-  loadPreset('special', 'castleOk');
-  loadPreset('check', 'foolsMate');
-  loadPreset('mate', 'mateKQ');
-
+  // 四个 tab 的起始局面：不再需要在这里手动调用 loadPreset() 了——
+  // E.init() 内部的 buildPresets() 会给每个声明了 presets 的 tab 都选中
+  // 第一项（legal→start、special→castleOk、check→foolsMate、mate→mateKQ，
+  // 与这里原来手写的四行一一对应），并通过 presetSpec() 里的 onSelect
+  // 调用同一个 loadPreset()。所有辅助函数与 DOM 引用（尤其是升变浮层）
+  // 在这一行之前已经就绪，所以这个自动初始化是安全的（与原来手写四行
+  // 调用点被放在这里的理由完全一致，见 loadPreset() 定义处的说明）。
   E.init({ canvas: canvas, SCENES: SCENES, PARAMS: PARAMS, TOOL: TOOL, VERSION: VERSION, ENGINE_VERSION: ENGINE_VERSION });
 
   // E.init() 内部同步跑过一次 resize()，FOCAL/W/H 这时才第一次有真实值——

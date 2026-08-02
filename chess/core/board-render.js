@@ -222,15 +222,75 @@
     return pathCache[d];
   }
 
+  /* defect：drawPiece 曾经把 o.scale（一个原始像素数）直接当 k 用，两个消费
+     工具各自手写死了一个常量（chess-moves-geometry.html 用 42，
+     chess-rules-check-mate.html 用 46）。相机怎么缩放、棋子都是这么大——
+     缩远了棋子溢出格线，缩近了棋子小得像丢在格子里。用户拿着两种失败模式
+     的截图报告过这个问题；这是我（任务下发者）的漏项，Phase 1 评审时就
+     记过、却没有真正排进任何一个任务，不是两个实现者的偏差。
+
+     修法：省略 o.scale 时，按「这枚棋子自己所在格」投影到屏幕的边长现算
+     scale，而不是吃调用方写死的像素数——这样近大远小（透视景深）和相机
+     远近（整体缩放）两件事都被同一个量自然吃掉了。
+
+     PIECE_SQUARE_FRACTION 不是拍脑袋定的：两位实现者互不知情地为各自的
+     工具手调过一个固定像素常量——46px（chess-rules-check-mate.html，
+     dist=11 附近调的）、42px（chess-moves-geometry.html，dist=13 附近调的）。
+     换算成「scale ÷ 当时那格的投影边长」，分别是 0.543 与 0.588——两次独立
+     的手感调校收敛到同一个窄区间。这里取区间中段的 0.58，直接复用两人已经
+     验证过「棋子读得清楚、又不会越出格线蹭到邻居」的手感，而不是重新发明
+     一个数字。 */
+  const PIECE_SQUARE_FRACTION = 0.58;
+  // 量不出格宽时（近裁剪、相机异常）的地板——退回旧手感的量级，
+  // 好过整帧不画这枚子。
+  const PIECE_SCALE_FALLBACK = 46;
+
+  /* 量出「一枚棋子自己所在格」投影到屏幕上的边长：从格心沿 +x/+y 各探一步
+     （世界坐标，步长 = cell），退化到 -x/-y（棋盘外沿一侧没有邻格——例如
+     a1 的左边和下边都探不到东西），两个方向都探不到时（例如整块画面被
+     近裁剪，或调用方给了一个退化的相机）返回 null，交给 pieceAutoScale
+     兜底，而不是在这里悄悄吐出一个编造的数字。按这枚子自己的格心探测、
+     不是量一次全棋盘——否则透视下远排的棋子会被按近排的格宽现算，反而
+     放大了「近大远小」本该消除的错觉（这正是 coordLabelSize() 量整块棋盘
+     一次就够用、而这里不能照抄的原因：坐标标签只有一处，棋子却排布在
+     不同深度）。两个方向都探到时取平均，同一手法 coordLabelSize() 已经在
+     用——顶视角之外，x/y 两个方向的投影步长本就不总相等（透视 + 旋转）。 */
+  function pieceSquarePx(C, E, center, cell) {
+    const s0 = E.proj(C, center);
+    if (!s0) return null;
+    function probe(dx, dy) {
+      const p = E.proj(C, [center[0] + dx, center[1] + dy, center[2]]);
+      return p ? Math.hypot(p[0] - s0[0], p[1] - s0[1]) : null;
+    }
+    const dx = probe(cell, 0) != null ? probe(cell, 0) : probe(-cell, 0);
+    const dy = probe(0, cell) != null ? probe(0, cell) : probe(0, -cell);
+    const parts = [dx, dy].filter(function (v) { return v != null; });
+    if (!parts.length) return null;
+    return parts.reduce(function (a, b) { return a + b; }, 0) / parts.length;
+  }
+
+  /* drawPiece 的默认缩放：cell 省略时按 1（本子项目目前所有棋盘都是
+     cell=1），仍然可覆盖——留给将来 cell 更小的算法棋盘（如八皇后的
+     12×12）一个入口，不必回头改这里的签名。 */
+  function pieceAutoScale(C, E, center, cell) {
+    const px = pieceSquarePx(C, E, center, cell == null ? 1 : cell);
+    return px == null ? PIECE_SCALE_FALLBACK : px * PIECE_SQUARE_FRACTION;
+  }
+
   /* 棋子画成朝向相机的剪影：把它的世界坐标投影成屏幕点，
-     然后在屏幕空间里以该点为基准绘制。这样任意相机角度下都读得清。 */
+     然后在屏幕空间里以该点为基准绘制。这样任意相机角度下都读得清。
+
+     o.scale 仍然是可选的显式覆盖——_piece-preview.html 的合法性网格要给
+     32 颗子摆一个刻意固定、彼此可比的尺寸做视觉核验，那里不该跟着相机
+     距离自动变化，必须原样保留这个逃生舱口。省略 o.scale 时才现算。 */
   function drawPiece(ctx, C, E, o) {
     const s = E.proj(C, o.center);
     if (!s) return;
     const key = CODE_KEY[Math.abs(o.code)];
     if (!key) return;
     const white = o.code > 0;
-    const k = (o.scale || 1) / PIECE_BOX;
+    const scale = o.scale != null ? o.scale : pieceAutoScale(C, E, o.center, o.cell);
+    const k = (scale || 1) / PIECE_BOX;
 
     ctx.save();
     ctx.globalAlpha = o.alpha == null ? 1 : o.alpha;
@@ -256,5 +316,7 @@
     coordLabelSize: coordLabelSize, COORD_LABEL_OFFSET: COORD_LABEL_OFFSET,
     PIECE_PATHS: PIECE_PATHS, drawPiece: drawPiece,
     PIECE_BOX: PIECE_BOX, PIECE_ANCHOR: PIECE_ANCHOR, CODE_KEY: CODE_KEY,
+    pieceSquarePx: pieceSquarePx, pieceAutoScale: pieceAutoScale,
+    PIECE_SQUARE_FRACTION: PIECE_SQUARE_FRACTION,
   };
 });
