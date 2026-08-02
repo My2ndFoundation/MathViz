@@ -1,4 +1,5 @@
-/* 参数化棋盘与棋子渲染。棋盘躺在 z=0 平面、以原点为中心。
+/* 参数化棋盘与棋子渲染。棋盘以原点为中心，躺在 layout({z}) 指定的平面上，
+   z 默认 0 —— 前两个工具只有一块棋盘，工具③ 的历史局面才需要沿 −z 分层。
    算法工具与规则工具共用同一套 —— 八皇后摆的是真正的后。
    零依赖；node 与浏览器双用。编辑源，运行时被内联。 */
 (function (root, factory) {
@@ -11,17 +12,22 @@
     const files = (spec && spec.files) || 8;
     const ranks = (spec && spec.ranks) || 8;
     const cell = (spec && spec.cell) || 1;
+    /* z：棋盘所在的平面。默认 0（前两个工具的全部用法）。工具③ 的历史局面
+       沿 −z 后退，每一层是一块自己的 layout——把 z 放进 layout 而不是让每个
+       调用方在拿到 [x,y,0] 之后自己改第三个分量，是因为 pickSquare 也要用
+       同一个 z 去求交：两处各写一遍必然有一天对不上。 */
+    const z = (spec && spec.z) || 0;
     const w = files * cell, h = ranks * cell;
     const x0 = -w / 2, y0 = -h / 2;
 
     return {
-      files: files, ranks: ranks, cell: cell, w: w, h: h,
+      files: files, ranks: ranks, cell: cell, z: z, w: w, h: h,
       squareCenter: function (f, r) {
-        return [x0 + (f + 0.5) * cell, y0 + (r + 0.5) * cell, 0];
+        return [x0 + (f + 0.5) * cell, y0 + (r + 0.5) * cell, z];
       },
       squareCorners: function (f, r) {
         const x = x0 + f * cell, y = y0 + r * cell;
-        return [[x, y, 0], [x + cell, y, 0], [x + cell, y + cell, 0], [x, y + cell, 0]];
+        return [[x, y, z], [x + cell, y, z], [x + cell, y + cell, z], [x, y + cell, z]];
       },
     };
   }
@@ -59,8 +65,8 @@
   function coordLabelSize(C, E, L) {
     const o = L.squareCorners(0, 0)[0];
     const p0 = E.proj(C, o);
-    const px = E.proj(C, [o[0] + L.cell, o[1], 0]);
-    const py = E.proj(C, [o[0], o[1] + L.cell, 0]);
+    const px = E.proj(C, [o[0] + L.cell, o[1], L.z]);
+    const py = E.proj(C, [o[0], o[1] + L.cell, L.z]);
     if (!p0 || !px || !py) return COORD_LABEL_SIZE_MIN;
     const cellPx = (Math.hypot(px[0] - p0[0], px[1] - p0[1]) +
                     Math.hypot(py[0] - p0[0], py[1] - p0[1])) / 2;
@@ -91,12 +97,12 @@
     E.withContext(ctx, function () {
       for (let f = 0; f < L.files; f++) {
         const c = L.squareCenter(f, 0);
-        E.label3(C, [c[0], o[1] - COORD_LABEL_OFFSET * L.cell, 0], fileLabel(f),
+        E.label3(C, [c[0], o[1] - COORD_LABEL_OFFSET * L.cell, L.z], fileLabel(f),
                  { color: COORD, size: size, align: 'center' });
       }
       for (let r = 0; r < L.ranks; r++) {
         const c = L.squareCenter(0, r);
-        E.label3(C, [o[0] - COORD_LABEL_OFFSET * L.cell, c[1], 0], String(r + 1),
+        E.label3(C, [o[0] - COORD_LABEL_OFFSET * L.cell, c[1], L.z], String(r + 1),
                  { color: COORD, size: size, align: 'center' });
       }
     });
@@ -124,7 +130,7 @@
     const o = L.squareCorners(0, 0)[0];
     E.withContext(ctx, function () {
       // 外框
-      const frame = [o, [o[0] + L.w, o[1], 0], [o[0] + L.w, o[1] + L.h, 0], [o[0], o[1] + L.h, 0], o];
+      const frame = [o, [o[0] + L.w, o[1], L.z], [o[0] + L.w, o[1] + L.h, L.z], [o[0], o[1] + L.h, L.z], o];
       E.strokePoly(C, frame, { color: EDGE, width: 1.4 });
     });
 
@@ -135,10 +141,10 @@
 
   /* 反向查询：屏幕坐标 → 棋盘格。是「点击选子」这枚阶段 1 头号交互
      （点棋子→高亮合法目标→点目标→落子）唯一需要的引擎入口。
-     用 E.unproject 把射线与棋盘所在的 z=0 平面求交，再按 layout 的格距换算
-     成 file/rank；落在相机之后、或点在棋盘外框之外都返回 null。 */
+     用 E.unproject 把射线与棋盘所在的平面（L.z，默认 0）求交，再按 layout
+     的格距换算成 file/rank；落在相机之后、或点在棋盘外框之外都返回 null。 */
   function pickSquare(C, E, screenXY, L) {
-    const p = E.unproject(C, screenXY, 0);
+    const p = E.unproject(C, screenXY, L.z || 0);
     if (!p) return null;
     const o = L.squareCorners(0, 0)[0];   // 棋盘左下角，和 drawBoard 的外框基准一致
     const f = Math.floor((p[0] - o[0]) / L.cell);
