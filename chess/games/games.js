@@ -39,6 +39,30 @@
     'world-championship', 'prodigy', 'defence', 'positional', 'longest',
   ];
 
+  /* 本阶段的完整清单（计划 §Task 7–12 的分组表），按 GROUP_ORDER 分组排列。
+     这是「有没有拼错 id / 悄悄溜进第 31 局」的判据来源，不是「填了几局」的
+     判据——填没填齐是里程碑，见 games.test.js 里对 EXPECTED_IDS 的用法。 */
+  const EXPECTED_IDS = [
+    // teaching（2）
+    'fools-mate', 'scholars-mate',
+    // machine（5）
+    'deep-blue-kasparov-1996-g1', 'deep-blue-kasparov-1997-g2',
+    'deep-blue-kasparov-1997-g6', 'alphazero-stockfish-2017-g10', 'hydra-adams-2005',
+    // romantic（6）
+    'anderssen-kieseritzky-1851', 'anderssen-dufresne-1852', 'morphy-opera-1858',
+    'rotlewi-rubinstein-1907', 'legal-saint-brie-1750', 'levitsky-marshall-1912',
+    // coldwar（7）
+    'byrne-fischer-1956', 'spassky-fischer-1972-g1', 'fischer-spassky-1972-g6',
+    'tal-botvinnik-1960-g6', 'karpov-kasparov-1985-g16', 'karpov-kasparov-1985-g48',
+    'carlsen-nepomniachtchi-2021-g6',
+    // theory（5）
+    'reti-capablanca-1924', 'botvinnik-capablanca-1938', 'steinitz-bardeleben-1895',
+    'kasparov-topalov-1999', 'capablanca-marshall-1918',
+    // human（5）
+    'kasparov-polgar-2002', 'deep-fritz-kramnik-2006-g2', 'carlsen-niemann-2022',
+    'kasparov-world-1999', 'menchik-euwe-1930',
+  ];
+
   /* 给零基础的顺序（规格 §6.3）。UI 默认按它排列，而不是平铺 30 局。 */
   const LEARNING_ROUTE = [
     'fools-mate',
@@ -81,5 +105,5 @@
 
   return { GAMES: GAMES, byId: byId, GROUPS: GROUPS, GROUP_ORDER: GROUP_ORDER,
            GROUP_LABEL: GROUP_LABEL, LEARNING_ROUTE: LEARNING_ROUTE, TAGS: TAGS,
-           headersOf: headersOf };
+           EXPECTED_IDS: EXPECTED_IDS, headersOf: headersOf };
 });

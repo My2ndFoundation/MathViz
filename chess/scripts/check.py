@@ -56,8 +56,14 @@ def node_check() -> int:
 
 
 def core_tests() -> int:
+    """跑 core/ 与 games/ 下的全部 *.test.js。
+
+    棋谱校验门（games/games.test.js，规格 §7 门 2）与内核测试同等重要：
+    30 局棋谱里抄错的一步，只有它能当场抓住。
+    """
     rc = 0
-    for test in sorted((ROOT / 'core').glob('*.test.js')):
+    tests = sorted((ROOT / 'core').glob('*.test.js')) + sorted((ROOT / 'games').glob('*.test.js'))
+    for test in tests:
         proc = subprocess.run(['node', str(test)])
         if proc.returncode != 0:
             print(f'ERROR: {test.name} 未通过', file=sys.stderr)
