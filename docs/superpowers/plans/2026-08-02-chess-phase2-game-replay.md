@@ -634,7 +634,7 @@ T.eq(auto.playing, false, '到末尾自动取消播放');
 
 // ---- keyMoves：自动暂停 + 说明 ----
 const KM = [
-  { ply: 10, note: { en: 'Morphy gives up a knight to open the b-file.', zh: '莫菲弃马打开 b 线。' } },
+  { ply: 10, note: { en: '5…dxe5 recaptures; material is level again.', zh: '5…dxe5 吃回来，子力重新持平。' } },
   { ply: 33, note: { en: 'Mate with the last two pieces he has left.', zh: '用仅剩的两个子将死。' } },
 ];
 const key = R.load({ pgn: OPERA, keyMoves: KM });
@@ -891,8 +891,12 @@ T.eq(S.safety.length, 34, '三条曲线等长');
 T.eq(S.material[0], 0, '开局子力差 0');
 T.eq(S.control[0], 0, '开局控制差 0');
 T.eq(S.safety[0], 0, '开局王安全差 0');
-// 第 10 个半步是 10.Nxb5（白方弃马吃兵）→ 白方净少一个马、多一个兵
-T.eq(S.material[10], -2, '10.Nxb5 之后白方子力落后 2（马换兵）');
+// 第 19 个半步是 10.Nxb5（白方吃掉 b5 的兵，暂时多一个兵）；
+// 第 20 个半步是 10...cxb5（黑方吃回那只马）。两条一起断言，才看得见
+// 「弃马」在这条曲线上是先上一格、再掉三格的一个两拍动作。
+// 注意换算：白方第 N 回合的走法是第 2N−1 个半步 —— 10.Nxb5 是 ply 19，不是 ply 10。
+T.eq(S.material[19], 1, '10.Nxb5 吃掉一个兵，白方暂时领先 1');
+T.eq(S.material[20], -2, '10...cxb5 吃回马之后，白方净落后 2（马换兵）');
 // 末局面：白方以少得多的子力将死 —— 断言符号而不是具体数字，
 // 具体数字取决于双方各剩什么，改棋谱就会变，断言符号才是真意图
 T.ok(S.material[33] < 0, '莫菲最后是在子力落后的情况下将死的');
@@ -998,7 +1002,9 @@ Expected: FAIL —— `R.evalAt is not a function`
 Run: `node chess/core/replay.test.js`
 Expected: PASS
 
-> 若 `S.material[10]` 不是 `-2`，**先手工核对第 10 个半步是不是 `Nxb5`**（`console.log(srs.san[9])`）——是的话就是实现错了，不是测试错了。
+> 若 `S.material[19]`/`S.material[20]` 不是 `1`/`-2`，**先手工核对第 19 个半步是不是 `Nxb5`**（`console.log(srs.san[18])`）——是的话就是实现错了，不是测试错了。
+>
+> **勘误**：本文档曾在此处断言 `S.material[10] === -2` 并称「第 10 个半步是 10.Nxb5」——这把 PGN 记号里的「白方第 10 回合」与「第 10 个半步」搞混了：白方第 N 回合的走法是第 `2N−1` 个半步，`10.Nxb5` 实际是第 19 个半步。`S.material[10]`（第 10 个半步，即 `5...dxe5`）应为 `0`。已改为断言 `S.material[19]` 与 `S.material[20]`，见上。
 
 - [ ] **Step 5: 提交**
 
