@@ -353,8 +353,20 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
 
   /* ================= 轨道相机与投影 ================= */
+  // 仰角安全范围：world up 取的是 (0,1,0)，el 趋近 ±π/2 时 forward 与它共线，
+  // 下面 cross(f, [0,1,0]) 会退化成一个接近零的向量——右/上手基就此失定，
+  // 不会报错，是整块画面悄悄塌缩成屏幕正中的一个点（norm() 对零向量的
+  // 兜底是 0/1=0，不是抛异常）。bindOrbit() 里鼠标拖拽早就把 el 夹在这个
+  // 范围内（见下面 pointermove 的 clamp），但那只管交互拖拽——SCENES 里
+  // 声明的视角预设（tools/*.html 的 CAM_TOP 之类）是直接把 el 写进
+  // tween.to 再原样赋给 cam.el 的，不经过那处 clamp。这里把同一对边界
+  // 值搬到相机基本身的计算里，保证不管 cam.el 是被拖出来的还是被某个
+  // 视角预设直接赋值出来的，算出来的基永远不会撞上这个奇点——单一出口，
+  // 以后任何新工具写一个贴着 ±π/2 的 el 都不会把渲染悄悄弄坏。
+  const EL_MIN = -1.45, EL_MAX = 1.53;
   function makeCam() {
-    const cp = Math.cos(cam.el), sp = Math.sin(cam.el);
+    const elC = clamp(cam.el, EL_MIN, EL_MAX);
+    const cp = Math.cos(elC), sp = Math.sin(elC);
     const eye = [
       cam.tx + cam.dist * cp * Math.sin(cam.az),
       cam.ty + cam.dist * sp,
@@ -1214,7 +1226,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
           pan(dx, dy);
         } else {
           cam.az -= dx * 0.0055;
-          cam.el = clamp(cam.el + dy * 0.0055, -1.45, 1.53);
+          cam.el = clamp(cam.el + dy * 0.0055, EL_MIN, EL_MAX);   // 与 makeCam() 共用同一对边界，见那里的注释
         }
       } else if (pointers.size === 2 && pinch) {
         const vs = Array.from(pointers.values());
@@ -2425,7 +2437,35 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   const COORD = 'rgba(159,176,200,0.75)';
 
   // a–h/1–8 坐标标签离棋盘外框的偏移，按格宽的比例算。
+  // 导出它是因为调用方（如需要按视口算合适相机距离的顶视角）要知道
+  // 「标了坐标的棋盘」比棋盘本身的世界半径多出多少，不能自己再猜一遍。
   const COORD_LABEL_OFFSET = 0.42;
+
+  // 坐标标签字号：不再写死成常量。12×12 的算法棋盘（如八皇后）和 8×8 的
+  // 经典棋盘用同一套相机距离时，前者每格在屏幕上投影出的像素本就更小——
+  // 写死 12px 会让 8×8 棋盘上的字显小（用户报告的 defect），而反过来把
+  // 12px 调大又会让 12×12 棋盘的字挤成一团。这里改成按「投影后一个格子
+  // 有多大」换算：格子越大（相机越近/棋盘越少），字号跟着变大；格子越小，
+  // 字号跟着变小。地板/天花板防止近裁剪或极端缩放把字变得读不出来或荒谬。
+  const COORD_LABEL_SIZE_FACTOR = 0.34;
+  const COORD_LABEL_SIZE_MIN = 12;
+  const COORD_LABEL_SIZE_MAX = 26;
+
+  /* 量出「一个格子投影到屏幕上有多大」，用来把坐标标签的字号和它挂靠的
+     格子大小挂钩（见上面 COORD_LABEL_SIZE_* 的注释）。用 a1 角上那格的
+     两条边（沿 x、沿 y 各一条)分别投影量一次再取平均，而不是只量一条边——
+     顶视角之外的角度下，两个方向的投影长度并不总相等（透视 + 旋转）。
+     任一角点被近裁剪掉（E.proj 返回 null）时退回地板值，总比整体不画字好。 */
+  function coordLabelSize(C, E, L) {
+    const o = L.squareCorners(0, 0)[0];
+    const p0 = E.proj(C, o);
+    const px = E.proj(C, [o[0] + L.cell, o[1], 0]);
+    const py = E.proj(C, [o[0], o[1] + L.cell, 0]);
+    if (!p0 || !px || !py) return COORD_LABEL_SIZE_MIN;
+    const cellPx = (Math.hypot(px[0] - p0[0], px[1] - p0[1]) +
+                    Math.hypot(py[0] - p0[0], py[1] - p0[1])) / 2;
+    return Math.max(COORD_LABEL_SIZE_MIN, Math.min(COORD_LABEL_SIZE_MAX, cellPx * COORD_LABEL_SIZE_FACTOR));
+  }
 
   /* ctx: CanvasRenderingContext2D；C: 相机；E: VizEngine（注入而非全局引用，
      这样本模块在 node 里可加载、可测，不需要 DOM）。
@@ -2447,16 +2487,17 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   function drawCoordLabels(ctx, C, E, spec) {
     const L = spec.layout || layout(spec);
     const o = L.squareCorners(0, 0)[0];
+    const size = coordLabelSize(C, E, L);
     E.withContext(ctx, function () {
       for (let f = 0; f < L.files; f++) {
         const c = L.squareCenter(f, 0);
         E.label3(C, [c[0], o[1] - COORD_LABEL_OFFSET * L.cell, 0], fileLabel(f),
-                 { color: COORD, size: 12, align: 'center' });
+                 { color: COORD, size: size, align: 'center' });
       }
       for (let r = 0; r < L.ranks; r++) {
         const c = L.squareCenter(0, r);
         E.label3(C, [o[0] - COORD_LABEL_OFFSET * L.cell, c[1], 0], String(r + 1),
-                 { color: COORD, size: 12, align: 'center' });
+                 { color: COORD, size: size, align: 'center' });
       }
     });
   }
@@ -2612,6 +2653,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   return {
     layout: layout, fileLabel: fileLabel, isLight: isLight,
     drawBoard: drawBoard, drawCoordLabels: drawCoordLabels, pickSquare: pickSquare,
+    coordLabelSize: coordLabelSize, COORD_LABEL_OFFSET: COORD_LABEL_OFFSET,
     PIECE_PATHS: PIECE_PATHS, drawPiece: drawPiece,
     PIECE_BOX: PIECE_BOX, PIECE_ANCHOR: PIECE_ANCHOR, CODE_KEY: CODE_KEY,
   };
@@ -3167,10 +3209,45 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   // ================= SCENES =================
   var CAM_BASE = { az: -0.6, el: 0.55, dist: 11 };
   var CAM_ZOOM = { az: -0.3, el: 0.62, dist: 9 };
-  var CAM_TOP  = { az: 0, el: 1.45, dist: 14 };
+  /* 「俯视（顿悟）」的机位：BoardRender 把棋盘铺在世界的 x-y 平面
+     （squareCenter 返回 [x,y,0]），法线是 z 轴，而 makeCam() 的
+     world-up 取 (0,1,0)——沿棋盘法线正对看过去，是 az=0, el=0（工具①
+     chess-moves-geometry.html 的 VIEW_TOP 用的就是这个约定），不是
+     el→90°：那会让 eye 几乎跑到 y 轴上，看向棋盘所在的 x-y 平面变成
+     side-on（几乎贴着棋盘的边看过去），与「俯视」的本意相反。这里原来
+     写的 el:1.45 正是这个错误——算出来的 eye 离棋盘法线有 83°，几乎
+     边看。dist 同理不再写死，见 computeTopDist() 的推导。 */
+  var CAM_TOP  = { az: 0, el: 0, dist: 14 };
   var CAM_KING = { az: 0.25, el: 0.55, dist: 10.5 };
   var CAM_QUEEN = { az: -1.15, el: 0.55, dist: 10.5 };
   var CAM_CHECK = { az: -0.5, el: 0.42, dist: 13.5 };
+
+  // 顶视角要塞下的世界半径：棋盘半边长 + 坐标标签探出的偏移（与
+  // chess-moves-geometry.html 的 TOP_HALF_EXTENT 同一份推导，8×8、cell=1
+  // 时两个方向的半边长相等）。
+  var TOP_HALF_EXTENT = Math.max(L.w, L.h) / 2 + BR.COORD_LABEL_OFFSET * L.cell;
+  var TOP_VIEW_MARGIN = 0.85;   // 留边距，别让标签正好贴着画布边缘
+  /* 按当前视口反解出「刚好装下带坐标标签的棋盘、且留有边距」的相机距离——
+     推导与 chess-moves-geometry.html 的 computeTopDist() 完全一致：
+     screen = FOCAL·world/depth，顶视角下世界半径投影到屏幕的半程是
+     TOP_HALF_EXTENT·FOCAL/dist，要落进 min(W,H)/2 的舒适范围内，反解
+     dist 即可。FOCAL/W/H 随窗口 resize 变化，这个距离必须现算。 */
+  function computeTopDist() {
+    var info = E.viewInfo();
+    if (!info.W || !info.H) return CAM_TOP.dist;   // resize() 还没跑过时的兜底
+    var halfScreen = Math.min(info.W, info.H) / 2;
+    return TOP_HALF_EXTENT * info.FOCAL / (halfScreen * TOP_VIEW_MARGIN);
+  }
+  /* CAM_TOP 只被 viewSpec() 拷贝进了 SCENES.legal.views.top 这一处（v.top，
+     见下方 SCENES 定义），但拷贝终究是按值拷贝——之后单独改 CAM_TOP.dist
+     不会传播过去，必须把新距离也写回那份拷贝。 */
+  function refreshTopDist() {
+    var d = computeTopDist();
+    CAM_TOP.dist = d;
+    if (SCENES.legal && SCENES.legal.views && SCENES.legal.views.top) {
+      SCENES.legal.views.top.dist = d;
+    }
+  }
 
   function viewSpec(cam, label) {
     return { label: label, az: cam.az, el: cam.el, dist: cam.dist, tx: cam.tx || 0, ty: cam.ty || 0, tz: cam.tz || 0 };
@@ -3292,6 +3369,13 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   loadPreset('mate', 'mateKQ');
 
   E.init({ canvas: canvas, SCENES: SCENES, PARAMS: PARAMS, TOOL: TOOL, VERSION: VERSION, ENGINE_VERSION: ENGINE_VERSION });
+
+  // E.init() 内部同步跑过一次 resize()，FOCAL/W/H 这时才第一次有真实值——
+  // 在那之前 computeTopDist() 只能拿到兜底值。这里补一次现算，把「俯视
+  // （顿悟）」拷贝出去的 views.top.dist 纠正成当前窗口算出来的距离；
+  // 随后每次 resize，FOCAL/W/H 跟着变，同一份距离也要跟着重算。
+  refreshTopDist();
+  window.addEventListener('resize', refreshTopDist);
 
   // buildTabs() (inside E.init(), just above) has now created one <button class="tab">
   // per SCENES key. Attach our own click listener alongside the engine's own — this is

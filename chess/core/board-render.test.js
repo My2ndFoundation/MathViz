@@ -69,6 +69,38 @@ T.eq(Object.keys(BR.PIECE_PATHS).sort(), KEYS.slice().sort(), '六种棋子齐�
 T.eq(BR.CODE_KEY, { 1: 'P', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K' },
      'CODE_KEY 与 chess-core.js 的棋子编码常量一一对应');
 
+// ---- 坐标标签字号：随「棋盘在屏幕上投影出的格子大小」缩放，不再写死 ----
+// defect：a-h/1-8 标签曾经无论相机远近、格子多大都固定 size:12，用户报告
+// 太小。字号必须是「投影后一个格子有多大」的函数——这个量只取决于 cell
+// 的世界尺寸和相机远近，不取决于 files/ranks 有多少格（L8 与 L12 都用
+// cell=1，同一相机下单格投影大小天然相近，字号也该相近；真正让 12×12
+// 算法棋盘的格子在屏幕上变小的，是作者为了让更多格塞进同一屏幕而选用更小
+// 的 cell 或更远的相机——这两种情况分别由下面两组断言覆盖）。
+{
+  const camNear = E.makeCam();   // 默认 cam：dist=10
+  const sizeNear = BR.coordLabelSize(camNear, E, L8);
+  T.ok(sizeNear > 12, '默认相机下 8×8 棋盘的字号应比旧的写死值 12 更大（这正是用户报告的 defect）');
+  T.ok(sizeNear <= 26, '字号不应超过天花板');
+
+  // cell 更小（Lc：cell=0.5，8×8 但棋盘整体只有 L8 的一半宽）→ 同一相机下
+  // 单格投影天然更小 —— 这正是「12×12 算法棋盘为了同屏塞下更多格而缩小
+  // cell」时会发生的情形，字号应跟着变小。
+  const sizeSmallCell = BR.coordLabelSize(camNear, E, Lc);
+  T.ok(sizeSmallCell < sizeNear, 'cell 更小时，单格投影更小，字号应更小');
+  T.ok(sizeSmallCell >= 12, '字号不应低于地板');
+
+  // 相机拉远 → 棋盘（连同每一格）在屏幕上整体缩小 → 字号应跟着变小——
+  // 这是 12×12 棋盘常见的另一种情形：cell 不变，靠拉远相机让整块棋盘
+  // 装进同一屏幕。
+  const savedDist = E.cam.dist;
+  E.cam.dist = savedDist * 6;
+  const camFar = E.makeCam();
+  const sizeFar = BR.coordLabelSize(camFar, E, L8);
+  T.ok(sizeFar < sizeNear, '相机拉远、棋盘在屏幕上变小时，字号应跟着变小');
+  T.eq(sizeFar, Math.max(12, sizeFar), '字号不应低于地板 12');
+  E.cam.dist = savedDist;   // 还原，避免影响后面用默认相机的断言
+}
+
 // ---- pickSquare：屏幕坐标 → 棋盘格（点击选子的唯一入口） ----
 // 用 proj 把每个格心投影到屏幕，再用 pickSquare 挑回来，必须得到同一格。
 // 覆盖默认 8×8、非默认 12×12、非方形 5×8 —— 尺寸是参数化的，不能只测一种。

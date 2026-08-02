@@ -37,7 +37,35 @@
   const COORD = 'rgba(159,176,200,0.75)';
 
   // a–h/1–8 坐标标签离棋盘外框的偏移，按格宽的比例算。
+  // 导出它是因为调用方（如需要按视口算合适相机距离的顶视角）要知道
+  // 「标了坐标的棋盘」比棋盘本身的世界半径多出多少，不能自己再猜一遍。
   const COORD_LABEL_OFFSET = 0.42;
+
+  // 坐标标签字号：不再写死成常量。12×12 的算法棋盘（如八皇后）和 8×8 的
+  // 经典棋盘用同一套相机距离时，前者每格在屏幕上投影出的像素本就更小——
+  // 写死 12px 会让 8×8 棋盘上的字显小（用户报告的 defect），而反过来把
+  // 12px 调大又会让 12×12 棋盘的字挤成一团。这里改成按「投影后一个格子
+  // 有多大」换算：格子越大（相机越近/棋盘越少），字号跟着变大；格子越小，
+  // 字号跟着变小。地板/天花板防止近裁剪或极端缩放把字变得读不出来或荒谬。
+  const COORD_LABEL_SIZE_FACTOR = 0.34;
+  const COORD_LABEL_SIZE_MIN = 12;
+  const COORD_LABEL_SIZE_MAX = 26;
+
+  /* 量出「一个格子投影到屏幕上有多大」，用来把坐标标签的字号和它挂靠的
+     格子大小挂钩（见上面 COORD_LABEL_SIZE_* 的注释）。用 a1 角上那格的
+     两条边（沿 x、沿 y 各一条)分别投影量一次再取平均，而不是只量一条边——
+     顶视角之外的角度下，两个方向的投影长度并不总相等（透视 + 旋转）。
+     任一角点被近裁剪掉（E.proj 返回 null）时退回地板值，总比整体不画字好。 */
+  function coordLabelSize(C, E, L) {
+    const o = L.squareCorners(0, 0)[0];
+    const p0 = E.proj(C, o);
+    const px = E.proj(C, [o[0] + L.cell, o[1], 0]);
+    const py = E.proj(C, [o[0], o[1] + L.cell, 0]);
+    if (!p0 || !px || !py) return COORD_LABEL_SIZE_MIN;
+    const cellPx = (Math.hypot(px[0] - p0[0], px[1] - p0[1]) +
+                    Math.hypot(py[0] - p0[0], py[1] - p0[1])) / 2;
+    return Math.max(COORD_LABEL_SIZE_MIN, Math.min(COORD_LABEL_SIZE_MAX, cellPx * COORD_LABEL_SIZE_FACTOR));
+  }
 
   /* ctx: CanvasRenderingContext2D；C: 相机；E: VizEngine（注入而非全局引用，
      这样本模块在 node 里可加载、可测，不需要 DOM）。
@@ -59,16 +87,17 @@
   function drawCoordLabels(ctx, C, E, spec) {
     const L = spec.layout || layout(spec);
     const o = L.squareCorners(0, 0)[0];
+    const size = coordLabelSize(C, E, L);
     E.withContext(ctx, function () {
       for (let f = 0; f < L.files; f++) {
         const c = L.squareCenter(f, 0);
         E.label3(C, [c[0], o[1] - COORD_LABEL_OFFSET * L.cell, 0], fileLabel(f),
-                 { color: COORD, size: 12, align: 'center' });
+                 { color: COORD, size: size, align: 'center' });
       }
       for (let r = 0; r < L.ranks; r++) {
         const c = L.squareCenter(0, r);
         E.label3(C, [o[0] - COORD_LABEL_OFFSET * L.cell, c[1], 0], String(r + 1),
-                 { color: COORD, size: 12, align: 'center' });
+                 { color: COORD, size: size, align: 'center' });
       }
     });
   }
@@ -224,6 +253,7 @@
   return {
     layout: layout, fileLabel: fileLabel, isLight: isLight,
     drawBoard: drawBoard, drawCoordLabels: drawCoordLabels, pickSquare: pickSquare,
+    coordLabelSize: coordLabelSize, COORD_LABEL_OFFSET: COORD_LABEL_OFFSET,
     PIECE_PATHS: PIECE_PATHS, drawPiece: drawPiece,
     PIECE_BOX: PIECE_BOX, PIECE_ANCHOR: PIECE_ANCHOR, CODE_KEY: CODE_KEY,
   };
