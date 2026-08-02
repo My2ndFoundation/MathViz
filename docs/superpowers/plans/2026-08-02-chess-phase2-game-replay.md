@@ -1243,8 +1243,32 @@ ChessGames = {
 | `story` | 双语各 2–3 段（每段 2–4 句）。写**为什么这局重要、当时发生了什么**，不逐步讲解棋 |
 | `why` | 双语各**一句话**。它是列表页上唯一显示的那行字 |
 | `keyMoves` | 3–6 条，`ply` 严格递增且 ∈ `[1, plies]`。`note` 双语各 1–3 句，说明**这一步为什么是转折**。回放到这里会自动暂停 |
+| `keyMoves[].san` | 该 ply 那一步的 SAN，**由 `moveToSAN` 生成后抄进来**，不是手写的。它存在的唯一理由是：将来换一份更完整的 PGN 时，全部 `ply` 会整体平移，而平移后的 ply 多半仍落在 `[1, plies]` 里——校验门会照常通过，说明却已经指向了另一步棋。有了 `san`，换谱当场报错，报的还是「第几条 keyMove 对不上、期望什么、实际什么」 |
 | `source` | `{ a, b }` 两个不同站点的 URL。`a` 是走法的来源，`b` 是核对步数与结果的来源 |
 | `pgn` | 只含走法与结果的主线字符串（如 `'1. e4 e5 … 1-0'`）。**不写标签对**——`Event`/`Site`/`Date`/`White`/`Black`/`Result` 已经是记录的字段，导出时由 `writePGN` 现拼 |
+
+### 棋谱数据存在哪里，以后怎么换一份更好的
+
+**存在哪里**：唯一编辑源是 `chess/games/games-<group>.js` 里那条记录的 `pgn` 字段（一串 SAN 主线，不带标签对）。运行时 `inline_core.py` 把七个 `games/*.js` 拼进 `chess/tools/chess-game-replay.html` 的 `/* >>> GENERATED:GAMES */` 区间——那是**副本，不是编辑源**，改它会被下一次内联覆盖，`check.py --check` 也会当场报出不一致。
+
+**三种「导入」是三件不同的事，不要混**：
+
+| 我想…… | 怎么做 | 代价 |
+|---|---|---|
+| 现在就看一眼手上这份 PGN | 直接把 `.pgn` 拖进画布（Task 17） | 零。四个页签全部照常工作，但**不留存**——没有故事、没有 keyMoves，刷新即失 |
+| 把一局**新棋**加进内置清单 | 挑一个分组文件，照数据契约加一条记录；跑 `inline_core.py` + `check.py` | 五分钟。不用改 `games.js`、不用改工具、不用改注册表。**唯一要顺手改的是 `games.test.js` 里 `GAMES.length` 那个数字**——它是故意设成会拦你一下的：加棋谱是要过脑子的事，不该悄悄溜进去 |
+| 把某局**换成更完整/更权威的一份** | 见下 | 需要重新核 `plies` / `result` / 全部 `keyMoves` |
+
+**换谱的完整流程**（这是最容易出事的一种，因为它看起来只是替换一个字符串）：
+
+1. 新 PGN 走一遍上面的取谱协议第 1–5 步（逐步重放 + 第二来源核对）。
+2. 替换 `pgn`，同时更新 `plies` 与 `result`。
+3. **重算全部 `keyMoves[].ply`**。换一份更完整的记谱——补上了开头几步、或接上了赛后演示的杀法——会让后面每一条 keyMove 整体平移。
+4. 跑 `node chess/games/games.test.js`。
+
+第 3 步是这条流程的全部风险所在，也正是 `keyMoves[].san` 存在的理由：平移之后的 ply **多半仍然落在 `[1, plies]` 区间里**，只查范围的校验门会全绿通过，而回放到那一步弹出的说明已经在讲另一步棋了。加上 `san` 锚点之后，换谱会当场报出「第几条 keyMove 期望 `Qg3+`、实际 `Rxd4`」，你按报错逐条修完就对了。
+
+> 这条与本仓库的一贯做法同源：`plies`/`result` 防的是「合法但抄成了另一局」，`san` 防的是「同一局但对齐错位」。两者都是「让机器去查人查不出来的那部分」。
 
 ### 全部 30 个 id（分组即文件归属）
 
@@ -1269,7 +1293,11 @@ const G = require('./games.js');
 
 const RESULTS = ['1-0', '0-1', '1/2-1/2'];
 
-T.eq(G.GAMES.length, 30, '一共 30 局（规格 §6.2）');
+/* 这个数字是一道刻意的绊索：以后加一局棋会让它失败，逼你回来把它改成 31。
+   加棋谱是要过脑子的事（新的一局要有故事、要有来源、要进不进学习路线），
+   不该悄悄溜进清单。 */
+const EXPECTED_GAME_COUNT = 30;
+T.eq(G.GAMES.length, EXPECTED_GAME_COUNT, '一共 30 局（规格 §6.2）');
 T.eq(G.LEARNING_ROUTE.length, 11, '学习路线 11 站（规格 §6.3）');
 
 const seen = {};
@@ -1320,6 +1348,11 @@ for (const g of G.GAMES) {
     last = k.ply;
     T.ok(k.note && k.note.en && k.note.en.trim(), at + 'keyMove@' + k.ply + ' 有英文说明');
     T.ok(k.note && k.note.zh && k.note.zh.trim(), at + 'keyMove@' + k.ply + ' 有中文说明');
+    /* 锚在走法上，不只锚在序号上。换一份更完整的 PGN 时 ply 会整体平移，
+       而平移后的 ply 多半仍落在 [1, plies] 里 —— 只查范围的话，说明会
+       悄悄指向另一步棋而校验门全绿。这一条让它当场报错。 */
+    T.eq(C.moveToSAN(parsed.positions[k.ply - 1], parsed.moves[k.ply - 1]), k.san,
+         at + 'keyMove@' + k.ply + ' 指向的仍然是它当初标注的那一步');
   }
 }
 
@@ -1411,13 +1444,13 @@ Expected: FAIL —— `Cannot find module './games.js'`
         zh: '现存最短的将死，因此也是你能见到的对「将死」最干净的定义。',
       },
       keyMoves: [
-        { ply: 1, note: {
+        { ply: 1, san: 'f3', note: {
           en: '1.f3 opens the h4–e1 diagonal towards White\'s own king. On its own it is merely careless.',
           zh: '1.f3 打开了通向白方自家王的 h4–e1 斜线。单看这一步只是随手。' } },
-        { ply: 3, note: {
+        { ply: 3, san: 'g4', note: {
           en: '2.g4 is the fatal one: it blocks the only square (g4) from which a piece could later interpose on that diagonal, and it does so voluntarily.',
           zh: '2.g4 才是致命的一步：它自己堵死了 g4——那是日后唯一还能垫在这条斜线上的格子——而且是主动堵死的。' } },
-        { ply: 4, note: {
+        { ply: 4, san: 'Qh4#', note: {
           en: 'Qh4#. Count White\'s legal moves: zero. Count the attackers on the king: one, and nothing can capture it, block it, or run. That triple is the whole definition.',
           zh: 'Qh4#。数一数白方的合法走法：零。数一数攻击王的子：一个，而白方吃不掉它、挡不住它、也躲不开。这三件事同时成立，就是将死的全部定义。' } },
       ],
@@ -1445,16 +1478,16 @@ Expected: FAIL —— `Cannot find module './games.js'`
         zh: '两个攻击者对一个防守者，落在 f7——每个初始局面都自带的那处结构弱点。',
       },
       keyMoves: [
-        { ply: 3, note: {
+        { ply: 3, san: 'Bc4', note: {
           en: '2.Bc4 puts the first attacker on f7. Nothing is threatened yet: f7 is defended once, by the king.',
           zh: '2.Bc4 把第一个攻击者对准 f7。此刻还没有威胁：f7 有一个防守者，就是黑王。' } },
-        { ply: 5, note: {
+        { ply: 5, san: 'Qh5', note: {
           en: '3.Qh5 makes it two attackers against one defender. Black must add a defender or remove an attacker — …g6 does both jobs at once.',
           zh: '3.Qh5 让攻击者变成两个、防守者仍是一个。黑方必须加一个防守者或赶走一个攻击者——…g6 一步同时做到两件事。' } },
-        { ply: 6, note: {
+        { ply: 6, san: 'Nf6', note: {
           en: '3…Nf6?? develops a piece and ignores the count. It is the most natural-looking losing move in chess.',
           zh: '3…Nf6?? 出了一个子，却没去数攻防的人数。这是国际象棋里看上去最自然的一步败着。' } },
-        { ply: 7, note: {
+        { ply: 7, san: 'Qxf7#', note: {
           en: 'Qxf7#. The queen is protected by the bishop on c4, so the king cannot take it — and no other piece can reach f7.',
           zh: 'Qxf7#。这个后有 c4 的象保护，所以黑王吃不掉它——而黑方再没有别的子够得到 f7。' } },
       ],
@@ -1590,7 +1623,17 @@ console.log('last 6 SAN:', g.moves.slice(-6).map((m,i)=>C.moveToSAN(g.positions[
    - **两个来源对不上就停下报告**，不要选一个信。
 5. **末局面自检**：以将死结束的局，`status()` 必须是 `'checkmate'`；认输结束的局通常是 `'ongoing'` 或 `'check'`——这不是错误，但如果一局标称「将死」而 `status()` 不是 `checkmate`，说明抄少了或抄多了。
 6. **写文案**（见下）。
-7. **`keyMoves` 的 ply 换算**：白方第 N 回合的走法是第 `2N−1` 个半步，黑方第 N 回合是第 `2N`。`23...Qg3` 这样的记法是**黑方**第 23 回合 → ply = 46。换算完用 `console.log(g.moves.length, C.moveToSAN(g.positions[ply-1], g.moves[ply-1]))` 核对那一步真的是你想标的那一步。
+7. **`keyMoves` 的 ply 换算与 `san` 锚点**：白方第 N 回合的走法是第 `2N−1` 个半步，黑方第 N 回合是第 `2N`。`23...Qg3` 这样的记法是**黑方**第 23 回合 → ply = 46。换算完跑一次，把打印出来的 SAN **原样抄进 `san` 字段**（不要手写——手写的 `Qg3` 与 `moveToSAN` 生成的 `Qg3+` 差一个字符，校验门会当场拒绝，那正是它该做的）：
+
+```bash
+node -e "
+const C=require('./chess/core/chess-core.js');
+const pgn='<粘在这里>';
+const plies=[/* 你算出来的 ply 列表，如 */ 17, 33, 46];
+const g=C.parsePGN(pgn);
+for(const p of plies) console.log(p, '→', C.moveToSAN(g.positions[p-1], g.moves[p-1]));
+"
+```
 
 ### 文案标准
 
