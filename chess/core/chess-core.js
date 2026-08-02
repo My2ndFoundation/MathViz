@@ -603,7 +603,21 @@
     throw new Error('Ambiguous SAN "' + text + '": ' + hits.length + ' moves match');
   }
 
+  const UCI_RE = /^([a-h][1-8])([a-h][1-8])([nbrq])?$/;
+  const UCI_TO_CODE = { n: N, b: B, r: R, q: Q };
+
+  function parseUCI(pos, text) {
+    const g = UCI_RE.exec(String(text).trim());
+    if (!g) throw new Error('Bad UCI syntax: "' + text + '" (expected e.g. e2e4 or e7e8q)');
+    const from = fromAlg(g[1]), to = fromAlg(g[2]);
+    const promo = g[3] ? UCI_TO_CODE[g[3]] : 0;
+    const m = pos.legalMoves().find(x =>
+      x.from === from && x.to === to && (promo ? x.promo === promo : !x.promo));
+    if (!m) throw new Error('Illegal UCI move "' + text + '" in position ' + pos.toFEN());
+    return m;
+  }
+
   return { WHITE, BLACK, EMPTY, P, N, B, R, Q, K,
            SQ, fileOf, rankOf, offBoard, toAlg, fromAlg, Position, FLAG,
-           perft, perftDivide, moveToUCI, moveToSAN, parseSAN };
+           perft, perftDivide, moveToUCI, moveToSAN, parseSAN, parseUCI };
 });

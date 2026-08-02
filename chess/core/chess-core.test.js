@@ -551,4 +551,22 @@ T.eq(C.moveToSAN(relaxed, C.parseSAN(relaxed, 'Re7')), 'Re7+', '省略 + 也能�
 T.throws(() => C.parseSAN(C.Position.fromFEN(START), 'Qh5'), 'SAN 指向非法走法应抛错');
 T.throws(() => C.parseSAN(C.Position.fromFEN(START), 'zz9'), 'SAN 语法错误应抛错');
 
+// ---- UCI ----
+const u0 = C.Position.fromFEN(START);
+T.eq(C.moveToUCI(C.parseSAN(u0, 'e4')), 'e2e4', 'SAN e4 的 UCI 是 e2e4');
+T.eq(C.moveToUCI(C.parseSAN(u0, 'Nf3')), 'g1f3', 'SAN Nf3 的 UCI 是 g1f3');
+T.eq(C.moveToSAN(u0, C.parseUCI(u0, 'e2e4')), 'e4', 'UCI e2e4 的 SAN 是 e4');
+
+const uc = C.Position.fromFEN('r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1');
+T.eq(C.moveToUCI(C.parseSAN(uc, 'O-O')), 'e1g1', '短易位的 UCI 记王的起讫格');
+T.eq(C.moveToSAN(uc, C.parseUCI(uc, 'e1c1')), 'O-O-O', 'UCI e1c1 解析回长易位');
+
+// 同 Task 9 处的缺陷：原始简报 FEN 没有黑王，在 h8 补上。
+const up = C.Position.fromFEN('7k/8/8/8/8/8/4p3/3P3K b - - 0 1');
+T.eq(C.moveToUCI(C.parseUCI(up, 'e2e1q')), 'e2e1q', '升变的 UCI 带小写棋子字母');
+T.eq(C.moveToSAN(up, C.parseUCI(up, 'e2e1n')), 'e1=N', 'underpromotion 也能解析');
+
+T.throws(() => C.parseUCI(u0, 'e2e5'), 'UCI 指向非法走法应抛错');
+T.throws(() => C.parseUCI(u0, 'xx'), 'UCI 语法错误应抛错');
+
 T.report();
