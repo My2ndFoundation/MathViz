@@ -203,6 +203,54 @@
     }
   }
 
+  // 易位权掩码：某格一旦被"离开或被占据"，对应的权利就消失。
+  // 例如 a1 既是白后翼车的家，也是黑车吃过来时会落到的格，两种情况都该清 Q。
+  const CASTLE_MASK = new Int8Array(128).fill(15);
+  CASTLE_MASK[SQ(4, 0)] = 12;   // e1：白王一动，K 与 Q 全没
+  CASTLE_MASK[SQ(0, 0)] = 13;   // a1：清 Q
+  CASTLE_MASK[SQ(7, 0)] = 14;   // h1：清 K
+  CASTLE_MASK[SQ(4, 7)] = 3;    // e8：清 k 与 q
+  CASTLE_MASK[SQ(0, 7)] = 7;    // a8：清 q
+  CASTLE_MASK[SQ(7, 7)] = 11;   // h8：清 k
+
+  Position.prototype._make = function (m) {
+    const undo = { castling: this.castling, ep: this.ep, half: this.half,
+                   kingW: this.kingW, kingB: this.kingB };
+    const bd = this.board;
+
+    bd[m.from] = EMPTY;
+    bd[m.to] = m.promo ? (this.turn === WHITE ? m.promo : -m.promo) : m.piece;
+
+    if (Math.abs(m.piece) === K) {
+      if (this.turn === WHITE) this.kingW = m.to; else this.kingB = m.to;
+    }
+
+    this.castling &= CASTLE_MASK[m.from] & CASTLE_MASK[m.to];
+    this.ep = (m.flags & FLAG.DOUBLE)
+      ? m.from + (this.turn === WHITE ? 16 : -16)
+      : -1;
+    this.half = (Math.abs(m.piece) === P || m.captured) ? 0 : this.half + 1;
+    if (this.turn === BLACK) this.full++;
+    this.turn = -this.turn;
+    return undo;
+  };
+
+  Position.prototype._unmake = function (m, undo) {
+    const bd = this.board;
+    this.turn = -this.turn;
+    if (this.turn === BLACK) this.full--;
+    bd[m.from] = m.piece;
+    bd[m.to] = m.captured;
+    this.castling = undo.castling; this.ep = undo.ep; this.half = undo.half;
+    this.kingW = undo.kingW; this.kingB = undo.kingB;
+  };
+
+  Position.prototype.make = function (m) {
+    const p = this.clone();
+    p._make(m);
+    return p;
+  };
+
   return { WHITE, BLACK, EMPTY, P, N, B, R, Q, K,
            SQ, fileOf, rankOf, offBoard, toAlg, fromAlg, Position, FLAG };
 });

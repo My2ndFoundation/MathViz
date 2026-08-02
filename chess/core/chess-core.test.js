@@ -113,4 +113,73 @@ T.ok(promoMoves.every(m => m.flags & C.FLAG.PROMO), '升变走法都带 PROMO �
 const turnCheck = C.Position.fromFEN('8/4p3/8/8/8/8/4P3/K6k w - - 0 1');
 T.ok(turnCheck.pseudoLegalMoves().every(m => m.piece > 0), '轮到白方时不生成黑方走法');
 
+// ---- 施加与撤销 ----
+function findMove(pos, from, to, promo) {
+  const f = C.fromAlg(from), t = C.fromAlg(to);
+  const m = pos.pseudoLegalMoves().find(x =>
+    x.from === f && x.to === t && (promo ? x.promo === promo : !x.promo));
+  if (!m) throw new Error('测试用例找不到走法 ' + from + to);
+  return m;
+}
+
+const mk1 = C.Position.fromFEN(START);
+const e4 = findMove(mk1, 'e2', 'e4');
+const after = mk1.make(e4);
+T.eq(after.board[C.fromAlg('e4')], C.P, 'make 后 e4 是白兵');
+T.eq(after.board[C.fromAlg('e2')], C.EMPTY, 'make 后 e2 为空');
+T.eq(after.turn, C.BLACK, 'make 后轮到黑方');
+T.eq(after.ep, C.fromAlg('e3'), '双步推进设置 ep 目标格为 e3');
+T.eq(after.half, 0, '兵走动使半步计数归零');
+T.eq(after.full, 1, '白方走完回合数不变');
+T.eq(mk1.board[C.fromAlg('e2')], C.P, 'make 不修改原局面');
+T.eq(mk1.turn, C.WHITE, 'make 不修改原局面的轮次');
+
+const blackMoved = after.make(findMove(after, 'e7', 'e5'));
+T.eq(blackMoved.full, 2, '黑方走完回合数 +1');
+
+// _make / _unmake 必须精确还原
+const roundTrip = C.Position.fromFEN(KIWI);
+const before = roundTrip.toFEN();
+for (const m of roundTrip.pseudoLegalMoves()) {
+  const undo = roundTrip._make(m);
+  roundTrip._unmake(m, undo);
+  if (roundTrip.toFEN() !== before) {
+    T.eq(roundTrip.toFEN(), before, '_unmake 未能还原走法 ' + C.toAlg(m.from) + C.toAlg(m.to));
+    break;
+  }
+}
+T.eq(roundTrip.toFEN(), before, 'Kiwipete 全部伪合法走法 make/unmake 后局面不变');
+
+// 吃子与半步计数
+const capPos = C.Position.fromFEN('8/8/8/3r4/8/8/3R4/K6k w - - 7 20');
+const cap = findMove(capPos, 'd2', 'd5');
+const capAfter = capPos.make(cap);
+T.eq(capAfter.board[C.fromAlg('d5')], C.R, '吃子后落点是白车');
+T.eq(capAfter.half, 0, '吃子使半步计数归零');
+
+const quiet = C.Position.fromFEN('8/8/8/8/8/8/3R4/K6k w - - 7 20');
+T.eq(quiet.make(findMove(quiet, 'd2', 'd4')).half, 8, '非吃子非兵走动使半步计数 +1');
+
+// 升变
+const promoPos = C.Position.fromFEN('8/4P3/8/8/8/8/8/K6k w - - 0 1');
+const promoQ = promoPos.make(findMove(promoPos, 'e7', 'e8', C.Q));
+T.eq(promoQ.board[C.fromAlg('e8')], C.Q, '升变后 e8 是白后');
+T.eq(promoQ.board[C.fromAlg('e7')], C.EMPTY, '升变后 e7 为空');
+
+// 王移动后位置记录同步
+const kingPos = C.Position.fromFEN('8/8/8/8/8/8/8/K6k w - - 0 1');
+T.eq(kingPos.make(findMove(kingPos, 'a1', 'b1')).kingW, C.fromAlg('b1'), '白王移动后 kingW 同步更新');
+
+// 易位权因走动而失去
+const rights = C.Position.fromFEN('r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1');
+T.eq(rights.make(findMove(rights, 'e1', 'e2')).castling, 12, '白王走动后失去 KQ，保留 kq');
+T.eq(rights.make(findMove(rights, 'a1', 'a2')).castling, 13, 'a1 车走动后失去 Q');
+T.eq(rights.make(findMove(rights, 'h1', 'h2')).castling, 14, 'h1 车走动后失去 K');
+
+const rookTaken = C.Position.fromFEN('r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1');
+const takeA8 = rookTaken.pseudoLegalMoves().find(m =>
+  m.from === C.fromAlg('a1') && m.to === C.fromAlg('a8'));
+// a1 车离家清 Q(2)，a8 车被吃清 q(8)：15 − 2 − 8 = 5（剩 K 与 k）
+T.eq(rookTaken.make(takeA8).castling, 5, 'a1 车吃掉 a8 车后，双方各失一项后翼易位权');
+
 T.report();
