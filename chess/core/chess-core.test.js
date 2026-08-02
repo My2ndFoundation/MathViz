@@ -569,4 +569,57 @@ T.eq(C.moveToSAN(up, C.parseUCI(up, 'e2e1n')), 'e1=N', 'underpromotion 也能解
 T.throws(() => C.parseUCI(u0, 'e2e5'), 'UCI 指向非法走法应抛错');
 T.throws(() => C.parseUCI(u0, 'xx'), 'UCI 语法错误应抛错');
 
+// ---- PGN ----
+const FOOLS = [
+  '[Event "Fool\'s Mate"]',
+  '[Site "?"]',
+  '[Date "????.??.??"]',
+  '[White "?"]',
+  '[Black "?"]',
+  '[Result "0-1"]',
+  '',
+  '1. f3 e5 2. g4 Qh4# 0-1',
+].join('\n');
+
+const g1 = C.parsePGN(FOOLS);
+T.eq(g1.headers.Event, "Fool's Mate", 'PGN 标签解析正确');
+T.eq(g1.headers.Result, '0-1', 'Result 标签解析正确');
+T.eq(g1.result, '0-1', '棋谱结果解析正确');
+T.eq(g1.moves.length, 4, 'Fool\'s Mate 共 4 个半步');
+T.eq(g1.positions.length, 5, 'positions 比 moves 多一个起始局面');
+T.eq(g1.positions[0].toFEN(), START, 'positions[0] 是初始局面');
+T.eq(g1.positions[4].status(), 'checkmate', '最后一个局面是将死');
+
+// 走法逐步重放 —— 抄错一步就会在这里当场走不通
+const replayed = g1.moves.map((m, i) => C.moveToSAN(g1.positions[i], m));
+T.eq(replayed, ['f3', 'e5', 'g4', 'Qh4#'], '逐步重放得到原样的 SAN 序列');
+
+// 归一化往返
+const written = C.writePGN(g1.headers, g1.moves);
+T.eq(C.parsePGN(written).moves.length, 4, 'writePGN 的输出能被 parsePGN 读回');
+T.ok(written.indexOf('1. f3 e5 2. g4 Qh4#') >= 0, 'writePGN 输出标准的回合编号格式');
+
+// Scholar's Mate
+const SCHOLARS = '1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6?? 4. Qxf7# 1-0';
+const g2 = C.parsePGN(SCHOLARS);
+T.eq(g2.moves.length, 7, 'Scholar\'s Mate 共 7 个半步');
+T.eq(g2.result, '1-0', '无标签时也能从结果标记读出胜负');
+T.eq(g2.positions[7].status(), 'checkmate', 'Scholar\'s Mate 结尾是将死');
+
+// 注释与变着被跳过而非报错
+const WITH_NOISE = '1. e4 {好棋} e5 2. Nf3 (2. f4 exf4) Nc6 *';
+const g3 = C.parsePGN(WITH_NOISE);
+T.eq(g3.moves.length, 4, '注释与变着被跳过，主线 4 个半步');
+T.ok(g3.skipped > 0, '跳过的内容被计数，不静默');
+
+// 从非初始局面开始
+const FROM_FEN = '[FEN "4k3/8/8/8/8/8/8/4K2R w K - 0 1"]\n[SetUp "1"]\n\n1. O-O *';
+const g4 = C.parsePGN(FROM_FEN);
+T.eq(g4.positions[0].toFEN(), '4k3/8/8/8/8/8/8/4K2R w K - 0 1', 'FEN 标签作为起始局面');
+T.eq(C.moveToSAN(g4.positions[0], g4.moves[0]), 'O-O', '从自定义局面开始的走法解析正确');
+
+// 抄错的棋谱必须报错，且指明第几步
+T.throws(() => C.parsePGN('1. e4 e5 2. Qh5 Qh4 3. Nf7 *'),
+         '非法走法应抛错（Nf7 在该局面下走不通）');
+
 T.report();

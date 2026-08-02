@@ -9,6 +9,9 @@
   const WHITE = 1, BLACK = -1;
   const EMPTY = 0, P = 1, N = 2, B = 3, R = 4, Q = 5, K = 6;
 
+  // 标准初始局面的 FEN —— PGN 在没有 [FEN] 标签时以此为起点。
+  const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+
   // 0x88：索引 = rank * 16 + file。盘内格的第 4、7 位必为 0，
   // 所以越界检测是一次按位与，不需要两次范围比较。
   function SQ(file, rank) { return rank * 16 + file; }
@@ -617,7 +620,100 @@
     return m;
   }
 
+  const TAG_RE = /\[\s*(\w+)\s*"((?:[^"\\]|\\.)*)"\s*\]/g;
+  const RESULTS = ['1-0', '0-1', '1/2-1/2', '*'];
+
+  function parsePGN(text) {
+    const src = String(text);
+    const headers = {};
+    let m, tagEnd = 0;
+    TAG_RE.lastIndex = 0;
+    // 注意：exec 返回 null 时 lastIndex 会被重置为 0，所以必须在循环里
+    // 自己记住最后一个标签的结束位置，不能循环结束后再读 lastIndex。
+    while ((m = TAG_RE.exec(src))) {
+      headers[m[1]] = m[2].replace(/\\(.)/g, '$1');
+      tagEnd = TAG_RE.lastIndex;
+    }
+    const body = src.slice(tagEnd);      // 无标签时 tagEnd 为 0，即全文
+
+    let skipped = 0;
+    // 逐层剥掉 { } 注释与 ( ) 变着（可嵌套）
+    let clean = '', depth = 0;
+    for (let i = 0; i < body.length; i++) {
+      const ch = body[i];
+      if (ch === '{' || ch === '(') { depth++; if (depth === 1) skipped++; continue; }
+      if (ch === '}' || ch === ')') { if (depth > 0) depth--; continue; }
+      if (depth === 0) clean += ch;
+    }
+    clean = clean.replace(/;[^\n]*/g, '')          // 行注释
+                 .replace(/\$\d+/g, '')            // NAG
+                 .replace(/\d+\s*\.(\.\.)?/g, ' ') // 回合编号
+                 .replace(/\s+/g, ' ').trim();
+
+    const startFEN = (headers.SetUp === '1' && headers.FEN) ? headers.FEN
+                   : (headers.FEN || null);
+    let pos = startFEN ? Position.fromFEN(startFEN) : Position.fromFEN(START_FEN);
+
+    const moves = [], positions = [pos];
+    let result = '*';
+    const tokens = clean ? clean.split(' ') : [];
+    for (let i = 0; i < tokens.length; i++) {
+      const tk = tokens[i];
+      if (!tk) continue;
+      if (RESULTS.indexOf(tk) >= 0) { result = tk; break; }
+      let mv;
+      try {
+        mv = parseSAN(pos, tk);
+      } catch (e) {
+        throw new Error('PGN move ' + (moves.length + 1) + ' ("' + tk + '") is illegal: ' + e.message);
+      }
+      moves.push(mv);
+      pos = pos.make(mv);
+      positions.push(pos);
+    }
+    if (headers.Result && RESULTS.indexOf(headers.Result) >= 0 && result === '*') {
+      result = headers.Result;
+    }
+    return { headers: headers, moves: moves, positions: positions,
+             result: result, skipped: skipped, startFEN: startFEN };
+  }
+
+  function writePGN(headers, moves, startFEN) {
+    const out = [];
+    const seven = ['Event', 'Site', 'Date', 'Round', 'White', 'Black', 'Result'];
+    for (let i = 0; i < seven.length; i++) {
+      const k = seven[i];
+      const v = (headers && headers[k] != null) ? String(headers[k]) : '?';
+      out.push('[' + k + ' "' + v.replace(/["\\]/g, '\\$&') + '"]');
+    }
+    for (const k in headers) {
+      if (seven.indexOf(k) >= 0) continue;
+      out.push('[' + k + ' "' + String(headers[k]).replace(/["\\]/g, '\\$&') + '"]');
+    }
+    out.push('');
+
+    let pos = startFEN ? Position.fromFEN(startFEN) : Position.fromFEN(START_FEN);
+    const toks = [];
+    for (let i = 0; i < moves.length; i++) {
+      if (pos.turn === WHITE) toks.push(pos.full + '.');
+      toks.push(moveToSAN(pos, moves[i]));
+      pos = pos.make(moves[i]);
+    }
+    const res = (headers && headers.Result) || '*';
+    toks.push(res);
+
+    // 按 80 列折行，这是 PGN 的通行写法
+    let line = '';
+    for (let i = 0; i < toks.length; i++) {
+      if (line && line.length + 1 + toks[i].length > 80) { out.push(line); line = ''; }
+      line = line ? line + ' ' + toks[i] : toks[i];
+    }
+    if (line) out.push(line);
+    return out.join('\n') + '\n';
+  }
+
   return { WHITE, BLACK, EMPTY, P, N, B, R, Q, K,
            SQ, fileOf, rankOf, offBoard, toAlg, fromAlg, Position, FLAG,
-           perft, perftDivide, moveToUCI, moveToSAN, parseSAN, parseUCI };
+           perft, perftDivide, moveToUCI, moveToSAN, parseSAN, parseUCI,
+           parsePGN, writePGN, START_FEN };
 });
