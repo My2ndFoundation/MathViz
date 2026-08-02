@@ -650,8 +650,11 @@
                  .replace(/\d+\s*\.(\.\.)?/g, ' ') // 回合编号
                  .replace(/\s+/g, ' ').trim();
 
-    const startFEN = (headers.SetUp === '1' && headers.FEN) ? headers.FEN
-                   : (headers.FEN || null);
+    // PGN 标准规定 [SetUp "1"] 才"授权" [FEN] 标签生效，但这里刻意从宽：
+    // 只要携带了 [FEN] 就采信，不论有没有 [SetUp]——后续阶段要加载来源各异
+    // 的历史棋谱，不少真实存在的 PGN 只写 FEN 不写 SetUp，严格按标准拒绝
+    // 这些合法数据只是在满足形式主义，对下游没有好处。
+    const startFEN = headers.FEN || null;
     let pos = startFEN ? Position.fromFEN(startFEN) : Position.fromFEN(START_FEN);
 
     const moves = [], positions = [pos];
