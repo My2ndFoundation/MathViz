@@ -1347,7 +1347,15 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     drawAxes, drawGridXY,
     clamp, fmt, fmtS, t,
     init, bindOrbit,
-    cam, recInfo
+    cam, recInfo,
+    /* PARAMS/toggles 把滑杆与开关的值写进这个对象（buildParams 的
+       state[p.key]、buildToggles 的 state[tg.key]），state.running 也在
+       这里——三者都曾经只在引擎私有闭包内可见，工具的 SCENES（另一个
+       <script> 块，另一个作用域）够不着。导出的是这个对象本身，不是
+       拷贝或冻结视图：starter 的既有语义就是场景读写同一份 state（例如
+       state.running 由 togglePlay() 写、由 frame() 读），拷贝或冻结都会
+       破坏这一点。 */
+    state
   };
 });
 /* <<< GENERATED:VIZ-ENGINE */
@@ -2610,11 +2618,12 @@ const PIECE_NAME = {
   [CC.K]: { zh: '王', en: 'King' },
 };
 
-/* ---- 工具自己的可变状态（引擎的 PARAMS/toggles 把值写进它私有、未导出的
-   state[key]，工具这一侧够不着——见下方 pieceSliderEl 的说明）。 ---- */
+/* ---- 工具自己的可变状态。棋种由 PARAMS 的滑杆驱动，值就读引擎导出的
+   E.state.pieceIdx（buildParams() 里 state[p.key] = p.map(raw) 写的正是
+   这一份，E.init() 之后 E.state 与引擎内部是同一个对象，不是快照）。
+   放置格 G.placedSq 不是 PARAMS 声明的，纯属本工具自己的状态，留在 G 里。 ---- */
 const G = { placedSq: CC.SQ(3, 3) };   // 默认 d4：顿悟从这里开始
-let pieceIdx = 1;                       // 默认马（PIECE_CODES 的下标 1）
-function currentPieceCode() { return PIECE_CODES[pieceIdx]; }
+function currentPieceCode() { return PIECE_CODES[E.state.pieceIdx]; }
 
 /* ---- 最少步数场（BFS，§Task5 Step1 给定算法，逐字节保留以确保与
    node 复算一致）与机动性场（每格攻击格数）；按 (棋子,起点) / 棋子 记忆化，
@@ -2715,13 +2724,17 @@ function drawHeightField(Cam, fieldObj, color, mid, k) {
   }
 }
 
-const K_FIELD = 0.35;   // Task5 给定：8 步的场高约 2.8，与棋盘边长 8 比例协调
-/* 机动性的量纲是「攻击格数」，后在中心可到 27——若仍用 0.35，塔高会到 9.45，
-   三倍于棋盘边长，视觉比例失衡（Task5 的 0.35 是照 8 步距离场推的，没有
-   照顾到机动性最高到 27 这一档）。这里改用 2.8 / 27 ≈ 0.1 的量纲，让后在
-   中心的塔顶（≈2.7）与 field 页的场高上限（8×0.35=2.8）视觉同一量级，
-   两页可以直接对照——这是设计判断，不是国际象棋事实，与 Task5 的文字不同,
-   在此记一笔。 */
+// 缩放到「最少步数」这个量纲——BFS 步数最高约 6~8（马 a1→h8 就是 6），
+// Task5 给定：8 步的场高约 2.8，与棋盘边长 8 比例协调。field 与 metric
+// 两页都用这个常数。不要把它拿去给 mobility 用——量纲不同，见下方 K_MOBILITY。
+const K_FIELD = 0.35;
+// 缩放到「攻击格数」这个量纲——最高到 27（后在中心）。这与 K_FIELD 的
+// 「步数」量纲不是一回事：若仍用 0.35，塔高会到 9.45，三倍于棋盘边长，
+// 视觉比例失衡（Task5 给的 0.35 是照 8 步距离场推的，没有照顾到机动性
+// 最高到 27 这一档——两个量纲合用一个常数，这是 Task5 文字本身的疏漏，
+// 不是本工具的偏差）。这里改用 2.8 / 27 ≈ 0.1，让后在中心的塔顶（≈2.7）
+// 与 field 页的场高上限（8×0.35=2.8）视觉同一量级，两页可以直接对照。
+// 只用于 mobility 页；不要为了「统一」把它并回 K_FIELD。
 const K_MOBILITY = 0.1;
 
 /* ---- 自动演示：依次巡回六种棋子，~2.5s 一档；用户一点棋盘就暂停，
@@ -2730,8 +2743,9 @@ const K_MOBILITY = 0.1;
 let pieceSliderEl = null, btnPlayEl = null;
 let demoRunning = true, demoAcc = 0, lastDemoTs = null;
 function setPieceIdx(i) {
-  pieceIdx = ((i % 6) + 6) % 6;
-  if (pieceSliderEl) { pieceSliderEl.value = String(pieceIdx); pieceSliderEl.dispatchEvent(new Event('input', { bubbles: true })); }
+  const v = ((i % 6) + 6) % 6;
+  E.state.pieceIdx = v;   // 立即生效，不必等 input 事件的回环
+  if (pieceSliderEl) { pieceSliderEl.value = String(v); pieceSliderEl.dispatchEvent(new Event('input', { bubbles: true })); }
 }
 function advanceDemo() {
   const now = performance.now();
@@ -2741,7 +2755,7 @@ function advanceDemo() {
   dt = E.clamp(dt, 0, 0.05);
   if (!demoRunning) return;
   demoAcc += dt;
-  if (demoAcc >= 2.5) { demoAcc -= 2.5; setPieceIdx(pieceIdx + 1); }
+  if (demoAcc >= 2.5) { demoAcc -= 2.5; setPieceIdx(E.state.pieceIdx + 1); }
 }
 
 function getCurTab() {
@@ -2749,10 +2763,9 @@ function getCurTab() {
   return el ? el.dataset.tab : 'piece';
 }
 
-/* ---- PARAMS：唯一的滑杆——选棋种。工具自己再挂一份 'input' 监听
-   （见 init() 之后的接线）：引擎的 buildParams() 把映射后的值写进它自己
-   私有、未导出的 state[key]，本工具的 draw()/readout() 够不着那个对象，
-   所以另挂一份监听，直接维护 pieceIdx。 ---- */
+/* ---- PARAMS：唯一的滑杆——选棋种。滑杆值就是 E.state.pieceIdx
+   （buildParams() 里 state[p.key] = p.map(raw) 写的），draw()/readout()
+   直接读它，无需本工具再挂一份监听。 ---- */
 const PARAMS = [
   {
     key: 'pieceIdx', min: 0, max: 5, step: 1, value: 1,
@@ -2932,13 +2945,11 @@ E.init({
   autoLoop: true,
 });
 
-/* ---- 接线：滑杆的第二份监听（见 PARAMS 上方注释）；播放键驱动的是
-   本工具自己的 demoRunning，不是引擎私有的 state.running——棋没有连续
-   模拟可言，「播放」在这里的唯一含义就是「自动巡回六种棋子」。 ---- */
+/* ---- 接线：只需拿到滑杆的 DOM 引用给 setPieceIdx() 在自动演示时改它
+   （滑杆本身的值已经就是 E.state.pieceIdx，不需要工具自己再维护一份）。
+   播放键驱动的是本工具自己的 demoRunning，不是引擎的 state.running——棋
+   没有连续模拟可言，「播放」在这里的唯一含义就是「自动巡回六种棋子」。 ---- */
 pieceSliderEl = document.querySelector('#paramsHost input[type=range]');
-if (pieceSliderEl) {
-  pieceSliderEl.addEventListener('input', function () { pieceIdx = Math.round(parseFloat(pieceSliderEl.value)); });
-}
 btnPlayEl = document.getElementById('btnPlay');
 if (btnPlayEl) btnPlayEl.addEventListener('click', function () { demoRunning = !demoRunning; });
 
