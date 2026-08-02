@@ -311,4 +311,51 @@ for (const m of cRT.pseudoLegalMoves()) {
 }
 T.eq(cRT.toFEN(), cBefore, '含易位的全部走法 make/unmake 后局面不变');
 
+// ---- 合法走法过滤 ----
+T.eq(C.Position.fromFEN(START).legalMoves().length, 20, '初始局面有 20 个合法走法');
+
+// 被别住的子不能动
+// 注：原始简报此处的 FEN（马在 e2、车在 h1、王在 e1）并不构成别子 ——
+// e2 不在 e1–h1 这条直线上，那其实是"王被将军，Ng1 挡将"的合法局面。
+// 已改为马真正夹在王与车之间（f1）的局面，让测试名与局面相符。
+const pinned = C.Position.fromFEN('4k3/8/8/8/8/8/8/4KN1r w - - 0 1');
+T.eq(pinned.legalMoves().filter(m => m.from === C.fromAlg('f1')).length, 0,
+     '被 h1 车沿第一横行别住的马一步也不能走');
+T.ok(pinned.pseudoLegalMoves().filter(m => m.from === C.fromAlg('f1')).length > 0,
+     '同一颗子的伪合法走法不为零 —— 差集正是"被别住"');
+
+// 沿别住方向仍可移动
+// 同理改为车真正被 e 列上的黑车别住（e2 挡在王 e1 与黑车 e8 之间）。
+const pinLine = C.Position.fromFEN('4r2k/8/8/8/8/8/4R3/4K3 w - - 0 1');
+T.ok(pinLine.legalMoves().some(m => m.from === C.fromAlg('e2') && m.to === C.fromAlg('e3')),
+     '被沿直列别住的车仍可沿该直列移动');
+
+// 被将军时只能应将
+const mustBlock = C.Position.fromFEN('4k3/8/8/8/8/8/8/r3K3 w - - 0 1');
+T.ok(mustBlock.legalMoves().every(m => !mustBlock.make(m).inCheck(C.WHITE)),
+     '所有合法走法走完之后白王都不再被将军');
+
+// 王不能走到被攻击的格
+const kingSafe = C.Position.fromFEN('4k3/8/8/8/8/8/8/4K2r w - - 0 1');
+T.ok(!kingSafe.legalMoves().some(m => m.to === C.fromAlg('f1')),
+     '白王不能走到仍被 h1 车攻击的 f1');
+
+// ---- status ----
+T.eq(C.Position.fromFEN(START).status(), 'ongoing', '初始局面进行中');
+T.eq(C.Position.fromFEN('4k3/4R3/8/8/8/8/8/4K3 b - - 0 1').status(), 'check', '被将军但可逃');
+T.eq(C.Position.fromFEN('rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3').status(),
+     'checkmate', 'Fool\'s Mate 是将死');
+T.eq(C.Position.fromFEN('7k/5Q2/6K1/8/8/8/8/8 b - - 0 1').status(), 'stalemate',
+     '黑王无合法走法且未被将军 —— 逼和');
+T.eq(C.Position.fromFEN('4k3/8/8/8/8/8/8/4K3 w - - 0 1').status(), 'insufficient',
+     '王对王是子力不足');
+T.eq(C.Position.fromFEN('4k3/8/8/8/8/8/8/4KB2 w - - 0 1').status(), 'insufficient',
+     '王象对王是子力不足');
+T.eq(C.Position.fromFEN('4k3/8/8/8/8/8/8/4KN2 w - - 0 1').status(), 'insufficient',
+     '王马对王是子力不足');
+T.eq(C.Position.fromFEN('4k3/8/8/8/8/8/8/4KR2 w - - 0 1').status(), 'ongoing',
+     '王车对王不是子力不足');
+T.eq(C.Position.fromFEN('4k3/8/8/8/8/8/8/R3K3 w - - 100 60').status(), 'fifty',
+     '半步计数达到 100 触发五十步规则');
+
 T.report();

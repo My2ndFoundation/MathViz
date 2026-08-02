@@ -383,6 +383,40 @@
     return out;
   };
 
+  Position.prototype.legalMoves = function () {
+    const me = this.turn, out = [];
+    const ms = this.pseudoLegalMoves();
+    for (let i = 0; i < ms.length; i++) {
+      const m = ms[i];
+      const undo = this._make(m);
+      if (!this.isAttacked(this.kingSq(me), -me)) out.push(m);
+      this._unmake(m, undo);
+    }
+    return out;
+  };
+
+  function insufficientMaterial(pos) {
+    let minors = 0;
+    for (let s = 0; s < 128; s++) {
+      if (s & 0x88) { s += 7; continue; }
+      const t = Math.abs(pos.board[s]);
+      if (t === EMPTY || t === K) continue;
+      if (t === P || t === R || t === Q) return false;
+      minors++;
+      if (minors > 1) return false;      // 两个轻子起就可能杀（含异色象）
+    }
+    return true;
+  }
+
+  Position.prototype.status = function () {
+    const has = this.legalMoves().length > 0;
+    const chk = this.inCheck(this.turn);
+    if (!has) return chk ? 'checkmate' : 'stalemate';
+    if (insufficientMaterial(this)) return 'insufficient';
+    if (this.half >= 100) return 'fifty';
+    return chk ? 'check' : 'ongoing';
+  };
+
   return { WHITE, BLACK, EMPTY, P, N, B, R, Q, K,
            SQ, fileOf, rankOf, offBoard, toAlg, fromAlg, Position, FLAG };
 });
