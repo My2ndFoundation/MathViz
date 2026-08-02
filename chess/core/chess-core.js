@@ -31,7 +31,7 @@
   }
 
   const FEN_TO_CODE = { p: P, n: N, b: B, r: R, q: Q, k: K };
-  const CODE_TO_FEN = { 1: 'p', 2: 'n', 3: 'b', 4: 'r', 5: 'q', 6: 'k' };
+  const CODE_TO_FEN = { [P]: 'p', [N]: 'n', [B]: 'b', [R]: 'r', [Q]: 'q', [K]: 'k' };
 
   function Position() {
     this.board = new Int8Array(128);
@@ -57,7 +57,8 @@
     return p;
   };
 
-  Position.fromFEN = function (fen) {
+  Position.fromFEN = function (fen, opts) {
+    const requireKings = !opts || opts.requireKings !== false;
     const parts = String(fen).trim().split(/\s+/);
     if (parts.length < 4) throw new Error('Bad FEN: expected at least 4 fields, got ' + parts.length);
     const rows = parts[0].split('/');
@@ -87,8 +88,13 @@
     }
     // 没有王、或某一方不止一个王，都不是一个真实的国际象棋局面 ——
     // 放任它通过会让 legalMoves/inCheck 在下游悄悄地对着 −1 出错。
-    if (wKings !== 1) throw new Error('Bad FEN: white must have exactly one king, found ' + wKings);
-    if (bKings !== 1) throw new Error('Bad FEN: black must have exactly one king, found ' + bKings);
+    // 但这条护栏只对"对局"场景成立：有些教学用途（例如孤马 BFS 到
+    // 每格最短步数场）就是要表示没有王的局面，所以留一个显式的
+    // opt-out —— { requireKings: false }，默认仍为 true。
+    if (requireKings) {
+      if (wKings !== 1) throw new Error('Bad FEN: white must have exactly one king, found ' + wKings);
+      if (bKings !== 1) throw new Error('Bad FEN: black must have exactly one king, found ' + bKings);
+    }
 
     if (parts[1] !== 'w' && parts[1] !== 'b') {
       throw new Error('Bad FEN: side to move must be "w" or "b", got "' + parts[1] + '"');
@@ -143,13 +149,26 @@
   const OFF_N = [33, 31, 18, 14, -33, -31, -18, -14];
   const OFF_B = [17, 15, -17, -15];
   const OFF_R = [16, 1, -16, -1];
-  const OFF_K = [17, 16, 15, 1, -17, -16, -15, -1];
-  const SLIDE = { 3: OFF_B, 4: OFF_R, 5: OFF_K };   // B / R / Q 共用射线表
+  // 八个方向的并集：斜线（象）∪ 直线（车）= 后的射线表，也恰好是王走一步
+  // 能到的八个方向——王与后共享这张表纯属几何巧合（王只走一步，后可以
+  // 滑到底），二者语义并不相同，所以用 OFF_K 只作为"王用这张表"的别名，
+  // 不要把它当成"王专属"的表来读。
+  const OFF_ALL8 = [17, 16, 15, 1, -17, -16, -15, -1];
+  const OFF_K = OFF_ALL8;
+  const SLIDE = { [B]: OFF_B, [R]: OFF_R, [Q]: OFF_ALL8 };   // B / R / Q 共用射线表
   const PROMO_PIECES = [Q, R, B, N];
 
   function mk(from, to, piece, captured, promo, flags) {
     return { from: from, to: to, piece: piece,
              captured: captured || 0, promo: promo || 0, flags: flags || 0 };
+  }
+
+  // Move 是每次调用现造的新对象，没有稳定恒等性——工具代码（例如用
+  // pseudoLegalMoves() 减 legalMoves() 求"被别住的子"）需要按值比较两步棋
+  // 是否是同一步。在同一局面内，from/to/promo 三项已完全确定一步棋
+  // （piece/captured/flags 都能从局面 + from/to/promo 推出，不需要参与比较）。
+  function sameMove(a, b) {
+    return a.from === b.from && a.to === b.to && a.promo === b.promo;
   }
 
   Position.prototype.pseudoLegalMoves = function () {
@@ -464,6 +483,11 @@
       const undo = this._make(m);
       // 与 inCheck 保持一致：找不到王（k < 0）视为"不构成将军"，
       // 而不是让 isAttacked(-1, …) 悄悄给出未定义的答案。
+      // 这不是漏洞，是有意为之：没有王的局面（fromFEN(fen, {requireKings:false})
+      // 构造出来的教学局面，例如孤马 BFS 场）根本没有"将军"这回事可暴露，
+      // 所以 k < 0 时直接放行——legalMoves() 在此退化为 pseudoLegalMoves()，
+      // 全部走法都算合法。调用方如果依赖"合法性过滤"这一行为，
+      // 需要自己先确认局面里有王。
       const k = this.kingSq(me);
       if (k < 0 || !this.isAttacked(k, -me)) out.push(m);
       this._unmake(m, undo);
@@ -494,6 +518,11 @@
     const has = this.legalMoves().length > 0;
     const chk = this.inCheck(this.turn);
     if (!has) return chk ? 'checkmate' : 'stalemate';
+    // 这条排在 chk 判断之前是刻意的：即使 this.turn 一方正被将军，只要子力
+    // 不足，也报告 'insufficient' 而不是 'check'——checkmate 已经在上面的
+    // !has 分支被排除了，所以这里不会掩盖任何将死；FIDE 的死局规则本就
+    // 不区分"死局时是否被将军"。想单独知道"当下是否被将军"这个盘面事实
+    // 的调用方，应该直接调 inCheck()，不要依赖 status() 的优先级。
     if (insufficientMaterial(this)) return 'insufficient';   // 死局自动成立，优先于一切
     // 将军是当下必须回应的事实；五十步规则只是"可主张"而非自动生效，
     // 棋局仍在进行中，所以将军排在五十步之前——这个顺序不是随意的。
@@ -528,8 +557,12 @@
     return out;
   }
 
+  // 与文件里其它查表一样提到模块层：先前是函数内的字面量，每次调用
+  // moveToUCI() 都要重新分配一次——perft 的热路径里 moveToUCI 调用量
+  // 很大（例如 perftDivide），没必要每次都重建这张表。
+  const PROMO_CH = { [N]: 'n', [B]: 'b', [R]: 'r', [Q]: 'q' };
+
   function moveToUCI(m) {
-    const PROMO_CH = { 2: 'n', 3: 'b', 4: 'r', 5: 'q' };
     return toAlg(m.from) + toAlg(m.to) + (m.promo ? PROMO_CH[m.promo] : '');
   }
 
@@ -699,6 +732,12 @@
     const toks = [];
     for (let i = 0; i < moves.length; i++) {
       if (pos.turn === WHITE) toks.push(pos.full + '.');
+      // 只有白方走动才带回合号是不够的：如果棋谱本身从黑方先行的局面
+      // 开始（[FEN]/[SetUp] 起点，或历史棋谱的中局切片），第一个黑方
+      // 半步也必须标出回合号，写成 "N..." 形式，否则输出的 PGN 丢了
+      // 回合号，不是合法 PGN。只有序列的第一个半步需要这样补——此后
+      // 黑方的半步照常紧跟在同一回合的白方半步之后，不需要回合号。
+      else if (i === 0) toks.push(pos.full + '...');
       toks.push(moveToSAN(pos, moves[i]));
       pos = pos.make(moves[i]);
     }
@@ -718,5 +757,5 @@
   return { WHITE, BLACK, EMPTY, P, N, B, R, Q, K,
            SQ, fileOf, rankOf, offBoard, toAlg, fromAlg, Position, FLAG,
            perft, perftDivide, moveToUCI, moveToSAN, parseSAN, parseUCI,
-           parsePGN, writePGN, START_FEN };
+           parsePGN, writePGN, START_FEN, sameMove };
 });
