@@ -65,11 +65,10 @@
     recVerifyOK: { zh: '种子比对：本机复现（δ = ', en: 'Seed check: reproduced here (δ = ' },
     recVerifyNo: { zh: '种子比对：本机复现不了（δ = ', en: 'Seed check: not reproducible here (δ = ' },
     recVerifyTail: { zh: '）—— 这不是 bug，见提示', en: ') — not a bug, see the tip' },
-    /* 棋是离散的：没有连续时间驱动，键盘视角/页签快捷键也不在引擎本体里绑定
-       （那属于消费方按自己的 SCENES 去接），所以提示语只保留真正在
-       bindOrbit() 里生效的手势。 */
-    hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正',
-              en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset' }
+    /* 手势由 bindOrbit(canvas) 绑定，快捷键由 bindKeyboard() 绑定（见「交互」
+       一节）——两组都是 init() 会自动接好的，提示语把它们列在一起。 */
+    hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 空格暂停 · 1–9 视角 · T 切换页签',
+              en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · Space to pause · 1–9 views · T to switch tabs' }
   };
 
   /* ================= 常量与状态（引擎区，以下一般无需改动） ================= */
@@ -126,7 +125,6 @@
 
   /* ================= 基础数学 ================= */
   const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
-  const mod2pi = a => { a %= TAU; if (a < 0) a += TAU; return a; };
   const wrapPI = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
   const ease = k => k < 0.5 ? 4*k*k*k : 1 - Math.pow(-2*k + 2, 3) / 2;
   const fmt = (x, d = 2) => x.toFixed(d);
@@ -317,6 +315,11 @@
     if (curTab != null && SCENES[curTab] && typeof SCENES[curTab].draw === 'function') {
       SCENES[curTab].draw(C);
     }
+  }
+
+  function updateReadout() {
+    if (!roEl || curTab == null || !SCENES[curTab] || typeof SCENES[curTab].readout !== 'function') return;
+    roEl.innerHTML = SCENES[curTab].readout();
   }
 
   /* 帧级异常兜底：同一页签的同一条错误只报一次，否则 60 fps 会把控制台刷爆。
@@ -544,7 +547,11 @@
 
   function recHooks(tab) { return (RECORD && RECORD[tab || curTab]) || null; }
 
-  /* 唯一的只读判据访问器。工具的 draw()/readout() 要查模式一律走它。 */
+  /* 唯一的只读判据访问器。工具的 draw()/readout() 要查模式一律走它，不得自己
+     伸手进 recState 拼一份判据——那是留给下一个人的陷阱（同一判据两种写法
+     必然漂移）。导出为 VizEngine.recInfo：SCENES 现在由消费方在另一个作用域
+     声明，不再和这份引擎代码共享同一个顶层作用域，裸标识符 recInfo 够不着，
+     必须真正跨过模块边界才能履行这份对录制感知场景的承诺。 */
   function recInfo() {
     if (!recHooks()) return null;
     return {
@@ -862,11 +869,6 @@
   }
 
   /* ================= 语言切换 ================= */
-  function updateReadout() {
-    if (!roEl || curTab == null || !SCENES[curTab] || typeof SCENES[curTab].readout !== 'function') return;
-    roEl.innerHTML = SCENES[curTab].readout();
-  }
-
   function applyLang() {
     if (typeof document === 'undefined') return;
     document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
@@ -980,6 +982,33 @@
     });
   }
 
+  /* 全局键盘快捷键：Space 暂停/继续、r 重置、T 切换页签、1–9 选视角。
+     这四组快捷键都只驱动引擎本体已经实现、且已经接在按钮上的函数
+     （togglePlay / resetSim / switchTab / applyView），不需要消费方提供任何
+     东西，所以放在这里而不是要求每个工具各自重新接一遍。
+     绑在 window 上，不是 canvas 上——这是键盘事件，和 bindOrbit() 的
+     canvas 指针事件是两回事，混在一起会把两者都说不清楚。 */
+  function bindKeyboard() {
+    window.addEventListener('keydown', e => {
+      const el = document.activeElement;
+      const tag = el && el.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el && el.isContentEditable)) return;
+
+      if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+      else if (e.key === 'r' || e.key === 'R') { resetSim(); }
+      else if (e.key === 't' || e.key === 'T') {
+        const keys = Object.keys(SCENES);
+        if (keys.length) switchTab(keys[(keys.indexOf(curTab) + 1) % keys.length]);
+      } else if (e.key >= '1' && e.key <= '9') {
+        const sc = SCENES[curTab];
+        const names = sc && sc.views && Object.keys(sc.views);
+        if (!names) return;
+        const i = +e.key - 1;
+        if (i < names.length) applyView(names[i]);   // 越界就什么也不做，不抛也不落到 undefined
+      }
+    });
+  }
+
   /* ================= 启动 ================= */
   /* VizEngine.init({ canvas, SCENES, PARAMS, RECORD, TOOL, VERSION, ENGINE_VERSION }) ——
      只有 canvas 是必需的。其余都是「工具专属声明」，省略时对应机制安静地不生效
@@ -1052,6 +1081,7 @@
     }
 
     bindOrbit(canvas);
+    bindKeyboard();
     applyLang();
     resetSim();
     requestAnimationFrame(frame);
@@ -1063,6 +1093,6 @@
     drawAxes, drawGridXY,
     clamp, fmt, fmtS, t,
     init, bindOrbit,
-    cam
+    cam, recInfo
   };
 });
