@@ -1117,6 +1117,9 @@
   const WHITE = 1, BLACK = -1;
   const EMPTY = 0, P = 1, N = 2, B = 3, R = 4, Q = 5, K = 6;
 
+  // 标准初始局面的 FEN —— PGN 在没有 [FEN] 标签时以此为起点。
+  const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+
   // 0x88：索引 = rank * 16 + file。盘内格的第 4、7 位必为 0，
   // 所以越界检测是一次按位与，不需要两次范围比较。
   function SQ(file, rank) { return rank * 16 + file; }
@@ -1638,9 +1641,192 @@
     return toAlg(m.from) + toAlg(m.to) + (m.promo ? PROMO_CH[m.promo] : '');
   }
 
+  const SAN_CH = { 1: '', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K' };
+  const SAN_TO_CODE = { N: N, B: B, R: R, Q: Q, K: K };
+
+  function moveToSAN(pos, m) {
+    if (!m) throw new Error('moveToSAN: move is required');
+    let s;
+    if (m.flags & FLAG.CASTLE_K) s = 'O-O';
+    else if (m.flags & FLAG.CASTLE_Q) s = 'O-O-O';
+    else {
+      const type = Math.abs(m.piece);
+      if (type === P) {
+        s = (m.flags & FLAG.CAPTURE) ? toAlg(m.from)[0] + 'x' : '';
+        s += toAlg(m.to);
+        if (m.promo) s += '=' + SAN_CH[m.promo];
+      } else {
+        s = SAN_CH[type] + disambiguate(pos, m) +
+            ((m.flags & FLAG.CAPTURE) ? 'x' : '') + toAlg(m.to);
+      }
+    }
+    const after = pos.make(m);
+    if (after.inCheck(after.turn)) s += after.legalMoves().length ? '+' : '#';
+    return s;
+  }
+
+  // 消歧规则：先试直列，不够再试横行，还不够就写全格。
+  function disambiguate(pos, m) {
+    const type = Math.abs(m.piece);
+    const rivals = pos.legalMoves().filter(x =>
+      x.to === m.to && x.from !== m.from && Math.abs(x.piece) === type);
+    if (!rivals.length) return '';
+    const sameFile = rivals.some(x => fileOf(x.from) === fileOf(m.from));
+    const sameRank = rivals.some(x => rankOf(x.from) === rankOf(m.from));
+    if (!sameFile) return toAlg(m.from)[0];
+    if (!sameRank) return toAlg(m.from)[1];
+    return toAlg(m.from);
+  }
+
+  const SAN_RE = /^([NBRQK])?([a-h])?([1-8])?(x)?([a-h][1-8])(?:=?([NBRQ]))?[+#]?$/;
+
+  function parseSAN(pos, text) {
+    const s = String(text).trim().replace(/[!?]+$/, '');
+    const legal = pos.legalMoves();
+
+    if (s === 'O-O' || s === '0-0') {
+      const m = legal.find(x => x.flags & FLAG.CASTLE_K);
+      if (!m) throw new Error('Illegal SAN "' + text + '": kingside castling is not available');
+      return m;
+    }
+    if (s === 'O-O-O' || s === '0-0-0') {
+      const m = legal.find(x => x.flags & FLAG.CASTLE_Q);
+      if (!m) throw new Error('Illegal SAN "' + text + '": queenside castling is not available');
+      return m;
+    }
+
+    const g = SAN_RE.exec(s);
+    if (!g) throw new Error('Bad SAN syntax: "' + text + '"');
+    const type = g[1] ? SAN_TO_CODE[g[1]] : P;
+    const hintF = g[2] ? g[2].charCodeAt(0) - 97 : -1;
+    const hintR = g[3] ? g[3].charCodeAt(0) - 49 : -1;
+    const to = fromAlg(g[5]);
+    const promo = g[6] ? SAN_TO_CODE[g[6]] : 0;
+
+    const hits = legal.filter(x =>
+      Math.abs(x.piece) === type && x.to === to &&
+      (promo ? x.promo === promo : !x.promo) &&
+      (hintF < 0 || fileOf(x.from) === hintF) &&
+      (hintR < 0 || rankOf(x.from) === hintR));
+
+    if (hits.length === 1) return hits[0];
+    if (!hits.length) throw new Error('Illegal SAN "' + text + '" in position ' + pos.toFEN());
+    throw new Error('Ambiguous SAN "' + text + '": ' + hits.length + ' moves match');
+  }
+
+  const UCI_RE = /^([a-h][1-8])([a-h][1-8])([nbrq])?$/;
+  const UCI_TO_CODE = { n: N, b: B, r: R, q: Q };
+
+  function parseUCI(pos, text) {
+    const g = UCI_RE.exec(String(text).trim());
+    if (!g) throw new Error('Bad UCI syntax: "' + text + '" (expected e.g. e2e4 or e7e8q)');
+    const from = fromAlg(g[1]), to = fromAlg(g[2]);
+    const promo = g[3] ? UCI_TO_CODE[g[3]] : 0;
+    const m = pos.legalMoves().find(x =>
+      x.from === from && x.to === to && (promo ? x.promo === promo : !x.promo));
+    if (!m) throw new Error('Illegal UCI move "' + text + '" in position ' + pos.toFEN());
+    return m;
+  }
+
+  const TAG_RE = /\[\s*(\w+)\s*"((?:[^"\\]|\\.)*)"\s*\]/g;
+  const RESULTS = ['1-0', '0-1', '1/2-1/2', '*'];
+
+  function parsePGN(text) {
+    const src = String(text);
+    const headers = {};
+    let m, tagEnd = 0;
+    TAG_RE.lastIndex = 0;
+    // 注意：exec 返回 null 时 lastIndex 会被重置为 0，所以必须在循环里
+    // 自己记住最后一个标签的结束位置，不能循环结束后再读 lastIndex。
+    while ((m = TAG_RE.exec(src))) {
+      headers[m[1]] = m[2].replace(/\\(.)/g, '$1');
+      tagEnd = TAG_RE.lastIndex;
+    }
+    const body = src.slice(tagEnd);      // 无标签时 tagEnd 为 0，即全文
+
+    let skipped = 0;
+    // 逐层剥掉 { } 注释与 ( ) 变着（可嵌套）
+    let clean = '', depth = 0;
+    for (let i = 0; i < body.length; i++) {
+      const ch = body[i];
+      if (ch === '{' || ch === '(') { depth++; if (depth === 1) skipped++; continue; }
+      if (ch === '}' || ch === ')') { if (depth > 0) depth--; continue; }
+      if (depth === 0) clean += ch;
+    }
+    clean = clean.replace(/;[^\n]*/g, '')          // 行注释
+                 .replace(/\$\d+/g, '')            // NAG
+                 .replace(/\d+\s*\.(\.\.)?/g, ' ') // 回合编号
+                 .replace(/\s+/g, ' ').trim();
+
+    // PGN 标准规定 [SetUp "1"] 才"授权" [FEN] 标签生效，但这里刻意从宽：
+    // 只要携带了 [FEN] 就采信，不论有没有 [SetUp]——后续阶段要加载来源各异
+    // 的历史棋谱，不少真实存在的 PGN 只写 FEN 不写 SetUp，严格按标准拒绝
+    // 这些合法数据只是在满足形式主义，对下游没有好处。
+    const startFEN = headers.FEN || null;
+    let pos = startFEN ? Position.fromFEN(startFEN) : Position.fromFEN(START_FEN);
+
+    const moves = [], positions = [pos];
+    let result = '*';
+    const tokens = clean ? clean.split(' ') : [];
+    for (let i = 0; i < tokens.length; i++) {
+      const tk = tokens[i];
+      if (!tk) continue;
+      if (RESULTS.indexOf(tk) >= 0) { result = tk; break; }
+      let mv;
+      try {
+        mv = parseSAN(pos, tk);
+      } catch (e) {
+        throw new Error('PGN move ' + (moves.length + 1) + ' ("' + tk + '") is illegal: ' + e.message);
+      }
+      moves.push(mv);
+      pos = pos.make(mv);
+      positions.push(pos);
+    }
+    if (headers.Result && RESULTS.indexOf(headers.Result) >= 0 && result === '*') {
+      result = headers.Result;
+    }
+    return { headers: headers, moves: moves, positions: positions,
+             result: result, skipped: skipped, startFEN: startFEN };
+  }
+
+  function writePGN(headers, moves, startFEN) {
+    const out = [];
+    const seven = ['Event', 'Site', 'Date', 'Round', 'White', 'Black', 'Result'];
+    for (let i = 0; i < seven.length; i++) {
+      const k = seven[i];
+      const v = (headers && headers[k] != null) ? String(headers[k]) : '?';
+      out.push('[' + k + ' "' + v.replace(/["\\]/g, '\\$&') + '"]');
+    }
+    for (const k in headers) {
+      if (seven.indexOf(k) >= 0) continue;
+      out.push('[' + k + ' "' + String(headers[k]).replace(/["\\]/g, '\\$&') + '"]');
+    }
+    out.push('');
+
+    let pos = startFEN ? Position.fromFEN(startFEN) : Position.fromFEN(START_FEN);
+    const toks = [];
+    for (let i = 0; i < moves.length; i++) {
+      if (pos.turn === WHITE) toks.push(pos.full + '.');
+      toks.push(moveToSAN(pos, moves[i]));
+      pos = pos.make(moves[i]);
+    }
+    const res = (headers && headers.Result) || '*';
+    toks.push(res);
+
+    // 按 80 列折行，这是 PGN 的通行写法
+    let line = '';
+    for (let i = 0; i < toks.length; i++) {
+      if (line && line.length + 1 + toks[i].length > 80) { out.push(line); line = ''; }
+      line = line ? line + ' ' + toks[i] : toks[i];
+    }
+    if (line) out.push(line);
+    return out.join('\n') + '\n';
+  }
+
   return { WHITE, BLACK, EMPTY, P, N, B, R, Q, K,
            SQ, fileOf, rankOf, offBoard, toAlg, fromAlg, Position, FLAG,
-           perft, perftDivide, moveToUCI };
+           perft, perftDivide, moveToUCI, moveToSAN, parseSAN, parseUCI,
+           parsePGN, writePGN, START_FEN };
 });
 /* <<< GENERATED:CHESS-CORE */
 /* >>> GENERATED:BOARD-RENDER */
