@@ -631,7 +631,7 @@ function rewindVars(trace, from, to) {
 const rw = I.run('let a = 1;\na = 2;\na = 3;', { host: {} }).trace;
 T.eq(replayVars(rw, 3).a, 3, '正放到第 3 步 a=3');
 T.eq(rewindVars(rw, 3, 1).a, 1, '从第 3 步反放回第 1 步，a 回到 1');
-T.eq(rewindVars(rw, 3, 0).a, undefined, '反放到第 0 步，a 不存在');
+T.ok(typeof rewindVars(rw, 3, 0).a === 'undefined', '反放到第 0 步，a 不存在');
 
 // ---- Gap 1（协调者审查发现）：块作用域遮蔽下，扁平按名回放必须与
 //      程序的真实语义一致。没有「声明记下被遮蔽的旧值」+「作用域退出时
@@ -641,7 +641,7 @@ T.eq(rewindVars(rw, 3, 0).a, undefined, '反放到第 0 步，a 不存在');
 const sh = I.run('let a = 1;\n{ let a = 2; }\nreturn a;', { host: {} }).trace;
 T.eq(replayVars(sh, sh.length).a, 1, '正放到末尾，a 是外层的 1 而不是内层的 2');
 T.eq(rewindVars(sh, sh.length, 1).a, 1, '反放回第 1 步，a 是外层的 1');
-T.eq(rewindVars(sh, sh.length, 0).a, undefined, '反放到第 0 步，a 尚不存在');
+T.ok(typeof rewindVars(sh, sh.length, 0).a === 'undefined', '反放到第 0 步，a 尚不存在');
 
 // 顺带确认 for 的「每轮新环境」（Task 5 按 ECMA-262 实现的那个）在同一套
 // 规则下也正确——循环变量在整个 for 语句退出后必须从扁平回放里消失，
@@ -664,7 +664,7 @@ T.ok(loop.trace.length <= 500, '轨迹不超过上限');
 /* 不编造「省略了 N 步」：到达上限时执行已经停止，我们并不知道还剩多少步，
    而要知道就得跑完 —— 可上限的另一个身份正是死循环保护。规格 §2.6 那句
    「省略 N 步」与 §2.8 的「执行上限」互相冲突，本阶段按 §2.8 裁定。 */
-T.eq(loop.trace.omitted, undefined, '不报一个我们不知道的数字');
+T.ok(typeof loop.trace.omitted === 'undefined', '不报一个我们不知道的数字');
 
 // 正常结束的程序不该被标 truncated
 const fine = I.run('let s = 0; for (let i = 0; i < 10; i++) { s += i; } return s;', { host: {} });
