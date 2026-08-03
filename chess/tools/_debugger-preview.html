@@ -87,9 +87,20 @@ body.folded #split,body.folded #divider{display:none}
   backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
 .legend div{display:flex;align-items:center;gap:7px;line-height:1.7}
 .legend i{width:9px;height:9px;border-radius:2px;background:var(--c);box-shadow:0 0 6px var(--c)}
-.hint{position:fixed;left:50%;bottom:10px;transform:translateX(-50%);z-index:2;pointer-events:none;
-  user-select:none;font-size:10.5px;letter-spacing:.04em;color:rgba(159,176,200,.55);white-space:nowrap}
-body.folded .hint{color:rgba(159,176,200,.75)}
+/* 提示条居中于**棋盘那一块**，不是整窗。整窗居中会让它的左半截钻到不透明的
+   代码面板底下，露出来的右半截读起来像一行糊掉的幽灵字（Task 6 截图 01 抓到）。
+   折叠时面板没了，回到整窗居中。
+
+   **保持一行、装不下就省略号，不折行。** 我试过折行（不想截掉尾巴），结果它
+   往上长到了右下角图例那一带，两块字叠在一起——比截断难看得多。而截断在这里
+   代价几乎为零：同一串快捷键在代码面板底部的读数行里**本来就完整写着**
+   （`F10 step over · F11 step in · …`）；真正需要这条提示的是折叠状态，
+   而那时面板没了、整窗都是它的，一行绰绰有余。 */
+.hint{position:fixed;left:calc(var(--code-w) + (100vw - var(--code-w)) / 2);bottom:10px;
+  transform:translateX(-50%);z-index:2;pointer-events:none;max-width:calc(100vw - var(--code-w) - 24px);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  user-select:none;font-size:10.5px;letter-spacing:.04em;color:rgba(159,176,200,.55)}
+body.folded .hint{left:50%;max-width:calc(100vw - 24px);color:rgba(159,176,200,.75)}
 </style>
 </head>
 <body>
@@ -5703,14 +5714,99 @@ return k.square;
     return { f: f, r: r };
   }
 
-  /* 代码面板占掉左边一条，棋盘要落在**剩下那块**的正中。dx = 面板宽度的一半：
-     可见区是 [wCode, W]，它的中点比窗口中点右移 wCode/2。折叠时 wCode = 0，
-     棋盘自然回到全屏正中——这就是 §1.5 承诺的「一键折叠回全屏棋盘」在渲染
-     侧的全部代价。 */
-  function boardOffsetX() {
-    if (document.body.classList.contains('folded')) return 0;
-    const w = document.getElementById('split').getBoundingClientRect().width;
-    return w / 2;
+  /* ---------------- 棋盘的取景框：装进**它真正拿得到的那块地方** ----------------
+
+     上一版这里只做一次屏幕平移 `dx = 面板宽/2`：中心对上了，大小没管。
+     Task 6 的截图 09 抓到后果——把分隔条拖到 1100/1500 px，棋盘左右两侧
+     一起被裁掉，1–8 行号整排消失、a/b 两列压在面板底下。**只平移不缩放，
+     等于假设"剩下那块地方永远够大"**，而分隔条的存在本身就是在推翻这个假设。
+
+     改成一个完整的取景变换 `p → s·p + t`：
+       s  = 让「棋盘 + 坐标标签 + 最高的棋子」的投影包围盒装进可见区的比例
+       t  = 让那个包围盒的中心落在可见区的中心
+
+     三个选择，都是有取舍的，写下来免得下一个人当成随手写的：
+
+     ① **该放就放，不只是缩。** 我第一版写了 `s ≤ 1`，怕放大会把滚轮缩放
+        变成一场空——**那个顾虑是错的**，前提没成立：s 只在可见区变化时算，
+        相机变化时**不重算**，所以两次可见区变化之间它就是个常数，使用者
+        照常拉近拉远。折叠成全屏时可见区大得多，`s ≈ 1.46`，棋盘真的把
+        那块地方用起来，而不是缩在左上角留一大片死区（截图 07 抓到的）。
+
+     ② **包围盒按「回正视角」算，不是按活相机算，而且只在**可见区变了**的
+        时候重算**（分隔条、折叠、窗口尺寸）。按活相机每帧重算会让旋转变成
+        "棋盘被自动追着摆正"，那是另一种坏；而回正视角是双击就能回到的状态，
+        也是四张验收截图里的状态，用它算出来的取景框稳定、可预测。
+        旋到别的角度可能又探出框外——那是 3D 场景的常态，不是这条要治的病。
+
+     ③ **每帧不读布局。** 上一版 `boardOffsetX()` 每帧一次
+        `getBoundingClientRect()`，那是一次强制同步重排，在绘制循环里。
+        现在只在上面三个事件里读一次，绘制循环只读三个已经算好的数。 */
+
+  /* 回正视角。SCENES 的 iso 预设与这里必须是同一份数字，所以只写一遍。 */
+  const HOME_VIEW = { az: -0.32, el: 0.92, dist: 15.5, tx: 0, ty: 0, tz: 0 };
+  const FIT_MARGIN = 0.92;          // 四周留一点气，别让棋盘顶着面板边
+
+  /* 绘制循环只读它，不算它。 */
+  let boardFit = { s: 1, tx: 0, ty: 0 };
+
+  /* 可见区 = 整窗减去代码面板。折叠时面板 display:none，宽度为 0。
+     这是**唯一**读布局的地方，只在下面三个事件里被调到。 */
+  function availRect() {
+    const folded = document.body.classList.contains('folded');
+    const x0 = folded ? 0 : document.getElementById('split').getBoundingClientRect().width;
+    return { x0: x0, y0: 0, w: Math.max(1, window.innerWidth - x0), h: Math.max(1, window.innerHeight) };
+  }
+
+  /* 借引擎的 makeCam 算「回正视角」的相机：临时把 E.cam 换成预设、算完立刻换回。
+     不自己抄一遍球坐标→基向量的公式——那是本仓库反复吃过亏的那种分叉
+     （同一段数学两处各写一份，总有一天对不上）。整段同步，中间不 yield。 */
+  function homeCam() {
+    const live = E.cam, saved = {};
+    for (const k in HOME_VIEW) { saved[k] = live[k]; live[k] = HOME_VIEW[k]; }
+    const C = E.makeCam();
+    for (const k in saved) live[k] = saved[k];
+    return C;
+  }
+
+  /* 棋盘在屏幕上到底占多大：外框 + 坐标标签的锚点带（世界坐标里的一个矩形，
+     透视投影下它的像仍是一个四边形，四个角就够定包围盒），再按像素补两笔
+     ——标签是居中绘制的，字会探出锚点半个身位；棋子以格心为底座往上长，
+     最远一排的后冠会探出棋盘上沿。这两笔不补，"八行八列都在框里"就是句空话。 */
+  function boardScreenBox(C) {
+    const o = L.squareCorners(0, 0)[0];
+    const pad = BR.COORD_LABEL_OFFSET * L.cell;
+    const corners = [
+      [o[0] - pad, o[1] - pad, L.z], [o[0] + L.w, o[1] - pad, L.z],
+      [o[0] + L.w, o[1] + L.h, L.z], [o[0] - pad, o[1] + L.h, L.z],
+    ];
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let k = 0; k < corners.length; k++) {
+      const p = E.proj(C, corners[k]);
+      if (!p) return null;                       // 近裁剪掉了：这一帧算不出，沿用上一次
+      x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]);
+      y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]);
+    }
+    const lab = BR.coordLabelSize(C, E, L);
+    let tall = 0;
+    for (let f = 0; f < L.files; f++) {
+      tall = Math.max(tall, BR.pieceAutoScale(C, E, L.squareCenter(f, L.ranks - 1), L.cell) || 0);
+    }
+    return { x0: x0 - lab, y0: y0 - tall, x1: x1 + lab, y1: y1 + lab * 0.9 };
+  }
+
+  /* 可见区变了就重算取景框。三个调用点：窗口 resize、分隔条拖拽、`\` 折叠。 */
+  function updateBoardFit() {
+    const box = boardScreenBox(homeCam());
+    if (!box) return;                            // 算不出就不动，绝不退化成 1:1 把画面跳一下
+    const bw = Math.max(1, box.x1 - box.x0), bh = Math.max(1, box.y1 - box.y0);
+    const rect = availRect();
+    const s = Math.min((rect.w * FIT_MARGIN) / bw, (rect.h * FIT_MARGIN) / bh);
+    boardFit = {
+      s: s,
+      tx: rect.x0 + rect.w / 2 - s * (box.x0 + box.x1) / 2,
+      ty: rect.y0 + rect.h / 2 - s * (box.y0 + box.y1) / 2,
+    };
   }
 
   function drawSquareFill(C, f, r, color, alpha) {
@@ -5742,9 +5838,12 @@ return k.square;
        计数——开发者的外接屏是 30 Hz，按帧计数在那台机器上会慢一半。 */
     if (dbg) dbg.tick(E.state.dt);
 
-    const dx = boardOffsetX();
+    /* 取景框：三个已经算好的数，绘制循环里不读布局、不投影包围盒。
+       缩放是整体的——线宽、坐标标签字号、棋子一起跟着，与"把整幅画面
+       拉近拉远"是同一件事，而不是把棋盘缩了、字还留在原来那么大。 */
     ctx.save();
-    ctx.translate(dx, 0);
+    ctx.translate(boardFit.tx, boardFit.ty);
+    ctx.scale(boardFit.s, boardFit.s);
     BR.drawBoard(ctx, C, E, { layout: L });
 
     /* 面板数据一律读**缓存**（dbg.state()），从不在这里调 Debugger.locals /
@@ -5777,7 +5876,9 @@ return k.square;
       label: { zh: '棋盘', en: 'Board' },
       brand: STR.brand,
       tips: STR.tips,
-      views: { iso: { label: { zh: '等距', en: 'Iso' }, az: -0.32, el: 0.92, dist: 15.5, ty: 0 } },
+      /* 双击回正的那个视角。取景框（updateBoardFit）按的就是这一份数字，
+         所以它从 HOME_VIEW 展开，两处永远不会分叉。 */
+      views: { iso: Object.assign({ label: { zh: '等距', en: 'Iso' } }, HOME_VIEW) },
       toggles: [],
       draw: drawScene,
     },
@@ -5791,6 +5892,13 @@ return k.square;
     TOOL: { id: '_debugger-preview', title: STR.title, h1: STR.title },
     VERSION: '0.1.0',
   });
+
+  /* 取景框的第一次计算，以及 resize 上的重算。
+     **必须排在 E.init 之后**：引擎的 resize 处理器是在 init 里挂上的，
+     它负责刷新 W/H/CX/CY/FOCAL，而 makeCam/proj 读的正是那几个值。
+     同一个事件上后挂的监听器后跑，所以这里拿到的一定是新尺寸。 */
+  updateBoardFit();
+  window.addEventListener('resize', updateBoardFit);
 
   /* ---- 编辑器与调试器 ---- */
   const statusEl = document.getElementById('status');
@@ -5902,6 +6010,9 @@ return k.square;
     const onMove = function (ev) {
       const w = Math.max(300, Math.min(window.innerWidth * 0.78, ev.clientX));
       document.documentElement.style.setProperty('--code-w', w + 'px');
+      /* 可见区变了 → 重算取景框。放在这里（而不是绘制循环里）是这条修复的
+         另一半：绘制循环从此不再每帧强制一次重排。 */
+      updateBoardFit();
     };
     const onUp = function () {
       divider.classList.remove('drag');
@@ -5921,6 +6032,9 @@ return k.square;
     if (document.activeElement === ed.textarea) return;
     e.preventDefault();
     document.body.classList.toggle('folded');
+    /* 折叠/展开都会改可见区（整窗 ⇄ 整窗减面板），取景框跟着重算。
+       **必须排在 classList.toggle 之后**：availRect 读的就是这个 class。 */
+    updateBoardFit();
     /* 展开之后必须让编辑器重刷一次：折叠期间面板是 display:none，
        编辑器量不到字符宽度（getBoundingClientRect 全是 0），所以它会跳过
        波浪线与括号框不画。重刷给它一次在可见状态下重新量的机会。 */
@@ -6003,6 +6117,32 @@ return k.square;
       speed: dbg.speed(),
       caretLine: ed.caretLine(),
       folded: document.body.classList.contains('folded'),
+      /* 取景框与可见区：Task 6 要逐条验「八行八列都在框里、棋盘居中」，
+         而那是像素的事，只能量不能推。boardBox 给的是**当前活相机**下
+         棋盘（含标签与最高棋子）经过取景变换之后的屏幕包围盒。 */
+      boardFit: { s: boardFit.s, tx: boardFit.tx, ty: boardFit.ty },
+      avail: availRect(),
+      boardBox: (function () {
+        const b = boardScreenBox(E.makeCam());
+        if (!b) return null;
+        const f = boardFit;
+        return { x0: f.tx + f.s * b.x0, y0: f.ty + f.s * b.y0,
+                 x1: f.tx + f.s * b.x1, y1: f.ty + f.s * b.y1 };
+      })(),
+      /* 八个行号 + 八个列名的锚点，取景变换之后的屏幕坐标。 */
+      coordAnchors: (function () {
+        const C = E.makeCam(), f = boardFit, o = L.squareCorners(0, 0)[0];
+        const pad = BR.COORD_LABEL_OFFSET * L.cell, out = {};
+        const put = function (name, w) {
+          const p = E.proj(C, w);
+          out[name] = p ? [f.tx + f.s * p[0], f.ty + f.s * p[1]] : null;
+        };
+        for (let k = 0; k < L.files; k++) {
+          put(BR.fileLabel(k), [L.squareCenter(k, 0)[0], o[1] - pad, L.z]);
+          put(String(k + 1), [o[0] - pad, L.squareCenter(0, k)[1], L.z]);
+        }
+        return out;
+      })(),
       lang: document.documentElement.lang,
       codeWidth: Math.round(document.getElementById('split').getBoundingClientRect().width),
       editorFocused: document.activeElement === ed.textarea,
