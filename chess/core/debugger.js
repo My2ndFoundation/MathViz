@@ -386,11 +386,509 @@
     return { marks: marks, pieces: pieces };
   }
 
+  /* ==================== DOM 层：五区面板与控制条（规格 §2.7） ====================
+
+     以下所有代码**只在 mount() 被调用之后**才碰 document / window。上面的游标
+     与六个派生函数一律零 DOM，node 测试套件（debugger.test.js）因此照常装载得了
+     这个文件。这条分界线是本模块的架构承诺，不要越过它：任何判断都留在上面的
+     纯函数里，这一层只负责把结果画出来。
+
+     **为什么这里有一份缓存，而上面没有**：六个派生函数每次调用都从第 0 步重放
+     整条轨迹（那是刻意的设计，见上面的注释）。实测（200k 步轨迹）单是 locals
+     就要 8.45 ms，五区全量重算 14.72 ms——而本仓库给每帧绘制的预算是 4 ms。
+     所以缓存必须存在，但它属于**这一层**：只在游标真的移动、或轨迹被换掉时
+     重算一次，渲染循环只读缓存。反过来把缓存塞进 locals() 里会让那六个函数
+     从纯函数变成有状态的东西，测试与推理都要跟着变贵。
+
+     **不要假设「下一步一定换行」**：3b 对 interp.js 的修复会在进入新帧之前，
+     先把调用方挂着的变量增量刷成独立的一步。于是连着两步停在同一源码行是
+     正常轨迹（第一步是赋值，第二步才入帧），而且那条被刷出来的增量记在
+     **调用点那一行**上——变量面板里可能出现一个在 for 头部声明的名字，而
+     高亮还停在调用行。这是对的，不要在这一层"修"它。 */
+
+  const DBG_CSS_ID = 'chess-debugger-dom-css';
+  const DBG_CSS = [
+    '.dbg-root{display:flex;flex-direction:column;gap:8px;min-height:0}',
+    '.dbg-bar{display:flex;flex-wrap:wrap;gap:5px;align-items:center}',
+    '.dbg-btn{padding:5px 9px;border-radius:8px;border:1px solid rgba(148,163,184,.25);',
+    'background:rgba(30,41,59,.55);color:#d7e2f2;font-size:11.5px;cursor:pointer;',
+    'font-family:inherit;transition:border-color .15s,color .15s,background .15s}',
+    '.dbg-btn:hover:not(:disabled){border-color:rgba(45,212,234,.55);color:#bfefff}',
+    '.dbg-btn:disabled{opacity:.4;cursor:default}',
+    '.dbg-btn.on{border-color:rgba(45,212,234,.8);background:rgba(45,212,234,.12);color:#9be8f7}',
+    '.dbg-speed{display:flex;align-items:center;gap:6px;margin-left:auto;font-size:11px;color:rgba(159,176,200,.8)}',
+    '.dbg-speed input{width:96px}',
+    '.dbg-speed b{font-family:ui-monospace,Menlo,monospace;font-weight:500;color:#7dd3fc;min-width:52px;text-align:right}',
+    '.dbg-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-height:0}',
+    '.dbg-pane{display:flex;flex-direction:column;min-height:0;background:rgba(8,13,24,.55);',
+    'border:1px solid rgba(148,163,184,.14);border-radius:10px;overflow:hidden}',
+    '.dbg-pane h4{margin:0;padding:6px 10px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;',
+    'color:rgba(159,176,200,.62);border-bottom:1px solid rgba(148,163,184,.12);font-weight:600}',
+    '.dbg-list{flex:1 1 auto;min-height:0;overflow:auto;padding:4px 0;',
+    'font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:11.5px;line-height:1.65}',
+    '.dbg-list::-webkit-scrollbar{width:7px}',
+    '.dbg-list::-webkit-scrollbar-thumb{background:rgba(148,163,184,.26);border-radius:4px}',
+    '.dbg-row{padding:1px 10px;color:#c6d2e4;white-space:pre-wrap;word-break:break-word}',
+    '.dbg-frame{cursor:pointer}',
+    '.dbg-frame:hover{background:rgba(45,212,234,.09);color:#bfefff}',
+    '.dbg-frame.sel{background:rgba(167,139,250,.14);color:#ddd0ff}',
+    '.dbg-frame .at{color:rgba(159,176,200,.5)}',
+    '.dbg-var .nm{color:#7dd3fc}',
+    '.dbg-var .eq{color:rgba(159,176,200,.5)}',
+    '.dbg-var.chg{animation:dbgFlash .55s ease-out 1}',
+    '@keyframes dbgFlash{0%{background:rgba(251,191,36,.42)}100%{background:transparent}}',
+    '.dbg-out .dbg-row{color:rgba(159,176,200,.86)}',
+    '.dbg-empty{padding:3px 10px;color:rgba(159,176,200,.38);font-style:italic}',
+    '.dbg-readout{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:11px;',
+    'line-height:1.7;color:#a9b8cd;padding:7px 10px;background:rgba(8,13,24,.55);',
+    'border:1px solid rgba(148,163,184,.14);border-radius:10px}',
+    '.dbg-readout b{color:#7dd3fc;font-weight:600}',
+    '.dbg-readout .warn{color:#fb923c}',
+  ].join('');
+
+  const DBG_UI = {
+    play:    { zh: '▶ 播放', en: '▶ Play' },
+    pause:   { zh: '⏸ 暂停', en: '⏸ Pause' },
+    step:    { zh: '单步 ▸', en: 'Step ▸' },
+    back:    { zh: '◂ 后退', en: '◂ Back' },
+    stepIn:  { zh: '步入', en: 'Step in' },
+    stepOver:{ zh: '步过', en: 'Step over' },
+    stepOut: { zh: '步出', en: 'Step out' },
+    runTo:   { zh: '跑到断点', en: 'Run to bp' },
+    speed:   { zh: '速度', en: 'Speed' },
+    stack:   { zh: '调用栈', en: 'Call stack' },
+    vars:    { zh: '变量', en: 'Variables' },
+    out:     { zh: '输出', en: 'Output' },
+    global:  { zh: '（全局）', en: '(global)' },
+    noStack: { zh: '只有全局帧', en: 'global frame only' },
+    noVars:  { zh: '本帧还没有变量', en: 'no variables in this frame yet' },
+    noOut:   { zh: '还没有输出', en: 'no output yet' },
+    stepsPerSec: { zh: ' 步/秒', en: ' steps/s' },
+    roStep:  { zh: '步', en: 'step' },
+    roLine:  { zh: '行', en: 'line' },
+    roDepth: { zh: '深度', en: 'depth' },
+    roBreaks:{ zh: '断点', en: 'breakpoints' },
+    roTrunc: { zh: '轨迹已达上限，后续步数未记录', en: 'trace hit the step limit; later steps were not recorded' },
+    keys:    { zh: 'F10 步过 · F11 步入 · Shift+F11 步出 · F9 断点 · F5 跑到断点',
+               en: 'F10 step over · F11 step in · Shift+F11 step out · F9 breakpoint · F5 run to breakpoint' },
+  };
+
+  function ensureDbgStyles() {
+    if (document.getElementById(DBG_CSS_ID)) return;
+    const st = document.createElement('style');
+    st.id = DBG_CSS_ID;
+    st.textContent = DBG_CSS;
+    document.head.appendChild(st);
+  }
+
+  /* locals() 里的值**已经是 interp.js 的 snap() 快照**，不是活对象：
+     snap() 会把函数值（解释出来的 {__fn:true,…} 和真 JS function 两种）
+     就地换成字符串 `'ƒ 名字'`，把环形引用换成 `'[环形引用]'`，其余原样。
+     所以下面这个前缀判断不是装饰：不加它，`ƒ safe` 会落进上一行的字符串
+     分支被 JSON.stringify 加上一对引号，面板上显示成 `safe = "ƒ safe"`
+     ——看起来像一个内容碰巧是这几个字的字符串变量，而不是一个函数。
+     （实测抓到的，见任务报告。）
+     代价是一个真的以 U+0192 加空格开头的用户字符串会被显示成不带引号的
+     样子。这份歧义是 snap() 在轨迹里就已经造成的，不是这一层引入的——
+     这一层只能选把常见情形显示对，而不是把它显示错。
+     下面 function / __fn 两个分支因此在**正常轨迹上永远走不到**，留着是给
+     没经过 snap() 的值用的：fmtVal 也被验收页拿去渲染 run().result，那个
+     值是活的原值，不是快照。 */
+  function fmtVal(v, depth) {
+    depth = depth || 0;
+    if (v === null) return 'null';
+    if (typeof v === 'undefined') return 'undefined';
+    if (typeof v === 'string') return v.slice(0, 2) === 'ƒ ' ? v : JSON.stringify(v);
+    if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+    if (typeof v === 'function') return 'ƒ ' + (v.name || '(anonymous)');
+    if (typeof v === 'object' && v.__fn === true) return 'ƒ ' + (v.name || '(anonymous)');
+    if (Array.isArray(v)) {
+      if (depth >= 2) return '[…]';
+      const parts = [];
+      for (let k = 0; k < v.length && k < 12; k++) parts.push(fmtVal(v[k], depth + 1));
+      if (v.length > 12) parts.push('… +' + (v.length - 12));
+      return '[' + parts.join(', ') + ']';
+    }
+    if (typeof v === 'object') {
+      if (depth >= 2) return '{…}';
+      const keys = Object.keys(v), parts = [];
+      for (let k = 0; k < keys.length && k < 8; k++) parts.push(keys[k] + ': ' + fmtVal(v[keys[k]], depth + 1));
+      if (keys.length > 8) parts.push('… +' + (keys.length - 8));
+      return '{' + parts.join(', ') + '}';
+    }
+    return String(v);
+  }
+
+  /* mount(el, cur, opts) → handle。
+
+     opts:
+       editor        Editor.mount() 的句柄。**代码区就是它**（规格 §2.8：
+                     「当前执行行高亮（与调试器共用同一状态）」）——本模块不
+                     另建第二个代码视图，只往这个句柄里写执行行/已访问行/断点。
+       t             i18n 取值函数（页面传 VizEngine.t）。省略时退回英文。
+       onCursorMove  游标移动且缓存已刷新之后调用，参数是 handle.state()。
+       readout       可选：返回一段 HTML，追加进读数区（工具 ④⑤ 的尝试/回溯/
+                     剪枝计数属于工具，不属于本模块）。
+       keyTarget     绑快捷键的目标，默认 window。
+
+     **本模块不自己起 rAF**：播放靠调用方每帧调一次 tick(dt)，dt 必须来自
+     VizEngine.state.dt（引擎唯一的时钟出口，已 clamp 到 [0,0.05]）。按时间
+     推进而不是按帧计数，是硬约束——开发者的外接屏是 30 Hz，任何按帧计数的
+     速度在那台机器上都会慢一半。 */
+  function mount(el, cur, opts) {
+    opts = opts || {};
+    ensureDbgStyles();
+    const T = opts.t || function (s) { return (s && typeof s === 'object') ? (s.en != null ? s.en : s.zh) : s; };
+    const editor = opts.editor || null;
+    const keyTarget = opts.keyTarget || window;
+
+    el.classList.add('dbg-root');
+    el.textContent = '';
+
+    const bar = document.createElement('div');
+    bar.className = 'dbg-bar';
+    function mkBtn(key, fn, title) {
+      const b = document.createElement('button');
+      b.className = 'dbg-btn';
+      b.dataset.k = key;
+      if (title) b.dataset.hint = title;
+      b.addEventListener('click', fn);
+      bar.appendChild(b);
+      return b;
+    }
+    const bPlay = mkBtn('play', function () { setPlaying(!playing); });
+    const bBack = mkBtn('back', function () { move(function (c) { return step(c, -1); }); });
+    const bStep = mkBtn('step', function () { move(function (c) { return step(c, 1); }); });
+    const bIn   = mkBtn('stepIn', function () { move(stepIn); }, 'F11');
+    const bOver = mkBtn('stepOver', function () { move(stepOver); }, 'F10');
+    const bOut  = mkBtn('stepOut', function () { move(stepOut); }, 'Shift+F11');
+    const bRun  = mkBtn('runTo', function () { move(runTo); }, 'F5');
+
+    const speedWrap = document.createElement('div');
+    speedWrap.className = 'dbg-speed';
+    const speedLab = document.createElement('span');
+    const speedIn = document.createElement('input');
+    speedIn.type = 'range';
+    speedIn.min = '1'; speedIn.max = '120'; speedIn.step = '1'; speedIn.value = '10';
+    const speedVal = document.createElement('b');
+    speedWrap.appendChild(speedLab);
+    speedWrap.appendChild(speedIn);
+    speedWrap.appendChild(speedVal);
+    bar.appendChild(speedWrap);
+
+    const grid = document.createElement('div');
+    grid.className = 'dbg-grid';
+    function mkPane(cls) {
+      const p = document.createElement('section');
+      p.className = 'dbg-pane ' + cls;
+      const h = document.createElement('h4');
+      const list = document.createElement('div');
+      list.className = 'dbg-list';
+      p.appendChild(h);
+      p.appendChild(list);
+      return { pane: p, head: h, list: list };
+    }
+    const paneStack = mkPane('dbg-stack');
+    const paneVars = mkPane('dbg-vars');
+    const paneOut = mkPane('dbg-out');
+    grid.appendChild(paneStack.pane);
+    grid.appendChild(paneVars.pane);
+
+    const readoutEl = document.createElement('div');
+    readoutEl.className = 'dbg-readout';
+
+    el.appendChild(bar);
+    el.appendChild(grid);
+    el.appendChild(paneOut.pane);
+    el.appendChild(readoutEl);
+
+    /* ---------------- 缓存：只在游标移动 / 换轨迹时重算 ---------------- */
+    let cache = null;
+    let prevVals = Object.create(null);   // 上一次的变量渲染文本，用来判定"这一步变了谁"
+    let selFrame = -1;                    // 选中的调用栈帧（-1 = 未选）
+
+    function recompute() {
+      const stack = callStack(cur);
+      const lv = locals(cur);
+      const vals = Object.create(null);
+      const names = Object.keys(lv).sort();
+      for (let k = 0; k < names.length; k++) vals[names[k]] = fmtVal(lv[names[k]]);
+      cache = {
+        i: cur.i, len: cur.trace.length,
+        truncated: !!cur.trace.truncated,
+        line: currentLine(cur),
+        depth: stack.length,
+        visited: visitedLines(cur),
+        stack: stack,
+        names: names, vals: vals,
+        output: output(cur),
+        board: boardState(cur),
+      };
+    }
+
+    /* ---------------- 渲染 ---------------- */
+    function rowText(cls, text) {
+      const d = document.createElement('div');
+      d.className = 'dbg-row ' + cls;
+      d.textContent = text;
+      return d;
+    }
+    function emptyRow(msg) {
+      const d = document.createElement('div');
+      d.className = 'dbg-empty';
+      d.textContent = T(msg);
+      return d;
+    }
+
+    function paintStack() {
+      const frag = document.createDocumentFragment();
+      const g = document.createElement('div');
+      g.className = 'dbg-row dbg-frame' + (selFrame === 0 ? ' sel' : '');
+      g.dataset.fi = '0';
+      g.textContent = T(DBG_UI.global);
+      frag.appendChild(g);
+      for (let k = 0; k < cache.stack.length; k++) {
+        const f = cache.stack[k];
+        const d = document.createElement('div');
+        d.className = 'dbg-row dbg-frame' + (selFrame === k + 1 ? ' sel' : '');
+        d.dataset.fi = String(k + 1);
+        d.dataset.line = String(f.line);
+        const nm = document.createElement('span');
+        nm.textContent = '  '.repeat(k) + (f.name || '(anonymous)') + '()';
+        const at = document.createElement('span');
+        at.className = 'at';
+        at.textContent = '  @' + T(DBG_UI.roLine) + ' ' + f.line;
+        d.appendChild(nm);
+        d.appendChild(at);
+        frag.appendChild(d);
+      }
+      if (!cache.stack.length) frag.appendChild(emptyRow(DBG_UI.noStack));
+      paneStack.list.textContent = '';
+      paneStack.list.appendChild(frag);
+    }
+
+    function paintVars() {
+      const frag = document.createDocumentFragment();
+      for (let k = 0; k < cache.names.length; k++) {
+        const n = cache.names[k];
+        const changed = prevVals[n] !== cache.vals[n];
+        const d = document.createElement('div');
+        d.className = 'dbg-row dbg-var' + (changed ? ' chg' : '');
+        const nm = document.createElement('span');
+        nm.className = 'nm';
+        nm.textContent = n;
+        const eq = document.createElement('span');
+        eq.className = 'eq';
+        eq.textContent = ' = ';
+        d.appendChild(nm);
+        d.appendChild(eq);
+        d.appendChild(document.createTextNode(cache.vals[n]));
+        frag.appendChild(d);
+      }
+      if (!cache.names.length) frag.appendChild(emptyRow(DBG_UI.noVars));
+      paneVars.list.textContent = '';
+      paneVars.list.appendChild(frag);
+      prevVals = cache.vals;
+    }
+
+    /* 输出区增量渲染：日志只在末尾增删（输出是 [0, i] 的前缀），所以
+       前进时只追加、后退时只砍尾，不整块重建——重建会把使用者的滚动位置
+       每一步都甩回顶部。 */
+    let outLen = 0;
+    function paintOut() {
+      const want = cache.output.length;
+      if (want < outLen) {
+        while (paneOut.list.children.length > want) paneOut.list.removeChild(paneOut.list.lastChild);
+      } else if (want > outLen) {
+        if (outLen === 0) paneOut.list.textContent = '';
+        const frag = document.createDocumentFragment();
+        for (let k = outLen; k < want; k++) frag.appendChild(rowText('', cache.output[k]));
+        paneOut.list.appendChild(frag);
+        paneOut.list.scrollTop = paneOut.list.scrollHeight;
+      }
+      outLen = want;
+      if (!want && !paneOut.list.children.length) paneOut.list.appendChild(emptyRow(DBG_UI.noOut));
+    }
+
+    function paintReadout() {
+      const nBreaks = Object.keys(cur.breakpoints).length;
+      let html = '<b>' + (cache.len ? cache.i + 1 : 0) + '</b> / ' + cache.len + ' ' + T(DBG_UI.roStep) +
+                 ' &middot; ' + T(DBG_UI.roLine) + ' <b>' + (cache.line == null ? '—' : cache.line) + '</b>' +
+                 ' &middot; ' + T(DBG_UI.roDepth) + ' <b>' + cache.depth + '</b>' +
+                 ' &middot; ' + T(DBG_UI.roBreaks) + ' <b>' + nBreaks + '</b>';
+      if (cache.truncated) html += '<br><span class="warn">' + T(DBG_UI.roTrunc) + '</span>';
+      if (typeof opts.readout === 'function') {
+        const extra = opts.readout(cache);
+        if (extra) html += '<br>' + extra;
+      }
+      html += '<br><span style="opacity:.62">' + T(DBG_UI.keys) + '</span>';
+      readoutEl.innerHTML = html;
+    }
+
+    function paintEditor() {
+      if (!editor) return;
+      editor.setVisited(cache.visited);
+      editor.setExecLine(cache.line);
+      editor.setFrameLine(null);
+      editor.scrollToLine(cache.line);
+    }
+
+    function refresh() {
+      selFrame = -1;
+      recompute();
+      paintStack();
+      paintVars();
+      paintOut();
+      paintReadout();
+      paintEditor();
+      if (typeof opts.onCursorMove === 'function') opts.onCursorMove(cache);
+    }
+
+    /* move(fn)：所有游标移动的唯一出口。fn 返回「下标是否真的变了」——
+       没变就不重绘（六个派生函数都是 O(i) 的，白算一遍没有任何意义）。 */
+    function move(fn) {
+      const changed = fn(cur);
+      if (changed) refresh();
+      return changed;
+    }
+
+    paneStack.list.addEventListener('click', function (e) {
+      const row = e.target && e.target.closest ? e.target.closest('.dbg-frame') : null;
+      if (!row) return;
+      selFrame = +row.dataset.fi;
+      const kids = paneStack.list.children;
+      for (let k = 0; k < kids.length; k++) kids[k].classList.toggle('sel', +kids[k].dataset.fi === selFrame);
+      /* 点栈帧 = 「看那一帧停在哪一行」，与主流调试器一致：它移动的是代码
+         视图，不是执行位置。轨迹上的游标不动——动了就等于凭空改写了"程序
+         现在在哪儿"，而调用栈里的外层帧本来就还没执行到别处去。 */
+      if (!editor) return;
+      const line = row.dataset.line ? +row.dataset.line : cache.line;
+      editor.setFrameLine(selFrame === 0 ? null : line);
+      editor.scrollToLine(line);
+    });
+
+    /* ---------------- 播放：按时间推进，不按帧计数 ---------------- */
+    let playing = false, acc = 0, sps = 10;
+    function setPlaying(v) {
+      playing = !!v && cur.trace.length > 0;
+      acc = 0;
+      relabel();
+    }
+    function tick(dt) {
+      if (!playing) return;
+      if (!(dt > 0)) return;
+      acc += dt;
+      const iv = 1 / sps;
+      /* 单帧最多推进 240 步：dt 已被引擎 clamp 到 0.05 s，但速度上限 120 步/秒
+         配上后台标签页回前台的那一帧仍可能积出一大把——给个明确的上限，
+         省得某一帧突然跑掉半条轨迹。 */
+      let n = 0;
+      while (acc >= iv && n < 240) {
+        acc -= iv;
+        n++;
+        if (!move(stepIn)) { setPlaying(false); break; }   // 到末尾自动停
+      }
+    }
+    speedIn.addEventListener('input', function () {
+      sps = +speedIn.value || 1;
+      acc = 0;
+      relabel();
+    });
+
+    /* ---------------- 快捷键（规格 §5.4） ----------------
+       **只处理这五个键，其余一律放行。** 方向键、退格、字母、Tab……全都属于
+       编辑器，被这里吞掉一次，代码面板就再也编辑不了了。所以这里写的是
+       白名单 + 命中才 preventDefault，绝不是"先 preventDefault 再看看"。
+       带 Ctrl/Meta/Alt 的组合同样放行（Ctrl+F5 是浏览器的强制刷新）。 */
+    function onKey(e) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      let hit = false;
+      if (e.key === 'F10' && !e.shiftKey) { move(stepOver); hit = true; }
+      else if (e.key === 'F11') { move(e.shiftKey ? stepOut : stepIn); hit = true; }
+      else if (e.key === 'F9' && !e.shiftKey) { toggleBreakAt(breakLine()); hit = true; }
+      else if (e.key === 'F5' && !e.shiftKey) { move(runTo); hit = true; }
+      if (!hit) return;
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    keyTarget.addEventListener('keydown', onKey);
+
+    /* F9 打在哪一行：编辑器有焦点就打在光标所在行（她正看着那一行），
+       否则打在当前执行行。两者都取不到时什么也不做。 */
+    function breakLine() {
+      if (editor && document.activeElement === editor.textarea) return editor.caretLine();
+      return cache ? cache.line : null;
+    }
+    function toggleBreakAt(line) {
+      if (line == null) return;
+      toggleBreak(cur, line);
+      if (editor) editor.setBreakpoints(function (ln) { return hasBreak(cur, ln); });
+      paintReadout();
+    }
+
+    function relabel() {
+      bPlay.textContent = T(playing ? DBG_UI.pause : DBG_UI.play);
+      bPlay.classList.toggle('on', playing);
+      bBack.textContent = T(DBG_UI.back);
+      bStep.textContent = T(DBG_UI.step);
+      bIn.textContent = T(DBG_UI.stepIn);
+      bOver.textContent = T(DBG_UI.stepOver);
+      bOut.textContent = T(DBG_UI.stepOut);
+      bRun.textContent = T(DBG_UI.runTo);
+      [bIn, bOver, bOut, bRun].forEach(function (b) { b.title = b.dataset.hint; });
+      speedLab.textContent = T(DBG_UI.speed);
+      speedVal.textContent = sps + T(DBG_UI.stepsPerSec);
+      paneStack.head.textContent = T(DBG_UI.stack);
+      paneVars.head.textContent = T(DBG_UI.vars);
+      paneOut.head.textContent = T(DBG_UI.out);
+      if (cache) { paintStack(); paintVars(); paintReadout(); }
+    }
+
+    if (editor) {
+      editor.setBreakpoints(function (ln) { return hasBreak(cur, ln); });
+      editor.onGutterClick(function (ln) { toggleBreakAt(ln); });
+    }
+    relabel();
+    refresh();
+
+    return {
+      root: el,
+      cursor: function () { return cur; },
+      /* 换轨迹（Run 之后）：新游标、清缓存、面板从第 0 步重画。断点跟着新的
+         cur 走——调用方若想保留断点，自己在建新 cur 时把 breakpoints 搬过去。 */
+      setCursor: function (next) {
+        cur = next;
+        playing = false;
+        acc = 0;
+        prevVals = Object.create(null);
+        outLen = 0;
+        paneOut.list.textContent = '';
+        if (editor) editor.setBreakpoints(function (ln) { return hasBreak(cur, ln); });
+        relabel();
+        refresh();
+      },
+      state: function () { return cache; },
+      refresh: refresh,
+      relabel: relabel,
+      tick: tick,
+      isPlaying: function () { return playing; },
+      setPlaying: setPlaying,
+      speed: function () { return sps; },
+      toggleBreakAt: toggleBreakAt,
+      destroy: function () {
+        keyTarget.removeEventListener('keydown', onKey);
+        el.textContent = '';
+        el.classList.remove('dbg-root');
+      },
+    };
+  }
+
   return {
     create: create, goto: goto, step: step,
     stepIn: stepIn, stepOver: stepOver, stepOut: stepOut, runTo: runTo,
     toggleBreak: toggleBreak, hasBreak: hasBreak,
     currentLine: currentLine, visitedLines: visitedLines, callStack: callStack,
     locals: locals, output: output, boardState: boardState,
+    mount: mount, fmtVal: fmtVal,
   };
 });
