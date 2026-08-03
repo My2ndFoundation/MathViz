@@ -4,12 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<!-- 占位符，复制本骨架时必须改掉：<title>、下面这条 tool-version 的
-     content（新工具从 1.0.0 起），以及工具脚本里 TOOL 声明的 id / title / h1。
-     engine-version 反映的是四个 core 模块的版本，不是工具自己的版本，
-     一般不必跟着改。 -->
-<meta name="tool-version" content="1.0.0">
-<meta name="engine-version" content="chess-0.1.0">
+<!-- 版本记录（changelog，新→旧）：
+     1.0.2  2026-08-03  内部：跟进引擎 chess-1.2.0，它新增了供棋谱回放工具使用的
+                        公开接口 syncPresetHighlight()。本工具行为无变化。
+     1.0.1  2026-08-02  内部改写：帧时钟收口到引擎的单一出处（VizEngine.state.dt）；
+                        引擎里未被使用的浮点行录制骨架已删除。
+     1.0.0  2026-08-02  首发：伪合法/合法差集、易位四前提、吃过路兵时间窗、将死与逼和。 -->
+<meta name="tool-version" content="1.0.2">
+<meta name="engine-version" content="chess-1.2.0">
 <title>Rules, Legality and Mate</title>
 <!-- 样式令牌与组件整体搬运自 design-system/math-viz-starter.html 的 <style> 块，
      只做两处子项目专属调整：① canvas 是唯一主角，本子项目工具①②不分屏（分屏
@@ -127,7 +129,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 .tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
 .tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
 
-/* 录制 / 回放行（§11）；未声明 RECORD 的工具里 #recHost 始终为空 */
+/* 工具自己的传输条 / IO 行；#recHost 是给它的槽，不需要的工具留空即可 */
 .recrow{display:flex;flex-wrap:wrap;gap:6px;margin:11px 0 2px}
 .recrow .btn{padding:5px 9px;font-size:11.5px}
 .recinfo{font-family:var(--font-mono);font-size:11px;line-height:1.6;
@@ -224,9 +226,10 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 <script>
 /* >>> GENERATED:VIZ-ENGINE */
 /* 3D 渲染引擎 —— 由 design-system/math-viz-starter.html 裁剪而来。
-   保留：轨道相机、透视投影与近裁剪、绘图原语、设计令牌、UI 组件、
-         i18n、录制回放骨架。
-   删除：连续时间积分、历史样本环形缓冲、三角函数专用部件。
+   保留：轨道相机、透视投影与近裁剪、绘图原语、设计令牌、UI 组件、i18n。
+   删除：连续时间积分、历史样本环形缓冲、三角函数专用部件、
+         浮点采样录制/回放骨架（阶段 2 Task 1——每条前提在棋类工具上都不
+         成立：棋没有连续演算可供逐帧采样，见下面 state.dt 的说明）。
    编辑源，运行时被内联进 tools/*.html。
 
    模块顶层绝不触碰 document / window.matchMedia / localStorage / location ——
@@ -234,11 +237,10 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
    （见 task-12 的 Step 5 导出检查）。任何要碰 DOM 的东西都挪进 init() /
    bindOrbit() / 事件回调里，只有真正在浏览器里调用它们时才会执行。
 
-   SCENES / PARAMS / RECORD / TOOL 等「工具专属声明」不在这里假定成同名全局——
+   SCENES / PARAMS / TOOL 等「工具专属声明」不在这里假定成同名全局——
    那样在 node 下 require，或在没有声明它们的最小页面里调用 init()，会在
    第一次访问处直接 ReferenceError。这里把它们做成 init() 的可选参数，
-   默认是空容器，未提供时相关机制安静地不生效（与 starter 里「不声明 RECORD
-   就完全没有录制 UI」是同一条精神）。 */
+   默认是空容器，未提供时相关机制安静地不生效。 */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.VizEngine = factory();
@@ -276,23 +278,6 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     /* 预置局面/预置内容的默认标签——场景可以用 SCENES[id].presetsLabel 覆盖它
        （如「棋种」而不是通用的「预置」），省略时退回这个通用词。 */
     presets: { zh: '预置', en: 'Preset' },
-    /* 演算记录与回放（§11）。仅当调用方在 init() 里提供 RECORD 钩子时才出现。 */
-    recRec:    { zh: '● 记录',   en: '● Record' },
-    recStop:   { zh: '■ 停止',   en: '■ Stop' },
-    recSave:   { zh: '⬇ 保存',   en: '⬇ Save' },
-    recLoad:   { zh: '⬆ 载入',   en: '⬆ Load' },
-    recExit:   { zh: '✕ 退出回放', en: '✕ Exit replay' },
-    recPlay:   { zh: '▶',        en: '▶' },
-    recPause:  { zh: '⏸',        en: '⏸' },
-    recRewind: { zh: '⏮',        en: '⏮' },
-    recRows:   { zh: ' 行',      en: ' rows' },
-    recFull:   { zh: '已达行数上限，录制停止（数据完整，未截断）',
-                 en: 'Row limit reached, recording stopped (data complete, not truncated)' },
-    recRoundEnd: { zh: '本轮结束，录制自动停止', en: 'Round complete, recording stopped' },
-    recReplay: { zh: '回放中', en: 'Replaying' },
-    recVerifyOK: { zh: '种子比对：本机复现（δ = ', en: 'Seed check: reproduced here (δ = ' },
-    recVerifyNo: { zh: '种子比对：本机复现不了（δ = ', en: 'Seed check: not reproducible here (δ = ' },
-    recVerifyTail: { zh: '）—— 这不是 bug，见提示', en: ') — not a bug, see the tip' },
     /* 手势由 bindOrbit(canvas) 绑定，快捷键由 bindKeyboard() 绑定（见「交互」
        一节）——两组都是 init() 会自动接好的，提示语把它们列在一起。 */
     hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 1–9 视角 · T 切换页签',
@@ -308,17 +293,20 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   /* window.matchMedia 的结果；只在 init() 里读一次（硬约束：模块顶层不碰 window）。 */
   let REDUCED = false;
 
-  /* state.t 保留给录制骨架当「引擎时钟」用；state 里的连续相位（θ 积分）已删除——
-     棋没有连续时间驱动，参见 task-12 brief 的删除表。
-     running 默认 false（暂停），不是继承自 math-viz 引擎的 true——那边的工具
-     天生是一段持续运行的连续模拟，「打开就在动」是常态；棋类工具没有连续模拟，
-     running 目前唯一的效果是喂给（本来就哑的）simAdvance 和播放按钮的文案，
-     真正的「自动巡回演示」是每个工具自己的 demoRunning/demoPlaying 在管。
-     默认给 true 会让按钮在打开页面的瞬间就显示「暂停」，暗示着有什么正在跑，
-     这正是用户在两个棋类工具上报的体验问题的根——用户到达页面时演示已经在切换，
-     第一件事却要去找暂停键。默认 false 让「打开 = 静止，播放是你主动要的」
-     对每一个未来要接这份引擎的棋类工具都成立，不必每个工具各自记得覆盖它。 */
-  const state = { running: false, t: 0 };
+  /* state.dt：本帧的时长（秒），由 frame() 每帧写入，已 clamp 到 [0, 0.05]
+     以熬过后台标签页的时间跳变。场景在 draw() 里读它来推进自己的动画——
+     这是引擎唯一的时钟出口。工具不得自己再用 performance.now() 算一遍：
+     同一个量两处计算必然漂移（阶段 1 的两个工具各自造了一份 frameDt()，
+     阶段 2 Task 1 一并收口）。running 默认 false（载入即暂停）——不是继承自
+     math-viz 引擎的 true——那边的工具天生是一段持续运行的连续模拟，
+     「打开就在动」是常态；棋类工具没有连续模拟，running 目前唯一的效果是
+     喂给播放按钮的文案，真正的「自动巡回演示」是每个工具自己的
+     demoRunning/demoPlaying 在管。默认给 true 会让按钮在打开页面的瞬间就
+     显示「暂停」，暗示着有什么正在跑，这正是用户在两个棋类工具上报的体验
+     问题的根——用户到达页面时演示已经在切换，第一件事却要去找暂停键。
+     默认 false 让「打开 = 静止，播放是你主动要的」对每一个未来要接这份
+     引擎的棋类工具都成立，不必每个工具各自记得覆盖它。 */
+  const state = { running: false, dt: 0 };
   let curTab = null;
   const RELABEL = [];        // 语言切换时需要重新取文案的回调列表
   const cams = {};           // tabId -> 该页签「首视角」对应的相机参数（启动 / 双击回正用）
@@ -334,15 +322,13 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
      拆成两份独立状态，谁也不再替谁背锅。 */
   const lastPreset = {};
 
-  /* SCENES / PARAMS / RECORD / TOOL / 版本号：工具专属声明，由 init() 可选注入。
+  /* SCENES / PARAMS / TOOL / 版本号：工具专属声明，由 init() 可选注入。
      默认给空容器而不是假定同名全局已存在——这样 require() 或在没提供它们的
      最小页面上调用 init() 都不会在访问处抛 ReferenceError，机制只是安静地不生效。 */
   let SCENES = {};
   let PARAMS = [];
-  let RECORD = {};
   let TOOL = { id: null, title: { zh: '', en: '' }, h1: { zh: '', en: '' } };
   let VERSION = '0.0.0';
-  let ENGINE_VERSION = '0.0.0';
 
   /* ================= 画布 ================= */
   let canvas = null, ctx = null;
@@ -631,20 +617,6 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 
   function resetSim() {
     Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
-    state.t = 0;
-  }
-
-  /* 推进一步「引擎时钟」。starter 版本这里还会积分连续相位、驱动场景滑杆、
-     记一条历史采样——三样棋都用不上，删掉后只剩 state.t 前进，供录制骨架的
-     固定步长回放使用。真正的棋局推演（落子、算法单步）由消费方在
-     draw() / 自己的钩子里做。
-     现状记录：state.t 眼下除了录制/回放子系统（recPush 起点、recStep 回放
-     时钟、recVerify 的核对与复原）之外没有别的读者——键盘不再驱动它
-     （见 bindKeyboard 处的说明），也没有任何 draw()/readout() 在读它。
-     是否整体拿掉这份「引擎时钟」是阶段 2 接 PGN 回放时才能定的架构决定，
-     这里先如实记一笔，不做改动。 */
-  function simAdvance(d) {
-    state.t += d;
   }
 
   let lastTs = 0, lastRO = 0;
@@ -667,22 +639,10 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
         if (k >= 1) tween = null;
       }
 
-      /* 回放冻结的是「演算」，不是「观察」：相机 tween 在上面已经走过了，
-         视角、开关、绘制全部照常——与「暂停只冻结模拟」同一条精神（§11.7）。 */
-      if (recState.mode === 'replay') {
-        recStep(dt);
-      } else if (state.running) {
-        if (recState.mode === 'recording') {
-          recState.acc += dt;
-          let guard = 0;
-          while (recState.acc >= REC_DT && guard++ < 64) { recState.acc -= REC_DT; simAdvance(REC_DT); recPush(); }
-        } else {
-          simAdvance(dt);
-        }
-      }
+      state.dt = dt;
 
       draw();
-      if (ts - lastRO > 120) { lastRO = ts; updateReadout(); refreshRecInfo(); }
+      if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
     } catch (err) {
       frameError(err);
     } finally {
@@ -907,322 +867,25 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     refreshPresetButtons();
   }
 
-  let brandDescEl = null, tipsEl = null, roEl = null;
-
-  /* ══════════════ 演算记录与回放（规范 §11）══════════════
-     整体搬运自 starter：序列化 / 下载上传 / 回放时钟 / 校验 / 种子比对全在这里，
-     消费方只提供 RECORD 里的六个钩子。「存档格式」的序列化细节留成钩子——
-     阶段 2 会把它接到 PGN 上（规格 §1.3）。这里只搬骨架，并确认在没有
-     RECORD 声明时（默认 RECORD = {}）完全静默——recHooks() 恒为 null，
-     所有 rec* 函数第一行就 early-return。 */
-  const REC_FORMAT = 'chess-viz-run';
-  const REC_FORMAT_VERSION = 1;
-  const REC_DT = 0.02;         // 采样间隔（模拟秒）
-  const REC_MAX_ROWS = 20000;  // 行数上限；到顶停录并提示，绝不静默截断（§11.4）
-  const REC_PREC = 12;         // 数值有效位；比对基线要把这项舍入计入（§11.4）
-
-  const recState = {
-    mode: 'live',              // 'live' | 'recording' | 'replay'
-    rows: [], fields: null, shape: null,
-    seed: null, tab: null, srcName: null,
-    i: 0, playing: true, rate: 1, acc: 0, t0: 0,
-    roundAt: null, note: null,
-    verify: null               // { delta, reproduced } —— §11.2 的种子比对结论
-  };
-
-  function recHooks(tab) { return (RECORD && RECORD[tab || curTab]) || null; }
-
-  /* 唯一的只读判据访问器。工具的 draw()/readout() 要查模式一律走它，不得自己
-     伸手进 recState 拼一份判据——那是留给下一个人的陷阱（同一判据两种写法
-     必然漂移）。导出为 VizEngine.recInfo：SCENES 现在由消费方在另一个作用域
-     声明，不再和这份引擎代码共享同一个顶层作用域，裸标识符 recInfo 够不着，
-     必须真正跨过模块边界才能履行这份对录制感知场景的承诺。 */
-  function recInfo() {
-    if (!recHooks()) return null;
-    return {
-      mode: recState.mode,
-      rows: recState.rows.length,
-      i: recState.i,
-      playing: recState.playing,
-      srcName: recState.srcName,
-      verify: recState.verify,
-      note: recState.note
-    };
-  }
-
-  /* capture() 的对象 → 一行数字。展开顺序由第一次调用的结构冻结（§11.6）。 */
-  function recShapeOf(o) {
-    const f = [];
-    (function walk(v, path) {
-      if (Array.isArray(v)) v.forEach((x, i) => walk(x, path + '[' + i + ']'));
-      else if (v && typeof v === 'object') Object.keys(v).forEach(k => walk(v[k], path ? path + '.' + k : k));
-      else f.push(path);
-    })(o, '');
-    return f;
-  }
-  function recFlatten(o) {
-    const out = [];
-    (function walk(v) {
-      if (Array.isArray(v)) v.forEach(walk);
-      else if (v && typeof v === 'object') Object.keys(v).forEach(k => walk(v[k]));
-      else out.push(typeof v === 'number' ? +v.toPrecision(REC_PREC) : v);
-    })(o);
-    return out;
-  }
-  function recUnflatten(row, tmpl) {
-    let i = 0;
-    return (function walk(v) {
-      if (Array.isArray(v)) return v.map(walk);
-      if (v && typeof v === 'object') { const o = {}; Object.keys(v).forEach(k => { o[k] = walk(v[k]); }); return o; }
-      return row[i++];
-    })(tmpl);
-  }
-
-  function recStartRecording() {
-    const h = recHooks(); if (!h) return;
-    /* 起录前先把本页签重置到一轮的开头（§11.3）——引擎的责任，不是消费方
-       在 seed() 里偷偷做。 */
-    if (h.reseed && h.seed) h.reseed(h.seed());
-    const snap = h.capture();
-    recState.mode = 'recording';
-    recState.rows = []; recState.tab = curTab;
-    recState.shape = snap; recState.fields = recShapeOf(snap);
-    recState.seed = h.seed(); recState.roundAt = h.roundOf();
-    recState.t0 = state.t;          // 录制起点的引擎时钟；回放要照它复原，见 recStep
-    recState.note = null; recState.verify = null; recState.acc = 0;
-    recPush();                                      // 立即记下第 0 行
-    buildRecRow();
-  }
-  function recStopRecording(note) {
-    if (recState.mode !== 'recording') return;
-    recState.mode = 'live';
-    recState.note = note || null;
-    buildRecRow();
-  }
-
-  /* 记一行。不做时间节流——录制态下 frame() 已经把推进量子化成整数个
-     REC_DT，一格一行即可。 */
-  function recPush() {
-    if (recState.mode !== 'recording') return;
-    const h = recHooks(); if (!h) return;
-    if (h.roundOf() !== recState.roundAt) { recStopRecording(UI.recRoundEnd); return; }  // §11.3 录一轮
-    recState.rows.push(recFlatten(h.capture()));
-    if (recState.rows.length >= REC_MAX_ROWS) recStopRecording(UI.recFull);
-  }
-
-  /* 回放推进：按 rate 走行号，restore 后照常推进读数与绘制。 */
-  function recStep(dt) {
-    const h = recHooks(); if (!h || !recState.rows.length) return;
-    if (recState.playing) {
-      recState.acc += dt * recState.rate;
-      while (recState.acc >= REC_DT && recState.i < recState.rows.length - 1) { recState.acc -= REC_DT; recState.i++; }
-      if (recState.i >= recState.rows.length - 1) { recState.acc = 0; recState.playing = false; buildRecRow(); }
-    }
-    h.restore(recUnflatten(recState.rows[recState.i], recState.shape));
-    /* 从录制起点算起，不是从 0——录制未必始于 t = 0。 */
-    state.t = recState.t0 + recState.i * REC_DT;
-  }
-
-  function recExitReplay() {
-    if (recState.mode !== 'replay') return;
-    recState.mode = 'live';
-    recState.rows = []; recState.i = 0; recState.srcName = null; recState.verify = null; recState.note = null;
-    resetSim();
-    buildRecRow();
-  }
-
-  function recSave() {
-    if (!recState.rows.length) return;
-    const doc = {
-      format: REC_FORMAT, formatVersion: REC_FORMAT_VERSION,
-      tool: { id: TOOL.id, version: VERSION, engine: ENGINE_VERSION },
-      tab: recState.tab, recordedAt: new Date().toISOString(),
-      seed: recState.seed,
-      trace: { dt: REC_DT, t0: recState.t0, fields: recState.fields, rows: recState.rows }
-    };
-    const blob = new Blob([JSON.stringify(doc)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = (TOOL.id || 'run') + '-' + recState.tab + '.json';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-
-  /* 加载校验（§11.5）：任一不过即明确拒绝，不做兼容性猜测。 */
-  function recValidate(doc) {
-    if (!doc || doc.format !== REC_FORMAT) return { zh: '不是本引擎的存档文件', en: 'Not a valid run file for this engine' };
-    if (doc.formatVersion !== REC_FORMAT_VERSION)
-      return { zh: '存档格式版本 ' + doc.formatVersion + ' 本工具不认识', en: 'Unknown archive format version ' + doc.formatVersion };
-    if (!doc.tool || doc.tool.id !== TOOL.id)
-      return { zh: '这份存档属于「' + ((doc.tool && doc.tool.id) || '?') + '」，不是本工具',
-               en: 'This archive belongs to "' + ((doc.tool && doc.tool.id) || '?') + '", not this tool' };
-    const h = recHooks(doc.tab);
-    if (!h) return { zh: '存档的页签「' + doc.tab + '」在本工具中不可录制', en: 'Tab "' + doc.tab + '" is not recordable here' };
-    const want = recShapeOf(h.capture());
-    const got = (doc.trace && doc.trace.fields) || [];
-    if (want.length !== got.length || want.some((k, i) => k !== got[i]))
-      return { zh: '存档的字段与本版本不一致，拒绝载入（字段错位会画出看似合理实则错误的图）',
-               en: 'Field set does not match this version; refusing to load (a mismatch would draw a plausible but wrong picture)' };
-    if (!doc.trace.rows || !doc.trace.rows.length) return { zh: '存档里没有数据行', en: 'Archive contains no rows' };
-    return null;
-  }
-
-  /* §11.2：用种子在本机重新推演，与记录的轨迹逐点比对。
-     工具没给 reseed/seed 就跳过（返回 null），不阻塞回放。 */
-  function recVerify(doc) {
-    const h = recHooks(doc.tab);
-    if (!h || !h.reseed || !doc.seed) return null;
-    /* 重算是一次「离线」推演：它会走 simAdvance，因而动到 state.t。
-       全部存下来在 finally 里还原——比对不该在用户的现场留下任何痕迹。 */
-    const keep = h.capture();
-    const keepT = state.t;
-    try {
-      h.reseed(doc.seed);
-      let worst = 0;
-      const n = Math.min(doc.trace.rows.length, 400);
-      for (let k = 0; k < n; k++) {
-        const mine = recFlatten(h.capture()), theirs = doc.trace.rows[k];
-        for (let j = 0; j < mine.length; j++) {
-          const a = +mine[j], b = +theirs[j];
-          if (isFinite(a) && isFinite(b)) worst = Math.max(worst, Math.abs(a - b));
-        }
-        /* 走与录制时完全相同的推进路径（同一个 simAdvance、同一个 REC_DT）。 */
-        if (k < n - 1) simAdvance(REC_DT);
-      }
-      /* 阈值要把 toPrecision(REC_PREC) 的舍入算进去（§11.4）。 */
-      return { delta: worst, reproduced: worst < 1e-9 };
-    } catch (e) {
-      return null;
-    } finally {
-      h.restore(keep);
-      state.t = keepT;
-    }
-  }
-
-  function recLoadDoc(doc, name) {
-    const bad = recValidate(doc);
-    if (bad) { recState.note = bad; buildRecRow(); return false; }
-    const h = recHooks(doc.tab);
-    if (doc.tab !== curTab) switchTab(doc.tab);
-    recState.verify = recVerify(doc);
-    recState.mode = 'replay';
-    recState.rows = doc.trace.rows;
-    recState.fields = doc.trace.fields;
-    recState.shape = h.capture();
-    recState.seed = doc.seed; recState.tab = doc.tab; recState.srcName = name;
-    recState.t0 = +doc.trace.t0 || 0;
-    recState.i = 0; recState.acc = 0; recState.playing = true; recState.rate = 1; recState.note = null;
-    buildRecRow();
-    return true;
-  }
-
-  /* 状态行的文案只有这一处出处（buildRecRow 建行、refreshRecInfo 每 120ms 刷新，
-     两边都读它）——曾经因为两处各写一份文案，导致回放进度停在「1 / N」不动。 */
-  function recInfoText() {
-    const bits = [];
-    if (recState.mode === 'replay') {
-      bits.push(t(UI.recReplay) + ' ' + (recState.i + 1) + ' / ' + recState.rows.length);
-      if (recState.srcName) bits.push(recState.srcName);
-      if (recState.verify) {
-        bits.push(t(recState.verify.reproduced ? UI.recVerifyOK : UI.recVerifyNo) +
-                  recState.verify.delta.toExponential(1) +
-                  (recState.verify.reproduced ? '）' : t(UI.recVerifyTail)));
-      }
-    } else {
-      bits.push(recState.rows.length + t(UI.recRows));
-    }
-    if (recState.note) bits.push(t(recState.note));
-    return bits.join(' · ');
-  }
-
-  /* 录制 / 回放行（§11）。只在当前页签声明了 RECORD 钩子时出现。 */
-  function buildRecRow() {
-    const host = document.getElementById('recHost');
-    if (!host) return;
-    host.innerHTML = '';
-    if (!recHooks()) return;
-
-    const row = document.createElement('div');
-    row.className = 'row recrow';
-    const mk = (labObj, fn, cls) => {
-      const b = document.createElement('button');
-      b.className = 'btn' + (cls ? ' ' + cls : '');
-      b.textContent = t(labObj);
-      b.addEventListener('click', fn);
-      return b;
-    };
-
-    if (recState.mode === 'replay') {
-      row.appendChild(mk(recState.playing ? UI.recPause : UI.recPlay,
-        () => { recState.playing = !recState.playing; buildRecRow(); }));
-      row.appendChild(mk(UI.recRewind, () => { recState.i = 0; recState.acc = 0; recState.playing = true; buildRecRow(); }));
-      const rate = document.createElement('button');
-      rate.className = 'btn';
-      rate.textContent = recState.rate + '×';
-      rate.addEventListener('click', () => {
-        const steps = [0.25, 0.5, 1, 2, 4];
-        recState.rate = steps[(steps.indexOf(recState.rate) + 1) % steps.length];
-        buildRecRow();
-      });
-      row.appendChild(rate);
-      row.appendChild(mk(UI.recExit, recExitReplay));
-    } else if (recState.mode === 'recording') {
-      row.appendChild(mk(UI.recStop, () => recStopRecording(null), 'wide'));
-      row.appendChild(mk(UI.recSave, recSave));
-    } else {
-      row.appendChild(mk(UI.recRec, recStartRecording, 'wide'));
-      row.appendChild(mk(UI.recSave, recSave));
-      row.appendChild(mk(UI.recLoad, () => {
-        const inp = document.createElement('input');
-        inp.type = 'file'; inp.accept = 'application/json,.json';
-        inp.addEventListener('change', () => {
-          const f = inp.files && inp.files[0];
-          if (!f) return;
-          const rd = new FileReader();
-          rd.onload = () => {
-            let doc = null;
-            try { doc = JSON.parse(rd.result); }
-            catch (e) { recState.note = { zh: '文件不是合法 JSON', en: 'File is not valid JSON' }; buildRecRow(); return; }
-            recLoadDoc(doc, f.name);
-          };
-          rd.readAsText(f);
-        });
-        inp.click();
-      }));
-    }
-    host.appendChild(row);
-
-    const info = document.createElement('div');
-    info.className = 'recinfo';
-    info.textContent = recInfoText();
-    info.dataset.rec = '1';
-    host.appendChild(info);
-
-    refreshRecLocks();
-  }
-
-  /* 录制中的行数、回放中的进度都是每帧在变的，而 buildRecRow() 只在状态切换时
-     跑——只改这一行文本，别整行重建。判据是「不是 live」而不是「是 recording」：
-     回放同样每帧在走，漏掉它就等于让进度数字停在原地。 */
-  function refreshRecInfo() {
-    if (recState.mode === 'live') return;
-    const el = document.querySelector('#recHost .recinfo[data-rec]');
-    if (!el) return;
-    el.textContent = recInfoText();
-  }
-
-  /* 回放期间种子滑杆置灰——改它们等于改种子，画面与数据会脱节（§11.7）。 */
-  function refreshRecLocks() {
-    const h = recHooks();
-    const lock = (recState.mode === 'replay' && h && h.lock) || [];
-    Object.keys(paramWraps).forEach(k => {
-      const e = paramWraps[k];
-      if (!e) return;
-      const on = lock.indexOf(k) >= 0;
-      e.input.disabled = on;
-      e.wrap.style.opacity = on ? '0.45' : '';
+  /* 只同步高亮，不调用 onSelect：给调用方已经自己完成了加载（例如工具③
+     的 PGN 拖入 / FEN 粘贴 / 棋局浏览器直接选中某个 id）、只需要让预置
+     按钮组的选中态跟上真实状态的场景。key 传 null/undefined 表示「清空
+     高亮」——没有哪个按钮的 dataset.preset 会等于 undefined，所以这就是
+     『不让按钮组停在一个已经不成立的选中态』的实现方式。跨 tab 共享同一份
+     presets 数组引用时的同步逻辑与 applyPreset() 保持一致（否则切换 tab
+     会看见按钮组用另一条路径的陈旧值重新亮起）。 */
+  function syncPresetHighlight(tabId, key) {
+    const sc = SCENES[tabId];
+    const list = sc && sc.presets;
+    lastPreset[tabId] = key || undefined;
+    if (list) Object.keys(SCENES).forEach(otherId => {
+      if (otherId !== tabId && SCENES[otherId].presets === list) lastPreset[otherId] = key || undefined;
     });
+    if (tabId === curTab) state.preset = key || undefined;
+    refreshPresetButtons();
   }
+
+  let brandDescEl = null, tipsEl = null, roEl = null;
 
   function switchTab(id) {
     if (id === curTab) return;
@@ -1236,11 +899,6 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     const sc = SCENES[id];
     if (brandDescEl && sc) brandDescEl.textContent = t(sc.brand);
     if (tipsEl && sc) tipsEl.textContent = t(sc.tips);
-    /* 换页签 = 换实验：正在录的那一轮不再对应画面，停录并保留已录数据；
-       回放态则整个退出——存档是绑定页签的（§11.4 的 tab 字段）。 */
-    if (recState.mode === 'recording' && recState.tab !== id) recStopRecording(null);
-    if (recState.mode === 'replay' && recState.tab !== id) recExitReplay();
-    buildRecRow();
     syncParamVisibility();
     refreshViewButtons();
     /* 换 tab 时把导出的 state.preset 同步成这个 tab 自己记住的那一个——
@@ -1277,7 +935,6 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     const btnResetEl = document.getElementById('btnReset');
     if (btnResetEl) btnResetEl.textContent = t(UI.reset);
     RELABEL.forEach(f => f());
-    buildRecRow();               // 录制行的文案是建行时取的 t()，整行重建即跟随语言
     const sc = SCENES[curTab];
     if (brandDescEl && sc) brandDescEl.textContent = t(sc.brand);
     if (tipsEl && sc) tipsEl.textContent = t(sc.tips);
@@ -1385,8 +1042,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
      （阶段 3 的复盘工具还要用它当「下一步」），r 同理是工具自己的重置键；
      若引擎在这里先用 preventDefault() 抢注，工具将来接自己的处理器时
      只会和引擎打架，而不是真正拿到这个键。resetSim()/togglePlay() 本身
-     没有删——它们仍然接在面板的按钮上，只是不再从键盘直接触发。
-     （state.t 目前只有录制子系统在读，见 simAdvance 处的说明。） */
+     没有删——它们仍然接在面板的按钮上，只是不再从键盘直接触发。 */
   function bindKeyboard() {
     window.addEventListener('keydown', e => {
       const el = document.activeElement;
@@ -1407,11 +1063,14 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   }
 
   /* ================= 启动 ================= */
-  /* VizEngine.init({ canvas, SCENES, PARAMS, RECORD, TOOL, VERSION, ENGINE_VERSION }) ——
-     只有 canvas 是必需的。其余都是「工具专属声明」，省略时对应机制安静地不生效
-     （与 starter「不声明 RECORD 就没有录制 UI」同一条精神），这样本模块既可以
-     被最小页面（如棋子预览页）直接用来拿相机与绘图原语，也能在将来的算法工具里
-     接上完整的滑杆 / 页签 / 录制机制。 */
+  /* VizEngine.init({ canvas, SCENES, PARAMS, TOOL, VERSION }) ——
+     只有 canvas 是必需的。其余都是「工具专属声明」，省略时对应机制安静地不生效，
+     这样本模块既可以被最小页面（如棋子预览页）直接用来拿相机与绘图原语，
+     也能在将来的算法工具里接上完整的滑杆 / 页签机制。
+     没有 ENGINE_VERSION 参数——它唯一的读者是阶段 2 Task 1 删掉的那份录制
+     存档函数（下载 JSON 存档时把引擎版本写进文档头），删掉那份骨架后引擎
+     自己不再需要这个值。工具仍然在 <meta name="engine-version"> 里声明它、
+     给人读（§10 版本规范），只是不用再传进 init()。 */
   function init(opts) {
     opts = opts || {};
     canvas = opts.canvas;
@@ -1420,10 +1079,8 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 
     if (opts.SCENES) SCENES = opts.SCENES;
     if (opts.PARAMS) PARAMS = opts.PARAMS;
-    if (opts.RECORD) RECORD = opts.RECORD;
     if (opts.TOOL) TOOL = opts.TOOL;
     if (opts.VERSION) VERSION = opts.VERSION;
-    if (opts.ENGINE_VERSION) ENGINE_VERSION = opts.ENGINE_VERSION;
 
     try {
       REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -1504,14 +1161,15 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     drawAxes, drawGridXY,
     clamp, fmt, fmtS, t,
     init, bindOrbit,
-    cam, recInfo,
+    syncPresetHighlight,
+    cam,
     /* PARAMS/toggles 把滑杆与开关的值写进这个对象（buildParams 的
-       state[p.key]、buildToggles 的 state[tg.key]），state.running 也在
-       这里——三者都曾经只在引擎私有闭包内可见，工具的 SCENES（另一个
+       state[p.key]、buildToggles 的 state[tg.key]），state.running / state.dt
+       也在这里——它们都曾经只在引擎私有闭包内可见，工具的 SCENES（另一个
        <script> 块，另一个作用域）够不着。导出的是这个对象本身，不是
        拷贝或冻结视图：starter 的既有语义就是场景读写同一份 state（例如
-       state.running 由 togglePlay() 写、由 frame() 读），拷贝或冻结都会
-       破坏这一点。 */
+       state.running 由 togglePlay() 写、由 frame() 读；state.dt 由 frame()
+       写、工具自己的 frameDt() 读），拷贝或冻结都会破坏这一点。 */
     state
   };
 });
@@ -2513,7 +2171,8 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 });
 /* <<< GENERATED:INTERACT */
 /* >>> GENERATED:BOARD-RENDER */
-/* 参数化棋盘与棋子渲染。棋盘躺在 z=0 平面、以原点为中心。
+/* 参数化棋盘与棋子渲染。棋盘以原点为中心，躺在 layout({z}) 指定的平面上，
+   z 默认 0 —— 前两个工具只有一块棋盘，工具③ 的历史局面才需要沿 −z 分层。
    算法工具与规则工具共用同一套 —— 八皇后摆的是真正的后。
    零依赖；node 与浏览器双用。编辑源，运行时被内联。 */
 (function (root, factory) {
@@ -2526,17 +2185,22 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     const files = (spec && spec.files) || 8;
     const ranks = (spec && spec.ranks) || 8;
     const cell = (spec && spec.cell) || 1;
+    /* z：棋盘所在的平面。默认 0（前两个工具的全部用法）。工具③ 的历史局面
+       沿 −z 后退，每一层是一块自己的 layout——把 z 放进 layout 而不是让每个
+       调用方在拿到 [x,y,0] 之后自己改第三个分量，是因为 pickSquare 也要用
+       同一个 z 去求交：两处各写一遍必然有一天对不上。 */
+    const z = (spec && spec.z) || 0;
     const w = files * cell, h = ranks * cell;
     const x0 = -w / 2, y0 = -h / 2;
 
     return {
-      files: files, ranks: ranks, cell: cell, w: w, h: h,
+      files: files, ranks: ranks, cell: cell, z: z, w: w, h: h,
       squareCenter: function (f, r) {
-        return [x0 + (f + 0.5) * cell, y0 + (r + 0.5) * cell, 0];
+        return [x0 + (f + 0.5) * cell, y0 + (r + 0.5) * cell, z];
       },
       squareCorners: function (f, r) {
         const x = x0 + f * cell, y = y0 + r * cell;
-        return [[x, y, 0], [x + cell, y, 0], [x + cell, y + cell, 0], [x, y + cell, 0]];
+        return [[x, y, z], [x + cell, y, z], [x + cell, y + cell, z], [x, y + cell, z]];
       },
     };
   }
@@ -2574,8 +2238,8 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   function coordLabelSize(C, E, L) {
     const o = L.squareCorners(0, 0)[0];
     const p0 = E.proj(C, o);
-    const px = E.proj(C, [o[0] + L.cell, o[1], 0]);
-    const py = E.proj(C, [o[0], o[1] + L.cell, 0]);
+    const px = E.proj(C, [o[0] + L.cell, o[1], L.z]);
+    const py = E.proj(C, [o[0], o[1] + L.cell, L.z]);
     if (!p0 || !px || !py) return COORD_LABEL_SIZE_MIN;
     const cellPx = (Math.hypot(px[0] - p0[0], px[1] - p0[1]) +
                     Math.hypot(py[0] - p0[0], py[1] - p0[1])) / 2;
@@ -2606,12 +2270,12 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     E.withContext(ctx, function () {
       for (let f = 0; f < L.files; f++) {
         const c = L.squareCenter(f, 0);
-        E.label3(C, [c[0], o[1] - COORD_LABEL_OFFSET * L.cell, 0], fileLabel(f),
+        E.label3(C, [c[0], o[1] - COORD_LABEL_OFFSET * L.cell, L.z], fileLabel(f),
                  { color: COORD, size: size, align: 'center' });
       }
       for (let r = 0; r < L.ranks; r++) {
         const c = L.squareCenter(0, r);
-        E.label3(C, [o[0] - COORD_LABEL_OFFSET * L.cell, c[1], 0], String(r + 1),
+        E.label3(C, [o[0] - COORD_LABEL_OFFSET * L.cell, c[1], L.z], String(r + 1),
                  { color: COORD, size: size, align: 'center' });
       }
     });
@@ -2639,7 +2303,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     const o = L.squareCorners(0, 0)[0];
     E.withContext(ctx, function () {
       // 外框
-      const frame = [o, [o[0] + L.w, o[1], 0], [o[0] + L.w, o[1] + L.h, 0], [o[0], o[1] + L.h, 0], o];
+      const frame = [o, [o[0] + L.w, o[1], L.z], [o[0] + L.w, o[1] + L.h, L.z], [o[0], o[1] + L.h, L.z], o];
       E.strokePoly(C, frame, { color: EDGE, width: 1.4 });
     });
 
@@ -2650,10 +2314,10 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 
   /* 反向查询：屏幕坐标 → 棋盘格。是「点击选子」这枚阶段 1 头号交互
      （点棋子→高亮合法目标→点目标→落子）唯一需要的引擎入口。
-     用 E.unproject 把射线与棋盘所在的 z=0 平面求交，再按 layout 的格距换算
-     成 file/rank；落在相机之后、或点在棋盘外框之外都返回 null。 */
+     用 E.unproject 把射线与棋盘所在的平面（L.z，默认 0）求交，再按 layout
+     的格距换算成 file/rank；落在相机之后、或点在棋盘外框之外都返回 null。 */
   function pickSquare(C, E, screenXY, L) {
-    const p = E.unproject(C, screenXY, 0);
+    const p = E.unproject(C, screenXY, L.z || 0);
     if (!p) return null;
     const o = L.squareCorners(0, 0)[0];   // 棋盘左下角，和 drawBoard 的外框基准一致
     const f = Math.floor((p[0] - o[0]) / L.cell);
@@ -3261,13 +2925,10 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     var btn = document.querySelector('.presets[data-tab="' + myCurTab + '"] .pbtn[data-preset="' + next.key + '"]');
     if (btn) btn.click();
   }
-  var __lastTs = null;
-  function frameDt() {
-    var now = performance.now();
-    var dt = __lastTs == null ? 0 : Math.min(0.05, Math.max(0, (now - __lastTs) / 1000));
-    __lastTs = now;
-    return dt;
-  }
+  /* 帧时长只有一个出处：引擎的 state.dt（frame() 每帧写入，已 clamp 到
+     [0, 0.05]）。本工具曾用 performance.now() 自己算一份——同一个量两处
+     计算，engine 的时钟一改就会悄悄不同步。阶段 2 Task 1 收口到这里。 */
+  function frameDt() { return E.state.dt || 0; }
 
   // btnPlay 的监听器绑在 E.init() 之后（见下方），不在这里——原因见那处的注释。
   // btnReset：回到本 tab 的 iso 视角按钮，与双击画布回正走同一条路径（tween + onSelect）。
@@ -3570,7 +3231,6 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     h1: { en: 'Rules, Legality and Mate', zh: '规则、合法性与将杀' },
   };
   var VERSION = document.querySelector('meta[name="tool-version"]').content;
-  var ENGINE_VERSION = document.querySelector('meta[name="engine-version"]').content;
 
   // 四个 tab 的起始局面：不再需要在这里手动调用 loadPreset() 了——
   // E.init() 内部的 buildPresets() 会给每个声明了 presets 的 tab 都选中
@@ -3579,7 +3239,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   // 调用同一个 loadPreset()。所有辅助函数与 DOM 引用（尤其是升变浮层）
   // 在这一行之前已经就绪，所以这个自动初始化是安全的（与原来手写四行
   // 调用点被放在这里的理由完全一致，见 loadPreset() 定义处的说明）。
-  E.init({ canvas: canvas, SCENES: SCENES, PARAMS: PARAMS, TOOL: TOOL, VERSION: VERSION, ENGINE_VERSION: ENGINE_VERSION });
+  E.init({ canvas: canvas, SCENES: SCENES, PARAMS: PARAMS, TOOL: TOOL, VERSION: VERSION });
 
   // E.init() 内部同步跑过一次 resize()，FOCAL/W/H 这时才第一次有真实值——
   // 在那之前 computeTopDist() 只能拿到兜底值。这里补一次现算，把「俯视

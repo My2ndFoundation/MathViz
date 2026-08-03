@@ -9,12 +9,23 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+GAMES_DIR = ROOT / 'games'
+# games/ 下的分组文件先注入、汇总器最后——games.js 在浏览器里读的是
+# root.ChessGamesParts，那份对象由每个分组文件自己挂上去。靠文件名排序
+# 碰巧成立（'games-' < 'games.'）不算依据，这里显式写死顺序。
+GAMES_PARTS = ['games-teaching.js', 'games-machine.js', 'games-romantic.js',
+               'games-coldwar.js', 'games-theory.js', 'games-human.js', 'games.js']
+
 SOURCES = {
     'VIZ-ENGINE': ROOT / 'core' / 'viz-engine.js',
     'CHESS-CORE': ROOT / 'core' / 'chess-core.js',
     'INTERACT': ROOT / 'core' / 'interact.js',
     'BOARD-RENDER': ROOT / 'core' / 'board-render.js',
+    'REPLAY': ROOT / 'core' / 'replay.js',
 }
+
+# 只有工具③ 有这两个标记区；其余 html 缺它们是正常的，不该 WARN。
+OPTIONAL_TAGS = {'REPLAY', 'GAMES'}
 
 
 def block(tag: str, body: str) -> str:
@@ -36,10 +47,22 @@ def render(text: str) -> tuple[str, list[str]]:
     for tag, src in SOURCES.items():
         pat = pattern(tag)
         if not pat.search(text):
-            missing.append(tag)
+            if tag not in OPTIONAL_TAGS:
+                missing.append(tag)
             continue
         body = src.read_text(encoding='utf-8')
         text = pat.sub(lambda _m: block(tag, body), text, count=1)
+
+    pat = pattern('GAMES')
+    if pat.search(text):
+        parts = []
+        for name in GAMES_PARTS:
+            p = GAMES_DIR / name
+            if not p.exists():
+                raise SystemExit(f'ERROR: 缺少棋谱源 {p.relative_to(ROOT.parent)}')
+            parts.append(p.read_text(encoding='utf-8').rstrip())
+        text = pat.sub(lambda _m: block('GAMES', '\n'.join(parts)), text, count=1)
+
     return text, missing
 
 

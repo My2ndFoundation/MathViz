@@ -196,4 +196,74 @@ T.eq(E.unproject(sidewaysCam, [vi.CX, vi.CY], 0), null,
   Object.assign(E.cam, savedCam);
 }
 
+// ---- layout 的 z 平面 ----
+const L0 = BR.layout({ files: 8, ranks: 8, cell: 1 });
+T.eq(L0.z, 0, 'layout 默认躺在 z=0');
+T.eq(L0.squareCenter(0, 0)[2], 0, '默认格心 z=0');
+T.eq(L0.squareCorners(3, 4)[2][2], 0, '默认角点 z=0');
+
+const Lz = BR.layout({ files: 8, ranks: 8, cell: 1, z: -2.5 });
+T.eq(Lz.z, -2.5, 'layout 记住给定的 z');
+T.eq(Lz.squareCenter(0, 0)[2], -2.5, '格心跟着 z');
+T.eq(Lz.squareCorners(3, 4).map(p => p[2]), [-2.5, -2.5, -2.5, -2.5], '四个角点都跟着 z');
+// x/y 与 z=0 时逐值相同——抬起平面不该动到平面内的坐标
+T.eq(Lz.squareCenter(5, 2).slice(0, 2), L0.squareCenter(5, 2).slice(0, 2), '平移 z 不改 x/y');
+T.eq(Lz.w, L0.w, '宽不变');
+T.eq(Lz.h, L0.h, '高不变');
+
+// 极简正交相机桩：屏幕 (sx, sy) → 世界 (sx, -sy, planeZ)。
+// 只用来验证 pickSquare 是否把 L.z 传给了 unproject，不模拟透视。
+const Estub = {
+  unproject: function (C, xy, planeZ) { Estub.lastPlaneZ = planeZ; return [xy[0], -xy[1], planeZ]; },
+  lastPlaneZ: null,
+};
+BR.pickSquare(null, Estub, [0, 0], Lz);
+T.eq(Estub.lastPlaneZ, -2.5, 'pickSquare 在 L.z 那个平面上求交，不是写死的 0');
+BR.pickSquare(null, Estub, [0, 0], L0);
+T.eq(Estub.lastPlaneZ, 0, 'z=0 的棋盘照旧在 z=0 求交');
+
+// ---- drawBoard / drawCoordLabels / coordLabelSize 在 z≠0 的 layout 上 ----
+// defect：外框 frame 数组的三个中间点（旧代码手拼字面量）、坐标标签的
+// 定位点、coordLabelSize 探测格宽用的两个点，都曾经把第三分量写死成 0——
+// 棋盘挪到 L.z≠0 后，这些点仍然停在 z=0，跟它们框住/标注的格子（真正在
+// L.z）错层，透视下外框会歪斜地脱离格子。用一个只记录「E.proj / E.strokePoly
+// / E.label3 见过哪些 z」的桩，断言三者在 layout({z:-3}) 上用到的 z
+// 只能有一个值：-3。
+function makeZSpyE() {
+  const zs = [];
+  const fakeCtx = {
+    beginPath: function () {}, moveTo: function () {}, lineTo: function () {}, closePath: function () {}, fill: function () {},
+  };
+  return {
+    zs: zs,
+    ctx: fakeCtx,
+    proj: function (C, p) { zs.push(p[2]); return [0, 0]; },
+    withContext: function (targetCtx, fn) { return fn(); },
+    strokePoly: function (C, pts) { pts.forEach(function (p) { if (p) zs.push(p[2]); }); },
+    label3: function (C, p) { zs.push(p[2]); },
+  };
+}
+
+{
+  const Lm3 = BR.layout({ files: 8, ranks: 8, cell: 1, z: -3 });
+
+  const spyBoard = makeZSpyE();
+  BR.drawBoard(spyBoard.ctx, null, spyBoard, { layout: Lm3 });
+  T.ok(spyBoard.zs.length > 0, 'drawBoard 应该真的调用过 proj/strokePoly/label3（否则下面的判据没有验证力度）');
+  T.eq(Array.from(new Set(spyBoard.zs)), [-3],
+       'drawBoard 在 z=-3 的 layout 上，投影用到的 z 只能有一个值（外框/坐标标签不该停在 z=0）');
+
+  const spyCoords = makeZSpyE();
+  BR.drawCoordLabels(spyCoords.ctx, null, spyCoords, { layout: Lm3 });
+  T.ok(spyCoords.zs.length > 0, 'drawCoordLabels 应该真的调用过 proj/label3');
+  T.eq(Array.from(new Set(spyCoords.zs)), [-3],
+       'drawCoordLabels 在 z=-3 的 layout 上，投影用到的 z 只能有一个值');
+
+  const spySize = makeZSpyE();
+  BR.coordLabelSize(null, spySize, Lm3);
+  T.ok(spySize.zs.length > 0, 'coordLabelSize 应该真的调用过 proj');
+  T.eq(Array.from(new Set(spySize.zs)), [-3],
+       'coordLabelSize 在 z=-3 的 layout 上，探测格宽用到的两个点只能落在同一个 z');
+}
+
 T.report();
