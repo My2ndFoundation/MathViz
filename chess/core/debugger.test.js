@@ -540,6 +540,152 @@ const prPush = prt.findIndex(s => s.frameOp === 'push');
 const prPushCur = D.create(prCur.trace); D.goto(prPushCur, prPush);
 T.eq(D.locals(prPushCur).__proto__, 7, 'h 帧里名为 __proto__ 的形参也照常分帧（7，不是全局的 1）');
 
+/* ============================================================
+   ⑯ 差分守卫：新旧两套 locals 规则逐下标对拍
+
+   这条规则已经错过两次，第二次**通过了当时全部 369 条断言**才被复审逮住。
+   所以把「对拍旧实现」做成常驻的测试设施，而不是一次性脚本：以后再动这套
+   规则时，任何一处与 534cfaf 的深度窗口产生的分歧都会被列出来，逼着改动者
+   为每一处分歧给出判断，而不是悄悄用一个回归换掉另一个回归。
+
+   下面这个 depthWindowLocals 是 534cfaf 的实现原样搬过来（照 diff 的 `-` 行
+   重建），**故意保留它的缺陷** —— 它是基线，不是参考答案。两边不一致时，
+   由 EXPECTED_DIVERGENCES 逐条写明「哪边对、为什么」。 */
+function depthWindowLocals(cur) {
+  const trace = cur.trace, s = trace[cur.i];
+  if (!s) return {};
+  const depth = s.depth;
+  let start = 0;
+  if (depth > 0) {
+    for (let k = cur.i; k >= 0; k--) {
+      if (trace[k].frameOp === 'push' && trace[k].depth === depth) { start = k; break; }
+    }
+  }
+  const vars = {};
+  for (let k = start; k <= cur.i; k++) {
+    const step = trace[k];
+    if (step.depth !== depth) continue;
+    if (step.frameOp === 'pop') continue;
+    const d = step.varDelta;
+    for (let m = 0; m < d.length; m++) {
+      if (typeof d[m].to === 'undefined') delete vars[d[m].name];
+      else vars[d[m].name] = d[m].to;
+    }
+  }
+  return vars;
+}
+
+/* 每种程序形状：名字、源码、以及**期望的分歧条数**。
+   期望值不是"随它去"的橡皮图章 —— 它钉住的是「新规则应该在多少个下标上
+   与旧规则不同」。修好一个真 bug 会让某个数字变大，而**意外**引入回归会让
+   本该为 0 的形状冒出分歧。两个方向都会失败。 */
+const DIFF_SHAPES = [
+  { name: '块内 let 与外层帧同名（复审逮住的回归形状）',
+    src: ['function go(k) {',
+          '  if (k === 0) { return 0; }',
+          '  { let b = k * 10;',
+          '    go(k - 1);',
+          '    return b; }',
+          '}',
+          'return go(2);'].join('\n'),
+    /* 旧规则在这里其实是**对的**（块内 let 与本帧同深度，深度窗口照收），
+       新规则修好回归之后应该与它一致。 */
+    expectDiff: 0,
+    why: '新规则修好块作用域回归后，与深度窗口在这个形状上应当完全一致' },
+
+  { name: '块内 let 不与任何外层名字相撞',
+    src: ['function g(a) {',
+          '  { let fresh = a + 1;',
+          '    return fresh; }',
+          '}',
+          'return g(5);'].join('\n'),
+    expectDiff: 0,
+    why: '没有同名冲突时两套规则都把 fresh 归给当前帧' },
+
+  { name: '循环每轮重新声明的 let',
+    src: ['let total = 0;',
+          'for (let i = 0; i < 3; i = i + 1) { let d = i * 2; total = total + d; }',
+          'return total;'].join('\n'),
+    expectDiff: 0,
+    why: '全部发生在深度 0 的全局帧里，两套规则等价' },
+
+  { name: 'sol 累加器（深帧写外层绑定）',
+    src: ['let sol = 0;',
+          'function go(k) { if (k === 0) { sol = sol + 1; return; } go(k - 1); go(k - 1); }',
+          'go(2);',
+          'return sol;'].join('\n'),
+    expectDiff: -1,   // -1 = 只要求"必有分歧"，不锁死条数
+    why: '旧规则两头错（拥有 sol 的全局帧显示陈旧值，不拥有它的深帧却显示它），新规则对' },
+
+  { name: '遮蔽声明 vs 对外层赋值',
+    src: ['let t = 1;',
+          'function g() { t = 5; return t; }',
+          'const z = g();',
+          'return t;'].join('\n'),
+    expectDiff: -1,
+    why: '对外层赋值：旧规则把 t 留在 g 的帧里，新规则判给全局帧' },
+
+  { name: 'fact(3) 纯递归',
+    src: ['function fact(n) {',
+          '  if (n <= 1) { return 1; }',
+          '  return n * fact(n - 1);',
+          '}',
+          'return fact(3);'].join('\n'),
+    expectDiff: 0,
+    why: '没有跨帧写、没有块作用域，两套规则必须完全一致（约束 1 的基线）' },
+];
+
+let diffTotal = 0;
+for (let sh = 0; sh < DIFF_SHAPES.length; sh++) {
+  const shape = DIFF_SHAPES[sh];
+  const dt = I.run(shape.src, { host: {} }).trace;
+  T.ok(dt.length > 0, '差分形状「' + shape.name + '」产出了非空轨迹');
+  let diffs = 0;
+  for (let k = 0; k < dt.length; k++) {
+    const cNew = D.create(dt); D.goto(cNew, k);
+    const cOld = D.create(dt); D.goto(cOld, k);
+    const a = JSON.stringify(D.locals(cNew)), b = JSON.stringify(depthWindowLocals(cOld));
+    if (a !== b) diffs++;
+  }
+  diffTotal += diffs;
+  if (shape.expectDiff < 0) {
+    T.ok(diffs > 0, '差分形状「' + shape.name + '」与深度窗口有分歧（' + diffs + ' 处）—— ' + shape.why);
+  } else {
+    T.eq(diffs, shape.expectDiff,
+         '差分形状「' + shape.name + '」与深度窗口的分歧条数 —— ' + shape.why);
+  }
+}
+T.ok(diffTotal > 0, '差分对拍整体上确实跑出了分歧（' + diffTotal + ' 处）—— 否则说明两套规则被改成了同一个');
+
+/* 上面的对拍只统计条数。下面把复审逮住的那个具体下标钉死：**站在
+   `let b = k * 10;` 这一行上**（depth 2）必须看得见 b，而且外层帧的 b
+   不能被连累。回归发生时 b 在两个帧里都消失。 */
+const REG = ['function go(k) {',
+             '  if (k === 0) { return 0; }',
+             '  { let b = k * 10;',
+             '    go(k - 1);',
+             '    return b; }',
+             '}',
+             'return go(2);'].join('\n');
+const gt2 = I.run(REG, { host: {} }).trace;
+const inner = gt2.findIndex(s => s.depth === 2 && s.varDelta.some(d => d.name === 'b' && d.to === 10));
+T.ok(inner > 0, '找得到 depth 2 那一帧绑定 b = 10 的步');
+const innerCur = D.create(gt2); D.goto(innerCur, inner);
+T.eq(D.locals(innerCur).b, 10, '站在块内 let b 这一行（depth 2）看得见自己的 b === 10');
+T.eq(D.locals(innerCur).k, 1, '同一帧的 k === 1');
+
+const outerRet = gt2.findIndex((s, k) => s.depth === 1 && s.line === 5 && k > inner);
+T.ok(outerRet > 0, '找得到外层帧回到 return b 的那一步');
+const outerCur = D.create(gt2); D.goto(outerCur, outerRet);
+T.eq(D.locals(outerCur).b, 20, '外层帧（depth 1）的 b 仍是自己的 20 —— 没有被内层帧连累删掉');
+T.eq(D.locals(outerCur).k, 2, '外层帧的 k === 2');
+
+/* 判据只能是 from 的值，不能是 'from' in d —— 把这个前提钉住，
+   哪天 3a 改了 delta 的写法，这里要大声失败而不是悄悄失效。 */
+const freshDelta = gt2[inner].varDelta.filter(d => d.name === 'b')[0];
+T.eq('from' in freshDelta, true, '前提：recordVarDelta 恒写全三个键，`from` 键永远存在');
+T.eq(typeof freshDelta.from, 'undefined', '前提：全新绑定的 from 值是 undefined（判据只能看值）');
+
 // ---- 六个派生函数在空轨迹上也不能抛 ----
 /* 与上面 checkEmptySafe 同样的循环写法：清空编辑器缓冲区是阶段 5 验收
    页面的初始状态，面板必须能在长度为 0 的轨迹上正常渲染。 */

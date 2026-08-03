@@ -260,10 +260,33 @@
   }
 
   /* 三级优先级，规则在外层、帧在内层：先看有没有哪一帧 own 了这个名字，
-     再看有没有哪一帧当前就持有它，都没有才落到最内层帧。 */
-  function ownerFrame(stack, name) {
+     再看有没有哪一帧当前就持有它，都没有才落到最内层帧。
+
+     **规则 2 必须由「这条 delta 有没有 from」把门。** 没有 from 意味着这个
+     名字在此之前哪儿都不存在 —— 那是一次**全新绑定**，只可能属于最内层的帧
+     （规则 3）；有 from 才说明它在改一个已经存在于某处的绑定。
+
+     不加这道门会让「块作用域声明 + 外层帧有同名变量」两头落空（实测回归）：
+         function go(k) { if (k===0) { return 0; }
+                          { let b = k*10; go(k-1); return b; } }
+         return go(2);
+     depth 2 那一帧的 `let b`（`{b, to:10}`，无 from）既不在入帧 delta 也不在
+     出帧 delta 里（块作用域由块自己的 closeScope 收尾），规则 1 认不出；规则 2
+     于是找到 depth 1 那一帧 —— 它此刻正持有自己的 b=20 —— 把它覆盖成 10；
+     随后块拆除的 `{b, from:10}` 又从同一帧把它删掉。结果 b 在**两个帧里都消失**。
+     加上这道门之后：`{b, to:10}` 无 from → 规则 3 → 落进 depth 2 自己的帧（正确）；
+     它的拆除 `{b, from:10}` 有 from → 规则 2 → 命中此刻持有 b 的最内层帧，
+     正是同一个 depth 2 帧 → 从正确的地方删掉。
+
+     判据只能是 `d.from === undefined`，**不能**用 `'from' in d`：3a 的
+     recordVarDelta 恒写全 {name, from, to} 三个键，`'from' in d` 永远是 true
+     （JSON 里看不见只是因为 JSON.stringify 丢弃 undefined）。 */
+  function ownerFrame(stack, d) {
+    const name = d.name;
     for (let j = stack.length - 1; j >= 0; j--) if (stack[j].owned[name]) return stack[j];
-    for (let j = stack.length - 1; j >= 0; j--) if (name in stack[j].vars) return stack[j];
+    if (typeof d.from !== 'undefined') {
+      for (let j = stack.length - 1; j >= 0; j--) if (name in stack[j].vars) return stack[j];
+    }
     return stack[stack.length - 1];
   }
 
@@ -275,6 +298,16 @@
     }
   }
 
+  /* locals(cur) → { [name]: value }，当前帧的局部变量。规则见上面那段长注释。
+
+     **调用方注意：返回的是无原型对象（Object.create(null)），不是普通对象。**
+     这不是随手写的，是必需的：学习者完全可以写 `let __proto__ = 1;`，普通对象
+     字面量会把这个名字写进原型而不是自有属性，Object.keys 拿不到，面板上那一行
+     就凭空消失了。代价是这个返回值**没有** Object.prototype 上的方法：
+         locals(cur).hasOwnProperty(x)   ✗ 抛 TypeError（不是函数）
+         Object.prototype.hasOwnProperty.call(locals(cur), x)   ✓
+         x in locals(cur)                ✓（无原型，in 只会命中自有属性）
+     Object.keys / for…in / 属性读 / JSON.stringify 一切照常。 */
   function locals(cur) {
     const trace = cur.trace, i = cur.i;
     if (!trace[i]) return Object.create(null);
@@ -303,7 +336,7 @@
       }
       const deltas = s.varDelta;
       for (let m = 0; m < deltas.length; m++) {
-        applyTo(ownerFrame(stack, deltas[m].name), [deltas[m]]);
+        applyTo(ownerFrame(stack, deltas[m]), [deltas[m]]);
       }
     }
     return stack[stack.length - 1].vars;
