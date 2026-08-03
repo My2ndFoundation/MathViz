@@ -61,5 +61,45 @@
     return segs;
   }
 
-  return { highlight: highlight };
+  /* 每一行第一个字符在 src 里的字符下标，下标从 0 开始，行号从 1 开始
+     （starts[line - 1] 就是第 line 行的起点）。只按 '\n' 断行——'\r' 被
+     当成上一行末尾的一个普通字符，不产生额外的行边界。这不是随便选的
+     约定：Interp.tokenize 数行号时也只在遇到 '\n' 时 line++/col=1，
+     '\r' 和其它字符一样只让 col++。check() 用 lineStarts 把 (line, col)
+     换算成 index，这两处「什么算换行」必须完全一致，否则 CRLF 源码里
+     算出来的 index 会偏掉，波浪线画到错的字符上。 */
+  function lineStarts(src) {
+    const starts = [0];
+    for (let i = 0; i < src.length; i++) {
+      if (src[i] === '\n') starts.push(i + 1);
+    }
+    return starts;
+  }
+
+  /* 实时语法检查：包一层 Interp.parse，把抛出的 Error 转成 DOM 层能直接
+     画波浪线、在行号槽点红点、悬停显示 message 的纯对象（规格 §2.8）。
+     空源码不会走到 catch 分支（Interp.parse('') 本身就不抛），这里仍然
+     显式写清楚：合法代码返回 null。
+
+     category 原样取自 Interp 抛出的 e.category，不在这里重新按 message
+     文本猜——interp.js 才是权威：它决定一段代码是「压根不是合法 JS」
+     （syntax）还是「是合法 JS、只是不在这个教学子集里」（unsupported），
+     这两类对使用者的意义完全不同，编辑器要用不同的措辞去讲给学习者听，
+     但测哪一类是解释器的事，不是这里靠字符串匹配去猜的事。
+
+     message 原样透传，不包一层 {zh, en}、也不做任何翻译——它是从
+     interp.js 产生的，编辑器要逐字显示这句话，在这里发明一层双语会让
+     措辞跟解释器本身的表述分叉。 */
+  function check(src) {
+    try {
+      Interp.parse(src);
+      return null;
+    } catch (e) {
+      const starts = lineStarts(src);
+      const index = starts[e.line - 1] + e.col - 1;
+      return { line: e.line, col: e.col, category: e.category, message: e.message, index: index };
+    }
+  }
+
+  return { highlight: highlight, check: check, lineStarts: lineStarts };
 });
