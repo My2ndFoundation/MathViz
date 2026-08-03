@@ -193,4 +193,254 @@ checkEmptySafe('空源码派生的空轨迹', function () { return D.create(empt
 checkEmptySafe('纯空白源码派生的空轨迹', function () { return D.create(whitespaceTrace); });
 checkEmptySafe('手搓的字面量空数组', function () { return D.create([]); });
 
+// ============ 派生显示数据 ============
+
+// ---- 当前行与已访问行 ----
+const disp = D.create(trace);
+D.goto(disp, 0);
+T.eq(D.currentLine(disp), trace[0].line, '当前行取自当前步');
+D.goto(disp, 5);
+T.ok(D.visitedLines(disp).indexOf(trace[0].line) >= 0, '已访问行含第 0 步的行');
+T.ok(D.visitedLines(disp).indexOf(trace[trace.length - 1].line) < 0,
+     '还没走到的行不算已访问');
+
+// ---- 调用栈 ----
+const st = D.create(trace);
+const deepest = trace.reduce((best, s, k) => s.depth > trace[best].depth ? k : best, 0);
+D.goto(st, deepest);
+const stack = D.callStack(st);
+T.eq(stack.length, trace[deepest].depth, '栈深与该步的 depth 一致');
+T.ok(stack.every((f, k) => k === 0 || f.depth > stack[k - 1].depth), '由外到内深度递增');
+
+// ---- locals：**必须是当前帧的**（约束 1）----
+/* 递归里同名参数在不同帧各有一份。全局按名扁平回放会跨帧串味 ——
+   这条测试就是拿递归来钉死它。 */
+const REC = [
+  'function fact(n) {',        // 1
+  '  if (n <= 1) { return 1; }', // 2
+  '  return n * fact(n - 1);', // 3
+  '}',                         // 4
+  'return fact(3);',           // 5
+].join('\n');
+const rt = I.run(REC, { host: {} }).trace;
+
+/* 找到最深那一帧里的某一步（n 应该是 1），以及一个较浅帧里的步（n 应该是 3）。 */
+const deepIdx = rt.reduce((best, s, k) => s.depth > rt[best].depth ? k : best, 0);
+const deepCur = D.create(rt); D.goto(deepCur, deepIdx);
+T.eq(D.locals(deepCur).n, 1, '最深帧里 n === 1');
+
+const shallowIdx = rt.findIndex(s => s.depth === 1 && s.varDelta.some(d => d.name === 'n'));
+const shallowCur = D.create(rt); D.goto(shallowCur, shallowIdx);
+T.eq(D.locals(shallowCur).n, 3, '第一帧里 n === 3 —— 没有被更深的帧串味');
+
+/* 块作用域遮蔽：3a 已经让轨迹在作用域退出时补恢复 delta，
+   所以 locals 在块结束之后要看到外层的值。 */
+const SH = 'let a = 1;\n{ let a = 2; }\nreturn a;';
+const sht = I.run(SH, { host: {} }).trace;
+const shc = D.create(sht); D.goto(shc, sht.length - 1);
+T.eq(D.locals(shc).a, 1, '块结束后 a 是外层的 1，不是内层的 2');
+
+// ---- 输出 ----
+const OUT = 'log("a");\nlog("b");\nlog("c");';
+const ot = I.run(OUT, { host: {} }).trace;
+const oc = D.create(ot);
+D.goto(oc, ot.length - 1);
+T.eq(D.output(oc), ['a', 'b', 'c'], '截至末尾有三行');
+const oc2 = D.create(ot);
+const secondLog = ot.findIndex((s, k) => ot.slice(0, k + 1).filter(x => x.out).length === 2);
+D.goto(oc2, secondLog);
+T.eq(D.output(oc2), ['a', 'b'], '截至第二条日志只有两行 —— 输出跟着游标走');
+
+// ---- 棋盘状态：正放与反放都要对 ----
+const BD = 'mark(5, "trying");\nmark(5, "confirmed");\nclear(5);';
+const bt = I.run(BD, { host: {} }).trace;
+const bc = D.create(bt);
+const afterFirst = bt.findIndex(s => s.boardOps.length);
+D.goto(bc, afterFirst);
+T.eq(D.boardState(bc).marks[5], 'trying', '第一次标记后是 trying');
+D.goto(bc, bt.length - 1);
+T.ok(typeof D.boardState(bc).marks[5] === 'undefined', 'clear 之后这一格没有标记');
+D.goto(bc, afterFirst);
+T.eq(D.boardState(bc).marks[5], 'trying', '**反放回去仍然是 trying** —— 撤销信息真的被用上了');
+/* 注意：上一条断言的措辞过头了。本实现是「从 0 全区间正向回放」，压根
+   不读 boardOps.from —— 断言本身仍然成立（回到第 0 步时重放只走一步，
+   自然还是 trying），但它证明不了"撤销信息真的被用上了"。如实记在这里，
+   而不是为了让注释成真去把实现拧成反向撤销（见任务报告）。 */
+
+/* ============================================================
+   以下是本任务派发者要求的、超出简报底线的补充测试。简报自己的两条
+   locals 断言**没有牙齿**：deepIdx(=5) 与 shallowIdx(=1) 都恰好落在
+   push 步上（起点 === 当前下标），窗口只有一步，扁平回放看起来也是对的。
+   ============================================================ */
+
+// ---- ① locals 的真正不变量：fact(3) 每一帧里 n === 4 - depth ----
+/* 用循环遍历整条轨迹推导，而不是挑几个下标硬编码 —— 硬编码正是简报
+   那两条断言失去牙齿的原因。扁平回放在 i=9 与 i=11 会得到 undefined
+   （更深帧退出时的 pop delta 把 n 删掉了），这条测试因此会红。
+   pop 步本身排除在外：那一步的 varDelta 正是在拆掉这一帧的绑定。 */
+let recFrameChecks = 0;
+for (let k = 0; k < rt.length; k++) {
+  const s = rt[k];
+  if (s.depth < 1 || s.frameOp === 'pop') continue;
+  const c = D.create(rt); D.goto(c, k);
+  T.eq(D.locals(c).n, 4 - s.depth,
+       'fact(3) 第 ' + k + ' 步（depth=' + s.depth + '）里 n === ' + (4 - s.depth));
+  recFrameChecks++;
+}
+T.ok(recFrameChecks >= 8,
+     '上面这个循环真的跑了 ' + recFrameChecks + ' 次（>= 8）—— 循环体一次都没执行也能"通过"是假绿');
+
+// ---- ② 不同名变量也不能跨帧渗漏 ----
+/* 控制权回到 outer、a 刚绑上的那一步（depth 1，inner 已经出帧）：
+   locals 里要有 y 和 a，且**不能**有 inner 的形参 x。
+   缺席一律用 `typeof === 'undefined'` 判定，绝不用 T.eq(x, undefined)——
+   _test.js 的 eq 走 JSON.stringify，而 JSON.stringify(function(){}) 与
+   JSON.stringify(undefined) 都是 undefined，一个泄漏进来的函数值会让
+   T.eq(x, undefined) 假绿。 */
+const aBound = trace.findIndex(s => s.depth === 1 && s.frameOp !== 'pop' &&
+                                    s.varDelta.some(d => d.name === 'a'));
+T.ok(aBound > 0, 'SRC 轨迹里找得到「回到 outer 且 a 刚绑上」那一步');
+const leakCur = D.create(trace); D.goto(leakCur, aBound);
+const leakLocals = D.locals(leakCur);
+T.eq(leakLocals.y, 3, 'outer 帧里 y === 3');
+T.eq(leakLocals.a, 4, 'outer 帧里 a === 4');
+T.ok(typeof leakLocals.x === 'undefined', 'inner 的形参 x 没有渗漏进 outer 帧');
+
+// ---- ③ callStack 深度不变量：在两条 fixture 的**每一个**下标上都成立 ----
+function checkStackDepthEverywhere(label, tr) {
+  for (let k = 0; k < tr.length; k++) {
+    const c = D.create(tr); D.goto(c, k);
+    const s = D.callStack(c);
+    T.eq(s.length, tr[k].depth, label + ' 第 ' + k + ' 步：栈深 === depth');
+    T.ok(s.every((f, j) => j === 0 || f.depth > s[j - 1].depth),
+         label + ' 第 ' + k + ' 步：帧由外到内深度严格递增');
+  }
+}
+checkStackDepthEverywhere('SRC', trace);
+checkStackDepthEverywhere('fact(3)', rt);
+
+// ---- ④ output 不许用真值判断：'' 与 '0' 都是合法日志 ----
+/* Step.out 是**字符串**。log("") 产出 out: ""（假值），log(0) 产出 "0"。
+   用 `if (s.out)` 过滤会让学习者写的空 log 行凭空消失 —— 这正是本项目
+   最不能容忍的那种"安静的谎话"。 */
+const FALSY = 'log("a");\nlog("");\nlog(0);\nlog("c");';
+const ft = I.run(FALSY, { host: {} }).trace;
+const fc = D.create(ft); D.goto(fc, ft.length - 1);
+T.eq(D.output(fc), ['a', '', '0', 'c'], '空字符串日志与 "0" 都必须在输出里（真值过滤会漏掉前两条）');
+
+/* ============================================================
+   下面五组是变异测试（自审）暴露出来的缺口补测。前面那批断言全部通过，
+   但把实现改坏成以下几种样子时它们**依然全绿** —— 也就是说这几条性质
+   当时根本没有被守住。每一条都注明了它钉死的那个变异体。
+   ============================================================ */
+
+// ---- ⑤ locals 的窗口起点必须是本帧的入帧步，不能图省事从 0 扫 ----
+/* 杀掉的变异体：起点恒为 0（仍按 depth 过滤）。
+   前面的 fixture 都杀不掉它 —— fact/inner/outer 里同深度只有一帧，或者
+   前一帧的出帧 delta 恰好把自己清理干净了，从 0 扫和从入帧扫结果一样。
+   下面这段不一样：全局有个 n=99，f 的形参也叫 n。f 出帧时 closeScope 记的是
+   {n, from:5, to:99}（把全局值还回去）。从 0 扫到 g 的帧里，就会先把 n=99
+   捡起来 —— 于是 g 的变量面板里凭空多出一个它根本看不见的 n。 */
+const SIB = [
+  'let n = 99;',                      // 1
+  'function f(n) { return n + 1; }',  // 2
+  'function g(k) { return k + 1; }',  // 3
+  'const p = f(5);',                  // 4
+  'const q = g(7);',                  // 5
+  'return p + q;',                    // 6
+].join('\n');
+const sbt = I.run(SIB, { host: {} }).trace;
+const gPush = sbt.findIndex(s => s.frameOp === 'push' && s.varDelta.some(d => d.name === 'k'));
+T.ok(gPush > 0, '找得到 g 的入帧步');
+const gCur = D.create(sbt); D.goto(gCur, gPush);
+const gLocals = D.locals(gCur);
+T.eq(gLocals.k, 7, 'g 帧里 k === 7');
+T.ok(typeof gLocals.n === 'undefined',
+     '全局 n 没有从上一个同深度的帧渗进 g 的局部变量（从 0 扫会捡到 n=99）');
+T.eq(Object.keys(gLocals).sort(), ['k'], 'g 帧的局部变量**只有** k');
+
+// ---- ⑥ 出帧步显示的是「这一帧返回时的样子」，不是调用方的值 ----
+/* 杀掉的变异体：不跳过出帧步自己那条拆除 delta。
+   closeScope 往 `to` 里写的是**外层**同名变量此刻的值，照单应用会把全局的
+   n=99 贴上 f 帧的标签显示出来。 */
+const fPop = sbt.findIndex(s => s.frameOp === 'pop' && s.varDelta.some(d => d.name === 'n'));
+T.ok(fPop > 0, '找得到 f 的出帧步');
+const fpCur = D.create(sbt); D.goto(fpCur, fPop);
+T.eq(D.locals(fpCur).n, 5, 'f 的出帧步显示 n === 5（这一帧返回时的值），不是全局的 99');
+
+/* 递归同理：fact 的每个出帧步也该显示本帧的 n，而不是外层帧的。
+   这把简报那条测试排除掉的 pop 步一并盖住了。 */
+for (let k = 0; k < rt.length; k++) {
+  if (rt[k].frameOp !== 'pop') continue;
+  const c = D.create(rt); D.goto(c, k);
+  T.eq(D.locals(c).n, 4 - rt[k].depth,
+       'fact(3) 第 ' + k + ' 步（出帧，depth=' + rt[k].depth + '）显示本帧的 n');
+}
+
+// ---- ⑦ 名字消失就要真的消失，不能留一个值为 undefined 的空行 ----
+/* 杀掉的变异体：把 `to === undefined`（closeScope 记的"这个名字不再存在"）
+   当成"赋值为 undefined"。属性读两者都是 undefined，只有比对键集合才分得开；
+   而 Task 5 的变量面板是按 Object.keys 逐行渲染的，留下的空行就是一个
+   明明已经出了作用域、界面上却还在的变量。 */
+const GONE = 'let a = 1;\n{ let b = 2; }\nreturn a;';
+const gt = I.run(GONE, { host: {} }).trace;
+const goneCur = D.create(gt); D.goto(goneCur, gt.length - 1);
+T.eq(Object.keys(D.locals(goneCur)).sort(), ['a'],
+     '块结束后 b 从局部变量里彻底消失，而不是留一个 b: undefined 的空行');
+
+// ---- ⑧ clear 要同时清掉棋子槽与标记槽 ----
+/* 杀掉的变异体：clear 只清 marks。简报的 BD fixture 从头到尾没放过棋子，
+   所以它对这个 bug 完全无感 —— 而"同一格既有棋子又有标记"正是 N 皇后
+   （放皇后 + 标记它攻击的格子）的标准写法，也正是 3a 的 I5 修复把影子
+   状态拆成两层的原因。 */
+const BD2 = 'place(9, "wQ");\nmark(9, "confirmed");\nclear(9);';
+const b2t = I.run(BD2, { host: {} }).trace;
+const b2c = D.create(b2t);
+D.goto(b2c, 1);
+T.eq(D.boardState(b2c).pieces[9], 'wQ', '同一格可以同时有棋子');
+T.eq(D.boardState(b2c).marks[9], 'confirmed', '……和标记，两个槽互不覆盖');
+D.goto(b2c, 2);
+const cleared = D.boardState(b2c);
+T.ok(typeof cleared.pieces[9] === 'undefined', 'clear 之后棋子槽也空了');
+T.ok(typeof cleared.marks[9] === 'undefined', 'clear 之后标记槽也空了');
+
+// ---- ⑨ 当前行本身算「已访问」 ----
+/* 杀掉的变异体：visitedLines 的循环写成 k < cur.i（漏掉当前步）。
+   现有 fixture 里第 0 步的行恰好在更早就被访问过，所以漏掉最后一步也照样
+   全绿。契约要写死：当前这一行是刚刚执行完的那一行，必然属于已访问。 */
+function checkCurrentIsVisited(label, tr) {
+  for (let k = 0; k < tr.length; k++) {
+    const c = D.create(tr); D.goto(c, k);
+    T.ok(D.visitedLines(c).indexOf(D.currentLine(c)) >= 0,
+         label + ' 第 ' + k + ' 步：当前行必在已访问行里');
+  }
+}
+checkCurrentIsVisited('SRC', trace);
+checkCurrentIsVisited('fact(3)', rt);
+
+// ---- 六个派生函数在空轨迹上也不能抛 ----
+/* 与上面 checkEmptySafe 同样的循环写法：清空编辑器缓冲区是阶段 5 验收
+   页面的初始状态，面板必须能在长度为 0 的轨迹上正常渲染。 */
+function checkEmptyDerived(label, makeCur) {
+  const derived = [
+    ['currentLine', function (c) { return D.currentLine(c); }, null],
+    ['visitedLines', function (c) { return D.visitedLines(c); }, []],
+    ['callStack', function (c) { return D.callStack(c); }, []],
+    ['locals', function (c) { return D.locals(c); }, {}],
+    ['output', function (c) { return D.output(c); }, []],
+    ['boardState', function (c) { return D.boardState(c); }, { marks: {}, pieces: {} }],
+  ];
+  for (let m = 0; m < derived.length; m++) {
+    const name = derived[m][0], fn = derived[m][1], want = derived[m][2];
+    const c = makeCur();
+    let dThrew = false, dRet;
+    try { dRet = fn(c); } catch (e) { dThrew = true; }
+    T.ok(!dThrew, label + '.' + name + '：空轨迹上不抛异常');
+    T.eq(dRet, want, label + '.' + name + '：空轨迹上返回约定的空值');
+  }
+}
+checkEmptyDerived('空源码派生的空轨迹', function () { return D.create(emptyTrace); });
+checkEmptyDerived('纯空白源码派生的空轨迹', function () { return D.create(whitespaceTrace); });
+checkEmptyDerived('手搓的字面量空数组', function () { return D.create([]); });
+
 T.report();
