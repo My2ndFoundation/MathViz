@@ -31,7 +31,7 @@
 
 ---
 
-## 阶段 3a 交给本阶段的六条硬约束
+## 阶段 3a 交给本阶段的七条硬约束
 
 这些是 3a 实施过程中**实测得出**的，不是推测。**违反其中任何一条都会产生一个静默显示错值的调试器**——对教学工具而言，这比崩溃更糟。
 
@@ -76,7 +76,7 @@ Warnsdorff 启发式版只要 3,523–5,670 步。
 
 块内 `let`/`const` 在执行到声明语句之前处于暂时性死区，提前读取抛 `Cannot access 'x' before initialization`。**编辑器的示例代码若依赖旧的「静默读到外层」行为会报错。**
 
-### 约束 6（追加）：把 `hoistLexicalDecls` + `hoistFunctionDecls` 抽成共用前置
+### 约束 6：把 `hoistLexicalDecls` + `hoistFunctionDecls` 抽成共用前置
 
 3a 最后一轮修的那个 TDZ 缺口，根因是 **`callInterpreted` 与 `evalBlockBody` 各有一套语句循环**——前者为了绑定 push/pop 帧标记而手写。当时只给 `evalBlockBody` 接了 `hoistLexicalDecls`，函数体顶层的前向引用就绕过了 TDZ。
 
@@ -123,7 +123,7 @@ proj / unproject / strokePoly / line3 / glowDot / solidDot / label3 / withContex
 BoardRender.layout({ files, ranks, cell, z }) / drawBoard / drawPiece / pickSquare / pieceAutoScale
 
 // chess/core/_test.js
-eq(actual, expected, label)   // ⚠ JSON.stringify 比较，见约束 6
+eq(actual, expected, label)   // ⚠ JSON.stringify 比较，见约束 7
 ok(cond, label) / throws(fn, label) / report()
 ```
 
