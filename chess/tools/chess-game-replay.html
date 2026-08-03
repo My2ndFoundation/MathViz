@@ -5,9 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <!-- 版本记录（changelog，新→旧）：
+     1.1.0  2026-08-04  默认视角改为正视（az=0, el=0）——从数学工具继承来的斜转轴测
+                        对棋盘是错的：它把 a1–h1 那条边斜过来，读不出行列。board /
+                        trace / heat 三个 tab 的第一视角改为正视，按键 2 是新增的
+                        「桌面 45°」机位（az=0, el=−45°，坐在桌前看棋盘的角度）。
+                        eval 例外：那一页画的是三条沿回合轴生长的曲线而不是棋盘，
+                        正视等于顺着曲线看进去，什么也读不到——它保留侧视为第一视角，
+                        正视与 45° 排在其后。
      1.0.0  2026-08-02  首发：board / trace / eval / heat 四个页签，30 局预置棋谱与
                         双语故事、关键步自动暂停，PGN 拖入、FEN 粘贴与 PGN 导出。 -->
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="chess-1.2.0">
 <title>Game Replay · MathViz</title>
 <!-- 样式令牌与组件整体搬运自 design-system/math-viz-starter.html 的 <style> 块，
@@ -4539,10 +4546,17 @@ var ROSE = '#fb7185', VIOLET = '#a78bfa', EMERALD = '#34d399', ORANGE = '#fb923c
 var CAM_ISO   = { az: -0.72, el: 0.42, dist: 15 };
 var CAM_SIDE  = { az: -Math.PI / 2, el: 0.06, dist: 17 };   // 顿悟视角
 var CAM_TOP   = { az: 0, el: 0, dist: 14 };
+/* 「桌面 45°」——人坐在桌前看一副摆好的棋盘的角度。仰角是**负的**：
+   makeCam() 的 eye.y = dist·sin(el)，el>0 把相机抬到 +y 一侧，近处就成了
+   8 线（黑方）、1 线反而后退，那是坐在黑方对面；el<0 才把白方放在近处。
+   dist 比正视稍远（16 vs 14）：45° 下棋盘近边被推到眼前，而本工具的近边
+   之外还压着传输控件那一条，同样距离会顶上去。 */
+var CAM_TILT  = { az: 0, el: -Math.PI / 4, dist: 16 };
 
 var VIEW_ISO  = Object.assign({ label: { zh: '轴测', en: 'Iso' } }, CAM_ISO);
 var VIEW_SIDE = Object.assign({ label: { zh: '侧视 · 回合轴', en: 'Side · ply axis' } }, CAM_SIDE);
-var VIEW_TOP  = Object.assign({ label: { zh: '俯视', en: 'Top' } }, CAM_TOP);
+var VIEW_TOP  = Object.assign({ label: { zh: '正视', en: 'Top' } }, CAM_TOP);
+var VIEW_TILT = Object.assign({ label: { zh: '桌面 45°', en: 'Table 45°' } }, CAM_TILT);
 
 var L = BR.layout({ files: 8, ranks: 8, cell: 1 });          // 当前局面，z = 0
 
@@ -5389,7 +5403,7 @@ var SCENES = {
             en: 'Switch to Side: the receding stack of frames is the ply axis made visible. Scrub the timeline or hit ▶ and watch history flow out of the current position; press F to flip the board, Space to play or pause.' },
     presetsLabel: { en: 'Game', zh: '棋局' },
     presets: PRESETS,
-    views: { iso: VIEW_ISO, side: VIEW_SIDE, top: VIEW_TOP },
+    views: { top: VIEW_TOP, tilt: VIEW_TILT, side: VIEW_SIDE, iso: VIEW_ISO },
     draw: function (camC) {
       myCurTab = 'board';
       advanceReplay();
@@ -5429,7 +5443,7 @@ var SCENES = {
     },
     presetsLabel: { en: 'Game', zh: '棋局' },
     presets: PRESETS,
-    views: { iso: VIEW_ISO, side: VIEW_SIDE, top: VIEW_TOP },
+    views: { top: VIEW_TOP, tilt: VIEW_TILT, side: VIEW_SIDE, iso: VIEW_ISO },
     toggles: [
       { key: 'onlyMoved', label: { zh: '只看走过的子', en: 'Moved only' }, color: CYAN, checked: false },
     ],
@@ -5468,7 +5482,11 @@ var SCENES = {
             en: 'In Side view the three curves read like a standard line chart; in Iso they visibly grow out of the board\'s centre line. Each is normalised on its own scale — the real units are the ranges shown in the legend.' },
     presetsLabel: { en: 'Game', zh: '棋局' },
     presets: PRESETS,
-    views: { iso: VIEW_ISO, side: VIEW_SIDE },
+    /* 唯一不以正视打头的 tab：这一页画的是三条沿 +z（回合轴）生长的曲线，
+       正视正好是顺着这根轴看进去，三条曲线全叠成棋盘中线上的一个点。
+       侧视才是它的顿悟视角（也是本工具整体的顿悟视角），所以留在第一位；
+       正视与桌面 45° 仍然给出来，用来核对曲线底下那块棋盘。 */
+    views: { side: VIEW_SIDE, top: VIEW_TOP, tilt: VIEW_TILT, iso: VIEW_ISO },
     draw: function (camC) {
       myCurTab = 'eval';
       advanceReplay();
@@ -5502,12 +5520,12 @@ var SCENES = {
     brand: { zh: '累计落子热力——冷格（从没人碰过）与热格一样有信息量。',
              en: 'Cumulative landing heat — the squares nobody ever touched carry as much information as the hot ones.' },
     tips: {
-      en: 'Look from the Top view and read the map: the squares nobody ever touched are as informative as the hot ones. In most games a whole wing stays cold — that is a decision both players made, move after move, without ever discussing it.',
-      zh: '切到「俯视」读这张图：从头到尾没人碰过的格子，与最热的格子一样有信息量。多数棋局里整整一翼是冷的——那是双方一步一步共同做出的决定，从没商量过。',
+      en: 'This page opens flat-on — read it as a map: the squares nobody ever touched are as informative as the hot ones. In most games a whole wing stays cold — that is a decision both players made, move after move, without ever discussing it.',
+      zh: '这一页一开就是正视，当地图读：从头到尾没人碰过的格子，与最热的格子一样有信息量。多数棋局里整整一翼是冷的——那是双方一步一步共同做出的决定，从没商量过。',
     },
     presetsLabel: { en: 'Game', zh: '棋局' },
     presets: PRESETS,
-    views: { iso: VIEW_ISO, top: VIEW_TOP },
+    views: { top: VIEW_TOP, tilt: VIEW_TILT, iso: VIEW_ISO },
     toggles: [
       { key: 'wholeGame', label: { zh: '看全局', en: 'Whole game' }, color: ORANGE, checked: false },
     ],
@@ -5543,7 +5561,7 @@ var TOOL = {
   title: { zh: '一局棋的回放 · MathViz', en: 'Game Replay · MathViz' },
   h1: { zh: '一局棋的回放', en: 'Game Replay' },
 };
-var VERSION = '1.0.0';
+var VERSION = '1.1.0';   // 与 <meta name="tool-version"> 同值：面板徽章读这里
 
 E.init({
   canvas: canvas,
