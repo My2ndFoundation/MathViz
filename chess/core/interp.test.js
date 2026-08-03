@@ -16,6 +16,20 @@ T.eq(values('1 2.5 0.75'), [1, 2.5, 0.75], '整数与小数');
 T.eq(values("'hi' \"there\""), ['hi', 'there'], '两种引号');
 T.eq(values("'a\\nb'"), ['a\nb'], '转义序列在词法阶段就解掉');
 
+// 数字里第二个小数点：原生 JS 报 SyntaxError，我们也必须报错，
+// 而不是悄悄把 1.2.3 变成 1.2 —— 与参照实现（JS 自己）保持一致是
+// 本阶段的整套正确性标准，而「静默给出一个错的数字」是规格 §9
+// 点名要避免的那种「半懂不懂比明确拒绝更危险」的形态。
+T.throws(() => I.tokenize('1.2.3'), '数字里出现第二个小数点要报错');
+T.throws(() => I.tokenize('let x = 1.2.3'), '在语句里同样报错');
+
+T.eq(I.tokenize('1.5').filter(t => t.type !== 'eof')[0].value, 1.5, '正常小数');
+T.eq(I.tokenize('42').filter(t => t.type !== 'eof')[0].value, 42, '整数');
+T.eq(I.tokenize('a.b').filter(t => t.type !== 'eof').map(t => t.value), ['a', '.', 'b'],
+     '标识符后的点仍然是成员访问运算符，不是数字的一部分');
+T.eq(I.tokenize('1 .5').filter(t => t.type !== 'eof').map(t => t.value), [1, '.', 5],
+     '空格分开的话是三个 token');
+
 // ---- 模板字符串 ----
 const tpl = I.tokenize('`try ${r},${c}`').filter(t => t.type !== 'eof');
 T.eq(tpl.length, 1, '模板串是一个 token');

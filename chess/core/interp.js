@@ -69,7 +69,18 @@
       }
 
       if (c >= '0' && c <= '9') {
-        while (i < src.length && ((src[i] >= '0' && src[i] <= '9') || src[i] === '.')) adv();
+        /* 至多一个小数点：原生 JS 对 1.2.3 直接 SyntaxError，我们不能悄悄
+           把它读成 1.2 然后把第二个 '.' 扔给下一轮当成员访问符 —— 那样使用
+           者会拿到一个看似合法、实则错误的数字，而屏幕上没有任何报错提示
+           她哪里错了（规格 §9：半懂不懂的解释器比明确拒绝更危险）。 */
+        let dots = 0;
+        while (i < src.length && ((src[i] >= '0' && src[i] <= '9') || src[i] === '.')) {
+          if (src[i] === '.') {
+            dots++;
+            if (dots > 1) throw err('Invalid number: more than one decimal point', sl, sc);
+          }
+          adv();
+        }
         push('num', parseFloat(src.slice(start, i)), start, sl, sc);
         continue;
       }
