@@ -116,4 +116,83 @@ T.eq(posn.right.col, 3, '右操作数在第 3 列');
 try { P('a ? b : c'); T.ok(false, '三元运算符应当被拒绝'); }
 catch (e) { T.eq(e.category, 'unsupported', '三元报的是 unsupported 而不是 syntax'); }
 
+// ---- 语句解析 ----
+function S(src) { return I.parse(src).body; }
+
+T.eq(S('let x = 1;')[0].type, 'VarDecl', '变量声明');
+T.eq(S('let x = 1;')[0].kind, 'let', 'kind 区分 let/const');
+T.eq(S('x = 2;')[0].type, 'ExprStmt', '表达式语句');
+T.eq(S('if (a) b(); else c();')[0].type, 'If', 'if/else');
+T.ok(S('if (a) b();')[0].alt === null, '没有 else 时 alt 为 null');
+T.eq(S('for (let i = 0; i < 3; i++) {}')[0].type, 'For', 'for');
+T.eq(S('for (const v of xs) {}')[0].type, 'ForOf', 'for…of');
+T.eq(S('for (const v of xs) {}')[0].name, 'v', 'for…of 的绑定名');
+T.eq(S('while (a) {}')[0].type, 'While', 'while');
+T.eq(S('function f(a, b) { return a; }')[0].type, 'FuncDecl', '函数声明');
+T.eq(S('function f(a, b) { return a; }')[0].params, ['a', 'b'], '形参');
+T.eq(S('{ let a = 1; }')[0].type, 'Block', '块语句');
+
+// 分号可省（ASI 的极简版：换行或 } 处结束）
+T.eq(S('let a = 1\nlet b = 2').length, 2, '不写分号也能解析出两条语句');
+
+// ---- 不支持的语法：行、列、类别（阶段 3b 的波浪线全靠这三样）----
+function bad(src) {
+  try { I.parse(src); return null; }
+  catch (e) { return { line: e.line, col: e.col, category: e.category, message: e.message }; }
+}
+
+const cls = bad('let a = 1;\nclass Foo {}');
+T.eq(cls.category, 'unsupported', 'class 是 unsupported 不是 syntax');
+T.eq(cls.line, 2, '报在第 2 行');
+T.eq(cls.col, 1, '报在第 1 列');
+T.ok(/class/.test(cls.message), '消息里点名了 class：' + cls.message);
+
+T.eq(bad('try { a(); } catch (e) {}').category, 'unsupported', 'try/catch 不支持');
+T.eq(bad('async function f() {}').category, 'unsupported', 'async 不支持');
+T.eq(bad('const [a, b] = xs;').category, 'unsupported', '解构不支持');
+T.eq(bad('f(...xs);').category, 'unsupported', '展开运算符不支持');
+T.eq(bad('this.x = 1;').category, 'unsupported', 'this 不支持');
+T.eq(bad('const r = /ab+/;').category, 'unsupported', '正则不支持');
+
+// 真正的语法错误报 syntax
+T.eq(bad('let x = ;').category, 'syntax', '缺少表达式是 syntax');
+T.eq(bad('if (a { }').category, 'syntax', '缺少右括号是 syntax');
+
+// 好代码不报错
+T.eq(bad('let x = 1;'), null, '合法代码不抛');
+
+// ---- 块体箭头函数（上一任务遗留的临时状态：本任务解开）----
+// 上一个任务把 (a) => { ... } 暂时报成 unsupported，理由是当时还没有 Block
+// 节点。现在语句解析（含 Block）已经落地，这里必须接上，Task 6 的差分测试
+// 里 `const g = (a) => { return a * 2; }; return g(4);` 需要它。
+const ab = I.parseExpression('(a) => { return a * 2; }');
+T.eq(ab.type, 'Arrow', '块体箭头函数');
+T.eq(ab.expression, false, '块体 → expression=false');
+T.eq(ab.body.type, 'Block', '块体是 Block 节点');
+
+// ---- 额外验证 1：for…in 与 for…of 的报错要点名 for…of（brief 测试没覆盖）----
+// 只报「in 不支持」对使用者没用——她不知道该改成什么。文案必须提到 for...of。
+const forIn = bad('for (const k in obj) {}');
+T.eq(forIn.category, 'unsupported', 'for...in 是 unsupported');
+T.ok(/for\.\.\.of/.test(forIn.message), 'for...in 的报错文案里点名了 for...of：' + forIn.message);
+
+// ---- 额外验证 2：不支持关键字在不同位置时，行列要指向词本身（brief 测试没覆盖）----
+const classSrc = 'let a = 1;\nlet b = 2;\n    class Foo {}';
+const classPos = bad(classSrc);
+T.eq(classPos.line, 3, 'class 出现在嵌套/缩进位置：报在第 3 行');
+T.eq(classPos.col, classSrc.split('\n')[2].indexOf('class') + 1,
+     'class 报的列正好指向 class 本身，不是行首');
+
+const thisSrc = 'let x = 1 + this.y;';
+const thisPos = bad(thisSrc);
+T.eq(thisPos.line, 1, 'this 出现在表达式中间：报在第 1 行');
+T.eq(thisPos.col, thisSrc.indexOf('this') + 1,
+     'this 报的列指向 this 本身，不是语句开头或文件开头');
+
+const trySrc = 'if (a) {\n  if (b) {\n    try { c(); } catch (e) {}\n  }\n}';
+const tryPos = bad(trySrc);
+T.eq(tryPos.line, 3, 'try 出现在嵌套块里：报在第 3 行');
+T.eq(tryPos.col, trySrc.split('\n')[2].indexOf('try') + 1,
+     'try 报的列指向 try 本身，不是块开头');
+
 T.report();

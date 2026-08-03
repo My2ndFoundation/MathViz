@@ -176,9 +176,33 @@
 
   /* 子集边界之外的保留字：走 name 通道进词法器（KEYWORDS 表里没有它们），
      解析器在语法位置上直接拒绝，报错要说清楚是哪个词、为什么不支持——
-     「意外的标识符 class」对使用者毫无帮助。 */
-  const UNSUPPORTED_WORDS = ['class', 'this', 'new', 'typeof', 'delete',
-                              'async', 'await', 'try', 'catch', 'throw'];
+     「意外的标识符 class」对使用者毫无帮助。集中放在一张表里（而不是散落
+     在各个语法位置各写一条 if），是为了让「新增一个不支持的词」只需要
+     改一行。值是给使用者看的人话描述，配合 unsupported() 拼进统一格式的
+     消息（规格 §2.8：Unsupported syntax: X (line N). This interpreter
+     supports a subset of JavaScript.）。
+     'in' / 'instanceof' 放进来是因为它们是 for…in 与原型链的入口，而
+     规格明确不支持原型链；'var' 额外在描述里给出替代方案，因为它和
+     let/const 语义差异使用者未必知道该换成什么。 */
+  const UNSUPPORTED_WORDS = {
+    'class': 'class declaration', 'this': 'this', 'new': 'the new operator',
+    'async': 'async functions', 'await': 'await', 'try': 'try/catch',
+    'catch': 'try/catch', 'throw': 'throw', 'typeof': 'typeof',
+    'delete': 'delete', 'in': 'the in operator', 'instanceof': 'instanceof',
+    'var': 'var (use let or const)', 'switch': 'switch', 'do': 'do…while',
+    'yield': 'yield', 'super': 'super', 'export': 'export', 'import': 'import',
+  };
+
+  /* 不支持语法的消息在这一处统一拼装——阶段 3b 的编辑器要用 line/col 画
+     波浪线、在行号槽点红点、悬停显示 message（规格 §2.8），category 恒为
+     'unsupported'：这是「合法 JS，但不在这个解释器的子集里」，要说清楚
+     「本解释器只支持 JS 的一个子集」，而不是让使用者以为自己写错了
+     （那是 'syntax' 类别的意思，两者对使用者的意义完全不同）。 */
+  function unsupported(what, t) {
+    return err('Unsupported syntax: ' + what + ' (line ' + t.line + '). ' +
+               'This interpreter supports a subset of JavaScript.',
+               t.line, t.col, 'unsupported');
+  }
 
   function cur(state) { return state.toks[state.i]; }
   function at(state, type, value) {
@@ -201,21 +225,28 @@
   }
   /* 在任意表达式起始位置检查「这个词/符号是不是子集之外的东西」——
      class / this / new / typeof / delete / async / await / try / catch / throw
-     走 name 通道进来，... 与 ? 走 punct 通道，都要在这里拦下来，而不是
-     让它们继续往下走然后在基本单元里报一个不知所云的 syntax 错误。 */
+     等走 name 通道进来，... 与 ? 走 punct 通道，都要在这里拦下来，而不是
+     让它们继续往下走然后在基本单元里报一个不知所云的 syntax 错误。
+     '/' 单独检查：正则字面量不在子集内，词法器把 /ab+/ 切成了
+     '/' 'ab' '+' '/' 四个 token（词法器不认识正则语法），如果不在这里
+     拦截，'/' 会一路走到 parsePrimary 末尾的 catch-all，报出一个跟正则
+     毫无关系的「Unexpected token」。这个检查只在**期待操作数**的位置
+     生效（parsePrimary 入口），不会误伤 a / b 这种除法——除法的 '/' 是
+     在 parseBinary 里作为中缀运算符被消费掉的，永远不会成为 parsePrimary
+     看到的「当前 token」。 */
   function checkUnsupported(state) {
     const t = cur(state);
-    if (t.type === 'name' && UNSUPPORTED_WORDS.indexOf(t.value) >= 0) {
-      throw err('Unsupported syntax: ' + t.value + ' is outside this interpreter\'s JavaScript subset',
-                 t.line, t.col, 'unsupported');
+    if (t.type === 'name' && UNSUPPORTED_WORDS.hasOwnProperty(t.value)) {
+      throw unsupported(UNSUPPORTED_WORDS[t.value], t);
     }
     if (t.type === 'punct' && t.value === '...') {
-      throw err('Unsupported syntax: spread is outside this interpreter\'s JavaScript subset',
-                 t.line, t.col, 'unsupported');
+      throw unsupported('the spread operator', t);
     }
     if (t.type === 'punct' && t.value === '?') {
-      throw err('Unsupported syntax: ternary is outside this interpreter\'s JavaScript subset',
-                 t.line, t.col, 'unsupported');
+      throw unsupported('the ternary operator', t);
+    }
+    if (t.type === 'punct' && t.value === '/') {
+      throw unsupported('regular expressions', t);
     }
   }
 
@@ -233,9 +264,7 @@
        只能在这里、左手边刚解析完的地方拦截，才能报出 unsupported
        而不是「expected ')' but got '?'」这种不知所云的 syntax 错误。 */
     if (at(state, 'punct', '?')) {
-      const qt = cur(state);
-      throw err('Unsupported syntax: ternary is outside this interpreter\'s JavaScript subset',
-                 qt.line, qt.col, 'unsupported');
+      throw unsupported('the ternary operator', cur(state));
     }
     const t = cur(state);
     if (t.type === 'punct' && ASSIGN_OPS.indexOf(t.value) >= 0) {
@@ -254,6 +283,16 @@
     let left = parseUnary(state);
     for (;;) {
       const t = cur(state);
+      /* 'in' / 'instanceof' 是中缀运算符但走 name 通道（KEYWORDS 表里没有
+         它们），不在 BINOP 表里、也从不会成为 parsePrimary 看到的「当前
+         token」（它们前面总有一个已经解析完的左操作数）——如果不在这里
+         单独拦一次，`x in obj` 会一路解析到调用方期待的下一个符号处，
+         报出一个不知所云的「expected ')' but got 'in'」syntax 错误，
+         而不是「in 不支持」。for…in 有专门更友好的报错（见 parseFor），
+         这里兜底的是 in/instanceof 出现在其他任意表达式位置的情况。 */
+      if (t.type === 'name' && (t.value === 'in' || t.value === 'instanceof')) {
+        throw unsupported(UNSUPPORTED_WORDS[t.value], t);
+      }
       if (t.type !== 'punct') break;
       const prec = BINOP[t.value];
       if (prec === undefined || prec < minPrec) break;
@@ -373,17 +412,19 @@
     const arrowAttempt = tryParseArrowParams(state);
     if (arrowAttempt) {
       expect(state, '=>');
-      let body, expression;
+      /* 块体箭头函数 (a) => { ... }：上一个任务（表达式解析）暂时把这里
+         报成 unsupported，理由是当时还没有 Block 节点可用。现在语句解析
+         已经落地（parseBlock 见下），这里接上真正的支持——
+         expression: false 时 body 是一个 Block 节点，与表达式体
+         （expression: true，body 是表达式节点）区分开，供求值层
+         （下一层任务）分派。 */
       if (at(state, 'punct', '{')) {
-        /* 语句体的箭头函数属于阶段 3b（语句解析）才有意义——这里的
-           解析层还没有语句节点可用，先按子集边界拒绝，等语句解析落地
-           后由那个任务决定怎么支持。 */
-        throw err('Unsupported syntax: block-bodied arrow functions are outside this interpreter\'s JavaScript subset',
-                   cur(state).line, cur(state).col, 'unsupported');
+        const blockBody = parseBlock(state);
+        return { type: 'Arrow', params: arrowAttempt.params, body: blockBody, expression: false,
+                 line: arrowAttempt.t0.line, col: arrowAttempt.t0.col };
       }
-      body = parseAssign(state);
-      expression = true;
-      return { type: 'Arrow', params: arrowAttempt.params, body: body, expression: expression,
+      const body = parseAssign(state);
+      return { type: 'Arrow', params: arrowAttempt.params, body: body, expression: true,
                line: arrowAttempt.t0.line, col: arrowAttempt.t0.col };
     }
 
@@ -464,5 +505,237 @@
     return node;
   }
 
-  return { tokenize: tokenize, KEYWORDS: KEYWORDS, parseExpression: parseExpression };
+  /* ---- 解析器：token 流 → 语句 AST（任务简报的语句节点形状表） ----
+     不支持的语法在**解析阶段**就报，而不是运行到一半崩（规格 §2.6）。
+     报错必须带行、列、类别——阶段 3b 的编辑器要用它画波浪线、在行号槽
+     点红点、悬停显示消息（规格 §2.8），§7.3 为此专设了一组定位测试。
+     category 分两类：'unsupported' 是「合法 JS，但不在这个子集里」，
+     'syntax' 是「根本不是合法 JS」。两者对使用者的意义完全不同——
+     前者要说「这个解释器只支持 JS 的一个子集」，后者要说「你这里写错了」。 */
+
+  /* 极简版 ASI：分号可省，只在「下一个 token 换行了」或「紧跟 } / eof」
+     时允许——不做完整 ECMA-262 的 ASI 规则（那套规则连报错恢复都要考虑）。
+     换行信息不需要专门的换行 token：直接比较「上一个已消费 token」和
+     「当前 token」的 line 是否不同即可，词法器已经把每个 token 的行号
+     记下来了。 */
+  function semi(state) {
+    if (eat(state, ';')) return;
+    const t = cur(state);
+    if (t.type === 'eof' || (t.type === 'punct' && t.value === '}')) return;
+    const prevTok = state.toks[state.i - 1];
+    if (prevTok && t.line > prevTok.line) return;
+    throw err('Unexpected token: expected ";" but got ' + JSON.stringify(t.value), t.line, t.col);
+  }
+
+  function parseBlock(state) {
+    const t0 = cur(state);
+    expect(state, '{');
+    const body = [];
+    while (!at(state, 'punct', '}') && !at(state, 'eof')) {
+      body.push(parseStatement(state));
+    }
+    expect(state, '}');
+    return { type: 'Block', body: body, line: t0.line, col: t0.col };
+  }
+
+  /* let/const 声明。解构（let [a,b]=xs / let {a,b}=obj）不在子集内——
+     声明名之后如果不是 name 而是 '[' 或 '{'，直接报 unsupported，而不是
+     让它继续走进「expected identifier」这个不知所云的 syntax 错误。 */
+  function parseVarDecl(state) {
+    const t0 = cur(state); // 'let' 或 'const'
+    const kind = t0.value;
+    state.i++;
+    const nameTok = cur(state);
+    if (nameTok.type === 'punct' && (nameTok.value === '[' || nameTok.value === '{')) {
+      throw unsupported('destructuring', nameTok);
+    }
+    if (nameTok.type !== 'name') {
+      throw err('Unexpected token: expected identifier but got ' + JSON.stringify(nameTok.value),
+                 nameTok.line, nameTok.col);
+    }
+    const name = nameTok.value;
+    state.i++;
+    let init = null;
+    if (eat(state, '=')) init = parseAssign(state);
+    return { type: 'VarDecl', kind: kind, name: name, init: init, line: t0.line, col: t0.col };
+  }
+
+  function parseIf(state) {
+    const t0 = cur(state);
+    state.i++;
+    expect(state, '(');
+    const test = parseExpr(state);
+    expect(state, ')');
+    const cons = parseStatement(state);
+    let alt = null;
+    if (eat(state, 'else')) alt = parseStatement(state);
+    return { type: 'If', test: test, cons: cons, alt: alt, line: t0.line, col: t0.col };
+  }
+
+  function parseWhile(state) {
+    const t0 = cur(state);
+    state.i++;
+    expect(state, '(');
+    const test = parseExpr(state);
+    expect(state, ')');
+    const body = parseStatement(state);
+    return { type: 'While', test: test, body: body, line: t0.line, col: t0.col };
+  }
+
+  /* for 的三种形态共用一个左括号：普通三段式 for(init;test;update)，
+     for…of（子集支持），for…in（子集明确不支持——它是原型链的入口）。
+     只有 let/const 打头时才可能是 for…of/for…in，所以先探一下声明名
+     之后紧跟的词：'of' → ForOf；'in' → 专门的报错（点名该改用 for…of，
+     不能只说「in 不支持」，使用者不知道该换成什么）；其它 → 当成普通
+     三段式的初始化部分继续解析。 */
+  function parseFor(state) {
+    const t0 = cur(state);
+    state.i++;
+    expect(state, '(');
+
+    if (at(state, 'kw', 'let') || at(state, 'kw', 'const')) {
+      const kindTok = cur(state);
+      const kind = kindTok.value;
+      state.i++;
+      const nameTok = cur(state);
+      if (nameTok.type === 'punct' && (nameTok.value === '[' || nameTok.value === '{')) {
+        throw unsupported('destructuring', nameTok);
+      }
+      if (nameTok.type !== 'name') {
+        throw err('Unexpected token: expected identifier but got ' + JSON.stringify(nameTok.value),
+                   nameTok.line, nameTok.col);
+      }
+      const name = nameTok.value;
+      state.i++;
+
+      if (at(state, 'kw', 'of')) {
+        state.i++;
+        const iterable = parseExpr(state);
+        expect(state, ')');
+        const body = parseStatement(state);
+        return { type: 'ForOf', kind: kind, name: name, iterable: iterable, body: body,
+                 line: t0.line, col: t0.col };
+      }
+      if (at(state, 'name', 'in')) {
+        const inTok = cur(state);
+        throw err('Unsupported syntax: for...in (line ' + inTok.line + '). ' +
+                   'This interpreter supports for...of but not for...in — there is no ' +
+                   'prototype chain in this subset. Use for...of instead.',
+                   inTok.line, inTok.col, 'unsupported');
+      }
+
+      let varInit = null;
+      if (eat(state, '=')) varInit = parseAssign(state);
+      const init = { type: 'VarDecl', kind: kind, name: name, init: varInit,
+                     line: kindTok.line, col: kindTok.col };
+      expect(state, ';');
+      const test = at(state, 'punct', ';') ? null : parseExpr(state);
+      expect(state, ';');
+      const update = at(state, 'punct', ')') ? null : parseExpr(state);
+      expect(state, ')');
+      const body = parseStatement(state);
+      return { type: 'For', init: init, test: test, update: update, body: body,
+               line: t0.line, col: t0.col };
+    }
+
+    // 没有 let/const 打头：普通三段式，init 部分（若有）是一条表达式语句
+    let init = null;
+    if (!at(state, 'punct', ';')) {
+      const e0 = cur(state);
+      init = { type: 'ExprStmt', expr: parseExpr(state), line: e0.line, col: e0.col };
+    }
+    expect(state, ';');
+    const test = at(state, 'punct', ';') ? null : parseExpr(state);
+    expect(state, ';');
+    const update = at(state, 'punct', ')') ? null : parseExpr(state);
+    expect(state, ')');
+    const body = parseStatement(state);
+    return { type: 'For', init: init, test: test, update: update, body: body,
+             line: t0.line, col: t0.col };
+  }
+
+  function parseFuncDecl(state) {
+    const t0 = cur(state);
+    state.i++;
+    const nameTok = cur(state);
+    if (nameTok.type !== 'name') {
+      throw err('Unexpected token: expected function name', nameTok.line, nameTok.col);
+    }
+    const name = nameTok.value;
+    state.i++;
+    expect(state, '(');
+    const params = [];
+    if (!at(state, 'punct', ')')) {
+      for (;;) {
+        const p = cur(state);
+        if (p.type !== 'name') throw err('Unexpected token: expected parameter name', p.line, p.col);
+        params.push(p.value);
+        state.i++;
+        if (eat(state, ',')) continue;
+        break;
+      }
+    }
+    expect(state, ')');
+    const body = parseBlock(state);
+    return { type: 'FuncDecl', name: name, params: params, body: body, line: t0.line, col: t0.col };
+  }
+
+  /* 按首 token 分派。不支持的保留字（class/this/var/switch/do/... ）走
+     name 通道到这里，在语句的最外层就被拦下——这样 `this.x = 1;` 这种
+     一开始就没救的语句不会先走进表达式解析器兜一圈才报错。 */
+  function parseStatement(state) {
+    const t0 = cur(state);
+
+    if (t0.type === 'name' && UNSUPPORTED_WORDS.hasOwnProperty(t0.value)) {
+      throw unsupported(UNSUPPORTED_WORDS[t0.value], t0);
+    }
+
+    if (t0.type === 'punct' && t0.value === '{') return parseBlock(state);
+
+    if (t0.type === 'kw' && (t0.value === 'let' || t0.value === 'const')) {
+      const d = parseVarDecl(state);
+      semi(state);
+      return d;
+    }
+    if (t0.type === 'kw' && t0.value === 'if') return parseIf(state);
+    if (t0.type === 'kw' && t0.value === 'for') return parseFor(state);
+    if (t0.type === 'kw' && t0.value === 'while') return parseWhile(state);
+    if (t0.type === 'kw' && t0.value === 'function') return parseFuncDecl(state);
+    if (t0.type === 'kw' && t0.value === 'break') {
+      state.i++; semi(state);
+      return { type: 'Break', line: t0.line, col: t0.col };
+    }
+    if (t0.type === 'kw' && t0.value === 'continue') {
+      state.i++; semi(state);
+      return { type: 'Continue', line: t0.line, col: t0.col };
+    }
+    if (t0.type === 'kw' && t0.value === 'return') {
+      state.i++;
+      let arg = null;
+      if (!(at(state, 'punct', ';') || at(state, 'punct', '}') || at(state, 'eof'))) {
+        arg = parseExpr(state);
+      }
+      semi(state);
+      return { type: 'Return', arg: arg, line: t0.line, col: t0.col };
+    }
+
+    // 其余情况：表达式语句（赋值、调用、自增自减……）
+    const expr = parseExpr(state);
+    semi(state);
+    return { type: 'ExprStmt', expr: expr, line: t0.line, col: t0.col };
+  }
+
+  /* 顶层入口：token 流 → { type: 'Program', body: Stmt[] }。注释先过滤掉——
+     它们是词法层暴露给阶段 3b 编辑器高亮用的，解析器不关心。 */
+  function parse(src) {
+    const toks = tokenize(src).filter(function (t) { return t.type !== 'comment'; });
+    const state = { toks: toks, i: 0 };
+    const body = [];
+    while (!at(state, 'eof')) {
+      body.push(parseStatement(state));
+    }
+    return { type: 'Program', body: body };
+  }
+
+  return { tokenize: tokenize, KEYWORDS: KEYWORDS, parseExpression: parseExpression, parse: parse };
 });
