@@ -473,7 +473,7 @@ T.eq(walk.rebuilds, 2, '这 800 次 ±1 全部走增量');
 T.eq(cutStats.pruned, null, '截断时剪枝总数报 null（不知道），不是一个数字');
 T.ok(cutStats.pruned === null, '而且真的是 null（=== 判定，挡住 undefined）');
 T.ok(cutStats.pruned !== 0, '尤其不是 0 —— 0 会把「不知道」伪装成一次测量');
-T.eq(cutStats.mvTotal, null, '截断时走法总数同样是 null');
+T.eq(cutStats.mvEnumerated, null, '截断时「枚举了多少走法」同样是 null');
 T.ok(typeof cutStats.visited === 'number' && cutStats.visited > 0,
   '但「访问了多少个节点」是数得出来的，照常给数字：' + cutStats.visited);
 T.eq(cutStats.prunedKnown, 0, '已确认被剪掉的分支数恒是数字，纯 minimax 上是 0');
@@ -486,7 +486,60 @@ T.eq(abStats.truncated, false, 'α-β 的完整轨迹不标 truncated');
 T.eq(abStats.unknown, 0, '完整轨迹上没有判不出来的节点');
 T.ok(typeof abStats.pruned === 'number', 'α-β 的剪枝总数是数字');
 T.eq(abStats.pruned, abStats.prunedKnown, '没有未知项时，总数就等于已确认数');
-T.ok(typeof abStats.mvTotal === 'number', 'α-β 的走法总数也是数字');
+T.ok(typeof abStats.mvEnumerated === 'number', 'α-β 的「枚举了多少走法」也是数字');
+
+/* ---- 把 mvEnumerated 的**含义**钉住，而不只是钉住它的类型 ----
+   它是「真的调用 genMoves 枚举出来的走法数之和」，不是「这些局面一共有
+   多少条分支」（后者本模块给不出来，早退叶子有走法却从没枚举过）。
+   两种读法在类型上都是数字，只有拿一个**独立的恒等式**才分得开：
+
+     枚举出来的 − 被剪掉的 = 真的展开出来的孩子总数 = 节点数 − 顶层节点数
+
+   左边全部来自 statsAt 的累加器，右边只数树上的节点，两边各算各的。
+   若哪天有人把它改成「分支因子之和」（把早退叶子按某个猜测的走法数计入），
+   左边会立刻变大，这条当场红。 */
+/* ordered 也在这里一起过一遍 view —— 它是 shipped 工具里与 ab **并排**的
+   那半个对比 tab，却是三个 mode 里唯一没有任何 view 级断言的。 */
+const ordTrace = I.run(ALGO.source({ mode: 'ordered', depth: 3 }), { host: {} }).trace;
+T.ok(!ordTrace.truncated, '前提：depth 3 的 ordered 不截断');
+const ordTree = TM.build(ordTrace, 'search');
+const ordEnd = TM.createView(ordTree, ordTrace);
+TM.seek(ordEnd, ordTrace.length - 1);
+
+for (const [tr0, tree0, lbl] of [[abTrace, abTree, 'ab'], [plainTrace, plainTree, 'plain'],
+                                 [ordTrace, ordTree, 'ordered']]) {
+  const v = TM.createView(tree0, tr0);
+  TM.seek(v, tr0.length - 1);
+  const st = TM.statsAt(v);
+  let tops = 0;
+  for (const id of tree0.order) { if (TM.nodeAt(tree0, id).parentId < 0) { tops++; } }
+  T.eq(st.visited, tree0.order.length, lbl + '：跑到末尾时每个节点都访问过了');
+  T.eq(st.mvEnumerated - st.pruned, st.visited - tops,
+    lbl + '：枚举出来的走法 − 剪掉的 = 真的展开出来的孩子数');
+}
+
+/* ordered 的 view 级断言。它与 ab 并排展示的正是这两个数：同一个答案，
+   更早试到好棋 ⟹ 剪得更多、看的节点更少。 */
+const ordStats = TM.statsAt(ordEnd);
+T.eq(ordStats.truncated, false, 'ordered 的完整轨迹不标 truncated');
+T.eq(ordStats.unknown, 0, 'ordered 上没有判不出来的节点');
+T.ok(typeof ordStats.pruned === 'number', 'ordered 的剪枝总数是数字');
+T.ok(ordStats.pruned > 0, 'ordered 确实剪掉了分支：' + ordStats.pruned);
+T.ok(ordStats.pruned > abStats.pruned,
+  'ordered 比 ab 剪得更多：' + ordStats.pruned + ' > ' + abStats.pruned);
+T.ok(ordStats.visited < abStats.visited,
+  'ordered 看的节点比 ab 少：' + ordStats.visited + ' < ' + abStats.visited);
+T.ok(TM.prunedAt(ordEnd).length > 0, 'ordered 指认得出被剪过的节点');
+/* 三种 mode 在**同一个深度**上必须给出同一个答案 —— 剪枝和排序只改变
+   要看多少个局面，不改变那个分数。注意参照要拿 depth 3 的 plain，
+   不能拿文件开头那个 RESULT：那是 depth **2** 的答案（0），而 depth 3 是
+   136（minimax.js 里 0 / 136 / −12 这组数字说的正是「多想一层会改主意」）。 */
+T.eq(TM.nodeAt(ordTree, ordTree.rootId).value, TM.nodeAt(plainTree, plainTree.rootId).value,
+  'ordered 的答案与同深度的 plain 相同 —— 排序只改变要看多少个局面');
+T.eq(TM.nodeAt(abTree, abTree.rootId).value, TM.nodeAt(plainTree, plainTree.rootId).value,
+  'ab 的答案与同深度的 plain 相同 —— 剪枝不改变答案');
+T.ok(TM.nodeAt(plainTree, plainTree.rootId).value !== RESULT,
+  '前提：depth 3 的答案与 depth 2 不同（否则上面两条拿错参照也看不出来）');
 
 /* 剪枝计数在整条轨迹上**只增不减**（已确认的事实不会被推翻），
    而且中途一次都不会变成 null。 */
@@ -575,7 +628,7 @@ for (const id of TM.prunedAt(abEnd)) {
    null，那一课当场没了。实测六份 fixture 里「关闭了、读不到走法数、却有
    孩子」的节点数都是 0，所以这一档的判据是安全的 —— 这里把它钉住，
    哪天不成立了要当回归看。 */
-for (const [t2, lbl] of [[abTree, 'ab'], [plainTree, 'plain'], [cutTree, 'cut']]) {
+for (const [t2, lbl] of [[abTree, 'ab'], [plainTree, 'plain'], [cutTree, 'cut'], [ordTree, 'ordered']]) {
   for (const id of t2.order) {
     const n = TM.nodeAt(t2, id);
     if (n.popStep < 0 || n.mvCount !== null) { continue; }

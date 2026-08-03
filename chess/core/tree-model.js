@@ -272,7 +272,7 @@
     return {
       closed: 0,        // 截至游标已经关闭的节点数
       prunedSum: 0,     // 已**确定**被剪掉的分支总数（只累加判得出来的）
-      mvSum: 0,         // 已确定的走法总数
+      mvSum: 0,         // 已经**枚举出来**的走法总数（见 statsAt 的 mvEnumerated）
       openForever: 0,   // 可见节点里永不关闭的（= 轨迹被截断的直接证据）
       unreadable: 0,    // 关闭了、有孩子、却读不到走法数的（= 变量被改名）
     };
@@ -290,7 +290,14 @@
     acc.closed += sign;
     const cut = cutOf(n);
     if (cut < 0) { acc.unreadable += sign; return; }
-    acc.mvSum += sign * n.mvCount;
+    /* `mvCount === null` 的那一档（早退叶子）**枚举出来的走法就是 0 个**
+       ——它压根没调用过 genMoves。这里**显式**判 null 而不是靠
+       `sign * null === 0` 那个隐式强制：算出来的数一样，但一个 null 悄悄
+       变成 0 的表达式，正是这个文件从头到尾在防的那件事，不该在实现里
+       留一处反例。（注意这与「说这个局面有 0 个走法」不是一回事：
+       那个局面**有**合法走法，只是搜索没去枚举——所以这个累加器叫
+       「枚举了多少」，不叫「有多少」，见 statsAt。） */
+    if (n.mvCount !== null) acc.mvSum += sign * n.mvCount;
     if (cut > 0) acc.prunedSum += sign * cut;
   }
 
@@ -478,9 +485,9 @@
     return out;
   }
 
-  /* statsAt(view) → { visited, pruned, prunedKnown, mvTotal, unknown, truncated }
+  /* statsAt(view) → { visited, pruned, prunedKnown, mvEnumerated, unknown, truncated }
 
-     **pruned 与 mvTotal 会是 null，这是本函数的全部要点。**
+     **pruned 与 mvEnumerated 会是 null，这是本函数的全部要点。**
 
      「剪掉了几个」这个总数只有在**每一个可见节点都判得出来**时才是一个数。
      只要有一个判不出来（截断导致帧永不关闭，或者使用者改了 `ms` 的名字），
@@ -500,6 +507,23 @@
      所以这里同时给出两个字段，不是冗余：一个是「总数」（可能不知道），
      一个是「已经确认的」（永远知道）。
 
+     ---- mvEnumerated 是「**枚举出来了**多少个走法」，不是「一共有多少个」----
+
+     名字里的 Enumerated 是要害，它曾经叫 mvTotal，而 "total" 会把面板引向
+     另一个量：「这些局面**一共有**多少条分支」。那个量本模块**给不出来**，
+     `depth === 0` 的早退叶子有合法走法却从没枚举过（本文件 :52 起那段
+     null 契约说的正是它），把它们当 0 加进去就是编造——与上面 pruned 的
+     null 裁决自相矛盾。
+
+     所以定义钉死为：**每一帧真的调用 genMoves 生成出来的走法数之和**。
+     早退叶子贡献 0（它确实一个都没枚举），这是事实不是估计。这也正是
+     α-β 那一课要的分母：「本来要看的」对「真的看了的」，
+     而 `mvEnumerated - pruned` 恰好等于**真的展开出来的孩子总数**
+     （整条轨迹跑完时 = visited − 顶层节点数；测试拿它当独立参照钉住了这个读法）。
+
+     它跟着 pruned 一起变 null，理由也一致：有节点永远判不出来时，
+     那些帧枚举了多少走法同样无从知道。
+
      truncated 只由**截断**决定：轨迹自己说被截断，或者可见节点里有永不关闭
      的帧。改名导致的 unreadable 不算截断——那是另一码事，走 unknown。 */
   function statsAt(view) {
@@ -509,7 +533,7 @@
       visited: view.visCount,
       pruned: unknown ? null : a.prunedSum,
       prunedKnown: a.prunedSum,
-      mvTotal: unknown ? null : a.mvSum,
+      mvEnumerated: unknown ? null : a.mvSum,
       unknown: unknown,
       truncated: !!view.trace.truncated || a.openForever > 0,
     };
