@@ -633,4 +633,21 @@ T.eq(replayVars(rw, 3).a, 3, '正放到第 3 步 a=3');
 T.eq(rewindVars(rw, 3, 1).a, 1, '从第 3 步反放回第 1 步，a 回到 1');
 T.eq(rewindVars(rw, 3, 0).a, undefined, '反放到第 0 步，a 不存在');
 
+// ---- Gap 1（协调者审查发现）：块作用域遮蔽下，扁平按名回放必须与
+//      程序的真实语义一致。没有「声明记下被遮蔽的旧值」+「作用域退出时
+//      补一条恢复 delta」这两件事，调试器的变量面板会在块结束后继续
+//      显示内层的值——对一个教学工具，显示一个错的变量值比崩溃更糟，
+//      她会以为是自己理解错了。 ----
+const sh = I.run('let a = 1;\n{ let a = 2; }\nreturn a;', { host: {} }).trace;
+T.eq(replayVars(sh, sh.length).a, 1, '正放到末尾，a 是外层的 1 而不是内层的 2');
+T.eq(rewindVars(sh, sh.length, 1).a, 1, '反放回第 1 步，a 是外层的 1');
+T.eq(rewindVars(sh, sh.length, 0).a, undefined, '反放到第 0 步，a 尚不存在');
+
+// 顺带确认 for 的「每轮新环境」（Task 5 按 ECMA-262 实现的那个）在同一套
+// 规则下也正确——循环变量在整个 for 语句退出后必须从扁平回放里消失，
+// 不能继续显示循环体内最后一轮的值。
+const forSh = I.run('let i = 99;\nfor (let i = 0; i < 3; i++) {}\nreturn i;', { host: {} }).trace;
+T.eq(replayVars(forSh, forSh.length).i, 99,
+     'for 头部声明的 i 遮蔽外层同名变量，for 退出后扁平回放要看到外层的 99，不是循环体最后的 3');
+
 T.report();

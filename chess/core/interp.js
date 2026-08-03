@@ -1032,19 +1032,51 @@
      只查「当前层」的 Map，不沿 parent 链查：不同作用域的遮蔽（let a = 1;
      { let a = 2; }）是合法的，块作用域每层都是独立的 Map，天然不会误伤。
      node 用来报行列——调用方永远是解析期就带着源码位置的 AST 节点。 */
+  /* 遮蔽（Gap 1 修复的第一块拼图）：如果外层（env.parent 往上，不含
+     env 自己——env 自己此刻还没有这个名字，上面的重复声明检查已经保证
+     了这一点）已经有同名变量，这次声明的 from 要记它被遮蔽前的值，而
+     不是 undefined。原因：扁平按名回放（调试器最自然的重建方式——见
+     任务简报里 replayVars/rewindVars 那套模拟）分不清"这个名字第一次
+     出现"和"这个名字遮蔽了外层同名变量"，如果两者都记成 from:undefined，
+     反放到这一步之前时会把外层那份也一起删掉，而它其实还活着。
+     这一步单独不够——还需要 closeScope 在作用域退出时补一条恢复 delta，
+     两者缺一不可，见 closeScope 的注释与任务报告里的完整推演。 */
   function declareVar(env, kind, name, value, node) {
     if (env.vars.has(name)) {
       throw err("Identifier '" + name + "' has already been declared", node.line, node.col, 'syntax');
     }
+    const shadowed = findEnv(env.parent, name);
+    const from = shadowed ? snap(shadowed.vars.get(name).value) : undefined;
     env.vars.set(name, { kind: kind, value: value });
-    // from: undefined 表示「此前不存在」——声明是这个变量名第一次出现。
-    recordVarDelta(env, name, undefined, snap(value));
+    recordVarDelta(env, name, from, snap(value));
   }
 
   function findEnv(env, name) {
     let e = env;
     while (e) { if (e.vars.has(name)) return e; e = e.parent; }
     return null;
+  }
+
+  /* 作用域退出（Gap 1 修复的第二块拼图）：给 scopeEnv 里"自己声明"过的
+     每一个名字补一条恢复 delta——{name, from: 这个作用域里最后的值（它
+     马上要消失了）, to: 外层同名变量此刻的值；外层没有同名变量则
+     to: undefined，表示这个名字重新变为不存在}。
+     只做遮蔽（declareVar 那一半）不够：反放会对，但正放到"块结束之后"
+     仍然会停在内层值上，因为没有任何事件告诉扁平按名回放"现在应该看
+     外层的值了"——块作用域退出时，外层那个变量往往从未被重新赋值过
+     （assignVar 不会为它产生新的 delta），所以必须由 closeScope 主动
+     补一条。两者一起才能让 replayVars 在任意位置都跟真实语义一致，
+     rewindVars 沿轨迹倒着走也能在正确的位置把外层值找回来（完整的
+     推演过程见任务报告）。
+     调用点：Block 语句退出、函数调用返回、for 整体退出、for…of 每轮
+     退出——凡是 makeEnv() 开出来、且可能用 declareVar 声明过东西的
+     作用域，一旦不再使用就要在这里关掉。 */
+  function closeScope(scopeEnv) {
+    scopeEnv.vars.forEach(function (binding, name) {
+      const outer = findEnv(scopeEnv.parent, name);
+      const to = outer ? snap(outer.vars.get(name).value) : undefined;
+      recordVarDelta(scopeEnv, name, snap(binding.value), to);
+    });
   }
 
   function lookupVar(env, name, node) {
@@ -1274,6 +1306,10 @@
     stepBoundary(callEnv, node, 'push', frameName);
     if (fn.expression) {
       const v = yield* evalExpr(fn.body, callEnv);
+      // 函数返回：callEnv 里的形参（可能遮蔽了闭包里的同名变量，比如
+      // function f(log) {...} 遮蔽根环境的宿主桥接名 log）到这里彻底
+      // 离开作用域，要在这里恢复（Gap 1，见 closeScope）。
+      closeScope(callEnv);
       stepBoundary(callEnv, node, 'pop', frameName);
       depth.n--;
       return v;
@@ -1287,6 +1323,7 @@
       if (completion) break;
       yield;
     }
+    closeScope(callEnv);
     stepBoundary(callEnv, node, 'pop', frameName);
     depth.n--;
     return (completion && completion.signal === 'return') ? completion.value : undefined;
@@ -1548,7 +1585,11 @@
       }
       case 'Block': {
         const child = makeEnv(env);
-        return yield* evalBlockBody(node.body, child);
+        const completion = yield* evalBlockBody(node.body, child);
+        // 块作用域退出——不管是正常跑完还是被 break/continue/return 提前
+        // 打断，child 里声明过的名字都要在这里关掉（Gap 1，见 closeScope）。
+        closeScope(child);
+        return completion;
       }
       case 'If': {
         const test = yield* evalExpr(node.test, env);
@@ -1628,7 +1669,15 @@
             // 早退（break/return）没有 update 可跑，直接在这里 flush 一次；
             // 见 While 分支同一处的注释。
             if (completion.signal === 'break') { stepBoundary(env, node); break; }
-            if (completion.signal !== 'continue') { stepBoundary(env, node); return completion; } // return：继续向上传
+            if (completion.signal !== 'continue') {
+              // return：整个 for 语句到这里就彻底退出了，declEnv/iterEnv
+              // 声明的循环变量（比如头部的 i）要在这里关掉（Gap 1）——
+              // 用 iterEnv 而不是 declEnv 读值，见下面 return null 之前
+              // 那次 closeScope 调用的注释，理由是同一个。
+              closeScope(iterEnv);
+              stepBoundary(env, node);
+              return completion; // 继续向上传
+            }
           }
           const nextEnv = copyIterEnv(iterEnv);
           if (node.update) yield* evalExpr(node.update, nextEnv);
@@ -1639,6 +1688,17 @@
           stepBoundary(env, node);
           yield;
         }
+        /* for 整体退出（测试为假 / 遇到 break，两条路径都在这里落地）：
+           declEnv 声明的循环变量到这里彻底离开作用域——"for 的 i 不泄漏
+           到外层"这条差分测试验证的就是这件事，Gap 1 修复之前，轨迹里
+           从来没有任何事件告诉扁平按名回放"i 这个名字已经不存在了"。
+           用 iterEnv（而不是 declEnv）读当前值：declEnv 从声明起就再
+           也没被更新过（copyIterEnv 每轮拷贝一份新环境，见上面的整体
+           注释），iterEnv 才是"最新一轮"真正持有当前值的那个环境；两者
+           声明的名字集合恒相同（copyIterEnv 只拷贝、不增删名字），所以
+           用 iterEnv 只影响读到的值，不影响要恢复哪些名字。 */
+        closeScope(iterEnv);
+        stepBoundary(env, node);
         return null;
       }
       case 'ForOf': {
@@ -1659,10 +1719,19 @@
           const iterEnv = makeEnv(env);
           declareVar(iterEnv, node.kind, node.name, items[idx], node);
           const completion = yield* evalStmt(node.body, iterEnv);
+          /* for…of 跟 For 不一样：这里每一轮都是一个全新的 iterEnv（不是
+             像 For 那样 decl 一次、之后每轮只拷贝），所以 closeScope 要
+             跟着每一轮的每一条退出路径走，不能只在整个语句退出时做一次
+             （Gap 1：每轮循环变量都要在这一轮结束时恢复成外层的值）。 */
           if (completion) {
-            if (completion.signal === 'break') { stepBoundary(iterEnv, node); break; }
-            if (completion.signal !== 'continue') { stepBoundary(iterEnv, node); return completion; } // return：继续向上传
+            if (completion.signal === 'break') { closeScope(iterEnv); stepBoundary(iterEnv, node); break; }
+            if (completion.signal !== 'continue') { // return：继续向上传
+              closeScope(iterEnv);
+              stepBoundary(iterEnv, node);
+              return completion;
+            }
           }
+          closeScope(iterEnv);
           stepBoundary(iterEnv, node);
           yield;
         }
