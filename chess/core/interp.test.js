@@ -650,4 +650,30 @@ const forSh = I.run('let i = 99;\nfor (let i = 0; i < 3; i++) {}\nreturn i;', { 
 T.eq(replayVars(forSh, forSh.length).i, 99,
      'for 头部声明的 i 遮蔽外层同名变量，for 退出后扁平回放要看到外层的 99，不是循环体最后的 3');
 
+// ---- 步数上限：同时是死循环保护（规格 §2.8）----
+T.eq(I.STEP_LIMIT, 50000, '默认上限 50,000 步');
+
+const loop = I.run('let i = 0;\nwhile (true) { i++; }', { host: {}, limit: 500 });
+T.eq(loop.trace.truncated, true, '死循环被上限截住，不是卡死');
+T.eq(loop.trace.limit, 500, '记下当时生效的上限');
+T.ok(loop.trace.length <= 500, '轨迹不超过上限');
+
+/* 不编造「省略了 N 步」：到达上限时执行已经停止，我们并不知道还剩多少步，
+   而要知道就得跑完 —— 可上限的另一个身份正是死循环保护。规格 §2.6 那句
+   「省略 N 步」与 §2.8 的「执行上限」互相冲突，本阶段按 §2.8 裁定。 */
+T.eq(loop.trace.omitted, undefined, '不报一个我们不知道的数字');
+
+// 正常结束的程序不该被标 truncated
+const fine = I.run('let s = 0; for (let i = 0; i < 10; i++) { s += i; } return s;', { host: {} });
+T.eq(fine.trace.truncated, false, '正常结束不标截断');
+T.eq(fine.result, 45, '正常结束返回正确结果');
+
+// 调用深度上限（Task 6）在这里一并回归
+let depthErr = null;
+try { I.run('function f() { return f(); } return f();', { host: {} }); }
+catch (e) { depthErr = e; }
+T.ok(depthErr, '无穷递归被拦住');
+T.eq(depthErr.category, 'runtime', '类别是 runtime');
+T.ok(/depth/i.test(depthErr.message), '消息提到深度：' + (depthErr && depthErr.message));
+
 T.report();

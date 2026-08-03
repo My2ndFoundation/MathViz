@@ -1522,8 +1522,21 @@
      trace，然后清空供下一段累积。 */
   function newPending() { return { varDelta: [], boardOps: [], out: null }; }
 
-  function createRecorder() {
-    return { trace: [], shadowBoard: {}, pending: newPending() };
+  /* 步数上限（规格 §2.6 与 §2.8 的冲突裁定，见任务简报「核心裁定」）：
+     §2.6 说超限时「停止记录，并在读数区显式写明已达上限、省略 N 步」；
+     §2.8 说这同一个数字「同时充当执行上限，超限则停止并明确提示」。
+     两句不能同时成立——按 §2.8 停止执行，我们就不知道 N 是多少（要知道
+     就得跑完，可上限的另一个身份恰恰是死循环保护，"跑完"在死循环下永远
+     不会发生）。本阶段按 §2.8 裁定：到达上限即停止执行，不编造那个我们
+     并不知道的 N（trace 上只有 truncated/limit，没有 omitted 字段）。
+
+     50,000 这个默认值同时是两件事：教学规模的算法（哪怕是 O(n^2) 量级、
+     n 到几百的双重循环）正常跑完远用不到这么多步，撞上它基本可以断定是
+     忘了写终止条件的死循环，而不是一个合法的大计算被误伤。 */
+  const STEP_LIMIT = 50000;
+
+  function createRecorder(limit) {
+    return { trace: [], shadowBoard: {}, pending: newPending(), stepCount: 0, limit: limit, truncated: false };
   }
 
   /* 语句边界：把 env.rec.pending 打包成一条 Step，压进 trace，然后清空
@@ -1539,6 +1552,12 @@
   function stepBoundary(env, node, frameOp, frameName) {
     const rec = env.rec;
     if (!rec) return;
+    /* 已经截断就什么都不做——包括 break/return 沿多层循环/调用向上冒泡
+       时，沿途每一层各自补的那次 stepBoundary（见 While/For/ForOf/
+       callInterpreted 里那些早退路径）：一旦上一次调用把 rec.truncated
+       置了 true，这些后续调用必须是纯粹的 no-op，否则「trace 不超过
+       上限」这条不变量会被这类冒泡打破。 */
+    if (rec.truncated) return;
     const p = rec.pending;
     rec.trace.push({
       line: node.line,
@@ -1550,6 +1569,13 @@
       out: p.out,
     });
     rec.pending = newPending();
+    rec.stepCount++;
+    /* 到顶即标记，且**这一步本身仍然被记录**——limit 是「最多记录/执行
+       这么多步」，不是「提前一步截断」。之后所有 stepBoundary 调用都会
+       被上面那个 guard 挡住，驱动循环也会在下一次 yield 处发现
+       rec.truncated 并停止喂生成器（见 run()）——这里不抛异常：抛出去
+       会让"跑到一半被截断"和"程序出错了"混进同一条通道。 */
+    if (rec.stepCount >= rec.limit) rec.truncated = true;
   }
 
   /* 语句求值：返回值是「完成信号」——undefined/null 表示正常完成，非空
@@ -1892,15 +1918,23 @@
      这层包装）——调用方拿它检查"棋盘接口最终是谁"用的是这个，不该看到
      内部的记录层，也不该在 run() 结束之后还去调用它、误以为能追加轨迹
      （trace 数组是这次 run() 私有的，run() 返回之后 rec 再也不会被写）。
-     opts.limit：接口签名里留的位置，给循环步数上限用——本任务（控制流）
-     引入了 for/while 之后，写死循环在语法上已经可能（while (true) {} 不
-     带 break），但加步数上限不在本任务的差分测试范围内，留给需要它的
-     调用方（比如阶段 3b 的编辑器跑用户代码）在后面接上，这里先不做任何事。 */
+     opts.limit：本次 run() 生效的步数上限（Task 8），缺省用 STEP_LIMIT。
+     驱动循环每次 gen.next() 之后检查 rec.truncated——一旦 stepBoundary
+     判定到顶，本次调用绝不再喂一次生成器（不"多跑一轮看看"，那样就跟
+     "到顶即停止执行"自相矛盾了）。生成器就此被晾在原地、永远不会再被
+     resume，没有需要清理的外部资源，交给 GC 即可。
+     result 仍然按「拿到的最后一个 step」正常计算：如果截断发生在生成器
+     真正跑完的同一次 resume 里（巧合，步数恰好卡在最后一步），
+     step.done 是 true，result 会是真实返回值，附带 truncated:true 一起
+     报告，这是额外信息，不算「编造」；如果截断发生在跑到一半（绝大多数
+     情况，包括死循环），step.done 是 false，result 保持 undefined——
+     执行没有走到 return，没有值可报。 */
   function run(src, opts) {
     opts = opts || {};
+    const limit = opts.limit !== undefined ? opts.limit : STEP_LIMIT;
     const program = parse(src);
     const resolvedHost = resolveHost(opts.host);
-    const rec = createRecorder();
+    const rec = createRecorder(limit);
     const tracedHost = wrapHostForTrace(resolvedHost, rec);
     const env = makeRootEnv(tracedHost);
     /* env.rec 必须在 makeRootEnv 声明完 log/mark/place/clear/attacked/Math
@@ -1910,11 +1944,16 @@
     env.rec = rec;
     const gen = evalBlockBody(program.body, env);
     let step = gen.next();
-    while (!step.done) step = gen.next();
-    const completion = step.value;
+    while (!step.done && !rec.truncated) step = gen.next();
+    const completion = step.done ? step.value : undefined;
     const result = completion && completion.signal === 'return' ? completion.value : undefined;
+    // trace 是 rec.trace 这同一个数组对象——truncated/limit 直接挂在它
+    // 身上（不额外包一层对象），调用方 `run().trace.truncated` 就能读到。
+    rec.trace.truncated = rec.truncated;
+    if (rec.truncated) rec.trace.limit = limit;
     return { result: result, trace: rec.trace, host: resolvedHost };
   }
 
-  return { tokenize: tokenize, KEYWORDS: KEYWORDS, parseExpression: parseExpression, parse: parse, run: run };
+  return { tokenize: tokenize, KEYWORDS: KEYWORDS, parseExpression: parseExpression, parse: parse,
+           run: run, STEP_LIMIT: STEP_LIMIT };
 });
