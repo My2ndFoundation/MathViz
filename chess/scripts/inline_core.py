@@ -22,10 +22,13 @@ SOURCES = {
     'INTERACT': ROOT / 'core' / 'interact.js',
     'BOARD-RENDER': ROOT / 'core' / 'board-render.js',
     'REPLAY': ROOT / 'core' / 'replay.js',
+    'INTERP': ROOT / 'core' / 'interp.js',
 }
 
-# 只有工具③ 有这两个标记区；其余 html 缺它们是正常的，不该 WARN。
-OPTIONAL_TAGS = {'REPLAY', 'GAMES'}
+# 只有部分工具有这些标记区；其余 html 缺它们是正常的，不该 WARN。
+# INTERP 目前还没有任何 html 带 GENERATED:INTERP 标记（阶段 3b 的验收页
+# 与阶段 4 的工具④ 才会加）——这同样是正常缺失，不该 WARN。
+OPTIONAL_TAGS = {'REPLAY', 'GAMES', 'INTERP'}
 
 
 def block(tag: str, body: str) -> str:
