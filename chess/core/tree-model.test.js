@@ -824,6 +824,78 @@ for (const id of viaTree.order) {
   T.ok(Math.abs(viaLay.pos[id].x) <= 5 + 1e-9, '多顶层时同样压在 ±spanX/2 之内');
 }
 
+/* ---- ⑤ 截断的 d4：本阶段的主角 fixture，此前一条布局断言都没跑到它 ----
+   tree-model.js 里明写了「popStep < 0（截断、永不关闭）的帧照常参与布局」
+   —— 那是本模块与截断契约**唯一**的一处交互，而 cutTree（1,243 个节点、
+   5 帧从未关闭）此前只被 build / view 那几段用过，布局部分一次都没碰它。
+   这个 probe 只查最基本的三件事：坐标都是有限数、同层不重叠、压在
+   ±spanX/2 内 —— 都是 O(节点数) 的，1,243 个节点跑得起。 */
+function probeLayout(t0, lbl, spanX) {
+  const lp = TM.layout(t0, { spanX: spanX, spanZ: 1.5 });
+  const seen = {};
+  let deepest = -1, collisions = 0, nonFinite = 0, n0 = 0;
+  for (const id of t0.order) {
+    const n = TM.nodeAt(t0, id), p = lp.pos[id];
+    if (!p || !isFinite(p.x) || !isFinite(p.y) || !isFinite(p.z)) { nonFinite++; continue; }
+    T.ok(Math.abs(p.x) <= spanX / 2 + 1e-9, lbl + '：节点 ' + id + ' 压在 ±spanX/2 之内');
+    const key = n.depth + '@' + p.x;
+    if (seen[key]) { collisions++; }
+    seen[key] = true;
+    if (n.depth > deepest) { deepest = n.depth; }
+    n0++;
+  }
+  T.eq(nonFinite, 0, lbl + '：每个节点都拿到了有限的坐标');
+  T.eq(collisions, 0, lbl + '：同一层里没有两个节点落在同一个 x 上');
+  T.eq(lp.maxDepth, deepest, lbl + '：maxDepth 与逐个节点数出来的最大树深一致');
+  T.eq(n0, t0.order.length, lbl + '：每个节点都进了 pos');
+  return lp;
+}
+let neverClosed = 0;
+for (const id of cutTree.order) { if (TM.nodeAt(cutTree, id).popStep < 0) { neverClosed++; } }
+T.ok(neverClosed > 0, '前提：截断的 d4 上确实有永不关闭的帧（' + neverClosed + ' 帧）');
+const cutLay = probeLayout(cutTree, '截断 d4', 10);
+T.ok(cutTree.order.length > 1000, '前提：截断 d4 真的有一千多个节点（' + cutTree.order.length + '）');
+/* 永不关闭的那几帧照样拿到坐标 —— 「有没有关」不影响它横向占多宽。 */
+for (const id of cutTree.order) {
+  if (TM.nodeAt(cutTree, id).popStep >= 0) { continue; }
+  T.ok(isFinite(cutLay.pos[id].x), '永不关闭的帧 ' + id + ' 照常有横坐标');
+}
+T.ok(cutLay.width > 9.9 && cutLay.width < 10, '截断 d4 仍然铺满 spanX：width=' + cutLay.width);
+
+/* ---- ⑥ 退化的树：单节点、单孩子链 ----
+   深度 1 且只有一步合法走法时就会长成一条线，任务 6 会撞上这个形状。 */
+const oneRun = I.run('function f(n) { return 1; }\nreturn f(0);', { host: {} });
+const oneTree = TM.build(oneRun.trace, 'f');
+T.eq(oneTree.order.length, 1, '前提：这份 fixture 只有一个节点');
+const oneLay = probeLayout(oneTree, '单节点', 10);
+T.eq(oneLay.pos[oneTree.rootId].x, 0, '单节点落在正中间 x = 0');
+T.eq(oneLay.pos[oneTree.rootId].z, 0, '单节点在 z = 0（根的树深是 0）');
+T.eq(oneLay.width, 0, '单节点树的宽度是 0');
+T.eq(oneLay.maxDepth, 0, '单节点树的 maxDepth 是 0，**不是 -1** —— 它不是空树');
+
+const chainRun = I.run([
+  'function f(n) {',
+  '  if (n === 0) { return 0; }',
+  '  return f(n - 1);',
+  '}',
+  'return f(5);',
+].join('\n'), { host: {} });
+const chainTree = TM.build(chainRun.trace, 'f');
+T.eq(chainTree.order.length, 6, '前提：单孩子链有 6 个节点');
+const chainLay = probeLayout(chainTree, '单孩子链', 10);
+for (const id of chainTree.order) {
+  T.eq(chainLay.pos[id].x, 0, '单孩子链每一层都只有一个节点，全部叠在 x = 0');
+  T.eq(chainLay.pos[id].z, TM.nodeAt(chainTree, id).depth * 1.5, '链上的 z 仍逐层递增');
+}
+T.eq(chainLay.width, 0, '单孩子链的宽度是 0（它是一条竖线，不是一棵扇子）');
+T.eq(chainLay.maxDepth, 5, '单孩子链的 maxDepth 是 5');
+/* width === 0 有三种成因，判空只能看 maxDepth —— 这条把文档里那句话钉住：
+   一个写 `if (!lay.width) return` 的调用方会把后两种当成空树悄悄跳过。 */
+T.eq(el.width, chainLay.width, '空树、单孩子链的 width 一模一样（都是 0）');
+T.eq(oneLay.width, chainLay.width, '单节点树的 width 也是 0');
+T.ok(el.maxDepth < 0 && oneLay.maxDepth >= 0 && chainLay.maxDepth >= 0,
+  'maxDepth 才是唯一没有歧义的判空信号：只有空树 < 0');
+
 /* z 只由树深与 spanZ 决定，与 spanX 无关；换一个 spanZ 整棵树等比例拉长。 */
 const lay2 = TM.layout(abTree, { spanX: 4, spanZ: 3 });
 for (const id of abTree.order) {
