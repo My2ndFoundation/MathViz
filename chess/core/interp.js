@@ -717,10 +717,12 @@
      这个不知所云的 syntax 错误。
      返回值恒为数组（哪怕只有一个声明），逗号越多数组越长；VarDecl 节点
      本身的形状不变（仍是单声明 {kind,name,init}），「一条源码语句可能
-     展开成多条语句」这件事只在调用方（parseBlock / parse 的循环）里通过
-     flattenVarDecl 处理——for 循环头部的 let/const（parseFor 里那段内联
-     逻辑）故意不复用这个函数，因为 for(...)头部只允许恰好一个子句形状，
-     多声明放在 for-init 里目前不在测试范围内，维持原样。 */
+     展开成多条语句」这件事只在调用方里发生，且两个调用方摊平的方式不同：
+     普通语句位置（parseBlock / parse 的顶层循环）经 pushStmt 摊平成多条
+     独立的 VarDecl 语句；for 循环头部（parseFor，Task 5 起复用这个函数
+     解析 for (let i = 0, j = 3; ...) 的逗号多声明）则把整个数组包进一个
+     VarDeclList 壳节点里，因为 for-init 位置只能是一个节点，摊不开——
+     evalStmt 里 VarDeclList 的 case 就是为了消化这唯一的落地点。 */
   function parseVarDecl(state) {
     const t0 = cur(state); // 'let' 或 'const'
     const kind = t0.value;
@@ -749,9 +751,14 @@
      的单语句 body 位置全靠这个契约）——但一条 `let a=1, b=2;` 源码要展开
      成两个独立的 VarDecl 语句。折中：parseStatement 在遇到多声明时把它们
      包进一个轻量的 VarDeclList 壳节点里返回（仍然是「一个节点」，契约不
-     破），真正的展开只在 parseBlock / parse 的循环里发生——那里才是唯一
-     会把语句摊平进一个数组的地方。VarDeclList 因此永远不会真的被求值器
-     看到：合法源码里 let/const 只能出现在块或顶层，一定会走这条展开路径。 */
+     破），块/顶层位置的展开只在 parseBlock / parse 的循环里发生——那里
+     会把语句摊平进一个数组，pushStmt 就是做这件事的。
+     VarDeclList 在这条路径上确实永远不会被求值器看到；但 Task 5 之后多
+     了第二条产出 VarDeclList 的路径——parseFor 的 for 头部逗号多声明
+     （for (let i=0, j=3; ...)）——那里没有「摊平进语句数组」这个位置可用
+     （for-init 只能是一个节点），VarDeclList 会原样留到 evalStmt，由那边
+     专门的 case 逐条求值。两条路径产出的是同一种节点形状，但只有一条会
+     真正被求值器看到。 */
   function pushStmt(body, stmt) {
     if (stmt.type === 'VarDeclList') {
       for (let i = 0; i < stmt.decls.length; i++) body.push(stmt.decls[i]);
@@ -784,10 +791,16 @@
 
   /* for 的三种形态共用一个左括号：普通三段式 for(init;test;update)，
      for…of（子集支持），for…in（子集明确不支持——它是原型链的入口）。
-     只有 let/const 打头时才可能是 for…of/for…in，所以先探一下声明名
-     之后紧跟的词：'of' → ForOf；'in' → 专门的报错（点名该改用 for…of，
-     不能只说「in 不支持」，使用者不知道该换成什么）；其它 → 当成普通
-     三段式的初始化部分继续解析。 */
+     只有 let/const 打头时才可能是 for…of/for…in，所以先复用 parseVarDecl
+     解析出声明列表（这一步顺带接上了 for 头部的逗号多声明——
+     for (let i = 0, j = 3; ...) 双指针类算法的常见写法，Task 5 之前这里
+     是内联的单声明专用逻辑，不认逗号，一遇到 ',' 就在 expect(';') 处报
+     「expected ";" but got ","」）：
+       - 声明列表恰好一条 且紧跟 'of' → ForOf；
+       - 声明列表恰好一条 且紧跟 'in' → 专门的报错（点名该改用 for…of，
+         不能只说「in 不支持」，使用者不知道该换成什么）；
+       - 其它情况（含声明列表不止一条——for…of/for…in 语法上只允许恰好
+         一个绑定，不可能出现多声明）→ 当成普通三段式的初始化部分。 */
   function parseFor(state) {
     const t0 = cur(state);
     state.i++;
@@ -795,28 +808,17 @@
 
     if (at(state, 'kw', 'let') || at(state, 'kw', 'const')) {
       const kindTok = cur(state);
-      const kind = kindTok.value;
-      state.i++;
-      const nameTok = cur(state);
-      if (nameTok.type === 'punct' && (nameTok.value === '[' || nameTok.value === '{')) {
-        throw unsupported('destructuring', nameTok);
-      }
-      if (nameTok.type !== 'name') {
-        throw err('Unexpected token: expected identifier but got ' + JSON.stringify(nameTok.value),
-                   nameTok.line, nameTok.col);
-      }
-      const name = nameTok.value;
-      state.i++;
+      const decls = parseVarDecl(state);
 
-      if (at(state, 'kw', 'of')) {
+      if (decls.length === 1 && at(state, 'kw', 'of')) {
         state.i++;
         const iterable = parseExpr(state);
         expect(state, ')');
         const body = parseStatement(state);
-        return { type: 'ForOf', kind: kind, name: name, iterable: iterable, body: body,
+        return { type: 'ForOf', kind: decls[0].kind, name: decls[0].name, iterable: iterable, body: body,
                  line: t0.line, col: t0.col };
       }
-      if (at(state, 'name', 'in')) {
+      if (decls.length === 1 && at(state, 'name', 'in')) {
         const inTok = cur(state);
         throw err('Unsupported syntax: for...in (line ' + inTok.line + '). ' +
                    'This interpreter supports for...of but not for...in — there is no ' +
@@ -824,10 +826,8 @@
                    inTok.line, inTok.col, 'unsupported');
       }
 
-      let varInit = null;
-      if (eat(state, '=')) varInit = parseAssign(state);
-      const init = { type: 'VarDecl', kind: kind, name: name, init: varInit,
-                     line: kindTok.line, col: kindTok.col };
+      const init = decls.length === 1 ? decls[0]
+        : { type: 'VarDeclList', decls: decls, line: kindTok.line, col: kindTok.col };
       expect(state, ';');
       const test = at(state, 'punct', ';') ? null : parseExpr(state);
       expect(state, ';');
@@ -950,10 +950,10 @@
      只把生成器一次性驱动到底（run() 里的 while 循环），完全不利用这个
      暂停点；Task 7 加轨迹记录时才会真正用上「在 yield 处采样状态」。
 
-     本任务的范围：表达式 + 变量 + 顶层顺序执行 + return。if/for/while/
-     函数调用/递归是 Task 5、Task 6 的事——evalStmt/evalExpr 的 switch
-     分派结构已经留好位置（一个 case 一行），后续任务只需要往里加 case，
-     不需要改这里的驱动逻辑。
+     Task 4 的范围是表达式 + 变量 + 顶层顺序执行 + return；Task 5（本任务）
+     补上 if/for/for…of/while/break/continue 与块作用域。函数声明/调用/
+     递归仍是 Task 6 的事——evalStmt/evalExpr 的 switch 分派结构留着位置
+     （一个 case 一行），届时只需要往里加 case，不需要改这里的驱动逻辑。
 
      运行时值直接用真实的 JS 类型表示（number/string/boolean/null/
      undefined/Array/plain Object），运算符也直接用 JS 自己的运算符
@@ -970,7 +970,16 @@
      写的），差分测试会拿它对账。 */
   function makeEnv(parent) { return { vars: new Map(), parent: parent || null }; }
 
-  function declareVar(env, kind, name, value) {
+  /* 同一层环境内重复 let/const 声明是原生 SyntaxError（"Identifier 'a'
+     has already been declared"，用 node 亲自问过原生 new Function 对出来
+     的一字不差文案）——Task 4 遗留的真缺口（差分测试实测到我们静默通过）。
+     只查「当前层」的 Map，不沿 parent 链查：不同作用域的遮蔽（let a = 1;
+     { let a = 2; }）是合法的，块作用域每层都是独立的 Map，天然不会误伤。
+     node 用来报行列——调用方永远是解析期就带着源码位置的 AST 节点。 */
+  function declareVar(env, kind, name, value, node) {
+    if (env.vars.has(name)) {
+      throw err("Identifier '" + name + "' has already been declared", node.line, node.col, 'syntax');
+    }
     env.vars.set(name, { kind: kind, value: value });
   }
 
@@ -1234,16 +1243,36 @@
     }
   }
 
-  /* 语句求值：返回值是「完成信号」——本任务只有 Return 会产生非 null 的
-     完成信号（{type:'return', value}），沿 evalBlockBody 的循环一路
-     return 出去，直到 run() 的顶层驱动循环看到它为止。Break/Continue
-     是 Task 5 的事，到时候往这个 switch 里加 case 即可，不需要改这里的
-     信号传递机制。 */
+  /* break/continue/return 用哨兵对象逐层向上传，而不是 throw。
+     用 throw 也能工作，但会与「真正的运行时错误」混在同一条通道上，
+     调试器要区分「程序正常返回」和「程序崩了」时就得靠异常类型判断——
+     哨兵让这两件事从一开始就是两回事。三种信号统一走 `signal` 字段
+     （取代 Task 4 里 Return 专用的 `{type:'return', value}` 形状），
+     这样 evalStmt/evalBlockBody/run 只需要认一种形状。 */
+  const BREAK = { signal: 'break' }, CONTINUE = { signal: 'continue' };
+  function ret(v) { return { signal: 'return', value: v }; }
+
+  /* 语句求值：返回值是「完成信号」——undefined/null 表示正常完成，非空
+     则是上面三种哨兵之一，沿着 evalBlockBody / 各循环体的调用链一路
+     return 出去，直到遇到能消化它的地方为止：break/continue 被最近的
+     一层循环消化，return 一路传到 run() 的顶层驱动循环才被消化。 */
   function* evalStmt(node, env) {
     switch (node.type) {
       case 'VarDecl': {
         const value = node.init ? yield* evalExpr(node.init, env) : undefined;
-        declareVar(env, node.kind, node.name, value);
+        declareVar(env, node.kind, node.name, value, node);
+        return null;
+      }
+      /* 只有 for 循环头部的逗号多声明会产生这个节点（parseFor 复用了
+         parseVarDecl 的多声明解析路径，见该函数与 parseFor 的注释）——
+         块/顶层语句里的多声明在 pushStmt 阶段就已经摊平成独立的 VarDecl
+         语句，永远不会以 VarDeclList 的形状走到这里。逐条按声明顺序求值
+         （let a = 1, b = a + 1 这种「后一个初始化式引用前一个」的写法
+         要能工作），全部正常完成后返回 null。 */
+      case 'VarDeclList': {
+        for (let idx = 0; idx < node.decls.length; idx++) {
+          yield* evalStmt(node.decls[idx], env);
+        }
         return null;
       }
       case 'ExprStmt': {
@@ -1252,19 +1281,121 @@
       }
       case 'Return': {
         const value = node.arg ? yield* evalExpr(node.arg, env) : undefined;
-        return { type: 'return', value: value };
+        return ret(value);
       }
       case 'Block': {
         const child = makeEnv(env);
         return yield* evalBlockBody(node.body, child);
       }
-      /* If / For / ForOf / While / Break / Continue / FuncDecl：控制流与
-         函数声明是 Task 5（控制流）与 Task 6（函数递归）的范围，本任务
-         不实现。分派结构留在这里（一个 case 一行），后续任务只需要在这
-         加 case，不需要改 evalBlockBody / run 的驱动逻辑。 */
+      case 'If': {
+        const test = yield* evalExpr(node.test, env);
+        if (test) return yield* evalStmt(node.cons, env);
+        if (node.alt) return yield* evalStmt(node.alt, env);
+        return null;
+      }
+      case 'Break': return BREAK;
+      case 'Continue': return CONTINUE;
+      case 'While': {
+        /* while 的循环头没有声明，不需要每轮新建环境（跟 for 不同）——
+           body 如果是 Block，自己的 evalStmt 分支已经会新建一层块作用域。
+           每轮迭代末尾显式 yield 一次，标记「循环体跑完一轮」这个语句
+           边界——哪怕 body 是单条非 Block 语句（while (x) i++;），
+           单步调试也要能在每一轮停下来，不能只靠 body 内部（如果有
+           Block）自己的语句边界。 */
+        for (;;) {
+          const test = yield* evalExpr(node.test, env);
+          if (!test) break;
+          const completion = yield* evalStmt(node.body, env);
+          if (completion) {
+            if (completion.signal === 'break') break;
+            if (completion.signal !== 'continue') return completion; // return：继续向上传
+          }
+          yield;
+        }
+        return null;
+      }
+      case 'For': {
+        /* for 的每轮迭代要新建一层环境并把循环变量拷进去（ECMA-262
+           14.7.4.3 CreatePerIterationEnvironment）——否则闭包捕获会跟
+           原生 let 语义不一致：
+             const fs = []; for (let i=0;i<3;i++) fs.push(()=>i);
+             fs[0]()+fs[1]()+fs[2]() 原生是 0+1+2=3；如果三轮共享同一个
+             绑定，i 循环结束时已经是 3，三个闭包会全部读到同一个值。
+           函数调用是 Task 6 才实现，这里还测不了闭包捕获本身，但语义要
+           从一开始就按这个规则写，不然 Task 6 会拿到一个隐蔽的坑。
+           规格里这个过程分两步：
+             1) 进入循环之前，把 init 声明的绑定拷进第一轮的环境；
+             2) 每轮循环体跑完之后（continue 落到这里也一样）、下一轮
+                test 之前，再拷一层新的——update 表达式在这个新环境里
+                求值，于是「这一轮的 body/update」用同一份绑定，
+                「下一轮」则是全新的一份。 */
+        const declEnv = makeEnv(env);
+        if (node.init) {
+          if (node.init.type === 'VarDecl' || node.init.type === 'VarDeclList') {
+            yield* evalStmt(node.init, declEnv);
+          } else {
+            // 没有 let/const 打头：init 是一条 ExprStmt，不声明新变量，
+            // 直接在 declEnv 里求值（等价于在外层求值——declEnv 此时
+            // 是空的，assignVar 会沿 parent 链找到外层已声明的变量）。
+            yield* evalExpr(node.init.expr, declEnv);
+          }
+        }
+        function copyIterEnv(base) {
+          const e = makeEnv(env);
+          base.vars.forEach(function (binding, name) {
+            e.vars.set(name, { kind: binding.kind, value: binding.value });
+          });
+          return e;
+        }
+        let iterEnv = copyIterEnv(declEnv);
+        for (;;) {
+          if (node.test) {
+            const test = yield* evalExpr(node.test, iterEnv);
+            if (!test) break;
+          }
+          const completion = yield* evalStmt(node.body, iterEnv);
+          if (completion) {
+            if (completion.signal === 'break') break;
+            if (completion.signal !== 'continue') return completion; // return：继续向上传
+          }
+          const nextEnv = copyIterEnv(iterEnv);
+          if (node.update) yield* evalExpr(node.update, nextEnv);
+          iterEnv = nextEnv;
+          yield;
+        }
+        return null;
+      }
+      case 'ForOf': {
+        /* 可迭代对象只开数组与字符串两道口子（跟 getProp/resolveCallable
+           的「表面积刻意开得小而准」是同一条原则）——字符串按码元逐个
+           迭代（split('') 是 UTF-16 code unit 粒度，跟原生 for...of
+           字符串的 code point 粒度在 BMP 内一致，代理对不在这个教学
+           子集的关注范围）。
+           同 For：每轮迭代新建一层环境装循环变量，跟原生 for...of 对
+           let/const 都是「每轮独立绑定」的语义对齐。 */
+        const iterable = yield* evalExpr(node.iterable, env);
+        let items;
+        if (Array.isArray(iterable)) items = iterable;
+        else if (typeof iterable === 'string') items = iterable.split('');
+        else throw err('Value is not iterable', node.line, node.col, 'runtime');
+
+        for (let idx = 0; idx < items.length; idx++) {
+          const iterEnv = makeEnv(env);
+          declareVar(iterEnv, node.kind, node.name, items[idx], node);
+          const completion = yield* evalStmt(node.body, iterEnv);
+          if (completion) {
+            if (completion.signal === 'break') break;
+            if (completion.signal !== 'continue') return completion; // return：继续向上传
+          }
+          yield;
+        }
+        return null;
+      }
+      /* FuncDecl：函数声明与调用是 Task 6（函数递归）的范围，本任务不
+         实现。分派结构留在这里，后续任务只需要加这一个 case。 */
       default:
         throw err('Not yet implemented in this task: ' + node.type + ' statements ' +
-                   '(control flow and function declarations land in later tasks)',
+                   '(function declarations land in a later task)',
                    node.line, node.col, 'runtime');
     }
   }
@@ -1311,25 +1442,30 @@
     };
   }
 
+  /* 根环境的五个宿主桥接名 + Math 恒是全新 Map 上的第一次声明，不可能触发
+     上面新加的重复声明检查——node 参数只在报错时才用得到，这里传一个
+     line:0/col:0 的占位节点即可（没有源码位置可指，也用不上）。 */
+  const ROOT_NODE = { line: 0, col: 0 };
   function makeRootEnv(resolvedHost) {
     const env = makeEnv(null);
-    declareVar(env, 'const', 'log', resolvedHost.log);
-    declareVar(env, 'const', 'mark', resolvedHost.mark);
-    declareVar(env, 'const', 'place', resolvedHost.place);
-    declareVar(env, 'const', 'clear', resolvedHost.clear);
-    declareVar(env, 'const', 'attacked', resolvedHost.attacked);
-    declareVar(env, 'const', 'Math', MATH_NS);
+    declareVar(env, 'const', 'log', resolvedHost.log, ROOT_NODE);
+    declareVar(env, 'const', 'mark', resolvedHost.mark, ROOT_NODE);
+    declareVar(env, 'const', 'place', resolvedHost.place, ROOT_NODE);
+    declareVar(env, 'const', 'clear', resolvedHost.clear, ROOT_NODE);
+    declareVar(env, 'const', 'attacked', resolvedHost.attacked, ROOT_NODE);
+    declareVar(env, 'const', 'Math', MATH_NS, ROOT_NODE);
     return env;
   }
 
   /* run(src, opts) → { result, trace, host }：parse → 建根环境（注入
      opts.host 的五个函数，缺席的补 NOOP_HOST）→ 把求值生成器一次性驱动
-     到底 → 取顶层 Return 的值当 result。
+     到底 → 取顶层 Return 完成信号（signal:'return'）的值当 result。
      trace 本任务恒为空数组（Task 7 加轨迹记录）；host 是补完 NOOP 默认值
      之后实际注入求值环境的那五个函数，供调用方检查「棋盘接口最终是谁」。
-     opts.limit：接口签名里留的位置，给后面的循环步数上限用（防止 Task 5
-     引入 for/while 之后写出死循环）——本任务还没有循环，用不上，先不做
-     任何事，等 Task 5 再接上。 */
+     opts.limit：接口签名里留的位置，给循环步数上限用——本任务（控制流）
+     引入了 for/while 之后，写死循环在语法上已经可能（while (true) {} 不
+     带 break），但加步数上限不在本任务的差分测试范围内，留给需要它的
+     调用方（比如阶段 3b 的编辑器跑用户代码）在后面接上，这里先不做任何事。 */
   function run(src, opts) {
     opts = opts || {};
     const program = parse(src);
@@ -1339,7 +1475,7 @@
     let step = gen.next();
     while (!step.done) step = gen.next();
     const completion = step.value;
-    const result = completion && completion.type === 'return' ? completion.value : undefined;
+    const result = completion && completion.signal === 'return' ? completion.value : undefined;
     return { result: result, trace: [], host: resolvedHost };
   }
 

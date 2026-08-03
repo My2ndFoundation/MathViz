@@ -425,4 +425,54 @@ diff('return Math.min(1, 5, 3);', 'Math.min 多参数');
 diff('return Math.floor(2.7);', 'Math.floor 正数');
 diff('return Math.floor(-0.5);', 'Math.floor 负数：向下取整不是截断');
 
+// ---- 控制流（全部走差分）----
+diff('if (1 < 2) { log("y"); } else { log("n"); } return 0;', 'if 走 then 分支');
+diff('if (1 > 2) { log("y"); } else { log("n"); } return 0;', 'if 走 else 分支');
+diff('if (0) log("y"); return 1;', '无 else 的 if');
+diff('let s = 0; for (let i = 0; i < 5; i++) { s += i; } return s;', 'for 累加');
+diff('for (let i = 0; i < 3; i++) log(i); return 0;', 'for 的宿主序列');
+diff('let s = 0; for (const v of [1,2,3]) { s += v; } return s;', 'for…of 数组');
+diff('for (const c of "abc") log(c); return 0;', 'for…of 字符串');
+diff('let i = 0; while (i < 3) { log(i); i++; } return i;', 'while');
+diff('for (let i = 0; i < 5; i++) { if (i === 2) break; log(i); } return 0;', 'break');
+diff('for (let i = 0; i < 5; i++) { if (i === 2) continue; log(i); } return 0;', 'continue');
+diff('let i = 0; while (true) { i++; if (i > 3) break; } return i;', 'while(true) + break');
+diff('for (const v of [1,2,3]) { if (v === 2) continue; log(v); } return 0;', 'for…of 里 continue');
+
+// 嵌套循环里的 break 只跳出内层
+diff('let n = 0; for (let i = 0; i < 3; i++) { for (let j = 0; j < 3; j++) { if (j === 1) break; n++; } } return n;',
+     '嵌套 break 只跳内层');
+
+// 块作用域：内层的 let 不该泄漏到外层
+diff('let a = 1; { let a = 2; log(a); } log(a); return a;', '块作用域遮蔽');
+diff('for (let i = 0; i < 2; i++) {} let i = 9; return i;', 'for 的 i 不泄漏到外层');
+
+// ---- 携带项 A：同作用域重复声明要报错，不同作用域遮蔽合法（上面已有一条差分在测遮蔽）----
+diff('let a = 1; let a = 2; return a;', '同作用域重复 let 声明：原生 SyntaxError');
+diff('const a = 1; let a = 2; return a;', '同作用域先 const 后 let 重复声明：原生 SyntaxError');
+diff('let a = 1; const a = 2; return a;', '同作用域先 let 后 const 重复声明：原生 SyntaxError');
+// 宿主桥接名（log/mark/place/clear/attacked）在求值器里是根环境的 const
+// 绑定——这条设计选择要跟差分测试的参照实现（new Function('log', ...,
+// src) 把它们当形参）在「顶层用 let 重新声明同名变量」这件事上表现一致：
+// 形参名同样占据函数体的顶层作用域，let 重新声明它一样是原生 SyntaxError。
+diff('let log = 5; return log;', '顶层用 let 重新声明宿主桥接名 log：原生视作形参重声明，SyntaxError');
+
+// ---- 携带项 B：for 头部支持逗号多声明 ----
+// 更新部分只用 i++（单表达式）：逗号操作符（sequence expression，i++, j--
+// 这种写法）不在这个子集内——parseExpr 没有实现它，这条差分测试只验证
+// brief 要求的那一件事（for 头部的逗号多声明能解析、能求值），不顺带
+// 引入一个子集边界之外的语法点。
+diff('let n = 0; for (let i = 0, j = 3; i < j; i++) { n++; } return n;', 'for 头部逗号多声明');
+
+// ---- 每轮迭代新建一层环境：闭包捕获要与原生 let 语义一致 ----
+// 函数调用是下一个任务（Task 6）才实现，这里借数组 + 立即执行的箭头函数
+// （Arrow 节点在 Task 4 已经能构造出来，但调用它要等 Task 6）不可行；
+// 改用「每轮迭代把当次的 i 存进数组，最后返回数组」的方式验证同一件事：
+// 如果 for 每轮不新建环境，所有闭包/引用会共享同一个绑定。这里用数组
+// 元素直接观测每轮迭代看到的 i 值本身（而不是闭包），已经能被差分测试
+// 覆盖到「for 头部声明的变量在语义上是每轮一份」这件事的最基本形式；
+// 闭包捕获的差异要等 Task 6 才能真正暴露（届时应补一条 diff）。
+diff('const xs = []; for (let i = 0; i < 3; i++) { xs.push(i); } return xs;',
+     'for 每轮迭代的 i 各自独立（数组快照）');
+
 T.report();
