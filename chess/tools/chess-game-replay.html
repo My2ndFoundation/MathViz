@@ -5109,11 +5109,25 @@ function syncKeyNote() {
   if (el) el.addEventListener('click', function () { noteDismissed = true; syncKeyNote(); });
 })();
 
+/* ================= 棋局浏览器浮层开合判据（唯一一处） ================= */
+/* 浮层开着时是一层模态内容——F、Space 这些全局键都不该穿透它去驱动背后的
+   棋盘/回放。判据只写这一处，F、Space 两个 window keydown 处理器都调用它，
+   不各自重复一份 `document.getElementById('gbOverlay').classList.contains
+   ('show')`，否则两处一旦漂移就会有一处漏挡。ensureGameBrowser() 里的
+   Escape 处理器也改调它，同一份判据只有一个出处。
+   浮层还没创建（gbOverlay 元素不存在）时视为「未开」，不是异常。 */
+function isGameBrowserOpen() {
+  var overlay = document.getElementById('gbOverlay');
+  return !!(overlay && overlay.classList.contains('show'));
+}
+
 /* ================= 棋盘视角翻转键 F ================= */
 /* 键盘监听必须复用引擎那套焦点保护的判据——document.activeElement 是
    input/textarea/select/isContentEditable 时一律不响应，否则在 FEN 之类的
-   输入框里打一个 f 就会翻转棋盘。 */
+   输入框里打一个 f 就会翻转棋盘。浮层开着时同样不响应：它是模态内容，
+   背后的棋盘视角不该被浮层外的按键悄悄转走。 */
 window.addEventListener('keydown', function (e) {
+  if (isGameBrowserOpen()) return;
   var el = document.activeElement;
   var tag = el && el.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el && el.isContentEditable)) return;
@@ -5125,8 +5139,13 @@ window.addEventListener('keydown', function (e) {
 /* ================= 播放/暂停键 Space（规格 §5.3） ================= */
 /* 引擎在阶段 0 主动摘掉了 Space/r 的全局绑定（PR #68），播放/暂停这里要
    自己接——焦点保护判据与上面 F 键那套完全一样，复用同一份 guard，不
-   另写一份，否则两处一旦漂移就会有一处忘了防 FEN 输入框里的空格。 */
+   另写一份，否则两处一旦漂移就会有一处忘了防 FEN 输入框里的空格。
+   浮层开着时同样直接 return：复审实测过浮层开着、焦点在别处按空格，会
+   驱动浮层背后的棋局播放——用户正读着一局棋的背景故事，棋盘却在背后自己
+   动起来。卡片本身的 Enter/Space（展开 story）不经过这里：card 的 keydown
+   处理器已经 stopPropagation()，事件根本冒不到这个 window 级监听器上。 */
 window.addEventListener('keydown', function (e) {
+  if (isGameBrowserOpen()) return;
   var el = document.activeElement;
   var tag = el && el.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el && el.isContentEditable)) return;
@@ -5275,7 +5294,14 @@ function renderGameBrowserBody() {
       });
       card.addEventListener('keydown', function (e) {
         if (e.target !== card) return;
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleStoryCard(card); }
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          /* 必须同时 stopPropagation()：否则事件冒到 window 上的全局 Space
+             处理器，Tab 聚焦到卡片按空格会在展开 story 的同时把浮层背后的
+             棋局也播放/暂停了——复审抓到的组合缺陷。 */
+          e.stopPropagation();
+          toggleStoryCard(card);
+        }
       });
     })(cards[i]);
   }
@@ -5314,7 +5340,7 @@ function ensureGameBrowser() {
   document.getElementById('gbClose').addEventListener('click', closeGameBrowser);
   document.getElementById('gbSearch').addEventListener('input', applyGameFilter);
   window.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && overlay.classList.contains('show')) closeGameBrowser();
+    if (e.key === 'Escape' && isGameBrowserOpen()) closeGameBrowser();
   });
 }
 function openGameBrowser() {
@@ -5359,8 +5385,8 @@ var SCENES = {
     label: { zh: '棋盘', en: 'Board' },
     brand: { zh: '一局棋是三维里的一条曲线——棋盘沿 −z 后退，摆成一叠正在翻页的历史。',
              en: 'A game of chess is a curve in three dimensions — the board recedes along −z into a stack of history flipping past.' },
-    tips: { zh: '切到侧视：那一摞正在后退的方框就是回合轴本身。拖时间轴或按 ▶，看历史怎么从当前局面里「流出去」；F 翻转棋盘视角。',
-            en: 'Switch to Side: the receding stack of frames is the ply axis made visible. Scrub the timeline or hit ▶ and watch history flow out of the current position; press F to flip the board.' },
+    tips: { zh: '切到侧视：那一摞正在后退的方框就是回合轴本身。拖时间轴或按 ▶，看历史怎么从当前局面里「流出去」；F 翻转棋盘视角，空格键播放/暂停。',
+            en: 'Switch to Side: the receding stack of frames is the ply axis made visible. Scrub the timeline or hit ▶ and watch history flow out of the current position; press F to flip the board, Space to play or pause.' },
     presetsLabel: { en: 'Game', zh: '棋局' },
     presets: PRESETS,
     views: { iso: VIEW_ISO, side: VIEW_SIDE, top: VIEW_TOP },
