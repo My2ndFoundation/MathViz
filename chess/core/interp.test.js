@@ -1166,4 +1166,102 @@ for (let s45 = 0; s45 < T45_PARAM_SHAPES.length; s45++) {
   T.eq(c0[0].depth, 1, '4.5①: 调用方攒下的 delta 记在调用方的深度上');
 }
 
+/* ============================================================
+   任务 4.5 ②（约束 6）：块前置（提升扫描）只能有一份
+
+   3a 最后一轮修的 TDZ 缺口，根因是 callInterpreted 与 evalBlockBody 各有
+   一套语句循环，而两处的"前置"是分别手写的——只给其中一处加了
+   hoistLexicalDecls，函数体顶层的前向引用就绕过了 TDZ。把两行抽成一个
+   共用 helper，两处都调，下一次往前置里加东西时就不会再漏一次。
+
+   下面两道守卫各堵一半，缺一不可：
+   （a）行为对拍：同一段语句，放在**块/顶层**里跑与放在**函数体顶层**跑，
+        可观察结果必须一致，并且各自还要等于事先写死的期望值（否则"两边
+        一样地坏"也能过）。
+   （b）结构守卫：源码里所有 hoist*(…) 调用点都必须落在那个 helper 内部。
+        （a）只能发现"新加的前置改变了这批程序的行为"，发现不了"新加了一个
+        前置、但这批程序恰好观察不到"；（b）不看行为，直接钉住"前置只有
+        一处"这个结构事实。 */
+function prologueOutcome(src) {
+  try { return { ok: true, value: I.run(src, { host: {} }).result }; }
+  catch (e) { return { ok: false, message: e.message, category: e.category }; }
+}
+const T45_PROLOGUE_SHAPES = [
+  { name: 'TDZ：前向引用本层稍后声明的 let',
+    body: 'let y = x; let x = 2; return y;',
+    expect: { ok: false, message: "Cannot access 'x' before initialization", category: 'runtime' } },
+  { name: '函数声明提升：调用点在声明之前',
+    body: 'return f(); function f() { return 7; }',
+    expect: { ok: true, value: 7 } },
+  { name: '互递归：谁写在前面都不重要',
+    body: 'return even(4); function even(n) { if (n === 0) { return 1; } return odd(n - 1); } ' +
+          'function odd(n) { if (n === 0) { return 0; } return even(n - 1); }',
+    expect: { ok: true, value: 1 } },
+  { name: '同层重复 let 声明',
+    body: 'let a = 1; let a = 2; return a;',
+    expect: { ok: false, message: "Identifier 'a' has already been declared", category: 'syntax' } },
+  { name: '前置只扫本层：嵌套块里的 let 不该被提到外层',
+    body: 'let x = 1; { let y = x; } return x;',
+    expect: { ok: true, value: 1 } },
+  { name: '正常声明后使用（对照，前置不该改变它）',
+    body: 'let a = 5; return a;',
+    expect: { ok: true, value: 5 } },
+];
+for (let p45 = 0; p45 < T45_PROLOGUE_SHAPES.length; p45++) {
+  const shape = T45_PROLOGUE_SHAPES[p45];
+  // evalBlockBody 这一路：语句直接放在 Program 顶层
+  const viaBlock = prologueOutcome(shape.body);
+  // callInterpreted 这一路：同一批语句当函数体顶层，立刻调用
+  const viaCall = prologueOutcome('function __probe() { ' + shape.body + ' }\nreturn __probe();');
+  T.eq(viaBlock, shape.expect, '4.5②(a)「' + shape.name + '」在块/顶层这一路的结果符合期望');
+  T.eq(viaCall, shape.expect, '4.5②(a)「' + shape.name + '」在函数体顶层这一路的结果符合期望');
+  T.eq(viaCall, viaBlock, '4.5②(a)「' + shape.name + '」两条语句循环的前置行为一致');
+}
+
+/* （b）结构守卫。读的是 interp.js 的源码本身——测试文件跑在 node 里，
+   读文件是允许的（editor.test.js 已有先例）；被读的 interp.js 本身仍然
+   零依赖、不碰任何宿主 API。 */
+{
+  const fs45 = require('fs');
+  const path45 = require('path');
+  /* 先把块注释整段抹成等长空格再扫（保长度是为了行号仍然对得上）：
+     interp.js 的中文说明里会成段引用这些函数名，扫原文会把散文当成调用点，
+     变成一道"改注释就红"的假门。 */
+  const rawText = fs45.readFileSync(path45.join(__dirname, 'interp.js'), 'utf8');
+  const srcText = rawText.replace(/\/\*[\s\S]*?\*\//g, function (block) {
+    return block.replace(/[^\n]/g, ' ');
+  });
+
+  const defIdx = srcText.indexOf('function blockPrologue(');
+  T.ok(defIdx >= 0, '4.5②(b): 存在共用的块前置 helper blockPrologue');
+
+  /* helper 的函数体区间（从定义处第一个 { 开始花括号配平）。 */
+  let bodyStart = srcText.indexOf('{', defIdx), depth45 = 0, bodyEnd = -1;
+  for (let ch = bodyStart; ch >= 0 && ch < srcText.length; ch++) {
+    if (srcText[ch] === '{') depth45++;
+    else if (srcText[ch] === '}') { depth45--; if (depth45 === 0) { bodyEnd = ch; break; } }
+  }
+  T.ok(bodyEnd > bodyStart, '4.5②(b): 能定位到 blockPrologue 的函数体区间');
+
+  /* 所有 hoistXxx(…) 的**调用**点（排除 `function hoistXxx(` 定义处）。 */
+  const callRe = /(function\s+)?\bhoist[A-Za-z]*\s*\(/g;
+  const outside = [];
+  let m45;
+  while ((m45 = callRe.exec(srcText)) !== null) {
+    if (m45[1]) continue;                     // 定义处，不是调用
+    const at = m45.index;
+    if (at > bodyStart && at < bodyEnd) continue;   // 在 helper 内部，正是它该待的地方
+    outside.push(srcText.slice(0, at).split('\n').length);  // 行号
+  }
+  T.eq(outside, [],
+       '4.5②(b): 提升扫描的调用点只能出现在 blockPrologue 内部 —— ' +
+       '往前置里加东西必须加进这一份共用实现，不能挂在两套语句循环中的某一套上');
+
+  /* helper 恰好被两处语句循环各调用一次（多一处/少一处都要失败）。 */
+  const useRe = /\bblockPrologue\s*\(/g;
+  let uses = 0;
+  while (useRe.exec(srcText) !== null) uses++;
+  T.eq(uses, 3, '4.5②(b): blockPrologue 在源码里出现 3 次 —— 1 处定义 + 2 处调用');
+}
+
 T.report();

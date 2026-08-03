@@ -1559,15 +1559,11 @@
       return v;
     }
     const stmts = fn.body.body;
-    hoistFunctionDecls(stmts, callEnv);
-    /* 复审二轮：callEnv 是函数体自己的顶层作用域，跟 evalBlockBody 处理
-       的 Program 顶层/普通块/循环体是同一类"直接语句数组"，TDZ 预扫描
-       同样要跑一遍——这里有一套独立于 evalBlockBody 的语句循环（为了
-       push/pop 帧跟踪），漏接这一行会让函数体顶层的前向引用绕过 TDZ
-       （`function f(){ let y=x; let x=2; return y; }` 会报成
-       "x is not defined"，而不是原生的 "Cannot access 'x' before
-       initialization"——两边都抛，但抛的不是同一件事）。 */
-    hoistLexicalDecls(stmts, callEnv);
+    /* callEnv 是函数体自己的顶层作用域，跟 evalBlockBody 处理的 Program
+       顶层/普通块/循环体是同一类"直接语句数组"，前置扫描一模一样地跑一遍。
+       这里用的必须是那一份共用的 blockPrologue（约束 6），不能在这里另手写
+       一遍——历史教训见 blockPrologue 的注释。 */
+    blockPrologue(stmts, callEnv);
     let completion = null;
     for (let idx = 0; idx < stmts.length; idx++) {
       completion = yield* evalStmt(stmts[idx], callEnv);
@@ -2098,15 +2094,44 @@
     }
   }
 
+  /* 【约束 6】块前置：进入任意一个「直接语句数组」之前必须跑的提升扫描，
+     只此一份。
+
+     解释器里有**两套**语句循环：evalBlockBody（Program 顶层 / {} 块 /
+     循环体 / for…of 体）与 callInterpreted 里那一套（为了记录 push/pop
+     帧标记而手写摊平的，见 callInterpreted 顶上的注释）。3a 最后一轮修的
+     TDZ 缺口根因就在这里：当时两处的前置是各自手写的，只给 evalBlockBody
+     接了 hoistLexicalDecls，函数体顶层的前向引用于是绕过了 TDZ——
+     `function f(){ let y = x; let x = 2; return y; }` 报成
+     "x is not defined"，而不是原生的 "Cannot access 'x' before
+     initialization"：两边都抛，但抛的不是同一件事，正是本项目最不能容忍
+     的那种"看起来对、其实在教错东西"。
+
+     **所以：以后往前置里加任何东西，只加进这个函数。** 直接在某一套语句
+     循环里手写一行提升扫描，会以完全相同的方式再漏一次，而且下一次同样
+     不会有任何测试大声失败——除了 interp.test.js 的「任务 4.5 ②(b)」：
+     它扫源码，钉住"所有 hoist*(…) 调用点都在 blockPrologue 内部"。
+
+     两次扫描的先后不影响可观察行为：hoistLexicalDecls 只在名字**还不存在
+     于当前层**时才占 TDZ 位，hoistFunctionDecls 的 declareVar 允许覆盖一个
+     TDZ 占位。`let f = 1; function f(){}` 这类同层重复声明，无论哪个先跑，
+     都要等真正执行到 `let f = 1;` 那条语句时才由 declareVar 报重复声明，
+     报的是同一句话。这里采用 evalBlockBody 原本的顺序（词法在前）。 */
+  function blockPrologue(stmts, env) {
+    hoistLexicalDecls(stmts, env);
+    hoistFunctionDecls(stmts, env);
+  }
+
   /* 顺序执行一组语句；每条语句执行完 yield 一次，标记「语句边界」——
      单步执行（阶段 3b）与轨迹记录（Task 7）都靠这个暂停点，本任务的
      run() 只是简单地把生成器一次性驱动到底，不利用它。
-     这里也是唯一需要跑函数声明提升扫描的地方——Program 顶层、Block、
-     函数调用（callInterpreted 直接把函数体的语句数组喂给这里）全部
-     经过这一个函数，提升逻辑因此只需要写一遍。 */
+     这里覆盖 Program 顶层 / {} 块 / 循环体 / for…of 体；**函数体顶层不
+     经过这里**——callInterpreted 为了记录 push/pop 帧标记另有一套摊平的
+     语句循环。这条注释原来写着"函数调用直接把函数体的语句数组喂给这里"，
+     那是错的（3a 的 TDZ 缺口正是这个误解的产物）。两套循环共用的只有
+     blockPrologue 这一份前置，见它的注释与约束 6。 */
   function* evalBlockBody(stmts, env) {
-    hoistLexicalDecls(stmts, env);
-    hoistFunctionDecls(stmts, env);
+    blockPrologue(stmts, env);
     for (let idx = 0; idx < stmts.length; idx++) {
       const completion = yield* evalStmt(stmts[idx], env);
       /* stepBoundary 无条件调用（在 completion 检查之前）——哪怕这条语句
