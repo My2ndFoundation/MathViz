@@ -968,7 +968,17 @@
      const 重新赋值抛 "Assignment to constant variable."——这一字不差的
      文案是用 node 亲自问原生 `new Function(...)` 对出来的（不是凭印象
      写的），差分测试会拿它对账。 */
-  function makeEnv(parent) { return { vars: new Map(), parent: parent || null }; }
+  /* callDepth：一个在整条环境链上共享的可变计数器（同一个对象引用，从
+     根环境一路传下去），供 MAX_DEPTH 检查用。挂在 env 上而不是额外给
+     每个求值函数加一个参数——那样要改遍 evalExpr/evalStmt/evalBlockBody
+     的每一个调用点，改动面积远大于「env 多带一个字段」。子环境从
+     parent 继承同一个计数器对象（不是拷贝一份新的），这样无论调用嵌套
+     多深，callInterpreted 里 `fn.closure.callDepth` 拿到的都是同一个
+     计数器——「当前在第几层调用栈」这件事因此对任意一层求值代码都是
+     可读的，这正是 Task 8（步数/调用栈记录）需要的钩子。 */
+  function makeEnv(parent) {
+    return { vars: new Map(), parent: parent || null, callDepth: parent ? parent.callDepth : { n: 0 } };
+  }
 
   /* 同一层环境内重复 let/const 声明是原生 SyntaxError（"Identifier 'a'
      has already been declared"，用 node 亲自问过原生 new Function 对出来
@@ -1057,20 +1067,129 @@
      getProp 共用同一条「hasOwnProperty 自有属性」的路——那条路本来就是
      故意设计成读不到 Array.prototype.push 的。Math 命名空间对象自己只
      长了这四个自有属性（见下面 MATH_NS 的定义），所以它走的是跟普通
-     对象一样的 hasOwnProperty 通道，不需要单独列一次名字。 */
+     对象一样的 hasOwnProperty 通道，不需要单独列一次名字。
+
+     Task 6 补一道口子：数字下标（fs[0]()）与对象属性（o.f()）里存的
+     可能不是「方法名」而是一个普通存进去的函数值——闭包数组
+     `const fs = []; fs.push(() => i); fs[0]();` 正是差分测试骨架
+     验证「for 每轮新环境」时要用到的形状。这跟 push/pop 那种「原生方法、
+     需要 this 绑定」的调用完全是两回事，所以数字下标与自有属性里查到的
+     可调用值（原生函数或解释出来的 __fn 函数对象）都直接放行，不需要
+     进白名单——白名单挡的是「凭空调用数组/对象根本没有的方法」，不是
+     挡「用户自己存进去、自己取出来调用的函数值」。 */
+  function isCallableValue(v) {
+    return typeof v === 'function' || (v !== null && typeof v === 'object' && v.__fn === true);
+  }
   function resolveCallable(obj, prop, node) {
     if (Array.isArray(obj)) {
       if (prop === 'push') return Array.prototype.push;
       if (prop === 'pop') return Array.prototype.pop;
+      if (typeof prop === 'number') {
+        const v = obj[prop];
+        if (isCallableValue(v)) return v;
+        throw err('Value is not callable', node.line, node.col, 'runtime');
+      }
       throw err('Unsupported array method: ' + prop + ' (this subset only has push/pop)',
                  node.line, node.col, 'runtime');
     }
-    if (obj && typeof obj === 'object' &&
-        Object.prototype.hasOwnProperty.call(obj, prop) && typeof obj[prop] === 'function') {
+    if (obj && typeof obj === 'object' && Object.prototype.hasOwnProperty.call(obj, prop) &&
+        isCallableValue(obj[prop])) {
       return obj[prop];
     }
     throw err((typeof prop === 'string' ? prop : String(prop)) + ' is not a function',
                node.line, node.col, 'runtime');
+  }
+
+  /* ---- 函数值 / 调用 / 闭包 / 递归（Task 6） ----
+
+     函数值统一表示成 { __fn, params, body, closure, name, expression }：
+       - params：形参名字符串数组；
+       - body：函数声明与块体箭头函数是 Block 节点，表达式体箭头函数是
+         表达式节点（expression: true 时）；
+       - closure：函数「定义时」所在的环境，不是「调用时」的环境——调用
+         新建的环境 parent 指向它而不是调用点，这就是闭包；
+       - name：具名函数声明的名字（供将来报错/调试用），箭头函数是 null；
+       - expression：body 是表达式节点（true）还是 Block 节点（false）。
+     它不是真的 JS function（typeof 是 'object'），isCallableValue 与
+     resolveCallable 因此都要专门认这个形状，才能把它和 Math.abs 那类
+     真·原生函数用同一条调用路径分派开（callInterpreted vs fn.apply）。 */
+  function makeFunction(params, body, closureEnv, name, expression) {
+    return { __fn: true, params: params, body: body, closure: closureEnv,
+             name: name || null, expression: !!expression };
+  }
+
+  /* 调用深度上限：JS 引擎自己的栈溢出会抛一个对使用者毫无意义的
+     RangeError，而且 yield* 的嵌套会让真实可用深度比裸递归浅得多。
+     这里主动在一个可解释的深度上停下并报清楚，胜过让引擎崩。
+     1000 远大于教学规模所需（N 皇后 N≤12 的递归深度是 12）。 */
+  const MAX_DEPTH = 1000;
+
+  /* 调用一个解释出来的函数：新环境的 parent 是 fn.closure（闭包，见上），
+     不是调用点的 env——递归函数的每次调用因此各自拿到一份独立的形参
+     绑定，互不干扰，这正是递归能工作的基础。深度检查必须在「创建新环境
+     之前」就做，且必须在真正触发原生栈溢出之前生效——所以这里第一件事
+     就是检查计数器，不是等做完一堆工作才发现太深了。
+
+     两处刻意的「反直觉」写法，都是为同一个目标让路——把每一层解释出来
+     的递归调用在真实 JS 调用栈上占用的帧数压到最低，理由见下面第二条
+     注释里记录的实测数字：
+
+     1) 没有 try/finally 包住 depth.n--：正常返回时手动在两个 return
+        分支各减一次；出错时**不**做任何清理。这是安全的，不是偷懒——
+        一旦抛出（无论是 MAX_DEPTH 自己的错，还是任何运行时错误），
+        整条求值链会一路向上抛穿 run()，run() 不捕获、调用方拿到的就是
+        一次性报废的执行——这个 env/callDepth 计数器不会再被第二次使用，
+        「用完就扔」的东西不需要保证回滚到干净状态。try/finally 本身在
+        生成器里会占用额外一截栈帧（V8 要为异常处理路径多留出记账
+        空间），实测去掉它能让真实可用递归深度多出约 15%——这在下面
+        第二条要争取的裕度里不是可以随便让出的零头。
+
+     2) 块体不写成 `yield* evalBlockBody(fn.body.body, callEnv)`，而是
+        把 evalBlockBody「提升 + 顺序求值」的逻辑摊平直接写在这里（不足
+        十行的重复，用重复换一层生成器委托）：素朴地转发给 evalBlockBody
+        时，真实可用的递归深度在这台机器上大约是 685 层就先一步撞见
+        原生 "Maximum call stack size exceeded"——比 MAX_DEPTH=1000 更早
+        触发，我们自己的深度检查形同虚设，真正崩的是引擎栈而不是这条
+        防线。这正是 MAX_DEPTH 注释里"yield* 的嵌套会让真实可用深度比
+        裸递归浅得多"这句话的字面兑现：每多一层生成器委托都会把这个
+        系数再拉大一截。
+
+     即便叠加这两处优化，1000 在这台机器上仍然贴着真实栈上限走（测得
+     safely below 的实际边界视递归调用的源码形状而定，见任务报告——这
+     是本任务发现的一个真问题，报告里如实记了实测数字和结论，没有为了
+     让测试通过而悄悄改小 MAX_DEPTH 或在这里继续加码到不可读的地步）。
+     形参与函数体顶层声明共享同一个 callEnv，跟原生「参数与函数体顶层
+     同属一个函数作用域」的简化模型对得上，也让提升扫描能覆盖到函数体
+     自己内部声明的函数（互递归的内层函数场景）。 */
+  function* callInterpreted(fn, args, node) {
+    const depth = fn.closure.callDepth;
+    if (depth.n >= MAX_DEPTH) {
+      throw err('Maximum call depth exceeded (1000). Is this recursion missing its base case?',
+                 node.line, node.col, 'runtime');
+    }
+    depth.n++;
+    const callEnv = makeEnv(fn.closure);
+    // 形参绑定：多出的实参丢弃、缺失的实参补 undefined——与原生一致。
+    // 用 'let' 而不是 'const'：形参在函数体内是可以被重新赋值的
+    // （function f(a) { a = a + 1; return a; } 是合法 JS）。
+    for (let idx = 0; idx < fn.params.length; idx++) {
+      declareVar(callEnv, 'let', fn.params[idx], idx < args.length ? args[idx] : undefined, node);
+    }
+    if (fn.expression) {
+      const v = yield* evalExpr(fn.body, callEnv);
+      depth.n--;
+      return v;
+    }
+    const stmts = fn.body.body;
+    hoistFunctionDecls(stmts, callEnv);
+    let completion = null;
+    for (let idx = 0; idx < stmts.length; idx++) {
+      completion = yield* evalStmt(stmts[idx], callEnv);
+      if (completion) break;
+      yield;
+    }
+    depth.n--;
+    return (completion && completion.signal === 'return') ? completion.value : undefined;
   }
 
   /* 二元/复合赋值共用的运算实现：直接用 JS 自己的运算符，理由见文件顶
@@ -1160,7 +1279,12 @@
         /* 求值顺序要跟原生对齐：被调用者（含成员表达式的对象与属性）
            先求值，参数再按从左到右的顺序求值——原生是「先求出被调函数
            的引用，再求值参数列表」，反过来会在「对象/属性求值有副作用」
-           时被差分测试的宿主调用序列当场揪出来（见任务报告）。 */
+           时被差分测试的宿主调用序列当场揪出来（见任务报告）。
+
+           Task 6 起被调用者可能是解释出来的函数值（__fn，见 makeFunction）
+           而不是真的 JS function——两条分支（Member callee / 裸标识符
+           callee）取到 fn 之后都要认这第二种「可调用」的形状，走
+           callInterpreted（生成器）而不是 fn.apply。 */
         let thisArg, fn;
         if (node.callee.type === 'Member') {
           thisArg = yield* evalExpr(node.callee.obj, env);
@@ -1169,7 +1293,7 @@
         } else {
           thisArg = undefined;
           fn = yield* evalExpr(node.callee, env);
-          if (typeof fn !== 'function') {
+          if (!isCallableValue(fn)) {
             throw err('Value is not callable', node.line, node.col, 'runtime');
           }
         }
@@ -1177,6 +1301,7 @@
         for (let idx = 0; idx < node.args.length; idx++) {
           args.push(yield* evalExpr(node.args[idx], env));
         }
+        if (fn && typeof fn === 'object' && fn.__fn) return yield* callInterpreted(fn, args, node);
         return fn.apply(thisArg, args);
       }
 
@@ -1227,13 +1352,12 @@
       }
 
       case 'Arrow': {
-        /* 闭包对象只是个惰性描述——真正「调用一个解释出来的函数」是
-           Task 6（函数递归）的事，这里先占住位置。它不是真的 JS
-           function（typeof 是 'object' 不是 'function'），所以上面
-           resolveCallable 与裸标识符调用都不会误把它当成可调用对象
-           放行——`const f = (a) => a; return f(1);` 在本任务里应该报
-           "Value is not callable"，而不是静默按下不表。 */
-        return { __closure: true, node: node, env: env };
+        /* 箭头函数在求值到此处的一刻捕获当前环境——env 就是它的
+           closure，这正是闭包的实现：函数值携带的不是「调用点」的环境，
+           而是「定义点」的环境。node.expression 区分表达式体（body 是
+           表达式节点，调用时直接 evalExpr）与块体（body 是 Block 节点，
+           调用时跑 evalBlockBody 并取 Return 完成信号）。 */
+        return makeFunction(node.params, node.body, env, null, node.expression);
       }
 
       default:
@@ -1391,8 +1515,11 @@
         }
         return null;
       }
-      /* FuncDecl：函数声明与调用是 Task 6（函数递归）的范围，本任务不
-         实现。分派结构留在这里，后续任务只需要加这一个 case。 */
+      /* FuncDecl：真正的声明（把名字绑定成一个函数值）发生在
+         evalBlockBody 开头的提升扫描里，不在这里——真实执行流程走到
+         这条语句时，绑定早已存在（这正是「提升」的意义：函数在它出现
+         的位置之前就已经可调用）。这里因此是纯粹的 no-op。 */
+      case 'FuncDecl': return null;
       default:
         throw err('Not yet implemented in this task: ' + node.type + ' statements ' +
                    '(function declarations land in a later task)',
@@ -1400,10 +1527,36 @@
     }
   }
 
+  /* 函数声明提升（ECMA-262 §14.2.2 / Annex B 的简化版）：进入任意一个块
+     （Program 顶层、普通 {} 块、函数体）之前，先扫一遍这一层的语句数组，
+     把里面**直接**出现的 FuncDecl（不递归进 if/for/嵌套块内部——那些是
+     另一层块自己的提升范围）全部声明好，再按顺序执行语句。
+     这就是差分测试「函数声明提升」（`return f(); function f(){...}`）
+     与「互递归」（两个 function 互相调用，谁写在前面不重要）背后的机制：
+     调用点在源码顺序上出现在声明之前也无所谓，因为绑定在语句真正开始
+     顺序执行之前就已经就位。
+     绑定用 'let'（而不是 'const'）——原生里 `function f(){}` 之后
+     `f = 5;` 是合法的，重新赋值不该被当成「给 const 赋值」拒绝。
+     closure 捕获的是这一层块自己的 env（当前调用），不是全局——这样
+     嵌套在某次函数调用内部的具名函数声明，每次调用都会拿到一份闭包
+     指向那一次调用自己的环境，不会跨调用互相串。 */
+  function hoistFunctionDecls(stmts, env) {
+    for (let idx = 0; idx < stmts.length; idx++) {
+      const s = stmts[idx];
+      if (s.type === 'FuncDecl') {
+        declareVar(env, 'let', s.name, makeFunction(s.params, s.body, env, s.name, false), s);
+      }
+    }
+  }
+
   /* 顺序执行一组语句；每条语句执行完 yield 一次，标记「语句边界」——
      单步执行（阶段 3b）与轨迹记录（Task 7）都靠这个暂停点，本任务的
-     run() 只是简单地把生成器一次性驱动到底，不利用它。 */
+     run() 只是简单地把生成器一次性驱动到底，不利用它。
+     这里也是唯一需要跑函数声明提升扫描的地方——Program 顶层、Block、
+     函数调用（callInterpreted 直接把函数体的语句数组喂给这里）全部
+     经过这一个函数，提升逻辑因此只需要写一遍。 */
   function* evalBlockBody(stmts, env) {
+    hoistFunctionDecls(stmts, env);
     for (let idx = 0; idx < stmts.length; idx++) {
       const completion = yield* evalStmt(stmts[idx], env);
       if (completion) return completion;

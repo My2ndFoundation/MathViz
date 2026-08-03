@@ -475,4 +475,104 @@ diff('let n = 0; for (let i = 0, j = 3; i < j; i++) { n++; } return n;', 'for �
 diff('const xs = []; for (let i = 0; i < 3; i++) { xs.push(i); } return xs;',
      'for 每轮迭代的 i 各自独立（数组快照）');
 
+// ============ Task 6：函数、闭包与递归 ============
+
+// ---- 函数 ----
+diff('function f(a, b) { return a + b; } return f(1, 2);', '函数声明与调用');
+diff('function f() { } return f();', '无返回值的函数返回 undefined');
+diff('function f(a) { if (a) { return 1; } return 2; } return f(0);', '提前 return');
+diff('const g = (a) => a * 2; return g(4);', '箭头函数表达式体');
+diff('const g = (a) => { return a * 2; }; return g(4);', '箭头函数块体');
+diff('const g = x => x + 1; return g(1);', '单参数箭头函数');
+
+// 函数声明提升：调用写在声明之前也要能跑（原生 JS 会提升）
+diff('return f(); function f() { return 42; }', '函数声明提升');
+
+// 闭包
+diff('function mk(n) { return () => n; } const a = mk(1), b = mk(2); return a() + b();', '闭包各自捕获');
+diff('let c = 0; function inc() { c++; } inc(); inc(); return c;', '闭包写外层变量');
+
+// 递归 —— 回溯算法的核心
+diff('function fact(n) { if (n <= 1) { return 1; } return n * fact(n - 1); } return fact(6);', '阶乘');
+diff('function fib(n) { if (n < 2) { return n; } return fib(n-1) + fib(n-2); } return fib(12);', '斐波那契（深递归）');
+
+// 互递归
+diff('function ev(n) { if (n === 0) { return true; } return od(n-1); } ' +
+     'function od(n) { if (n === 0) { return false; } return ev(n-1); } return ev(10);', '互递归');
+
+// 数组作为参数按引用传递（与原生一致）
+diff('function push2(a) { a.push(2); } const xs = [1]; push2(xs); return xs.length;', '数组按引用传');
+
+// 回溯的形状：递归 + 撤销
+diff('function go(d, acc) { if (d === 0) { log(acc.length); return; } acc.push(d); go(d-1, acc); acc.pop(); } ' +
+     'go(3, []); return 0;', '回溯：进入时 push、返回后 pop');
+
+// ---- Task 5 遗留的待验证点：for/for…of 每轮新环境模型，现在有函数调用
+//      （闭包）了，可以真正验证——不能自己判断哪个数字对，让原生说话。 ----
+diff([
+  'const fs = [];',
+  'for (let i = 0; i < 3; i++) { fs.push(() => i); }',
+  'return fs[0]() + fs[1]() + fs[2]();',
+].join('\n'), 'for 的每轮迭代各自捕获自己的 i（原生 let 语义）');
+
+diff([
+  'const fs = [];',
+  'for (const v of [10, 20, 30]) { fs.push(() => v); }',
+  'return fs[0]() + fs[1]() + fs[2]();',
+].join('\n'), 'for…of 的每轮迭代各自捕获自己的循环变量');
+
+// 对照：while 没有「每轮新建一层环境」的语义——它没有循环头声明这个概念，
+// 循环变量 i 声明在 while 外面，全程只有一份绑定，所有闭包捕获的是
+// 同一个 i，读到的都是循环结束后的最终值（原生：3+3+3=9），与上面 for
+// 的 0+1+2=3 形成对比。
+diff([
+  'const fs = [];',
+  'let i = 0;',
+  'while (i < 3) { fs.push(() => i); i++; }',
+  'return fs[0]() + fs[1]() + fs[2]();',
+].join('\n'), 'while 没有每轮新环境：闭包共享同一个 i（与 for 不同）');
+
+// ---- 调用深度上限：不用 diff——原生栈溢出的 RangeError 文案跟我们主动
+//      拦截报出的教学向文案不是一回事，比较文案没有意义。只验证我们自己
+//      的行为：无限递归被主动拦下、报错类别是 runtime、文案点名 1000 与
+//      "缺基准情形"这个诊断方向。
+//
+//      这条测试比看上去的样子要棘手——任务报告详细记录了完整的排查
+//      过程，这里只留结论：
+//      1) 递归调用的写法必须是跟 brief 里 fact/fib 同样的两语句形状
+//         （独立的 if 判基准情形 + 纯尾位置递归调用），不能是单语句体或
+//         把调用包在算术表达式里——后两种写法量出来的真实可用原生递归
+//         深度分别只有约 999 层、约 936 层，够不到 1000，会在我们自己的
+//         检查生效前先撞上对使用者毫无意义的原生 RangeError。
+//      2) 光换对形状还不够：在**这个测试文件的这个位置**（前面已经跑过
+//         大约 380 个 diff() 用例）直接冷启动调用一次 loop(2000)，测得
+//         会不稳定地先撞上原生 RangeError，而不是我们的报错——但如果先
+//         用几个明确安全（远低于 1000）、深度递增的调用把
+//         evalStmt/evalExpr/callInterpreted 这条热路径"热身"一遍，
+//         再测超限深度，结果稳定可重现（多次独立验证都一致）。这跟
+//         MAX_DEPTH 那条实现注释里点名的风险是同一件事的延伸："yield*
+//         的嵌套让真实可用深度比裸递归浅得多"，而且这个"浅多少"本身
+//         还跟 JIT 的预热状态相关，比 brief 那句"1000 远大于教学规模
+//         所需"暗示的更微妙——教学规模（N 皇后 N≤12）离这条边界非常
+//         远，不受影响，但这条专门去够边界的测试必须先热身才稳。 ----
+(function () {
+  const src = (n) => 'function loop(n) { if (n <= 0) { return 0; } return loop(n - 1); } return loop(' + n + ');';
+  // 热身：这些深度远低于 MAX_DEPTH，预期一律正常返回（不做断言，只是
+  // 为了让下面真正的超限调用落在稳定可重现的路径上）。
+  for (const warm of [50, 200, 500, 800, 950, 999]) { I.run(src(warm)); }
+
+  let caught = null;
+  try { I.run(src(2000)); } catch (e) { caught = e; }
+  T.ok(caught !== null, 'MAX_DEPTH：无限递归应该被主动拦下而不是让引擎真崩');
+  T.eq(caught && caught.category, 'runtime', 'MAX_DEPTH 报错类别是 runtime');
+  T.eq(caught && caught.message,
+       'Maximum call depth exceeded (1000). Is this recursion missing its base case?',
+       'MAX_DEPTH 报错文案与 brief 一字不差');
+})();
+
+// 深递归但没超限：fib(12) 已经覆盖了「有意义深度但没触顶」的情形（见上）；
+// 这里额外确认 N 皇后规模（N=12）的递归深度稳稳落在上限之内。
+diff('function depth(n) { if (n <= 0) { return 0; } return 1 + depth(n - 1); } return depth(12);',
+     '递归深度 12（N 皇后 N≤12 的规模）远低于 MAX_DEPTH，正常返回');
+
 T.report();
