@@ -60,6 +60,29 @@ T.eq(tplExprs("`${ '{' }`").map(s => s.trim()), ["'{'"],
 T.eq(tplExprs('`${ f("}") }`').map(s => s.trim()), ['f("}")'],
      '函数调用参数里字符串的 } 不影响花括号计数');
 
+/* N1：C2 新增的 skipNestedString/skipNestedTemplate（跳过 ${...} 内部的
+   字符串/嵌套模板，专为花括号计深服务）必须重复一遍 C1 那条「单/双引号
+   字符串不能裸换行」的检查，不能指望"反正 parseExpression 会对 exprs
+   里的源码片段再 tokenize 一次，到时候会抓到"——这个词法器是公开导出
+   的接口，阶段 3b 编辑器的语法高亮直接调 tokenize()，走不到"第二遍"，
+   漏掉这里就是漏掉了高亮能看到的那一份检查（规格 §2.8）。
+   嵌套模板串本身允许跨行（原生允许），这里特意验证了这一点不受影响，
+   只有嵌套在其中的单/双引号字符串不行。 */
+T.throws(() => I.tokenize("`x${ 'a\nb' }y`"),
+         '模板表达式里嵌套的单引号字符串裸换行也要报错（N1）');
+T.throws(() => I.tokenize('`x${ "a\nb" }y`'),
+         '模板表达式里嵌套的双引号字符串裸换行也要报错（N1）');
+let nestedTplErr = null;
+try { I.tokenize('`x${ `a\nb` }y`'); } catch (e) { nestedTplErr = e; }
+T.eq(nestedTplErr, null, '嵌套模板串本身允许跨行，不应被 N1 的检查误伤');
+
+/* N2：I1 的招牌用例。数字扫描器至多吃一个小数点然后停，与原生一致。
+   把这条规则改回「见第二个点就抛」，下面这条会红——复审时实测过，
+   在没有这条断言之前整套仍然全绿，也就是说这个 bug 曾经可以无声地
+   回来。'1 .5' 那条断言走的是空格分隔的另一条代码路径，保护不了这条。 */
+T.eq(I.tokenize('5..toFixed(2)').filter(t => t.type !== 'eof').map(t => t.value),
+     [5, '.', 'toFixed', '(', 2, ')'], '5..toFixed(2) 正常词法化，不被多小数点检查误伤');
+
 // 模板串本身只验「不抛」——求值（把 quasis 和 exprs 拼起来）是后面任务的事。
 let tplRunErr = null;
 try { I.tokenize('`a${1+1}b`'); } catch (e) { tplRunErr = e; }

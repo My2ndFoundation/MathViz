@@ -103,8 +103,16 @@
        嵌套模板串会递归调用 skipNestedTemplate 处理它自己的 ${...}
        （同样需要跳过其中的字符串），支持任意层嵌套。 */
     function skipNestedString(quote, sl, sc) {
+      /* 单/双引号在这里也不能裸换行——跟主循环里字符串分支的 C1 检查
+         是同一条规则，必须重复一遍而不是指望"反正后面 parseExpression
+         会再 tokenize 一次、到时候会抓到"：这个词法器是公开导出的，
+         阶段 3b 编辑器的语法高亮直接调 tokenize()，不会走到"第二遍"，
+         漏掉这里就是漏掉了高亮能看到的那一份检查（规格 §2.8）。反引号
+         模板串本身允许跨行，所以这条检查只在这个函数里，不在
+         skipNestedTemplate 的外层循环里。 */
       adv(); // 跳过开始引号
       while (i < src.length && src[i] !== quote) {
+        if (src[i] === '\n') throw err('Unterminated string: raw newline not allowed', sl, sc);
         if (src[i] === '\\') { adv(); if (i < src.length) adv(); }
         else adv();
       }
