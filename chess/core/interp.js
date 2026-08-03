@@ -33,7 +33,13 @@
     return e;
   }
 
-  const ESCAPES = { n: '\n', t: '\t', r: '\r', '\\': '\\', "'": "'", '"': '"', '`': '`', '0': '\0' };
+  const ESCAPES = {
+    n: '\n', t: '\t', r: '\r', '\\': '\\', "'": "'", '"': '"', '`': '`', '0': '\0',
+    /* 反斜杠紧跟一个真实换行符是「续行」：原生里这两个字符整体消失，
+       不是把换行符原样并进字符串——这跟下面 C1 的「裸换行必须报错」是
+       两回事：那里说的是没有反斜杠打头的裸换行，这里是转义过的。 */
+    '\n': '',
+  };
 
   function tokenize(src) {
     const out = [];
@@ -47,6 +53,98 @@
     }
     function push(type, value, start, sl, sc) {
       out.push({ type: type, value: value, line: sl, col: sc, start: start, end: i });
+    }
+
+    /* 转义序列的换算统一交给原生的 parseInt / String.fromCodePoint，不
+       自己写码位转换表——自己实现只会多一处可能和原生分歧的地方（这正
+       是 C3 出问题的原因：那时压根没做进制转换，1e10 被词法器当成数字 1
+       后面跟着标识符 e10）。调用时 i 已经跳过反斜杠，停在紧跟反斜杠的
+       第一个字符上。 */
+    function readEscape(sl, sc) {
+      if (i >= src.length) return '';
+      const c2 = src[i];
+      if (c2 === 'u') return readUnicodeEscape(sl, sc);
+      if (c2 === 'x') return readHexEscape(sl, sc);
+      const mapped = ESCAPES[c2];
+      const out2 = mapped !== undefined ? mapped : c2;
+      adv();
+      return out2;
+    }
+    function readHexEscape(sl, sc) {
+      adv(); // 跳过 'x'
+      const hs = i;
+      for (let k = 0; k < 2 && i < src.length && /[0-9a-fA-F]/.test(src[i]); k++) adv();
+      const hex = src.slice(hs, i);
+      if (hex.length !== 2) throw err('Invalid hexadecimal escape sequence', sl, sc);
+      return String.fromCodePoint(parseInt(hex, 16));
+    }
+    function readUnicodeEscape(sl, sc) {
+      adv(); // 跳过 'u'
+      if (src[i] === '{') {
+        adv();
+        const hs = i;
+        while (i < src.length && /[0-9a-fA-F]/.test(src[i])) adv();
+        const hex = src.slice(hs, i);
+        if (hex.length === 0 || src[i] !== '}') throw err('Invalid Unicode escape sequence', sl, sc);
+        const code = parseInt(hex, 16);
+        if (code > 0x10FFFF) throw err('Undefined Unicode code-point', sl, sc);
+        adv(); // 跳过 '}'
+        return String.fromCodePoint(code);
+      }
+      const hs = i;
+      for (let k = 0; k < 4 && i < src.length && /[0-9a-fA-F]/.test(src[i]); k++) adv();
+      const hex = src.slice(hs, i);
+      if (hex.length !== 4) throw err('Invalid Unicode escape sequence', sl, sc);
+      return String.fromCodePoint(parseInt(hex, 16));
+    }
+
+    /* 供 ${...} 花括号计深使用：只管把游标越过一段字符串/嵌套模板串，
+       不提取内容——它们内部的 { / } 不该被算进外层表达式的花括号深度。
+       嵌套模板串会递归调用 skipNestedTemplate 处理它自己的 ${...}
+       （同样需要跳过其中的字符串），支持任意层嵌套。 */
+    function skipNestedString(quote, sl, sc) {
+      adv(); // 跳过开始引号
+      while (i < src.length && src[i] !== quote) {
+        if (src[i] === '\\') { adv(); if (i < src.length) adv(); }
+        else adv();
+      }
+      if (i >= src.length) throw err('Unterminated string inside template expression', sl, sc);
+      adv(); // 跳过结束引号
+    }
+    function skipNestedTemplate(sl, sc) {
+      adv(); // 跳过开始反引号
+      while (i < src.length && src[i] !== '`') {
+        if (src[i] === '\\') { adv(); if (i < src.length) adv(); }
+        else if (src[i] === '$' && peek(1) === '{') {
+          adv(2);
+          let depth = 1;
+          while (i < src.length && depth > 0) {
+            if (src[i] === '{') { depth++; adv(); }
+            else if (src[i] === '}') { depth--; if (depth > 0) adv(); }
+            else if (src[i] === "'" || src[i] === '"') { skipNestedString(src[i], sl, sc); }
+            else if (src[i] === '`') { skipNestedTemplate(sl, sc); }
+            else adv();
+          }
+          if (i >= src.length) throw err('Unterminated template expression', sl, sc);
+          adv(); // 跳过匹配的 '}'
+        } else adv();
+      }
+      if (i >= src.length) throw err('Unterminated template string inside template expression', sl, sc);
+      adv(); // 跳过结束反引号
+    }
+
+    /* 数字字面量后面紧跟一个十进制数字或标识符起始字符，原生一律是硬
+       报错（5g / 0x1Fg / 0o19 / 1e10x 都属此类）——统一在这一处堵死，
+       不必对每种数字形态（十进制/十六进制/科学计数法…）各写一次同样
+       的检查，也不会漏掉某个分支忘记检查。 */
+    function checkNumTail(sl, sc) {
+      if (i < src.length) {
+        const nc = src[i];
+        if ((nc >= '0' && nc <= '9') || /[A-Za-z_$]/.test(nc)) {
+          throw err('Invalid number: a numeric literal cannot be immediately followed by ' +
+                     JSON.stringify(nc), sl, sc);
+        }
+      }
     }
 
     while (i < src.length) {
@@ -68,19 +166,72 @@
         continue;
       }
 
-      if (c >= '0' && c <= '9') {
-        /* 至多一个小数点：原生 JS 对 1.2.3 直接 SyntaxError，我们不能悄悄
-           把它读成 1.2 然后把第二个 '.' 扔给下一轮当成员访问符 —— 那样使用
-           者会拿到一个看似合法、实则错误的数字，而屏幕上没有任何报错提示
-           她哪里错了（规格 §9：半懂不懂的解释器比明确拒绝更危险）。 */
-        let dots = 0;
-        while (i < src.length && ((src[i] >= '0' && src[i] <= '9') || src[i] === '.')) {
-          if (src[i] === '.') {
-            dots++;
-            if (dots > 1) throw err('Invalid number: more than one decimal point', sl, sc);
-          }
-          adv();
+      if ((c >= '0' && c <= '9') || (c === '.' && peek(1) >= '0' && peek(1) <= '9')) {
+        /* 数字字面量：十进制（含小数、科学计数法）/ 十六进制 / 八进制 /
+           二进制 / 前导小数点。 */
+        if (c === '0' && (peek(1) === 'x' || peek(1) === 'X')) {
+          adv(2);
+          const hs = i;
+          while (i < src.length && /[0-9a-fA-F]/.test(src[i])) adv();
+          if (i === hs) throw err('Invalid number: expected hex digits after 0x', sl, sc);
+          checkNumTail(sl, sc);
+          push('num', parseInt(src.slice(hs, i), 16), start, sl, sc);
+          continue;
         }
+        if (c === '0' && (peek(1) === 'o' || peek(1) === 'O')) {
+          adv(2);
+          const os = i;
+          while (i < src.length && src[i] >= '0' && src[i] <= '7') adv();
+          if (i === os) throw err('Invalid number: expected octal digits after 0o', sl, sc);
+          checkNumTail(sl, sc);
+          push('num', parseInt(src.slice(os, i), 8), start, sl, sc);
+          continue;
+        }
+        if (c === '0' && (peek(1) === 'b' || peek(1) === 'B')) {
+          adv(2);
+          const bs = i;
+          while (i < src.length && (src[i] === '0' || src[i] === '1')) adv();
+          if (i === bs) throw err('Invalid number: expected binary digits after 0b', sl, sc);
+          checkNumTail(sl, sc);
+          push('num', parseInt(src.slice(bs, i), 2), start, sl, sc);
+          continue;
+        }
+        /* 0 打头紧跟另一个十进制数字（017 / 08 这类旧式八进制 / 前导零
+           写法）是一个静默陷阱：非严格模式下原生会悄悄给出旧式八进制值
+           或者一个更怪的十进制退让值，两种都是历史包袱，且都不是这个
+           教学子集要照搬的语义——明确拒绝，好过面值和后面的数字粘在一起
+           时静默给出一个两不像的结果（这恰恰是之前的真实行为）。 */
+        if (c === '0' && src[i + 1] >= '0' && src[i + 1] <= '9') {
+          throw err('Invalid number: numbers cannot have a leading zero (legacy octal is not supported)', sl, sc);
+        }
+
+        while (i < src.length && src[i] >= '0' && src[i] <= '9') adv();
+
+        /* 至多吃一个小数点然后停——不管点后面有没有紧跟数字。这一条同时
+           是 I1（5..toFixed(2) 不能被词法器提前判死刑：第一个点在这里被
+           数字吃掉，第二个点留给外层主循环重新判断，会变成一个干净的
+           成员访问符）与「1.2.3 该在哪一层报错」的关键：第二个点因为
+           后面紧跟数字 3，会被主循环的前导小数点分支当成一个新数字
+           0.3——于是 1.2.3 词法成两个挨在一起的数字，跟原生「Unexpected
+           number」的报错本质（两个数字字面量之间缺一个运算符）完全对应，
+           而不是虚构一个「点后面必须是属性名」的场景。 */
+        if (i < src.length && src[i] === '.') {
+          adv();
+          while (i < src.length && src[i] >= '0' && src[i] <= '9') adv();
+        }
+
+        /* 科学计数法：e/E 一旦出现就是承诺——原生对 1e / 1e+ / 1ex 这些
+           「指数标记后面没有数字」的输入统统是 SyntaxError，不能读到一半
+           发现没数字就假装无事发生、把 e 退回去当标识符开头。 */
+        if (i < src.length && (src[i] === 'e' || src[i] === 'E')) {
+          adv();
+          if (i < src.length && (src[i] === '+' || src[i] === '-')) adv();
+          const ds = i;
+          while (i < src.length && src[i] >= '0' && src[i] <= '9') adv();
+          if (i === ds) throw err('Invalid number: missing exponent digits', sl, sc);
+        }
+
+        checkNumTail(sl, sc);
         push('num', parseFloat(src.slice(start, i)), start, sl, sc);
         continue;
       }
@@ -89,11 +240,15 @@
         adv();
         let s = '';
         while (i < src.length && src[i] !== c) {
+          /* 单/双引号字符串不能跨行——裸换行（没有反斜杠续行）在原生里
+             直接 SyntaxError，我们不能悄悄把它读成一个跨行的字符串然后
+             继续吞源码直到误配上下一个引号（那样报出的错误、指向的位置
+             都会跟真正的问题背道而驰）。行列指向字符串开始的位置，因为
+             使用者要找的是那个没关上的引号，不是这一行里换行符的位置。 */
+          if (src[i] === '\n') throw err('Unterminated string: raw newline not allowed', sl, sc);
           if (src[i] === '\\') {
             adv();
-            if (i >= src.length) break;
-            s += (ESCAPES[src[i]] !== undefined ? ESCAPES[src[i]] : src[i]);
-            adv();
+            s += readEscape(sl, sc);
           } else { s += src[i]; adv(); }
         }
         if (i >= src.length) throw err('Unterminated string', sl, sc);
@@ -105,24 +260,32 @@
       if (c === '`') {
         /* 模板串在词法阶段只切成「静态段 + 表达式源码片段」，不递归调用
            解析器 —— 词法器不该知道表达式长什么样。解析器拿到 exprs 里的
-           源码片段之后再各自 parse 一次。quasis 恒比 exprs 多一个。 */
+           源码片段之后再各自 parse 一次。quasis 恒比 exprs 多一个。
+           反引号字符串本身允许裸换行（这正是它存在的意义），跟上面单/
+           双引号字符串的规则不同，不在这里报错。 */
         adv();
         const quasis = [], exprs = [];
         let cur = '';
         while (i < src.length && src[i] !== '`') {
           if (src[i] === '\\') {
             adv();
-            if (i >= src.length) break;
-            cur += (ESCAPES[src[i]] !== undefined ? ESCAPES[src[i]] : src[i]);
-            adv();
+            cur += readEscape(sl, sc);
           } else if (src[i] === '$' && peek(1) === '{') {
             quasis.push(cur); cur = '';
             adv(2);
+            /* 花括号计深必须识别字符串边界——`${ "}" }` 这种表达式里，
+               字符串内恰好出现的 { / } 不能被当成真正的花括号，否则要么
+               提前把表达式截断（字符串里的 } 被当成收尾），要么让计数
+               失衡、一路找到源码末尾才报「未闭合」。遇到引号就整段跳过
+               （含转义），遇到反引号就递归跳过一层嵌套模板（它可能自带
+               ${...}，同样要跳过其中的字符串）。 */
             let depth = 1, es = i;
             while (i < src.length && depth > 0) {
-              if (src[i] === '{') depth++;
-              else if (src[i] === '}') depth--;
-              if (depth > 0) adv();
+              if (src[i] === '{') { depth++; adv(); }
+              else if (src[i] === '}') { depth--; if (depth > 0) adv(); }
+              else if (src[i] === "'" || src[i] === '"') { skipNestedString(src[i], sl, sc); }
+              else if (src[i] === '`') { skipNestedTemplate(sl, sc); }
+              else adv();
             }
             if (i >= src.length) throw err('Unterminated template expression', sl, sc);
             exprs.push(src.slice(es, i));

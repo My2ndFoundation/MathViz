@@ -16,19 +16,31 @@ T.eq(values('1 2.5 0.75'), [1, 2.5, 0.75], '整数与小数');
 T.eq(values("'hi' \"there\""), ['hi', 'there'], '两种引号');
 T.eq(values("'a\\nb'"), ['a\nb'], '转义序列在词法阶段就解掉');
 
-// 数字里第二个小数点：原生 JS 报 SyntaxError，我们也必须报错，
-// 而不是悄悄把 1.2.3 变成 1.2 —— 与参照实现（JS 自己）保持一致是
-// 本阶段的整套正确性标准，而「静默给出一个错的数字」是规格 §9
-// 点名要避免的那种「半懂不懂比明确拒绝更危险」的形态。
-T.throws(() => I.tokenize('1.2.3'), '数字里出现第二个小数点要报错');
-T.throws(() => I.tokenize('let x = 1.2.3'), '在语句里同样报错');
+/* 数字里第二个小数点：I1 审查发现上一轮「数字扫描器遇到第二个 . 就
+   throw」的修法过激——5..toFixed(2) 是合法原生写法（先一个数字字面量
+   吃掉一个点，再一个成员访问点），会被那条特例误杀。改成「扫描器至多
+   吃一个小数点然后停」，1.2.3 仍然会被拒绝，但拒绝的位置改到了解析层
+   （点后面必须是属性名，数字不是），报错原因更贴切。 */
+T.throws(() => I.parse('1.2.3;'), '数字里出现第二个小数点在解析层被拒绝');
+T.throws(() => I.parse('let x = 1.2.3;'), '在语句里同样被拒绝');
 
 T.eq(I.tokenize('1.5').filter(t => t.type !== 'eof')[0].value, 1.5, '正常小数');
 T.eq(I.tokenize('42').filter(t => t.type !== 'eof')[0].value, 42, '整数');
 T.eq(I.tokenize('a.b').filter(t => t.type !== 'eof').map(t => t.value), ['a', '.', 'b'],
      '标识符后的点仍然是成员访问运算符，不是数字的一部分');
-T.eq(I.tokenize('1 .5').filter(t => t.type !== 'eof').map(t => t.value), [1, '.', 5],
-     '空格分开的话是三个 token');
+
+/* 上一轮这里断言 '1 .5' 是三个 token（[1, '.', 5]），当时成立是因为
+   词法器还不支持「前导小数点」。C4 补上前导小数点支持之后，'.5' 本身
+   就是一个合法数字字面量（跟前面有没有空格无关——原生的数字文法是
+   上下文无关的最长匹配，不会因为前面出现过 '1' 就把 '.' 让给成员访问）。
+   用 node 亲自验证过：`new Function('return 1 .5;')()` 原生也抛
+   "Unexpected number"——这正说明原生把 '.5' 词法成了一个数字 token，
+   而不是留了一个 '.' 给成员访问，两个数字字面量挨在一起才在解析层报错。
+   所以这条断言本身描述的行为在 C4 之后不再等于原生行为，随之更新，
+   而不是保留一个「曾经通过、但与参照实现不一致」的断言。 */
+T.eq(I.tokenize('1 .5').filter(t => t.type !== 'eof').map(t => t.value), [1, 0.5],
+     "C4 之后 '.5' 本身就是数字字面量，'1 .5' 是两个数字 token（挨在一起会在解析层报错，" +
+     '与原生 new Function 的 "Unexpected number" 一致，见报告）');
 
 // ---- 模板字符串 ----
 const tpl = I.tokenize('`try ${r},${c}`').filter(t => t.type !== 'eof');
@@ -36,6 +48,22 @@ T.eq(tpl.length, 1, '模板串是一个 token');
 T.eq(tpl[0].type, 'tpl', '类别是 tpl');
 T.eq(tpl[0].value.quasis, ['try ', ',', ''], '静态段（比表达式多一个）');
 T.eq(tpl[0].value.exprs.map(s => s.trim()), ['r', 'c'], '内嵌表达式以源码片段保留，留给解析器');
+
+/* C2：${...} 的花括号计深必须识别字符串边界，否则字符串里恰好出现的
+   { / } 会提前打断（或延后）表达式的截取——审查用 `${ "}" }` 这种例子
+   实证抓到了它。 */
+function tplExprs(src) { return I.tokenize(src).filter(t => t.type !== 'eof')[0].value.exprs; }
+T.eq(tplExprs('`${ "}" }`').map(s => s.trim()), ['"}"'],
+     '表达式里字符串内的 } 不提前截断花括号计数');
+T.eq(tplExprs("`${ '{' }`").map(s => s.trim()), ["'{'"],
+     '表达式里字符串内的 { 不影响花括号计数');
+T.eq(tplExprs('`${ f("}") }`').map(s => s.trim()), ['f("}")'],
+     '函数调用参数里字符串的 } 不影响花括号计数');
+
+// 模板串本身只验「不抛」——求值（把 quasis 和 exprs 拼起来）是后面任务的事。
+let tplRunErr = null;
+try { I.tokenize('`a${1+1}b`'); } catch (e) { tplRunErr = e; }
+T.eq(tplRunErr, null, '正常模板串（含表达式）词法阶段不抛');
 
 // ---- 注释：产出 token 供高亮，解析器自己跳过 ----
 T.eq(types('// hi\nlet x = 1'), ['comment', 'kw', 'name', 'punct', 'num', 'eof'], '行注释是 token');
@@ -54,6 +82,83 @@ T.eq(pos[0].col, 1, '第一个 token 在第 1 列');
 T.throws(() => I.tokenize("'abc"), '未闭合的字符串报错');
 T.throws(() => I.tokenize('`abc'), '未闭合的模板串报错');
 T.throws(() => I.tokenize('/* abc'), '未闭合的块注释报错');
+
+/* ---- 与原生 JavaScript 对照（规格 §7.3：正确性判据是「跟原生一致」）----
+   上一轮 21 条写死期望值的测试，一条都没抓到 1e10 被切成两个 token——
+   写死的期望值只能覆盖测试作者想到的输入。这里反过来：不写死期望值，
+   当场问原生 JS 要答案，任何一个我们没想到的分歧都会自己暴露。 */
+function lexValue(src) {
+  const t = I.tokenize(src).filter(x => x.type !== 'eof');
+  return t.length === 1 ? t[0].value : t.map(x => x.value);
+}
+function nativeValue(src) { return new Function('return ' + src + ';')(); }
+function sameAsNative(src, label) {
+  T.eq(lexValue(src), nativeValue(src), label + ' —— 与原生一致：' + src);
+}
+sameAsNative('1e10', '科学计数法');
+sameAsNative('1E10', '大写 E');
+sameAsNative('1e-5', '负指数');
+sameAsNative('1e+5', '正指数（带显式加号）');
+sameAsNative('1.5e3', '小数 + 指数');
+sameAsNative('0x1F', '十六进制');
+sameAsNative('0X1f', '大写 X');
+sameAsNative('.5', '前导小数点');
+sameAsNative("'\\u0041'", '\\u 转义（定长 4 位）');
+sameAsNative("'\\u{1F600}'", '\\u{...} 转义（码位形式，非 BMP 字符）');
+sameAsNative("'\\x41'", '\\x 转义');
+
+/* 八进制 / 二进制：规格没有点名要不要支持，但原生 JS 本身支持 0o / 0b
+   字面量（node 里验证过 0o17 === 15、0b101 === 5），而我们的正确性判据
+   就是「跟原生一致」——选择不支持、让它们走进「数字后面跟着一个不认识
+   的标识符字符 o/b」这种含混错误，比选择支持更容易制造「表面正常、
+   实际跑偏」的假象（数字面值和后面的字母粘在一起时，静默截断是 C3 已经
+   踩过的坑）。而 parseInt(str, radix) 已经做了进制换算，多支持这两种
+   前缀不比 0x 分支多花什么成本，所以选择支持，而不是选择报错。 */
+sameAsNative('0o17', '八进制');
+sameAsNative('0O17', '八进制（大写 O）');
+sameAsNative('0b101', '二进制');
+sameAsNative('0B101', '二进制（大写 B）');
+
+// ---- 与原生对照：原生拒绝的，我们也要拒绝 ----
+T.throws(() => I.tokenize("'a\nb'"), '字符串内未转义换行要报错');
+T.throws(() => I.tokenize("'\\uZZZZ'"), '非法的 \\u 转义要报错');
+
+/* 下面这组同样是「先问原生」，但原生对这些输入是抛错而不是给值，
+   不能套用 sameAsNative（nativeValue 会直接把异常炸出测试文件）——
+   所以先确认原生自己也抛，再确认我们抛，两者都断言，而不是只断言
+   我们抛（那样万一我对原生行为的记忆有误，测试也发现不了）。 */
+function nativeRejects(src, label) {
+  let threwNatively = false;
+  try { nativeValue(src); } catch (e) { threwNatively = true; }
+  T.ok(threwNatively, label + '（先确认原生自己也拒绝）：' + src);
+  T.throws(() => I.tokenize(src), label + '：' + src);
+}
+nativeRejects('0xZZ', '0x 后面一个合法十六进制数字都没有');
+nativeRejects('0o19', '八进制里出现非法数字 9');
+nativeRejects('0b12', '二进制里出现非法数字 2');
+nativeRejects('1e', '指数标记后面没有数字');
+nativeRejects('1ex', '指数标记后面跟的不是数字');
+nativeRejects('5g', '数字字面量后面紧跟标识符字符');
+
+/* ---- 额外验证：反斜杠 + 真实换行是「续行」，整体消失而不是被添成
+   一个换行字符（原生在两种模式下都这样，不是严格模式限定的怪癖，
+   跟上面 C1「裸换行必须报错」是两回事：这里的换行前面有转义反斜杠）---- */
+sameAsNative("'a\\\nb'", '反斜杠 + 真实换行是续行，整体消失');
+
+/* ---- 额外验证：前导零的旧式八进制/十进制字面量（017 / 08）----
+   这条规格与审查都没点名，是我自己在实现 0o/0b 时顺手发现的邻近坑：
+   `new Function` 默认非严格模式，017 会被当成旧式八进制（=15），
+   08 会被当成「不算合法旧式八进制、但仍按十进制退让」的怪异值（=8）——
+   两种都是历史包袱，且都不是「跟原生一致」这条判据本身要求我们必须
+   模拟的通用语义（教学工具的 PARAMS/SCENES 心智模型里没有人会写
+   017）。选择明确拒绝，而不是悄悄照抄这份非严格模式的历史兼容行为，
+   或者更糟——两种都不模拟、静默给出第三种不上不下的值（之前就是这样：
+   017 会被当成十进制 17，跟原生的两种解释都对不上）。这是一个不跟随
+   sameAsNative 判据的主动选择，不是遗漏，已经在报告里向协调者点明。 */
+T.throws(() => I.tokenize('017'), '前导零字面量：明确拒绝，不悄悄照抄非严格模式的历史兼容行为');
+T.throws(() => I.tokenize('08'), '前导零字面量（08 在非严格模式下是十进制 8 这种更怪的历史包袱）：同样拒绝');
+T.eq(I.tokenize('0').filter(t => t.type !== 'eof')[0].value, 0, '单独的 0 不受影响');
+T.eq(I.tokenize('0.5').filter(t => t.type !== 'eof')[0].value, 0.5, '0 打头的正常小数不受影响');
 
 // ---- 表达式解析：结构 ----
 function P(src) { return I.parseExpression(src); }
