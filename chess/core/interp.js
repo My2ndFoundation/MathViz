@@ -1522,6 +1522,14 @@
     }
     const stmts = fn.body.body;
     hoistFunctionDecls(stmts, callEnv);
+    /* 复审二轮：callEnv 是函数体自己的顶层作用域，跟 evalBlockBody 处理
+       的 Program 顶层/普通块/循环体是同一类"直接语句数组"，TDZ 预扫描
+       同样要跑一遍——这里有一套独立于 evalBlockBody 的语句循环（为了
+       push/pop 帧跟踪），漏接这一行会让函数体顶层的前向引用绕过 TDZ
+       （`function f(){ let y=x; let x=2; return y; }` 会报成
+       "x is not defined"，而不是原生的 "Cannot access 'x' before
+       initialization"——两边都抛，但抛的不是同一件事）。 */
+    hoistLexicalDecls(stmts, callEnv);
     let completion = null;
     for (let idx = 0; idx < stmts.length; idx++) {
       completion = yield* evalStmt(stmts[idx], callEnv);

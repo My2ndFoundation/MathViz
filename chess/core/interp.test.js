@@ -932,6 +932,13 @@ diff('{ x; let x = 2; return 0; }',
 diff('{ let a = 5; return a; }', 'B2 对照: 正常声明后使用（回归）');
 diff('function f(){ let a = 1; return a; } return f();', 'B2 对照: 函数体内 let 不受影响（回归）');
 
+/* 复审二轮：TDZ 在函数自己的顶层 body 里也要生效。callInterpreted 有一套
+   独立于 evalBlockBody 的语句循环（为了 push/pop 帧跟踪），最初只给
+   evalBlockBody 接了 hoistLexicalDecls，于是函数体顶层的前向引用绕过了
+   TDZ —— 两边都抛，但抛的不是同一件事（原生："Cannot access 'x' before
+   initialization"；我们改之前："x is not defined"）。 */
+diff('function f(){ let y = x; let x = 2; return y; } return f();', 'B2 二轮: 函数体顶层的 TDZ');
+
 // ---- B-4：boardOps 的撤销信息按棋子层/标记层分开记 ----
 // 复审 I5：place 与 mark 曾经共用同一个影子槽，同一格先 place 再 mark
 // 会把棋子的旧值当成标记的旧值读出来，clear 时只找得回后写的那一层。
