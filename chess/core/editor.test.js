@@ -306,4 +306,154 @@ try {
   I.parse = realParse;
 }
 
+/* ==================== 3b 复审新增：括号配对（规格 §2.8） ====================
+   块作用域，理由同 debugger.test.js 里那一块：不跟上半部分的夹具抢名字。 */
+{
+
+/* at(src, ch, nth) —— 按「第 n 个某字符」取下标，省得在断言里手数偏移量；
+   手数出来的下标错一位，测试会以一种极难看出的方式变成在测别的东西。 */
+function at(src, ch, nth) {
+  let idx = -1;
+  for (let k = 0; k < (nth || 1); k++) idx = src.indexOf(ch, idx + 1);
+  return idx;
+}
+
+const S1 = 'const a = (1 + 2) * 3;';
+const o1 = at(S1, '('), c1 = at(S1, ')');
+
+// 光标贴在开括号右边（即左邻是它）
+T.eq(E.matchBracket(S1, o1 + 1), { open: o1, close: c1 }, 'matchBracket：光标左邻是开括号');
+// 光标贴在开括号左边（右邻是它）
+T.eq(E.matchBracket(S1, o1), { open: o1, close: c1 }, 'matchBracket：光标右邻是开括号');
+// 光标贴在闭括号右边 —— 刚打完一个右括号时人期待它立刻和左括号一起亮
+T.eq(E.matchBracket(S1, c1 + 1), { open: o1, close: c1 }, 'matchBracket：光标左邻是闭括号');
+T.eq(E.matchBracket(S1, c1), { open: o1, close: c1 }, 'matchBracket：光标右邻是闭括号');
+// 不挨着任何括号
+T.eq(E.matchBracket(S1, 0), null, 'matchBracket：不挨着括号时返回 null');
+T.eq(E.matchBracket(S1, S1.length), null, 'matchBracket：末尾（分号之后）返回 null');
+
+/* 左邻优先：`)(` 这个位置两边都是括号，约定取左邻那一个。 */
+const S2 = 'f()(1);';
+const closeOfF = at(S2, ')'), openOf2 = at(S2, '(', 2);
+T.eq(E.matchBracket(S2, closeOfF + 1).close, closeOfF,
+     'matchBracket：两边都是括号时取左邻那一个（左邻优先）');
+
+// 嵌套：外层与内层各配各的
+const S3 = 'g((a + b) * (c - d));';
+const outerO = at(S3, '('), outerC = S3.lastIndexOf(')');
+T.eq(E.matchBracket(S3, outerO + 1), { open: outerO, close: outerC }, 'matchBracket：嵌套时外层配外层');
+const innerO = at(S3, '(', 2), innerC = at(S3, ')');
+T.eq(E.matchBracket(S3, innerO + 1), { open: innerO, close: innerC }, 'matchBracket：嵌套时内层配内层');
+
+// 三种括号都要认，且互不串门
+const S4 = 'const m = { a: [1, 2], b: (3) };';
+T.eq(E.matchBracket(S4, at(S4, '{') + 1), { open: at(S4, '{'), close: S4.lastIndexOf('}') }, 'matchBracket：花括号');
+T.eq(E.matchBracket(S4, at(S4, '[') + 1), { open: at(S4, '['), close: at(S4, ']') }, 'matchBracket：方括号');
+T.eq(E.matchBracket(S4, at(S4, '(') + 1), { open: at(S4, '('), close: at(S4, ')') }, 'matchBracket：圆括号');
+
+/* ---- 复用词法器换来的那件事：字符串 / 模板串 / 注释里的括号不参与配对 ----
+   这几条是选「复用 Interp.tokenize 而不是裸扫字符」的全部理由。裸扫会让
+   log("(") 里那个左括号去跟真代码里的右括号配对，高亮当场指错地方。 */
+const S5 = 'log("(");';
+T.eq(E.matchBracket(S5, at(S5, '(') + 1), { open: at(S5, '('), close: S5.lastIndexOf(')') },
+     'matchBracket：字符串里的 "(" 不参与配对，真括号照常配上');
+const S6 = 'log("(") ;';
+T.ok(E.matchBracket(S6, S6.indexOf('"(') + 2) === null,
+     'matchBracket：光标贴着字符串内部的括号时不配对（它根本不是 punct token）');
+
+/* 注释里的 ")" 在源码里排在真括号**前面**，所以期望值必须用 lastIndexOf 取
+   真的那一个 —— 第一版这里写的是 at(S7, ')')（第一个），它取到的是注释里那个，
+   于是断言本身在要求一个错误答案。函数返回的 17 才是对的。 */
+const S7 = '// )\nconst a = (1);';
+T.eq(E.matchBracket(S7, at(S7, '(') + 1), { open: at(S7, '('), close: S7.lastIndexOf(')') },
+     'matchBracket：注释里的 ")" 不参与配对');
+
+/* **已知边界：`${}` 内部的括号不参与配对。** 不是 bug，是"复用词法器"这个
+   决定的直接后果 —— tokenize 把整条模板串切成**一个** tpl token
+   （实测 `const s = \`a${ (1) }b\`;` 只产出 tpl[10,22] 一个 token），
+   里面的括号压根不是 punct token，看不见。
+   要让它可见就得在这里重新对模板串内部做一遍词法分析，那正是本模块开头
+   写明不做的事（高亮与执行必须看同一份 token 流）。代价很小：模板串外面的
+   括号照常配对，只有 `${ }` 里面的不亮。下面这条断言把这个边界钉住，
+   免得它某天被"顺手修好"成一份与解释器分叉的第二套词法逻辑。 */
+const S8 = 'const s = `a${ (1) }b`;';
+T.eq(E.matchBracket(S8, at(S8, '(') + 1), null,
+     'matchBracket：模板串内部的括号不参与配对（整条模板串是一个 token，已知边界）');
+T.eq(E.matchBracket('f(`a${1}b`);', 1), { open: 1, close: 10 },
+     'matchBracket：模板串**外面**的括号照常配对，模板串整体当一个 token 跳过');
+
+// 配不上的：只有半边、或交叉
+T.eq(E.matchBracket('const a = (1;', 10), null, 'matchBracket：没有闭括号时返回 null');
+T.eq(E.matchBracket('a);', 1), null, 'matchBracket：没有开括号时返回 null');
+
+/* 交叉必须报 null，不能"就近凑一个"：`(]` 亮在一起会教出错误的直觉。
+   下标 0 的左括号在深度归零处遇到的是 `]`，不是 `)`。 */
+T.eq(E.matchBracket('(]', 1), null, 'matchBracket：种类不匹配（交叉）返回 null，不就近凑合');
+
+/* 词法器抛错（引号没闭合之类）时整体降级为 null —— 与 highlight() 的降级
+   同一策略：打字打到一半源码几乎总是暂时不合法的，这时候不配对好过配错。 */
+T.eq(E.matchBracket('const a = "unterminated (', 24), null, 'matchBracket：词法器抛错时降级为 null，不抛');
+let mbThrew = false;
+try { E.matchBracket('`unterminated ${ (', 17); } catch (e) { mbThrew = true; }
+T.ok(!mbThrew, 'matchBracket：非法源码上不抛异常');
+
+// 退化输入
+T.eq(E.matchBracket('', 0), null, 'matchBracket：空源码返回 null');
+T.eq(E.matchBracket('()', -5), null, 'matchBracket：负 caret 返回 null');
+T.eq(E.matchBracket('()', 999), null, 'matchBracket：caret 远超长度返回 null');
+T.eq(E.matchBracket('()', 1), { open: 0, close: 1 }, 'matchBracket：空括号对');
+
+/* open 恒小于 close，与光标贴的是哪一头无关 —— 调用方画两个框，不关心
+   是谁找到了谁。全语料扫一遍钉死这条。 */
+const orderBad = [];
+const CORPUS = ['f(g(h(1)));', 'const m = {a: [1, {b: (2)}]};', 'while ((a) && (b)) { c(); }'];
+for (const src of CORPUS) {
+  for (let k = 0; k <= src.length; k++) {
+    const m = E.matchBracket(src, k);
+    if (m && !(m.open < m.close)) orderBad.push([src, k, m]);
+  }
+}
+T.eq(orderBad, [], 'matchBracket：open 恒小于 close（全语料全下标）');
+
+/* 对称性：从开括号那一头查、和从它配对的闭括号那一头查，必须得到同一对。 */
+const asymmetric = [];
+for (const src of CORPUS) {
+  for (let k = 0; k <= src.length; k++) {
+    const m = E.matchBracket(src, k);
+    if (!m) continue;
+    const fromOpen = E.matchBracket(src, m.open + 1);
+    const fromClose = E.matchBracket(src, m.close + 1);
+    if (JSON.stringify(fromOpen) !== JSON.stringify(m) || JSON.stringify(fromClose) !== JSON.stringify(m)) {
+      asymmetric.push([src, k, m, fromOpen, fromClose]);
+    }
+  }
+}
+T.eq(asymmetric, [], 'matchBracket：从两头查同一对括号得到同一个结果（对称）');
+
+/* 配对结果指向的字符必须真的是括号 —— 这条挡的是「下标算偏了一位」，
+   而偏一位正是这类实现最典型的坏法（高亮框套在旁边那个字符上）。 */
+const PAIR = { '(': ')', '[': ']', '{': '}' };
+const badChars = [];
+for (const src of CORPUS) {
+  for (let k = 0; k <= src.length; k++) {
+    const m = E.matchBracket(src, k);
+    if (!m) continue;
+    if (PAIR[src[m.open]] !== src[m.close]) badChars.push([src, k, m, src[m.open], src[m.close]]);
+  }
+}
+T.eq(badChars, [], 'matchBracket：返回的两个下标真的指向同种的一对括号（挡"偏一位"）');
+
+/* PAD_X / LINE_H 是 CSS 与 JS 定位共用的两个常量，导出来是为了让"同一个数
+   写两遍"变成不可能。它们必须是正数 —— 0 会让覆盖层整体贴死在左上角。 */
+T.ok(E.PAD_X > 0, 'PAD_X 是正数（CSS padding 与覆盖层 left 共用的那一个）');
+T.ok(E.LINE_H > 0, 'LINE_H 是正数');
+
+/* DOM 层的导出在 node 下必须存在但**不执行**：整个文件是在没有 document 的
+   环境里被 require 进来的，mount 只要在模块顶层碰一下 document 就会在这里炸。 */
+T.eq(typeof E.mount, 'function', 'mount 被导出');
+T.eq(typeof E.matchBracket, 'function', 'matchBracket 被导出');
+T.ok(typeof document === 'undefined', '本套件确实跑在无 DOM 环境里（上面那条导出检查才有意义）');
+
+}
+
 T.report();

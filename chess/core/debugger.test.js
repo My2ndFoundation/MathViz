@@ -807,4 +807,187 @@ checkEmptyDerived('空源码派生的空轨迹', function () { return D.create(e
 checkEmptyDerived('纯空白源码派生的空轨迹', function () { return D.create(whitespaceTrace); });
 checkEmptyDerived('手搓的字面量空数组', function () { return D.create([]); });
 
+/* ==================== 3b 复审新增的三组断言 ====================
+   整块包在一个 block 里：这个文件上半部分已经用掉了 cur/trace/g 之类的短名，
+   块作用域让新断言不必去跟既有夹具抢名字，也不会反过来污染它们。 */
+{
+
+/* -------------------- ① locals 的 depth 参数 --------------------
+   点调用栈某一帧时，变量区要显示**那一帧**的变量。这个参数是那条交互唯一的
+   支点——错了的话面板会把 A 帧的代码摆在 B 帧的变量旁边，而这一阶段的整个
+   要点恰恰是「每次递归调用都有自己的 n」。 */
+
+const RECUR = [
+  'function fact(n) {',              // 1
+  '  if (n <= 1) { return 1; }',     // 2
+  '  const sub = fact(n - 1);',      // 3
+  '  return n * sub;',               // 4
+  '}',                               // 5
+  'const answer = fact(3);',         // 6
+  'return answer;',                  // 7
+].join('\n');
+const rt = I.run(RECUR, { host: {} }).trace;
+
+/* 找一个真正停在最深处（三层 = fact(1)）的下标，不靠猜某个具体的 i。 */
+let deepIdx = -1;
+for (let k = 0; k < rt.length; k++) {
+  const c = D.create(rt); D.goto(c, k);
+  if (D.callStack(c).length === 3) deepIdx = k;
+}
+T.ok(deepIdx >= 0, 'depth 夹具：递归确实到过三层深');
+
+const deep = D.create(rt);
+D.goto(deep, deepIdx);
+T.eq(D.callStack(deep).length, 3, 'depth 夹具：游标停在三层深处');
+
+// 向后兼容：省略 depth 必须与显式传当前最内层深度逐字节相同
+T.eq(D.locals(deep), D.locals(deep, 3), 'locals：省略 depth === 传当前最内层深度');
+T.eq(D.locals(deep, undefined), D.locals(deep), 'locals：显式 undefined === 省略');
+T.eq(D.locals(deep, null), D.locals(deep), 'locals：null === 省略');
+
+// 选中外层帧拿到的必须是那一帧的 n。fact(3) 三层的 n 分别是 3 / 2 / 1。
+const nAt = [0, 1, 2, 3].map(function (d) { return D.locals(deep, d).n; });
+T.eq(nAt[3], 1, 'locals(cur, 3)：最内层帧的 n 是 1');
+T.eq(nAt[2], 2, 'locals(cur, 2)：中间帧的 n 是 2');
+T.eq(nAt[1], 3, 'locals(cur, 1)：最外层调用帧的 n 是 3');
+T.eq([nAt[1], nAt[2], nAt[3]], [3, 2, 1],
+     'locals：三层递归的同名 n 互不相同，各归各帧（同名参数串味的探针）');
+
+// depth 0 = 全局帧：持有函数声明，不持有任何一帧的形参
+const glob = D.locals(deep, 0);
+T.ok('fact' in glob, 'locals(cur, 0)：全局帧持有函数声明 fact');
+T.ok(!('n' in glob), 'locals(cur, 0)：全局帧不持有任何一帧的形参 n');
+T.ok('answer' in glob === false, 'locals(cur, 0)：此刻 answer 还没被赋值，全局帧里没有它');
+
+/* 越界返回空对象，**不夹到边界上**。夹住会安静地显示另一帧的变量——面板
+   看着一切正常，值却属于别人，正是本项目最不能容忍的那种安静谎话。 */
+T.eq(Object.keys(D.locals(deep, 4)), [], 'locals：depth 大于栈高 → 空对象（不夹到最内层）');
+T.eq(Object.keys(D.locals(deep, 99)), [], 'locals：depth 远大于栈高 → 空对象');
+T.eq(Object.keys(D.locals(deep, -1)), [], 'locals：负 depth → 空对象');
+T.ok(!('n' in D.locals(deep, 4)), 'locals：越界返回的确实不是最内层那一帧');
+T.eq(Object.getPrototypeOf(D.locals(deep, 99)), null, 'locals：越界返回值同样是无原型对象');
+
+// 空轨迹 + depth 不抛（清空编辑器缓冲区是可达状态）
+const emptyCur = D.create([]);
+let ldThrew = false;
+try { D.locals(emptyCur, 2); } catch (e) { ldThrew = true; }
+T.ok(!ldThrew, 'locals：空轨迹 + depth 参数不抛');
+T.eq(Object.keys(D.locals(emptyCur, 2)), [], 'locals：空轨迹 + depth 返回空对象');
+
+/* 全下标扫一遍：depth 能当下标用的前提是「内部帧栈高 === callStack + 1」。
+   这条在每一个下标上都必须成立，否则 UI 的 selFrame 会整体错一格。 */
+const depthMismatch = [];
+for (let k = 0; k < rt.length; k++) {
+  const c = D.create(rt); D.goto(c, k);
+  const h = D.callStack(c).length;
+  if (JSON.stringify(D.locals(c, h)) !== JSON.stringify(D.locals(c))) depthMismatch.push(k);
+}
+T.eq(depthMismatch, [], 'locals：每个下标上 locals(cur, callStack.length) === locals(cur)');
+
+/* -------------------- ② 播放节流的算术 --------------------
+   「按时间推进、不按帧计数」是硬约束（开发者的外接屏是 30 Hz，按帧计数在
+   那台机器上会慢一半）。这几行以前只能靠在浏览器里手喂 dt 验，提成纯函数
+   之后在这里钉死。 */
+
+T.eq(D.playSteps(0, 1, 10, 1000).steps, 10, 'playSteps：1 秒 @10 步/秒 = 10 步');
+T.eq(D.playSteps(0, 1, 30, 1000).steps, 30, 'playSteps：1 秒 @30 步/秒 = 30 步');
+T.eq(D.playSteps(0, 0.5, 10, 1000).steps, 5, 'playSteps：半秒 @10 步/秒 = 5 步');
+/* 浮点回归：第一版用「反复减 1/sps」的循环实现，3 秒 @10 步/秒 只走 29 步
+   （连减 29 次 0.1 之后余 0.09999999999999973，第 30 次比不过 0.1）。
+   实测在浏览器里抓到的。改成 Math.floor(a * sps) 之后是 30。 */
+T.eq(D.playSteps(0, 3, 10, 1000).steps, 30, 'playSteps：3 秒 @10 步/秒 = 30 步（浮点累减的回归）');
+T.eq(D.playSteps(0, 7, 3, 1000).steps, 21, 'playSteps：7 秒 @3 步/秒 = 21 步');
+T.eq(D.playSteps(0, 0.7, 10, 1000).steps, 7, 'playSteps：0.7 秒 @10 步/秒 = 7 步（0.7 不是二进制精确值）');
+T.eq(D.playSteps(0, 2.9, 10, 1000).steps, 29, 'playSteps：2.9 秒 @10 步/秒 = 29 步');
+
+// 帧无关性：同样一秒切成 20 帧，总步数必须与一次喂完相同（余数留在 acc 里）
+let accum = 0, total = 0;
+for (let k = 0; k < 20; k++) {
+  const plan = D.playSteps(accum, 0.05, 10, 1000);
+  accum = plan.acc; total += plan.steps;
+}
+T.eq(total, 10, 'playSteps：20 帧 × 0.05s 与一次 1s 走的步数相同（帧无关）');
+
+let acc60 = 0, tot60 = 0;
+for (let k = 0; k < 60; k++) {
+  const plan = D.playSteps(acc60, 1 / 60, 7, 1000);
+  acc60 = plan.acc; tot60 += plan.steps;
+}
+T.eq(tot60, 7, 'playSteps：60 fps 跑满一秒 @7 步/秒 = 7 步（除不尽也不丢步）');
+
+// 30 Hz 与 60 Hz 跑同样的墙钟时间必须走同样多步 —— 那块外接屏的直接回归
+function runFor(seconds, fps, sps) {
+  let a = 0, n = 0;
+  for (let k = 0; k < seconds * fps; k++) {
+    const plan = D.playSteps(a, 1 / fps, sps, 1000);
+    a = plan.acc; n += plan.steps;
+  }
+  return n;
+}
+T.eq(runFor(2, 30, 12), runFor(2, 60, 12), 'playSteps：30 Hz 与 60 Hz 在同样墙钟时间里走同样多步');
+T.eq(runFor(2, 30, 12), 24, 'playSteps：2 秒 @12 步/秒 = 24 步，与刷新率无关');
+
+/* 刷新率 × 速度的交叉表。第一版在 60 fps @10 步/秒 上走 9 步、30 fps 上走
+   10 步——同一段墙钟时间在两块屏上走出不同步数，正是这个项目要防的那件事
+   （开发者的外接屏是 30 Hz）。原因是累加 60 个 1/60 得到 0.9999999999999999
+   而不是 1.0。浏览器里实测抓到的，PLAY_EPS 就是为它加的。 */
+const rateGrid = [];
+for (const fps of [24, 30, 50, 60, 120, 144]) {
+  for (const sps of [1, 7, 10, 12, 30, 60]) {
+    const got = runFor(1, fps, sps);
+    if (got !== sps) rateGrid.push({ fps: fps, sps: sps, got: got, want: sps });
+  }
+}
+T.eq(rateGrid, [], 'playSteps：任意刷新率 × 任意速度，跑满一秒恰好走 sps 步');
+
+/* 反向保证：容差不能让它凭空多走一步。差得比一个浮点末位多时必须还差着。 */
+T.eq(D.playSteps(0, 0.99, 10, 1000).steps, 9, 'playSteps：0.99 秒 @10 步/秒 是 9 步，容差不凭空多给一步');
+T.eq(D.playSteps(0, 0.0999, 10, 1000).steps, 0, 'playSteps：差一点点就是不够一步');
+T.ok(D.playSteps(0, 1, 10, 1000).acc >= 0, 'playSteps：acc 不会被减成负数');
+
+// cap 截断：多出来的时间留在 acc 里，不丢
+const capped = D.playSteps(0, 10, 100, 240);
+T.eq(capped.steps, 240, 'playSteps：单帧步数被 cap 截住');
+T.ok(capped.acc > 0, 'playSteps：被 cap 截掉的时间留在 acc 里');
+T.eq(Math.round(capped.acc * 1000), Math.round((10 - 240 / 100) * 1000),
+     'playSteps：留下的正是没走完的那部分时间');
+
+// 退化输入不能把累加器搅坏（引擎第一帧的 dt 可能是 0）
+T.eq(D.playSteps(0, 0, 10, 240), { steps: 0, acc: 0 }, 'playSteps：dt 为 0 时不前进也不污染 acc');
+/* 负 dt 当 0 处理 —— 判据是「与 dt=0 的结果完全相同」，**不是**「acc 原样不动」：
+   已经积攒的时间该照常花掉（acc=0.5 在 10 步/秒下本来就够走 5 步），负 dt 只是
+   不再往里加。第一版断言写成了 acc 保持 0.5，是断言错了，不是函数错了。 */
+T.eq(D.playSteps(0.5, -1, 10, 240), D.playSteps(0.5, 0, 10, 240), 'playSteps：负 dt 与 dt=0 结果一致');
+T.eq(D.playSteps(0.5, -1, 10, 240).steps, 5, 'playSteps：负 dt 时已积攒的时间照常花掉');
+T.ok(D.playSteps(0.5, -100, 10, 240).acc < 0.1, 'playSteps：负 dt 不会把 acc 减成负数');
+T.eq(D.playSteps(0, NaN, 10, 240), { steps: 0, acc: 0 }, 'playSteps：NaN dt 当 0（不让 acc 变成 NaN）');
+T.eq(D.playSteps(0, 1, 0, 240).steps, 1, 'playSteps：sps 为 0 兜成 1 步/秒，不除以零');
+
+/* -------------------- ③ fmtVal --------------------
+   第一条是一个真 bug 的回归：interp.js 的 snap() 在**记录 delta 之前**就把
+   函数值换成了字符串 'ƒ 名字'，于是「字符串 → JSON.stringify」这条分支会把它
+   渲染成 `"ƒ safe"`，看起来像一个内容碰巧是这几个字的字符串变量。 */
+T.eq(D.fmtVal('ƒ safe'), 'ƒ safe', 'fmtVal：snap() 的函数快照不再被套引号（真 bug 的回归）');
+T.eq(D.fmtVal('safe'), '"safe"', 'fmtVal：普通字符串照常加引号');
+T.eq(D.fmtVal('ƒsafe'), '"ƒsafe"', 'fmtVal：要「ƒ + 空格」才算函数快照，不是光看首字符');
+T.eq(D.fmtVal({ __fn: true, name: 'go' }), 'ƒ go', 'fmtVal：未经 snap 的解释器函数值（run().result 走这条）');
+T.eq(D.fmtVal({ __fn: true }), 'ƒ (anonymous)', 'fmtVal：匿名解释器函数');
+T.eq(D.fmtVal(null), 'null', 'fmtVal：null');
+T.eq(D.fmtVal(undefined), 'undefined', 'fmtVal：undefined');
+T.eq(D.fmtVal(0), '0', 'fmtVal：0 不被当成假值吞掉');
+T.eq(D.fmtVal(false), 'false', 'fmtVal：false 不被当成假值吞掉');
+T.eq(D.fmtVal(''), '""', 'fmtVal：空字符串显示成一对引号，不是一片空白');
+T.eq(D.fmtVal([1, 2, 3]), '[1, 2, 3]', 'fmtVal：数组');
+T.eq(D.fmtVal([]), '[]', 'fmtVal：空数组');
+T.eq(D.fmtVal({ a: 1, b: 'x' }), '{a: 1, b: "x"}', 'fmtVal：对象');
+/* 截断：BFS 的 dist 表就是 64 个元素，整条铺开会把面板撑成一堵墙。
+   截断处必须显式写出还剩几个，不做"看起来就这么多"的安静省略。 */
+const big = [];
+for (let k = 0; k < 20; k++) big.push(k);
+T.eq(D.fmtVal(big), '[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, … +8]',
+     'fmtVal：长数组截断并写出还剩几个');
+T.eq(D.fmtVal([[[1]]]), '[[[…]]]', 'fmtVal：嵌套超过两层折成省略号');
+
+}
+
 T.report();

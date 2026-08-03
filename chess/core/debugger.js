@@ -298,7 +298,23 @@
     }
   }
 
-  /* locals(cur) → { [name]: value }，当前帧的局部变量。规则见上面那段长注释。
+  /* locals(cur[, depth]) → { [name]: value }，某一帧的局部变量。规则见上面那段长注释。
+
+     **depth 省略（或 null/undefined）= 当前最内层帧**，与本函数原来的唯一行为
+     完全一致；给了 depth 就返回**那一帧**的变量。编号与 callStack 对齐：
+         depth 0            全局帧（callStack 里没有它，它没有入/出帧步）
+         depth k (k >= 1)   callStack(cur)[k - 1] 那一帧
+     这个参数是给 3b 的调试面板「点调用栈某一帧 → 变量区显示那一帧的变量」用的。
+     没有它，面板会把 A 帧的代码摆在 B 帧的变量旁边而不加任何说明 —— 对一个
+     正在学「每次递归调用都有自己的 n」的人来说，那是最坏的一种并排。
+
+     实现代价是 O(1)：下面那趟按帧归属的回放本来就把整个帧栈建了出来，
+     这里只是从 `stack[stack.length - 1]` 改成 `stack[d]`，一行下标之差，
+     没有任何算法改动。
+
+     **越界的 depth 返回空对象，不夹到边界上。** 夹住会安静地显示另一帧的变量
+     （面板看起来一切正常，值却属于别人）；返回空让「没有这一帧」当场看得见。
+     负数同理。
 
      **调用方注意：返回的是无原型对象（Object.create(null)），不是普通对象。**
      这不是随手写的，是必需的：学习者完全可以写 `let __proto__ = 1;`，普通对象
@@ -308,7 +324,7 @@
          Object.prototype.hasOwnProperty.call(locals(cur), x)   ✓
          x in locals(cur)                ✓（无原型，in 只会命中自有属性）
      Object.keys / for…in / 属性读 / JSON.stringify 一切照常。 */
-  function locals(cur) {
+  function locals(cur, depth) {
     const trace = cur.trace, i = cur.i;
     if (!trace[i]) return Object.create(null);
     const popOf = matchFrames(trace, i);
@@ -339,7 +355,14 @@
         applyTo(ownerFrame(stack, deltas[m]), [deltas[m]]);
       }
     }
-    return stack[stack.length - 1].vars;
+    /* 此刻 stack 正是 [全局帧, ...callStack(cur)]：push/pop 的收放边界
+       （k <= i 压、k < i 弹）与 callStack 逐字相同，所以
+       stack.length === callStack(cur).length + 1 在每个下标上都成立，
+       depth 参数因此可以直接当下标用。 */
+    if (depth === undefined || depth === null) return stack[stack.length - 1].vars;
+    const d = depth | 0;
+    if (d < 0 || d >= stack.length) return Object.create(null);
+    return stack[d].vars;
   }
 
   /* 截至当前步的日志。
@@ -462,6 +485,7 @@
     global:  { zh: '（全局）', en: '(global)' },
     noStack: { zh: '只有全局帧', en: 'global frame only' },
     noVars:  { zh: '本帧还没有变量', en: 'no variables in this frame yet' },
+    selected:{ zh: '（已选中，执行位置未动）', en: '(selected — execution has not moved)' },
     noOut:   { zh: '还没有输出', en: 'no output yet' },
     stepsPerSec: { zh: ' 步/秒', en: ' steps/s' },
     roStep:  { zh: '步', en: 'step' },
@@ -472,6 +496,41 @@
     keys:    { zh: 'F10 步过 · F11 步入 · Shift+F11 步出 · F9 断点 · F5 跑到断点',
                en: 'F10 step over · F11 step in · Shift+F11 step out · F9 breakpoint · F5 run to breakpoint' },
   };
+
+  /* 播放节流的算术：把「已积攒的时间 + 本帧时长」换算成「这一帧该走几步」
+     与「剩下多少时间留给下一帧」。纯函数、零 DOM，所以它在 node 里可测——
+     「按时间推进、不按帧计数」这条硬约束的正确性全落在这几行上，它不该只能
+     靠在浏览器里手喂 dt 来验。
+
+     cap 是单帧步数上限。它的意义在批量化之后变了：以前每步都要重算一遍五个
+     面板，cap 是在挡「一帧算 240 次」的墙钟灾难；现在一整批只重算一次，cap
+     只剩下「别让一帧在轨迹上跑太远」这一个作用。
+
+     dt <= 0（含 NaN）当 0 处理：引擎第一帧的 dt 可能是 0，不该让它把累加器
+     搅成 NaN 之后再也走不动。sps <= 0 同理兜到 1。 */
+  /* 实现用「乘以速率」一次算出步数，**不是**反复减去 1/sps 的循环。
+     两个理由，第二个是实测出来的：
+       1) O(1) 而不是 O(步数)；
+       2) 反复减会把浮点误差累起来。实测 3.0 秒 @10 步/秒 走出 **29** 步：
+          从 3.0 连减 29 次 0.1 之后余下 0.09999999999999973，比 0.1 差一点点，
+          第 30 次的 `a >= iv` 就不成立了。改成 Math.floor(3.0 * 10) = 30，
+          正是应有的答案（少的那一步虽然会留在 acc 里由下一帧补上，但
+          「一秒钟到底走几步」不该靠下一帧来找齐）。 */
+  /* EPS：把「差一个浮点末位就够一步」算作够了。
+     这不是随手加的容差，是实测的：60 帧各喂 1/60 秒，累加出来的 a 是
+     0.9999999999999999 而不是 1.0（二进制里 1/60 不精确），×10 得
+     9.999999999999998，floor 成 9 —— 满一秒却只走了 9 步。30 帧各喂 1/30
+     秒时又恰好凑够 10 步，于是同一段墙钟时间在 60 Hz 与 30 Hz 上走出不同
+     的步数，正好踩中本项目要防的那件事（开发者的外接屏是 30 Hz）。
+     1e-9 步是纳秒级的松弛，比任何真实计时分辨率都小若干个数量级，
+     不可能凭空多走一步；而它足够盖住 IEEE754 在这个量级上的末位误差。 */
+  const PLAY_EPS = 1e-9;
+  function playSteps(acc, dt, sps, cap) {
+    const rate = sps > 0 ? sps : 1;
+    const a = acc + (dt > 0 ? dt : 0);
+    const n = Math.max(0, Math.min(cap, Math.floor(a * rate + PLAY_EPS)));
+    return { steps: n, acc: Math.max(0, a - n / rate) };
+  }
 
   function ensureDbgStyles() {
     if (document.getElementById(DBG_CSS_ID)) return;
@@ -602,17 +661,26 @@
     el.appendChild(paneOut.pane);
     el.appendChild(readoutEl);
 
-    /* ---------------- 缓存：只在游标移动 / 换轨迹时重算 ---------------- */
+    /* ---------------- 缓存：只在游标移动 / 换轨迹 / 换选中帧时重算 ---------------- */
     let cache = null;
     let prevVals = Object.create(null);   // 上一次的变量渲染文本，用来判定"这一步变了谁"
-    let selFrame = -1;                    // 选中的调用栈帧（-1 = 未选）
+    /* 选中的调用栈帧。-1 = 跟随最内层（默认，也是每次单步之后自动回到的状态）；
+       >= 0 则是显式选中的一帧，0 是全局帧。选中一帧会同时改**两样**东西：
+       代码视图跳到那一帧的行，**变量区换成那一帧的变量**。只跳代码不换变量，
+       等于把 A 帧的代码摆在 B 帧的变量旁边而不加说明——对一个正在学
+       「每次递归调用都有自己的 n」的人，那是最坏的一种并排。 */
+    let selFrame = -1;
 
     function recompute() {
       const stack = callStack(cur);
-      const lv = locals(cur);
+      /* selFrame < 0 时传 undefined，让 locals 走它的默认分支（最内层帧）；
+         选中某一帧时传那一帧的 depth。越界（选中的帧因为游标移动已经不在栈上）
+         由 locals 自己返回空对象，这里不额外兜。 */
+      const lv = locals(cur, selFrame < 0 ? undefined : selFrame);
       const vals = Object.create(null);
       const names = Object.keys(lv).sort();
       for (let k = 0; k < names.length; k++) vals[names[k]] = fmtVal(lv[names[k]]);
+      const shown = selFrame < 0 ? stack.length : selFrame;
       cache = {
         i: cur.i, len: cur.trace.length,
         truncated: !!cur.trace.truncated,
@@ -620,6 +688,12 @@
         depth: stack.length,
         visited: visitedLines(cur),
         stack: stack,
+        /* varsFrame：变量区此刻显示的是**哪一帧**。面板标题写出来，
+           不让使用者自己猜（规格 §2.7 的变量区只说"当前作用域"，而一旦
+           允许点栈帧，"当前"就有两个可能的意思了）。 */
+        varsFrame: shown,
+        varsFrameName: shown === 0 ? null : ((stack[shown - 1] && stack[shown - 1].name) || '(anonymous)'),
+        selected: selFrame >= 0,
         names: names, vals: vals,
         output: output(cur),
         board: boardState(cur),
@@ -688,6 +762,11 @@
       if (!cache.names.length) frag.appendChild(emptyRow(DBG_UI.noVars));
       paneVars.list.textContent = '';
       paneVars.list.appendChild(frag);
+      /* 标题写出这一栏显示的是哪一帧的变量。选中外层帧时额外加一个记号，
+         省得看着一屏不熟悉的值去猜「程序是不是跳走了」——执行位置并没有动。 */
+      paneVars.head.textContent = T(DBG_UI.vars) + ' · ' +
+        (cache.varsFrameName ? cache.varsFrameName + '()' : T(DBG_UI.global)) +
+        (cache.selected ? '  ' + T(DBG_UI.selected) : '');
       prevVals = cache.vals;
     }
 
@@ -725,74 +804,98 @@
       readoutEl.innerHTML = html;
     }
 
-    function paintEditor() {
+    /* 一次性把三样调试状态推给编辑器。**必须走 setDebugState 这一个调用**，
+       不能拆成 setVisited + setExecLine + setFrameLine——那是三次独立的
+       refreshMarkers()，每次都要重建整块条纹层（有语法错时还各自重算一遍
+       lineStarts）。播放时这条路径每帧都走，三倍开销白付。 */
+    function paintEditor(frameLine) {
       if (!editor) return;
-      editor.setVisited(cache.visited);
-      editor.setExecLine(cache.line);
-      editor.setFrameLine(null);
-      editor.scrollToLine(cache.line);
+      editor.setDebugState({
+        visited: cache.visited,
+        execLine: cache.line,
+        frameLine: frameLine == null ? null : frameLine,
+        scrollTo: frameLine == null ? cache.line : frameLine,
+      });
     }
 
+    /* 游标移动之后的整套重算 + 重绘。**选中的帧在这里被清掉**：单步之后
+       自动回到最内层帧，与主流调试器一致（她按了一下单步，看的就该是
+       程序现在所在的那一帧）。 */
     function refresh() {
       selFrame = -1;
+      repaint(null);
+    }
+
+    /* 重算 + 重绘，但不动 selFrame。选中某一帧走这条路（游标没动，只是换了
+       在看哪一帧），单步走上面的 refresh()。 */
+    function repaint(frameLine) {
       recompute();
       paintStack();
       paintVars();
       paintOut();
       paintReadout();
-      paintEditor();
+      paintEditor(frameLine);
       if (typeof opts.onCursorMove === 'function') opts.onCursorMove(cache);
     }
 
-    /* move(fn)：所有游标移动的唯一出口。fn 返回「下标是否真的变了」——
-       没变就不重绘（六个派生函数都是 O(i) 的，白算一遍没有任何意义）。 */
+    /* move(fn)：单次游标移动的唯一出口。fn 返回「下标是否真的变了」——
+       没变就不重绘（六个派生函数都是 O(i) 的，白算一遍没有任何意义）。
+       播放的批量推进**不走这里**，见下面 tick() 的注释。 */
     function move(fn) {
       const changed = fn(cur);
       if (changed) refresh();
       return changed;
     }
 
+    /* 点调用栈某一帧 = **选中**它：代码视图跳到那一帧的行，变量区换成那一帧的
+       变量，标题写明在看哪一帧。**执行位置不动** —— 外层帧本来就还没执行到
+       别处去，把游标挪过去等于凭空改写"程序现在在哪儿"。
+       只跳代码、变量区还留在最内层帧，是明确被否掉的做法：那会把 A 帧的代码
+       摆在 B 帧的变量旁边而不加任何说明，对一个正在学「每次递归调用都有自己的
+       n」的人来说，恰恰是这一阶段要防的那种并排。 */
     paneStack.list.addEventListener('click', function (e) {
       const row = e.target && e.target.closest ? e.target.closest('.dbg-frame') : null;
       if (!row) return;
       selFrame = +row.dataset.fi;
-      const kids = paneStack.list.children;
-      for (let k = 0; k < kids.length; k++) kids[k].classList.toggle('sel', +kids[k].dataset.fi === selFrame);
-      /* 点栈帧 = 「看那一帧停在哪一行」，与主流调试器一致：它移动的是代码
-         视图，不是执行位置。轨迹上的游标不动——动了就等于凭空改写了"程序
-         现在在哪儿"，而调用栈里的外层帧本来就还没执行到别处去。 */
-      if (!editor) return;
       const line = row.dataset.line ? +row.dataset.line : cache.line;
-      editor.setFrameLine(selFrame === 0 ? null : line);
-      editor.scrollToLine(line);
+      repaint(selFrame === 0 ? null : line);
     });
 
-    /* ---------------- 播放：按时间推进，不按帧计数 ---------------- */
+    /* ---------------- 播放：按时间推进，不按帧计数 ----------------
+
+       **一整批只重算一次。** 这里曾经是每走一步就 move(stepIn) 一次，而 move
+       会 refresh() → recompute()（六趟 O(i) 回放）+ 全量重绘。于是播放时的
+       每帧代价 = 本帧步数 × 一次全量重算：滑杆拉到 120 步/秒、60 fps 时约是
+       每帧两次全量重算，在工具 ④⑤ 那种 200k 步轨迹上（实测一次五区重算
+       14.72 ms）就是每帧 ~29 ms，而绘制预算只有 4 ms；补帧那一下更可以是
+       240 × 14.72 ms ≈ 3.5 秒的界面冻结。缓存挡得住"空闲帧不重算"，挡不住
+       这个乘数——播放循环本身就是热点。
+       现在：先把游标连着推 N 次（每次都是纯下标移动，O(1)），推完之后
+       refresh() 一次。代价从 O(N · i) 降到 O(i)。 */
+    const BURST_CAP = 240;
     let playing = false, acc = 0, sps = 10;
     function setPlaying(v) {
       playing = !!v && cur.trace.length > 0;
       acc = 0;
-      relabel();
+      syncPlayButton();
     }
     function tick(dt) {
       if (!playing) return;
-      if (!(dt > 0)) return;
-      acc += dt;
-      const iv = 1 / sps;
-      /* 单帧最多推进 240 步：dt 已被引擎 clamp 到 0.05 s，但速度上限 120 步/秒
-         配上后台标签页回前台的那一帧仍可能积出一大把——给个明确的上限，
-         省得某一帧突然跑掉半条轨迹。 */
-      let n = 0;
-      while (acc >= iv && n < 240) {
-        acc -= iv;
-        n++;
-        if (!move(stepIn)) { setPlaying(false); break; }   // 到末尾自动停
+      const plan = playSteps(acc, dt, sps, BURST_CAP);
+      acc = plan.acc;
+      if (!plan.steps) return;
+      let moved = false, atEnd = false;
+      for (let k = 0; k < plan.steps; k++) {
+        if (stepIn(cur)) moved = true;         // 纯下标移动，不重绘
+        else { atEnd = true; break; }
       }
+      if (moved) refresh();                    // ← 一整批就这一次
+      if (atEnd) setPlaying(false);            // 到末尾自动停（refresh 之后，读的是新缓存）
     }
     speedIn.addEventListener('input', function () {
       sps = +speedIn.value || 1;
       acc = 0;
-      relabel();
+      syncSpeedLabel();
     });
 
     /* ---------------- 快捷键（规格 §5.4） ----------------
@@ -826,9 +929,20 @@
       paintReadout();
     }
 
-    function relabel() {
+    /* 播放键与速度标签各自单独同步。setPlaying / 速度滑杆以前调的是整个
+       relabel()，而 relabel() 末尾会重绘栈/变量/读数——那不但白画，还会把
+       变量区刚刚点亮的「本步变了谁」的闪烁一次性抹掉（重绘时 prevVals 已经
+       等于 cache.vals，没有一个名字算"变了"）。 */
+    function syncPlayButton() {
       bPlay.textContent = T(playing ? DBG_UI.pause : DBG_UI.play);
       bPlay.classList.toggle('on', playing);
+    }
+    function syncSpeedLabel() {
+      speedVal.textContent = sps + T(DBG_UI.stepsPerSec);
+    }
+
+    function relabel() {
+      syncPlayButton();
       bBack.textContent = T(DBG_UI.back);
       bStep.textContent = T(DBG_UI.step);
       bIn.textContent = T(DBG_UI.stepIn);
@@ -837,9 +951,9 @@
       bRun.textContent = T(DBG_UI.runTo);
       [bIn, bOver, bOut, bRun].forEach(function (b) { b.title = b.dataset.hint; });
       speedLab.textContent = T(DBG_UI.speed);
-      speedVal.textContent = sps + T(DBG_UI.stepsPerSec);
+      syncSpeedLabel();
       paneStack.head.textContent = T(DBG_UI.stack);
-      paneVars.head.textContent = T(DBG_UI.vars);
+      paneVars.head.textContent = T(DBG_UI.vars);   // paintVars 会补上"· 哪一帧"
       paneOut.head.textContent = T(DBG_UI.out);
       if (cache) { paintStack(); paintVars(); paintReadout(); }
     }
@@ -860,12 +974,22 @@
         cur = next;
         playing = false;
         acc = 0;
+        /* 旧轨迹的缓存必须当场作废，且**在它被作废之前不能画任何东西**。
+           这里原来先调 relabel()，而 relabel() 末尾有
+           `if (cache) { paintStack(); paintVars(); paintReadout(); }` ——
+           那一下会拿**上一条轨迹**的 cache 去配**新轨迹**的 cur.breakpoints
+           画一遍读数（两条轨迹混在同一行里），更要命的是 paintVars() 末尾的
+           `prevVals = cache.vals` 会把旧程序的值存成"上一次"，于是新轨迹第 0 步
+           的第一次 refresh 会拿新值去跟旧程序的值比，凭空闪一片琥珀色。
+           改成：先作废 cache，refresh() 之后再同步按钮文案（只同步按钮，
+           不重绘面板——见 syncPlayButton 的注释）。 */
+        cache = null;
         prevVals = Object.create(null);
         outLen = 0;
         paneOut.list.textContent = '';
         if (editor) editor.setBreakpoints(function (ln) { return hasBreak(cur, ln); });
-        relabel();
         refresh();
+        syncPlayButton();
       },
       state: function () { return cache; },
       refresh: refresh,
@@ -889,6 +1013,6 @@
     toggleBreak: toggleBreak, hasBreak: hasBreak,
     currentLine: currentLine, visitedLines: visitedLines, callStack: callStack,
     locals: locals, output: output, boardState: boardState,
-    mount: mount, fmtVal: fmtVal,
+    mount: mount, fmtVal: fmtVal, playSteps: playSteps,
   };
 });

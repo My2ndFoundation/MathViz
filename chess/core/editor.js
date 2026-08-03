@@ -101,6 +101,76 @@
     }
   }
 
+  /* ---------------- 括号配对（规格 §2.8「括号配对高亮」） ----------------
+     纯函数、零 DOM，node 可测。
+
+     **同样复用 Interp.tokenize，不自己扫字符。** 这不是为了省事，是为了正确：
+     裸扫字符会把字符串、模板串、注释里的括号当成真括号——`log("(")` 里的那个
+     左括号会去跟真代码里的右括号配对，高亮当场指错地方。词法器已经把它们
+     切成了 str/tpl/comment token，只看 punct token 就天然免疫。这与高亮层
+     复用同一个词法器是同一条理由（见文件头注释）。
+
+     光标定位约定与主流编辑器一致：**先看光标左邻的那个字符**（刚打完一个
+     右括号时，人期待它立刻和它的左括号一起亮），左邻不是括号再看右邻。
+
+     tokenize 抛错（引号没闭合之类）时返回 null，与 highlight() 的降级同一
+     策略：打字打到一半源码几乎总是暂时不合法的，这时候不配对好过配错。 */
+  const OPENERS = { '(': ')', '[': ']', '{': '}' };
+  const CLOSERS = { ')': '(', ']': '[', '}': '{' };
+
+  function bracketList(src) {
+    let toks;
+    try { toks = Interp.tokenize(src); } catch (e) { return null; }
+    const out = [];
+    for (let k = 0; k < toks.length; k++) {
+      const tk = toks[k];
+      if (tk.type !== 'punct') continue;
+      const ch = src.slice(tk.start, tk.end);
+      if (OPENERS[ch] || CLOSERS[ch]) out.push({ ch: ch, at: tk.start });
+    }
+    return out;
+  }
+
+  /* matchBracket(src, caret) → null | { open, close }，两个都是 src 里的字符下标。
+     open 恒小于 close，与光标贴的是哪一头无关——调用方画两个框，不关心是谁
+     找到了谁。 */
+  function matchBracket(src, caret) {
+    const list = bracketList(src);
+    if (!list) return null;
+    let idx = -1;
+    for (let k = 0; k < list.length; k++) if (list[k].at === caret - 1) { idx = k; break; }
+    if (idx < 0) for (let k = 0; k < list.length; k++) if (list[k].at === caret) { idx = k; break; }
+    if (idx < 0) return null;
+
+    const here = list[idx];
+    if (OPENERS[here.ch]) {
+      let depth = 0;
+      for (let k = idx; k < list.length; k++) {
+        if (OPENERS[list[k].ch]) depth++;
+        else {
+          depth--;
+          if (depth === 0) {
+            /* 深度归零时遇到的必须是**同种**的右括号；`(]` 这种交叉是配对
+               失败，不是配上了——报 null 让高亮不亮，比亮在错的字符上诚实。 */
+            return list[k].ch === OPENERS[here.ch] ? { open: here.at, close: list[k].at } : null;
+          }
+        }
+      }
+      return null;
+    }
+    let depth = 0;
+    for (let k = idx; k >= 0; k--) {
+      if (CLOSERS[list[k].ch]) depth++;
+      else {
+        depth--;
+        if (depth === 0) {
+          return list[k].ch === CLOSERS[here.ch] ? { open: list[k].at, close: here.at } : null;
+        }
+      }
+    }
+    return null;
+  }
+
   /* ==================== DOM 层：透明 textarea 叠加编辑器（规格 §2.8） ====================
 
      以下所有代码**只在 mount() 被调用之后**才碰 document / window。模块顶层与
@@ -124,6 +194,14 @@
   /* 行高：与下面 CSS 里的 line-height 是同一个数。行号槽、行条纹、波浪线的
      定位全靠它把行号换算成像素——改 CSS 就必须同时改这里。 */
   const LINE_H = 18;
+  /* 横向起点。**一个常量喂三处**：textarea 的 padding-left、高亮层的
+     padding-left、以及 JS 里波浪线/括号框的 left 计算。
+     字体度量已经靠"同一条 CSS 规则命中两层"做到了结构上不可能漂移，横向
+     起点原来却是两处各写一遍的 `8px` 字面量——那是同一种失败（光标压在错的
+     字形上），只是换了个轴。而且第三处（覆盖层的 left）当时压根没算这 8px，
+     波浪线一直整体左移了一个 padding 的宽度。三处现在都从这里取。 */
+  const PAD_X = 8;
+  const PAD_L = '0 0 0 ' + PAD_X + 'px';
   /* 波浪线用内联 SVG data URI，不引外部图片（零依赖硬约束）。 */
   const SQUIGGLE = "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='3'>" +
                    "<path d='M0 2.4 L1.5 0.6 L3 2.4 L4.5 0.6 L6 2.4' fill='none' stroke='%23f87171' stroke-width='1'/></svg>\")";
@@ -159,12 +237,15 @@
     '.ed-stripe.cur{background:rgba(45,212,234,.16);box-shadow:inset 2px 0 0 #2dd4ea}',
     '.ed-squiggle{position:absolute;height:18px;background-repeat:repeat-x;background-position:left bottom;',
     'background-size:6px 3px;background-image:' + SQUIGGLE + '}',
-    '.ed-hl{position:absolute;inset:0;margin:0;padding:0 0 0 8px;box-sizing:border-box;',
+    /* 括号配对高亮：两个等宽的框，一个套开括号、一个套闭括号 */
+    '.ed-bracket{position:absolute;height:18px;box-sizing:border-box;',
+    'border:1px solid rgba(45,212,234,.7);border-radius:2px;background:rgba(45,212,234,.12)}',
+    '.ed-hl{position:absolute;inset:0;margin:0;padding:' + PAD_L + ';box-sizing:border-box;',
     'overflow:hidden;pointer-events:none;z-index:1;color:#dbe6f5}',
     '.ed-hl code{display:block}',
     '.ed-measure{position:absolute;visibility:hidden;left:-9999px;top:0}',
     '.ed-ta{position:absolute;inset:0;z-index:2;box-sizing:border-box;width:100%;height:100%;',
-    'margin:0;padding:0 0 0 8px;border:0;outline:none;resize:none;display:block;',
+    'margin:0;padding:' + PAD_L + ';border:0;outline:none;resize:none;display:block;',
     'background:transparent;color:transparent;caret-color:#7dd3fc;overflow:auto}',
     '.ed-ta::selection{background:rgba(45,212,234,.30)}',
     '.ed-ta::-webkit-scrollbar{width:8px;height:8px}',
@@ -243,9 +324,26 @@
     let err = null;
     let lineCount = 0;
     let charW = 0;
+    let bracket = null;         // matchBracket() 的最近一次结果
+
+    /* 行起点缓存：refreshMarkers 与 caretLine 都要 lineStarts(ta.value)，而
+       refreshMarkers 在播放时每帧都跑。源码在两次调用之间几乎从不变，缓存
+       一份、按内容比对失效即可（字符串相等是一次 memcmp，比重建一个几十项
+       的数组 + 分配便宜得多）。 */
+    let startsText = null, startsArr = null;
+    function currentStarts() {
+      if (startsText !== ta.value) { startsText = ta.value; startsArr = lineStarts(startsText); }
+      return startsArr;
+    }
 
     /* 字符宽度：拿一个与高亮层度量完全相同的隐藏元素实测，而不是靠
-       canvas.measureText 另建一套字体串——那样又多出一处「同一个度量写两遍」。 */
+       canvas.measureText 另建一套字体串——那样又多出一处「同一个度量写两遍」。
+
+       **量到 0 时绝不缓存。** 面板此刻可能整个 display:none（验收页按 `\`
+       折叠时就是），getBoundingClientRect 返回 0。原来的 `w || 7` 会把
+       7px 这个假宽度钉死一整个会话，此后每一条波浪线、每一个括号框都错位，
+       而且再也没有机会自愈。现在量不到就返回 0，调用方跳过这一次绘制，
+       等面板可见时的下一次刷新自然量到真值。 */
     function measureChar() {
       const probe = document.createElement('span');
       probe.className = 'ed-measure';
@@ -253,8 +351,27 @@
       body.appendChild(probe);
       const w = probe.getBoundingClientRect().width / 40;
       body.removeChild(probe);
-      return w || 7;
+      return w > 0 ? w : 0;
     }
+    function ensureCharW() {
+      if (charW > 0) return charW;
+      const w = measureChar();
+      if (w > 0) charW = w;
+      return w;
+    }
+
+    /* 字符下标 → 覆盖层里的像素位置。PAD_X 必须加上：覆盖层（.ed-lines）是
+       贴着 .ed-body 满铺的，而文字从 padding-left 之后才开始。 */
+    function posOf(index) {
+      const starts = currentStarts();
+      let lo = 0, hi = starts.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (starts[mid] <= index) lo = mid; else hi = mid - 1;
+      }
+      return { line: lo + 1, col: index - starts[lo] + 1 };
+    }
+    function leftPx(col) { return PAD_X + (col - 1) * charW; }
 
     function renderHighlight() {
       const src = ta.value;
@@ -328,18 +445,32 @@
         st.style.top = ((execLine - 1) * LINE_H) + 'px';
         frag.appendChild(st);
       }
-      if (err) {
-        if (!charW) charW = measureChar();
-        const starts = lineStarts(ta.value);
-        const from = err.index;
-        const lineEnd = starts[err.line] != null ? starts[err.line] - 1 : ta.value.length;
-        const width = Math.max(1, lineEnd - from) * charW;
-        const sq = document.createElement('div');
-        sq.className = 'ed-squiggle';
-        sq.style.top = ((err.line - 1) * LINE_H) + 'px';
-        sq.style.left = ((err.col - 1) * charW) + 'px';
-        sq.style.width = width + 'px';
-        frag.appendChild(sq);
+      /* 波浪线与括号框都要按字符宽度定位。量不到宽度（面板此刻不可见）时
+         **一个都不画**——画出来必然错位，等下一次可见时的刷新再补。 */
+      if ((err || bracket) && ensureCharW() > 0) {
+        if (err) {
+          const starts = currentStarts();
+          const from = err.index;
+          const lineEnd = starts[err.line] != null ? starts[err.line] - 1 : ta.value.length;
+          const width = Math.max(1, lineEnd - from) * charW;
+          const sq = document.createElement('div');
+          sq.className = 'ed-squiggle';
+          sq.style.top = ((err.line - 1) * LINE_H) + 'px';
+          sq.style.left = leftPx(err.col) + 'px';
+          sq.style.width = width + 'px';
+          frag.appendChild(sq);
+        }
+        if (bracket) {
+          [bracket.open, bracket.close].forEach(function (ix) {
+            const p = posOf(ix);
+            const b = document.createElement('div');
+            b.className = 'ed-bracket';
+            b.style.top = ((p.line - 1) * LINE_H) + 'px';
+            b.style.left = leftPx(p.col) + 'px';
+            b.style.width = charW + 'px';
+            frag.appendChild(b);
+          });
+        }
       }
       linesInner.textContent = '';
       linesInner.appendChild(frag);
@@ -363,11 +494,33 @@
       if (typeof opts.onChange === 'function') opts.onChange(ta.value, err);
     }
 
+    /* 光标动了就重算括号配对。返回「结果变没变」，让调用方只在真的变了时
+       才重建覆盖层——方向键在一行里连按十下，配对结果一次没变，不该重画
+       十次。 */
+    function syncBracket() {
+      const next = (ta.selectionStart === ta.selectionEnd)
+        ? matchBracket(ta.value, ta.selectionStart)
+        : null;                        // 有选区时不高亮配对，与主流编辑器一致
+      const same = (!next && !bracket) ||
+                   (!!next && !!bracket && next.open === bracket.open && next.close === bracket.close);
+      bracket = next;
+      return !same;
+    }
+    function onCaretMove() {
+      if (syncBracket()) refreshMarkers();
+    }
+
     let timer = null;
     const delay = opts.debounce == null ? 220 : opts.debounce;
     function onInput() {
       renderHighlight();
       renderGutter();
+      syncBracket();
+      /* 改过内容之后必须立刻重刷标记层。原来这里只调 renderGutter()，
+         而行号槽的 bp/cur/err 类与条纹层都归 refreshMarkers() 管——于是
+         打一个字符之后，断点圆点、当前行高亮、已执行行痕迹会整整消失
+         一个防抖窗口（220 ms），等 emit() 跑完才回来。 */
+      refreshMarkers();
       syncScroll();
       if (timer) clearTimeout(timer);
       timer = setTimeout(function () { timer = null; emit(); }, delay);
@@ -375,6 +528,10 @@
 
     ta.addEventListener('input', onInput);
     ta.addEventListener('scroll', syncScroll);
+    ta.addEventListener('keyup', onCaretMove);
+    ta.addEventListener('click', onCaretMove);
+    ta.addEventListener('focus', onCaretMove);
+    ta.addEventListener('blur', function () { if (bracket) { bracket = null; refreshMarkers(); } });
 
     /* Tab 缩进（规格 §2.8）。优先走 execCommand('insertText')——它是唯一能
        把这次改动并进**浏览器原生撤销栈**的写法；手动改 value 会把 Ctrl+Z
@@ -399,15 +556,11 @@
       gutterClick(+row.dataset.line);
     });
 
-    function caretLine() {
-      const starts = lineStarts(ta.value);
-      const pos = ta.selectionStart;
-      let lo = 0, hi = starts.length - 1;
-      while (lo < hi) {
-        const mid = (lo + hi + 1) >> 1;
-        if (starts[mid] <= pos) lo = mid; else hi = mid - 1;
-      }
-      return lo + 1;
+    function caretLine() { return posOf(ta.selectionStart).line; }
+
+    function setVisitedList(list) {
+      visited = Object.create(null);
+      for (let k = 0; k < (list || []).length; k++) visited[list[k]] = true;
     }
 
     function scrollToLine(line) {
@@ -443,13 +596,25 @@
       setExecLine: function (line) { execLine = line == null ? null : line; refreshMarkers(); },
       setFrameLine: function (line) { frameLine = line == null ? null : line; refreshMarkers(); },
       setVisited: function (list) {
-        visited = Object.create(null);
-        for (let k = 0; k < (list || []).length; k++) visited[list[k]] = true;
+        setVisitedList(list);
         refreshMarkers();
+      },
+      /* 三样调试状态一次性推进来，**只重建一次标记层**。调试器每走一步都要
+         更新这三样，拆成三个 setter 就是三次 refreshMarkers()（每次都重建
+         整块条纹层、有语法错时还各自重算一遍 lineStarts）。播放时这条路径
+         每帧都走，三倍开销白付。个别 setter 保留，给只改一样的调用方。 */
+      setDebugState: function (o) {
+        o = o || {};
+        if ('visited' in o) setVisitedList(o.visited);
+        if ('execLine' in o) execLine = o.execLine == null ? null : o.execLine;
+        if ('frameLine' in o) frameLine = o.frameLine == null ? null : o.frameLine;
+        refreshMarkers();
+        if (o.scrollTo != null) scrollToLine(o.scrollTo);
       },
       setBreakpoints: function (pred) { hasBreak = pred || function () { return false; }; refreshMarkers(); },
       onGutterClick: function (fn) { gutterClick = fn; },
       getError: function () { return err; },
+      getBracket: function () { return bracket; },
       refresh: function () { renderHighlight(); renderGutter(); refreshMarkers(); syncScroll(); },
       destroy: function () {
         if (timer) clearTimeout(timer);
@@ -459,5 +624,6 @@
     };
   }
 
-  return { highlight: highlight, check: check, lineStarts: lineStarts, mount: mount, LINE_H: LINE_H };
+  return { highlight: highlight, check: check, lineStarts: lineStarts,
+           matchBracket: matchBracket, mount: mount, LINE_H: LINE_H, PAD_X: PAD_X };
 });
