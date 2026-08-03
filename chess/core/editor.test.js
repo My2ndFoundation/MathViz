@@ -339,9 +339,13 @@ T.eq(E.matchBracket(S1, S1.length), null, 'matchBracket：末尾（分号之后�
 const S2 = 'f()(1);';
 const openOfF = at(S2, '('), closeOfF = at(S2, ')');
 const openOf2 = at(S2, '(', 2), closeOf2 = at(S2, ')', 2);
-T.eq(E.matchBracket(S2, closeOfF + 1), { open: openOfF, close: closeOfF },
+/* 先取一次、再断言两条：第二条原来又调了一遍 matchBracket 并直接取 `.open`，
+   一旦回归成返回 null 就是抛 TypeError（整个文件剩下的三千多条断言当场夭折），
+   而不是干净地报一条失败。 */
+const mb2 = E.matchBracket(S2, closeOfF + 1);
+T.eq(mb2, { open: openOfF, close: closeOfF },
      'matchBracket：两边都是括号时取左邻那一对（左邻优先）');
-T.ok(E.matchBracket(S2, closeOfF + 1).open !== openOf2,
+T.ok(!!mb2 && mb2.open !== openOf2,
      'matchBracket：左邻优先时绝不返回右邻那一对（' + openOf2 + '/' + closeOf2 + '）');
 
 // 嵌套：外层与内层各配各的

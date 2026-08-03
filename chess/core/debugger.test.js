@@ -1015,4 +1015,211 @@ T.eq(D.fmtVal([[[1]]]), '[[[…]]]', 'fmtVal：嵌套超过两层折成省略号
 
 }
 
+/* ==================== Task 6：琥珀色标记的归属（换帧那一半） ====================
+
+   上一轮补的守卫只挡住了「不是一步」的重绘；`isStep` 这条路仍然拿**上一步
+   那一帧**的值当基线，于是每一次换帧都整帧闪。步入时那一闪是真的（形参确实
+   是这一步才诞生的绑定），步出时那一闪是假的（调用方的变量从被挂起到现在
+   一个字节都没动）—— 而步出正是学习者看递归收栈时盯着的那一下。 */
+{
+
+/* fact(n, acc)：尾递归的阶乘，跨帧同名（每一层都有自己的 n 和 acc），
+   步入步出各四次。选它是因为它就是这一阶段要教的那一课的最小形状。 */
+const FSRC = 'function fact(n, acc) { if (n <= 1) { return acc; } return fact(n - 1, acc * n); }\nreturn fact(4, 1);';
+const ftrace = I.run(FSRC, { host: {} }).trace;
+const fcur = D.create(ftrace);
+
+/* frameIds 与 callStack 必须永远等长、逐帧对应。两个函数的压/弹边界是抄的，
+   一旦有人只改一处，这条会当场炸——琥珀色的整套归属都建在这个对应上。 */
+let idsAligned = [];
+for (let k = 0; k < ftrace.length; k++) {
+  fcur.i = k;
+  const st = D.callStack(fcur), ids = D.frameIds(fcur);
+  if (ids.length !== st.length) idsAligned.push({ i: k, stack: st.length, ids: ids.length });
+  for (let m = 0; m < ids.length; m++) {
+    /* 入帧步下标指向的那一步必须真的是这一帧的 push，且行号对得上。 */
+    if (!ftrace[ids[m]] || ftrace[ids[m]].frameOp !== 'push' || ftrace[ids[m]].line !== st[m].line) {
+      idsAligned.push({ i: k, m: m, idx: ids[m] });
+    }
+  }
+}
+T.eq(idsAligned, [], 'frameIds：全下标与 callStack 等长且逐帧指向真正的 push 步');
+fcur.i = 0;
+T.eq(D.frameIds(fcur), [], 'frameIds：全局帧不占位（与 callStack 一致）');
+/* 单调：入帧步下标只增不减，这正是它能当身份证而深度不能的理由。 */
+let idsMono = true;
+for (let k = 0; k < ftrace.length; k++) {
+  fcur.i = k;
+  const ids = D.frameIds(fcur);
+  for (let m = 1; m < ids.length; m++) if (ids[m] <= ids[m - 1]) idsMono = false;
+}
+T.ok(idsMono, 'frameIds：由外到内严格递增');
+
+/* ---- 把 DOM 层的那一步比对逐步重放一遍（flashMarks 是纯函数，可以） ---- */
+function replayFlash(cur, trace) {
+  const rows = [];
+  let base = null;
+  for (let k = 0; k < trace.length; k++) {
+    cur.i = k;
+    const stack = D.callStack(cur), ids = D.frameIds(cur);
+    const lv = D.locals(cur);
+    const names = Object.keys(lv).sort();
+    const vals = Object.create(null);
+    for (let m = 0; m < names.length; m++) vals[names[m]] = D.fmtVal(lv[names[m]]);
+    const shown = stack.length;
+    const cache = {
+      i: k, names: names, vals: vals,
+      varsFrameId: shown === 0 ? -1 : (ids[shown - 1] != null ? ids[shown - 1] : -2),
+    };
+    const marks = D.flashMarks(base, cache);
+    rows.push({ i: k, depth: trace[k].depth, frameId: cache.varsFrameId,
+                names: names, flash: Object.keys(marks).sort(), vals: vals });
+    base = { frameId: cache.varsFrameId, i: k, vals: vals };
+  }
+  return rows;
+}
+const frows = replayFlash(fcur, ftrace);
+
+/* 步出（深度变小）的那些步：**一个琥珀色都不许有**。这是本条修复的靶心。
+   修复前实测：fact(4) 的四次步出每一次都把调用方的 acc 与 n 一起点亮。 */
+const outFlashes = [];
+for (let k = 1; k < frows.length; k++) {
+  if (frows[k].depth < frows[k - 1].depth && frows[k].flash.length) {
+    outFlashes.push({ i: k, from: frows[k - 1].depth, to: frows[k].depth, flash: frows[k].flash });
+  }
+}
+T.eq(outFlashes, [], 'flashMarks：步出回到调用方时，调用方的变量一个都不闪（本轮修复的靶心）');
+/* 有牙齿吗？确认这条轨迹里真的存在步出，否则上面那条是空过。 */
+let stepOuts = 0;
+for (let k = 1; k < frows.length; k++) if (frows[k].depth < frows[k - 1].depth) stepOuts++;
+T.ok(stepOuts >= 4, 'fact(4) 的轨迹里确实有 ≥4 次步出（上一条不是空过）');
+
+/* 而这些步上调用方的值**确实没变**——不是"变了但我们不显示"。
+   这条把「不闪」的正当性也钉住：值真的一模一样。 */
+const outValsSame = [];
+for (let k = 1; k < frows.length; k++) {
+  if (frows[k].depth >= frows[k - 1].depth) continue;
+  /* 找回到同一帧的上一次出现，比对那时的值 */
+  for (let m = k - 1; m >= 0; m--) {
+    if (frows[m].frameId === frows[k].frameId) {
+      for (let q = 0; q < frows[k].names.length; q++) {
+        const nm = frows[k].names[q];
+        if (frows[m].vals[nm] !== frows[k].vals[nm]) outValsSame.push({ i: k, name: nm });
+      }
+      break;
+    }
+  }
+}
+T.eq(outValsSame, [], '步出那一步，调用方的每一个变量与它被挂起时逐字节相同（所以不闪是对的）');
+
+/* 步入（深度变大）仍然整帧点亮 —— 那些绑定确实是这一步才诞生的。
+   这一半是**有意保留**的，不是漏网：一刀切"换帧不标"会把它一起杀掉。 */
+const inMissed = [];
+for (let k = 1; k < frows.length; k++) {
+  if (frows[k].depth > frows[k - 1].depth &&
+      frows[k].flash.join(',') !== frows[k].names.join(',')) {
+    inMissed.push({ i: k, flash: frows[k].flash, names: frows[k].names });
+  }
+}
+T.eq(inMissed, [], 'flashMarks：步入压新帧时整帧点亮（新绑定确实是这一步诞生的）');
+T.eq(frows[1].flash, ['acc', 'n'], 'fact(4)：第一次步入点亮 acc 与 n');
+
+/* 第 0 步：没有基线，一个都不许闪（setCursor / mount 之后的那一次 refresh）。
+   修复前它会把第 0 步可见的每一个绑定都点亮，验收清单第 23 条明令禁止。 */
+T.eq(frows[0].flash, [], 'flashMarks：没有基线时一个都不标（换样例之后的第 0 步）');
+T.eq(Object.keys(D.flashMarks(null, { i: 0, varsFrameId: -1, names: ['a', 'b'], vals: { a: '1', b: '2' } })), [],
+     'flashMarks：base 为 null → 空标记');
+T.eq(Object.keys(D.flashMarks({ frameId: null, i: -1, vals: {} },
+                              { i: 0, varsFrameId: -1, names: ['a'], vals: { a: '1' } })), [],
+     'flashMarks：base.frameId 为 null（刚换轨迹）→ 空标记');
+
+/* 同一帧内照常比对 —— 这条修复不能把真正的闪烁一起关掉。 */
+T.eq(Object.keys(D.flashMarks({ frameId: 5, i: 9, vals: { a: '1', b: '2' } },
+                              { i: 10, varsFrameId: 5, names: ['a', 'b'], vals: { a: '1', b: '3' } })).sort(),
+     ['b'], 'flashMarks：同一帧里只标真的变了的那个');
+/* 换到一个**早就存在**的帧（入帧步下标 <= 上一步的游标）→ 不标。 */
+T.eq(Object.keys(D.flashMarks({ frameId: 9, i: 20, vals: { n: '1' } },
+                              { i: 21, varsFrameId: 3, names: ['n', 'acc'], vals: { n: '4', acc: '1' } })), [],
+     'flashMarks：换回旧帧（frameId 小于等于上一步的游标）→ 一个都不标');
+/* 换到一个**这一步才诞生**的帧（入帧步下标 > 上一步的游标）→ 全标。 */
+T.eq(Object.keys(D.flashMarks({ frameId: 3, i: 20, vals: { n: '1' } },
+                              { i: 21, varsFrameId: 21, names: ['acc', 'n'], vals: { n: '4', acc: '1' } })).sort(),
+     ['acc', 'n'], 'flashMarks：新诞生的帧 → 整帧点亮');
+/* 全局帧（frameId = -1）永远不算"新诞生"：-1 不可能大于任何 >= 0 的游标。 */
+T.eq(Object.keys(D.flashMarks({ frameId: 7, i: 12, vals: {} },
+                              { i: 13, varsFrameId: -1, names: ['N'], vals: { N: '6' } })), [],
+     'flashMarks：回到全局帧不算新诞生，不闪');
+
+/* 全轨迹的兜底不变量：**任何被点亮的名字，要么值真的变了，要么它所在的帧
+   是这一步才诞生的。** 这一条比上面每一条都强，它就是那句不变量本身。 */
+const lies = [];
+for (let k = 1; k < frows.length; k++) {
+  const born = frows[k].frameId > frows[k - 1].i;
+  if (born) continue;
+  for (let q = 0; q < frows[k].flash.length; q++) {
+    const nm = frows[k].flash[q];
+    if (frows[k - 1].frameId === frows[k].frameId &&
+        frows[k - 1].vals[nm] !== frows[k].vals[nm]) continue;
+    lies.push({ i: k, name: nm });
+  }
+}
+T.eq(lies, [], '琥珀色的不变量：全轨迹上每一个点亮的名字，要么真的变了，要么帧是这一步才诞生的');
+
+/* 同样的不变量在 N 皇后那条真轨迹上再跑一遍（递归 + 循环 + 剪枝，
+   形状与 fact 完全不同，两条都过才说明修的是不变量不是那条 fixture）。 */
+const QSRC = [
+  'const N = 6;',
+  'const cols = [];',
+  'function safe(row, col) {',
+  '  for (let r = 0; r < row; r = r + 1) {',
+  '    const c = cols[r];',
+  '    if (c === col) { return false; }',
+  '    if (row - r === col - c) { return false; }',
+  '    if (row - r === c - col) { return false; }',
+  '  }',
+  '  return true;',
+  '}',
+  'function solve(row) {',
+  '  if (row === N) { return 1; }',
+  '  for (let col = 0; col < N; col = col + 1) {',
+  '    if (safe(row, col)) {',
+  '      cols[row] = col;',
+  '      if (solve(row + 1) === 1) { return 1; }',
+  '    }',
+  '  }',
+  '  return 0;',
+  '}',
+  'return solve(0);',
+].join('\n');
+const qtrace = I.run(QSRC, { host: {} }).trace;
+T.ok(qtrace.length > 500, 'N 皇后 fixture 的轨迹够长（' + qtrace.length + ' 步）');
+const qrows = replayFlash(D.create(qtrace), qtrace);
+const qlies = [];
+for (let k = 1; k < qrows.length; k++) {
+  const born = qrows[k].frameId > qrows[k - 1].i;
+  if (born) continue;
+  for (let q = 0; q < qrows[k].flash.length; q++) {
+    const nm = qrows[k].flash[q];
+    if (qrows[k - 1].frameId === qrows[k].frameId &&
+        qrows[k - 1].vals[nm] !== qrows[k].vals[nm]) continue;
+    qlies.push({ i: k, name: nm });
+  }
+}
+T.eq(qlies, [], '琥珀色的不变量：N 皇后整条轨迹上同样成立');
+/* 有牙齿：这条轨迹上确实有大量步出，而且确实有大量真闪烁。 */
+let qOuts = 0, qFlash = 0;
+for (let k = 1; k < qrows.length; k++) {
+  if (qrows[k].depth < qrows[k - 1].depth) qOuts++;
+  if (qrows[k].flash.length) qFlash++;
+}
+T.ok(qOuts > 50, 'N 皇后轨迹里有大量步出（' + qOuts + ' 次），上面那条不是空过');
+T.ok(qFlash > 50, 'N 皇后轨迹里仍有大量真闪烁（' + qFlash + ' 步），修复没有把闪烁关死');
+
+/* mount 的两个导出：redraw 必须存在且与 refresh 不是同一个函数
+   （refresh 会推进基线并清选中帧，工具 ④⑤ 拿它去做 resize 重绘会静默改状态）。 */
+T.ok(typeof D.flashMarks === 'function', 'flashMarks 已导出（纯函数，node 可测）');
+T.ok(typeof D.frameIds === 'function', 'frameIds 已导出');
+
+}
+
 T.report();
