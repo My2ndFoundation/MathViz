@@ -23,12 +23,15 @@ SOURCES = {
     'BOARD-RENDER': ROOT / 'core' / 'board-render.js',
     'REPLAY': ROOT / 'core' / 'replay.js',
     'INTERP': ROOT / 'core' / 'interp.js',
+    'DEBUGGER': ROOT / 'core' / 'debugger.js',
+    'EDITOR': ROOT / 'core' / 'editor.js',
 }
 
 # 只有部分工具有这些标记区；其余 html 缺它们是正常的，不该 WARN。
-# INTERP 目前还没有任何 html 带 GENERATED:INTERP 标记（阶段 3b 的验收页
-# 与阶段 4 的工具④ 才会加）——这同样是正常缺失，不该 WARN。
-OPTIONAL_TAGS = {'REPLAY', 'GAMES', 'INTERP'}
+# INTERP / DEBUGGER / EDITOR 只出现在阶段 3b 的验收页
+# （tools/_debugger-preview.html）与将来的工具 ④⑤ 上——阶段 1/2 的三个
+# 工具没有这三块是正常的，不该 WARN。
+OPTIONAL_TAGS = {'REPLAY', 'GAMES', 'INTERP', 'DEBUGGER', 'EDITOR'}
 
 
 def block(tag: str, body: str) -> str:

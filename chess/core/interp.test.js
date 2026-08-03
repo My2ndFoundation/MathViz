@@ -1062,4 +1062,206 @@ T.eq(I.run('return attacked(1);', {}).result, false,
 diff('function f(a, b) { return [a, b]; } return f(1);', 'M37: 实参少于形参，缺失的补 undefined');
 diff('function f(a) { return a; } return f(1, 2, 3);', 'M37: 实参多于形参，多余的被丢弃');
 
+/* ============================================================
+   任务 4.5 ①：入帧步（frameOp:'push'）的 varDelta 只含本次调用的形参绑定
+
+   3a 的 callInterpreted 在注释里断言过这件事，但它不成立：stepBoundary
+   打包的是 env.rec.pending，而 pending 里可能已经攒着**调用方**自上一次
+   语句边界以来的改动。最典型的形状就是阶段 5 六道题全都在用的
+   「for 头部声明循环变量 + 循环体第一条语句就是递归调用」——for 的
+   init（`let c = 0`）在调用发生之前只进了 pending，还没有任何
+   stepBoundary 把它打包出去，于是它被搭进了被调方那条 push 步里。
+   后果不是"记多了一点"：调试器的变量面板据此把调用方的 c 挂到被调方的
+   帧上（而拥有它的那一帧反而看不到它），而且**任何轨迹消费方都修不回来**
+   ——两类 delta 一旦合并就再也分不开。所以必须在源头分开。 */
+
+/* 一次调用里所有 push 步的 varDelta 名字表；顺带把 frameName 带出来。 */
+function pushDeltas(src) {
+  return I.run(src, { host: {} }).trace
+    .map(function (s, k) { return { k: k, s: s }; })
+    .filter(function (e) { return e.s.frameOp === 'push'; })
+    .map(function (e) {
+      return { at: e.k, depth: e.s.depth, fn: e.s.frameName,
+               names: e.s.varDelta.map(function (d) { return d.name; }) };
+    });
+}
+
+/* 阶段 5 六道题共同的形状：递归 + for 头部声明的循环变量。 */
+const T45_LOOPCALL = [
+  'function go(row) {',
+  '  if (row === 2) { return 1; }',
+  '  for (let c = 0; c < 2; c = c + 1) {',
+  '    go(row + 1);',
+  '  }',
+  '  return 0;',
+  '}',
+  'return go(0);'].join('\n');
+
+{
+  const pushes = pushDeltas(T45_LOOPCALL);
+  T.ok(pushes.length > 1, '4.5①前提：这个形状确实产生了多次入帧');
+  const bad = pushes.filter(function (p) { return JSON.stringify(p.names) !== '["row"]'; });
+  T.eq(bad, [], '4.5①: go 的每一条入帧步的 varDelta 都只有形参 row —— ' +
+                '调用方 for 头部的 c 不得被搭进被调方的帧');
+}
+
+/* 通用化：一批形状里，每条 push 步的 varDelta 名字必须恰好等于被调函数的
+   形参名单（顺序也一致，declareVar 是按形参顺序跑的）。这样将来任何一种
+   「调用点之前攒了未打包的改动」的新形状都会在这里失败，而不是只堵住
+   上面那一个具体程序。 */
+const T45_PARAM_SHAPES = [
+  { name: 'for 头部声明 + 循环体首句递归', src: T45_LOOPCALL, params: { go: ['row'] } },
+  { name: '同一条语句里先赋值再调用',
+    src: ['function f(a, b) { return a + b; }',
+          'let t = 0;',
+          'for (let i = 0; i < 3; i = i + 1) { t = f(i, 1); }',
+          'return t;'].join('\n'),
+    params: { f: ['a', 'b'] } },
+  { name: 'for…of 头部绑定 + 体内调用',
+    src: ['function g(v) { return v * 2; }',
+          'let s = 0;',
+          'for (const v of [1, 2, 3]) { s = s + g(v); }',
+          'return s;'].join('\n'),
+    params: { g: ['v'] } },
+  { name: '声明语句的初始化式里直接调用（init 与调用在同一条语句）',
+    src: ['function h(x) { return x + 1; }',
+          'const r = h(1);',
+          'return r;'].join('\n'),
+    params: { h: ['x'] } },
+  { name: '嵌套调用：实参本身是一次调用',
+    src: ['function inner(p) { return p; }',
+          'function outer(q) { return q; }',
+          'return outer(inner(3));'].join('\n'),
+    params: { inner: ['p'], outer: ['q'] } },
+  { name: '无形参函数的入帧步必须是空 delta',
+    src: ['function noop() { return 1; }',
+          'let z = 9;',
+          'for (let i = 0; i < 2; i = i + 1) { noop(); }',
+          'return z;'].join('\n'),
+    params: { noop: [] } },
+];
+for (let s45 = 0; s45 < T45_PARAM_SHAPES.length; s45++) {
+  const shape = T45_PARAM_SHAPES[s45];
+  const pushes = pushDeltas(shape.src);
+  T.ok(pushes.length > 0, '4.5① 形状「' + shape.name + '」确实有入帧步');
+  const wrong = pushes.filter(function (p) {
+    return JSON.stringify(p.names) !== JSON.stringify(shape.params[p.fn]);
+  });
+  T.eq(wrong, [], '4.5① 形状「' + shape.name + '」：每条入帧步的 varDelta 恰好是该函数的形参名单');
+}
+
+/* 分出去的那条 delta 不能凭空消失——它属于**调用方**，必须以调用方的深度
+   单独成一步留在轨迹里。只断言"push 干净了"是不够的：把 pending 直接丢掉
+   同样能让上面几条通过，而那会让面板永远看不到 c 的初始值。 */
+{
+  const tr45 = I.run(T45_LOOPCALL, { host: {} }).trace;
+  const c0 = tr45.filter(function (s) {
+    return s.varDelta.some(function (d) { return d.name === 'c' && d.to === 0; });
+  });
+  T.ok(c0.length > 0, '4.5①: `let c = 0` 的 delta 仍然在轨迹里（没有被丢掉）');
+  T.eq(c0.filter(function (s) { return s.frameOp !== null; }), [],
+       '4.5①: 承载 `let c = 0` 的那些步都不是进/出帧步');
+  /* 深度必须是**调用方**的深度。for 头部在 go 的第一层调用体里跑，
+     所以第一条 c=0 的深度是 1（不是被调方的 2）。 */
+  T.eq(c0[0].depth, 1, '4.5①: 调用方攒下的 delta 记在调用方的深度上');
+}
+
+/* ============================================================
+   任务 4.5 ②（约束 6）：块前置（提升扫描）只能有一份
+
+   3a 最后一轮修的 TDZ 缺口，根因是 callInterpreted 与 evalBlockBody 各有
+   一套语句循环，而两处的"前置"是分别手写的——只给其中一处加了
+   hoistLexicalDecls，函数体顶层的前向引用就绕过了 TDZ。把两行抽成一个
+   共用 helper，两处都调，下一次往前置里加东西时就不会再漏一次。
+
+   下面两道守卫各堵一半，缺一不可：
+   （a）行为对拍：同一段语句，放在**块/顶层**里跑与放在**函数体顶层**跑，
+        可观察结果必须一致，并且各自还要等于事先写死的期望值（否则"两边
+        一样地坏"也能过）。
+   （b）结构守卫：源码里所有 hoist*(…) 调用点都必须落在那个 helper 内部。
+        （a）只能发现"新加的前置改变了这批程序的行为"，发现不了"新加了一个
+        前置、但这批程序恰好观察不到"；（b）不看行为，直接钉住"前置只有
+        一处"这个结构事实。 */
+function prologueOutcome(src) {
+  try { return { ok: true, value: I.run(src, { host: {} }).result }; }
+  catch (e) { return { ok: false, message: e.message, category: e.category }; }
+}
+const T45_PROLOGUE_SHAPES = [
+  { name: 'TDZ：前向引用本层稍后声明的 let',
+    body: 'let y = x; let x = 2; return y;',
+    expect: { ok: false, message: "Cannot access 'x' before initialization", category: 'runtime' } },
+  { name: '函数声明提升：调用点在声明之前',
+    body: 'return f(); function f() { return 7; }',
+    expect: { ok: true, value: 7 } },
+  { name: '互递归：谁写在前面都不重要',
+    body: 'return even(4); function even(n) { if (n === 0) { return 1; } return odd(n - 1); } ' +
+          'function odd(n) { if (n === 0) { return 0; } return even(n - 1); }',
+    expect: { ok: true, value: 1 } },
+  { name: '同层重复 let 声明',
+    body: 'let a = 1; let a = 2; return a;',
+    expect: { ok: false, message: "Identifier 'a' has already been declared", category: 'syntax' } },
+  { name: '前置只扫本层：嵌套块里的 let 不该被提到外层',
+    body: 'let x = 1; { let y = x; } return x;',
+    expect: { ok: true, value: 1 } },
+  { name: '正常声明后使用（对照，前置不该改变它）',
+    body: 'let a = 5; return a;',
+    expect: { ok: true, value: 5 } },
+];
+for (let p45 = 0; p45 < T45_PROLOGUE_SHAPES.length; p45++) {
+  const shape = T45_PROLOGUE_SHAPES[p45];
+  // evalBlockBody 这一路：语句直接放在 Program 顶层
+  const viaBlock = prologueOutcome(shape.body);
+  // callInterpreted 这一路：同一批语句当函数体顶层，立刻调用
+  const viaCall = prologueOutcome('function __probe() { ' + shape.body + ' }\nreturn __probe();');
+  T.eq(viaBlock, shape.expect, '4.5②(a)「' + shape.name + '」在块/顶层这一路的结果符合期望');
+  T.eq(viaCall, shape.expect, '4.5②(a)「' + shape.name + '」在函数体顶层这一路的结果符合期望');
+  T.eq(viaCall, viaBlock, '4.5②(a)「' + shape.name + '」两条语句循环的前置行为一致');
+}
+
+/* （b）结构守卫。读的是 interp.js 的源码本身——测试文件跑在 node 里，
+   读文件是允许的（editor.test.js 已有先例）；被读的 interp.js 本身仍然
+   零依赖、不碰任何宿主 API。 */
+{
+  const fs45 = require('fs');
+  const path45 = require('path');
+  /* 先把块注释整段抹成等长空格再扫（保长度是为了行号仍然对得上）：
+     interp.js 的中文说明里会成段引用这些函数名，扫原文会把散文当成调用点，
+     变成一道"改注释就红"的假门。 */
+  const rawText = fs45.readFileSync(path45.join(__dirname, 'interp.js'), 'utf8');
+  const srcText = rawText.replace(/\/\*[\s\S]*?\*\//g, function (block) {
+    return block.replace(/[^\n]/g, ' ');
+  });
+
+  const defIdx = srcText.indexOf('function blockPrologue(');
+  T.ok(defIdx >= 0, '4.5②(b): 存在共用的块前置 helper blockPrologue');
+
+  /* helper 的函数体区间（从定义处第一个 { 开始花括号配平）。 */
+  let bodyStart = srcText.indexOf('{', defIdx), depth45 = 0, bodyEnd = -1;
+  for (let ch = bodyStart; ch >= 0 && ch < srcText.length; ch++) {
+    if (srcText[ch] === '{') depth45++;
+    else if (srcText[ch] === '}') { depth45--; if (depth45 === 0) { bodyEnd = ch; break; } }
+  }
+  T.ok(bodyEnd > bodyStart, '4.5②(b): 能定位到 blockPrologue 的函数体区间');
+
+  /* 所有 hoistXxx(…) 的**调用**点（排除 `function hoistXxx(` 定义处）。 */
+  const callRe = /(function\s+)?\bhoist[A-Za-z]*\s*\(/g;
+  const outside = [];
+  let m45;
+  while ((m45 = callRe.exec(srcText)) !== null) {
+    if (m45[1]) continue;                     // 定义处，不是调用
+    const at = m45.index;
+    if (at > bodyStart && at < bodyEnd) continue;   // 在 helper 内部，正是它该待的地方
+    outside.push(srcText.slice(0, at).split('\n').length);  // 行号
+  }
+  T.eq(outside, [],
+       '4.5②(b): 提升扫描的调用点只能出现在 blockPrologue 内部 —— ' +
+       '往前置里加东西必须加进这一份共用实现，不能挂在两套语句循环中的某一套上');
+
+  /* helper 恰好被两处语句循环各调用一次（多一处/少一处都要失败）。 */
+  const useRe = /\bblockPrologue\s*\(/g;
+  let uses = 0;
+  while (useRe.exec(srcText) !== null) uses++;
+  T.eq(uses, 3, '4.5②(b): blockPrologue 在源码里出现 3 次 —— 1 处定义 + 2 处调用');
+}
+
 T.report();

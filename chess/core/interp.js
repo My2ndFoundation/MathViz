@@ -1491,6 +1491,41 @@
                  'supports — try rewriting it as a loop.',
                  node.line, node.col, 'runtime');
     }
+    /* 【任务 4.5】进帧之前，先把**调用方**攒下的 pending 单独打包成一步。
+
+       下面那条 push 步的 varDelta 想表达的是"进入 f，参数 x=5"，调试器的
+       帧列表也是这么用它的。但 stepBoundary 打包的是 rec.pending，而
+       pending 里装的是"自上一次语句边界以来的全部改动"——调用方在走到这个
+       调用点之前，完全可能已经往里攒了自己的东西，最典型的就是阶段 5 六道
+       题共同的形状：
+
+           for (let c = 0; c < N; c = c + 1) { go(row + 1); }
+
+       for 的 init（`let c = 0`）之后到循环体第一条语句之间没有任何语句
+       边界（见 For 分支：正常路径要等 update 求值完才 flush），于是 c 的
+       delta 被原样搭进了被调方那条 push 步里。调试器据此把调用方的 c 挂到
+       被调方的帧上，而真正拥有它的那一帧反而看不见它——两类 delta 一旦
+       合并就再也分不开，任何轨迹消费方都修不回来。
+
+       所以在这里主动 flush 一次：多出来的这一步记在**调用方的深度**上
+       （depth.n++ 之前，callDepth 是整条环境链共享的同一个计数器）、
+       frameOp 为 null（它不是帧事件，只是调用方的一条普通语句边界）。
+       之后的形参绑定因此落进一份干净的 pending，push 步的 varDelta 从此
+       名副其实。
+       env 传 fn.closure：stepBoundary 只读 env.rec 与 env.callDepth，这两个
+       在整条环境链上是同一份对象，闭包环境拿到的和调用点拿到的完全一致
+       （callInterpreted 的签名里没有调用点的 env，也不需要为此加一个参数）。
+       行号用 node（调用点）：这条 flush 步表达的是"调用方走到这个调用点、
+       准备进去了"，与紧随其后的 push/pop 用同一行对齐。
+       pending 为空时**不**记这一步——绝大多数调用点都是这种情况（上一条
+       语句刚刚 flush 过），无条件记会凭空给每次调用加一步。 */
+    const callerRec = fn.closure.rec;
+    if (callerRec) {
+      const carried = callerRec.pending;
+      if (carried.varDelta.length || carried.boardOps.length || carried.out !== null) {
+        stepBoundary(fn.closure, node);
+      }
+    }
     depth.n++;
     const callEnv = makeEnv(fn.closure);
     // 形参绑定：多出的实参丢弃、缺失的实参补 undefined——与原生一致。
@@ -1500,14 +1535,17 @@
       declareVar(callEnv, 'let', fn.params[idx], idx < args.length ? args[idx] : undefined, node);
     }
     /* 进帧/出帧标记（frameOp）是调试器「调用栈帧列表」的原始数据。push
-       记在参数绑定之后、hoistFunctionDecls 之前——这样 push 这条 Step 的
+       记在参数绑定之后、提升扫描之前——这样 push 这条 Step 的
        varDelta 恰好是这次调用的形参绑定（"进入 f，参数 x=5"），而函数体
        内部提升声明的嵌套函数则跟 Program 顶层的提升同一个待遇：滚进函数
        体第一条语句自己的 stepBoundary，不需要在这里特殊处理。
        push/pop 都记在调用点（node，即 Call 表达式）的行号上，而不是函数
        定义的行号——两者都发生在「调用序列」的时间线上，用调用点的行更
        容易跟外层代码对上；这是本任务的一个实现选择，brief 没有对 push/
-       pop 的具体行号做断言。 */
+       pop 的具体行号做断言。
+       "varDelta 恰好是形参绑定"这句话只有配合上面那次 flush 才成立——它
+       曾经是一句错话（任务 4.5 的缺陷），别把 flush 那几行当成可有可无的
+       优化删掉。interp.test.js 的「任务 4.5 ①」逐条钉住了这件事。 */
     const frameName = fn.name || '(anonymous)';
     stepBoundary(callEnv, node, 'push', frameName);
     if (fn.expression) {
@@ -1521,15 +1559,11 @@
       return v;
     }
     const stmts = fn.body.body;
-    hoistFunctionDecls(stmts, callEnv);
-    /* 复审二轮：callEnv 是函数体自己的顶层作用域，跟 evalBlockBody 处理
-       的 Program 顶层/普通块/循环体是同一类"直接语句数组"，TDZ 预扫描
-       同样要跑一遍——这里有一套独立于 evalBlockBody 的语句循环（为了
-       push/pop 帧跟踪），漏接这一行会让函数体顶层的前向引用绕过 TDZ
-       （`function f(){ let y=x; let x=2; return y; }` 会报成
-       "x is not defined"，而不是原生的 "Cannot access 'x' before
-       initialization"——两边都抛，但抛的不是同一件事）。 */
-    hoistLexicalDecls(stmts, callEnv);
+    /* callEnv 是函数体自己的顶层作用域，跟 evalBlockBody 处理的 Program
+       顶层/普通块/循环体是同一类"直接语句数组"，前置扫描一模一样地跑一遍。
+       这里用的必须是那一份共用的 blockPrologue（约束 6），不能在这里另手写
+       一遍——历史教训见 blockPrologue 的注释。 */
+    blockPrologue(stmts, callEnv);
     let completion = null;
     for (let idx = 0; idx < stmts.length; idx++) {
       completion = yield* evalStmt(stmts[idx], callEnv);
@@ -2060,15 +2094,50 @@
     }
   }
 
+  /* 【约束 6】块前置：进入任意一个「直接语句数组」之前必须跑的提升扫描，
+     只此一份。
+
+     解释器里有**两套**语句循环：evalBlockBody（Program 顶层 / {} 块 /
+     循环体 / for…of 体）与 callInterpreted 里那一套（为了记录 push/pop
+     帧标记而手写摊平的，见 callInterpreted 顶上的注释）。3a 最后一轮修的
+     TDZ 缺口根因就在这里：当时两处的前置是各自手写的，只给 evalBlockBody
+     接了 hoistLexicalDecls，函数体顶层的前向引用于是绕过了 TDZ——
+     `function f(){ let y = x; let x = 2; return y; }` 报成
+     "x is not defined"，而不是原生的 "Cannot access 'x' before
+     initialization"：两边都抛，但抛的不是同一件事，正是本项目最不能容忍
+     的那种"看起来对、其实在教错东西"。
+
+     **所以：以后往前置里加任何东西，只加进这个函数。** 直接在某一套语句
+     循环里手写一行提升扫描，会以完全相同的方式再漏一次，而且下一次同样
+     不会有任何测试大声失败——除了 interp.test.js 的「任务 4.5 ②(b)」：
+     它扫源码，钉住"所有 hoist*(…) 调用点都在 blockPrologue 内部"。
+
+     **那道守卫认的是名字，不是语义：它的正则是 /\bhoist[A-Za-z]*\s*\(/。**
+     所以新加的前置扫描**必须叫 hoistXxx**。取个别的名字（predeclareClasses、
+     prescanLabels 之类）再只挂到两套语句循环中的一套上，守卫一声不吭，
+     行为对拍（a）也只在恰好观察得到的程序上才红——正好复刻 3a 那次 TDZ 缺口
+     的漏法。要么按 hoist* 命名，要么同时把 interp.test.js 里那条正则改宽。
+
+     两次扫描的先后不影响可观察行为：hoistLexicalDecls 只在名字**还不存在
+     于当前层**时才占 TDZ 位，hoistFunctionDecls 的 declareVar 允许覆盖一个
+     TDZ 占位。`let f = 1; function f(){}` 这类同层重复声明，无论哪个先跑，
+     都要等真正执行到 `let f = 1;` 那条语句时才由 declareVar 报重复声明，
+     报的是同一句话。这里采用 evalBlockBody 原本的顺序（词法在前）。 */
+  function blockPrologue(stmts, env) {
+    hoistLexicalDecls(stmts, env);
+    hoistFunctionDecls(stmts, env);
+  }
+
   /* 顺序执行一组语句；每条语句执行完 yield 一次，标记「语句边界」——
      单步执行（阶段 3b）与轨迹记录（Task 7）都靠这个暂停点，本任务的
      run() 只是简单地把生成器一次性驱动到底，不利用它。
-     这里也是唯一需要跑函数声明提升扫描的地方——Program 顶层、Block、
-     函数调用（callInterpreted 直接把函数体的语句数组喂给这里）全部
-     经过这一个函数，提升逻辑因此只需要写一遍。 */
+     这里覆盖 Program 顶层 / {} 块 / 循环体 / for…of 体；**函数体顶层不
+     经过这里**——callInterpreted 为了记录 push/pop 帧标记另有一套摊平的
+     语句循环。这条注释原来写着"函数调用直接把函数体的语句数组喂给这里"，
+     那是错的（3a 的 TDZ 缺口正是这个误解的产物）。两套循环共用的只有
+     blockPrologue 这一份前置，见它的注释与约束 6。 */
   function* evalBlockBody(stmts, env) {
-    hoistLexicalDecls(stmts, env);
-    hoistFunctionDecls(stmts, env);
+    blockPrologue(stmts, env);
     for (let idx = 0; idx < stmts.length; idx++) {
       const completion = yield* evalStmt(stmts[idx], env);
       /* stepBoundary 无条件调用（在 completion 检查之前）——哪怕这条语句
