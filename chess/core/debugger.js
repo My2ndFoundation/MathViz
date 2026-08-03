@@ -170,69 +170,154 @@
     return frames;
   }
 
-  /* locals 必须只反映**当前帧**的局部变量。
-     3a 的 varDelta 只带 { name, from, to }，**不带作用域标识** —— 递归时
-     同名参数在不同帧各有一份，全局按名扁平回放会跨帧串味。
+  /* ---------------- locals：按「帧归属」回放 ----------------
 
-     简报给的做法（"找到本帧起点，回放那个区间内的全部 varDelta"）**不够**，
-     会静默算错。以 fact(3) 的真实轨迹为例（i / depth / frameOp / varDelta）：
-         1  d1 push  n→3      3  d2 push  n→2      5  d3 push  n→1
-         8  d3 pop   {n,from:1,to:undefined}       9  d2  -    []
-     取 i=9（depth 2），本帧起点是 i=3。区间 [3,9] 的**全部** varDelta 扁平
-     回放会依次应用 n→2、n→1，再应用第 8 步那条"删除 n"的 delta —— 得到
-     n === undefined，而正确答案是 2。
+     locals 必须只反映**当前帧**的局部变量。3a 的 varDelta 只带
+     { name, from, to }，**不带作用域标识**，所以「这条改动属于哪一帧」必须
+     从轨迹的形状反推出来。
 
-     正确的规则是**深度窗口**：起点 = 最近一个 `frameOp==='push' && depth
-     === 当前 depth` 的 k <= i（当前 depth 为 0 时起点是 0，全局帧没有 push），
-     然后**只回放 [起点, i] 区间内 depth === 当前 depth 的那些步**。更深的
-     帧 depth 恒严格更大，这个过滤把它们不多不少地排除干净。
+     两条走不通的路（都实测验证过，不是推测）：
 
-     `to === undefined` 表示这个名字**不再存在**（closeScope 在作用域退出时
-     补的恢复 delta：外层没有同名变量时 to 就是 undefined），因此删除而不是
-     置为 undefined。已知的信息缺口：`let a;` 产生的也是 to === undefined，
-     从轨迹里无法与"名字消失"区分——后果只是面板暂时不显示这个尚未赋值的
-     名字，不会显示错误的值（详见任务报告的「关切」）。
+     (A) 全局按名扁平回放 —— 递归时同名参数跨帧串味：fact(3) 停在 i=9
+         (depth 2) 会得到 n === undefined，正确答案是 2。
 
-     阶段 5 的六道算法题全是递归 —— 这里错了，那六道题的变量面板全是错的。 */
+     (B) 深度窗口（只回放本帧区间内 depth 相同的步）—— 看似干净，但会**漏掉
+         深帧对外层绑定的赋值**。累加器是阶段 5 六道题的通用形状：
+             let sol = 0;
+             function go(k) { if (k === 0) { sol = sol + 1; return; } go(k-1); go(k-1); }
+             go(2); return sol;
+         `sol = sol + 1` 记在 depth 3 的步上。深度窗口在最后的 `return sol`
+         (depth 0) 只回放 depth 0 的步，于是显示 sol: 0，而程序真的返回 4；
+         同时 depth 3 的帧里又凭空多出一个它并不拥有的 sol。两个方向都错。
+
+     正确的做法是**帧归属回放**：维护一个帧栈，每条 delta 落到真正拥有那个
+     名字的帧上。难点在于「声明遮蔽」与「对外层赋值」在中途那一步长得
+     一模一样 —— 实测 `let t = 1; function g() { let t = 5; ... }` 与
+     `let t = 1; function g() { t = 5; ... }` 的中途 delta 都是
+     `{name:'t', from:1, to:5}`，**逐字节相同**。
+
+     判别器是这一帧**自己的出帧拆除 delta**（轨迹已经录完，前瞻是免费的）：
+         let t = 5 遮蔽外层 t   中途 {t,from:1,to:5}   出帧 [{t,from:5,to:1}]
+         t = 5 赋值给外层 t     中途 {t,from:1,to:5}   出帧 []
+         let q = 7（外层没有 q）中途 {q,to:7}          出帧 [{q,from:7}]
+     出现在某帧出帧 delta 里的名字，就是**这一帧声明的**；不出现的，是一次
+     向外触达的赋值。于是：
+         owned(帧) = names(入帧步 varDelta) ∪ names(匹配的出帧步 varDelta)
+
+     解析一条 delta 的归属时，按下面的优先级**逐级扫描整个帧栈**（先把规则 1
+     在所有帧上试一遍，再试规则 2，最后才是规则 3 —— 顺序反了 `sol` 就会落进
+     最内层帧）：
+       1) owned 里有这个名字的帧（由内向外第一个）；
+       2) 否则，当前 vars 里已经有这个名字的帧（全局帧就是这样认领 sol 和 t 的）；
+       3) 否则，最内层的开着的帧（就地新建的绑定 —— 比如函数体内嵌套块里的
+          `let b`，它由块自己的 closeScope 收尾，不会出现在函数的出帧 delta 里）。
+
+     `to` 缺席表示这个名字**不再存在**（closeScope 在作用域退出时补的恢复
+     delta），所以是删除而不是置 undefined。已知的信息缺口：`let a;` 产生的
+     也是 to === undefined，从轨迹里无法与"名字消失"区分 —— 后果只是面板暂时
+     不显示这个尚未赋值的名字，不会显示错误的值（详见任务报告的「关切」）。
+
+     阶段 5 的六道算法题全是递归 + 累加器 —— 这里错了，那六道题的变量面板
+     全是错的。 */
+
+  /* 把每个入帧步配上它匹配的出帧步下标（没有匹配的记 -1）。
+     匹配规则：出帧步按后进先出配对，用一个下标栈一趟扫完，O(n)。
+     `upto` 是当前游标：一旦扫过了游标**且栈已空**，游标之前开的帧就全都
+     配对完了，可以提前收工 —— 游标停在轨迹前段时不必扫完整条轨迹。
+     注意不能只扫到 upto 就停：**游标处还开着的帧，它们的出帧步在 upto
+     之后**，而 owned 正需要那一条。
+     -1（没有匹配的出帧步）是**设计内**的情形，不是异常：撞上 STEP_LIMIT
+     的轨迹（trace.truncated）会把帧永远留在开着的状态。此时 owned 退化成
+     只有入帧 delta，函数照常返回，不抛。 */
+  function matchFrames(trace, upto) {
+    const popOf = {}, open = [];
+    for (let k = 0; k < trace.length; k++) {
+      const op = trace[k].frameOp;
+      if (op === 'push') { popOf[k] = -1; open.push(k); }
+      else if (op === 'pop') { const p = open.pop(); if (p !== undefined) popOf[p] = k; }
+      if (k >= upto && open.length === 0) break;
+    }
+    return popOf;
+  }
+
+  /* 一个帧的 owned 名字集。用 Object.create(null) 而不是 {}：学习者完全
+     可以写 `let __proto__ = 1;`（解释器接受，并照常发出 delta），而普通对象
+     字面量会把这个名字吞掉 —— 面板上那一行会凭空消失。所有 per-frame 的
+     映射（owned 与 vars）都因此走无原型对象。 */
+  function ownedNames(trace, pushIdx, popOf) {
+    const owned = Object.create(null);
+    const own = function (deltas) {
+      for (let m = 0; m < deltas.length; m++) owned[deltas[m].name] = true;
+    };
+    own(trace[pushIdx].varDelta);
+    const q = popOf[pushIdx];
+    if (q >= 0) own(trace[q].varDelta);
+    return owned;
+  }
+
+  function newFrame(owned) {
+    return { owned: owned || Object.create(null), vars: Object.create(null) };
+  }
+
+  /* 三级优先级，规则在外层、帧在内层：先看有没有哪一帧 own 了这个名字，
+     再看有没有哪一帧当前就持有它，都没有才落到最内层帧。 */
+  function ownerFrame(stack, name) {
+    for (let j = stack.length - 1; j >= 0; j--) if (stack[j].owned[name]) return stack[j];
+    for (let j = stack.length - 1; j >= 0; j--) if (name in stack[j].vars) return stack[j];
+    return stack[stack.length - 1];
+  }
+
+  function applyTo(frame, deltas) {
+    for (let m = 0; m < deltas.length; m++) {
+      const d = deltas[m];
+      if (typeof d.to === 'undefined') delete frame.vars[d.name];
+      else frame.vars[d.name] = d.to;
+    }
+  }
+
   function locals(cur) {
-    const trace = cur.trace, s = trace[cur.i];
-    if (!s) return {};
-    const depth = s.depth;
-    let start = 0;
-    if (depth > 0) {
-      for (let k = cur.i; k >= 0; k--) {
-        if (trace[k].frameOp === 'push' && trace[k].depth === depth) { start = k; break; }
+    const trace = cur.trace, i = cur.i;
+    if (!trace[i]) return Object.create(null);
+    const popOf = matchFrames(trace, i);
+    const stack = [newFrame()];            // 全局帧永远在栈底，它没有入/出帧步
+    for (let k = 0; k <= i; k++) {
+      const s = trace[k];
+      if (s.frameOp === 'push') {
+        /* 入帧步的 delta 是这次调用的**形参绑定**，直接落进新帧 ——
+           这正是「形参遮蔽同名全局」能被正确分开的地方
+           （let n = 99; function f(n) {…} 里 f 的 n 与全局的 n）。 */
+        const f = newFrame(ownedNames(trace, k, popOf));
+        stack.push(f);
+        applyTo(f, s.varDelta);
+        continue;
+      }
+      if (s.frameOp === 'pop') {
+        /* 出帧步一条 delta 都不应用：那是拆除记录，closeScope 往 `to` 里写的
+           是**外层**同名变量此刻的值，照单应用会把调用方/全局的值贴上被调方
+           帧的标签（`let n = 99; function f(n){…}` 停在 f 的 return 上会显示
+           「f 的 n = 99」）。
+           帧只在 k < i 时才关闭，与 callStack 的约定一致 —— 停在 return 那一步
+           时面板仍然显示「这一帧返回时的样子」，而不是已经跳回调用方。 */
+        if (k < i && stack.length > 1) stack.pop();
+        continue;
+      }
+      const deltas = s.varDelta;
+      for (let m = 0; m < deltas.length; m++) {
+        applyTo(ownerFrame(stack, deltas[m].name), [deltas[m]]);
       }
     }
-    const vars = {};
-    for (let k = start; k <= cur.i; k++) {
-      const step = trace[k];
-      if (step.depth !== depth) continue;
-      /* 出帧步**自己**那条 varDelta 要跳过：它是这一帧的拆除记录，而
-         closeScope 写进 `to` 的是**外层同名变量此刻的值**（interp.js
-         closeScope：`to = outer ? snap(outer.vars.get(name).value) : undefined`）。
-         照单应用会把调用方/全局的值贴上被调方帧的标签显示出来 ——
-         `let n = 99; function f(n){...}; f(5);` 停在 f 的出帧步时会显示
-         「f 的 n = 99」，正是本阶段第一条约束要禁止的跨帧串味。
-         跳过之后，出帧步显示的是「这一帧返回时的样子」（n = 5），这也是
-         学习者单步停在 return 上时真正想看的东西。
-         只可能命中 k === cur.i：depth 为 d 的出帧步会让深度回落，若它落在
-         窗口中间，则其后必然还有一个 depth === d 的入帧步，而那个入帧步
-         才会被选作 start —— 与前提矛盾。所以这一行不会误伤窗口内的其它步。 */
-      if (step.frameOp === 'pop') continue;
-      const d = step.varDelta;
-      for (let m = 0; m < d.length; m++) {
-        if (typeof d[m].to === 'undefined') delete vars[d[m].name];
-        else vars[d[m].name] = d[m].to;
-      }
-    }
-    return vars;
+    return stack[stack.length - 1].vars;
   }
 
   /* 截至当前步的日志。
      判据是 `out !== null` —— **不是真值判断**。Step.out 是字符串：
      `log("")` 产出 `""`（假值），`log(0)` 产出 `"0"`。用 `if (s.out)` 过滤
      会让学习者写的空 log 行凭空消失，那正是本项目最不能容忍的安静谎话。
+     下面那行**故意**比规格的 `out !== null` 再宽一点，连 undefined 一起挡掉：
+     3a 的 newPending() 把 out 初始化成 null，正常轨迹里不会出现 undefined，
+     但手搓的 Step（测试夹具、将来别的轨迹来源）少写一个 out 字段是很容易的，
+     那时 `!== null` 会让一个 undefined 混进输出面板。这不是顺手写宽的，
+     是明确要覆盖「字段缺席」这一种情况。
      一步里连续多次 log 时 3a 把它们用 '\n' 拼进同一个 out（见 interp.js 的
      wrapHostForTrace），这里原样保留一条，不拆分——拆分会让"一步 = 一条
      记录"这个与游标对齐的关系变松。 */

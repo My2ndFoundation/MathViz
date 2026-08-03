@@ -247,7 +247,9 @@ const oc = D.create(ot);
 D.goto(oc, ot.length - 1);
 T.eq(D.output(oc), ['a', 'b', 'c'], '截至末尾有三行');
 const oc2 = D.create(ot);
-const secondLog = ot.findIndex((s, k) => ot.slice(0, k + 1).filter(x => x.out).length === 2);
+/* 简报原文是 `(s, k)`，但回调从不读 s（静态检查会报未使用参数）——
+   改成 `(_, k)`，语义完全不变。 */
+const secondLog = ot.findIndex((_, k) => ot.slice(0, k + 1).filter(x => x.out).length === 2);
 D.goto(oc2, secondLog);
 T.eq(D.output(oc2), ['a', 'b'], '截至第二条日志只有两行 —— 输出跟着游标走');
 
@@ -370,12 +372,16 @@ T.eq(D.locals(fpCur).n, 5, 'f 的出帧步显示 n === 5（这一帧返回时的
 
 /* 递归同理：fact 的每个出帧步也该显示本帧的 n，而不是外层帧的。
    这把简报那条测试排除掉的 pop 步一并盖住了。 */
+let popChecks = 0;
 for (let k = 0; k < rt.length; k++) {
   if (rt[k].frameOp !== 'pop') continue;
   const c = D.create(rt); D.goto(c, k);
   T.eq(D.locals(c).n, 4 - rt[k].depth,
        'fact(3) 第 ' + k + ' 步（出帧，depth=' + rt[k].depth + '）显示本帧的 n');
+  popChecks++;
 }
+T.ok(popChecks >= 3,
+     '上面这个出帧步循环真的跑了 ' + popChecks + ' 次（>= 3）—— 补上哨兵，避免空转假绿');
 
 // ---- ⑦ 名字消失就要真的消失，不能留一个值为 undefined 的空行 ----
 /* 杀掉的变异体：把 `to === undefined`（closeScope 记的"这个名字不再存在"）
@@ -417,6 +423,122 @@ function checkCurrentIsVisited(label, tr) {
 }
 checkCurrentIsVisited('SRC', trace);
 checkCurrentIsVisited('fact(3)', rt);
+
+/* ============================================================
+   复审发现：深度窗口（只回放本帧区间内 depth 相同的步）会**漏掉深帧对
+   外层绑定的赋值**。累加器是阶段 5 六道题的通用形状，两个方向都会错：
+   拥有它的帧显示陈旧值，不拥有它的帧却把它显示出来。
+   实现已改为**帧归属回放**，下面这几组就是钉死新规则的测试。
+   ============================================================ */
+
+// ---- ⑩ 累加器：深帧对外层绑定的赋值 ----
+const ACC = [
+  'let sol = 0;',                                                        // 1
+  'function go(k) { if (k === 0) { sol = sol + 1; return; } go(k - 1); go(k - 1); }', // 2
+  'go(2);',                                                              // 3
+  'return sol;',                                                         // 4
+].join('\n');
+const at = I.run(ACC, { host: {} }).trace;
+const accCur = D.create(at); D.goto(accCur, at.length - 1);
+T.eq(D.locals(accCur).sol, 4,
+     '最后的 return sol 那一步 sol === 4 —— 深帧里做的累加要落回拥有它的全局帧');
+
+/* 反向：sol 不属于 go 的任何一帧，就不能出现在那些帧的局部变量里。 */
+let deepAccChecks = 0;
+for (let k = 0; k < at.length; k++) {
+  if (at[k].depth < 1) continue;
+  const c = D.create(at); D.goto(c, k);
+  const lv = D.locals(c);
+  T.ok(typeof lv.sol === 'undefined',
+       'go 的第 ' + k + ' 步（depth=' + at[k].depth + '）局部变量里没有 sol —— 它是全局的');
+  T.eq(typeof lv.k, 'number', 'go 的第 ' + k + ' 步有自己的形参 k');
+  deepAccChecks++;
+}
+T.ok(deepAccChecks >= 20, '累加器循环真的跑了 ' + deepAccChecks + ' 次（>= 20）');
+
+// ---- ⑪ 遮蔽声明 vs 对外层赋值：中途那条 delta 逐字节相同 ----
+/* 这两段源码在函数中途产生的 varDelta 完全一样（实测都是
+   {name:'t', from:1, to:5}），唯一的判别器是**这一帧自己的出帧拆除 delta**：
+   遮蔽会留下 [{t, from:5, to:1}]，对外层赋值则是 []。 */
+const SHADOW = 'let t = 1;\nfunction g() { let t = 5; return t; }\nconst z = g();\nreturn t;';
+const ASSIGN = 'let t = 1;\nfunction g() { t = 5; return t; }\nconst z = g();\nreturn t;';
+const sht2 = I.run(SHADOW, { host: {} }).trace;
+const ast2 = I.run(ASSIGN, { host: {} }).trace;
+
+/* 先把「中途 delta 真的一模一样」这个前提钉住 —— 否则下面两组断言就不是在
+   考验判别器了，而哪天 3a 改了 delta 形状，这里应该大声失败。 */
+const midS = sht2.findIndex(s => s.depth === 1 && s.varDelta.some(d => d.name === 't'));
+const midA = ast2.findIndex(s => s.depth === 1 && s.varDelta.some(d => d.name === 't'));
+T.eq(sht2[midS].varDelta, ast2[midA].varDelta,
+     '前提：遮蔽与赋值在函数中途那一步的 varDelta 逐字节相同（判别器只能是出帧 delta）');
+
+const shMid = D.create(sht2); D.goto(shMid, midS);
+T.eq(D.locals(shMid).t, 5, '遮蔽：g 帧内的 t 是自己声明的 5');
+const shEnd = D.create(sht2); D.goto(shEnd, sht2.length - 1);
+T.eq(D.locals(shEnd).t, 1, '遮蔽：全局的 t 完好无损，仍是 1');
+
+const asMid = D.create(ast2); D.goto(asMid, midA);
+T.ok(typeof D.locals(asMid).t === 'undefined',
+     '赋值：t 归全局帧所有，不出现在 g 的局部变量里');
+const asEnd = D.create(ast2); D.goto(asEnd, ast2.length - 1);
+T.eq(D.locals(asEnd).t, 5, '赋值：全局的 t 真的被改成了 5');
+
+// ---- ⑫ 形参遮蔽同名全局 ----
+const PSH = 'let n = 99;\nfunction f(n) { return n + 1; }\nconst p = f(2);\nreturn n;';
+const pt2 = I.run(PSH, { host: {} }).trace;
+const pPush = pt2.findIndex(s => s.frameOp === 'push');
+const pPop = pt2.findIndex(s => s.frameOp === 'pop');
+const pPushCur = D.create(pt2); D.goto(pPushCur, pPush);
+T.eq(D.locals(pPushCur).n, 2, 'f 帧里的形参 n === 2（不是全局的 99）');
+const pPopCur = D.create(pt2); D.goto(pPopCur, pPop);
+T.eq(D.locals(pPopCur).n, 2, 'f 的出帧步仍显示本帧的 n === 2');
+const pEnd = D.create(pt2); D.goto(pEnd, pt2.length - 1);
+T.eq(D.locals(pEnd).n, 99, '全局的 n 从头到尾都是 99');
+
+// ---- ⑬ 函数体内嵌套块里的 let 要落在这个函数的帧里 ----
+/* 这种绑定由块自己的 closeScope 收尾，**不会**出现在函数的出帧 delta 里，
+   所以 owned 认不出它 —— 归属靠的是优先级 3「最内层开着的帧」。 */
+const NEST = 'let t = 1;\nfunction g(a) { if (a > 0) { let b = a * 2; return b; } return 0; }\nconst z = g(3);\nreturn t;';
+const nt = I.run(NEST, { host: {} }).trace;
+const bBound = nt.findIndex(s => s.depth === 1 && s.varDelta.some(d => d.name === 'b' && 'to' in d && typeof d.to !== 'undefined'));
+T.ok(bBound > 0, '找得到嵌套块里 b 绑定的那一步');
+const nbCur = D.create(nt); D.goto(nbCur, bBound);
+T.eq(D.locals(nbCur).b, 6, '嵌套块的 b 落在 g 的帧里');
+T.ok(typeof D.locals(nbCur).t === 'undefined', 'g 的帧里没有全局的 t');
+const nEnd = D.create(nt); D.goto(nEnd, nt.length - 1);
+T.ok(typeof D.locals(nEnd).b === 'undefined', 'b 没有渗漏进全局帧');
+T.eq(D.locals(nEnd).t, 1, '全局帧里的 t 仍是 1');
+
+// ---- ⑭ 截断轨迹：帧可能永远没有匹配的出帧步 ----
+/* trace.truncated 是设计内的场景（STEP_LIMIT），不是异常。此时 owned 退化成
+   只有入帧 delta，六个函数照常工作、不抛。 */
+const TRUNC = ['function fact(n) {', '  if (n <= 1) { return 1; }',
+               '  return n * fact(n - 1);', '}', 'return fact(6);'].join('\n');
+const tt = I.run(TRUNC, { host: {}, limit: 8 }).trace;
+T.eq(tt.truncated, true, '前提：limit=8 真的截断了这条轨迹');
+T.eq(tt.length, 8, '前提：截断后的轨迹长度就是 limit');
+T.ok(tt.some(s => s.frameOp === 'push') && !tt.some(s => s.frameOp === 'pop'),
+     '前提：截断轨迹里有入帧步、一个出帧步都没有（帧永远开着）');
+const tCur = D.create(tt); D.goto(tCur, tt.length - 1);
+let truncThrew = false, truncLocals;
+try { truncLocals = D.locals(tCur); } catch (e) { truncThrew = true; }
+T.ok(!truncThrew, '没有匹配出帧步时 locals 不抛');
+T.eq(truncLocals.n, 3, '入帧 delta 单独就够认领形参：最内层帧 n === 3');
+T.eq(D.callStack(tCur).length, tt[tt.length - 1].depth, '截断轨迹上栈深不变量依然成立');
+
+// ---- ⑮ 名为 __proto__ 的变量不能被悄悄吞掉 ----
+/* 解释器接受 `let __proto__ = 1;` 并照常发出 delta；用 {} 字面量当变量表
+   会让它写进原型而不是自有属性，Object.keys 拿不到 —— 面板上那一行凭空消失。
+   所有 per-frame 的映射都必须是 Object.create(null)。 */
+const PROTO = 'let __proto__ = 1;\nfunction h(__proto__) { return __proto__; }\nconst w = h(7);\nreturn 0;';
+const prt = I.run(PROTO, { host: {} }).trace;
+const prCur = D.create(prt); D.goto(prCur, 0);
+T.eq(Object.keys(D.locals(prCur)).indexOf('__proto__') >= 0, true,
+     '名为 __proto__ 的全局变量出现在 Object.keys 里');
+T.eq(D.locals(prCur).__proto__, 1, '并且读得到它的值 1');
+const prPush = prt.findIndex(s => s.frameOp === 'push');
+const prPushCur = D.create(prCur.trace); D.goto(prPushCur, prPush);
+T.eq(D.locals(prPushCur).__proto__, 7, 'h 帧里名为 __proto__ 的形参也照常分帧（7，不是全局的 1）');
 
 // ---- 六个派生函数在空轨迹上也不能抛 ----
 /* 与上面 checkEmptySafe 同样的循环写法：清空编辑器缓冲区是阶段 5 验收
