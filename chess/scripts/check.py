@@ -113,6 +113,14 @@ def core_tests() -> int:
     """
     rc = 0
     tests = sorted((ROOT / 'core').rglob('*.test.js')) + sorted((ROOT / 'games').rglob('*.test.js'))
+    # 一个测试都没找到必须是失败，不是通过。空列表下这个循环一次都不转、
+    # rc 保持 0，这道门就会"因为什么都没找到"而通过——正是上面那个
+    # glob 洞的同一类错误，只是低一层：那次是漏掉一部分，这次是漏掉全部
+    # （目录改名、脚本被挪走、rglob 手滑写错，都会走到这里）。
+    if not tests:
+        print('ERROR: core/ 与 games/ 下一个 *.test.js 都没找到 —— '
+              '这道门本该跑测试，不是跑了个寂寞', file=sys.stderr)
+        return 1
     for test in tests:
         proc = subprocess.run(['node', str(test)])
         if proc.returncode != 0:

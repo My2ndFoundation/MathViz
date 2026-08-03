@@ -68,4 +68,60 @@ for (const l of onlyInAb) {
   T.ok(/alpha|beta/.test(l), '多出来的每一行都与 alpha/beta 有关：' + l.trim());
 }
 
+// ---- ordered 也必须与 ab 共用同一份源码（两段式，不是一条正则打三家）----
+/* 上面那条 plain↔ab 的 diff 管不到 ordered。少了这一段，一次「给 ordered
+   单独复制一份源码」的重构可以全身而过：onlyInAb 仍是 4，三个 mode 仍然
+   返回同一个值，ordSteps 仍然小于 abSteps —— 而 order tab 从此不再是对比，
+   可它的全部内容就是对比。
+   为什么必须分两段而不是把 ordered 也塞进上面那条正则：排序那几行**压根
+   不含 alpha/beta**（它谈的是 caps/quiet/ms），硬要一条正则同时管住三个
+   mode，只能靠往排序代码里塞 alpha/beta 字样去迁就断言 —— 那是为了断言
+   去污染源码，正好是不该做的事。
+   于是：第一段查「有没有丢东西」（ordered ⊇ ab，逐行），第二段查「多出来
+   的是不是只有排序那一块」（数量、位置连成一片、且只谈 caps/quiet/ms）。 */
+const ordLines = A.source({ mode: 'ordered', depth: 3 }).split('\n');
+
+// 第一段：ordered 必须逐行包含 ab 的全部内容 —— 这条才是防「另写一份」的那道锁。
+const missingFromOrd = abLines.filter(function (l) { return ordLines.indexOf(l) === -1; });
+T.eq(missingFromOrd, [], 'ordered 没有丢掉 α-β 的任何一行 —— 它是在 α-β 之上加排序，不是另写一份');
+
+// 第二段：ordered 比 ab 多出来的，必须只有排序那一块。
+const ordOnly = ordLines.filter(function (l) { return abLines.indexOf(l) === -1; });
+T.ok(ordOnly.length > 0, 'ordered 确实多出了排序那几行');
+T.ok(ordOnly.length <= 14, 'ordered 只比 α-β 多出不超过 14 行（实际多出：' +
+     ordOnly.length + ' 行）');
+
+/* 多出来的行必须**挤在一起**。散落各处 = 源码被整份改写过；连成一片 =
+   只插入了一块。窗口按行号算而不要求严格连续，因为块里的 `  }` 这类行
+   在 ab 里本来就有，会被 filter 漏掉，在窗口中间留个洞。 */
+const ordOnlyIdx = [];
+ordLines.forEach(function (l, i) { if (abLines.indexOf(l) === -1) { ordOnlyIdx.push(i); } });
+const span = ordOnlyIdx[ordOnlyIdx.length - 1] - ordOnlyIdx[0] + 1;
+T.ok(span <= 14, '多出来的行连成一片（跨 ' + span + ' 行，不超过 14）—— 不是散落在整份源码里');
+
+/* 而且这一块只能在谈排序。判据：要么是注释（整块的说明文字），要么这行
+   代码只碰排序用的那几个名字 —— caps / quiet / ms 两个桶和被分桶的走法
+   q / qt。碰到 bd、best、depth、search 之类就说明多出来的不只是排序。 */
+const SORTING_NAMES = /caps|quiet|\bms\b|\bq\b|\bqt\b/;
+for (const l of ordOnly) {
+  const code = l.replace(/\/\/.*$/, '').trim();          // 去掉行尾注释
+  const isCommentOnly = code === '' || code.indexOf('/*') === 0 || !/[;{}=]/.test(code);
+  T.ok(isCommentOnly || SORTING_NAMES.test(code),
+       '多出来的每一行都只在谈排序（caps/quiet/ms/q）：' + l.trim());
+}
+
+// ---- 钉住公布出去的那几个值（不是步数）----
+/* 王的分值那个 bug 能活下来，正是因为这几个参考值没有任何守卫：VAL 错开
+   一格，深度 3 静默地从 136 变成 112，测试全绿。
+   钉**值**不钉**步数**：值是这个算法的意思，不许无声漂移；步数是它的代价，
+   本来就该在使用者改动源码时改变（规格 §2.8 就指望她去改）。 */
+const EXPECTED = { 1: 124, 2: 0, 3: 136 };
+for (const depth of [1, 2, 3]) {
+  const r = I.run(A.source({ mode: 'plain', depth: depth }), { host: {} });
+  T.eq(r.result, EXPECTED[depth], 'depth ' + depth + ' 的极小极大值是公布的那个：' + EXPECTED[depth]);
+}
+/* 深度 4 只能拿 α-β 问 —— plain 在这一格撞墙、返回 undefined，
+   而那正是这一课本身（上面已经断言过 truncated）。 */
+T.eq(survive.result, -12, 'depth 4 的极小极大值是公布的 −12（问 α-β，因为 plain 在这一格跑不完）');
+
 T.report();
