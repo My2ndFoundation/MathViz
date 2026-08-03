@@ -182,6 +182,27 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 .gtags{font-family:var(--font-mono);font-size:9.5px;color:rgba(159,176,200,.55);text-align:right;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
+/* 卡片的展开态（story 全文）。卡片本身（除 .gLoadBtn 外）点击切换展开/收起——
+   载入这一局收进 .gLoadBtn 这个明确按钮，两件事不再共用同一次点击（规格
+   §5）。展开时占满整行（grid-column:1/-1），但 .gStory p 自己的 max-width
+   仍按舒适阅读的量把住——不能因为卡片变宽了，段落就跟着横跨整个浮层。 */
+.gcard{position:relative}
+.gcard:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.gcard.expanded{grid-column:1 / -1;background:rgba(30,41,59,.7);border-color:rgba(45,212,234,.4)}
+.gActions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:2px}
+.gStoryCue{font-size:10.5px;color:rgba(159,176,200,.6);letter-spacing:.02em}
+.gcard:hover .gStoryCue{color:#9fb0c8}
+.gcard.expanded .gStoryCue{color:#7dd3fc}
+.gLoadBtn{padding:4px 10px;border-radius:7px;border:1px solid rgba(148,163,184,.28);
+  background:rgba(45,212,234,.10);color:#9be8f7;font-size:10.5px;font-family:var(--font-cn);
+  cursor:pointer;white-space:nowrap;transition:border-color .15s,background .15s}
+.gLoadBtn:hover{border-color:rgba(45,212,234,.75);background:rgba(45,212,234,.2)}
+.gLoadBtn:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.gStory{display:none;margin-top:9px;padding-top:9px;border-top:1px solid var(--panel-line)}
+.gcard.expanded .gStory{display:block}
+.gStory p{margin:0 0 9px;max-width:60ch;font-size:12px;line-height:1.7;color:#c6d2e4}
+.gStory p:last-child{margin-bottom:0}
+
 /* 读数与提示 */
 .readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
   font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
@@ -5167,17 +5188,59 @@ function diffDots(n) {
   for (var i = 1; i <= 3; i++) s += '<span class="gdiff-dot' + (i <= n ? ' on' : '') + '"></span>';
   return s;
 }
+/* g.story 双语背景故事（规格 §6.1）——卡片默认只显示一行 g.why，story 全文
+   要点开才看得到。段落间是 '\n\n'，按它切成 <p>，不能整段糊成一坨。
+   escapeHtml 只防 & < >：当前 30 局的 story 正文里没有这三个字符（已用
+   node 逐条扫过），但既然是拼 innerHTML，防一手总比信任数据源便宜。 */
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function storyParasHTML(g) {
+  var raw = E.t(g.story);
+  if (!raw) return '';
+  return raw.split(/\n\n+/).map(function (p) { return p.trim(); }).filter(Boolean)
+    .map(function (p) { return '<p>' + escapeHtml(p) + '</p>'; }).join('');
+}
+var STR_READ_STORY = { en: '▾ Read the story', zh: '▾ 阅读背景故事' };
+var STR_HIDE_STORY = { en: '▴ Hide story', zh: '▴ 收起故事' };
 function gameCardHTML(g, num) {
   var h = GM.headersOf(g);
   var search = ((h.White || '') + ' ' + (h.Black || '') + ' ' + (h.Event || '') + ' ' + g.tags.join(' '))
     .toLowerCase().replace(/"/g, '');
-  return '<div class="gcard" data-id="' + g.id + '" data-search="' + search + '">' +
+  return '<div class="gcard" data-id="' + g.id + '" data-search="' + search + '" role="button" tabindex="0" aria-expanded="false">' +
     (num ? '<div class="gnum">' + num + '</div>' : '') +
     '<div class="gnames">' + (h.White || '?') + ' – ' + (h.Black || '?') + '</div>' +
     '<div class="gmeta">' + (h.Event || '?') + ', ' + (h.Date || '????.??.??') + '</div>' +
     '<div class="gwhy">' + E.t(g.why) + '</div>' +
     '<div class="gfoot"><span class="gdiff">' + diffDots(g.difficulty) + '</span>' +
-    '<span class="gtags">' + g.tags.join(' · ') + '</span></div></div>';
+    '<span class="gtags">' + g.tags.join(' · ') + '</span></div>' +
+    '<div class="gActions"><span class="gStoryCue">' + E.t(STR_READ_STORY) + '</span>' +
+    '<button class="gLoadBtn" type="button">' + E.t({ en: 'Load this game ▸', zh: '载入这局 ▸' }) + '</button></div>' +
+    '<div class="gStory">' + storyParasHTML(g) + '</div></div>';
+}
+/* 展开态一次只允许一张（否则滚动位置乱），点卡片本身（除 .gLoadBtn、
+   .gStory 内部——留出选中/复制文字的空间）切换；载入这一局是卡片上一个
+   独立、文字写明的按钮，两件事不再共用同一次点击。 */
+function collapseStoryCard(card) {
+  card.classList.remove('expanded');
+  card.setAttribute('aria-expanded', 'false');
+  var cue = card.querySelector('.gStoryCue');
+  if (cue) cue.textContent = E.t(STR_READ_STORY);
+}
+function expandStoryCard(card) {
+  card.classList.add('expanded');
+  card.setAttribute('aria-expanded', 'true');
+  var cue = card.querySelector('.gStoryCue');
+  if (cue) cue.textContent = E.t(STR_HIDE_STORY);
+}
+function toggleStoryCard(card) {
+  var body = document.getElementById('gbBody');
+  var wasExpanded = card.classList.contains('expanded');
+  var opened = body.querySelectorAll('.gcard.expanded');
+  for (var i = 0; i < opened.length; i++) {
+    if (opened[i] !== card) collapseStoryCard(opened[i]);
+  }
+  if (wasExpanded) collapseStoryCard(card); else expandStoryCard(card);
 }
 function renderGameBrowserBody() {
   var body = document.getElementById('gbBody');
@@ -5197,7 +5260,23 @@ function renderGameBrowserBody() {
   var cards = body.querySelectorAll('.gcard');
   for (var i = 0; i < cards.length; i++) {
     (function (card) {
-      card.addEventListener('click', function () { loadGame(card.dataset.id); closeGameBrowser(); });
+      var loadBtn = card.querySelector('.gLoadBtn');
+      if (loadBtn) {
+        loadBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          loadGame(card.dataset.id);
+          closeGameBrowser();
+        });
+      }
+      card.addEventListener('click', function (e) {
+        if (e.target.closest('.gLoadBtn')) return;
+        if (e.target.closest('.gStory')) return;
+        toggleStoryCard(card);
+      });
+      card.addEventListener('keydown', function (e) {
+        if (e.target !== card) return;
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleStoryCard(card); }
+      });
     })(cards[i]);
   }
   applyGameFilter();
