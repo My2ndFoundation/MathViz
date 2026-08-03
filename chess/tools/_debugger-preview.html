@@ -3648,6 +3648,12 @@ return k.square;
      不会有任何测试大声失败——除了 interp.test.js 的「任务 4.5 ②(b)」：
      它扫源码，钉住"所有 hoist*(…) 调用点都在 blockPrologue 内部"。
 
+     **那道守卫认的是名字，不是语义：它的正则是 /\bhoist[A-Za-z]*\s*\(/。**
+     所以新加的前置扫描**必须叫 hoistXxx**。取个别的名字（predeclareClasses、
+     prescanLabels 之类）再只挂到两套语句循环中的一套上，守卫一声不吭，
+     行为对拍（a）也只在恰好观察得到的程序上才红——正好复刻 3a 那次 TDZ 缺口
+     的漏法。要么按 hoist* 命名，要么同时把 interp.test.js 里那条正则改宽。
+
      两次扫描的先后不影响可观察行为：hoistLexicalDecls 只在名字**还不存在
      于当前层**时才占 TDZ 位，hoistFunctionDecls 的 declareVar 允许覆盖一个
      TDZ 占位。`let f = 1; function f(){}` 这类同层重复声明，无论哪个先跑，
@@ -4089,7 +4095,19 @@ return k.square;
      之后**，而 owned 正需要那一条。
      -1（没有匹配的出帧步）是**设计内**的情形，不是异常：撞上 STEP_LIMIT
      的轨迹（trace.truncated）会把帧永远留在开着的状态。此时 owned 退化成
-     只有入帧 delta，函数照常返回，不抛。 */
+     只有入帧 delta，函数照常返回，不抛。
+
+     **截断轨迹上的复杂度是 O(trace.length)，不是 O(cursor) —— 这是阶段 4 的
+     架构阻塞项，不是随手一提。** 帧永远不关闭 ⇒ `open` 永远不空 ⇒ 上面那条
+     提前收工的分支永远不触发，无论游标停在哪里都要扫完整条轨迹。实测（20 万
+     步的截断轨迹）：i=5000 → 3.46 ms，i=100000 → 8.88 ms，i=199999 → 16.12 ms
+     —— 注意 i=5000 也要 3.46 ms，代价与游标位置无关。五个区各重算一次就越过
+     本仓 4 ms 的每帧绘制预算，临界点约在 2 万步。
+     3b **故意不修**：修法是在本模块里挂一份缓存，而那要么引入模块级可变状态、
+     要么把缓存塞进 cur —— 两条都会毁掉这个文件"纯逻辑、零 DOM、可反复调用
+     无副作用"的性质，而约 4100 条 node 断言正建立在这条性质上。阶段 4 真要用
+     20 万步轨迹时，缓存应当加在**调用方**（mount 里已有的 cache 那一层），
+     不要加在这里。 */
   function matchFrames(trace, upto) {
     const popOf = {}, open = [];
     for (let k = 0; k < trace.length; k++) {
@@ -4177,6 +4195,14 @@ return k.square;
      （面板看起来一切正常，值却属于别人）；返回空让「没有这一帧」当场看得见。
      负数同理。
 
+     **非整数、非有限、非数字的 depth 同样返回空对象，判定必须排在 `| 0` 之前。**
+     `| 0` 会把 NaN / undefined 之外的一切垃圾悄悄折成 0 —— NaN|0 === 0、
+     'x'|0 === 0、Infinity|0 === 0 —— 于是「算错的 depth」不是报错，而是
+     **稳稳地显示全局帧**：面板上一排变量看着都对，却是别人的。这正是上面那段
+     话要防的事，只是入口换了一个。2.5 这类小数也一并挡掉（2.5|0 === 2 会显示
+     第 2 帧），理由同上：不存在的帧就该看得见地为空，不该被折到相邻那一帧。
+     省略 / null / undefined 仍然走上面那条「当前最内层帧」的路，不受这里影响。
+
      **调用方注意：返回的是无原型对象（Object.create(null)），不是普通对象。**
      这不是随手写的，是必需的：学习者完全可以写 `let __proto__ = 1;`，普通对象
      字面量会把这个名字写进原型而不是自有属性，Object.keys 拿不到，面板上那一行
@@ -4221,6 +4247,10 @@ return k.square;
        stack.length === callStack(cur).length + 1 在每个下标上都成立，
        depth 参数因此可以直接当下标用。 */
     if (depth === undefined || depth === null) return stack[stack.length - 1].vars;
+    // ↓ 这三个判定必须留在 `| 0` 之前，见上面注释里那段「稳稳地显示全局帧」。
+    if (typeof depth !== 'number' || !isFinite(depth) || Math.floor(depth) !== depth) {
+      return Object.create(null);
+    }
     const d = depth | 0;
     if (d < 0 || d >= stack.length) return Object.create(null);
     return stack[d].vars;
@@ -4967,7 +4997,20 @@ return k.square;
          当前值（下一步于是少闪一片）并清掉选中的调用栈帧。**只在你自己刚刚
          移动过 cur.i 之后调它。**
          resize / 重新布局 / 面板重新可见之后要重画，调 redraw() —— 名字最像
-         "重画一下"的这个方法恰恰是唯一会改状态的那个，所以另外给了一个。 */
+         "重画一下"的这个方法恰恰是唯一会改状态的那个，所以另外给了一个。
+
+         ⚠⚠ **同名陷阱：Editor 的句柄上也有一个 refresh()，语义完全不同** ——
+         那一个是纯重绘（renderHighlight + renderGutter + refreshMarkers +
+         syncScroll，见 chess/core/editor.js 的句柄导出），没有任何状态推进，
+         对应的正是这里的 redraw()。阶段 4/5 的工具会同时握着这两个句柄，
+         一个照着直觉写的 resize 处理器
+             window.addEventListener('resize', function () { ed.refresh(); dbg.refresh(); });
+         对编辑器是对的，对调试器是**静默地推进琥珀色基线并清掉选中帧**：
+         窗口一改大小，「这一步刚变的变量」就少闪一片，而面板看不出任何异常。
+         正确写法是 `ed.refresh(); dbg.redraw();`。
+         3b 末期不改名（两个句柄各自的调用点都已稳定，此刻重命名的风险大于
+         收益），改用这条交叉引用把陷阱钉在两边都读得到的地方；真要统一，
+         应当在阶段 4 一次性把 Editor 的 refresh 也改叫 redraw。 */
       refresh: refresh,
       redraw: redraw,
       relabel: relabel,
@@ -5020,11 +5063,34 @@ return k.square;
       得自己在 tokenize 内部埋一份「已产出 token」的钩子，这已经超出
       本任务「只用 tokenize，不重写词法逻辑」的范围。代价很直白：一个
       引号没有闭合期间，整份文档都会短暂失去颜色，直到使用者把它闭合。 */
+/* **Interp 是惰性取的，工厂里不抓 root.Interp。** 这一行看着比 `factory(root.Interp)`
+   啰嗦，理由是内联脚本：chess/scripts/inline_core.py 按标记块**就地替换**，它既不
+   保证也不检查块与块之间的先后。今天 tools/*.html 里恰好是 INTERP 排在 EDITOR
+   前面，明天一个新工具把 EDITOR 的标记写在上面，`factory(root.Interp)` 当场抓到
+   undefined，而症状要等使用者敲第一个键才出现，现场离真正的原因（HTML 里两个
+   标记的顺序）隔着一整个文件。Debugger 没有任何跨模块依赖，所以这条不对称不把
+   两个模块和内联脚本摆在一起看根本发现不了。取值推迟到用的时候，顺序就不再重要。 */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./interp.js'));
-  else root.Editor = factory(root.Interp);
-})(typeof self !== 'undefined' ? self : this, function (Interp) {
+  if (typeof module === 'object' && module.exports) {
+    module.exports = factory(function () { return require('./interp.js'); });
+  } else {
+    root.Editor = factory(function () { return root.Interp; });
+  }
+})(typeof self !== 'undefined' ? self : this, function (getInterp) {
   'use strict';
+
+  /* 取 Interp 并当场校验。**这个调用必须留在各自的 try 之外**：highlight /
+     check / bracketList 里的 try 是「源码打到一半暂时不合法就降级」用的，
+     把"依赖压根没装载"也吞进那条降级路径，结果是整篇永远没有颜色、语法检查
+     永远返回 null（Run 永远可点）——一种安静的坏。这里宁可响亮地抛。 */
+  function interp() {
+    const I = getInterp();
+    if (!I || typeof I.tokenize !== 'function' || typeof I.parse !== 'function') {
+      throw new Error('Editor needs Interp (chess/core/interp.js) loaded first: ' +
+                      'the INTERP inline block must come before the EDITOR one.');
+    }
+    return I;
+  }
 
   // token.type -> 片段的 cls。跟规格里列的八个值一一对应，plain 不是
   // token 类型，是「两个 token 之间的空白」专用的类别。
@@ -5034,9 +5100,10 @@ return k.square;
   };
 
   function highlight(src) {
+    const I = interp();                  // ← 故意在 try 之外，见 interp() 的注释
     let tokens;
     try {
-      tokens = Interp.tokenize(src);
+      tokens = I.tokenize(src);
     } catch (e) {
       // 降级路径，见文件头注释。空源码不会走到这里（tokenize('') 不抛），
       // 但非空源码抛错时，整篇当纯文本，只要非空就产出一个 plain 片段。
@@ -5086,12 +5153,33 @@ return k.square;
 
      message 原样透传，不包一层 {zh, en}、也不做任何翻译——它是从
      interp.js 产生的，编辑器要逐字显示这句话，在这里发明一层双语会让
-     措辞跟解释器本身的表述分叉。 */
+     措辞跟解释器本身的表述分叉。
+
+     **catch 接住的不一定是解析错。** 这个 try 罩着的是 Interp.parse 的整个
+     调用，parse 内部自己的 bug（TypeError: Cannot read properties of
+     undefined…）同样会落进来，而它**没有** line / col / category。照原样往
+     下走的后果是：index 算成 NaN、category 是 undefined、V8 自己的报错文案
+     被摆进编辑器的「语法错误」槽里，学习者读到的是"你第 NaN 行写错了"。
+     一条她无法理解、也无法修的错误被说成是她写错了——正是本阶段最不能出的
+     那种谎话（她只会得出"我没看懂"的结论）。
+     所以：**只有带 line 的错才当解析错处理**，其余归到 category:'internal'，
+     line/col/index 一律 null（DOM 层据此不画波浪线、不点红点——错不在某一行
+     上，指哪一行都是编的），message 仍旧原样透传给调用方，由它去配一句
+     「这是编辑器内部出错，不是你的代码的问题」的双语措辞（见 category 那段：
+     分类是机器读的字段，措辞是调用方的事）。
+     注意 Run 照旧被禁用（返回值是真值）——内部出错时不该假装可以运行。 */
   function check(src) {
+    const I = interp();                  // ← 故意在 try 之外，见 interp() 的注释
     try {
-      Interp.parse(src);
+      I.parse(src);
       return null;
     } catch (e) {
+      if (!e || typeof e.line !== 'number' || typeof e.col !== 'number') {
+        return {
+          line: null, col: null, index: null, category: 'internal',
+          message: (e && e.message) ? String(e.message) : String(e),
+        };
+      }
       const starts = lineStarts(src);
       const index = starts[e.line - 1] + e.col - 1;
       return { line: e.line, col: e.col, category: e.category, message: e.message, index: index };
@@ -5116,8 +5204,9 @@ return k.square;
   const CLOSERS = { ')': '(', ']': '[', '}': '{' };
 
   function bracketList(src) {
+    const I = interp();                  // ← 故意在 try 之外，见 interp() 的注释
     let toks;
-    try { toks = Interp.tokenize(src); } catch (e) { return null; }
+    try { toks = I.tokenize(src); } catch (e) { return null; }
     const out = [];
     for (let k = 0; k < toks.length; k++) {
       const tk = toks[k];
@@ -5188,8 +5277,14 @@ return k.square;
      padding 区上，行为一致，所以可以留。 */
 
   const CSS_ID = 'chess-editor-dom-css';
-  /* 行高：与下面 CSS 里的 line-height 是同一个数。行号槽、行条纹、波浪线的
-     定位全靠它把行号换算成像素——改 CSS 就必须同时改这里。 */
+  /* 行高。行号槽、行条纹、波浪线、括号框的定位全靠它把行号换算成像素。
+     **CSS 里所有跟行高有关的数都从这里插值出来，一个字面量都不留**（写法与
+     下面的 PAD_X 一致）。这一条原来写的是"与下面 CSS 里的 line-height 是同一个
+     数……改 CSS 就必须同时改这里"——那是一句靠人记住的约定，而 CSS 里当时躺着
+     七个 18px 字面量。把 CSS 改成 20px、常量留在 18，条纹/波浪线/括号框会顺着
+     文件**越往下偏得越多**（第 40 行差 80px），而整套 node 断言全绿：
+     editor.test.js 只测得到 `LINE_H > 0`，测不到 CSS 字符串里写的是几。
+     插值之后这种漂移写不出来了。 */
   const LINE_H = 18;
   /* 横向起点。**一个常量喂三处**：textarea 的 padding-left、高亮层的
      padding-left、以及 JS 里波浪线/括号框的 left 计算。
@@ -5209,15 +5304,15 @@ return k.square;
     /* ↓↓↓ 两层度量的唯一声明处，见上面的长注释 ↓↓↓ */
     '.ed-ta,.ed-hl,.ed-hl code,.ed-measure{',
     'font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;',
-    'font-size:12.5px;line-height:18px;letter-spacing:0;word-spacing:0;',
+    'font-size:12.5px;line-height:' + LINE_H + 'px;letter-spacing:0;word-spacing:0;',
     'tab-size:2;-moz-tab-size:2;font-variant-ligatures:none;font-kerning:none;',
     'white-space:pre;overflow-wrap:normal;text-rendering:geometricPrecision}',
     /* ↑↑↑ 两层度量的唯一声明处 ↑↑↑ */
     '.ed-gutter{flex:0 0 auto;width:48px;position:relative;overflow:hidden;',
     'background:rgba(6,10,20,.55);border-right:1px solid rgba(148,163,184,.14);user-select:none}',
     '.ed-gutter-inner{position:absolute;left:0;top:0;right:0}',
-    '.ed-ln{position:relative;height:18px;line-height:18px;box-sizing:border-box;',
-    'font:11px/18px ui-monospace,"SF Mono",Menlo,Consolas,monospace;',
+    '.ed-ln{position:relative;height:' + LINE_H + 'px;line-height:' + LINE_H + 'px;box-sizing:border-box;',
+    'font:11px/' + LINE_H + 'px ui-monospace,"SF Mono",Menlo,Consolas,monospace;',
     'color:rgba(159,176,200,.42);text-align:right;padding-right:8px;cursor:pointer}',
     '.ed-ln:hover{color:#bfefff;background:rgba(45,212,234,.07)}',
     '.ed-ln.bp{color:#ffd9e0}',
@@ -5228,14 +5323,14 @@ return k.square;
     '.ed-body{position:relative;flex:1 1 auto;min-width:0}',
     '.ed-lines{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:0}',
     '.ed-lines-inner{position:absolute;left:0;top:0;right:0}',
-    '.ed-stripe{position:absolute;left:0;right:0;height:18px}',
+    '.ed-stripe{position:absolute;left:0;right:0;height:' + LINE_H + 'px}',
     '.ed-stripe.visited{background:rgba(45,212,234,.055)}',
     '.ed-stripe.frame{background:rgba(167,139,250,.14);box-shadow:inset 2px 0 0 #a78bfa}',
     '.ed-stripe.cur{background:rgba(45,212,234,.16);box-shadow:inset 2px 0 0 #2dd4ea}',
-    '.ed-squiggle{position:absolute;height:18px;background-repeat:repeat-x;background-position:left bottom;',
+    '.ed-squiggle{position:absolute;height:' + LINE_H + 'px;background-repeat:repeat-x;background-position:left bottom;',
     'background-size:6px 3px;background-image:' + SQUIGGLE + '}',
     /* 括号配对高亮：两个等宽的框，一个套开括号、一个套闭括号 */
-    '.ed-bracket{position:absolute;height:18px;box-sizing:border-box;',
+    '.ed-bracket{position:absolute;height:' + LINE_H + 'px;box-sizing:border-box;',
     'border:1px solid rgba(45,212,234,.7);border-radius:2px;background:rgba(45,212,234,.12)}',
     '.ed-hl{position:absolute;inset:0;margin:0;padding:' + PAD_L + ';box-sizing:border-box;',
     'overflow:hidden;pointer-events:none;z-index:1;color:#dbe6f5}',
@@ -5455,7 +5550,12 @@ return k.square;
       /* 波浪线与括号框都要按字符宽度定位。量不到宽度（面板此刻不可见）时
          **一个都不画**——画出来必然错位，等下一次可见时的刷新再补。 */
       if ((e || bracket) && ensureCharW() > 0) {
-        if (e) {
+        /* `e.line != null` 这道门是给 check() 的 category:'internal' 留的：
+           解释器自己出 bug 时错不落在源码的任何一行上，line/col/index 全是
+           null，硬画会得到 top/left = NaN 的一条波浪线（浏览器丢掉 NaN，于是
+           它贴在第 1 行）——等于当着学习者的面指着一行没问题的代码说它错了。
+           不画，只留状态行里那句「编辑器内部出错」。 */
+        if (e && e.line != null) {
           const starts = currentStarts();
           const from = e.index;
           const lineEnd = starts[e.line] != null ? starts[e.line] - 1 : ta.value.length;
@@ -5628,6 +5728,11 @@ return k.square;
       onGutterClick: function (fn) { gutterClick = fn; },
       getError: function () { return err; },
       getBracket: function () { return bracket; },
+      /* ⚠ 同名陷阱：这个 refresh() 是**纯重绘**，不动任何状态，对应的是
+         Debugger 句柄上的 redraw()——**不是** Debugger 的 refresh()（那一个会
+         推进琥珀色基线并清掉选中帧）。阶段 4/5 的工具会同时握着两个句柄，
+         `ed.refresh(); dbg.refresh();` 这种照直觉写的 resize 处理器会静默改坏
+         调试器的状态。详见 chess/core/debugger.js 里 refresh 导出上的 ⚠⚠ 注释。 */
       refresh: function () { renderHighlight(); renderGutter(); refreshMarkers(); syncScroll(); },
       destroy: function () {
         if (timer) clearTimeout(timer);
@@ -5675,6 +5780,11 @@ return k.square;
     syntax: { zh: '语法错误', en: 'Syntax error' },
     unsupported: { zh: '不支持的语法', en: 'Unsupported syntax' },
     runtime:{ zh: '运行时错误', en: 'Runtime error' },
+    /* Editor.check() 的 category:'internal' —— 解释器**自己**出了 bug（不带
+       line/col 的 TypeError 之类）。这一句必须明确说「不是你的代码的问题」：
+       把 V8 的措辞摆进「语法错误」槽里，学习者只会得出"我没看懂"的结论。 */
+    internal:{ zh: '编辑器内部出错（不是你的代码的问题）',
+               en: 'Internal editor error (not your code)' },
     atLine: { zh: '第 %L 行', en: 'line %L' },
     legend: {
       try:  { zh: '正在尝试', en: 'trying' },
@@ -5940,6 +6050,12 @@ return k.square;
      Unsupported syntax: class declaration…」这种同一句话说两遍的读数
      （实测抓到的）。syntax / runtime 的 message 没有这层自述，才需要前缀。 */
   function errText(err) {
+    /* internal 没有行号（错不落在源码的任何一行上），所以不套「第 %L 行」——
+       套上去会印出「第 null 行」，而且等于当着她的面指着一行没问题的代码
+       说它错了。措辞也不能落进下面的 syntax 分支。 */
+    if (err.category === 'internal' || err.line == null) {
+      return esc(t(STR.internal) + ': ' + err.message);
+    }
     const head = err.category === 'unsupported' ? ''
                : (err.category === 'runtime' ? t(STR.runtime) : t(STR.syntax)) + ' · ';
     return esc(head + t(STR.atLine).replace('%L', err.line) + ': ' + err.message);
@@ -5982,9 +6098,19 @@ return k.square;
   function loadSample(s) {
     curSample = s;
     lastRun = null;
+    /* **statusKind 必须在 setValue 之前归位。** setValue() 会**同步**触发一次
+       onChange：加载「故意写坏的」样例时那一下把 statusKind 设成 'bad' 并画出
+       错误行；写在 setValue 之后就把它又抹回 'idle'，而下面那行 `if
+       (!ed.getError())` 恰好因为有错而跳过重绘 —— 状态行显示的是错误、
+       statusKind 记的却是 idle。症状要到切一次语言才现形：relabel() 按
+       statusKind 走 else 分支，把红色的错误消息换成中性的「改一改代码」，
+       而 Run 仍然禁用、红波浪线仍然在屏幕上（实测抓到的）。
+       归位放在前面之后：坏样例 → onChange 置 'bad' 并画错误，这里不再覆盖；
+       好样例 → onChange 因 statusKind 已不是 'bad' 而不动，由下面这行画
+       「改一改代码」。两条路都自洽。 */
+    statusKind = 'idle';
     ed.setValue(sampleSrc(s));
     dbg.setCursor(D.create([]));
-    statusKind = 'idle';
     if (!ed.getError()) setStatus(t(STR.ready), '');
     refreshSampleButtons();
   }

@@ -23,11 +23,34 @@
       得自己在 tokenize 内部埋一份「已产出 token」的钩子，这已经超出
       本任务「只用 tokenize，不重写词法逻辑」的范围。代价很直白：一个
       引号没有闭合期间，整份文档都会短暂失去颜色，直到使用者把它闭合。 */
+/* **Interp 是惰性取的，工厂里不抓 root.Interp。** 这一行看着比 `factory(root.Interp)`
+   啰嗦，理由是内联脚本：chess/scripts/inline_core.py 按标记块**就地替换**，它既不
+   保证也不检查块与块之间的先后。今天 tools/*.html 里恰好是 INTERP 排在 EDITOR
+   前面，明天一个新工具把 EDITOR 的标记写在上面，`factory(root.Interp)` 当场抓到
+   undefined，而症状要等使用者敲第一个键才出现，现场离真正的原因（HTML 里两个
+   标记的顺序）隔着一整个文件。Debugger 没有任何跨模块依赖，所以这条不对称不把
+   两个模块和内联脚本摆在一起看根本发现不了。取值推迟到用的时候，顺序就不再重要。 */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./interp.js'));
-  else root.Editor = factory(root.Interp);
-})(typeof self !== 'undefined' ? self : this, function (Interp) {
+  if (typeof module === 'object' && module.exports) {
+    module.exports = factory(function () { return require('./interp.js'); });
+  } else {
+    root.Editor = factory(function () { return root.Interp; });
+  }
+})(typeof self !== 'undefined' ? self : this, function (getInterp) {
   'use strict';
+
+  /* 取 Interp 并当场校验。**这个调用必须留在各自的 try 之外**：highlight /
+     check / bracketList 里的 try 是「源码打到一半暂时不合法就降级」用的，
+     把"依赖压根没装载"也吞进那条降级路径，结果是整篇永远没有颜色、语法检查
+     永远返回 null（Run 永远可点）——一种安静的坏。这里宁可响亮地抛。 */
+  function interp() {
+    const I = getInterp();
+    if (!I || typeof I.tokenize !== 'function' || typeof I.parse !== 'function') {
+      throw new Error('Editor needs Interp (chess/core/interp.js) loaded first: ' +
+                      'the INTERP inline block must come before the EDITOR one.');
+    }
+    return I;
+  }
 
   // token.type -> 片段的 cls。跟规格里列的八个值一一对应，plain 不是
   // token 类型，是「两个 token 之间的空白」专用的类别。
@@ -37,9 +60,10 @@
   };
 
   function highlight(src) {
+    const I = interp();                  // ← 故意在 try 之外，见 interp() 的注释
     let tokens;
     try {
-      tokens = Interp.tokenize(src);
+      tokens = I.tokenize(src);
     } catch (e) {
       // 降级路径，见文件头注释。空源码不会走到这里（tokenize('') 不抛），
       // 但非空源码抛错时，整篇当纯文本，只要非空就产出一个 plain 片段。
@@ -89,12 +113,33 @@
 
      message 原样透传，不包一层 {zh, en}、也不做任何翻译——它是从
      interp.js 产生的，编辑器要逐字显示这句话，在这里发明一层双语会让
-     措辞跟解释器本身的表述分叉。 */
+     措辞跟解释器本身的表述分叉。
+
+     **catch 接住的不一定是解析错。** 这个 try 罩着的是 Interp.parse 的整个
+     调用，parse 内部自己的 bug（TypeError: Cannot read properties of
+     undefined…）同样会落进来，而它**没有** line / col / category。照原样往
+     下走的后果是：index 算成 NaN、category 是 undefined、V8 自己的报错文案
+     被摆进编辑器的「语法错误」槽里，学习者读到的是"你第 NaN 行写错了"。
+     一条她无法理解、也无法修的错误被说成是她写错了——正是本阶段最不能出的
+     那种谎话（她只会得出"我没看懂"的结论）。
+     所以：**只有带 line 的错才当解析错处理**，其余归到 category:'internal'，
+     line/col/index 一律 null（DOM 层据此不画波浪线、不点红点——错不在某一行
+     上，指哪一行都是编的），message 仍旧原样透传给调用方，由它去配一句
+     「这是编辑器内部出错，不是你的代码的问题」的双语措辞（见 category 那段：
+     分类是机器读的字段，措辞是调用方的事）。
+     注意 Run 照旧被禁用（返回值是真值）——内部出错时不该假装可以运行。 */
   function check(src) {
+    const I = interp();                  // ← 故意在 try 之外，见 interp() 的注释
     try {
-      Interp.parse(src);
+      I.parse(src);
       return null;
     } catch (e) {
+      if (!e || typeof e.line !== 'number' || typeof e.col !== 'number') {
+        return {
+          line: null, col: null, index: null, category: 'internal',
+          message: (e && e.message) ? String(e.message) : String(e),
+        };
+      }
       const starts = lineStarts(src);
       const index = starts[e.line - 1] + e.col - 1;
       return { line: e.line, col: e.col, category: e.category, message: e.message, index: index };
@@ -119,8 +164,9 @@
   const CLOSERS = { ')': '(', ']': '[', '}': '{' };
 
   function bracketList(src) {
+    const I = interp();                  // ← 故意在 try 之外，见 interp() 的注释
     let toks;
-    try { toks = Interp.tokenize(src); } catch (e) { return null; }
+    try { toks = I.tokenize(src); } catch (e) { return null; }
     const out = [];
     for (let k = 0; k < toks.length; k++) {
       const tk = toks[k];
@@ -191,8 +237,14 @@
      padding 区上，行为一致，所以可以留。 */
 
   const CSS_ID = 'chess-editor-dom-css';
-  /* 行高：与下面 CSS 里的 line-height 是同一个数。行号槽、行条纹、波浪线的
-     定位全靠它把行号换算成像素——改 CSS 就必须同时改这里。 */
+  /* 行高。行号槽、行条纹、波浪线、括号框的定位全靠它把行号换算成像素。
+     **CSS 里所有跟行高有关的数都从这里插值出来，一个字面量都不留**（写法与
+     下面的 PAD_X 一致）。这一条原来写的是"与下面 CSS 里的 line-height 是同一个
+     数……改 CSS 就必须同时改这里"——那是一句靠人记住的约定，而 CSS 里当时躺着
+     七个 18px 字面量。把 CSS 改成 20px、常量留在 18，条纹/波浪线/括号框会顺着
+     文件**越往下偏得越多**（第 40 行差 80px），而整套 node 断言全绿：
+     editor.test.js 只测得到 `LINE_H > 0`，测不到 CSS 字符串里写的是几。
+     插值之后这种漂移写不出来了。 */
   const LINE_H = 18;
   /* 横向起点。**一个常量喂三处**：textarea 的 padding-left、高亮层的
      padding-left、以及 JS 里波浪线/括号框的 left 计算。
@@ -212,15 +264,15 @@
     /* ↓↓↓ 两层度量的唯一声明处，见上面的长注释 ↓↓↓ */
     '.ed-ta,.ed-hl,.ed-hl code,.ed-measure{',
     'font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;',
-    'font-size:12.5px;line-height:18px;letter-spacing:0;word-spacing:0;',
+    'font-size:12.5px;line-height:' + LINE_H + 'px;letter-spacing:0;word-spacing:0;',
     'tab-size:2;-moz-tab-size:2;font-variant-ligatures:none;font-kerning:none;',
     'white-space:pre;overflow-wrap:normal;text-rendering:geometricPrecision}',
     /* ↑↑↑ 两层度量的唯一声明处 ↑↑↑ */
     '.ed-gutter{flex:0 0 auto;width:48px;position:relative;overflow:hidden;',
     'background:rgba(6,10,20,.55);border-right:1px solid rgba(148,163,184,.14);user-select:none}',
     '.ed-gutter-inner{position:absolute;left:0;top:0;right:0}',
-    '.ed-ln{position:relative;height:18px;line-height:18px;box-sizing:border-box;',
-    'font:11px/18px ui-monospace,"SF Mono",Menlo,Consolas,monospace;',
+    '.ed-ln{position:relative;height:' + LINE_H + 'px;line-height:' + LINE_H + 'px;box-sizing:border-box;',
+    'font:11px/' + LINE_H + 'px ui-monospace,"SF Mono",Menlo,Consolas,monospace;',
     'color:rgba(159,176,200,.42);text-align:right;padding-right:8px;cursor:pointer}',
     '.ed-ln:hover{color:#bfefff;background:rgba(45,212,234,.07)}',
     '.ed-ln.bp{color:#ffd9e0}',
@@ -231,14 +283,14 @@
     '.ed-body{position:relative;flex:1 1 auto;min-width:0}',
     '.ed-lines{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:0}',
     '.ed-lines-inner{position:absolute;left:0;top:0;right:0}',
-    '.ed-stripe{position:absolute;left:0;right:0;height:18px}',
+    '.ed-stripe{position:absolute;left:0;right:0;height:' + LINE_H + 'px}',
     '.ed-stripe.visited{background:rgba(45,212,234,.055)}',
     '.ed-stripe.frame{background:rgba(167,139,250,.14);box-shadow:inset 2px 0 0 #a78bfa}',
     '.ed-stripe.cur{background:rgba(45,212,234,.16);box-shadow:inset 2px 0 0 #2dd4ea}',
-    '.ed-squiggle{position:absolute;height:18px;background-repeat:repeat-x;background-position:left bottom;',
+    '.ed-squiggle{position:absolute;height:' + LINE_H + 'px;background-repeat:repeat-x;background-position:left bottom;',
     'background-size:6px 3px;background-image:' + SQUIGGLE + '}',
     /* 括号配对高亮：两个等宽的框，一个套开括号、一个套闭括号 */
-    '.ed-bracket{position:absolute;height:18px;box-sizing:border-box;',
+    '.ed-bracket{position:absolute;height:' + LINE_H + 'px;box-sizing:border-box;',
     'border:1px solid rgba(45,212,234,.7);border-radius:2px;background:rgba(45,212,234,.12)}',
     '.ed-hl{position:absolute;inset:0;margin:0;padding:' + PAD_L + ';box-sizing:border-box;',
     'overflow:hidden;pointer-events:none;z-index:1;color:#dbe6f5}',
@@ -458,7 +510,12 @@
       /* 波浪线与括号框都要按字符宽度定位。量不到宽度（面板此刻不可见）时
          **一个都不画**——画出来必然错位，等下一次可见时的刷新再补。 */
       if ((e || bracket) && ensureCharW() > 0) {
-        if (e) {
+        /* `e.line != null` 这道门是给 check() 的 category:'internal' 留的：
+           解释器自己出 bug 时错不落在源码的任何一行上，line/col/index 全是
+           null，硬画会得到 top/left = NaN 的一条波浪线（浏览器丢掉 NaN，于是
+           它贴在第 1 行）——等于当着学习者的面指着一行没问题的代码说它错了。
+           不画，只留状态行里那句「编辑器内部出错」。 */
+        if (e && e.line != null) {
           const starts = currentStarts();
           const from = e.index;
           const lineEnd = starts[e.line] != null ? starts[e.line] - 1 : ta.value.length;
@@ -631,6 +688,11 @@
       onGutterClick: function (fn) { gutterClick = fn; },
       getError: function () { return err; },
       getBracket: function () { return bracket; },
+      /* ⚠ 同名陷阱：这个 refresh() 是**纯重绘**，不动任何状态，对应的是
+         Debugger 句柄上的 redraw()——**不是** Debugger 的 refresh()（那一个会
+         推进琥珀色基线并清掉选中帧）。阶段 4/5 的工具会同时握着两个句柄，
+         `ed.refresh(); dbg.refresh();` 这种照直觉写的 resize 处理器会静默改坏
+         调试器的状态。详见 chess/core/debugger.js 里 refresh 导出上的 ⚠⚠ 注释。 */
       refresh: function () { renderHighlight(); renderGutter(); refreshMarkers(); syncScroll(); },
       destroy: function () {
         if (timer) clearTimeout(timer);

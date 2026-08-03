@@ -867,6 +867,28 @@ T.eq(Object.keys(D.locals(deep, -1)), [], 'locals：负 depth → 空对象');
 T.ok(!('n' in D.locals(deep, 4)), 'locals：越界返回的确实不是最内层那一帧');
 T.eq(Object.getPrototypeOf(D.locals(deep, 99)), null, 'locals：越界返回值同样是无原型对象');
 
+/* 上面三条挡的是「太大 / 太小」，挡不住「压根不是一个帧号」。`depth | 0` 把
+   NaN / 'x' / Infinity 一律折成 0，于是算错的 depth 不会报错，而是**稳稳地
+   显示全局帧**——面板上一排变量看着都对，值却属于别人，与夹到边界上是同一种
+   安静的谎话。判定必须排在 `| 0` 之前，这几条就是钉住这一点的。
+   注意断言的是「全局帧的名字不在里面」而不只是 Object.keys 为空：全局帧
+   恰好持有 fact，只测空会在 fact 被改名之后变成一条空过的断言。 */
+const badDepths = [NaN, 'x', '2', Infinity, -Infinity, 2.5, true, {}, [], function () {}];
+const depthLies = [];
+for (let bd = 0; bd < badDepths.length; bd++) {
+  const got = D.locals(deep, badDepths[bd]);
+  if (Object.keys(got).length !== 0) depthLies.push(String(badDepths[bd]));
+}
+T.eq(depthLies, [], 'locals：非整数/非有限/非数字的 depth 一律返回空对象，不悄悄退成全局帧');
+T.ok(!('fact' in D.locals(deep, NaN)), 'locals(cur, NaN)：拿到的不是全局帧');
+T.ok(!('n' in D.locals(deep, NaN)), 'locals(cur, NaN)：拿到的也不是任何一个调用帧');
+T.eq(Object.getPrototypeOf(D.locals(deep, NaN)), null, 'locals(cur, NaN)：返回值同样是无原型对象');
+T.ok(!('fact' in D.locals(deep, 'x')), "locals(cur, 'x')：字符串 depth 拿到的不是全局帧");
+T.ok(!('n' in D.locals(deep, 2.5)), 'locals(cur, 2.5)：小数 depth 不被折到第 2 帧');
+/* 有牙齿：把同一条夹具喂给合法的 0 与 3，确实各自拿得到东西。 */
+T.ok('fact' in D.locals(deep, 0), '有牙齿：合法的 depth 0 确实拿得到全局帧的 fact');
+T.ok('n' in D.locals(deep, 3), '有牙齿：合法的 depth 3 确实拿得到那一帧的 n');
+
 // 空轨迹 + depth 不抛（清空编辑器缓冲区是可达状态）
 const emptyCur = D.create([]);
 let ldThrew = false;
@@ -1215,8 +1237,15 @@ for (let k = 1; k < qrows.length; k++) {
 T.ok(qOuts > 50, 'N 皇后轨迹里有大量步出（' + qOuts + ' 次），上面那条不是空过');
 T.ok(qFlash > 50, 'N 皇后轨迹里仍有大量真闪烁（' + qFlash + ' 步），修复没有把闪烁关死');
 
-/* mount 的两个导出：redraw 必须存在且与 refresh 不是同一个函数
-   （refresh 会推进基线并清选中帧，工具 ④⑤ 拿它去做 resize 重绘会静默改状态）。 */
+/* 上面这一整段琥珀色不变量所依赖的两个纯函数确实在模块导出面上（它们是从
+   mount 的内部逻辑里提出来、专为在 node 里可测才导出的；漏掉导出会让上面
+   几百条断言变成"测不到"而不是"测失败"）。
+   **这里没有覆盖 handle.redraw：** redraw 只能经由 mount() 拿到，而 mount 是
+   DOM 层，node 里跑不到，所以整个分支上 redraw 一条断言都没有。它与 refresh
+   的区别（refresh 会推进琥珀色基线并清掉选中帧，redraw 两样都不做）只由
+   debugger.js 里那段注释和浏览器验收把守——工具 ④⑤ 若拿 refresh 去做 resize
+   重绘会静默改状态，而这道测试套件不会因此变红。不要在这里写一条假装覆盖了
+   它的断言：一条为不存在的测试作保的注释，正是下一次回归蒙混过关的方式。 */
 T.ok(typeof D.flashMarks === 'function', 'flashMarks 已导出（纯函数，node 可测）');
 T.ok(typeof D.frameIds === 'function', 'frameIds 已导出');
 

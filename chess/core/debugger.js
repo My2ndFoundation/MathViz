@@ -249,7 +249,19 @@
      之后**，而 owned 正需要那一条。
      -1（没有匹配的出帧步）是**设计内**的情形，不是异常：撞上 STEP_LIMIT
      的轨迹（trace.truncated）会把帧永远留在开着的状态。此时 owned 退化成
-     只有入帧 delta，函数照常返回，不抛。 */
+     只有入帧 delta，函数照常返回，不抛。
+
+     **截断轨迹上的复杂度是 O(trace.length)，不是 O(cursor) —— 这是阶段 4 的
+     架构阻塞项，不是随手一提。** 帧永远不关闭 ⇒ `open` 永远不空 ⇒ 上面那条
+     提前收工的分支永远不触发，无论游标停在哪里都要扫完整条轨迹。实测（20 万
+     步的截断轨迹）：i=5000 → 3.46 ms，i=100000 → 8.88 ms，i=199999 → 16.12 ms
+     —— 注意 i=5000 也要 3.46 ms，代价与游标位置无关。五个区各重算一次就越过
+     本仓 4 ms 的每帧绘制预算，临界点约在 2 万步。
+     3b **故意不修**：修法是在本模块里挂一份缓存，而那要么引入模块级可变状态、
+     要么把缓存塞进 cur —— 两条都会毁掉这个文件"纯逻辑、零 DOM、可反复调用
+     无副作用"的性质，而约 4100 条 node 断言正建立在这条性质上。阶段 4 真要用
+     20 万步轨迹时，缓存应当加在**调用方**（mount 里已有的 cache 那一层），
+     不要加在这里。 */
   function matchFrames(trace, upto) {
     const popOf = {}, open = [];
     for (let k = 0; k < trace.length; k++) {
@@ -337,6 +349,14 @@
      （面板看起来一切正常，值却属于别人）；返回空让「没有这一帧」当场看得见。
      负数同理。
 
+     **非整数、非有限、非数字的 depth 同样返回空对象，判定必须排在 `| 0` 之前。**
+     `| 0` 会把 NaN / undefined 之外的一切垃圾悄悄折成 0 —— NaN|0 === 0、
+     'x'|0 === 0、Infinity|0 === 0 —— 于是「算错的 depth」不是报错，而是
+     **稳稳地显示全局帧**：面板上一排变量看着都对，却是别人的。这正是上面那段
+     话要防的事，只是入口换了一个。2.5 这类小数也一并挡掉（2.5|0 === 2 会显示
+     第 2 帧），理由同上：不存在的帧就该看得见地为空，不该被折到相邻那一帧。
+     省略 / null / undefined 仍然走上面那条「当前最内层帧」的路，不受这里影响。
+
      **调用方注意：返回的是无原型对象（Object.create(null)），不是普通对象。**
      这不是随手写的，是必需的：学习者完全可以写 `let __proto__ = 1;`，普通对象
      字面量会把这个名字写进原型而不是自有属性，Object.keys 拿不到，面板上那一行
@@ -381,6 +401,10 @@
        stack.length === callStack(cur).length + 1 在每个下标上都成立，
        depth 参数因此可以直接当下标用。 */
     if (depth === undefined || depth === null) return stack[stack.length - 1].vars;
+    // ↓ 这三个判定必须留在 `| 0` 之前，见上面注释里那段「稳稳地显示全局帧」。
+    if (typeof depth !== 'number' || !isFinite(depth) || Math.floor(depth) !== depth) {
+      return Object.create(null);
+    }
     const d = depth | 0;
     if (d < 0 || d >= stack.length) return Object.create(null);
     return stack[d].vars;
@@ -1127,7 +1151,20 @@
          当前值（下一步于是少闪一片）并清掉选中的调用栈帧。**只在你自己刚刚
          移动过 cur.i 之后调它。**
          resize / 重新布局 / 面板重新可见之后要重画，调 redraw() —— 名字最像
-         "重画一下"的这个方法恰恰是唯一会改状态的那个，所以另外给了一个。 */
+         "重画一下"的这个方法恰恰是唯一会改状态的那个，所以另外给了一个。
+
+         ⚠⚠ **同名陷阱：Editor 的句柄上也有一个 refresh()，语义完全不同** ——
+         那一个是纯重绘（renderHighlight + renderGutter + refreshMarkers +
+         syncScroll，见 chess/core/editor.js 的句柄导出），没有任何状态推进，
+         对应的正是这里的 redraw()。阶段 4/5 的工具会同时握着这两个句柄，
+         一个照着直觉写的 resize 处理器
+             window.addEventListener('resize', function () { ed.refresh(); dbg.refresh(); });
+         对编辑器是对的，对调试器是**静默地推进琥珀色基线并清掉选中帧**：
+         窗口一改大小，「这一步刚变的变量」就少闪一片，而面板看不出任何异常。
+         正确写法是 `ed.refresh(); dbg.redraw();`。
+         3b 末期不改名（两个句柄各自的调用点都已稳定，此刻重命名的风险大于
+         收益），改用这条交叉引用把陷阱钉在两边都读得到的地方；真要统一，
+         应当在阶段 4 一次性把 Editor 的 refresh 也改叫 redraw。 */
       refresh: refresh,
       redraw: redraw,
       relabel: relabel,

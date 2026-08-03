@@ -512,6 +512,91 @@ T.eq(badChars, [], 'matchBracket：返回的两个下标真的指向同种的一
 T.ok(E.PAD_X > 0, 'PAD_X 是正数（CSS padding 与覆盖层 left 共用的那一个）');
 T.ok(E.LINE_H > 0, 'LINE_H 是正数');
 
+/* 上面两条**只测得到"是正数"，测不到 CSS 字符串里写的是几**。CSS 里曾经躺着
+   七个 18px 字面量：把它们改成 20px、常量留在 18，条纹/波浪线/括号框会顺着
+   文件越往下偏得越多（第 40 行差 80px），而整套断言全绿。所以这里改成扫源码，
+   直接钉住"跟行高有关的 CSS 值一个字面量都不留"这个结构事实。
+   读 editor.js 自己的源码：测试跑在 node 里，读文件是允许的（interp.test.js
+   的「4.5②(b)」同样这么做）；被读的 editor.js 本身仍然零依赖。 */
+{
+  const edSrc = fs.readFileSync(path.join(__dirname, 'editor.js'), 'utf8');
+  const cssFrom = edSrc.indexOf('const CSS = [');
+  const cssTo = edSrc.indexOf("].join('');", cssFrom);
+  T.ok(cssFrom >= 0 && cssTo > cssFrom, 'LINE_H 单源：能定位到 editor.js 里的 CSS 数组');
+  /* 先把块注释抹成等长空格再扫：注释里会成段谈论 18px / line-height，
+     扫原文会把散文当成声明，变成一道"改注释就红"的假门。 */
+  const cssText = edSrc.slice(cssFrom, cssTo).replace(/\/\*[\s\S]*?\*\//g, function (b) {
+    return b.replace(/[^\n]/g, ' ');
+  });
+  T.eq(cssText.match(/line-height:\s*[\d.]/g), null,
+       'LINE_H 单源：CSS 里没有任何写死数字的 line-height（必须从 LINE_H 插值）');
+  T.eq(cssText.match(/font:\s*[\d.]+px\/\s*[\d.]/g), null,
+       'LINE_H 单源：font 简写里的行高部分也没有写死数字（.ed-ln 的 11px/…）');
+  /* 四条按行高定高的规则：height 必须是插值来的。（.ed-ta 的 height:100% 与
+     滚动条的 height:8px 跟行高无关，不在这张名单上。） */
+  const H_RULES = ['.ed-ln{', '.ed-stripe{', '.ed-squiggle{', '.ed-bracket{'];
+  const hardHeights = [], missingInterp = [];
+  for (let hr = 0; hr < H_RULES.length; hr++) {
+    const at = cssText.indexOf(H_RULES[hr]);
+    if (at < 0) { missingInterp.push(H_RULES[hr] + '（规则找不到了）'); continue; }
+    const end = cssText.indexOf('}', at);
+    const rule = cssText.slice(at, end < 0 ? cssText.length : end);
+    if (/height:\s*[\d.]/.test(rule)) hardHeights.push(H_RULES[hr]);
+    if (!/height:'\s*\+\s*LINE_H\s*\+\s*'px/.test(rule)) missingInterp.push(H_RULES[hr]);
+  }
+  T.eq(hardHeights, [], 'LINE_H 单源：按行高定高的四条规则里没有写死的 height');
+  T.eq(missingInterp, [], 'LINE_H 单源：这四条规则的 height 确实是 LINE_H 插值出来的（有牙齿）');
+}
+
+/* check()：**解释器自己的 bug 不许被说成是学习者的语法错误。** 这个 try 罩着
+   Interp.parse 的整个调用，parse 内部抛的 TypeError 也会落进来，而它没有
+   line/col/category —— 照原样往下走会得到 index: NaN、category: undefined，
+   以及 V8 自己的措辞被摆进编辑器的「语法错误」槽里。对一个正在学递归的人来说，
+   一条她既看不懂也修不了的错误被说成是她写错了，她只会得出"我没看懂"的结论。
+   猴子补丁的手法与上面 category 那一块相同（同一个 require 缓存出来的对象）。 */
+{
+  const realParseI = I.parse;
+  let internalErr, thrownStrErr;
+  try {
+    I.parse = function () { throw new TypeError("Cannot read properties of undefined (reading 'type')"); };
+    internalErr = E.check('let x = 1;');
+    I.parse = function () { throw 'boom'; };          // 连 Error 都不是的抛出物
+    thrownStrErr = E.check('let x = 1;');
+  } finally {
+    I.parse = realParseI;
+  }
+  T.ok(internalErr, 'check：解释器内部的 TypeError 仍然返回一个真值（Run 照旧被禁用，不假装能跑）');
+  T.eq(internalErr.category, 'internal', 'check：内部错误的 category 是 internal，不是 undefined 冒充语法错');
+  T.eq(internalErr.line, null, 'check：内部错误不指向任何一行（line 是 null）');
+  T.eq(internalErr.col, null, 'check：内部错误的 col 是 null');
+  T.eq(internalErr.index, null, 'check：内部错误的 index 是 null，不是 NaN（原来 starts[NaN] + NaN 就是 NaN）');
+  T.eq(internalErr.message, "Cannot read properties of undefined (reading 'type')",
+       'check：原始 message 原样透传，调用方才有话可说');
+  T.eq(thrownStrErr.category, 'internal', 'check：抛的不是 Error 对象时也归 internal');
+  T.eq(thrownStrErr.message, 'boom', 'check：抛的不是 Error 对象时，message 取 String(e)');
+  /* 有牙齿：真正的解析错**没有**被这道门顺手改掉分类。 */
+  const stillSyntax = E.check('let x = ;');
+  T.eq(stillSyntax.category, 'syntax', '有牙齿：真正的语法错依旧是 syntax，没被新门改分类');
+  T.eq(typeof stillSyntax.line, 'number', '有牙齿：真正的语法错依旧带数字行号');
+  T.eq(typeof stillSyntax.index, 'number', '有牙齿：真正的语法错依旧带数字 index');
+}
+
+/* Interp 必须是**惰性**取的：内联脚本按标记块就地替换，不保证 INTERP 排在
+   EDITOR 前面。工厂时就抓住 root.Interp 的写法会在那种页面上捕获 undefined，
+   而症状要等使用者敲第一个键才出现。这里扫源码钉住这个结构事实：工厂参数
+   不是 root.Interp 本身，而是一个取值函数。 */
+{
+  const edSrc2 = fs.readFileSync(path.join(__dirname, 'editor.js'), 'utf8');
+  const umdEnd = edSrc2.indexOf("'use strict'");
+  const umd = edSrc2.slice(0, umdEnd).replace(/\/\*[\s\S]*?\*\//g, function (b) {
+    return b.replace(/[^\n]/g, ' ');
+  });
+  T.eq(umd.match(/factory\(\s*root\.Interp\s*\)/g), null,
+       'Interp 惰性：工厂不能直接吃 root.Interp（内联块的先后顺序不受保证）');
+  T.ok(/return\s+root\.Interp/.test(umd),
+       'Interp 惰性：浏览器分支传进去的是一个「用到时才取 root.Interp」的函数');
+}
+
 /* DOM 层的导出在 node 下必须存在但**不执行**：整个文件是在没有 document 的
    环境里被 require 进来的，mount 只要在模块顶层碰一下 document 就会在这里炸。 */
 T.eq(typeof E.mount, 'function', 'mount 被导出');

@@ -2112,6 +2112,12 @@
      不会有任何测试大声失败——除了 interp.test.js 的「任务 4.5 ②(b)」：
      它扫源码，钉住"所有 hoist*(…) 调用点都在 blockPrologue 内部"。
 
+     **那道守卫认的是名字，不是语义：它的正则是 /\bhoist[A-Za-z]*\s*\(/。**
+     所以新加的前置扫描**必须叫 hoistXxx**。取个别的名字（predeclareClasses、
+     prescanLabels 之类）再只挂到两套语句循环中的一套上，守卫一声不吭，
+     行为对拍（a）也只在恰好观察得到的程序上才红——正好复刻 3a 那次 TDZ 缺口
+     的漏法。要么按 hoist* 命名，要么同时把 interp.test.js 里那条正则改宽。
+
      两次扫描的先后不影响可观察行为：hoistLexicalDecls 只在名字**还不存在
      于当前层**时才占 TDZ 位，hoistFunctionDecls 的 declareVar 允许覆盖一个
      TDZ 占位。`let f = 1; function f(){}` 这类同层重复声明，无论哪个先跑，
