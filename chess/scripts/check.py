@@ -3,6 +3,7 @@
 
 对应规格 §7 的第 5、6 道门。第 1–4 道由 node 测试文件负责。
 """
+import json
 import pathlib
 import re
 import subprocess
@@ -12,6 +13,10 @@ import inline_core
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT_RE = re.compile(r'<script>(.*?)</script>', re.DOTALL)
+# chess/index.html 里内嵌的 FALLBACK 列表（file:// 下 fetch chess-tools.json
+# 会因同源限制失败，靠它兜底渲染）。只抓 id 字段——FALLBACK 里其余字段
+# （kicker/title/tag）是给人看的展示文案，不是这道检查关心的东西。
+FALLBACK_ID_RE = re.compile(r"id:\s*'([\w-]+)'")
 # node --check -（从 stdin 读）报错时行号前缀是 [stdin]:<n>；把 <n> 换算回
 # 该脚本块在原文件里的真实行号，见 node_check() 里的用法。
 STDIN_LINE_RE = re.compile(r'^\[stdin\]:(\d+)$', re.MULTILINE)
@@ -55,6 +60,44 @@ def node_check() -> int:
     return 1 if failed else 0
 
 
+def fallback_check() -> int:
+    """chess/index.html 内嵌的 FALLBACK 列表，id 集合必须与 chess-tools.json 一致。
+
+    放在这里而不是 core/ 或 games/ 下的某个 *.test.js：这道检查跨的是两份
+    非 JS-模块的静态资产（一份 html 里手写的 JS 字面量、一份 json），不像
+    core/games 的测试那样是在测某个可 require() 的模块——用 Python 直接读
+    两份文件、正则摘 id、求集合差，比现开一个 node 脚本去手搓一个「假 DOM
+    环境」解析 <script> 里的字面量要直接。check.py 本来就是「跨文件一致性」
+    这类检查的家（node_check/inline_core 也是同一类）。
+
+    真正会坏的从来不是「fetch 失败」这条分支本身（那条分支好测、也测过），
+    而是「以后加了第四个工具，忘了同步 FALLBACK」——这份内嵌副本会不知不觉
+    地和 chess-tools.json 分岔，而任何 file:// 冒烟测试都不会触发这条分支
+    去暴露它（本机预览通常走 http server，不是 file://）。
+    """
+    index_path = ROOT / 'index.html'
+    tools_path = ROOT / 'chess-tools.json'
+    index_text = index_path.read_text(encoding='utf-8')
+    m = re.search(r'var FALLBACK = \[(.*?)\n\];', index_text, re.DOTALL)
+    if not m:
+        print('ERROR: index.html 里找不到 FALLBACK 数组', file=sys.stderr)
+        return 1
+    fallback_ids = set(FALLBACK_ID_RE.findall(m.group(1)))
+    registry = json.loads(tools_path.read_text(encoding='utf-8'))
+    registry_ids = {t['id'] for t in registry['tools']}
+    if fallback_ids != registry_ids:
+        missing = registry_ids - fallback_ids
+        extra = fallback_ids - registry_ids
+        print('ERROR: index.html 的 FALLBACK 与 chess-tools.json 的 id 集合不一致', file=sys.stderr)
+        if missing:
+            print(f'  FALLBACK 里缺失：{sorted(missing)}', file=sys.stderr)
+        if extra:
+            print(f'  FALLBACK 里多余（chess-tools.json 里已经没有）：{sorted(extra)}', file=sys.stderr)
+        return 1
+    print(f'FALLBACK 一致性：{len(registry_ids)} 个 id 全部对上')
+    return 0
+
+
 def core_tests() -> int:
     """跑 core/ 与 games/ 下的全部 *.test.js。
 
@@ -72,12 +115,13 @@ def core_tests() -> int:
 
 
 if __name__ == '__main__':
-    # 三道门都要跑到底、都要报——不能用 `or` 短路。之前 `a() or b() or c()`
+    # 四道门都要跑到底、都要报——不能用 `or` 短路。之前 `a() or b() or c()`
     # 一旦 a() 非零就直接跳过 b()/c()，意味着一份过期的内联副本（或任何语法
     # 错误）会让 406 条断言的 core_tests() 门根本不执行，问题只报出第一个，
-    # 最有分量的那道门被悄悄跳过了。这里三个都无条件跑，各自打印自己的
+    # 最有分量的那道门被悄悄跳过了。这里四个都无条件跑，各自打印自己的
     # ERROR，最后按「任一失败则整体失败」汇总退出码。
     rc_inline = inline_core.main(check_only=True)
     rc_node = node_check()
+    rc_fallback = fallback_check()
     rc_core = core_tests()
-    sys.exit(1 if (rc_inline or rc_node or rc_core) else 0)
+    sys.exit(1 if (rc_inline or rc_node or rc_fallback or rc_core) else 0)

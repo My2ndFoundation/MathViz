@@ -100,7 +100,8 @@
      但遇到关键步就停在那一步、把剩下的时间丢掉——「走到关键步自动暂停」
      如果被同一次 tick 里后续的推进越过去，等于没有暂停。 */
   function tick(rs, dt) {
-    if (!rs.playing || rs.maxPly === 0) return false;
+    if (rs.maxPly === 0) { rs.playing = false; return false; }
+    if (!rs.playing) return false;
     const interval = 1 / Math.max(0.01, rs.speed);
     /* Math.max(0, dt) 钳不住 NaN —— Math.max(0, NaN) 还是 NaN，一次 NaN 的 dt
        就会永久毒化 acc，此后 acc >= interval 恒为 false：回放不报错、不停止，

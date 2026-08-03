@@ -65,6 +65,19 @@ T.eq(nanGuard.ply, 0, 'NaN dt 不推进，但也不该是别的坏结果');
 R.tick(nanGuard, 0.6);
 T.eq(nanGuard.ply, 1, 'NaN 之后正常 dt 照常推进 —— acc 没有被 NaN 污染');
 
+// ---- maxPly === 0（单个局面，没有历史）：按下播放不该让按钮说谎 ----
+// 可达路径：粘一个只有 FEN、没有着法的 PGN → maxPly 是 0 → 点 ▶ →
+// 两个播放按钮都读 rs.playing 来决定显示「暂停」还是「播放」，如果
+// tick() 只 return 而不把 playing 拉回 false，按钮就会一直显示
+// 「⏸ Pause」，但画面（ply）永远不会动——UI 与真实状态相反。
+const zeroPly = R.load({ pgn: '[FEN "4k3/8/8/8/8/8/8/4K3 w - - 0 1"]\n*' });
+T.eq(zeroPly.maxPly, 0, '只有 FEN 没有着法的棋局 maxPly 是 0');
+R.setPlaying(zeroPly, true);
+T.eq(zeroPly.playing, true, 'setPlaying(true) 本身照常置位');
+R.tick(zeroPly, 1);
+T.eq(zeroPly.playing, false, 'maxPly=0 时 tick() 必须把 playing 拉回 false —— 没有历史可播放');
+T.eq(zeroPly.ply, 0, 'ply 依旧是 0，没有任何东西可以推进');
+
 // ---- keyMoves：自动暂停 + 说明 ----
 const KM = [
   { ply: 10, note: { en: '5…dxe5 recaptures; material is level again.', zh: '5…dxe5 吃回来，子力重新持平。' } },

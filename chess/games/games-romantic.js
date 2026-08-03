@@ -137,8 +137,8 @@
           en: '13.Rxd7 gives up the exchange, a rook for a knight, to drag Black\'s last active piece off the board and rip open the d-file toward the king that never found safety.',
           zh: '13.Rxd7 主动弃还「车换马」的子力差，目的是拔掉黑方唯一活跃的子、彻底打开通向那个从未安全过的黑王的 d 线。' } },
         { ply: 33, san: 'Rd8#', note: {
-          en: '17.Rd8# mates with a single rook. Two of Black\'s own pieces — the bishop still on f8, the pawn still on f7, both undeveloped since move one — block his own king\'s last two escape squares.',
-          zh: '17.Rd8# 单凭一个车完成将杀。黑方自己的两个子——从没挪过窝的 f8 象和 f7 兵——正好堵死了自己王最后两条逃生路线。' } },
+          en: '17.Rd8# — the rook lands the mate, but it isn\'t alone: the bishop on g5, sitting on the same diagonal, defends the rook on d8 (so the king can\'t take it) and covers e7 (so the king can\'t step there) at the same time. Two of Black\'s own pieces — the bishop still on f8, the pawn still on f7, both undeveloped since move one — block his own king\'s last two escape squares.',
+          zh: '17.Rd8#——落子将杀的是车，但不是它单独完成的：g5 的象正在同一条斜线上，同时盖住 d8（王吃不掉这个车）和 e7（王也走不到那格）。黑方自己的两个子——从没挪过窝的 f8 象和 f7 兵——正好堵死了自己王最后两条逃生路线。' } },
       ],
       pgn: [
         '[Event "Casual game"]',
@@ -210,8 +210,8 @@
       difficulty: 1,
       source: 'https://en.wikipedia.org/wiki/L%C3%A9gal_Trap',
       story: {
-        en: 'This is one of the oldest recorded games still played through today, credited to Kermur, Sire de Legal, against an amateur named Saint Brie. It is usually dated to Paris in 1750, though chess historians have questioned that date — some evidence points to the 1780s instead — and even the exact order of moves has been argued over, since the earliest printed version may have been tidied up after the fact to remove a flaw. What has never been in doubt is the idea itself, because it is simple enough to survive centuries of retelling.\n\nBlack pins White\'s knight on f3 to the queen with 3...Bg4 — a natural-looking move that any player might reach for. But a piece pinned to the queen, not the king, is not actually stuck: nothing in the rules stops it from moving, it only risks losing the queen if it does and nothing comes of it. Legal ignores the pin entirely, jumps the knight into e5, and when Saint Brie grabs the "free" queen, a bishop and the same knight combine for checkmate two moves later, with the black king boxed in by its own untouched pieces.\n\nThe trap now carries Legal\'s name and is usually the first lesson a beginner gets in the difference between an absolute pin, against the king, which really cannot move, and a relative one, against anything else, which can — a distinction the rest of a chess education rests on.',
-        zh: '这是至今仍被反复摆出的最古老的名局之一，记在勒加尔骑士（Kermur, Sire de Legal）名下，对手是一位业余棋手圣布里（Saint Brie）。它通常被定在1750年的巴黎，但棋史研究者对这个年代提出过质疑——有证据指向1780年代——就连具体的走法顺序也有争议，因为最早刊出的版本可能是事后被「修饰」过的，为了掩盖原局里的一个漏洞。唯一从未被质疑过的是这个构思本身，因为它足够简单，才能被反复讲了两百多年还立得住。\n\n黑方用 3...Bg4 把白方 f3 的马别在后上——这是任何棋手都会下意识走出的一步。但别在后（而不是王）身上的子，并不是真的动不了：规则里没有任何东西禁止它移动，唯一的风险是后可能因此丢掉，而这里根本什么都不会丢。勒加尔干脆无视这个「别子 pin」，把马跳上 e5，圣布里贪吃那个「白送」的后，两步之后，一象一马联手完成将杀——黑王被自己那些原地未动的子堵得无处可去。\n\n这个陷阱如今就以勒加尔的名字命名，通常是初学者接触到「绝对别子（钉在王身上，真的动不了）」与「相对别子（钉在别的子上，其实能动）」这组区别时的第一课——往后学到的很多东西，都建立在这组区别之上。',
+        en: 'This is one of the oldest recorded games still played through today, credited to Kermur, Sire de Legal, against an amateur named Saint Brie. It is usually dated to Paris in 1750, though chess historians have questioned that date — some evidence points to the 1780s instead — and even the exact order of moves has been argued over, since the earliest printed version may have been tidied up after the fact to remove a flaw. What has never been in doubt is the idea itself, because it is simple enough to survive centuries of retelling.\n\nBlack pins White\'s knight on f3 to the queen with 3...Bg4 — a natural-looking move that any player might reach for. But a piece pinned to the queen, not the king, is not actually stuck: nothing in the rules stops it from moving, it only risks losing the queen if it does and nothing comes of it. Legal ignores the pin entirely, jumps the knight into e5, and when Saint Brie grabs the "free" queen, White mates two moves later with all three remaining minor pieces taking a job — just not all at once. The bishop strikes first, capturing on f7 with check and driving the king from e8 to e7; by the mating move it has switched jobs, no longer giving check itself but sealing off e8 and e6 so the king cannot step back. The knight left behind on e5 seals off d7 and g6, and also guards that bishop so the king cannot simply take it. The checkmate itself comes from the other knight alone, jumping into d5 to deliver the only check on the board — with the black king boxed in by its own untouched pieces.\n\nThe trap now carries Legal\'s name and is usually the first lesson a beginner gets in the difference between an absolute pin, against the king, which really cannot move, and a relative one, against anything else, which can — a distinction the rest of a chess education rests on.',
+        zh: '这是至今仍被反复摆出的最古老的名局之一，记在勒加尔骑士（Kermur, Sire de Legal）名下，对手是一位业余棋手圣布里（Saint Brie）。它通常被定在1750年的巴黎，但棋史研究者对这个年代提出过质疑——有证据指向1780年代——就连具体的走法顺序也有争议，因为最早刊出的版本可能是事后被「修饰」过的，为了掩盖原局里的一个漏洞。唯一从未被质疑过的是这个构思本身，因为它足够简单，才能被反复讲了两百多年还立得住。\n\n黑方用 3...Bg4 把白方 f3 的马别在后上——这是任何棋手都会下意识走出的一步。但别在后（而不是王）身上的子，并不是真的动不了：规则里没有任何东西禁止它移动，唯一的风险是后可能因此丢掉，而这里根本什么都不会丢。勒加尔干脆无视这个「别子 pin」，把马跳上 e5，圣布里贪吃那个「白送」的后，两步之后，白方剩下的三个轻子各司其职完成将杀——但不是同时上场。象先出手：吃 f7 将军，把王从 e8 逼到 e7；到了将杀的那一刻，它已经换了角色，不再自己将军，而是封住 e8 与 e6，让王连退都退不回去。先前跳上 e5 的那只马封住 d7 与 g6，还顺带保护着这只象，黑王吃不掉它。真正完成将杀的，是另一只马单独跳上 d5——那一刻盘面上唯一的将军，就是它——黑王被自己那些原地未动的子堵得无处可去。\n\n这个陷阱如今就以勒加尔的名字命名，通常是初学者接触到「绝对别子（钉在王身上，真的动不了）」与「相对别子（钉在别的子上，其实能动）」这组区别时的第一课——往后学到的很多东西，都建立在这组区别之上。',
       },
       why: {
         en: 'A relative pin, a knight that ignores it, and a queen sacrifice that leads to mate two moves later.',
@@ -234,10 +234,15 @@
           en: '7.Nd5# delivers mate two moves after the "free" queen was taken. The king on e7 has nowhere to go — hemmed in by its own pawns and pieces that never got the chance to help.',
           zh: '7.Nd5# 在那个「白送」的后被吃掉仅仅两步之后完成将杀。e7 上的王无路可走——被自己那些根本还没来得及帮上忙的兵和子堵得死死的。' } },
       ],
+      /* [Date] 是 "????.??.??"，不是 "1750.??.??"——story 已经明确说这个年代存疑
+         （更可能是 1780 年代），卡片渲染直接读 h.Date 显示在列表页，如果这里写
+         一个具体年份，story 正文的对冲就会被列表页的断言盖过去，读者只会记住
+         后者。[Event] 里留 "1750?" 这个带问号的写法，把「常被引用的年份」和
+         「棋局真实发生的年份」这两件事分开说清楚。 */
       pgn: [
-        '[Event "Casual game"]',
+        '[Event "Casual game (dated 1750?)"]',
         '[Site "Paris FRA"]',
-        '[Date "1750.??.??"]',
+        '[Date "????.??.??"]',
         '[Round "-"]',
         '[White "Kermur Sire de Legal"]',
         '[Black "Saint Brie"]',

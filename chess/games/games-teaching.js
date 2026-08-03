@@ -31,8 +31,8 @@
           en: '1.f3 opens the h4–e1 diagonal towards White\'s own king. On its own it is merely careless.',
           zh: '1.f3 打开了通向白方自家王的 h4–e1 斜线。单看这一步只是随手。' } },
         { ply: 3, san: 'g4', note: {
-          en: '2.g4 is the fatal one: it blocks the only square (g4) from which a piece could later interpose on that diagonal, and it does so voluntarily.',
-          zh: '2.g4 才是致命的一步：它自己堵死了 g4——那是日后唯一还能垫在这条斜线上的格子——而且是主动堵死的。' } },
+          en: '2.g4 is the fatal one. After 1.f3, White still had a defence in hand: the g-pawn could later play g3 and interpose on the h4–e1 diagonal. Pushing it to g4 instead skips over that square — and pawns cannot move backwards, so the one piece that could have blocked the diagonal has just given up its only chance to do it, permanently.',
+          zh: '2.g4 才是致命的一步：1.f3 之后，白方手里其实还有一步防御——g 前的兵日后可以走 g3，垫在 h4–e1 这条斜线上。可这一步却把它一口气推过了 g3——而兵不能后退，于是唯一能挡将的这颗兵，永久地放弃了它挡将的唯一机会。' } },
         { ply: 4, san: 'Qh4#', note: {
           en: 'Qh4#. Count White\'s legal moves: zero. Count the attackers on the king: one, and nothing can capture it, block it, or run. That triple is the whole definition.',
           zh: 'Qh4#。数一数白方的合法走法：零。数一数攻击王的子：一个，而白方吃不掉它、挡不住它、也躲不开。这三件事同时成立，就是将死的全部定义。' } },

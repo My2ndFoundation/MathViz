@@ -140,8 +140,8 @@
           en: '42.Rd7?? is the game\'s one outright blunder — the point where a merely worse position for White became a lost one.',
           zh: '42.Rd7?? 是这局棋唯一一步实实在在的漏着 blunder——白方从只是差一点，变成了输定。' } },
         { ply: 114, san: 'Ke5', note: {
-          en: '57...Ke5 is the position Carlsen resigned in: a rook down for two minor pieces, with no fortress left to build. What happened next had nothing to do with any of the fifty-odd moves before it.',
-          zh: '57...Ke5 是卡尔森认输时的局面：车换双子后仍然吃亏，已经无险可守。接下来发生的事，跟前面这五十多步棋都没有关系。' } },
+          en: '57...Ke5 is the position Carlsen resigned in: no rooks left on the board at all — just king and bishop for White against king, knight and two connected passed pawns for Black, two pawns down with no fortress left to build. What happened next had nothing to do with any of the fifty-odd moves before it.',
+          zh: '57...Ke5 是卡尔森认输时的局面：棋盘上已经没有车了——只剩白方王 + 象，对黑方王 + 马 + 两个相连的通路兵，白方少两个兵，已经无险可守。接下来发生的事，跟前面这五十多步棋都没有关系。' } },
       ],
       pgn: [
         '[Event "Sinquefield Cup"]',
@@ -166,7 +166,7 @@
     {
       id: 'kasparov-world-1999',
       group: 'human',
-      tags: ['attack'],
+      tags: ['controversy', 'opening-theory', 'prodigy'],
       difficulty: 3,
       source: 'https://www.chessgames.com/perl/chessgame?gid=1252350',
       story: {
