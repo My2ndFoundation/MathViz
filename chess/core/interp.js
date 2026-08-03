@@ -21,11 +21,25 @@
                     'break', 'continue', 'function', 'return', 'true', 'false', 'null'];
 
   /* 多字符运算符按长度倒序排，保证 '===' 先于 '==' 先于 '=' 被匹配到。
-     顺序错了会把 '!==' 切成 '!=' + '='，而那个错误只在特定表达式上暴露。 */
-  const PUNCT = ['===', '!==', '**=', '...', '=>', '==', '!=', '<=', '>=', '&&', '||',
-                 '++', '--', '+=', '-=', '*=', '/=', '%=', '**',
+     顺序错了会把 '!==' 切成 '!=' + '='，而那个错误只在特定表达式上暴露。
+
+     复审 I4：`?.`/`??`/`**`/`**=`/位运算符（`& | ^ ~ << >>`）本来就是
+     合法 JS，只是不在这个教学子集里——它们应该在解析阶段报
+     category:'unsupported'（"这不在支持范围内"），而不是被词法器直接
+     拒收（`&`/`|`/`^`/`~` 原来根本不在这张表里，词法器会报一个跟"不支持"
+     毫无关系的 `Unexpected character` 词法错误）或被解析器当成语法错误
+     （`**`/`**=` 原来已经在这张表里，但 BINOP/ASSIGN_OPS 没认它们，
+     停在半路，报出的是 `expected ";" but got "**"` 这种不知所云的
+     syntax 错误）。这里把它们都补进词法表，让它们至少能被词法器认出来，
+     真正的"这是不支持的语法"判断与消息在 checkUnsupported / parseBinary /
+     parseUnary / parseAssign 里各自的位置补上（见那几处的注释）。
+     `?.` 必须排在 `?`（三元）与 `.`（成员访问）之前，`??` 必须排在 `?`
+     之前，`<<`/`>>` 排在个位数运算符 `<`/`>` 之前——都是同一条"更长的
+     优先"规则，不是新规则。 */
+  const PUNCT = ['===', '!==', '**=', '...', '=>', '?.', '??', '==', '!=', '<=', '>=', '&&', '||',
+                 '++', '--', '+=', '-=', '*=', '/=', '%=', '**', '<<', '>>',
                  '{', '}', '(', ')', '[', ']', ';', ',', '.', ':', '?',
-                 '+', '-', '*', '/', '%', '<', '>', '=', '!'];
+                 '+', '-', '*', '/', '%', '<', '>', '=', '!', '&', '|', '^', '~'];
 
   function err(msg, line, col, category) {
     const e = new Error(msg);
@@ -345,6 +359,20 @@
   };
   const LOGICAL_OPS = { '&&': true, '||': true };
 
+  /* 中缀记号里"合法 JS、但不在这个子集"的那一批（复审 I4）——跟
+     UNSUPPORTED_WORDS 是同一条原则（消息要点名具体、类别是 unsupported
+     不是 syntax），只是这些是标点记号、且只在 parseBinary 的中缀位置
+     才会遇到，所以单独开一张表，不跟 UNSUPPORTED_WORDS 混在一起。 */
+  const UNSUPPORTED_BINOP = {
+    '**': 'the ** operator (use repeated multiplication instead)',
+    '??': 'the ?? operator (nullish coalescing)',
+    '&': 'the & operator (bitwise and)',
+    '|': 'the | operator (bitwise or)',
+    '^': 'the ^ operator (bitwise xor)',
+    '<<': 'the << operator (bitwise shift)',
+    '>>': 'the >> operator (bitwise shift)',
+  };
+
   /* 子集边界之外的保留字：走 name 通道进词法器（KEYWORDS 表里没有它们），
      解析器在语法位置上直接拒绝，报错要说清楚是哪个词、为什么不支持——
      「意外的标识符 class」对使用者毫无帮助。集中放在一张表里（而不是散落
@@ -419,6 +447,13 @@
     if (t.type === 'punct' && t.value === '/') {
       throw unsupported('regular expressions', t);
     }
+    /* '~'（按位取反）只会以「一元前缀运算符」的形状出现在期待操作数的
+       位置——跟 '-'/'+'/'!' 是同一类，但它不在这个教学子集里（复审 I4：
+       改之前词法器压根不认识这个字符，报的是 `Unexpected character "~"`，
+       跟"不支持"毫无关系）。 */
+    if (t.type === 'punct' && t.value === '~') {
+      throw unsupported('the ~ operator (bitwise not)', t);
+    }
   }
 
   /* 赋值：右结合，单独一层，不走 BINOP 表（表里全是左结合）。
@@ -436,6 +471,13 @@
        而不是「expected ')' but got '?'」这种不知所云的 syntax 错误。 */
     if (at(state, 'punct', '?')) {
       throw unsupported('the ternary operator', cur(state));
+    }
+    /* '**='（幂赋值）跟上面的 '?' 是同一种处境：只有解析完左手边才会
+       遇到它，不在 ASSIGN_OPS 表里就会原样漏给调用方，报出不知所云的
+       syntax 错误（复审 I4，与 UNSUPPORTED_BINOP 的 '**' 是同一条分歧
+       原因，只是这是赋值形式）。 */
+    if (at(state, 'punct', '**=')) {
+      throw unsupported('the **= operator (use x = x ** y instead)', cur(state));
     }
     const t = cur(state);
     if (t.type === 'punct' && ASSIGN_OPS.indexOf(t.value) >= 0) {
@@ -463,6 +505,17 @@
          这里兜底的是 in/instanceof 出现在其他任意表达式位置的情况。 */
       if (t.type === 'name' && (t.value === 'in' || t.value === 'instanceof')) {
         throw unsupported(UNSUPPORTED_WORDS[t.value], t);
+      }
+      /* 同样的道理：'**'（幂）/'??'（空值合并）/位运算符都是"左边已经有
+         一个解析完的操作数"之后才出现的中缀记号，不会成为 parsePrimary
+         看到的当前 token，checkUnsupported 拦不到它们，必须在这里单独
+         认（复审 I4）。改之前 BINOP 表里没有它们，落到下面 `prec ===
+         undefined` 就直接 break，把这个 token 原样留给外层，最终在
+         semi()/expect() 那里报出一句跟真正原因毫无关系的
+         `expected ";" but got "**"`——'**' 甚至已经是半成品状态：词法器
+         早就认识它（连 '**=' 都切好了），只是没人在这里接住。 */
+      if (t.type === 'punct' && UNSUPPORTED_BINOP.hasOwnProperty(t.value)) {
+        throw unsupported(UNSUPPORTED_BINOP[t.value], t);
       }
       if (t.type !== 'punct') break;
       const prec = BINOP[t.value];
@@ -501,6 +554,15 @@
     let node = parsePrimary(state);
     for (;;) {
       const t = cur(state);
+      /* 可选链 '?.' 在真实 JS 语法里紧跟在成员访问链的某一环，位置跟这里
+         的 '.' 完全对应——但它不在子集内（复审 I4：改之前 '?' 会先被
+         parseAssign 的三元检查拦下，报的消息说这是"三元运算符"，一句
+         错误的提示，会把使用者往完全无关的方向引）。这里单独认出
+         '?.'（词法器已经把它切成独立 token，见 PUNCT），给出它自己的
+         名字。 */
+      if (t.type === 'punct' && t.value === '?.') {
+        throw unsupported('optional chaining (?.)', t);
+      }
       if (t.type === 'punct' && t.value === '.') {
         state.i++;
         const nameTok = cur(state);
@@ -638,11 +700,28 @@
       if (!at(state, 'punct', '}')) {
         for (;;) {
           const keyTok = cur(state);
+          /* 计算属性键 {[k]: v} 不在子集内（复审 I4）——不拦在这里的话，
+             '[' 会一路走到下面的 else 分支，报"expected property key"，
+             使用者看不出这跟"这不在支持范围内"有什么关系。 */
+          if (keyTok.type === 'punct' && keyTok.value === '[') {
+            throw unsupported('computed object keys ({[k]: v})', keyTok);
+          }
           let key;
           if (keyTok.type === 'name' || keyTok.type === 'kw') key = keyTok.value;
           else if (keyTok.type === 'str') key = keyTok.value;
           else throw err('Unexpected token: expected property key', keyTok.line, keyTok.col);
           state.i++;
+          /* 方法简写 {f(){}} 与属性简写 {x}（等价于 {x: x}）同样不在子集
+             内（复审 I4）：本来 expect(state, ':') 会在这里报一句
+             "expected ':' but got '(' / ',' / '}'"，同样是一句跟真正原因
+             无关的通用 syntax 错误。这两个都要在读到 key 之后、真正要求
+             冒号之前拦下来，才能报出点名具体、类别正确的 unsupported。 */
+          if (at(state, 'punct', '(')) {
+            throw unsupported('method shorthand ({f(){}} — use {f: function(){}} instead)', keyTok);
+          }
+          if (at(state, 'punct', ',') || at(state, 'punct', '}')) {
+            throw unsupported('object shorthand ({x} — use {x: x} instead)', keyTok);
+          }
           expect(state, ':');
           const value = parseAssign(state);
           props.push({ key: key, value: value });
@@ -868,9 +947,22 @@
     if (!at(state, 'punct', ')')) {
       for (;;) {
         const p = cur(state);
+        /* 剩余参数 function f(...args){} 不在子集内（复审 I4）——不拦
+           在这里的话，'...' 会被下面 "expected parameter name" 的通用
+           检查当成一句普通语法错误报出去，看不出这是"这个特性不支持"。 */
+        if (p.type === 'punct' && p.value === '...') {
+          throw unsupported('rest parameters (...args)', p);
+        }
         if (p.type !== 'name') throw err('Unexpected token: expected parameter name', p.line, p.col);
         params.push(p.value);
         state.i++;
+        /* 默认参数 function f(a = 1){} 同样不在子集内——原来读完参数名
+           之后直接检查逗号/右括号，遇到 '=' 两者都不是，会直接跳出循环，
+           让 expect(state, ')') 报一句"expected ')' but got '='"，同样
+           是一句跟真正原因无关的 syntax 错误。 */
+        if (at(state, 'punct', '=')) {
+          throw unsupported('default parameters (a = 1)', cur(state));
+        }
         if (eat(state, ',')) continue;
         break;
       }
@@ -888,6 +980,18 @@
 
     if (t0.type === 'name' && UNSUPPORTED_WORDS.hasOwnProperty(t0.value)) {
       throw unsupported(UNSUPPORTED_WORDS[t0.value], t0);
+    }
+
+    /* 标签语句 outer: for (...) {} 不在子集内（复审 I4）——在语句起始
+       位置，一个裸标识符紧跟着 ':' 在真实 JS 语法里只可能是标签（对象
+       字面量要求先有 '{'，三元表达式的 ':' 前面必然有个 '?'，两者在
+       这个位置都不可能出现），判定不会跟其他合法写法冲突。不拦在这里
+       的话，'字面量; ... :' 会被当成一条普通表达式语句解析，随后
+       semi() 在 ':' 处报"expected ';' but got ':'"，一句跟标签毫无
+       关系的 syntax 错误。 */
+    const t1 = state.toks[state.i + 1];
+    if (t0.type === 'name' && t1 && t1.type === 'punct' && t1.value === ':') {
+      throw unsupported('labeled statements (label: ...)', t0);
     }
 
     if (t0.type === 'punct' && t0.value === '{') return parseBlock(state);
@@ -913,7 +1017,16 @@
     if (t0.type === 'kw' && t0.value === 'return') {
       state.i++;
       let arg = null;
-      if (!(at(state, 'punct', ';') || at(state, 'punct', '}') || at(state, 'eof'))) {
+      /* restricted production（ECMA-262 14.10：no LineTerminator here）：
+         'return' 与它的实参之间不能隔着换行，一旦隔了就必须在这里插入
+         分号——'return' 自己是一条完整语句，换行后的表达式变成下一条
+         独立语句，值被丢弃（复审 I1）。不检查这个的后果是静默地把
+         `function f(){ return\n5; }` 解释成 `return 5;`（原生是
+         `return; 5;`，函数返回 undefined，5; 是一条没有效果的表达式
+         语句）——返回值另起一行是常见排版习惯，这是 JS 最经典的坑之一，
+         属于「看起来合理但悄悄给错值」，比直接报错更危险。 */
+      const brokenLine = cur(state).line > t0.line;
+      if (!brokenLine && !(at(state, 'punct', ';') || at(state, 'punct', '}') || at(state, 'eof'))) {
         arg = parseExpr(state);
       }
       semi(state);
@@ -1002,15 +1115,37 @@
      看到的会是第 200 步的内容——轨迹会随着程序继续运行「悄悄改写历史」。
      函数值（无论是解释出来的 __fn 对象还是原生函数，比如宿主桥接函数、
      Array.prototype.push、Math.abs）不可深拷贝，对调试显示也没有价值，
-     统一渲染成 'ƒ name' 字符串。 */
-  function snap(v) {
-    if (Array.isArray(v)) return v.map(snap);
+     统一渲染成 'ƒ name' 字符串。
+
+     C2（复审）：环形引用会让这个递归无限深下去，把引擎自己的栈打爆——
+     `const o={}; o.self=o;` 这种再普通不过的写法，一旦这个值经过
+     declareVar/assignVar/closeScope 就会崩，报出的是无行列信息的引擎
+     RangeError，正是两道守卫（MAX_DEPTH/STEP_LIMIT）想让使用者避免的
+     那种崩法。用一个 seen 集合记「当前这条拷贝路径上已经在处理的对象」，
+     命中就返回一个占位字符串——轨迹是给人看的调试快照，不是可执行的
+     数据，占位值完全够用，没必要（也不可能）在快照里真的表示一个环。
+     seen 只覆盖「当前路径」，不是全局去重：兄弟位置引用同一个对象（不
+     是祖先）应该各自正常展开，出了这个对象的子树就要 delete 它，否则
+     `const a={}; const b={x:a,y:a};` 这种合法的共享引用会被误判成环。 */
+  function snap(v, seen) {
+    if (Array.isArray(v)) {
+      if (seen && seen.has(v)) return '[环形引用]';
+      seen = seen || new Set();
+      seen.add(v);
+      const out = v.map(function (x) { return snap(x, seen); });
+      seen.delete(v);
+      return out;
+    }
     if (v && typeof v === 'object') {
       if (v.__fn === true) return 'ƒ ' + (v.name || '(anonymous)');
+      if (seen && seen.has(v)) return '[环形引用]';
+      seen = seen || new Set();
+      seen.add(v);
       const out = {};
       for (const k in v) {
-        if (Object.prototype.hasOwnProperty.call(v, k)) out[k] = snap(v[k]);
+        if (Object.prototype.hasOwnProperty.call(v, k)) out[k] = snap(v[k], seen);
       }
+      seen.delete(v);
       return out;
     }
     if (typeof v === 'function') return 'ƒ ' + (v.name || '(anonymous)');
@@ -1026,12 +1161,25 @@
     if (env.rec) env.rec.pending.varDelta.push({ name: name, from: from, to: to });
   }
 
+  /* 暂时性死区（TDZ，复审 I2）的哨兵值。块内 let/const 声明的名字，从
+     进入这个块的那一刻起就已经"存在"（否则块内提前引用外层同名变量会
+     被下面的遮蔽逻辑误判成"这是第一次出现"），但在真正执行到声明语句
+     之前不可读——原生对这个区间的读取会抛
+     "Cannot access 'x' before initialization"。用一个独立的对象引用
+     （不是 undefined，避免跟 `let a;`——合法的、值确实是 undefined——
+     混淆）占位，hoistLexicalDecls 在块入口把它填进去，declareVar 执行
+     到真正的声明语句时用真实值覆盖它。 */
+  const TDZ = { tdz: true };
+
   /* 同一层环境内重复 let/const 声明是原生 SyntaxError（"Identifier 'a'
      has already been declared"，用 node 亲自问过原生 new Function 对出来
      的一字不差文案）——Task 4 遗留的真缺口（差分测试实测到我们静默通过）。
      只查「当前层」的 Map，不沿 parent 链查：不同作用域的遮蔽（let a = 1;
      { let a = 2; }）是合法的，块作用域每层都是独立的 Map，天然不会误伤。
-     node 用来报行列——调用方永远是解析期就带着源码位置的 AST 节点。 */
+     node 用来报行列——调用方永远是解析期就带着源码位置的 AST 节点。
+     existing.value === TDZ 时不算"已声明"——hoistLexicalDecls 预先占的
+     位不该挡住真正的声明语句；只有"已经有一个真实值"才是货真价实的
+     重复声明。 */
   /* 遮蔽（Gap 1 修复的第一块拼图）：如果外层（env.parent 往上，不含
      env 自己——env 自己此刻还没有这个名字，上面的重复声明检查已经保证
      了这一点）已经有同名变量，这次声明的 from 要记它被遮蔽前的值，而
@@ -1042,13 +1190,40 @@
      这一步单独不够——还需要 closeScope 在作用域退出时补一条恢复 delta，
      两者缺一不可，见 closeScope 的注释与任务报告里的完整推演。 */
   function declareVar(env, kind, name, value, node) {
-    if (env.vars.has(name)) {
+    const existing = env.vars.get(name);
+    if (existing !== undefined && existing.value !== TDZ) {
       throw err("Identifier '" + name + "' has already been declared", node.line, node.col, 'syntax');
     }
     const shadowed = findEnv(env.parent, name);
     const from = shadowed ? snap(shadowed.vars.get(name).value) : undefined;
     env.vars.set(name, { kind: kind, value: value });
     recordVarDelta(env, name, from, snap(value));
+  }
+
+  /* TDZ 预扫描（复审 I2，Gap 1 遮蔽逻辑的必要前提）：进入一个块（Program
+     顶层 / {} 块 / 函数体——凡是 evalBlockBody 会跑的地方）之前，先把
+     这一层**直接**出现的 let/const 名字（不递归进 if/for/嵌套块内部，
+     跟 hoistFunctionDecls 是同一条"只扫这一层"的规则）占成 TDZ 哨兵。
+     没有这一步，`{ let y = x; let x = 2; }` 里的 `x` 在读取那一刻还没
+     被 declareVar 处理过，findEnv 会一路向上找到外层的 x，静默读到一个
+     看起来合理、实则错误的值（原生这里是 ReferenceError）——这正是
+     "半懂不懂的解释器比明确拒绝更危险"的一个具体例子。
+     只在名字**还不存在于当前层**时才占位——如果当前层已经有一个真实值
+     （比如根环境的 log/mark/... 常量，或者同一层里第一次真正的声明已经
+     跑过），不去覆盖它：那种情况本来就该在真正执行到重复声明语句时，由
+     declareVar 的重复声明检查报错，不该被这里的预扫描抢先用 TDZ 盖掉一
+     个本应保留、以便稍后正确报错的真实值。 */
+  function hoistLexicalDecls(stmts, env) {
+    function claim(name) {
+      if (!env.vars.has(name)) env.vars.set(name, { kind: 'let', value: TDZ });
+    }
+    for (let idx = 0; idx < stmts.length; idx++) {
+      const s = stmts[idx];
+      if (s.type === 'VarDecl') claim(s.name);
+      else if (s.type === 'VarDeclList') {
+        for (let j = 0; j < s.decls.length; j++) claim(s.decls[j].name);
+      }
+    }
   }
 
   function findEnv(env, name) {
@@ -1073,6 +1248,10 @@
      作用域，一旦不再使用就要在这里关掉。 */
   function closeScope(scopeEnv) {
     scopeEnv.vars.forEach(function (binding, name) {
+      // 仍处于 TDZ：这个块提前退出（break/continue/return）时还没执行到
+      // 它的声明语句，declareVar 从没真正跑过，也就没有对应的"声明 delta"
+      // 需要在这里补一条恢复——扁平回放从头到尾都不会看到这个名字出现过。
+      if (binding.value === TDZ) return;
       const outer = findEnv(scopeEnv.parent, name);
       const to = outer ? snap(outer.vars.get(name).value) : undefined;
       recordVarDelta(scopeEnv, name, snap(binding.value), to);
@@ -1082,13 +1261,20 @@
   function lookupVar(env, name, node) {
     const e = findEnv(env, name);
     if (!e) throw err(name + ' is not defined', node.line, node.col, 'runtime');
-    return e.vars.get(name).value;
+    const binding = e.vars.get(name);
+    if (binding.value === TDZ) {
+      throw err("Cannot access '" + name + "' before initialization", node.line, node.col, 'runtime');
+    }
+    return binding.value;
   }
 
   function assignVar(env, name, value, node) {
     const e = findEnv(env, name);
     if (!e) throw err(name + ' is not defined', node.line, node.col, 'runtime');
     const binding = e.vars.get(name);
+    if (binding.value === TDZ) {
+      throw err("Cannot access '" + name + "' before initialization", node.line, node.col, 'runtime');
+    }
     if (binding.kind === 'const') {
       throw err('Assignment to constant variable.', node.line, node.col, 'runtime');
     }
@@ -1106,7 +1292,19 @@
      真实对象的 constructor / __proto__ 都不是自有属性，hasOwnProperty
      一律为 false，天然被挡在外面，不需要单独列一张黑名单。数组只放行
      length 与数字下标，字符串同理——这两类值的「方法」（push/pop 之类）
-     不走这条读属性的路径，走下面 resolveCallable 单独把关的调用路径。 */
+     不走这条读属性的路径，走下面 resolveCallable 单独把关的调用路径。
+
+     C3（复审）：解释出来的函数值（makeFunction 的 __fn 对象）typeof 是
+     'object'，如果不专门拦截，会直接落进下面「plain object」分支——
+     `hasOwnProperty` 对 params/body/closure/name/expression 这几个自有
+     字段全部为真，于是 `f.closure` 就能读到**解释器自己的运行时环境**
+     （闭包链、callDepth、rec 记录器），被解释的程序据此可以关掉两道
+     守卫（`f.closure.callDepth.n = 0` 让 MAX_DEPTH 失效、
+     `f.closure.rec.limit = 1e12` 让 STEP_LIMIT 失效并挂死浏览器）、
+     还能伪造轨迹（`f.closure.rec.trace.pop()`）。这不是新开一道口子，
+     是把函数值也纳入「只暴露约定好的表面」这条既有原则——原生 JS 里
+     `function f(){}; f.closure` 本来就是 `undefined`，这里的收口顺带
+     也修掉了这条与原生的分歧。 */
   function getProp(obj, prop, node) {
     if (Array.isArray(obj)) {
       if (prop === 'length') return obj.length;
@@ -1117,6 +1315,11 @@
       if (prop === 'length') return obj.length;
       if (typeof prop === 'number') return obj[prop];
       throw err('Unsupported string property: ' + prop, node.line, node.col, 'runtime');
+    }
+    if (obj && typeof obj === 'object' && obj.__fn === true) {
+      if (prop === 'name') return obj.name || '';
+      if (prop === 'length') return obj.params.length;
+      return undefined; // params/body/closure/expression 等内部字段一律不可见
     }
     if (obj && typeof obj === 'object') {
       if (Object.prototype.hasOwnProperty.call(obj, prop)) return obj[prop];
@@ -1130,6 +1333,9 @@
     if (Array.isArray(obj)) {
       if (typeof prop === 'number') { obj[prop] = value; return value; }
       throw err('Unsupported array property assignment: ' + prop, node.line, node.col, 'runtime');
+    }
+    if (obj && typeof obj === 'object' && obj.__fn === true) {
+      throw err('Cannot set properties of a function', node.line, node.col, 'runtime');
     }
     if (obj && typeof obj === 'object') {
       /* 写路径同样挡住 __proto__ / constructor / prototype——防的是靠
@@ -1450,11 +1656,18 @@
       }
 
       case 'Update': {
+        /* ECMA-262 13.4.4/13.4.5：两者第一步都是 ToNumeric(oldValue)——
+           '--' 侥幸正确是因为一元 '-' 本身就强制转数字，'++' 原来直接
+           `old + 1` 对字符串是拼接，不是加法（复审 C1：`let x="5"; x++;`
+           原生得 6，改前我们得 "51"）。这里用 Number(old) 补一个子集版
+           的 ToNumeric（本子集没有 BigInt，不需要分支）。后缀形式返回的
+           也是转换后的数字（原生 `let x="5"; x++;` 的表达式值是数字 5，
+           不是字符串 "5"），所以前缀/后缀都读 num，不再读未转换的 old。 */
         const ref = yield* evalRef(node.arg, env);
-        const old = ref.get();
-        const next = node.op === '++' ? old + 1 : old - 1;
+        const num = Number(ref.get());
+        const next = node.op === '++' ? num + 1 : num - 1;
         ref.set(next);
-        return node.prefix ? next : old;
+        return node.prefix ? next : num;
       }
 
       case 'Binary': {
@@ -1530,13 +1743,55 @@
      不会发生）。本阶段按 §2.8 裁定：到达上限即停止执行，不编造那个我们
      并不知道的 N（trace 上只有 truncated/limit，没有 omitted 字段）。
 
-     50,000 这个默认值同时是两件事：教学规模的算法（哪怕是 O(n^2) 量级、
-     n 到几百的双重循环）正常跑完远用不到这么多步，撞上它基本可以断定是
-     忘了写终止条件的死循环，而不是一个合法的大计算被误伤。 */
-  const STEP_LIMIT = 50000;
+     200,000 这个默认值不是凭感觉定的（复审 I3 发现旧值 50,000 连本分支
+     自己在 interp.test.js §"六道算法题的形状"里放的 N 皇后 N=8 都装不下，
+     而上面这段注释曾经断言过正相反的事——那句话是错的，已删掉，换成
+     下面这些实测数字）。
+
+     实测方法：用 interp.test.js 里同一份 N 皇后回溯（cols/d1/d2 剪枝 +
+     mark/place/clear）与骑士巡游（Warnsdorff 贪心启发式）算法源码，把
+     opts.limit 临时调到 5×10^7（相当于不设上限），读 run().trace.length
+     当真实步数：
+
+       N 皇后 N=6                         4,674 步     10 ms
+       N 皇后 N=8（规格 §5 点名的标准题目）  73,904 步     86 ms   ← 已超旧上限 50,000
+       骑士巡游 Warnsdorff 5×5（贪心，不回溯）  3,523 步      4 ms   ← 一次成功，不触边界
+       骑士巡游 Warnsdorff 6×6（贪心，不回溯）  5,670 步      6 ms   ← 同上
+
+     以及每步的内存开销（`process.memoryUsage().heapUsed` 前后差 ÷ 步数，
+     N=8 皇后那次运行实测约 234 字节/步；用 `JSON.stringify(trace).length`
+     ÷ 步数量的口径约 103 字节/步——两种量法本就该不同，量的是不同的
+     东西，这里都如实记录，不挑一个好看的）。按较大的口径估算：
+     50,000 步≈11 MB、200,000 步≈47 MB、1,000,000 步≈234 MB——200,000
+     在浏览器标签页里的内存代价可以接受。
+
+     200,000 对 N=8 皇后（73,904）留了约 2.7 倍余量，同时仍然远低于死
+     循环会在几十毫秒内冲到的量级，不会明显减弱"撞上限就是忘了写终止
+     条件"这个判断力。跟 MAX_DEPTH 一样，这个数字可以被 `opts.limit`
+     覆盖（Task 8）——上面这些数字只决定**缺省值**该是多少。
+
+     架构限制（写下来，不要让阶段 3b/4/5 重新踩一遍）：上面的骑士巡游
+     用的是 Warnsdorff 贪心启发式，一步到位、不回溯，步数很小；但如果
+     换成**不带启发式排序的纯回溯 DFS**（按固定方向顺序尝试八个方向，
+     走不通才回溯——这是教材里"骑士巡游"最常见的朴素写法，也正是
+     interp.test.js 里 `tourDFS` 这个名字暗示的范式），实测同一个 5×5
+     棋盘就要 472,717 步（1.1 秒），6×6 要 13,393,996 步（约 48 秒，
+     trace 长度对应的内存已是 GB 量级）。这类数字量级上跟审核者用另一
+     种写法测到的 5×5 362,062 步、6×6 10,174,375 步一致——差异来自
+     算法写法不同（有没有启发式排序），不是测量误差。也就是说：
+     "把 STEP_LIMIT 调大" 治得了 N 皇后，治不了朴素回溯的骑士巡游——
+     "先跑完、记全轨迹、再回放"这套架构撑不住那个规模。阶段 4/5 选骑士
+     巡游算法时要么用带启发式排序的版本（步数会回到几千的量级），要么
+     限制棋盘规模，要么等一个"只跑不记录"的模式（本阶段不实现）。 */
+  const STEP_LIMIT = 200000;
 
   function createRecorder(limit) {
-    return { trace: [], shadowBoard: {}, pending: newPending(), stepCount: 0, limit: limit, truncated: false };
+    // shadowBoard 分两层（复审 I5，见 wrapHostForTrace 的注释）：piece 记
+    // place/clear 的棋子层，mark 记 mark/clear 的标记层——同一格可以同时
+    // 有一枚棋子和一个标记（N 皇后放皇后 + 标记它攻击的格子是标准写法），
+    // 单层会把两者的撤销信息互相踩掉。
+    return { trace: [], shadowBoard: { piece: {}, mark: {} },
+             pending: newPending(), stepCount: 0, limit: limit, truncated: false };
   }
 
   /* 语句边界：把 env.rec.pending 打包成一条 Step，压进 trace，然后清空
@@ -1804,6 +2059,7 @@
      函数调用（callInterpreted 直接把函数体的语句数组喂给这里）全部
      经过这一个函数，提升逻辑因此只需要写一遍。 */
   function* evalBlockBody(stmts, env) {
+    hoistLexicalDecls(stmts, env);
     hoistFunctionDecls(stmts, env);
     for (let idx = 0; idx < stmts.length; idx++) {
       const completion = yield* evalStmt(stmts[idx], env);
@@ -1854,14 +2110,25 @@
      调用（return resolvedHost.xxx(...)），包装只是在旁边多做一次记录，
      不改变返回值或调用时机。
      mark/place/clear 的 from 取自解释器自己维护的「棋盘影子状态」
-     （rec.shadowBoard: { [sq]: kind }），不去问宿主——宿主未必肯回答
-     "这一格之前是什么"（上下文 6）。影子状态只为算出撤销信息服务，
-     不参与任何求值，这是它在整个解释器里唯一被读写的地方。
+     （rec.shadowBoard），不去问宿主——宿主未必肯回答"这一格之前是什么"
+     （上下文 6）。影子状态只为算出撤销信息服务，不参与任何求值，这是它
+     在整个解释器里唯一被读写的地方。
      attacked 只读、不产生任何棋盘变化，boardOps 的 kind 枚举里也没有
-     它的位置，所以只转发调用，不记录。 */
+     它的位置，所以只转发调用，不记录。
+
+     复审 I5：shadowBoard 分两层——`piece`（place/clear 写）与 `mark`
+     （mark/clear 写）。规格 §2.7 的棋盘侧四种状态本来就该跟棋子并存两层
+     （放皇后 + 标记它攻击的格子是 N 皇后的标准写法，interp.test.js 里
+     算法①正是这么写的：`mark(...)` 之后 `place` 从未在同一格出现，但
+     阶段 5 的算法一旦两者用在同一格，单层影子状态会把 place 的旧值当成
+     mark 的旧值读出来，clear 时只找得回后写的那一层，先写的那一层在
+     轨迹里再也回不来。分两层后 place/mark 各自只读写自己那一层，互不
+     覆盖；clear 清空一整格（两层都清），所以它的撤销信息要同时带上两层
+     的旧值——`from: { piece, mark }`，而不是一个标量。 */
   function wrapHostForTrace(resolvedHost, rec) {
-    function shadowFrom(sq) {
-      return Object.prototype.hasOwnProperty.call(rec.shadowBoard, sq) ? rec.shadowBoard[sq] : null;
+    function shadowFrom(layer, sq) {
+      const board = rec.shadowBoard[layer];
+      return Object.prototype.hasOwnProperty.call(board, sq) ? board[sq] : null;
     }
     return {
       log: function (msg) {
@@ -1873,18 +2140,23 @@
         return r;
       },
       mark: function (sq, kind) {
-        rec.pending.boardOps.push({ kind: 'mark', sq: sq, to: kind, from: shadowFrom(sq) });
-        rec.shadowBoard[sq] = kind;
+        rec.pending.boardOps.push({ kind: 'mark', sq: sq, to: kind, from: shadowFrom('mark', sq) });
+        rec.shadowBoard.mark[sq] = kind;
         return resolvedHost.mark(sq, kind);
       },
       place: function (sq, piece) {
-        rec.pending.boardOps.push({ kind: 'place', sq: sq, to: piece, from: shadowFrom(sq) });
-        rec.shadowBoard[sq] = piece;
+        rec.pending.boardOps.push({ kind: 'place', sq: sq, to: piece, from: shadowFrom('piece', sq) });
+        rec.shadowBoard.piece[sq] = piece;
         return resolvedHost.place(sq, piece);
       },
       clear: function (sq) {
-        rec.pending.boardOps.push({ kind: 'clear', sq: sq, to: null, from: shadowFrom(sq) });
-        delete rec.shadowBoard[sq];
+        // clear 清空整格：棋子层与标记层一起消失，撤销信息因此要带上
+        // 两层各自的旧值——反悔这一步时，两层都要能恢复，缺一层就会像
+        // I5 描述的那样把先写的那层永久丢在轨迹之外。
+        const from = { piece: shadowFrom('piece', sq), mark: shadowFrom('mark', sq) };
+        rec.pending.boardOps.push({ kind: 'clear', sq: sq, to: null, from: from });
+        delete rec.shadowBoard.piece[sq];
+        delete rec.shadowBoard.mark[sq];
         return resolvedHost.clear(sq);
       },
       attacked: function (sq) { return resolvedHost.attacked(sq); },

@@ -651,7 +651,10 @@ T.eq(replayVars(forSh, forSh.length).i, 99,
      'for 头部声明的 i 遮蔽外层同名变量，for 退出后扁平回放要看到外层的 99，不是循环体最后的 3');
 
 // ---- 步数上限：同时是死循环保护（规格 §2.8）----
-T.eq(I.STEP_LIMIT, 50000, '默认上限 50,000 步');
+// 复审 I3：50,000 装不下本文件自己后面测的 N 皇后 N=8（实测 73,904 步），
+// 改成 200,000（约 2.7 倍余量），细节与实测数字见 interp.js 里
+// STEP_LIMIT 常量旁边的注释。
+T.eq(I.STEP_LIMIT, 200000, '默认上限 200,000 步（复审 I3：50,000 装不下 N=8 皇后）');
 
 const loop = I.run('let i = 0;\nwhile (true) { i++; }', { host: {}, limit: 500 });
 T.eq(loop.trace.truncated, true, '死循环被上限截住，不是卡死');
@@ -845,5 +848,211 @@ diff([
   'log("visited " + visited);',
   'return r;',
 ].join('\n'), '⑥ α-β 剪枝（剪枝序列必须与原生逐条一致）');
+
+// ============ 最终审核修复轮（final-review.md 的 A/B/C 三节）============
+
+// ---- A-1：'++'/'--' 必须先做 ToNumber，不能对字符串做拼接 ----
+// 复审 C1：'--' 侥幸正确（一元 '-' 本身就强制转数字），'++' 原来
+// `old + 1` 对字符串是拼接不是加法。六种组合逐一锁住，覆盖前缀/后缀、
+// 变量/数组下标/对象属性三种赋值目标。
+diff('let x = "5"; x++; return x;', 'A1: 字符串 x++（后缀，读结果）');
+diff('let x = "5"; let y = x++; return y;', 'A1: 字符串 x++ 的返回值也是数字，不是原字符串');
+diff('let x = "5"; return ++x;', 'A1: 字符串 ++x（前缀，返回新值）');
+diff('let a = ["3"]; a[0]++; return a[0];', 'A1: 数组元素 a[0]++');
+diff('let o = { v: "3" }; o.v++; return o.v;', 'A1: 对象属性 o.v++');
+diff('let x = "7"; let y = x++; return y + 1;', 'A1: 字符串 x++ 返回值参与后续运算');
+diff('let x = "5"; x--; return x;', 'A1 对照: 字符串 x--（回归，"--" 本来就是对的）');
+diff('let x = true; x++; return x;', 'A1 对照: 布尔值 ++（回归）');
+diff('let x = null; x++; return x;', 'A1 对照: null 的 ++（回归）');
+
+// ---- A-2：snap() 遇到环形引用不能把引擎栈打爆 ----
+// 复审 C2：四种最普通的写法（closeScope / 函数返回 / 形参绑定 /
+// assignVar）都会让一个环形引用值经过 snap()，改之前全部无限递归、
+// 报无行列信息的引擎 RangeError。
+const circularCases = [
+  { src: '{ const o = {}; o.self = o; }', label: '块退出（closeScope）遇到环形引用' },
+  { src: 'function f(){ const o={}; o.self=o; return 1; } return f();', label: '函数返回时环形引用经过声明快照' },
+  { src: 'function f(x){ return 1; } const o={}; o.self=o; return f(o);', label: '形参绑定时环形引用经过 declareVar' },
+  { src: 'let o={},p={}; o.p=p; p.o=o; o = 1; return 0;', label: '重新赋值经过 assignVar 时的双向环' },
+];
+for (const c of circularCases) {
+  let threw = null, result;
+  try { result = I.run(c.src, { host: {} }).result; } catch (e) { threw = e; }
+  T.eq(threw, null, 'A2 不崩：' + c.label + (threw ? ('（实际抛出：' + threw.message + '）') : ''));
+}
+// 用带块退出的写法（而不是顶层）——顶层 Program 不会在 run() 结束时补
+// closeScope，property 写入本身也不产生 varDelta，必须让 o 真正离开一层
+// 块作用域才会触发 snap()。
+const circTrace = I.run('{ const o = {}; o.self = o; }', { host: {} }).trace;
+T.ok(JSON.stringify(circTrace).indexOf('环形引用') >= 0,
+     'A2: 环形引用在轨迹快照里显示占位符，而不是被深拷贝到无限深');
+
+// ---- A-3：函数值不能泄漏解释器内部对象（params/body/closure/expression）----
+// 复审 C3：makeFunction 的 __fn 对象 typeof 是 'object'，改之前 getProp 的
+// hasOwnProperty 通道会把这些内部字段照单全收，被解释的程序可以据此关掉
+// MAX_DEPTH/STEP_LIMIT 两道守卫、伪造轨迹。只留 name/length 两个原生也有
+// 的属性可读，其余一律 undefined；写入一律报错。
+diff('function f(){} return f.closure;', 'A3: f.closure 不可见（原生本来就是 undefined）');
+diff('function f(){} return f.body;', 'A3: f.body 不可见');
+diff('function f(){} return f.params;', 'A3: f.params 不可见');
+diff('function f(){} return f.expression;', 'A3: f.expression 不可见');
+diff('function f(a, b) {} return f.length;', 'A3: f.length 返回形参个数（原生行为，不是内部字段）');
+diff('function foo() {} return foo.name;', 'A3: foo.name 返回函数名（原生行为）');
+
+let closureLeakErr = null;
+try {
+  I.run('function f(k){ if(k<=0){return 0;} f.closure.callDepth.n = 0; return 1+f(k-1); } return f(100000);',
+        { host: {} });
+} catch (e) { closureLeakErr = e; }
+T.ok(closureLeakErr, 'A3: 试图用 f.closure.callDepth 关掉 MAX_DEPTH 守卫必须失败');
+T.eq(closureLeakErr && closureLeakErr.category, 'runtime',
+     'A3: 失败原因是"closure 不存在"，不是绕过守卫后引擎自己的 RangeError');
+
+let traceForgeErr = null;
+try { I.run('function f(){} f.closure.rec.trace.pop();', { host: {} }); }
+catch (e) { traceForgeErr = e; }
+T.ok(traceForgeErr, 'A3: 试图用 f.closure.rec.trace 伪造轨迹必须失败');
+
+let setFnPropErr = null;
+try { I.run('function f(){} f.closure = 1;', { host: {} }); }
+catch (e) { setFnPropErr = e; }
+T.ok(setFnPropErr, 'A3: 不能给函数值设置属性');
+T.eq(setFnPropErr && setFnPropErr.message, 'Cannot set properties of a function', 'A3: setProp 报错文案');
+
+// ---- B-1：'return' 后遇到换行必须触发 ASI，不能把下一行当成返回值 ----
+diff('function f(){ return\n5; }\nreturn f();', 'B1: return 后换行触发 ASI，函数返回 undefined 而不是 5');
+diff('function f(){\n  return\n}\nreturn f();', 'B1 对照: return 后直接是 } 换行（回归）');
+diff('function f(){ return 5; }\nreturn f();', 'B1 对照: return 与返回值同一行仍然正常工作（回归）');
+
+// ---- B-2：暂时性死区（TDZ）——块内提前引用外层同名变量必须报错 ----
+diff('let x = 1;\n{ let y = x; let x = 2; return y; }',
+     'B2: TDZ - 块内 let y=x 提前引用了本层稍后才声明的 x，必须报 ReferenceError（不能静默读到外层的 1）');
+diff('{ x; let x = 2; return 0; }',
+     'B2: TDZ - 单纯的表达式语句提前引用同一层稍后声明的名字，同样受 TDZ 约束');
+diff('{ let a = 5; return a; }', 'B2 对照: 正常声明后使用（回归）');
+diff('function f(){ let a = 1; return a; } return f();', 'B2 对照: 函数体内 let 不受影响（回归）');
+
+// ---- B-4：boardOps 的撤销信息按棋子层/标记层分开记 ----
+// 复审 I5：place 与 mark 曾经共用同一个影子槽，同一格先 place 再 mark
+// 会把棋子的旧值当成标记的旧值读出来，clear 时只找得回后写的那一层。
+{
+  const ops = I.run('place("d4", "Q");\nmark("d4", "attacked");\nclear("d4");', { host: {} }).trace
+    .flatMap(function (s) { return s.boardOps; });
+  T.eq(ops[0], { kind: 'place', sq: 'd4', to: 'Q', from: null },
+       'B4: place 记自己那层的旧值（棋子层，第一次是 null）');
+  T.eq(ops[1], { kind: 'mark', sq: 'd4', to: 'attacked', from: null },
+       'B4: mark 记自己那层的旧值（标记层，不该被 place 的 "Q" 污染）');
+  T.eq(ops[2], { kind: 'clear', sq: 'd4', to: null, from: { piece: 'Q', mark: 'attacked' } },
+       'B4: clear 清空整格，撤销信息要同时带上棋子层与标记层的旧值');
+}
+
+// ---- B-5：子集外的现代语法要分类为 unsupported，且消息要点名具体 ----
+// 复审 I4：'?.'/'??' 原来的消息说自己是"三元运算符"——一句错误的提示；
+// '**'/'**='/位运算符是半成品状态（词法器认识、解析器没接住）；默认/
+// 剩余参数、对象简写/计算键/方法简写、标签语句都被通用 syntax 错误
+// 兜底，看不出这是"不支持"而不是"写错了"。
+function unsupportedCheck(src, mustContain, label) {
+  let caught = null;
+  try { I.parse(src); } catch (e) { caught = e; }
+  T.ok(caught, label + ' —— 应该报错');
+  T.eq(caught && caught.category, 'unsupported', label + ' —— category 应为 unsupported，实际: ' + (caught && caught.category));
+  T.ok(caught && caught.message.indexOf(mustContain) >= 0,
+       label + ' —— 消息应提到 "' + mustContain + '"，实际: ' + (caught && caught.message));
+}
+unsupportedCheck('return 2 ** 3;', '**', 'B5: ** 运算符（原来是 syntax："expected \\";\\" but got \\"**\\""）');
+unsupportedCheck('let a = 2; a **= 3;', '**=', 'B5: **= 复合赋值');
+unsupportedCheck('return 1 & 2;', '&', 'B5: 位运算 &（原来词法器直接报 Unexpected character）');
+unsupportedCheck('return 1 | 2;', '|', 'B5: 位运算 |');
+unsupportedCheck('return 1 ^ 2;', '^', 'B5: 位运算 ^');
+unsupportedCheck('return ~1;', '~', 'B5: 按位取反 ~');
+unsupportedCheck('return 1 << 2;', '<<', 'B5: 左移 <<');
+unsupportedCheck('return 1 >> 2;', '>>', 'B5: 右移 >>');
+unsupportedCheck('const o = {}; return o?.x;', 'optional chaining', 'B5: 可选链 ?. 的消息必须点名"可选链"');
+unsupportedCheck('return a ?? 1;', '??', 'B5: 空值合并 ?? 的消息必须点名 ??');
+unsupportedCheck('function f(a = 1) {}', 'default parameters', 'B5: 默认参数');
+unsupportedCheck('function f(...a) {}', 'rest parameters', 'B5: 剩余参数');
+unsupportedCheck('const x = 1; return { x };', 'object shorthand', 'B5: 对象属性简写');
+unsupportedCheck('const k = 1; return { [k]: 1 };', 'computed object keys', 'B5: 计算属性键');
+unsupportedCheck('return { f() {} };', 'method shorthand', 'B5: 方法简写');
+unsupportedCheck('outer: for (;;) { break; }', 'labeled statements', 'B5: 标签语句');
+// 专门确认旧的错误消息（"三元运算符"）不会再出现在 ?./?? 的报错里——
+// 只查类别/关键词不够，得确认真的换掉了那句误导性的话。
+(function () {
+  let e1 = null, e2 = null;
+  try { I.parse('const o = {}; return o?.x;'); } catch (e) { e1 = e; }
+  try { I.parse('return a ?? 1;'); } catch (e) { e2 = e; }
+  T.ok(e1 && e1.message.indexOf('ternary') === -1, 'B5: ?. 的消息不再提"三元运算符"');
+  T.ok(e2 && e2.message.indexOf('ternary') === -1, 'B5: ?? 的消息不再提"三元运算符"');
+})();
+// 回归：尾随逗号一直是允许的（复审 M34：没有专门的断言盯着，未来被
+// 误删也不会被发现）。
+diff('const a = [1, 2, 3,]; return a.length;', 'M34 回归: 数组字面量允许尾随逗号');
+diff('const o = { a: 1, b: 2, }; return o.b;', 'M34 回归: 对象字面量同样允许尾随逗号');
+
+// ============ C 节：沙箱核心保证 + 其余几条低成本补测 ============
+// 复审发现这三条改坏之后 442 条测试仍然全绿——不是"写了拦不住"，是
+// "压根没写断言"。每一条都在这次修复里做过一次变异往返（改坏 → 确认
+// 变红 → 还原），实际输出记在 final-fix-report.md 里，这里补的是让它们
+// 从此有牙的永久断言。
+
+// ---- M16：不走原型链读——只读自有属性 ----
+// 注意：constructor/toString 泄漏出来的是一个真的原生函数值——_test.js
+// 的 T.eq 用 JSON.stringify 比较，而 JSON.stringify(函数) 和
+// JSON.stringify(undefined) 都是 JS 的 undefined（不是字符串），两者会
+// 被误判成相等！第一版这里直接 T.eq(result, undefined, ...) 在做变异
+// 往返验证时被现场揪出这个假阳性（M16 的 constructor/toString 两条改坏
+// 后没有变红）——改成 typeof 比较（'undefined' 字符串 vs 'function'
+// 字符串，二者在 JSON.stringify 下是不同的字符串）才是真的有牙。
+// __proto__ 泄漏出来的是 Object.prototype（一个对象，没有可枚举自有
+// 属性），JSON.stringify 后是 "{}"，跟 JSON.stringify(undefined) 不同，
+// 这一条本身就有牙，不需要 typeof。
+T.eq(typeof I.run('const o = {}; return o.constructor;', { host: {} }).result, 'undefined',
+     'M16: o.constructor 读到 undefined（原生会经原型链读到 Object，这是有意的沙箱分歧）');
+T.eq(typeof I.run('const o = {}; const k = "constructor"; return o[k];', { host: {} }).result, 'undefined',
+     'M16: 计算属性键读取同样挡住原型链');
+T.eq(I.run('const o = {}; return o.__proto__;', { host: {} }).result, undefined,
+     'M16: __proto__ 读取同样挡住');
+T.eq(typeof I.run('const o = {}; return o.toString;', { host: {} }).result, 'undefined',
+     'M16: 继承来的方法（toString 等）读不到——只有 hasOwnProperty 为真的自有属性可读');
+
+// ---- M17：setProp 拒绝 __proto__/constructor/prototype 写入 ----
+function throwsCheck(src, label) {
+  let e = null;
+  try { I.run(src, { host: {} }); } catch (err2) { e = err2; }
+  T.ok(e, label);
+  return e;
+}
+throwsCheck('const o = {}; o.__proto__ = 1;', 'M17: 写 __proto__ 被拒绝');
+throwsCheck('const o = {}; o.constructor = 1;', 'M17: 写 constructor 被拒绝');
+throwsCheck('const o = {}; o.prototype = 1;', 'M17: 写 prototype 被拒绝');
+throwsCheck('const a = []; a.__proto__ = 1;', 'M17: 数组的 __proto__ 写入同样被拒绝');
+
+// ---- M29：const 不可重新赋值（此前只有一条只读的 diff，写入路径没有
+//      任何断言真的盯着它） ----
+const constErr = throwsCheck('const c = 3; c = 4;', 'M29: 给 const 变量重新赋值必须报错');
+T.eq(constErr && constErr.message, 'Assignment to constant variable.', 'M29: 报错文案与原生一字不差');
+T.eq(constErr && constErr.category, 'runtime', 'M29: 类别是 runtime');
+throwsCheck('const c = 3; c += 1;', 'M29: 复合赋值给 const 同样要报错');
+throwsCheck('const c = 3; c++;', 'M29: 自增给 const 同样要报错（顺带覆盖 A1 的 ToNumber 路径与 const 检查的交互）');
+
+// ---- M32：数组方法白名单只有 push/pop ----
+const shiftErr = throwsCheck('const a = [1, 2, 3]; a.shift();', 'M32: shift 不在白名单里，必须被拒绝');
+T.ok(shiftErr && /push\/pop/.test(shiftErr.message), 'M32: 报错要点名"只有 push/pop"');
+
+// ---- M08：调用实参按从左到右求值（宿主调用序列可验证顺序）----
+diff('function f(a, b) { return 0; } return f(log("first"), log("second"));',
+     'M08: 实参求值顺序从左到右');
+
+// ---- M18：复合赋值先读旧值、再求值右手边（ECMA-262 13.15.3）----
+diff('let a = 1; function bump() { a = 100; return 1; } a += bump(); return a;',
+     'M18: a+=bump() 先读旧值 1，bump() 把 a 改成 100 不影响这次读到的旧值，最终写回 1+1=2');
+
+// ---- M26：没有提供 host 时，attacked 缺省返回 false（不是 undefined）----
+T.eq(I.run('return attacked(1);', {}).result, false,
+     'M26: 没有 host 时 attacked 走 NOOP_HOST，缺省返回 false');
+
+// ---- M37：形参与实参个数不一致时按原生规则处理（多余丢弃/缺失补 undefined）----
+diff('function f(a, b) { return [a, b]; } return f(1);', 'M37: 实参少于形参，缺失的补 undefined');
+diff('function f(a) { return a; } return f(1, 2, 3);', 'M37: 实参多于形参，多余的被丢弃');
 
 T.report();
