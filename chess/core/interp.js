@@ -156,5 +156,313 @@
     return out;
   }
 
-  return { tokenize: tokenize, KEYWORDS: KEYWORDS };
+  /* ---- 解析器：token 流 → 表达式 AST（规格 §2.6 的节点形状表，见任务简报） ----
+     不做「每个优先级一个 parseXxx」的十层嵌套：二元运算符走表驱动的
+     precedence climbing（见 BINOP），层次是
+       赋值（右结合，单独一层）→ 表驱动二元 → 一元/前缀 → 后缀/调用/成员 → 基本单元。
+     十层手写函数最容易在中间某一层把结合性写反，而那种错误只在特定
+     表达式上暴露（a - b - c 对了不代表 a / b / c 对）。 */
+
+  /* 二元运算优先级：数字越大结合得越紧。全部列出的都是左结合；右结合的
+     只有赋值，它在 parseAssign 里单独处理，不走这张表。 */
+  const BINOP = {
+    '||': 1, '&&': 2,
+    '===': 3, '!==': 3, '==': 3, '!=': 3,
+    '<': 4, '>': 4, '<=': 4, '>=': 4,
+    '+': 5, '-': 5,
+    '*': 6, '/': 6, '%': 6,
+  };
+  const LOGICAL_OPS = { '&&': true, '||': true };
+
+  /* 子集边界之外的保留字：走 name 通道进词法器（KEYWORDS 表里没有它们），
+     解析器在语法位置上直接拒绝，报错要说清楚是哪个词、为什么不支持——
+     「意外的标识符 class」对使用者毫无帮助。 */
+  const UNSUPPORTED_WORDS = ['class', 'this', 'new', 'typeof', 'delete',
+                              'async', 'await', 'try', 'catch', 'throw'];
+
+  function cur(state) { return state.toks[state.i]; }
+  function at(state, type, value) {
+    const t = cur(state);
+    if (t.type !== type) return false;
+    return value === undefined || t.value === value;
+  }
+  /* eat：只对 punct/kw 这类「值即身份」的 token 有意义，按 value 匹配。 */
+  function eat(state, value) {
+    const t = cur(state);
+    if ((t.type === 'punct' || t.type === 'kw') && t.value === value) { state.i++; return true; }
+    return false;
+  }
+  function expect(state, value) {
+    if (!eat(state, value)) {
+      const t = cur(state);
+      throw err('Unexpected token: expected ' + JSON.stringify(value) + ' but got ' +
+                 JSON.stringify(t.value), t.line, t.col);
+    }
+  }
+  /* 在任意表达式起始位置检查「这个词/符号是不是子集之外的东西」——
+     class / this / new / typeof / delete / async / await / try / catch / throw
+     走 name 通道进来，... 与 ? 走 punct 通道，都要在这里拦下来，而不是
+     让它们继续往下走然后在基本单元里报一个不知所云的 syntax 错误。 */
+  function checkUnsupported(state) {
+    const t = cur(state);
+    if (t.type === 'name' && UNSUPPORTED_WORDS.indexOf(t.value) >= 0) {
+      throw err('Unsupported syntax: ' + t.value + ' is outside this interpreter\'s JavaScript subset',
+                 t.line, t.col, 'unsupported');
+    }
+    if (t.type === 'punct' && t.value === '...') {
+      throw err('Unsupported syntax: spread is outside this interpreter\'s JavaScript subset',
+                 t.line, t.col, 'unsupported');
+    }
+    if (t.type === 'punct' && t.value === '?') {
+      throw err('Unsupported syntax: ternary is outside this interpreter\'s JavaScript subset',
+                 t.line, t.col, 'unsupported');
+    }
+  }
+
+  /* 赋值：右结合，单独一层，不走 BINOP 表（表里全是左结合）。
+     先按「二元优先级链」解析左手边，如果紧跟着赋值符号，再整体回收成
+     Assign 节点——这样 a = b = c 这种右结合链靠递归调用 parseAssign
+     自然得到，不需要额外的结合性判断。 */
+  const ASSIGN_OPS = ['=', '+=', '-=', '*=', '/=', '%='];
+  function parseAssign(state) {
+    const t0 = cur(state);
+    const left = parseBinary(state, 1);
+    /* 三元 ?: 不在子集内。它在真实 JS 语法里紧跟在「条件部分」
+       （大致相当于我们这里刚解析完的 parseBinary 结果）之后，且这个
+       位置不会被 parsePrimary 看到（'?' 不能开始一个表达式）——所以
+       只能在这里、左手边刚解析完的地方拦截，才能报出 unsupported
+       而不是「expected ')' but got '?'」这种不知所云的 syntax 错误。 */
+    if (at(state, 'punct', '?')) {
+      const qt = cur(state);
+      throw err('Unsupported syntax: ternary is outside this interpreter\'s JavaScript subset',
+                 qt.line, qt.col, 'unsupported');
+    }
+    const t = cur(state);
+    if (t.type === 'punct' && ASSIGN_OPS.indexOf(t.value) >= 0) {
+      state.i++;
+      const value = parseAssign(state);
+      return { type: 'Assign', op: t.value, target: left, value: value, line: t0.line, col: t0.col };
+    }
+    return left;
+  }
+
+  /* 表驱动 precedence climbing：minPrec 是「当前允许结合的最低优先级」。
+     每次吃掉一个运算符后，右手边用 prec+1 递归——这就是左结合的做法：
+     同级运算符不会被塞进右子树，而是留在下一轮循环里挂到左子树上。 */
+  function parseBinary(state, minPrec) {
+    const t0 = cur(state);
+    let left = parseUnary(state);
+    for (;;) {
+      const t = cur(state);
+      if (t.type !== 'punct') break;
+      const prec = BINOP[t.value];
+      if (prec === undefined || prec < minPrec) break;
+      state.i++;
+      const right = parseBinary(state, prec + 1);
+      left = {
+        type: LOGICAL_OPS[t.value] ? 'Logical' : 'Binary',
+        op: t.value, left: left, right: right,
+        line: t0.line, col: t0.col,
+      };
+    }
+    return left;
+  }
+
+  const UNARY_OPS = { '-': true, '+': true, '!': true };
+  function parseUnary(state) {
+    const t0 = cur(state);
+    if (t0.type === 'punct' && UNARY_OPS[t0.value]) {
+      state.i++;
+      const arg = parseUnary(state);
+      return { type: 'Unary', op: t0.value, arg: arg, line: t0.line, col: t0.col };
+    }
+    if (t0.type === 'punct' && (t0.value === '++' || t0.value === '--')) {
+      state.i++;
+      const arg = parseUnary(state);
+      return { type: 'Update', op: t0.value, arg: arg, prefix: true, line: t0.line, col: t0.col };
+    }
+    return parsePostfix(state);
+  }
+
+  /* 后缀/调用/成员链：a.b[0](x) 要能无限链下去，谁在左边就继续绕圈，
+     直到看不到 . [ ( ++ -- 中的任何一个为止。 */
+  function parsePostfix(state) {
+    const t0 = cur(state);
+    let node = parsePrimary(state);
+    for (;;) {
+      const t = cur(state);
+      if (t.type === 'punct' && t.value === '.') {
+        state.i++;
+        const nameTok = cur(state);
+        if (nameTok.type !== 'name' && nameTok.type !== 'kw') {
+          throw err('Unexpected token: expected property name', nameTok.line, nameTok.col);
+        }
+        state.i++;
+        node = { type: 'Member', obj: node, prop: nameTok.value, computed: false, line: t0.line, col: t0.col };
+        continue;
+      }
+      if (t.type === 'punct' && t.value === '[') {
+        state.i++;
+        const prop = parseExpr(state);
+        expect(state, ']');
+        node = { type: 'Member', obj: node, prop: prop, computed: true, line: t0.line, col: t0.col };
+        continue;
+      }
+      if (t.type === 'punct' && t.value === '(') {
+        state.i++;
+        const args = [];
+        if (!at(state, 'punct', ')')) {
+          args.push(parseAssign(state));
+          while (eat(state, ',')) args.push(parseAssign(state));
+        }
+        expect(state, ')');
+        node = { type: 'Call', callee: node, args: args, line: t0.line, col: t0.col };
+        continue;
+      }
+      if (t.type === 'punct' && (t.value === '++' || t.value === '--')) {
+        state.i++;
+        node = { type: 'Update', op: t.value, arg: node, prefix: false, line: t0.line, col: t0.col };
+        continue;
+      }
+      break;
+    }
+    return node;
+  }
+
+  /* 箭头函数的形参表与括号表达式共用同一个左括号，只能往前探探看：
+     扫描到匹配的 ')' 之后如果紧跟着 '=>' 就是箭头函数，否则回退当括号
+     表达式处理。这里不做逐字符回溯，而是先假设是形参表——用逗号分隔
+     的裸标识符列表——扫描失败再退回普通括号表达式，两者语法在「只有
+     标识符」这一形状上是共同前缀，靠向前看一个 token（=>）消歧。 */
+  function tryParseArrowParams(state) {
+    const save = state.i;
+    const t0 = cur(state);
+    if (at(state, 'name')) {
+      // 单参数不带括号：x => x
+      const name = cur(state).value;
+      const save2 = state.i;
+      state.i++;
+      if (at(state, 'punct', '=>')) return { params: [name], t0: t0 };
+      state.i = save2;
+      return null;
+    }
+    if (!at(state, 'punct', '(')) return null;
+    state.i++;
+    const params = [];
+    let ok = true;
+    if (!at(state, 'punct', ')')) {
+      for (;;) {
+        if (!at(state, 'name')) { ok = false; break; }
+        params.push(cur(state).value);
+        state.i++;
+        if (eat(state, ',')) continue;
+        break;
+      }
+    }
+    if (ok && eat(state, ')') && at(state, 'punct', '=>')) {
+      return { params: params, t0: t0 };
+    }
+    state.i = save;
+    return null;
+  }
+
+  function parsePrimary(state) {
+    checkUnsupported(state);
+    const t0 = cur(state);
+
+    const arrowAttempt = tryParseArrowParams(state);
+    if (arrowAttempt) {
+      expect(state, '=>');
+      let body, expression;
+      if (at(state, 'punct', '{')) {
+        /* 语句体的箭头函数属于阶段 3b（语句解析）才有意义——这里的
+           解析层还没有语句节点可用，先按子集边界拒绝，等语句解析落地
+           后由那个任务决定怎么支持。 */
+        throw err('Unsupported syntax: block-bodied arrow functions are outside this interpreter\'s JavaScript subset',
+                   cur(state).line, cur(state).col, 'unsupported');
+      }
+      body = parseAssign(state);
+      expression = true;
+      return { type: 'Arrow', params: arrowAttempt.params, body: body, expression: expression,
+               line: arrowAttempt.t0.line, col: arrowAttempt.t0.col };
+    }
+
+    if (t0.type === 'num') { state.i++; return { type: 'Num', value: t0.value, line: t0.line, col: t0.col }; }
+    if (t0.type === 'str') { state.i++; return { type: 'Str', value: t0.value, line: t0.line, col: t0.col }; }
+    if (t0.type === 'tpl') {
+      state.i++;
+      const exprs = t0.value.exprs.map(function (src) { return parseExpression(src); });
+      return { type: 'Tpl', quasis: t0.value.quasis, exprs: exprs, line: t0.line, col: t0.col };
+    }
+    if (t0.type === 'kw' && t0.value === 'true') { state.i++; return { type: 'Bool', value: true, line: t0.line, col: t0.col }; }
+    if (t0.type === 'kw' && t0.value === 'false') { state.i++; return { type: 'Bool', value: false, line: t0.line, col: t0.col }; }
+    if (t0.type === 'kw' && t0.value === 'null') { state.i++; return { type: 'Null', line: t0.line, col: t0.col }; }
+    if (t0.type === 'name') { state.i++; return { type: 'Ident', name: t0.value, line: t0.line, col: t0.col }; }
+
+    if (t0.type === 'punct' && t0.value === '(') {
+      state.i++;
+      const e = parseExpr(state);
+      expect(state, ')');
+      return e;
+    }
+
+    if (t0.type === 'punct' && t0.value === '[') {
+      state.i++;
+      const elements = [];
+      if (!at(state, 'punct', ']')) {
+        elements.push(parseAssign(state));
+        while (eat(state, ',')) {
+          if (at(state, 'punct', ']')) break; // 允许尾随逗号
+          elements.push(parseAssign(state));
+        }
+      }
+      expect(state, ']');
+      return { type: 'Array', elements: elements, line: t0.line, col: t0.col };
+    }
+
+    if (t0.type === 'punct' && t0.value === '{') {
+      state.i++;
+      const props = [];
+      if (!at(state, 'punct', '}')) {
+        for (;;) {
+          const keyTok = cur(state);
+          let key;
+          if (keyTok.type === 'name' || keyTok.type === 'kw') key = keyTok.value;
+          else if (keyTok.type === 'str') key = keyTok.value;
+          else throw err('Unexpected token: expected property key', keyTok.line, keyTok.col);
+          state.i++;
+          expect(state, ':');
+          const value = parseAssign(state);
+          props.push({ key: key, value: value });
+          if (eat(state, ',')) {
+            if (at(state, 'punct', '}')) break; // 尾随逗号
+            continue;
+          }
+          break;
+        }
+      }
+      expect(state, '}');
+      return { type: 'Object', props: props, line: t0.line, col: t0.col };
+    }
+
+    throw err('Unexpected token: ' + JSON.stringify(t0.value), t0.line, t0.col);
+  }
+
+  function parseExpr(state) { return parseAssign(state); }
+
+  /* 供测试与阶段 3b 的表达式求值使用：从源码字符串直接解析出一个表达式
+     节点，断言之后紧跟 eof（防止 '1 2' 这种「解析到一半就丢下剩余源码」
+     的情况悄悄通过）。 */
+  function parseExpression(src) {
+    const toks = tokenize(src).filter(function (t) { return t.type !== 'comment'; });
+    const state = { toks: toks, i: 0 };
+    const node = parseExpr(state);
+    if (!at(state, 'eof')) {
+      const t = cur(state);
+      throw err('Unexpected token: ' + JSON.stringify(t.value), t.line, t.col);
+    }
+    return node;
+  }
+
+  return { tokenize: tokenize, KEYWORDS: KEYWORDS, parseExpression: parseExpression };
 });

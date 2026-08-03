@@ -55,4 +55,65 @@ T.throws(() => I.tokenize("'abc"), '未闭合的字符串报错');
 T.throws(() => I.tokenize('`abc'), '未闭合的模板串报错');
 T.throws(() => I.tokenize('/* abc'), '未闭合的块注释报错');
 
+// ---- 表达式解析：结构 ----
+function P(src) { return I.parseExpression(src); }
+
+T.eq(P('1').type, 'Num', '数字字面量');
+T.eq(P('x').type, 'Ident', '标识符');
+T.eq(P('true').value, true, 'true 是布尔不是标识符');
+T.eq(P('null').type, 'Null', 'null 有自己的节点类型');
+
+// 优先级：a + b * c 必须是 a + (b * c)
+const prec = P('a + b * c');
+T.eq(prec.op, '+', '顶层是加法');
+T.eq(prec.right.op, '*', '乘法在右子树 —— 优先级正确');
+
+// 左结合：a - b - c 必须是 (a - b) - c
+const assoc = P('a - b - c');
+T.eq(assoc.left.op, '-', '减法左结合');
+
+// 逻辑运算与关系运算的相对优先级
+const mix = P('a < b && c > d');
+T.eq(mix.type, 'Logical', '顶层是逻辑与');
+T.eq(mix.left.op, '<', '关系运算优先于逻辑运算');
+
+// 成员、下标、调用可以链起来
+const chain = P('a.b[0](x)');
+T.eq(chain.type, 'Call', '最外层是调用');
+T.eq(chain.callee.type, 'Member', '被调用的是成员表达式');
+T.eq(chain.callee.computed, true, '最内一层是下标');
+T.eq(chain.callee.obj.type, 'Member', '再里面是点访问');
+T.eq(chain.callee.obj.computed, false, '点访问 computed=false');
+T.eq(chain.callee.obj.prop, 'b', '点访问的属性名是字符串');
+
+// 数组与对象
+T.eq(P('[1, 2]').elements.length, 2, '数组字面量');
+T.eq(P('{ a: 1, b: 2 }').props.map(p => p.key), ['a', 'b'], '对象字面量的键');
+
+// 箭头函数
+const arrow = P('(a, b) => a + b');
+T.eq(arrow.type, 'Arrow', '箭头函数');
+T.eq(arrow.params, ['a', 'b'], '参数名');
+T.eq(arrow.expression, true, '表达式体');
+T.eq(P('x => x').params, ['x'], '单参数可以不带括号');
+
+// 前缀与后缀
+T.eq(P('i++').type, 'Update', '后缀自增');
+T.eq(P('i++').prefix, false, '后缀');
+T.eq(P('!ok').type, 'Unary', '逻辑非');
+T.eq(P('-n').op, '-', '一元负号');
+
+// 赋值是右结合的表达式
+T.eq(P('a = b').type, 'Assign', '赋值');
+T.eq(P('a += 1').op, '+=', '复合赋值');
+
+// 位置信息
+const posn = I.parseExpression('a +\n  bbb');
+T.eq(posn.right.line, 2, '右操作数在第 2 行');
+T.eq(posn.right.col, 3, '右操作数在第 3 列');
+
+// 三元不在子集内（规格 §2.6 的清单没有它；§9 说清单是硬边界）
+try { P('a ? b : c'); T.ok(false, '三元运算符应当被拒绝'); }
+catch (e) { T.eq(e.category, 'unsupported', '三元报的是 unsupported 而不是 syntax'); }
+
 T.report();
