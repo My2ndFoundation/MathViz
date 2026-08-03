@@ -110,7 +110,9 @@ Interp.run(src, { host, limit }) → { result, trace, host }
     boardOps = [ { kind, sq, to, from } ]    // kind ∈ 'mark'|'place'|'clear'
   trace.truncated / trace.limit             // 到达上限时 truncated=true，**没有 omitted 字段**
 Interp.STEP_LIMIT = 200000
-Interp.MAX_DEPTH = 500
+// ⚠ 更正（3b 实施时实测）：MAX_DEPTH **没有导出**。module.exports 只有
+//   tokenize / KEYWORDS / parseExpression / parse / run / STEP_LIMIT。
+//   常量本身在 interp.js 里是 500，但消费方读不到它，别写 Interp.MAX_DEPTH。
 
 // chess/core/viz-engine.js
 VizEngine.init({ canvas, SCENES, PARAMS, TOOL, VERSION, ENGINE_VERSION, autoLoop })
@@ -651,7 +653,7 @@ git commit -m "feat(chess): 实时语法检查与波浪线定位，区分 syntax
 
 页面内置两三段示例程序（**规模必须在 `STEP_LIMIT = 200000` 之内**，见约束 4）：
 
-- 一段 N 皇后 N=6（实测 4,370 步）——回溯与 `mark`/`clear` 的典型形态
+- 一段 N 皇后 N=6（**4,674 步**——原写 4,370 有误，3b 实施时实测更正，与 `interp.js` 自己记录的数字一致；本阶段最终交付的那份示例源码写法略有不同，实测 4,792 步）——回溯与 `mark`/`clear` 的典型形态
 - 一段马的最短路 BFS 8×8——`mark` 的另一种用法
 - 一段故意写错的（比如 `class Foo {}` 或缺分号），用来看实时检查与 `Run` 禁用
 

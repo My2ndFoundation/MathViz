@@ -62,6 +62,11 @@ python3 chess/scripts/check.py
 node -e "console.log(Object.keys(require('./chess/core/interp.js')))"
 ```
 
+> **3b 实测更正**：`Interp.MAX_DEPTH` **没有导出**——`module.exports` 只有
+> `tokenize / KEYWORDS / parseExpression / parse / run / STEP_LIMIT`。常量在
+> `interp.js` 里确实是 500，但消费方读不到它。计划的接口表把它列成导出的，是错的。
+> 这正是上面那行「用前先核实，不要凭这段文字」要防的东西。
+
 ---
 
 ## 工作方式
@@ -162,7 +167,7 @@ node -e "console.log(Object.keys(require('./chess/core/interp.js')))"
 
 | 程序 | 步数 |
 |---|---|
-| N 皇后 N=6 | 4,370 |
+| N 皇后 N=6 | **4,674**（原写 4,370 有误，3b 实施时实测更正） |
 | N 皇后 N=8 | 73,904 |
 | Warnsdorff 骑士巡游 5×5 / 6×6 | 3,523 – 5,670 |
 | **朴素回溯 DFS 骑士巡游 5×5** | **472,717**（超限） |
