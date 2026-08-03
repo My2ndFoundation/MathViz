@@ -322,6 +322,14 @@
     let hasBreak = function () { return false; };
     let gutterClick = null;
     let err = null;
+    /* err 是不是**针对当前这份文本**算出来的。输入之后、防抖到期之前，err 还是
+       编辑前那一次的结果：它的 line/col/index 指的是旧文本里的位置，拿去画
+       波浪线会画在错的字符上；删掉几行时 err.line 甚至可能大于现在的总行数，
+       波浪线就飘到最后一行下面去。所以 onInput 把它标记为陈旧，refreshMarkers
+       在陈旧期间不画任何错误标记，emit() 重算之后再恢复。
+       **getError() 仍然返回 err**（最后一次算出来的结果）——调用方拿它去
+       决定 Run 的禁用态，那个判断在防抖期间应当保持不变，而不是先松开再收紧。 */
+    let errFresh = true;
     let lineCount = 0;
     let charW = 0;
     let bracket = null;         // matchBracket() 的最近一次结果
@@ -414,14 +422,16 @@
     /* 只改标记，不重建 DOM：断点/当前行/错误行每一步都在变，重建整槽会把
        点击目标在指针按下与抬起之间换掉。 */
     function refreshMarkers() {
+      /* 陈旧的 err 一律不参与绘制，见 errFresh 的声明处。 */
+      const e = errFresh ? err : null;
       const kids = gutterInner.children;
       for (let i = 0; i < kids.length; i++) {
         const ln = i + 1;
         const d = kids[i];
         d.classList.toggle('bp', !!hasBreak(ln));
         d.classList.toggle('cur', execLine === ln);
-        d.classList.toggle('err', !!err && err.line === ln);
-        d.title = (err && err.line === ln) ? err.message : '';
+        d.classList.toggle('err', !!e && e.line === ln);
+        d.title = (e && e.line === ln) ? e.message : '';
       }
 
       const frag = document.createDocumentFragment();
@@ -447,16 +457,16 @@
       }
       /* 波浪线与括号框都要按字符宽度定位。量不到宽度（面板此刻不可见）时
          **一个都不画**——画出来必然错位，等下一次可见时的刷新再补。 */
-      if ((err || bracket) && ensureCharW() > 0) {
-        if (err) {
+      if ((e || bracket) && ensureCharW() > 0) {
+        if (e) {
           const starts = currentStarts();
-          const from = err.index;
-          const lineEnd = starts[err.line] != null ? starts[err.line] - 1 : ta.value.length;
+          const from = e.index;
+          const lineEnd = starts[e.line] != null ? starts[e.line] - 1 : ta.value.length;
           const width = Math.max(1, lineEnd - from) * charW;
           const sq = document.createElement('div');
           sq.className = 'ed-squiggle';
-          sq.style.top = ((err.line - 1) * LINE_H) + 'px';
-          sq.style.left = leftPx(err.col) + 'px';
+          sq.style.top = ((e.line - 1) * LINE_H) + 'px';
+          sq.style.left = leftPx(e.col) + 'px';
           sq.style.width = width + 'px';
           frag.appendChild(sq);
         }
@@ -489,6 +499,7 @@
 
     function emit() {
       err = check(ta.value);
+      errFresh = true;             // 这一份 err 是针对当前文本算的，可以画了
       renderGutter();
       refreshMarkers();
       if (typeof opts.onChange === 'function') opts.onChange(ta.value, err);
@@ -513,6 +524,11 @@
     let timer = null;
     const delay = opts.debounce == null ? 220 : opts.debounce;
     function onInput() {
+      /* 文本变了 → 上一次的 err 立刻作废（它的 line/col/index 指的是旧文本）。
+         不清掉就会在防抖窗口里拿旧坐标画波浪线；删掉几行时 err.line 甚至会
+         超出现在的总行数，波浪线飘到最后一行下面。这是上一轮给 onInput 补
+         refreshMarkers() 时带出来的新瑕疵。 */
+      errFresh = false;
       renderHighlight();
       renderGutter();
       syncBracket();

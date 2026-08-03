@@ -963,6 +963,31 @@ T.ok(D.playSteps(0.5, -100, 10, 240).acc < 0.1, 'playSteps：负 dt 不会把 ac
 T.eq(D.playSteps(0, NaN, 10, 240), { steps: 0, acc: 0 }, 'playSteps：NaN dt 当 0（不让 acc 变成 NaN）');
 T.eq(D.playSteps(0, 1, 0, 240).steps, 1, 'playSteps：sps 为 0 兜成 1 步/秒，不除以零');
 
+/* cap 省略 / 非法时必须兜到默认值，**绝不能算出 NaN**。
+   Math.min(undefined, n) 是 NaN，而 NaN 一旦被写回调用方的累加器就再也出不来
+   （NaN+dt、NaN*rate、Math.floor(NaN) 全是 NaN），播放从此静默死掉且不可恢复。
+   本仓库唯一的调用点是传了 cap 的，但这是导出给工具 ④⑤ 的公开函数，
+   下一个调用方会在另一个文件里安静地中招。 */
+const noCap = D.playSteps(0, 1, 10);
+T.eq(noCap.steps, 10, 'playSteps：省略 cap 时照常前进（不是 NaN）');
+T.ok(isFinite(noCap.acc), 'playSteps：省略 cap 时 acc 是有限数（NaN 会永久毒死累加器）');
+T.ok(isFinite(D.playSteps(noCap.acc, 1, 10).acc), 'playSteps：省略 cap 连续调用，acc 始终有限');
+T.ok(isFinite(D.playSteps(0, 1, 10, NaN).acc), 'playSteps：cap 为 NaN 时兜到默认值');
+T.eq(D.playSteps(0, 1, 10, NaN).steps, 10, 'playSteps：cap 为 NaN 不影响步数');
+T.ok(isFinite(D.playSteps(0, 1, 10, null).acc), 'playSteps：cap 为 null 时兜到默认值');
+T.eq(D.playSteps(0, 1, 10, -5).steps, 10, 'playSteps：负 cap 兜到默认值（不是"永不前进"）');
+T.eq(D.playSteps(0, 100, 10, Infinity).steps, 1000, 'playSteps：Infinity 是有意义的"不设上限"，放行');
+T.eq(D.playSteps(0, 100, 10).steps, 240, 'playSteps：省略 cap 时用的是默认上限 240');
+T.eq(D.playSteps(0, 1, 10, 0).steps, 0, 'playSteps：显式 cap=0 是"这一帧不走"，与省略不同');
+/* 连喂 50 帧不带 cap，累加器必须始终有限——毒化是累积的，单次调用看不出来。 */
+let noCapAcc = 0, noCapOk = true;
+for (let k = 0; k < 50; k++) {
+  const p = D.playSteps(noCapAcc, 1 / 60, 10);
+  noCapAcc = p.acc;
+  if (!isFinite(noCapAcc) || !isFinite(p.steps)) noCapOk = false;
+}
+T.ok(noCapOk, 'playSteps：省略 cap 连喂 50 帧，steps 与 acc 全程有限');
+
 /* -------------------- ③ fmtVal --------------------
    第一条是一个真 bug 的回归：interp.js 的 snap() 在**记录 delta 之前**就把
    函数值换成了字符串 'ƒ 名字'，于是「字符串 → JSON.stringify」这条分支会把它

@@ -525,10 +525,18 @@
      1e-9 步是纳秒级的松弛，比任何真实计时分辨率都小若干个数量级，
      不可能凭空多走一步；而它足够盖住 IEEE754 在这个量级上的末位误差。 */
   const PLAY_EPS = 1e-9;
+  /* 单帧步数上限的默认值。cap 省略时必须兜到它，**不能**让 Math.min(undefined, n)
+     算出 NaN —— NaN 会写进调用方的累加器，而 NaN 一旦进去就再也出不来
+     （NaN + dt 还是 NaN，NaN * rate 还是 NaN，floor 还是 NaN），播放从此
+     静默死掉且不可恢复。本仓库唯一的调用点是传了 cap 的，但这是个导出给
+     工具 ④⑤ 用的公开函数，下一个调用方会在另一个文件里安静地中招。
+     同理挡掉 NaN / 负数 cap（Infinity 是有意义的"不设上限"，放行）。 */
+  const PLAY_BURST_CAP = 240;
   function playSteps(acc, dt, sps, cap) {
+    const lim = (typeof cap === 'number' && cap >= 0) ? cap : PLAY_BURST_CAP;
     const rate = sps > 0 ? sps : 1;
     const a = acc + (dt > 0 ? dt : 0);
-    const n = Math.max(0, Math.min(cap, Math.floor(a * rate + PLAY_EPS)));
+    const n = Math.max(0, Math.min(lim, Math.floor(a * rate + PLAY_EPS)));
     return { steps: n, acc: Math.max(0, a - n / rate) };
   }
 
@@ -663,7 +671,9 @@
 
     /* ---------------- 缓存：只在游标移动 / 换轨迹 / 换选中帧时重算 ---------------- */
     let cache = null;
-    let prevVals = Object.create(null);   // 上一次的变量渲染文本，用来判定"这一步变了谁"
+    let prevVals = Object.create(null);   // 上一**步**的变量渲染文本，用来判定"这一步变了谁"
+    let flashed = Object.create(null);    // 上一步真的变了的那些名字
+    let flashedFrame = -1;                // 那份标记是在哪一帧上算出来的
     /* 选中的调用栈帧。-1 = 跟随最内层（默认，也是每次单步之后自动回到的状态）；
        >= 0 则是显式选中的一帧，0 是全局帧。选中一帧会同时改**两样**东西：
        代码视图跳到那一帧的行，**变量区换成那一帧的变量**。只跳代码不换变量，
@@ -741,11 +751,42 @@
       paneStack.list.appendChild(frag);
     }
 
-    function paintVars() {
+    /* paintVars(isStep) —— **琥珀色闪烁的唯一含义是「这一步变了」。**
+       因此只有真的走了一步（游标移动或换轨迹）才允许比对与重置基线；
+       任何"不是一步"的重绘（点栈帧换看哪一帧、切语言）都必须 isStep=false：
+       不闪，也**不动 prevVals**。
+
+       两个具体的坏法，都是这条不变量被破坏的样子：
+       ① 点外层帧时若照常比对，prevVals 还是最内层帧的值、cache.vals 已是
+          外层帧的值，两帧的变量名基本不重合 —— 整屏变量一起闪，而根本没有
+          任何一步发生；
+       ② 更隐蔽的是接下来那一下 F10：若刚才顺手把 prevVals 重置成了外层帧的
+          值，这一步就会拿最内层帧的新值去跟**另一帧**的旧值比，于是又闪一屏。
+       验收清单第 23 条把"凭空的琥珀色"直接判成 bug，这里正是它的另一个来源。 */
+    function paintVars(isStep) {
+      /* 标记归属于一对 (哪一步, 哪一帧)：
+         - 真的走了一步 → 现算，记下来，并把基线推进到本步的值；
+         - 不是一步 → **原样复用**上一步算出来的那份标记，前提是现在显示的
+           还是同一帧。只把 changed 一律当 false 会把当前这一步的琥珀色抹掉
+           （切语言时就会这样）；而不看帧就复用，又会把最内层帧变了的名字
+           标到外层帧同名的变量上。两个条件都要。 */
+      let marks;
+      if (isStep) {
+        marks = Object.create(null);
+        for (let k = 0; k < cache.names.length; k++) {
+          const n = cache.names[k];
+          if (prevVals[n] !== cache.vals[n]) marks[n] = true;
+        }
+        flashed = marks;
+        flashedFrame = cache.varsFrame;
+        prevVals = cache.vals;
+      } else {
+        marks = (cache.varsFrame === flashedFrame) ? flashed : Object.create(null);
+      }
       const frag = document.createDocumentFragment();
       for (let k = 0; k < cache.names.length; k++) {
         const n = cache.names[k];
-        const changed = prevVals[n] !== cache.vals[n];
+        const changed = !!marks[n];
         const d = document.createElement('div');
         d.className = 'dbg-row dbg-var' + (changed ? ' chg' : '');
         const nm = document.createElement('span');
@@ -767,7 +808,6 @@
       paneVars.head.textContent = T(DBG_UI.vars) + ' · ' +
         (cache.varsFrameName ? cache.varsFrameName + '()' : T(DBG_UI.global)) +
         (cache.selected ? '  ' + T(DBG_UI.selected) : '');
-      prevVals = cache.vals;
     }
 
     /* 输出区增量渲染：日志只在末尾增删（输出是 [0, i] 的前缀），所以
@@ -823,15 +863,16 @@
        程序现在所在的那一帧）。 */
     function refresh() {
       selFrame = -1;
-      repaint(null);
+      repaint(null, true);          // ← 这是唯一一条「真的走了一步」的路径
     }
 
     /* 重算 + 重绘，但不动 selFrame。选中某一帧走这条路（游标没动，只是换了
-       在看哪一帧），单步走上面的 refresh()。 */
-    function repaint(frameLine) {
+       在看哪一帧），单步走上面的 refresh()。
+       isStep 一路传给 paintVars —— 见那里关于琥珀色闪烁不变量的注释。 */
+    function repaint(frameLine, isStep) {
       recompute();
       paintStack();
-      paintVars();
+      paintVars(!!isStep);
       paintOut();
       paintReadout();
       paintEditor(frameLine);
@@ -858,7 +899,7 @@
       if (!row) return;
       selFrame = +row.dataset.fi;
       const line = row.dataset.line ? +row.dataset.line : cache.line;
-      repaint(selFrame === 0 ? null : line);
+      repaint(selFrame === 0 ? null : line, false);   // 不是一步：不闪、不重置基线
     });
 
     /* ---------------- 播放：按时间推进，不按帧计数 ----------------
@@ -872,7 +913,7 @@
        这个乘数——播放循环本身就是热点。
        现在：先把游标连着推 N 次（每次都是纯下标移动，O(1)），推完之后
        refresh() 一次。代价从 O(N · i) 降到 O(i)。 */
-    const BURST_CAP = 240;
+    const BURST_CAP = PLAY_BURST_CAP;
     let playing = false, acc = 0, sps = 10;
     function setPlaying(v) {
       playing = !!v && cur.trace.length > 0;
@@ -955,7 +996,9 @@
       paneStack.head.textContent = T(DBG_UI.stack);
       paneVars.head.textContent = T(DBG_UI.vars);   // paintVars 会补上"· 哪一帧"
       paneOut.head.textContent = T(DBG_UI.out);
-      if (cache) { paintStack(); paintVars(); paintReadout(); }
+      /* 切语言也不是一步：重画可以，但不能把当前这一步的琥珀色标记抹掉，
+         更不能把基线重置成本步的值（那会让紧接着的下一步少闪一片）。 */
+      if (cache) { paintStack(); paintVars(false); paintReadout(); }
     }
 
     if (editor) {
@@ -985,6 +1028,8 @@
            不重绘面板——见 syncPlayButton 的注释）。 */
         cache = null;
         prevVals = Object.create(null);
+        flashed = Object.create(null);
+        flashedFrame = -1;
         outLen = 0;
         paneOut.list.textContent = '';
         if (editor) editor.setBreakpoints(function (ln) { return hasBreak(cur, ln); });

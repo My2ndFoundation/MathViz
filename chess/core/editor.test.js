@@ -332,11 +332,17 @@ T.eq(E.matchBracket(S1, c1), { open: o1, close: c1 }, 'matchBracket：光标右�
 T.eq(E.matchBracket(S1, 0), null, 'matchBracket：不挨着括号时返回 null');
 T.eq(E.matchBracket(S1, S1.length), null, 'matchBracket：末尾（分号之后）返回 null');
 
-/* 左邻优先：`)(` 这个位置两边都是括号，约定取左邻那一个。 */
+/* 左邻优先：`)(` 这个位置两边都是括号，约定取左邻那一个。
+   第一版只断言了 `.close`，还把 openOf2 算出来又没用上；而且写成
+   `matchBracket(...).close` 时，一旦返回 null 就是抛 TypeError 而不是干净地
+   报失败。这里改成整对比较，并把 openOf2 用在"绝不该是右邻那一对"上。 */
 const S2 = 'f()(1);';
-const closeOfF = at(S2, ')'), openOf2 = at(S2, '(', 2);
-T.eq(E.matchBracket(S2, closeOfF + 1).close, closeOfF,
-     'matchBracket：两边都是括号时取左邻那一个（左邻优先）');
+const openOfF = at(S2, '('), closeOfF = at(S2, ')');
+const openOf2 = at(S2, '(', 2), closeOf2 = at(S2, ')', 2);
+T.eq(E.matchBracket(S2, closeOfF + 1), { open: openOfF, close: closeOfF },
+     'matchBracket：两边都是括号时取左邻那一对（左邻优先）');
+T.ok(E.matchBracket(S2, closeOfF + 1).open !== openOf2,
+     'matchBracket：左邻优先时绝不返回右邻那一对（' + openOf2 + '/' + closeOf2 + '）');
 
 // 嵌套：外层与内层各配各的
 const S3 = 'g((a + b) * (c - d));';
@@ -361,12 +367,66 @@ const S6 = 'log("(") ;';
 T.ok(E.matchBracket(S6, S6.indexOf('"(') + 2) === null,
      'matchBracket：光标贴着字符串内部的括号时不配对（它根本不是 punct token）');
 
-/* 注释里的 ")" 在源码里排在真括号**前面**，所以期望值必须用 lastIndexOf 取
-   真的那一个 —— 第一版这里写的是 at(S7, ')')（第一个），它取到的是注释里那个，
-   于是断言本身在要求一个错误答案。函数返回的 17 才是对的。 */
-const S7 = '// )\nconst a = (1);';
-T.eq(E.matchBracket(S7, at(S7, '(') + 1), { open: at(S7, '('), close: S7.lastIndexOf(')') },
-     'matchBracket：注释里的 ")" 不参与配对');
+/* ---- 注释里的括号：必须是**不配对**的那种才有区分度 ----
+   第一版写的是 '// )\nconst a = (1);'：注释里那个 ")" 排在真括号**前面**，
+   朴素字符扫描器从 "(" 往后找根本碰不到它，于是朴素实现给出同一个答案 ——
+   这个用例测不出任何东西（把它挪到真括号后面也一样，实测过）。
+   有区分度的形状是：注释里塞一个**多余的**括号，逼着扫描器路过它。
+   下面用一个朴素扫描器当对照，直接断言两者给出**不同**的答案，把"这个用例
+   确实有牙齿"这件事本身也钉住 —— 免得哪天它悄悄退化成又一个测不出东西的用例。 */
+function naiveMatch(src, caret) {
+  const OP = { '(': ')', '[': ']', '{': '}' }, CL = { ')': '(', ']': '[', '}': '{' };
+  let i = -1;
+  if (OP[src[caret - 1]] || CL[src[caret - 1]]) i = caret - 1;
+  else if (OP[src[caret]] || CL[src[caret]]) i = caret;
+  else return null;
+  if (OP[src[i]]) {
+    let d = 0;
+    for (let k = i; k < src.length; k++) {
+      if (OP[src[k]]) d++;
+      else if (CL[src[k]]) { d--; if (d === 0) return { open: i, close: k }; }
+    }
+    return null;
+  }
+  let d = 0;
+  for (let k = i; k >= 0; k--) {
+    if (CL[src[k]]) d++;
+    else if (OP[src[k]]) { d--; if (d === 0) return { open: k, close: i }; }
+  }
+  return null;
+}
+
+// 块注释里多一个左括号：向前扫的路上会撞见它
+const S7 = 'const a = ( /* ( */ 1);';
+const s7o = S7.indexOf('('), s7c = S7.lastIndexOf(')');
+T.eq(E.matchBracket(S7, s7o + 1), { open: s7o, close: s7c },
+     'matchBracket：块注释里多余的 "(" 不参与配对');
+T.ok(JSON.stringify(naiveMatch(S7, s7o + 1)) !== JSON.stringify(E.matchBracket(S7, s7o + 1)),
+     'matchBracket：上一条确实有区分度（朴素字符扫描在这里会给出不同答案）');
+
+// 行注释里多一个左括号
+const S7b = 'const a = (   // (\n  1);';
+const s7bo = S7b.indexOf('('), s7bc = S7b.lastIndexOf(')');
+T.eq(E.matchBracket(S7b, s7bo + 1), { open: s7bo, close: s7bc },
+     'matchBracket：行注释里多余的 "(" 不参与配对');
+T.ok(JSON.stringify(naiveMatch(S7b, s7bo + 1)) !== JSON.stringify(E.matchBracket(S7b, s7bo + 1)),
+     'matchBracket：行注释那条也有区分度');
+
+// 注释里多一个右括号：向**后**扫的路上会撞见它
+const S7c = 'const a = (1 /* ) */ );';
+const s7co = S7c.indexOf('('), s7cc = S7c.lastIndexOf(')');
+T.eq(E.matchBracket(S7c, s7cc + 1), { open: s7co, close: s7cc },
+     'matchBracket：注释里多余的 ")" 不参与配对（从闭括号往回扫）');
+T.ok(JSON.stringify(naiveMatch(S7c, s7cc + 1)) !== JSON.stringify(E.matchBracket(S7c, s7cc + 1)),
+     'matchBracket：向后扫那条也有区分度');
+
+// 字符串那两条（S5/S6）本来就有区分度，这里补一条同样形状的多余括号
+const S7d = 'const a = ( "(" + 1);';
+const s7do = S7d.indexOf('('), s7dc = S7d.lastIndexOf(')');
+T.eq(E.matchBracket(S7d, s7do + 1), { open: s7do, close: s7dc },
+     'matchBracket：字符串里多余的 "(" 不参与配对');
+T.ok(JSON.stringify(naiveMatch(S7d, s7do + 1)) !== JSON.stringify(E.matchBracket(S7d, s7do + 1)),
+     'matchBracket：字符串那条有区分度');
 
 /* **已知边界：`${}` 内部的括号不参与配对。** 不是 bug，是"复用词法器"这个
    决定的直接后果 —— tokenize 把整条模板串切成**一个** tpl token
