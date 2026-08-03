@@ -308,4 +308,302 @@ T.eq(viaTree.rootId, viaTree.order[0], 'rootId 取第一个顶层帧');
 T.eq(TM.build(hoRun.trace, 'nosuchfn').order, [], '认一个不存在的函数名建出空树');
 T.eq(TM.build(hoRun.trace, 'nosuchfn').rootId, -1, '认不到就没有根');
 
+// ============ 增量游标与剪枝 ============
+
+const abSrc = ALGO.source({ mode: 'ab', depth: 3 });
+const abTrace = I.run(abSrc, { host: {} }).trace;
+T.ok(!abTrace.truncated, '前提：depth 3 的 α-β 不会截断');
+const abTree = TM.build(abTrace, 'search');
+
+// ---- 增量与全量必须给出同一个答案（这条是本任务的命脉）----
+/* 增量推进最典型的坏法是「和全量算出来的不一样，但只在某些路径上」。
+   拿全量重建当参照逐点对拍，而不是相信增量自己。 */
+let mismatches = 0, sampled = 0;
+const stride = Math.max(1, Math.floor(abTrace.length / 60));
+const inc = TM.createView(abTree, abTrace);
+for (let i = 0; i < abTrace.length; i += stride) {
+  TM.seek(inc, i);                                   // 增量路径
+  const fresh = TM.createView(abTree, abTrace);
+  TM.seek(fresh, i);                                 // 全量路径（新 view，必然全量）
+  if (JSON.stringify(TM.visibleAt(inc)) !== JSON.stringify(TM.visibleAt(fresh))) { mismatches++; }
+  if (JSON.stringify(TM.spineAt(inc)) !== JSON.stringify(TM.spineAt(fresh))) { mismatches++; }
+  sampled++;
+}
+T.eq(mismatches, 0, '增量推进与全量重建逐点一致');
+T.ok(sampled >= 30, '对拍采样了至少 30 个游标位置');
+
+// ---- 后退也要对（不能只在前进方向上正确）----
+let backMismatch = 0;
+for (let i = abTrace.length - 1; i >= 0; i -= stride) {
+  TM.seek(inc, i);
+  const fresh = TM.createView(abTree, abTrace);
+  TM.seek(fresh, i);
+  if (JSON.stringify(TM.visibleAt(inc)) !== JSON.stringify(TM.visibleAt(fresh))) { backMismatch++; }
+}
+T.eq(backMismatch, 0, '反向推进同样与全量一致');
+
+// ---- 可见节点单调增长 ----
+const grow = TM.createView(abTree, abTrace);
+let prevLen = 0, grew = 0;
+for (let i = 0; i < abTrace.length; i += stride) {
+  TM.seek(grow, i);
+  const len = TM.visibleAt(grow).length;
+  T.ok(len >= prevLen, '可见节点数不随游标前进而减少（i=' + i + '）');
+  if (len > prevLen) { grew++; }
+  prevLen = len;
+}
+T.ok(grew >= 5, '可见节点确实在增长，不是恒为 0');
+
+// ---- 剪枝：α-β 必须剪掉一些，纯 minimax 一个都不剪 ----
+const abEnd = TM.createView(abTree, abTrace);
+TM.seek(abEnd, abTrace.length - 1);
+const abStats = TM.statsAt(abEnd);
+T.ok(abStats.pruned > 0, 'α-β 到末尾时确实剪掉了分支：' + abStats.pruned);
+
+const plainTrace = I.run(ALGO.source({ mode: 'plain', depth: 3 }), { host: {} }).trace;
+T.ok(!plainTrace.truncated, '前提：depth 3 的纯 minimax 不截断');
+const plainTree = TM.build(plainTrace, 'search');
+const plainEnd = TM.createView(plainTree, plainTrace);
+TM.seek(plainEnd, plainTrace.length - 1);
+T.eq(TM.statsAt(plainEnd).pruned, 0, '纯 minimax 一个分支都不剪 —— 这是两个 tab 的全部区别');
+
+// ---- α-β 访问的节点必须严格少于纯 minimax ----
+T.ok(TM.statsAt(abEnd).visited < TM.statsAt(plainEnd).visited,
+     'α-β 访问的节点更少：' + TM.statsAt(abEnd).visited + ' < ' + TM.statsAt(plainEnd).visited);
+
+// ---- 截断轨迹：剪枝不可判定时不许报 0（约束 3）----
+const cutTrace = I.run(ALGO.source({ mode: 'plain', depth: 4 }), { host: {} }).trace;
+T.eq(cutTrace.truncated, true, '前提：depth 4 的纯 minimax 会截断');
+const cutTree = TM.build(cutTrace, 'search');
+const cutView = TM.createView(cutTree, cutTrace);
+TM.seek(cutView, cutTrace.length - 1);
+const cutStats = TM.statsAt(cutView);
+T.eq(cutStats.truncated, true, '截断轨迹的 stats 要如实标出 truncated');
+/* 截断时根本没跑完，「剪了多少」是不知道的。报一个数字就是编造，
+   与 3a 拒绝编造「省略了 N 步」是同一条纪律。 */
+T.ok(TM.nodeAt(cutTree, cutTree.rootId).popStep === -1, '根帧从未关闭 —— 截断的直接体现');
+
+// ---- seek 越界与空树不抛 ----
+const safe = TM.createView(TM.build(I.run('', { host: {} }).trace, 'search'), []);
+for (const i of [-5, 0, 999999]) {
+  let threw = false;
+  try { TM.seek(safe, i); TM.visibleAt(safe); TM.spineAt(safe); TM.statsAt(safe); }
+  catch (e) { threw = true; }
+  T.ok(!threw, '空树上 seek(' + i + ') 不抛异常');
+}
+
+/* ==================== brief 之外补充的断言（游标部分）====================
+
+   brief 的这一段有三个缺口，每一个都能让上面的断言在**错误的实现上照样全绿**：
+
+   ① 对拍**可能是空转的**。增量与全量之所以能对拍，前提是那 60 次 seek 真的
+      走了增量路径；阈值一旦小于采样步长（ab d3 的 stride 是 629），两边就都
+      是全量，「增量与全量一致」这句话变成「全量与全量一致」。从外面看不出
+      差别 —— 只能数重建次数。
+   ② 反向那一圈**只对了 visibleAt**，spineAt / statsAt / prunedAt 一个没比。
+      而「只在前进方向上正确」正是增量状态最典型的坏法，反向恰恰是重灾区。
+   ③ 截断那一段只断言了 `truncated === true`，**没有断言剪枝报的是「未知」**
+      —— 而那才是整个约束 3 的落点。注释里写着「报一个数字就是编造」，测试
+      却允许它报数字。 */
+
+// ---- ① 对拍不是空转：那 120 次 seek 里绝大多数真的走了增量 ----
+/* createView 自己算一次 i=0 的状态（rebuilds → 1），第一次 seek 强制全量
+   （→ 2），此后 60 次前进 + 60 次后退全部是 629 步的小跨度，必须一次都不
+   再重建。若哪天阈值被调到 629 以下，这一条会立刻响。 */
+T.eq(inc.rebuilds, 2, '命脉对拍里 120 次 seek 只全量重建了 2 次（其余走增量，对拍没空转）');
+T.ok(stride > 1, '采样步长 > 1，增量路径确实跨了多步（stride=' + stride + '）');
+
+// ---- ② 反向也要逐点比 spine / stats / pruned，不只比 visible ----
+const back2 = TM.createView(abTree, abTrace);
+TM.seek(back2, abTrace.length - 1);
+let backAll = 0, backSamples = 0;
+for (let i = abTrace.length - 1; i >= 0; i -= stride) {
+  TM.seek(back2, i);
+  const fresh = TM.createView(abTree, abTrace);
+  TM.seek(fresh, i);
+  if (JSON.stringify(TM.spineAt(back2)) !== JSON.stringify(TM.spineAt(fresh))) { backAll++; }
+  if (JSON.stringify(TM.statsAt(back2)) !== JSON.stringify(TM.statsAt(fresh))) { backAll++; }
+  if (JSON.stringify(TM.prunedAt(back2)) !== JSON.stringify(TM.prunedAt(fresh))) { backAll++; }
+  backSamples++;
+}
+T.eq(backAll, 0, '反向推进时 spine / stats / pruned 同样与全量逐点一致');
+T.ok(backSamples >= 30, '反向对拍采样了至少 30 个游标位置');
+T.eq(back2.rebuilds, 2, '反向那一圈也确实走的增量');
+
+/* 前进方向补上 stats / pruned（brief 只比了 visible 与 spine）。 */
+const fwd2 = TM.createView(abTree, abTrace);
+let fwdAll = 0;
+for (let i = 0; i < abTrace.length; i += stride) {
+  TM.seek(fwd2, i);
+  const fresh = TM.createView(abTree, abTrace);
+  TM.seek(fresh, i);
+  if (JSON.stringify(TM.statsAt(fwd2)) !== JSON.stringify(TM.statsAt(fresh))) { fwdAll++; }
+  if (JSON.stringify(TM.prunedAt(fwd2)) !== JSON.stringify(TM.prunedAt(fresh))) { fwdAll++; }
+}
+T.eq(fwdAll, 0, '前进方向的 stats / pruned 也与全量逐点一致');
+
+/* 一步一步走完一整段（±1），与全量逐点对拍。stride 那种大跨度掩盖不了
+   「跨过 1 步」这条最常用的路径 —— 面板上按一次「下一步」走的正是它。 */
+let oneStep = 0;
+const walk = TM.createView(abTree, abTrace);
+const WALK_FROM = Math.floor(abTrace.length / 2), WALK_TO = WALK_FROM + 400;
+TM.seek(walk, WALK_FROM);
+for (let i = WALK_FROM; i <= WALK_TO; i++) {
+  TM.seek(walk, i);
+  const fresh = TM.createView(abTree, abTrace); TM.seek(fresh, i);
+  if (JSON.stringify(TM.visibleAt(walk)) !== JSON.stringify(TM.visibleAt(fresh))) { oneStep++; }
+  if (JSON.stringify(TM.spineAt(walk)) !== JSON.stringify(TM.spineAt(fresh))) { oneStep++; }
+  if (JSON.stringify(TM.statsAt(walk)) !== JSON.stringify(TM.statsAt(fresh))) { oneStep++; }
+}
+for (let i = WALK_TO; i >= WALK_FROM; i--) {   // 再原路退回来
+  TM.seek(walk, i);
+  const fresh = TM.createView(abTree, abTrace); TM.seek(fresh, i);
+  if (JSON.stringify(TM.visibleAt(walk)) !== JSON.stringify(TM.visibleAt(fresh))) { oneStep++; }
+  if (JSON.stringify(TM.spineAt(walk)) !== JSON.stringify(TM.spineAt(fresh))) { oneStep++; }
+  if (JSON.stringify(TM.statsAt(walk)) !== JSON.stringify(TM.statsAt(fresh))) { oneStep++; }
+}
+T.eq(oneStep, 0, '±1 逐步走过 400 步再原路退回，每一步都与全量一致');
+T.eq(walk.rebuilds, 2, '这 800 次 ±1 全部走增量');
+
+// ---- ③ 截断时剪枝必须报「未知」，而且是 null，不是 undefined 也不是 0 ----
+/* _test.js 的 eq 走 JSON.stringify，而 stringify(undefined) 与
+   stringify(function(){}) 都是 undefined —— 拿 undefined 当「没有」会让
+   一整类断言变成空转。null 的 stringify 是 'null'，与 0、与 undefined 都
+   分得开，所以这三条要一起写，缺一条就漏掉一种坏法。 */
+T.eq(cutStats.pruned, null, '截断时剪枝总数报 null（不知道），不是一个数字');
+T.ok(cutStats.pruned === null, '而且真的是 null（=== 判定，挡住 undefined）');
+T.ok(cutStats.pruned !== 0, '尤其不是 0 —— 0 会把「不知道」伪装成一次测量');
+T.eq(cutStats.mvTotal, null, '截断时走法总数同样是 null');
+T.ok(typeof cutStats.visited === 'number' && cutStats.visited > 0,
+  '但「访问了多少个节点」是数得出来的，照常给数字：' + cutStats.visited);
+T.eq(cutStats.prunedKnown, 0, '已确认被剪掉的分支数恒是数字，纯 minimax 上是 0');
+T.ok(cutStats.unknown > 0, '并且如实说明有几个节点判不出来：' + cutStats.unknown);
+T.eq(TM.prunedAt(cutView), [], '纯 minimax 截断轨迹上没有任何**已确认**的剪枝');
+
+/* 反过来：没截断的轨迹上，pruned 必须是货真价实的数字，一次都不许是 null
+   —— 否则 α-β 那一课的计数器全程是「—」。 */
+T.eq(abStats.truncated, false, 'α-β 的完整轨迹不标 truncated');
+T.eq(abStats.unknown, 0, '完整轨迹上没有判不出来的节点');
+T.ok(typeof abStats.pruned === 'number', 'α-β 的剪枝总数是数字');
+T.eq(abStats.pruned, abStats.prunedKnown, '没有未知项时，总数就等于已确认数');
+T.ok(typeof abStats.mvTotal === 'number', 'α-β 的走法总数也是数字');
+
+/* 剪枝计数在整条轨迹上**只增不减**（已确认的事实不会被推翻），
+   而且中途一次都不会变成 null。 */
+const mono = TM.createView(abTree, abTrace);
+let prevPruned = -1, prunedGrew = 0, nulls = 0;
+for (let i = 0; i < abTrace.length; i += stride) {
+  TM.seek(mono, i);
+  const st = TM.statsAt(mono);
+  if (st.pruned === null) { nulls++; continue; }
+  T.ok(st.pruned >= prevPruned, '已确认的剪枝数不随游标前进而减少（i=' + i + '）');
+  if (st.pruned > prevPruned) { prunedGrew++; }
+  prevPruned = st.pruned;
+}
+T.eq(nulls, 0, '完整轨迹上剪枝计数全程都是数字，没有中途变成 null');
+T.ok(prunedGrew >= 3, '剪枝计数确实在长大，不是恒为 0');
+
+// ---- spineAt 拿运行时调用栈当独立参照（本任务最强的一条对拍）----
+/* 与任务 2 钉父链用的是同一招，但这次在**任意游标**上比，不只在入帧步上。
+   spineAt 的两个边界（pop 步本身仍在栈上）是抄 debugger.callStack 的，
+   抄得对不对只能靠它自己说话。 */
+const spineCur = D.create(abTrace);
+const spineView = TM.createView(abTree, abTrace);
+let spineChecked = 0, spineBad = 0;
+const spineStride = Math.max(1, Math.floor(abTrace.length / 120));
+for (let i = 0; i < abTrace.length; i += spineStride) {
+  D.goto(spineCur, i);
+  TM.seek(spineView, i);
+  const stack = D.callStack(spineCur), ids = D.frameIds(spineCur);
+  const runtime = [];
+  for (let k = 0; k < stack.length; k++) { if (stack[k].name === 'search') { runtime.push(ids[k]); } }
+  if (JSON.stringify(TM.spineAt(spineView)) !== JSON.stringify(runtime)) { spineBad++; }
+  spineChecked++;
+}
+T.eq(spineBad, 0, '每个游标上的 spine 都与运行时调用栈里的 search 帧逐项相同');
+T.ok(spineChecked >= 100, 'spine 对拍跑了至少 100 个游标（不是空转）');
+T.ok(spineChecked > 0 && TM.spineAt(spineView).length >= 0, 'spine 对拍真的取到了值');
+
+// ---- spine 自身的形状：是一条真链，且每个成员都可见 ----
+const shape = TM.createView(abTree, abTrace);
+let shapeChecked = 0;
+for (let i = 0; i < abTrace.length; i += stride) {
+  TM.seek(shape, i);
+  const sp = TM.spineAt(shape);
+  const vis = TM.visibleAt(shape);
+  for (let k = 0; k < sp.length; k++) {
+    const n = TM.nodeAt(abTree, sp[k]);
+    T.eq(n.parentId, k === 0 ? -1 : sp[k - 1], 'spine 是一条父链（第 ' + k + ' 段）');
+    T.ok(vis.indexOf(sp[k]) >= 0, 'spine 上的节点必然已经可见');
+    T.ok(shape.visible[sp[k]] === true, 'visible 这张表与 visibleAt 说的是同一件事');
+    shapeChecked++;
+  }
+}
+T.ok(shapeChecked > 20, 'spine 形状检查不是空转');
+
+// ---- prunedAt 与 statsAt 同出一源 ----
+/* 两个函数各算各的（一个现算、一个增量累加），必须永远对得上；
+   这里把 prunedAt 报出来的节点逐个重算一遍差额，加起来去撞 prunedKnown。 */
+const agree = TM.createView(abTree, abTrace);
+let agreeChecked = 0;
+for (let i = 0; i < abTrace.length; i += stride) {
+  TM.seek(agree, i);
+  const ids = TM.prunedAt(agree);
+  let sum = 0;
+  for (const id of ids) {
+    const n = TM.nodeAt(abTree, id);
+    T.ok(n.popStep >= 0 && n.popStep <= i, '报剪枝的节点必然已经出帧（否则判不出来）');
+    T.ok(n.mvCount !== null, '报剪枝的节点必然读得到走法数');
+    T.ok(n.childIds.length < n.mvCount, '报剪枝的节点真的少看了分支');
+    sum += n.mvCount - n.childIds.length;
+  }
+  T.eq(sum, TM.statsAt(agree).prunedKnown, 'prunedAt 逐个重算的差额之和 = statsAt 的剪枝数');
+  agreeChecked++;
+}
+T.ok(agreeChecked >= 30, 'prunedAt / statsAt 对拍不是空转');
+T.ok(TM.prunedAt(abEnd).length > 0, 'α-β 末尾确实指认得出被剪过的节点：' + TM.prunedAt(abEnd).length);
+T.eq(TM.prunedAt(plainEnd), [], '纯 minimax 全程指认不出任何被剪的节点');
+
+/* prunedAt 报的是**父** id：被剪掉的分支根本没有 id 可报。逐个验证它们
+   确实是树上的节点，而且孩子数严格少于走法数。 */
+for (const id of TM.prunedAt(abEnd)) {
+  T.ok(TM.nodeAt(abTree, id) !== null, '剪枝报出来的 id 是树上真实存在的节点');
+}
+
+// ---- 「关闭了、零孩子」那一档确定是 0，不是未知（cutOf 的核心判据）----
+/* 若把这一档当未知，每棵树上一大半叶子都会污染总数，α-β 的 pruned 会变成
+   null，那一课当场没了。实测六份 fixture 里「关闭了、读不到走法数、却有
+   孩子」的节点数都是 0，所以这一档的判据是安全的 —— 这里把它钉住，
+   哪天不成立了要当回归看。 */
+for (const [t2, lbl] of [[abTree, 'ab'], [plainTree, 'plain'], [cutTree, 'cut']]) {
+  for (const id of t2.order) {
+    const n = TM.nodeAt(t2, id);
+    if (n.popStep < 0 || n.mvCount !== null) { continue; }
+    T.eq(n.childIds.length, 0, lbl + '：关闭了却读不到走法数的节点必然没有孩子');
+  }
+}
+
+// ---- 边界：createView 什么都不给也不抛 ----
+let noThrow = true;
+try {
+  const v0 = TM.createView(null, null);
+  TM.seek(v0, 3); TM.visibleAt(v0); TM.spineAt(v0); TM.prunedAt(v0); TM.statsAt(v0);
+  T.eq(TM.visibleAt(v0), [], 'createView(null, null) 的可见集是空的');
+  T.eq(TM.spineAt(v0), [], 'createView(null, null) 的 spine 是空的');
+  T.eq(TM.statsAt(v0).visited, 0, 'createView(null, null) 访问了 0 个节点');
+  T.eq(TM.statsAt(v0).pruned, 0, '空树上没有未知项，剪枝数是确定的 0');
+} catch (e) { noThrow = false; }
+T.ok(noThrow, 'createView(null, null) 全套读法都不抛');
+
+// 空树上的 stats 也要如实：什么都没有 ≠ 不知道。
+T.eq(TM.statsAt(safe).visited, 0, '空轨迹上访问了 0 个节点');
+T.eq(TM.statsAt(safe).pruned, 0, '空轨迹上剪枝数是确定的 0，不是 null');
+T.eq(TM.statsAt(safe).truncated, false, '空轨迹不是被截断的轨迹');
+T.eq(TM.visibleAt(safe), [], '空轨迹上没有可见节点');
+
+// seek 返回 view 本身（brief 的签名是 → view），且游标被夹在合法区间里
+T.ok(TM.seek(abEnd, 10) === abEnd, 'seek 返回 view 本身');
+T.eq(TM.seek(abEnd, -5).i, 0, 'seek 到负数夹回 0');
+T.eq(TM.seek(abEnd, 999999).i, abTrace.length - 1, 'seek 越界夹到末尾');
+
 T.report();

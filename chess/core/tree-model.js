@@ -208,5 +208,321 @@
     return n ? n : null;
   }
 
-  return { build: build, nodeAt: nodeAt };
+  /* ==================== 游标视图：某一刻这棵树长什么样 ====================
+
+     build 给的是**整条轨迹跑完**的那棵树；面板要画的却是「游标停在第 i 步
+     时」的那一棵——哪些节点已经诞生、栈上正开着哪一条、哪些分支已经确定
+     被砍掉。view 就是这个「某一刻」的状态。
+
+     seek 是增量的，因为**撞墙演示恰好就是性能最坏点**：深度 4 的 tree tab
+     是一条 200,000 步的截断轨迹，而截断轨迹里帧永不关闭，debugger.js 的
+     matchFrames 早退分支失效、每次推导退化成 O(trace.length)——实测
+     i=199999 时一次五区重算 16.12 ms，预算是 4 ms。
+     所以：游标 ±1 时只处理跨过的那几步，只有跳转/换轨迹才全量重建。
+     缓存放在这里而不是 debugger.js 里——那个模块的零 DOM 纯度是约 4,100
+     条 node 断言的前提，不能为了性能赔掉。
+
+     view 对外的字段是 brief 约定的那五个（tree / trace / i / visible /
+     spineIds），其余（popIndex / visCount / acc / seeked）是增量簿记，
+     调用方不要读，更不要写——它们与 i 之间有不变式，手改一处就全错。 */
+
+  /* 节点「开着」= 已经入帧、还没离开调用栈。两个边界与 debugger.callStack
+     **逐字相同**（那边的注释解释了为什么不对称）：
+       · push 步本身已经身处新帧里 → `pushStep <= i` 算进去；
+       · pop 步记的仍是内层深度，函数直到下一步才真正回到调用方 →
+         `popStep >= i` 时仍在栈上。
+     于是 spineAt(view) 与 D.frameIds(cur) 里的 search 帧序列在每个下标上
+     都对得上——两个模块各算各的，能对上才说明两边都没错。
+     popStep < 0（截断，永不关闭）的帧一直算开着，它确实再也没弹出去过。 */
+  function isOpen(n, i) {
+    return n.pushStep <= i && (n.popStep < 0 || n.popStep >= i);
+  }
+
+  /* ---------------- 剪枝判据 ----------------
+
+     一个**已经关闭**的节点确定被剪掉了几个分支；**-1 表示不可判定**。
+
+     判据本身很简单：mvCount 是「本来要看的走法数」，childIds.length 是
+     「真的看了的」，差额就是 `if (beta <= alpha) { break; }` 砍掉的。
+
+     难的是 mvCount === null（读不到走法数）那一档要不要当 0。**分两种，
+     必须分开，否则不是漏报就是虚报**：
+
+       · 没有孩子 → 确实剪了 0 个。这一帧是 `depth === 0` 或
+         `ms.length === 0` 那两条早退路径，压根没跑到 `for (const mv of ms)`，
+         没有循环也就没有 break。**这不是「不知道」，是「确定是 0」**：
+         剪枝只可能发生在 `const v = search(...)` 之后，所以任何真被剪过的
+         节点必然至少有一个孩子；反过来「关闭了且零孩子」⟹ 一个都没剪。
+         （实测佐证：plain d2/d3、ab d3、ordered d3、plain d4、ab d4 六份
+         fixture 里，「关闭了、读不到 mvCount、却有孩子」的节点数都是 0。）
+         这一档**不能**报未知：否则每棵树上一大半都是叶子，α-β 的剪枝总数
+         会被自己的叶子污染成 null，那一课就没了。
+       · 有孩子却读不到 → **真的不知道**，返回 -1。这只有一种成因：使用者
+         把源码里的 `ms` 改了名（这份源码本来就是拿来给人改的）。此时这一帧
+         明明跑过循环，分母却读不到，报 0 就是虚报。
+
+     还有一档在这个函数之外：`popStep < 0`（截断，帧永不关闭）。那种节点
+     连「关没关」都还没发生，压根轮不到这里判，见 onBorn。 */
+  function cutOf(n) {
+    if (n.mvCount === null) return n.childIds.length ? -1 : 0;
+    return n.mvCount - n.childIds.length;
+  }
+
+  function newAcc() {
+    return {
+      closed: 0,        // 截至游标已经关闭的节点数
+      prunedSum: 0,     // 已**确定**被剪掉的分支总数（只累加判得出来的）
+      mvSum: 0,         // 已确定的走法总数
+      openForever: 0,   // 可见节点里永不关闭的（= 轨迹被截断的直接证据）
+      unreadable: 0,    // 关闭了、有孩子、却读不到走法数的（= 变量被改名）
+    };
+  }
+
+  /* 节点诞生 / 撤销诞生。sign = +1 前进，-1 后退，两边逐字对称。
+     永不关闭的帧一**露面**就把「不可判定」记上：它不会再有关闭那一刻了。 */
+  function onBorn(acc, n, sign) {
+    if (n.popStep < 0) acc.openForever += sign;
+  }
+
+  /* 节点关闭 / 撤销关闭。只有 popStep >= 0 的节点会走到这里（popIndex 里
+     根本没有 -1 那一档）。 */
+  function onClose(acc, n, sign) {
+    acc.closed += sign;
+    const cut = cutOf(n);
+    if (cut < 0) { acc.unreadable += sign; return; }
+    acc.mvSum += sign * n.mvCount;
+    if (cut > 0) acc.prunedSum += sign * cut;
+  }
+
+  /* 出帧步下标 → 节点 id。**只有它让增量成立**：跨过第 k 步时要知道
+     「有没有哪个节点在这一步关闭」，没有这张表就只能回头翻轨迹。
+     入帧方向不需要这张表——规则 1 说了 id 就是入帧步下标，`nodes[k]`
+     本身就是那张表。 */
+  function popIndexOf(tree) {
+    const idx = Object.create(null);
+    for (let k = 0; k < tree.order.length; k++) {
+      const n = tree.nodes[tree.order[k]];
+      if (n.popStep >= 0) idx[n.popStep] = n.id;
+    }
+    return idx;
+  }
+
+  /* 全量重建：不看轨迹，只扫这棵树（≤ 1,243 个节点），O(节点数)。
+     注意它**不读 trace 的任何一步**——所有需要的时间信息（pushStep /
+     popStep）在 build 那一趟已经蒸馏进节点里了。这也是为什么本模块能躲开
+     matchFrames 那个 O(trace.length)：那边每次都要重新配对帧，这边配对
+     一次就存下来了。 */
+  function rebuild(view, i) {
+    const order = view.tree.order, nodes = view.tree.nodes;
+    const visible = Object.create(null);
+    const acc = newAcc();
+    let vis = 0;
+    for (let k = 0; k < order.length; k++) {
+      const n = nodes[order[k]];
+      if (n.pushStep > i) break;   // order 是 id 升序，后面的只会更晚
+      visible[n.id] = true;
+      vis++;
+      onBorn(acc, n, 1);
+      if (n.popStep >= 0 && n.popStep <= i) onClose(acc, n, 1);
+    }
+    /* 脊：从可见前缀的**末尾往回**找第一个还开着的节点。它必定是最内层的
+       ——开着的节点两两之间只可能是祖先/后代关系（兄弟是先后串行的，弟弟
+       入帧时哥哥早就弹了），所以「开着的」构成一条链，链上 pushStep 最大的
+       就是链尾。倒着扫遇到的第一个正是它。 */
+    const spine = [];
+    for (let k = vis - 1; k >= 0; k--) {
+      const n = nodes[order[k]];
+      if (!isOpen(n, i)) continue;
+      let m = n;
+      while (m) { spine.unshift(m.id); m = m.parentId < 0 ? null : nodes[m.parentId]; }
+      break;
+    }
+    view.visible = visible;
+    view.visCount = vis;
+    view.spineIds = spine;
+    view.acc = acc;
+    view.i = i;
+    view.rebuilds++;
+  }
+
+  /* 前进：逐步跨过 (view.i, to]，每一步只做三件事，全是 O(1) 查表。
+     顺序不能换，它就是「游标从 k-1 迈到 k」这一瞬间发生的事的时间顺序：
+       ① k-1 那一步关掉的帧，此刻才真正离开调用栈（pop 步本身仍算在栈上）；
+       ② 第 k 步若是某个节点的入帧步，它诞生并压上栈；
+       ③ 第 k 步若是某个节点的出帧步，它的 ms / best 就写在这一步的 varDelta
+          里——**信息在这一刻就已经拿得到**，所以记账也在这一刻，
+          尽管按 ① 那条边界它还要在栈上多待一步。两件事不矛盾。 */
+  function advance(view, to) {
+    const nodes = view.tree.nodes, popIndex = view.popIndex, acc = view.acc;
+    for (let k = view.i + 1; k <= to; k++) {
+      if (popIndex[k - 1] !== undefined) view.spineIds.pop();
+      const born = nodes[k];
+      if (born !== undefined) {
+        view.visible[born.id] = true;
+        view.visCount++;
+        onBorn(acc, born, 1);
+        view.spineIds.push(born.id);
+      }
+      const shut = popIndex[k];
+      if (shut !== undefined) onClose(acc, nodes[shut], 1);
+    }
+    view.i = to;
+  }
+
+  /* 后退：把 advance 做过的每一件事**逐条反着撤销**（顺序也反过来）。
+     后退方向单独写一遍，不是图省事的对称抄写——只在前进方向上正确的增量
+     状态是这类代码最典型的坏法，测试因此在两个方向上各对拍一遍。 */
+  function retreat(view, to) {
+    const nodes = view.tree.nodes, popIndex = view.popIndex, acc = view.acc;
+    for (let k = view.i; k > to; k--) {
+      const shut = popIndex[k];
+      if (shut !== undefined) onClose(acc, nodes[shut], -1);
+      const born = nodes[k];
+      if (born !== undefined) {
+        delete view.visible[born.id];
+        view.visCount--;
+        onBorn(acc, born, -1);
+        view.spineIds.pop();
+      }
+      const back = popIndex[k - 1];
+      if (back !== undefined) view.spineIds.push(back);
+    }
+    view.i = to;
+  }
+
+  /* createView(tree, trace) → view。游标落在 0（与 Debugger.create 一致：
+     「停在第一步」是唯一自然的初始状态，哪怕空轨迹上这一步并不存在）。
+     tree / trace 缺席都不抛：这个模块的输入是外面递进来的东西，清空编辑器
+     缓冲区在 3b 是真实可达的状态，不该让面板崩掉。 */
+  function createView(tree, trace) {
+    const tr = tree && tree.order ? tree : { nodes: Object.create(null), rootId: -1, order: [] };
+    const view = {
+      tree: tr,
+      trace: trace || [],
+      i: 0,
+      visible: Object.create(null),
+      spineIds: [],
+      popIndex: popIndexOf(tr),
+      visCount: 0,
+      acc: newAcc(),
+      seeked: false,
+      /* 全量重建了几次。**留着是给测试用的**：命脉那条对拍（增量 vs 全量）
+         有一种无声的坏法——阈值定小了，两边其实都走了全量，对拍从此空转
+         而全绿。除了从外面数一下重建次数，没有别的办法把它钉住。 */
+      rebuilds: 0,
+    };
+    rebuild(view, clampTo(view, 0));
+    /* rebuild 之后仍标成「没 seek 过」：让**第一次 seek 必然走全量**。
+       这不是洁癖——测试拿「新建的 view 上 seek 一次」当全量参照去对拍
+       增量，若小游标处新 view 也走了增量，那一次对拍就变成了自己跟自己比，
+       白白丢掉几个采样点的鉴别力。 */
+    view.seeked = false;
+    return view;
+  }
+
+  /* 把下标夹到 [0, trace.length-1]，与 Debugger.goto 同一套（含空轨迹时
+     `length - 1 === -1` 被 Math.max 拉回 0 的那条边界）。 */
+  function clampTo(view, i) {
+    return Math.max(0, Math.min(view.trace.length - 1, i | 0));
+  }
+
+  /* 增量与全量的分水岭。**测出来的，不是拍的**（第一版拍了 4096，实测差了
+     一倍多，当场改掉）：在 1,243 个节点 / 200,000 步的截断 d4 轨迹上，
+       · 全量重建（rebuild，O(节点数)）    0.060 ms
+       · 增量每跨一步                      0.0000345 ms
+     打平点 = 0.060 / 0.0000345 ≈ 1,740 步。取 2048 是那个量级上的整数，
+     边界处最多比全量贵 0.01 ms，可以忽略。
+     这个常数**只影响快慢，不影响答案**——两条路径给出的状态必须逐点相同，
+     测试正是拿全量当参照把这一条钉死的。 */
+  const REBUILD_MAX = 2048;
+
+  /* seek(view, i) → view（返回 view 本身，方便链式调用；不是新对象）。 */
+  function seek(view, i) {
+    const to = clampTo(view, i);
+    if (!view.seeked) { view.seeked = true; rebuild(view, to); return view; }
+    if (to === view.i) return view;
+    if (to > view.i + REBUILD_MAX || to < view.i - REBUILD_MAX) { rebuild(view, to); return view; }
+    if (to > view.i) advance(view, to); else retreat(view, to);
+    return view;
+  }
+
+  /* visibleAt(view) → 截至游标已经**被访问过**的节点 id，按访问先后。
+     它恒是 tree.order 的一段前缀：可见 ⟺ pushStep <= i，而 order 正是
+     pushStep 升序。返回**副本**，调用方随便改都伤不到 view。 */
+  function visibleAt(view) {
+    return view.tree.order.slice(0, view.visCount);
+  }
+
+  /* spineAt(view) → 根到最内层 search 帧的路径（由外到内）。同样返回副本
+     ——这是 view 的内部栈，被外面 pop 一下整个增量状态就废了。 */
+  function spineAt(view) {
+    return view.spineIds.slice();
+  }
+
+  /* prunedAt(view) → 截至游标**已确定**有分支被剪掉的节点 id（升序）。
+
+     返回的是「被剪掉的节点的**父** id」，因为被剪掉的分支根本没进过轨迹
+     ——它们没有入帧步，也就没有 id，永远画不出来。能指认的只有「在谁身上
+     少看了几个分支」。
+
+     每次现算而不做增量缓存：它与 statsAt 的剪枝数必须同出一源（都走
+     cutOf），两处各存一份状态迟早分岔；O(可见节点数) ≤ 1,243 也不值得为它
+     再养一个不变式。 */
+  function prunedAt(view) {
+    const out = [], order = view.tree.order, nodes = view.tree.nodes;
+    for (let k = 0; k < view.visCount; k++) {
+      const n = nodes[order[k]];
+      if (n.popStep < 0 || n.popStep > view.i) continue;   // 还没关，还轮不到判
+      if (cutOf(n) > 0) out.push(n.id);
+    }
+    return out;
+  }
+
+  /* statsAt(view) → { visited, pruned, prunedKnown, mvTotal, unknown, truncated }
+
+     **pruned 与 mvTotal 会是 null，这是本函数的全部要点。**
+
+     「剪掉了几个」这个总数只有在**每一个可见节点都判得出来**时才是一个数。
+     只要有一个判不出来（截断导致帧永不关闭，或者使用者改了 `ms` 的名字），
+     真实总数就在已知数之上、之外，报那个已知数等于宣称「就这么多」。
+     ——与 3a 拒绝编造「省略了 N 步」是同一条纪律：**null 一路传到面板，
+     由面板显式地画成「—」，而不是在这里悄悄变成一个像样的数字。**
+
+     三档要分清，混起来就没意义了：
+       · pending（popStep > i，此刻开着但**将来**会关）——不是不可判定，
+         只是还没轮到。不计入 unknown，否则根节点一直开到最后一步，整段
+         演示里剪枝计数全是 null，那个逐步长大的计数器就没了。
+       · unknown（openForever + unreadable）——**永远**判不出来。
+       · 其余都判得出来，含「关闭了、零孩子」那种确定剪了 0 个的叶子。
+
+     prunedKnown 恒是数字：已确认被剪掉的分支数，是个**下界**。面板可以在
+     pruned === null 时画「至少 N（另有 M 个节点判不出来）」，而不是干瞪眼。
+     所以这里同时给出两个字段，不是冗余：一个是「总数」（可能不知道），
+     一个是「已经确认的」（永远知道）。
+
+     truncated 只由**截断**决定：轨迹自己说被截断，或者可见节点里有永不关闭
+     的帧。改名导致的 unreadable 不算截断——那是另一码事，走 unknown。 */
+  function statsAt(view) {
+    const a = view.acc;
+    const unknown = a.openForever + a.unreadable;
+    return {
+      visited: view.visCount,
+      pruned: unknown ? null : a.prunedSum,
+      prunedKnown: a.prunedSum,
+      mvTotal: unknown ? null : a.mvSum,
+      unknown: unknown,
+      truncated: !!view.trace.truncated || a.openForever > 0,
+    };
+  }
+
+  return {
+    build: build,
+    nodeAt: nodeAt,
+    createView: createView,
+    seek: seek,
+    visibleAt: visibleAt,
+    spineAt: spineAt,
+    prunedAt: prunedAt,
+    statsAt: statsAt,
+  };
 });
