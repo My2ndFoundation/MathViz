@@ -5,12 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <!-- 版本记录（changelog，新→旧）：
+     1.1.0  2026-08-04  默认视角改为正视（az=0, el=0）——从数学工具继承来的斜转轴测
+                        对棋盘是错的：它把 a1–h1 那条边斜过来，读不出行列。四个 tab
+                        的视角顺序统一成 1 正视 / 2 桌面 45° / 3 轴测（check tab 的
+                        侧视排在其后），按键 1–9 依次对应。新增「桌面 45°」机位
+                        （az=0, el=−45°）：负仰角让 1 线在近处、8 线后退，正是人坐在
+                        桌前看棋盘的样子；正仰角会把 8 线拉到眼前，是反的。
      1.0.2  2026-08-03  内部：跟进引擎 chess-1.2.0，它新增了供棋谱回放工具使用的
                         公开接口 syncPresetHighlight()。本工具行为无变化。
      1.0.1  2026-08-02  内部改写：帧时钟收口到引擎的单一出处（VizEngine.state.dt）；
                         引擎里未被使用的浮点行录制骨架已删除。
      1.0.0  2026-08-02  首发：伪合法/合法差集、易位四前提、吃过路兵时间窗、将死与逼和。 -->
-<meta name="tool-version" content="1.0.2">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="chess-1.2.0">
 <title>Rules, Legality and Mate</title>
 <!-- 样式令牌与组件整体搬运自 design-system/math-viz-starter.html 的 <style> 块，
@@ -3057,9 +3063,9 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   // （初始/别子/易位变体/……）与相机角度曾经合并进同一份 views——选局面会
   // 悄悄带着相机跳，切相机也会悄悄换局面。两件事其实互不相干：views 回答
   // 「从哪儿看」，下面的 PRESETS/games[tab].presetKey 回答「看什么」。这里
-  // 把 views 收窄成纯相机角度（每个 tab 至少 iso + 顶视，check tab 另加一个
-  // 侧视——它的应手层沿 z 轴立起来，侧视能看清那个「立起来的薄层」，其余
-  // 三个 tab 没有这类沿 z 抬升的结构，不需要额外角度）。局面选择完全移到
+  // 把 views 收窄成纯相机角度（每个 tab 至少 正视 + 桌面 45° + iso，check tab
+  // 另加一个侧视——它的应手层沿 z 轴立起来，侧视能看清那个「立起来的薄层」，
+  // 其余三个 tab 没有这类沿 z 抬升的结构，不需要额外角度）。局面选择完全移到
   // 下面 SCENES 声明里的 presets。CAM_KING/CAM_QUEEN/CAM_ZOOM 这几个曾经
   // 专为某个局面调的机位（易位经过被将、b1 不安全、别子特写）随着「局面
   // 不再驱动相机」一起退休——统一用每个 tab 自己的 iso 机位，不再为单个
@@ -3075,6 +3081,14 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
      写的 el:1.45 正是这个错误——算出来的 eye 离棋盘法线有 83°，几乎
      边看。dist 同理不再写死，见 computeTopDist() 的推导。 */
   var CAM_TOP  = { az: 0, el: 0, dist: 14 };
+  /* 「桌面 45°」——人坐在桌前看一副摆好的棋盘的角度。仰角是**负的**，这一点
+     反直觉但可实测：makeCam() 的 eye.y = dist·sin(el)，el>0 把相机抬到 +y 一侧，
+     于是离相机近的是 8 线（黑方），1 线反而退到远处——正好是坐在黑方对面。
+     el<0 把相机放到 1 线这一侧的上方，近大远小于是落在白方，8 线后退，
+     才是「白方在自己面前」的那个视角。45° 是这里的字面意思：−π/4。
+     dist 比正视稍远（15 vs 14）：45° 下棋盘近边被推到眼前，同样的距离会顶到
+     画布下沿——这个数是在浏览器里逐档看出来的，不是估的。 */
+  var CAM_TILT = { az: 0, el: -Math.PI / 4, dist: 15 };
   var CAM_CHECK = { az: -0.5, el: 0.42, dist: 13.5 };
   // check tab 专属的侧视——drawReplyTree() 把候选应手摆在 z = PLY_Z 抬起的
   // 一层薄面上（见下方 PLY_Z），低仰角、side-on 的机位能看清这层「悬浮在
@@ -3128,8 +3142,9 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       tips: PRESETS.start.tips,
       // views：纯相机角度——iso（双击回正的家）+ 顶视（顿悟视角）。
       views: {
+        top: viewSpec(CAM_TOP, { en: 'Top (epiphany)', zh: '正视（顿悟）' }),
+        tilt: viewSpec(CAM_TILT, { en: 'Table 45°', zh: '桌面 45°' }),
         iso: viewSpec(CAM_BASE, { en: 'Iso', zh: '轴测' }),
-        top: viewSpec(CAM_TOP, { en: 'Top (epiphany)', zh: '俯视（顿悟）' }),
       },
       // presets：局面——从相机角度里搬出来的内容选择。
       presetsLabel: { en: 'Position', zh: '局面' },
@@ -3152,8 +3167,9 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
                zh: '易位有四个各自独立的前提；吃过路兵只在那一步棋里存在；升变是一次选择，不只是变后。' },
       tips: PRESETS.castleOk.tips,
       views: {
+        top: viewSpec(CAM_TOP, { en: 'Top (epiphany)', zh: '正视（顿悟）' }),
+        tilt: viewSpec(CAM_TILT, { en: 'Table 45°', zh: '桌面 45°' }),
         iso: viewSpec(CAM_BASE, { en: 'Iso', zh: '轴测' }),
-        top: viewSpec(CAM_TOP, { en: 'Top (epiphany)', zh: '俯视（顿悟）' }),
       },
       presetsLabel: { en: 'Position', zh: '局面' },
       presets: [
@@ -3180,9 +3196,10 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
       // 这个 tab 的应手层沿 z 轴抬起（drawReplyTree()），side 视角能看清那层
       // 「悬浮的薄面」本身——其余三个 tab 没有这类结构，不需要这个额外角度。
       views: {
-        iso: viewSpec(CAM_CHECK, { en: 'Iso', zh: '轴测' }),
-        top: viewSpec(CAM_TOP, { en: 'Top (epiphany)', zh: '俯视（顿悟）' }),
+        top: viewSpec(CAM_TOP, { en: 'Top (epiphany)', zh: '正视（顿悟）' }),
+        tilt: viewSpec(CAM_TILT, { en: 'Table 45°', zh: '桌面 45°' }),
         side: viewSpec(CAM_CHECK_SIDE, { en: 'Side · reply layer', zh: '侧视·应手层' }),
+        iso: viewSpec(CAM_CHECK, { en: 'Iso', zh: '轴测' }),
       },
       presetsLabel: { en: 'Position', zh: '局面' },
       presets: [
@@ -3205,8 +3222,9 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
                zh: '初学者第一个能刻意强制做到、而不是误打误撞碰上的将死。' },
       tips: PRESETS.mateKQ.tips,
       views: {
+        top: viewSpec(CAM_TOP, { en: 'Top (epiphany)', zh: '正视（顿悟）' }),
+        tilt: viewSpec(CAM_TILT, { en: 'Table 45°', zh: '桌面 45°' }),
         iso: viewSpec(CAM_BASE, { en: 'Iso', zh: '轴测' }),
-        top: viewSpec(CAM_TOP, { en: 'Top (epiphany)', zh: '俯视（顿悟）' }),
       },
       presetsLabel: { en: 'Position', zh: '局面' },
       presets: [

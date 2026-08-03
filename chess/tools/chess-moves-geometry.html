@@ -5,12 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <!-- 版本记录（changelog，新→旧）：
+     1.1.0  2026-08-04  默认视角改为正视（az=0, el=0）——从数学工具继承来的斜转轴测
+                        对棋盘是错的：它把 a1–h1 那条边斜过来，读不出行列。四个 tab
+                        的视角顺序统一成 1 正视 / 2 桌面 45° / 3 轴测，field 页的
+                        侧视（看阶梯）排在轴测之前，按键 1–9 依次对应。新增「桌面 45°」
+                        机位（az=0, el=−45°）：负仰角让 1 线在近处、8 线后退，正是人坐在
+                        桌前看棋盘的样子；正仰角会把 8 线拉到眼前，是反的。
+                        另修：面板版本徽章一直显示 1.0.1——脚本里的 VERSION 常量在
+                        1.0.2 那次没跟着 meta 一起改，这次两处一起对齐。
      1.0.2  2026-08-03  内部：跟进引擎 chess-1.2.0，它新增了供棋谱回放工具使用的
                         公开接口 syncPresetHighlight()。本工具行为无变化。
      1.0.1  2026-08-02  内部改写：帧时钟收口到引擎的单一出处（VizEngine.state.dt）；
                         引擎里未被使用的浮点行录制骨架已删除。
      1.0.0  2026-08-02  首发：攻击域、最少步数场、机动性高度场、距离度量。 -->
-<meta name="tool-version" content="1.0.2">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="chess-1.2.0">
 <title>Geometry of Movement</title>
 <!-- 样式令牌与组件整体搬运自 design-system/math-viz-starter.html 的 <style> 块，
@@ -2689,19 +2697,30 @@ const PIECE_PRESETS = PIECE_CODES.map(function (code, i) {
 const VIEW_ISO = { az: -0.68, el: 0.5, dist: 13 };
 /* BoardRender 把棋盘铺在世界的 x-y 平面（squareCenter 返回 [x,y,0]），
    而本工具把场的高度立在 z 轴上（top=[x,y,k·d]）——这与该引擎「z=0 平面
-   放几何、z 是深度/时间轴」的既有约定一致，但也意味着「真正的俯视」
+   放几何、z 是深度/时间轴」的既有约定一致，但也意味着「正对棋盘看过去」
    不是 el→90°（那会让棋盘自己所在的 x-y 平面side-on，边界拉成一条线，
    实测过：见下方 side 的手感），而是 az=0, el=0——沿棋盘的法线（z 轴，
    恰好也是高度轴）正对看过去，高度被压缩成看不见的一个点，露出的正是
-   「覆盖形状」这个俯视要看的东西。 */
-/* dist:10 在这里只是个占位初值——真正的距离由 computeTopDist() 按当前
+   「覆盖形状」这个正视要看的东西。UI 上这个视角标作「正视 / Top」：
+   它既是每个 tab 的第一个视角（= 引擎的初始相机与双击回正的家），
+   也是按键 1。 */
+/* dist:13 在这里只是个占位初值——真正的距离由 computeTopDist() 按当前
    视口现算，见下面的定义与 refreshTopDist() 的调用点。写死一个数只是把
    「在这台机器这扇窗口下不裁标签」的问题挪到另一个窗口尺寸上而已：棋盘
    本身的世界半径是 BOARD.w/2（4），但真正决定裁不裁得到的是坐标标签，
    它们探到 BOARD.w/2 + BR.COORD_LABEL_OFFSET·cell（board-render.js 的
    drawCoordLabels 就是这么算标签位置的，这里必须用同一个常量，不能自己
    再猜一份）之外。 */
-const VIEW_TOP = { az: 0, el: 0, dist: 10 };
+const VIEW_TOP = { az: 0, el: 0, dist: 13 };
+/* 「桌面 45°」——人坐在桌前看一副摆好的棋盘的角度。仰角是**负的**，这一点
+   反直觉但可实测：makeCam() 的 eye.y = dist·sin(el)，el>0 把相机抬到 +y 一侧，
+   于是离相机近的是 8 线（黑方），1 线反而退到远处——那是坐在黑方对面。
+   el<0 把相机放到 1 线这一侧的上方，近大远小于是落在白方，8 线后退，
+   才是「白方在自己面前」的那个视角。45° 是字面意思：−π/4。
+   注意本工具的 field / mobility / metric 三个 tab 把场的高度立在 +z 上
+   （drawHeightField），而 45° 机位是绕 x 轴倾的，仍然沿 z 轴正对看进去——
+   所以它看到的是「带厚度的场」而不是侧面的阶梯；要读阶梯仍然用 side。 */
+const VIEW_TILT = { az: 0, el: -Math.PI / 4, dist: 15 };
 const VIEW_SIDE = { az: -1.5708, el: 0.14, dist: 13 };
 
 // 顶视角要塞下的世界半径：棋盘半边长 + 坐标标签探出的偏移。8×8、cell=1
@@ -2745,8 +2764,9 @@ const SCENES = {
     presetsLabel: { zh: '棋种', en: 'Piece' },
     presets: PIECE_PRESETS,
     views: {
+      top: Object.assign({ label: { zh: '正视', en: 'Top' } }, VIEW_TOP),
+      tilt: Object.assign({ label: { zh: '桌面 45°', en: 'Table 45°' } }, VIEW_TILT),
       iso: Object.assign({ label: { zh: '轴测', en: 'Iso' } }, VIEW_ISO),
-      top: Object.assign({ label: { zh: '俯视', en: 'Top' } }, VIEW_TOP),
     },
     draw: function (Cam) {
       advanceDemo();
@@ -2783,9 +2803,10 @@ const SCENES = {
     presetsLabel: { zh: '棋种', en: 'Piece' },
     presets: PIECE_PRESETS,
     views: {
-      iso: Object.assign({ label: { zh: '轴测', en: 'Iso' } }, VIEW_ISO),
-      top: Object.assign({ label: { zh: '俯视·看覆盖形状', en: 'Top · shape' } }, VIEW_TOP),
+      top: Object.assign({ label: { zh: '正视·看覆盖形状', en: 'Top · shape' } }, VIEW_TOP),
+      tilt: Object.assign({ label: { zh: '桌面 45°', en: 'Table 45°' } }, VIEW_TILT),
       side: Object.assign({ label: { zh: '侧视·看阶梯', en: 'Side · steps' } }, VIEW_SIDE),
+      iso: Object.assign({ label: { zh: '轴测', en: 'Iso' } }, VIEW_ISO),
     },
     draw: function (Cam) {
       advanceDemo();
@@ -2827,8 +2848,9 @@ const SCENES = {
     presetsLabel: { zh: '棋种', en: 'Piece' },
     presets: PIECE_PRESETS,
     views: {
+      top: Object.assign({ label: { zh: '正视', en: 'Top' } }, VIEW_TOP),
+      tilt: Object.assign({ label: { zh: '桌面 45°', en: 'Table 45°' } }, VIEW_TILT),
       iso: Object.assign({ label: { zh: '轴测', en: 'Iso' } }, VIEW_ISO),
-      top: Object.assign({ label: { zh: '俯视', en: 'Top' } }, VIEW_TOP),
     },
     draw: function (Cam) {
       advanceDemo();
@@ -2860,8 +2882,9 @@ const SCENES = {
     },
     // 不声明 presets：本 tab 固定对照王与车，不随棋种变化。
     views: {
+      top: Object.assign({ label: { zh: '正视', en: 'Top' } }, VIEW_TOP),
+      tilt: Object.assign({ label: { zh: '桌面 45°', en: 'Table 45°' } }, VIEW_TILT),
       iso: Object.assign({ label: { zh: '轴测', en: 'Iso' } }, VIEW_ISO),
-      top: Object.assign({ label: { zh: '俯视', en: 'Top' } }, VIEW_TOP),
     },
     draw: function (Cam) {
       advanceDemo();
@@ -2888,7 +2911,11 @@ const TOOL = {
   title: { zh: '走法的几何本质 · MathViz', en: 'Geometry of Movement · MathViz' },
   h1: { zh: '走法的几何本质', en: 'Geometry of Movement' },
 };
-const VERSION = '1.0.1';
+/* 与 <meta name="tool-version"> 必须同值——面板徽章读的是这里，注册表与
+   changelog 读的是 meta。1.0.2 那次只改了 meta，徽章因此一直停在 1.0.1；
+   两处的唯一读者不同，所以谁也没发现。工具② 直接从 meta 里读，本工具沿用
+   常量形式（脚本块在 <head> 之后，读 meta 同样可行，但改动面留给下次）。 */
+const VERSION = '1.1.0';
 
 E.init({
   canvas: document.getElementById('scene'),
