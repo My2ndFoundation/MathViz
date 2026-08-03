@@ -68,6 +68,35 @@ for (const l of onlyInAb) {
   T.ok(/alpha|beta/.test(l), '多出来的每一行都与 alpha/beta 有关：' + l.trim());
 }
 
+// ---- 源码里对自己的说法必须与实测相符（自洽检查）----
+/* 这一条是「注释说了假话」那一类问题的守卫。它**不是**短语黑名单：
+   黑名单只认已经被删掉的那几个字节，同一句错话换个说法就能大摇大摆地
+   走过去，看着像防住了、其实什么也没防。
+   有牙齿的做法是让源码里的说法**可被计算验证** —— 注释声称两个 tab 差
+   多少行，就当场去数实际差多少行。以后谁动了剪枝那几行，要么同步改她
+   读的那句话，要么这条断言变红。
+   这条守卫的形状可以复用到任何「源码自称一个数」的说法上。 */
+const abSource = abLines.join('\n');
+const plainSource = plainLines.join('\n');
+const claimRe = /一共 (\d+) 行/;
+const claim = claimRe.exec(abSource);
+T.ok(claim !== null, '源码里有一句「一共 N 行」的自述，可以拿去核对');
+/* 分支不能省：自述整句被删掉时 claim 是 null，直接写 claim[1] 会抛
+   TypeError，测试**崩在这里**、后面的断言一条都跑不到、T.report() 也
+   不会执行 —— 一个本该"红一条"的改动会变成"整个套件不出声"。
+   这不是假想，是这条守卫自己的变异测试当场撞出来的。 */
+if (claim === null) {
+  T.ok(false, '源码里没有那句「一共 N 行」的自述，没法核对（实测差 ' + onlyInAb.length + ' 行）');
+} else {
+  T.eq(Number(claim[1]), onlyInAb.length,
+       '源码里写给她看的差异行数与实测一致（源码说 ' + claim[1] +
+       ' 行，实际数出来 ' + onlyInAb.length + ' 行）');
+}
+/* 这句话必须待在**共享**那段里 —— 它描述的是「两个 tab 之间」的关系，
+   两个 tab 都该读到。掉进剪枝块里的话，它自己就变成了差异的一部分，
+   这条断言会变成自己数自己，什么也证明不了。 */
+T.ok(claimRe.test(plainSource), '这句自述在纯 minimax 那份里也在 —— 它属于共享段，不是剪枝块的一部分');
+
 // ---- ordered 也必须与 ab 共用同一份源码（两段式，不是一条正则打三家）----
 /* 上面那条 plain↔ab 的 diff 管不到 ordered。少了这一段，一次「给 ordered
    单独复制一份源码」的重构可以全身而过：onlyInAb 仍是 4，三个 mode 仍然
