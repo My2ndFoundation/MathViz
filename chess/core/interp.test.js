@@ -533,46 +533,47 @@ diff([
 ].join('\n'), 'while 没有每轮新环境：闭包共享同一个 i（与 for 不同）');
 
 // ---- 调用深度上限：不用 diff——原生栈溢出的 RangeError 文案跟我们主动
-//      拦截报出的教学向文案不是一回事，比较文案没有意义。只验证我们自己
-//      的行为：无限递归被主动拦下、报错类别是 runtime、文案点名 1000 与
-//      "缺基准情形"这个诊断方向。
+//      拦截报出的教学向文案不是一回事，比较文案没有意义。
 //
-//      这条测试比看上去的样子要棘手——任务报告详细记录了完整的排查
-//      过程，这里只留结论：
-//      1) 递归调用的写法必须是跟 brief 里 fact/fib 同样的两语句形状
-//         （独立的 if 判基准情形 + 纯尾位置递归调用），不能是单语句体或
-//         把调用包在算术表达式里——后两种写法量出来的真实可用原生递归
-//         深度分别只有约 999 层、约 936 层，够不到 1000，会在我们自己的
-//         检查生效前先撞上对使用者毫无意义的原生 RangeError。
-//      2) 光换对形状还不够：在**这个测试文件的这个位置**（前面已经跑过
-//         大约 380 个 diff() 用例）直接冷启动调用一次 loop(2000)，测得
-//         会不稳定地先撞上原生 RangeError，而不是我们的报错——但如果先
-//         用几个明确安全（远低于 1000）、深度递增的调用把
-//         evalStmt/evalExpr/callInterpreted 这条热路径"热身"一遍，
-//         再测超限深度，结果稳定可重现（多次独立验证都一致）。这跟
-//         MAX_DEPTH 那条实现注释里点名的风险是同一件事的延伸："yield*
-//         的嵌套让真实可用深度比裸递归浅得多"，而且这个"浅多少"本身
-//         还跟 JIT 的预热状态相关，比 brief 那句"1000 远大于教学规模
-//         所需"暗示的更微妙——教学规模（N 皇后 N≤12）离这条边界非常
-//         远，不受影响，但这条专门去够边界的测试必须先热身才稳。 ----
-(function () {
-  const src = (n) => 'function loop(n) { if (n <= 0) { return 0; } return loop(n - 1); } return loop(' + n + ');';
-  // 热身：这些深度远低于 MAX_DEPTH，预期一律正常返回（不做断言，只是
-  // 为了让下面真正的超限调用落在稳定可重现的路径上）。
-  for (const warm of [50, 200, 500, 800, 950, 999]) { I.run(src(warm)); }
-
-  let caught = null;
-  try { I.run(src(2000)); } catch (e) { caught = e; }
-  T.ok(caught !== null, 'MAX_DEPTH：无限递归应该被主动拦下而不是让引擎真崩');
-  T.eq(caught && caught.category, 'runtime', 'MAX_DEPTH 报错类别是 runtime');
-  T.eq(caught && caught.message,
-       'Maximum call depth exceeded (1000). Is this recursion missing its base case?',
-       'MAX_DEPTH 报错文案与 brief 一字不差');
-})();
+//      这条测试的历史：MAX_DEPTH 最初按计划稿写的是 1000，但实测发现
+//      在嵌套生成器的委托链下，V8 自己的裸栈溢出在**远早于** 1000 层
+//      就会先发生——也就是说旧的 1000 这个守卫实际上永远不会被真正
+//      触发，使用者拿到的是一个对她毫无意义的引擎崩溃，而不是我们想给
+//      的解释。复审后把 MAX_DEPTH 降到 500（常量旁边的注释记录了完整的
+//      实测方法与数字），这条断言就是用来盯住「越界时抛的确实是我们的
+//      报错、不是引擎的裸 RangeError」——没有这条断言，没有任何测试能
+//      证明这道防线是活的。
+//
+//      递归形状特意选成「递归调用嵌在算术表达式里」（`return 1 + f(k -
+//      1);`，而不是纯尾调用）——这更贴近真实的教学算法写法（回溯类算法
+//      常把递归调用嵌进 `+=`/`+` 之类的表达式），也是实测中更容易先撞见
+//      裸栈溢出的形状，用它来验证余量更保守、更可信。深度探测值 600 已
+//      经在冷启动（全新 node 进程，只跑这一段）与预热后（跟在这个文件
+//      其余 diff() 测试后面跑，讲 evalStmt/evalExpr/callInterpreted 这条
+//      热路径先被 JIT 摸过一遍）两种状态下各自反复验证过，结果一致：
+//      两种状态都稳稳落在 MAX_DEPTH=500 与实测真实栈上限（冷启动约
+//      650～700 层、预热后约 900～1000 层）之间，不是卡在边界上凑巧
+//      通过。 ----
+let deepErr = null;
+try {
+  I.run('function f(k){ if(k<=0){return 0;} return 1+f(k-1); } return f(600);', { host: {} });
+} catch (e) { deepErr = e; }
+T.ok(deepErr, '超过深度上限要抛错');
+T.eq(deepErr && deepErr.category, 'runtime', '抛的是我们的 runtime 错，不是引擎的 RangeError');
+T.ok(deepErr && /depth/i.test(deepErr.message), '消息提到深度：' + (deepErr && deepErr.message));
+T.eq(deepErr && deepErr.message,
+     'Maximum call depth exceeded (500). Either this recursion is missing its base case, ' +
+     'or it simply nests deeper than this interpreter supports — try rewriting it as a loop.',
+     'MAX_DEPTH 报错文案：给出限值、两种成因、一条出路');
 
 // 深递归但没超限：fib(12) 已经覆盖了「有意义深度但没触顶」的情形（见上）；
 // 这里额外确认 N 皇后规模（N=12）的递归深度稳稳落在上限之内。
 diff('function depth(n) { if (n <= 0) { return 0; } return 1 + depth(n - 1); } return depth(12);',
      '递归深度 12（N 皇后 N≤12 的规模）远低于 MAX_DEPTH，正常返回');
+
+// 合法的深递归（节点数上千，但调用深度只有 15）仍然要能正常跑完——
+// 降低 MAX_DEPTH 不能误伤这类教学场景常见的深度。
+diff('function fib(n){ if(n<2){return n;} return fib(n-1)+fib(n-2); } return fib(15);',
+     '深递归 fib(15)：调用深度仅 15，节点数上千，压一压性能与正确性');
 
 T.report();
