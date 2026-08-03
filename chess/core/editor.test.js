@@ -159,6 +159,14 @@ const bad = E.check('let x = ;');
 T.ok(bad, '语法错误被报出来');
 T.eq(bad.category, 'syntax', '类别是 syntax');
 T.eq(bad.line, 1, '行号');
+/* check 必须返回一个纯对象，不能把 Interp.parse 抛出的 Error 实例原样透出
+   去——那样会带上 .stack 这类实现细节，且形状不受控（Error 的 message 是
+   不可枚举属性，逐个属性读虽然还能读到，但对象整体已经不是「这五个字段」
+   这个约定形状了）。用 JSON.stringify 比较整个对象的键集合，比逐个属性
+   断言更能堵住「返回了错误对象本身」这类退化实现。 */
+T.eq(Object.keys(bad).sort(), ['category', 'col', 'index', 'line', 'message'],
+     'check 的返回值恰好是这五个字段，不多不少');
+T.ok(!(bad instanceof Error), 'check 返回的是纯对象而不是 Error 实例');
 
 const unsup = E.check('class Foo {}');
 T.eq(unsup.category, 'unsupported', 'class 报 unsupported 而不是 syntax');
