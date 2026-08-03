@@ -576,4 +576,61 @@ diff('function depth(n) { if (n <= 0) { return 0; } return 1 + depth(n - 1); } r
 diff('function fib(n){ if(n<2){return n;} return fib(n-1)+fib(n-2); } return fib(15);',
      '深递归 fib(15)：调用深度仅 15，节点数上千，压一压性能与正确性');
 
+// ============ Task 7：宿主桥接与可反放的轨迹 ============
+// 逐字采用任务简报 task-7-brief.md 里给出的测试代码。
+
+// ---- 轨迹结构 ----
+const tr1 = I.run('let a = 1;\nlet b = 2;\na = 3;', { host: {} }).trace;
+T.ok(tr1.length >= 3, '三条语句至少三步');
+T.eq(tr1.map(s => s.line).slice(0, 3), [1, 2, 3], '每步记下它所在的行');
+T.eq(tr1[0].varDelta, [{ name: 'a', from: undefined, to: 1 }], '声明记为 from=undefined');
+T.eq(tr1[2].varDelta, [{ name: 'a', from: 1, to: 3 }], '赋值记下旧值 —— 反放要靠它撤销');
+
+// depth：步入/步过/步出的唯一依据
+const tr2 = I.run('function f() { return 1; }\nf();', { host: {} }).trace;
+T.ok(tr2.some(s => s.depth > 0), '进入函数后 depth 增大');
+T.ok(tr2.some(s => s.frameOp === 'push'), '有入帧标记');
+T.ok(tr2.some(s => s.frameOp === 'pop'), '有出帧标记');
+T.eq(tr2[tr2.length - 1].depth, 0, '跑完回到深度 0');
+
+// 宿主 op 自带撤销信息
+const ops = I.run('mark(5, "trying");\nmark(5, "confirmed");', { host: {} }).trace
+  .filter(s => s.boardOps.length).map(s => s.boardOps[0]);
+T.eq(ops[0], { kind: 'mark', sq: 5, to: 'trying', from: null }, '首次标记 from=null');
+T.eq(ops[1], { kind: 'mark', sq: 5, to: 'confirmed', from: 'trying' }, '再次标记记下旧值');
+
+// 日志进 out
+const outs = I.run('log("a");\nlog("b");', { host: {} }).trace.filter(s => s.out).map(s => s.out);
+T.eq(outs, ['a', 'b'], '日志逐步记进 out');
+
+// ---- 决定 3：轨迹存深拷贝，不存活引用 ----
+/* 这条是本任务最容易做错、也最难在别处发现的地方：如果 varDelta 里存的是
+   同一个数组引用，那么程序后续对它的修改会「改写历史」—— 回放到第 2 步时
+   看到的是第 4 步的内容。 */
+const alias = I.run('const xs = [];\nxs.push(1);\nxs.push(2);', { host: {} }).trace;
+const firstXs = alias[0].varDelta.find(d => d.name === 'xs');
+T.eq(firstXs.to, [], '第 1 步记下的 xs 必须仍然是空数组（不能被后续 push 改写）');
+
+// ---- 反放：沿轨迹倒着撤销，能回到初始状态 ----
+/* 这是「后退」功能的正确性判据。用一个纯函数模拟调试器的做法：
+   正放时应用 to，反放时应用 from。 */
+function replayVars(trace, upto) {
+  const env = {};
+  for (let i = 0; i < upto; i++) for (const d of trace[i].varDelta) env[d.name] = d.to;
+  return env;
+}
+function rewindVars(trace, from, to) {
+  const env = replayVars(trace, from);
+  for (let i = from - 1; i >= to; i--) {
+    for (const d of trace[i].varDelta) {
+      if (d.from === undefined) delete env[d.name]; else env[d.name] = d.from;
+    }
+  }
+  return env;
+}
+const rw = I.run('let a = 1;\na = 2;\na = 3;', { host: {} }).trace;
+T.eq(replayVars(rw, 3).a, 3, '正放到第 3 步 a=3');
+T.eq(rewindVars(rw, 3, 1).a, 1, '从第 3 步反放回第 1 步，a 回到 1');
+T.eq(rewindVars(rw, 3, 0).a, undefined, '反放到第 0 步，a 不存在');
+
 T.report();

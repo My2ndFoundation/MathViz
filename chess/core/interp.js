@@ -975,9 +975,55 @@
      parent 继承同一个计数器对象（不是拷贝一份新的），这样无论调用嵌套
      多深，callInterpreted 里 `fn.closure.callDepth` 拿到的都是同一个
      计数器——「当前在第几层调用栈」这件事因此对任意一层求值代码都是
-     可读的，这正是 Task 8（步数/调用栈记录）需要的钩子。 */
+     可读的，这正是 Task 8（步数/调用栈记录）需要的钩子。
+
+     rec：同样是「整条环境链共享同一个对象」的模式，这次载的是 Task 7 的
+     轨迹记录器（trace 数组 + 棋盘影子状态 + 当前语句正在累积的 pending）。
+     根环境创建时先不挂它（makeEnv(null) 走这里的 parent?...:null 分支，
+     结果是 null）——run() 会在**声明完 log/mark/place/clear/attacked/Math
+     这五个根绑定之后**才把 env.rec 补上，这样那五个声明本身（它们不是
+     用户源码的一部分，用户永远看不到、也不该出现在轨迹里）不会被
+     declareVar 误记成第一条用户语句的 varDelta。子环境一律继承
+     parent.rec（同一个对象，不是拷贝），这跟 callDepth 是同一个理由：
+     一次 run() 只有一个记录器，无论调用嵌套多深，大家记的都是同一份
+     trace。 */
   function makeEnv(parent) {
-    return { vars: new Map(), parent: parent || null, callDepth: parent ? parent.callDepth : { n: 0 } };
+    return {
+      vars: new Map(),
+      parent: parent || null,
+      callDepth: parent ? parent.callDepth : { n: 0 },
+      rec: parent ? parent.rec : null,
+    };
+  }
+
+  /* 深拷贝一个运行时值，供写进轨迹用（决定③：轨迹存的是"某一刻的快照"，
+     不是活引用）。不深拷贝的后果很隐蔽：数组 board 在第 10 步被 push、
+     第 200 步被 pop，如果轨迹里存的是同一个数组引用，回放到第 10 步时
+     看到的会是第 200 步的内容——轨迹会随着程序继续运行「悄悄改写历史」。
+     函数值（无论是解释出来的 __fn 对象还是原生函数，比如宿主桥接函数、
+     Array.prototype.push、Math.abs）不可深拷贝，对调试显示也没有价值，
+     统一渲染成 'ƒ name' 字符串。 */
+  function snap(v) {
+    if (Array.isArray(v)) return v.map(snap);
+    if (v && typeof v === 'object') {
+      if (v.__fn === true) return 'ƒ ' + (v.name || '(anonymous)');
+      const out = {};
+      for (const k in v) {
+        if (Object.prototype.hasOwnProperty.call(v, k)) out[k] = snap(v[k]);
+      }
+      return out;
+    }
+    if (typeof v === 'function') return 'ƒ ' + (v.name || '(anonymous)');
+    return v; // 数字/字符串/布尔/null/undefined：原样返回
+  }
+
+  /* 一条变量改动记录，供 declareVar/assignVar 共用。from/to 在压进
+     pending 之前就已经是 snap() 过的快照——调用方不需要、也不应该自己
+     再想着「要不要拷贝」。env.rec 为 null 时（当前不在某次 run() 的求值
+     过程里，或者是 run() 声明根绑定的那一小段窗口期）什么都不做，这不是
+     兜底容错，而是刻意的「没有记录器就不记录」。 */
+  function recordVarDelta(env, name, from, to) {
+    if (env.rec) env.rec.pending.varDelta.push({ name: name, from: from, to: to });
   }
 
   /* 同一层环境内重复 let/const 声明是原生 SyntaxError（"Identifier 'a'
@@ -991,6 +1037,8 @@
       throw err("Identifier '" + name + "' has already been declared", node.line, node.col, 'syntax');
     }
     env.vars.set(name, { kind: kind, value: value });
+    // from: undefined 表示「此前不存在」——声明是这个变量名第一次出现。
+    recordVarDelta(env, name, undefined, snap(value));
   }
 
   function findEnv(env, name) {
@@ -1012,7 +1060,10 @@
     if (binding.kind === 'const') {
       throw err('Assignment to constant variable.', node.line, node.col, 'runtime');
     }
+    // 记旧值必须在覆盖之前——反放（后退）全靠这个 from 值撤销这一步。
+    const oldValue = binding.value;
     binding.value = value;
+    recordVarDelta(env, name, snap(oldValue), snap(value));
     return value;
   }
 
@@ -1210,8 +1261,20 @@
     for (let idx = 0; idx < fn.params.length; idx++) {
       declareVar(callEnv, 'let', fn.params[idx], idx < args.length ? args[idx] : undefined, node);
     }
+    /* 进帧/出帧标记（frameOp）是调试器「调用栈帧列表」的原始数据。push
+       记在参数绑定之后、hoistFunctionDecls 之前——这样 push 这条 Step 的
+       varDelta 恰好是这次调用的形参绑定（"进入 f，参数 x=5"），而函数体
+       内部提升声明的嵌套函数则跟 Program 顶层的提升同一个待遇：滚进函数
+       体第一条语句自己的 stepBoundary，不需要在这里特殊处理。
+       push/pop 都记在调用点（node，即 Call 表达式）的行号上，而不是函数
+       定义的行号——两者都发生在「调用序列」的时间线上，用调用点的行更
+       容易跟外层代码对上；这是本任务的一个实现选择，brief 没有对 push/
+       pop 的具体行号做断言。 */
+    const frameName = fn.name || '(anonymous)';
+    stepBoundary(callEnv, node, 'push', frameName);
     if (fn.expression) {
       const v = yield* evalExpr(fn.body, callEnv);
+      stepBoundary(callEnv, node, 'pop', frameName);
       depth.n--;
       return v;
     }
@@ -1220,9 +1283,11 @@
     let completion = null;
     for (let idx = 0; idx < stmts.length; idx++) {
       completion = yield* evalStmt(stmts[idx], callEnv);
+      stepBoundary(callEnv, stmts[idx]); // 同 evalBlockBody：哪怕提前 return 也要记这一步
       if (completion) break;
       yield;
     }
+    stepBoundary(callEnv, node, 'pop', frameName);
     depth.n--;
     return (completion && completion.signal === 'return') ? completion.value : undefined;
   }
@@ -1411,6 +1476,45 @@
   const BREAK = { signal: 'break' }, CONTINUE = { signal: 'continue' };
   function ret(v) { return { signal: 'return', value: v }; }
 
+  /* ---- 轨迹记录（Task 7） ----
+
+     策略是「先跑完、记全轨迹、再回放」——因为「后退」只有这样才做得到
+     （生成器「能在任意点暂停」这个能力只在录制期用到，回放期不再驱动
+     生成器）。这里的 pending 是「自上一次 flush 以来累积的变量改动/
+     棋盘操作/日志」，在语句边界（stepBoundary）打包成一条 Step 压进
+     trace，然后清空供下一段累积。 */
+  function newPending() { return { varDelta: [], boardOps: [], out: null }; }
+
+  function createRecorder() {
+    return { trace: [], shadowBoard: {}, pending: newPending() };
+  }
+
+  /* 语句边界：把 env.rec.pending 打包成一条 Step，压进 trace，然后清空
+     pending。line/depth 取自传入的 node 与 env——depth 读的是
+     env.callDepth.n，这是整条环境链共享的同一个计数器，因此天然反映
+     「记录这一刻时，调用栈有多深」（决定①：depth 是调试器实现步入/
+     步过/步出的唯一依据：步过 = 前进到 depth <= 当前；步入 = 前进一步；
+     步出 = 前进到 depth < 当前）。
+     frameOp/frameName 默认 null（绝大多数语句边界不是函数调用的进出
+     帧事件），只有 callInterpreted 记录调用/返回时才传非空值。
+     env.rec 为 null 时什么都不做——不是兜底容错，是刻意的「没有记录器
+     就不记录」（呼应 recordVarDelta 的同一条设计）。 */
+  function stepBoundary(env, node, frameOp, frameName) {
+    const rec = env.rec;
+    if (!rec) return;
+    const p = rec.pending;
+    rec.trace.push({
+      line: node.line,
+      depth: env.callDepth.n,
+      frameOp: frameOp || null,
+      frameName: frameName || null,
+      varDelta: p.varDelta,
+      boardOps: p.boardOps,
+      out: p.out,
+    });
+    rec.pending = newPending();
+  }
+
   /* 语句求值：返回值是「完成信号」——undefined/null 表示正常完成，非空
      则是上面三种哨兵之一，沿着 evalBlockBody / 各循环体的调用链一路
      return 出去，直到遇到能消化它的地方为止：break/continue 被最近的
@@ -1466,9 +1570,16 @@
           if (!test) break;
           const completion = yield* evalStmt(node.body, env);
           if (completion) {
-            if (completion.signal === 'break') break;
-            if (completion.signal !== 'continue') return completion; // return：继续向上传
+            /* stepBoundary 必须在 break/return 两条早退路径上也调用一次——
+               不这样做的话，body 求值期间累积的 pending（比如 body 是单条
+               非 Block 语句时它自己的变量改动）会跟着这次提前退出一起
+               丢掉，永远进不了 trace。正常路径（下面循环末尾）跟这两条
+               早退路径合起来，保证每一轮迭代无论怎么结束都恰好 flush
+               一次——不会漏、也不会在同一轮里重复计入。 */
+            if (completion.signal === 'break') { stepBoundary(env, node); break; }
+            if (completion.signal !== 'continue') { stepBoundary(env, node); return completion; } // return：继续向上传
           }
+          stepBoundary(env, node);
           yield;
         }
         return null;
@@ -1514,12 +1625,18 @@
           }
           const completion = yield* evalStmt(node.body, iterEnv);
           if (completion) {
-            if (completion.signal === 'break') break;
-            if (completion.signal !== 'continue') return completion; // return：继续向上传
+            // 早退（break/return）没有 update 可跑，直接在这里 flush 一次；
+            // 见 While 分支同一处的注释。
+            if (completion.signal === 'break') { stepBoundary(env, node); break; }
+            if (completion.signal !== 'continue') { stepBoundary(env, node); return completion; } // return：继续向上传
           }
           const nextEnv = copyIterEnv(iterEnv);
           if (node.update) yield* evalExpr(node.update, nextEnv);
           iterEnv = nextEnv;
+          // 正常路径（含 continue 落下来的情况）在 update 求值之后才 flush，
+          // 这样 update 表达式自身的改动（最典型的 i++）跟这一轮 body 的
+          // 改动一起进同一条 Step，而不是被孤立地丢给下一轮。
+          stepBoundary(env, node);
           yield;
         }
         return null;
@@ -1543,9 +1660,10 @@
           declareVar(iterEnv, node.kind, node.name, items[idx], node);
           const completion = yield* evalStmt(node.body, iterEnv);
           if (completion) {
-            if (completion.signal === 'break') break;
-            if (completion.signal !== 'continue') return completion; // return：继续向上传
+            if (completion.signal === 'break') { stepBoundary(iterEnv, node); break; }
+            if (completion.signal !== 'continue') { stepBoundary(iterEnv, node); return completion; } // return：继续向上传
           }
+          stepBoundary(iterEnv, node);
           yield;
         }
         return null;
@@ -1594,6 +1712,10 @@
     hoistFunctionDecls(stmts, env);
     for (let idx = 0; idx < stmts.length; idx++) {
       const completion = yield* evalStmt(stmts[idx], env);
+      /* stepBoundary 无条件调用（在 completion 检查之前）——哪怕这条语句
+         是 return/break/continue，它本身也确确实实执行了一次，必须进
+         trace；跳过它只会在「函数提前 return」这种最常见的场景里丢一步。 */
+      stepBoundary(env, stmts[idx]);
       if (completion) return completion;
       yield;
     }
@@ -1630,6 +1752,50 @@
     };
   }
 
+  /* 给已经补完 NOOP 默认值的五个宿主函数再包一层轨迹记录。无论调用方
+     有没有传真正的棋盘实现，包出来的这一层在「记轨迹」这件事上表现
+     完全一致——轨迹记的是"算法要求棋盘做什么"，不是"棋盘真的做了
+     什么"（任务简报的上下文 5）。真正的宿主实现（或 NOOP）仍然照常被
+     调用（return resolvedHost.xxx(...)），包装只是在旁边多做一次记录，
+     不改变返回值或调用时机。
+     mark/place/clear 的 from 取自解释器自己维护的「棋盘影子状态」
+     （rec.shadowBoard: { [sq]: kind }），不去问宿主——宿主未必肯回答
+     "这一格之前是什么"（上下文 6）。影子状态只为算出撤销信息服务，
+     不参与任何求值，这是它在整个解释器里唯一被读写的地方。
+     attacked 只读、不产生任何棋盘变化，boardOps 的 kind 枚举里也没有
+     它的位置，所以只转发调用，不记录。 */
+  function wrapHostForTrace(resolvedHost, rec) {
+    function shadowFrom(sq) {
+      return Object.prototype.hasOwnProperty.call(rec.shadowBoard, sq) ? rec.shadowBoard[sq] : null;
+    }
+    return {
+      log: function (msg) {
+        const r = resolvedHost.log(msg);
+        // 同一步里连续多次 log 的场景没有测试覆盖，也不常见（brief 的
+        // Step.out 定义是单个字符串/null）；选择拼接而不是覆盖，避免
+        // 静默丢掉更早的一条日志。
+        rec.pending.out = rec.pending.out === null ? String(msg) : rec.pending.out + '\n' + String(msg);
+        return r;
+      },
+      mark: function (sq, kind) {
+        rec.pending.boardOps.push({ kind: 'mark', sq: sq, to: kind, from: shadowFrom(sq) });
+        rec.shadowBoard[sq] = kind;
+        return resolvedHost.mark(sq, kind);
+      },
+      place: function (sq, piece) {
+        rec.pending.boardOps.push({ kind: 'place', sq: sq, to: piece, from: shadowFrom(sq) });
+        rec.shadowBoard[sq] = piece;
+        return resolvedHost.place(sq, piece);
+      },
+      clear: function (sq) {
+        rec.pending.boardOps.push({ kind: 'clear', sq: sq, to: null, from: shadowFrom(sq) });
+        delete rec.shadowBoard[sq];
+        return resolvedHost.clear(sq);
+      },
+      attacked: function (sq) { return resolvedHost.attacked(sq); },
+    };
+  }
+
   /* 根环境的五个宿主桥接名 + Math 恒是全新 Map 上的第一次声明，不可能触发
      上面新加的重复声明检查——node 参数只在报错时才用得到，这里传一个
      line:0/col:0 的占位节点即可（没有源码位置可指，也用不上）。 */
@@ -1646,10 +1812,17 @@
   }
 
   /* run(src, opts) → { result, trace, host }：parse → 建根环境（注入
-     opts.host 的五个函数，缺席的补 NOOP_HOST）→ 把求值生成器一次性驱动
-     到底 → 取顶层 Return 完成信号（signal:'return'）的值当 result。
-     trace 本任务恒为空数组（Task 7 加轨迹记录）；host 是补完 NOOP 默认值
-     之后实际注入求值环境的那五个函数，供调用方检查「棋盘接口最终是谁」。
+     opts.host 的五个函数，缺席的补 NOOP_HOST，再包一层轨迹记录）→ 把
+     求值生成器一次性驱动到底 → 取顶层 Return 完成信号（signal:'return'）
+     的值当 result。
+     trace 是这一次 run() 全程录下的 Step[]（Task 7）——录制策略是「先
+     跑完、记全轨迹、再回放」：生成器一次性驱动到底，state 变化全部靠
+     declareVar/assignVar/宿主桥接调用这些"事件点"的副作用写进 rec，
+     stepBoundary 在每个语句边界把它们打包成一条 Step。
+     host 是补完 NOOP 默认值之后、实际语义上的那五个函数（不含轨迹记录
+     这层包装）——调用方拿它检查"棋盘接口最终是谁"用的是这个，不该看到
+     内部的记录层，也不该在 run() 结束之后还去调用它、误以为能追加轨迹
+     （trace 数组是这次 run() 私有的，run() 返回之后 rec 再也不会被写）。
      opts.limit：接口签名里留的位置，给循环步数上限用——本任务（控制流）
      引入了 for/while 之后，写死循环在语法上已经可能（while (true) {} 不
      带 break），但加步数上限不在本任务的差分测试范围内，留给需要它的
@@ -1658,13 +1831,20 @@
     opts = opts || {};
     const program = parse(src);
     const resolvedHost = resolveHost(opts.host);
-    const env = makeRootEnv(resolvedHost);
+    const rec = createRecorder();
+    const tracedHost = wrapHostForTrace(resolvedHost, rec);
+    const env = makeRootEnv(tracedHost);
+    /* env.rec 必须在 makeRootEnv 声明完 log/mark/place/clear/attacked/Math
+       这六个根绑定之后才挂上——这六个 declareVar 调用不是用户源码的一
+       部分，用户永远看不到、也不该出现在第一条用户语句的 varDelta 里。
+       makeEnv(null) 里 rec 的默认值就是 null，这里显式补上。 */
+    env.rec = rec;
     const gen = evalBlockBody(program.body, env);
     let step = gen.next();
     while (!step.done) step = gen.next();
     const completion = step.value;
     const result = completion && completion.signal === 'return' ? completion.value : undefined;
-    return { result: result, trace: [], host: resolvedHost };
+    return { result: result, trace: rec.trace, host: resolvedHost };
   }
 
   return { tokenize: tokenize, KEYWORDS: KEYWORDS, parseExpression: parseExpression, parse: parse, run: run };
