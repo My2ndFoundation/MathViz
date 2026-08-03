@@ -300,4 +300,106 @@ T.eq(tryPos.line, 3, 'try 出现在嵌套块里：报在第 3 行');
 T.eq(tryPos.col, trySrc.split('\n')[2].indexOf('try') + 1,
      'try 报的列指向 try 本身，不是块开头');
 
+// ============ §7.3 差分测试骨架 ============
+/* 参照实现就是 JavaScript 自己：同一份源码交给自写解释器和原生 Function，
+   比对返回值与宿主调用序列。任何不一致即失败。这是本阶段最强的一道门——
+   不需要人工写期望值，也就不会出现「期望值本身写错了」这种事。 */
+function diff(src, label) {
+  const ops = [];
+  const hostFor = (sink) => ({
+    log: (m) => { sink.push(['log', m]); },
+    mark: (sq, kind) => { sink.push(['mark', sq, kind]); },
+    place: (sq, p) => { sink.push(['place', sq, p]); },
+    clear: (sq) => { sink.push(['clear', sq]); },
+    attacked: (sq) => { sink.push(['attacked', sq]); return false; },
+  });
+
+  const nativeOps = [];
+  const nh = hostFor(nativeOps);
+  let nativeVal, nativeErr = null;
+  try {
+    nativeVal = new Function('log', 'mark', 'place', 'clear', 'attacked',
+      '"use strict";' + src)(nh.log, nh.mark, nh.place, nh.clear, nh.attacked);
+  } catch (e) { nativeErr = String(e.message); }
+
+  const interpOps = [];
+  const ih = hostFor(interpOps);
+  let interpVal, interpErr = null;
+  try { interpVal = I.run(src, { host: ih }).result; }
+  catch (e) { interpErr = String(e.message); }
+
+  T.eq(interpErr, nativeErr, label + ' —— 抛错行为一致');
+  T.eq(interpVal, nativeVal, label + ' —— 返回值一致');
+  T.eq(interpOps, nativeOps, label + ' —— 宿主调用序列一致');
+}
+
+// ---- 算术与比较 ----
+diff('return 1 + 2 * 3;', '运算优先级');
+diff('return (1 + 2) * 3;', '括号');
+diff('return 7 % 3;', '取模');
+diff('return 7 / 2;', '除法保留小数');
+diff('return -5 + 3;', '一元负号');
+diff('return 1 < 2;', '小于');
+diff('return 2 === 2;', '严格相等');
+diff('return 2 !== 3;', '严格不等');
+diff('return "a" + "b";', '字符串拼接');
+diff('return "a" + 1;', '字符串与数字相加');
+
+// ---- 短路求值：必须真的短路（宿主序列会暴露有没有多算）----
+diff('return false && log("no");', '&& 短路：右侧不该被求值');
+diff('return true || log("no");', '|| 短路：右侧不该被求值');
+diff('log("a"); return true && log("b");', '&& 不短路时右侧要求值');
+diff('return null;', 'null');
+diff('return !0;', '逻辑非');
+
+// ---- 变量 ----
+diff('let a = 1; a = a + 1; return a;', '赋值');
+diff('let a = 1; a += 5; return a;', '复合赋值');
+diff('let i = 0; i++; return i;', '后缀自增');
+diff('let i = 0; return i++;', '后缀自增返回旧值');
+diff('let i = 0; return ++i;', '前缀自增返回新值');
+diff('const c = 3; return c * 2;', 'const');
+
+// ---- 数组与对象 ----
+diff('const a = [1, 2, 3]; return a[1];', '数组下标');
+diff('const a = [1, 2, 3]; a[0] = 9; return a[0];', '数组下标赋值');
+diff('const a = [1, 2, 3]; return a.length;', '数组 length');
+diff('const o = { x: 1 }; return o.x;', '对象属性');
+diff('const o = { x: 1 }; o.y = 2; return o.y;', '对象属性赋值');
+diff('const o = { x: 1 }; return o["x"];', '对象下标访问');
+
+// ---- 模板串 ----
+diff('const r = 3, c = 5; return `try (${r},${c})`;', '模板串插值');
+diff('return `plain`;', '无插值的模板串');
+
+// ---- 宿主桥接 ----
+diff('log("hello"); return 1;', '宿主 log');
+diff('mark(12, "trying"); clear(12); return 0;', '宿主 mark/clear');
+diff('return attacked(9);', '宿主 attacked 的返回值');
+
+// ---- 额外补充：短路求值的调用顺序（brief 只给了单个 &&/|| 短路，这里补
+//      混合优先级下的调用顺序）。本任务还没有函数声明/递归（Task 6 才有），
+//      所以调用顺序只能借宿主函数（log/mark/attacked）来暴露，不借用户
+//      自定义函数——log 恒返回 undefined（假），attacked 恒返回 false（假），
+//      正好够摆出「左边假才走右边」「左边真就跳过右边」两种局面。 ----
+diff('return log("a") && log("b") || log("c");',
+     'a && b || c：a 假（log 返回 undefined）跳过 b，落到 c');
+diff('return attacked(1) || log("fallback");',
+     'a || b：a 假（attacked 恒 false）才调用 b');
+diff('return attacked(1) && log("never") || mark(2, "x");',
+     'a && b || c：a 假跳过 b，c 仍执行（混合宿主调用的短路顺序）');
+diff('let a = [1]; return a.length && log("nonempty");',
+     '&&：非调用的真值左操作数（数组 length）仍然让右边求值');
+
+// ---- 额外补充：内建函数——每加一个都要有差分测试盯着原生边界行为 ----
+diff('const a = []; a.push(1); a.push(2); return a;', 'push 返回/追加');
+diff('const a = [1, 2, 3]; const v = a.pop(); return [v, a];', 'pop 返回被弹出的值');
+diff('const a = []; return a.pop();', '空数组 pop 返回 undefined');
+diff('return Math.abs(-5);', 'Math.abs 负数');
+diff('return Math.abs(5);', 'Math.abs 正数');
+diff('return Math.max(1, 5, 3);', 'Math.max 多参数');
+diff('return Math.min(1, 5, 3);', 'Math.min 多参数');
+diff('return Math.floor(2.7);', 'Math.floor 正数');
+diff('return Math.floor(-0.5);', 'Math.floor 负数：向下取整不是截断');
+
 T.report();

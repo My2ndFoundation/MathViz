@@ -695,32 +695,61 @@
     expect(state, '{');
     const body = [];
     while (!at(state, 'punct', '}') && !at(state, 'eof')) {
-      body.push(parseStatement(state));
+      pushStmt(body, parseStatement(state));
     }
     expect(state, '}');
     return { type: 'Block', body: body, line: t0.line, col: t0.col };
   }
 
-  /* let/const 声明。解构（let [a,b]=xs / let {a,b}=obj）不在子集内——
-     声明名之后如果不是 name 而是 '[' 或 '{'，直接报 unsupported，而不是
-     让它继续走进「expected identifier」这个不知所云的 syntax 错误。 */
+  /* let/const 声明，含逗号分隔的多声明（let a = 1, b = 2;——两指针类算法
+     的常见写法，Task 4 的差分测试 `const r = 3, c = 5; ...` 就用了它，
+     一跑原生就露出这里以前只认单个声明名的缺口）。解构（let [a,b]=xs /
+     let {a,b}=obj）仍然不在子集内——声明名之后如果不是 name 而是 '[' 或
+     '{'，直接报 unsupported，而不是让它继续走进「expected identifier」
+     这个不知所云的 syntax 错误。
+     返回值恒为数组（哪怕只有一个声明），逗号越多数组越长；VarDecl 节点
+     本身的形状不变（仍是单声明 {kind,name,init}），「一条源码语句可能
+     展开成多条语句」这件事只在调用方（parseBlock / parse 的循环）里通过
+     flattenVarDecl 处理——for 循环头部的 let/const（parseFor 里那段内联
+     逻辑）故意不复用这个函数，因为 for(...)头部只允许恰好一个子句形状，
+     多声明放在 for-init 里目前不在测试范围内，维持原样。 */
   function parseVarDecl(state) {
     const t0 = cur(state); // 'let' 或 'const'
     const kind = t0.value;
     state.i++;
-    const nameTok = cur(state);
-    if (nameTok.type === 'punct' && (nameTok.value === '[' || nameTok.value === '{')) {
-      throw unsupported('destructuring', nameTok);
+    const decls = [];
+    for (;;) {
+      const nameTok = cur(state);
+      if (nameTok.type === 'punct' && (nameTok.value === '[' || nameTok.value === '{')) {
+        throw unsupported('destructuring', nameTok);
+      }
+      if (nameTok.type !== 'name') {
+        throw err('Unexpected token: expected identifier but got ' + JSON.stringify(nameTok.value),
+                   nameTok.line, nameTok.col);
+      }
+      const name = nameTok.value;
+      state.i++;
+      let init = null;
+      if (eat(state, '=')) init = parseAssign(state);
+      decls.push({ type: 'VarDecl', kind: kind, name: name, init: init, line: t0.line, col: t0.col });
+      if (!eat(state, ',')) break;
     }
-    if (nameTok.type !== 'name') {
-      throw err('Unexpected token: expected identifier but got ' + JSON.stringify(nameTok.value),
-                 nameTok.line, nameTok.col);
+    return decls;
+  }
+
+  /* parseStatement 的整体契约是「一次调用产出一个语句节点」（if/while/for
+     的单语句 body 位置全靠这个契约）——但一条 `let a=1, b=2;` 源码要展开
+     成两个独立的 VarDecl 语句。折中：parseStatement 在遇到多声明时把它们
+     包进一个轻量的 VarDeclList 壳节点里返回（仍然是「一个节点」，契约不
+     破），真正的展开只在 parseBlock / parse 的循环里发生——那里才是唯一
+     会把语句摊平进一个数组的地方。VarDeclList 因此永远不会真的被求值器
+     看到：合法源码里 let/const 只能出现在块或顶层，一定会走这条展开路径。 */
+  function pushStmt(body, stmt) {
+    if (stmt.type === 'VarDeclList') {
+      for (let i = 0; i < stmt.decls.length; i++) body.push(stmt.decls[i]);
+    } else {
+      body.push(stmt);
     }
-    const name = nameTok.value;
-    state.i++;
-    let init = null;
-    if (eat(state, '=')) init = parseAssign(state);
-    return { type: 'VarDecl', kind: kind, name: name, init: init, line: t0.line, col: t0.col };
   }
 
   function parseIf(state) {
@@ -856,9 +885,10 @@
     if (t0.type === 'punct' && t0.value === '{') return parseBlock(state);
 
     if (t0.type === 'kw' && (t0.value === 'let' || t0.value === 'const')) {
-      const d = parseVarDecl(state);
+      const decls = parseVarDecl(state);
       semi(state);
-      return d;
+      return decls.length === 1 ? decls[0]
+        : { type: 'VarDeclList', decls: decls, line: t0.line, col: t0.col };
     }
     if (t0.type === 'kw' && t0.value === 'if') return parseIf(state);
     if (t0.type === 'kw' && t0.value === 'for') return parseFor(state);
@@ -895,10 +925,415 @@
     const state = { toks: toks, i: 0 };
     const body = [];
     while (!at(state, 'eof')) {
-      body.push(parseStatement(state));
+      pushStmt(body, parseStatement(state));
     }
     return { type: 'Program', body: body };
   }
 
-  return { tokenize: tokenize, KEYWORDS: KEYWORDS, parseExpression: parseExpression, parse: parse };
+  /* ---- 求值器（规格 §2.6/§7.3） ----
+
+     求值器用 JS 生成器写：function* evalX(...) + yield*，每到语句边界
+     yield 一次。这样递归下降的写法天然可以在任意点暂停，代码量比手写
+     显式栈机小得多。
+
+     注意：生成器「能在任意点暂停」这个能力**只在录制期用到**。回放期
+     （单步/后退/拖时间轴）走的是已记录好的轨迹数组，不再驱动生成器——
+     因为「后退」只有先跑完再回放才做得到（规格 §2.7）。本任务（Task 4）
+     只把生成器一次性驱动到底（run() 里的 while 循环），完全不利用这个
+     暂停点；Task 7 加轨迹记录时才会真正用上「在 yield 处采样状态」。
+
+     本任务的范围：表达式 + 变量 + 顶层顺序执行 + return。if/for/while/
+     函数调用/递归是 Task 5、Task 6 的事——evalStmt/evalExpr 的 switch
+     分派结构已经留好位置（一个 case 一行），后续任务只需要往里加 case，
+     不需要改这里的驱动逻辑。
+
+     运行时值直接用真实的 JS 类型表示（number/string/boolean/null/
+     undefined/Array/plain Object），运算符也直接用 JS 自己的运算符
+     （+ - * / % < > === ...）——这样绝大多数运行时报错信息（TypeError/
+     RangeError 的具体文案）会跟 §7.3 差分测试里的原生参照实现天然一致，
+     因为两边跑的都是同一个 V8。这也是为什么这道差分测试骨架这么可信：
+     我们不是在「模拟」JS 的语义，很多时候就是在直接执行它。 */
+
+  /* 作用域：链式环境 {vars: Map, parent}。lookup 沿链向上找到声明它的那
+     一层；declare 只作用于当前层；assign 找到声明它的那一层再改，找不到
+     就是「未声明就赋值」（报 ReferenceError，跟原生严格模式一致）。
+     const 重新赋值抛 "Assignment to constant variable."——这一字不差的
+     文案是用 node 亲自问原生 `new Function(...)` 对出来的（不是凭印象
+     写的），差分测试会拿它对账。 */
+  function makeEnv(parent) { return { vars: new Map(), parent: parent || null }; }
+
+  function declareVar(env, kind, name, value) {
+    env.vars.set(name, { kind: kind, value: value });
+  }
+
+  function findEnv(env, name) {
+    let e = env;
+    while (e) { if (e.vars.has(name)) return e; e = e.parent; }
+    return null;
+  }
+
+  function lookupVar(env, name, node) {
+    const e = findEnv(env, name);
+    if (!e) throw err(name + ' is not defined', node.line, node.col, 'runtime');
+    return e.vars.get(name).value;
+  }
+
+  function assignVar(env, name, value, node) {
+    const e = findEnv(env, name);
+    if (!e) throw err(name + ' is not defined', node.line, node.col, 'runtime');
+    const binding = e.vars.get(name);
+    if (binding.kind === 'const') {
+      throw err('Assignment to constant variable.', node.line, node.col, 'runtime');
+    }
+    binding.value = value;
+    return value;
+  }
+
+  /* 数组/对象的属性读写只开一道小口子（规格 §2.8：没有原型链、没有
+     class/new/instanceof）——对象只读写「自有属性」（hasOwnProperty
+     把关），从不沿原型链走下去；这不是随手加的限制，是防住
+     `o.constructor.constructor("...")()` 这种经典沙箱逃逸的关键一环：
+     真实对象的 constructor / __proto__ 都不是自有属性，hasOwnProperty
+     一律为 false，天然被挡在外面，不需要单独列一张黑名单。数组只放行
+     length 与数字下标，字符串同理——这两类值的「方法」（push/pop 之类）
+     不走这条读属性的路径，走下面 resolveCallable 单独把关的调用路径。 */
+  function getProp(obj, prop, node) {
+    if (Array.isArray(obj)) {
+      if (prop === 'length') return obj.length;
+      if (typeof prop === 'number') return obj[prop];
+      throw err('Unsupported array property: ' + prop, node.line, node.col, 'runtime');
+    }
+    if (typeof obj === 'string') {
+      if (prop === 'length') return obj.length;
+      if (typeof prop === 'number') return obj[prop];
+      throw err('Unsupported string property: ' + prop, node.line, node.col, 'runtime');
+    }
+    if (obj && typeof obj === 'object') {
+      if (Object.prototype.hasOwnProperty.call(obj, prop)) return obj[prop];
+      return undefined; // 只读自有属性，不走原型链
+    }
+    throw err('Cannot read properties of ' + String(obj) + ' (reading ' + JSON.stringify(prop) + ')',
+               node.line, node.col, 'runtime');
+  }
+
+  function setProp(obj, prop, value, node) {
+    if (Array.isArray(obj)) {
+      if (typeof prop === 'number') { obj[prop] = value; return value; }
+      throw err('Unsupported array property assignment: ' + prop, node.line, node.col, 'runtime');
+    }
+    if (obj && typeof obj === 'object') {
+      /* 写路径同样挡住 __proto__ / constructor / prototype——防的是靠
+         赋值做原型污染，跟上面读路径挡沙箱逃逸是同一件事的另一面。 */
+      if (prop === '__proto__' || prop === 'constructor' || prop === 'prototype') {
+        throw err('Cannot set unsafe property: ' + prop, node.line, node.col, 'runtime');
+      }
+      obj[prop] = value;
+      return value;
+    }
+    throw err('Cannot set properties of ' + String(obj), node.line, node.col, 'runtime');
+  }
+
+  /* 内建函数的表面积刻意开得小而准（规格 §2.8 + 任务简报）：数组只有
+     push/pop，宿主的五个桥接函数（log/mark/place/clear/attacked）与
+     Math 的四个函数（abs/max/min/floor）之外一律拒绝。数组方法不是自有
+     属性（来自 Array.prototype），所以在这里单独列白名单，不能跟
+     getProp 共用同一条「hasOwnProperty 自有属性」的路——那条路本来就是
+     故意设计成读不到 Array.prototype.push 的。Math 命名空间对象自己只
+     长了这四个自有属性（见下面 MATH_NS 的定义），所以它走的是跟普通
+     对象一样的 hasOwnProperty 通道，不需要单独列一次名字。 */
+  function resolveCallable(obj, prop, node) {
+    if (Array.isArray(obj)) {
+      if (prop === 'push') return Array.prototype.push;
+      if (prop === 'pop') return Array.prototype.pop;
+      throw err('Unsupported array method: ' + prop + ' (this subset only has push/pop)',
+                 node.line, node.col, 'runtime');
+    }
+    if (obj && typeof obj === 'object' &&
+        Object.prototype.hasOwnProperty.call(obj, prop) && typeof obj[prop] === 'function') {
+      return obj[prop];
+    }
+    throw err((typeof prop === 'string' ? prop : String(prop)) + ' is not a function',
+               node.line, node.col, 'runtime');
+  }
+
+  /* 二元/复合赋值共用的运算实现：直接用 JS 自己的运算符，理由见文件顶
+     的求值器说明——这样不会有第二套跟原生分歧的算术/比较语义。 */
+  function applyBinary(op, l, r) {
+    switch (op) {
+      case '+': return l + r;
+      case '-': return l - r;
+      case '*': return l * r;
+      case '/': return l / r;
+      case '%': return l % r;
+      case '<': return l < r;
+      case '>': return l > r;
+      case '<=': return l <= r;
+      case '>=': return l >= r;
+      case '===': return l === r;
+      case '!==': return l !== r;
+      case '==': return l == r;
+      case '!=': return l != r;
+      default: throw new Error('applyBinary: unknown operator ' + op);
+    }
+  }
+
+  /* Assign / Update 的公共读写口：先把「目标是谁」（变量名，或对象+属性）
+     解析成一对 get/set 闭包，obj/prop 只求值一次——这跟原生的赋值运算符
+     语义（ECMA-262 13.15.3：先求出引用，再求值右手边，最后 PutValue）
+     对得上，`a[i()] += 1` 这种目标里带副作用的表达式不会被求值两次。 */
+  function* evalRef(node, env) {
+    if (node.type === 'Ident') {
+      return {
+        get: function () { return lookupVar(env, node.name, node); },
+        set: function (v) { return assignVar(env, node.name, v, node); },
+      };
+    }
+    if (node.type === 'Member') {
+      const obj = yield* evalExpr(node.obj, env);
+      const prop = node.computed ? yield* evalExpr(node.prop, env) : node.prop;
+      return {
+        get: function () { return getProp(obj, prop, node); },
+        set: function (v) { return setProp(obj, prop, v, node); },
+      };
+    }
+    throw err('Invalid assignment target', node.line, node.col, 'runtime');
+  }
+
+  function* evalExpr(node, env) {
+    switch (node.type) {
+      case 'Num': return node.value;
+      case 'Str': return node.value;
+      case 'Bool': return node.value;
+      case 'Null': return null;
+      case 'Ident': return lookupVar(env, node.name, node);
+
+      case 'Tpl': {
+        let s = node.quasis[0];
+        for (let idx = 0; idx < node.exprs.length; idx++) {
+          const v = yield* evalExpr(node.exprs[idx], env);
+          s += String(v) + node.quasis[idx + 1];
+        }
+        return s;
+      }
+
+      case 'Array': {
+        const arr = [];
+        for (let idx = 0; idx < node.elements.length; idx++) {
+          arr.push(yield* evalExpr(node.elements[idx], env));
+        }
+        return arr;
+      }
+
+      case 'Object': {
+        const obj = {};
+        for (let idx = 0; idx < node.props.length; idx++) {
+          const p = node.props[idx];
+          obj[p.key] = yield* evalExpr(p.value, env);
+        }
+        return obj;
+      }
+
+      case 'Member': {
+        const obj = yield* evalExpr(node.obj, env);
+        const prop = node.computed ? yield* evalExpr(node.prop, env) : node.prop;
+        return getProp(obj, prop, node);
+      }
+
+      case 'Call': {
+        /* 求值顺序要跟原生对齐：被调用者（含成员表达式的对象与属性）
+           先求值，参数再按从左到右的顺序求值——原生是「先求出被调函数
+           的引用，再求值参数列表」，反过来会在「对象/属性求值有副作用」
+           时被差分测试的宿主调用序列当场揪出来（见任务报告）。 */
+        let thisArg, fn;
+        if (node.callee.type === 'Member') {
+          thisArg = yield* evalExpr(node.callee.obj, env);
+          const prop = node.callee.computed ? yield* evalExpr(node.callee.prop, env) : node.callee.prop;
+          fn = resolveCallable(thisArg, prop, node);
+        } else {
+          thisArg = undefined;
+          fn = yield* evalExpr(node.callee, env);
+          if (typeof fn !== 'function') {
+            throw err('Value is not callable', node.line, node.col, 'runtime');
+          }
+        }
+        const args = [];
+        for (let idx = 0; idx < node.args.length; idx++) {
+          args.push(yield* evalExpr(node.args[idx], env));
+        }
+        return fn.apply(thisArg, args);
+      }
+
+      case 'Unary': {
+        const v = yield* evalExpr(node.arg, env);
+        if (node.op === '-') return -v;
+        if (node.op === '+') return +v;
+        return !v; // '!'
+      }
+
+      case 'Update': {
+        const ref = yield* evalRef(node.arg, env);
+        const old = ref.get();
+        const next = node.op === '++' ? old + 1 : old - 1;
+        ref.set(next);
+        return node.prefix ? next : old;
+      }
+
+      case 'Binary': {
+        const l = yield* evalExpr(node.left, env);
+        const r = yield* evalExpr(node.right, env);
+        return applyBinary(node.op, l, r);
+      }
+
+      case 'Logical': {
+        /* 真短路：假分支的右操作数节点根本不会被 yield* 求值——不是求值
+           完两边再挑一个。差分测试拿宿主调用序列验证过这一点（见任务
+           报告：`false && log("no")` 里 log 一次都不会被调用）。 */
+        const l = yield* evalExpr(node.left, env);
+        if (node.op === '&&') return l ? (yield* evalExpr(node.right, env)) : l;
+        return l ? l : (yield* evalExpr(node.right, env)); // '||'
+      }
+
+      case 'Assign': {
+        const ref = yield* evalRef(node.target, env);
+        if (node.op === '=') {
+          const v = yield* evalExpr(node.value, env);
+          ref.set(v);
+          return v;
+        }
+        // 复合赋值（+= -= *= /= %=）：先读旧值，再求值右手边，顺序对应
+        // ECMA-262 13.15.3。
+        const old = ref.get();
+        const rhs = yield* evalExpr(node.value, env);
+        const v = applyBinary(node.op.slice(0, -1), old, rhs); // '+=' -> '+'
+        ref.set(v);
+        return v;
+      }
+
+      case 'Arrow': {
+        /* 闭包对象只是个惰性描述——真正「调用一个解释出来的函数」是
+           Task 6（函数递归）的事，这里先占住位置。它不是真的 JS
+           function（typeof 是 'object' 不是 'function'），所以上面
+           resolveCallable 与裸标识符调用都不会误把它当成可调用对象
+           放行——`const f = (a) => a; return f(1);` 在本任务里应该报
+           "Value is not callable"，而不是静默按下不表。 */
+        return { __closure: true, node: node, env: env };
+      }
+
+      default:
+        throw err('Not yet implemented in this task: ' + node.type + ' expressions ' +
+                   '(control flow and function calls land in later tasks)',
+                   node.line, node.col, 'runtime');
+    }
+  }
+
+  /* 语句求值：返回值是「完成信号」——本任务只有 Return 会产生非 null 的
+     完成信号（{type:'return', value}），沿 evalBlockBody 的循环一路
+     return 出去，直到 run() 的顶层驱动循环看到它为止。Break/Continue
+     是 Task 5 的事，到时候往这个 switch 里加 case 即可，不需要改这里的
+     信号传递机制。 */
+  function* evalStmt(node, env) {
+    switch (node.type) {
+      case 'VarDecl': {
+        const value = node.init ? yield* evalExpr(node.init, env) : undefined;
+        declareVar(env, node.kind, node.name, value);
+        return null;
+      }
+      case 'ExprStmt': {
+        yield* evalExpr(node.expr, env);
+        return null;
+      }
+      case 'Return': {
+        const value = node.arg ? yield* evalExpr(node.arg, env) : undefined;
+        return { type: 'return', value: value };
+      }
+      case 'Block': {
+        const child = makeEnv(env);
+        return yield* evalBlockBody(node.body, child);
+      }
+      /* If / For / ForOf / While / Break / Continue / FuncDecl：控制流与
+         函数声明是 Task 5（控制流）与 Task 6（函数递归）的范围，本任务
+         不实现。分派结构留在这里（一个 case 一行），后续任务只需要在这
+         加 case，不需要改 evalBlockBody / run 的驱动逻辑。 */
+      default:
+        throw err('Not yet implemented in this task: ' + node.type + ' statements ' +
+                   '(control flow and function declarations land in later tasks)',
+                   node.line, node.col, 'runtime');
+    }
+  }
+
+  /* 顺序执行一组语句；每条语句执行完 yield 一次，标记「语句边界」——
+     单步执行（阶段 3b）与轨迹记录（Task 7）都靠这个暂停点，本任务的
+     run() 只是简单地把生成器一次性驱动到底，不利用它。 */
+  function* evalBlockBody(stmts, env) {
+    for (let idx = 0; idx < stmts.length; idx++) {
+      const completion = yield* evalStmt(stmts[idx], env);
+      if (completion) return completion;
+      yield;
+    }
+    return null;
+  }
+
+  /* Math 命名空间只长这四个自有属性——resolveCallable/getProp 走的都是
+     「hasOwnProperty 自有属性」通道，所以这里没暴露的方法（Math.random
+     等）天然调不到，不需要另外维护一张排除名单。 */
+  const MATH_NS = { abs: Math.abs, max: Math.max, min: Math.min, floor: Math.floor };
+
+  /* opts.host 里没给的函数补成空操作，而不是让它变成 undefined 然后在
+     调用点抛「x is not a function」。理由是这五个函数是**算法与棋盘之间
+     唯一的接口**（规格 §2.6）：算法源码里永远写着它们，而调用方有时并
+     不需要棋盘（node 里跑纯逻辑测试、编辑器里只做语法检查）。缺席时静静
+     不做事，比强迫每个调用方都传五个空函数干净。
+     注意：**空操作不影响轨迹记录** —— boardOps 照记，因为轨迹记的是
+     「算法要求棋盘做什么」，不是「棋盘真的做了什么」。
+     attacked 的缺省返回 false——它是唯一有返回值的宿主函数，返回
+     undefined 会让算法里的 if (attacked(sq)) 行为与真实宿主下不同。 */
+  const NOOP_HOST = {
+    log: function () {}, mark: function () {}, place: function () {},
+    clear: function () {}, attacked: function () { return false; },
+  };
+
+  function resolveHost(host) {
+    const h = host || {};
+    return {
+      log: h.log || NOOP_HOST.log,
+      mark: h.mark || NOOP_HOST.mark,
+      place: h.place || NOOP_HOST.place,
+      clear: h.clear || NOOP_HOST.clear,
+      attacked: h.attacked || NOOP_HOST.attacked,
+    };
+  }
+
+  function makeRootEnv(resolvedHost) {
+    const env = makeEnv(null);
+    declareVar(env, 'const', 'log', resolvedHost.log);
+    declareVar(env, 'const', 'mark', resolvedHost.mark);
+    declareVar(env, 'const', 'place', resolvedHost.place);
+    declareVar(env, 'const', 'clear', resolvedHost.clear);
+    declareVar(env, 'const', 'attacked', resolvedHost.attacked);
+    declareVar(env, 'const', 'Math', MATH_NS);
+    return env;
+  }
+
+  /* run(src, opts) → { result, trace, host }：parse → 建根环境（注入
+     opts.host 的五个函数，缺席的补 NOOP_HOST）→ 把求值生成器一次性驱动
+     到底 → 取顶层 Return 的值当 result。
+     trace 本任务恒为空数组（Task 7 加轨迹记录）；host 是补完 NOOP 默认值
+     之后实际注入求值环境的那五个函数，供调用方检查「棋盘接口最终是谁」。
+     opts.limit：接口签名里留的位置，给后面的循环步数上限用（防止 Task 5
+     引入 for/while 之后写出死循环）——本任务还没有循环，用不上，先不做
+     任何事，等 Task 5 再接上。 */
+  function run(src, opts) {
+    opts = opts || {};
+    const program = parse(src);
+    const resolvedHost = resolveHost(opts.host);
+    const env = makeRootEnv(resolvedHost);
+    const gen = evalBlockBody(program.body, env);
+    let step = gen.next();
+    while (!step.done) step = gen.next();
+    const completion = step.value;
+    const result = completion && completion.type === 'return' ? completion.value : undefined;
+    return { result: result, trace: [], host: resolvedHost };
+  }
+
+  return { tokenize: tokenize, KEYWORDS: KEYWORDS, parseExpression: parseExpression, parse: parse, run: run };
 });
