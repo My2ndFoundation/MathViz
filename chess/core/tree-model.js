@@ -539,9 +539,149 @@
     };
   }
 
+  /* ==================== 布局：按子树叶子数压缩 ====================
+
+     layout(tree, opts) → { pos: id → {x, y, z}, width, maxDepth }
+       opts = { spanX, spanZ }
+
+     ---- 为什么横向空间按**子树叶子数**分配 ----
+
+     规格 §4④ 那一课是「α-β 剪掉的**体积**是肉眼可见的一块」。要看见体积，
+     两个 tab 里的同一棵树必须落在**同一个横向总宽**里——只有总宽固定，
+     「ab 那棵比 plain 那棵少掉的那片」才是一块看得见的空缺，而不是被自动
+     缩放悄悄抹平成两张一样满的图。
+
+     而树宽得离谱：实测 plain d3 = 388 个节点、ab d3 = 225、ordered d3 = 157，
+     截断的 plain d4 = 1,243。按节点画一格是画不下的。所以反过来做：
+     总宽固定为 spanX，每个节点分到的横向区间宽度**正比于它子树里的叶子数**
+     ——叶子是这棵树真正的"宽度单位"（内部节点不占额外横向空间，它靠孩子
+     撑开），于是同层区间恰好铺满、互不重叠，整棵树无论多大都压进 spanX。
+
+     「按节点平均分」是个看起来差不多的错做法：那样每层各自填满 spanX，
+     一棵被剪掉一半的树和一棵完整的树画出来一样宽，**剪掉的体积当场消失**。
+     这正是这个函数存在的理由，不是实现细节。
+
+     ---- 父节点为什么取孩子的中点，而不是自己区间的中点 ----
+
+     两者**不相等**：孩子按叶子数分到的区间宽度不同，
+     第一个孩子中心到最后一个孩子中心的中点 = 区间中心 + (w_首 − w_尾)/4。
+     取孩子的中点，画出来父子连线才是对称的一把扇子（也是测试断言的那条）；
+     取区间中心则会在首尾孩子胖瘦不同时把父亲拉偏。
+     父亲仍然**严格落在自己的区间内**（孩子中心都在区间内），所以同层节点
+     的先后与不重叠不受影响，±spanX/2 的上界也照旧成立。
+
+     ---- 与 null 契约的关系：这里一个"不知道"都用不上 ----
+
+     叶子数只数 childIds，**不碰 mvCount**。mvCount 是"本来有几个走法"，
+     可能是 null（见文件开头那段），拿它当宽度就得替 null 挑一个数——
+     那正是本模块从头到尾在拒绝的事。被剪掉的分支本来就没有节点、画不出来，
+     它们在图上表现为"这个父亲的扇子比兄弟窄"，那恰恰就是要看见的东西。
+     popStep < 0（截断、永不关闭）的帧照常参与布局：它是一个真实到过的节点，
+     只是没关；有没有关不影响它在横向上占多宽。
+
+     ---- 布局与游标无关 ----
+
+     入参是 tree 不是 view：坐标必须**在整段演示里钉死**。若按"当前可见的
+     节点"重算，每诞生一个孩子整棵树就要横向重排一次，看的人只会看见满屏
+     乱跳，而"长出来一块"和"少掉一块"的对比也就没了。面板该做的是按 view
+     决定每个节点画不画、什么颜色，而不是画在哪。
+
+     ---- 三个返回值 ----
+       pos      id → {x, y, z}。y 恒为 0：树铺在 y=0 这个平面上（引擎里几何
+                体也在这个平面）。要不要把分数抬到 y 上是任务 6 的展示决定，
+                布局不替它做——何况 value 可能是 null，抬高就得替"不知道"
+                编一个高度。
+       width    **实际**横向跨度（max x − min x），不是 spanX：最左最右两个
+                叶子各自只占自己区间的中心，真实跨度恒比 spanX 少一点点。
+                空树是 0。
+       maxDepth 最大树深；**空树是 -1**，与 build 的 rootId = -1 同一个用法
+                ——"没有任何一层"不能写成 0，那会让 `for (d = 0; d <= maxDepth)`
+                凭空多转一圈。
+
+     实现两趟，都在 order 上迭代、不递归（截断的 d4 有 1,243 个节点，深度虽
+     浅，但递归在这个模块里没有任何必要）。order 是先序、且孩子的 id 必然
+     大于父亲的 id（孩子是后入帧的），所以：
+       ① 正向一趟自上而下切区间（切孩子时父亲的区间已经算好）；
+       ② 反向一趟自下而上定 x（定父亲时孩子的 x 已经算好）。
+
+     多个顶层帧（轨迹里前后跑了两次搜索）时，spanX 按各自的叶子数分给它们，
+     和处理兄弟节点是同一套——不为它专门设计，但也不让它挤成一团。 */
+  function layout(tree, opts) {
+    const o = opts || {};
+    /* 非正数 / 非有限值一律退回默认值：这两个数是从面板尺寸算出来递进来的，
+       容器还没布局好时拿到 0 或 NaN 是真实可达的，不该把整棵树算成 NaN。 */
+    const spanX = (typeof o.spanX === 'number' && isFinite(o.spanX) && o.spanX > 0) ? o.spanX : 10;
+    const spanZ = (typeof o.spanZ === 'number' && isFinite(o.spanZ) && o.spanZ > 0) ? o.spanZ : 1.5;
+
+    const pos = Object.create(null);
+    const t = (tree && tree.order) ? tree : { nodes: Object.create(null), rootId: -1, order: [] };
+    const order = t.order, nodes = t.nodes;
+    if (!order.length) return { pos: pos, width: 0, maxDepth: -1 };
+
+    // ① 子树叶子数。反向扫 order：孩子的 id 大于父亲，所以孩子必然先算完。
+    const leaves = Object.create(null);
+    for (let k = order.length - 1; k >= 0; k--) {
+      const n = nodes[order[k]];
+      if (!n.childIds.length) { leaves[n.id] = 1; continue; }
+      let sum = 0;
+      for (let c = 0; c < n.childIds.length; c++) sum += leaves[n.childIds[c]];
+      leaves[n.id] = sum;
+    }
+
+    /* ② 自上而下切区间。顶层帧先按叶子数瓜分 [−spanX/2, +spanX/2]。
+       lo/w 只在这一趟里用得着，用两张表存，不往 pos 里塞中间量。 */
+    const lo = Object.create(null), wide = Object.create(null);
+    let topLeaves = 0;
+    for (let k = 0; k < order.length; k++) {
+      const n = nodes[order[k]];
+      if (n.parentId < 0) topLeaves += leaves[n.id];
+    }
+    let cursor = -spanX / 2;
+    for (let k = 0; k < order.length; k++) {
+      const n = nodes[order[k]];
+      if (n.parentId < 0) {
+        const w = spanX * leaves[n.id] / topLeaves;
+        lo[n.id] = cursor; wide[n.id] = w; cursor += w;
+      }
+      if (!n.childIds.length) continue;
+      let at = lo[n.id];
+      for (let c = 0; c < n.childIds.length; c++) {
+        const cid = n.childIds[c];
+        const w = wide[n.id] * leaves[cid] / leaves[n.id];
+        lo[cid] = at; wide[cid] = w; at += w;
+      }
+    }
+
+    /* ③ 自下而上定 x：叶子取自己区间的中心，内部节点取**首尾孩子的中点**
+       （不是区间中心，理由见上）。反向扫 order，孩子必然先定好。 */
+    let maxDepth = 0, minX = Infinity, maxX = -Infinity;
+    for (let k = order.length - 1; k >= 0; k--) {
+      const n = nodes[order[k]];
+      let x;
+      if (!n.childIds.length) {
+        x = lo[n.id] + wide[n.id] / 2;
+      } else {
+        let a = Infinity, b = -Infinity;
+        for (let c = 0; c < n.childIds.length; c++) {
+          const cx = pos[n.childIds[c]].x;
+          if (cx < a) a = cx;
+          if (cx > b) b = cx;
+        }
+        x = (a + b) / 2;
+      }
+      pos[n.id] = { x: x, y: 0, z: n.depth * spanZ };
+      if (n.depth > maxDepth) maxDepth = n.depth;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+    }
+
+    return { pos: pos, width: maxX - minX, maxDepth: maxDepth };
+  }
+
   return {
     build: build,
     nodeAt: nodeAt,
+    layout: layout,
     createView: createView,
     seek: seek,
     visibleAt: visibleAt,

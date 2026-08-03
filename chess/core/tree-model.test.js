@@ -659,4 +659,178 @@ T.ok(TM.seek(abEnd, 10) === abEnd, 'seek 返回 view 本身');
 T.eq(TM.seek(abEnd, -5).i, 0, 'seek 到负数夹回 0');
 T.eq(TM.seek(abEnd, 999999).i, abTrace.length - 1, 'seek 越界夹到末尾');
 
+// ============ 布局 ============
+const lay = TM.layout(abTree, { spanX: 10, spanZ: 1.5 });
+
+// ---- 同一层的节点不许重叠 ----
+const byDepth = {};
+for (const id of abTree.order) {
+  const d = TM.nodeAt(abTree, id).depth;
+  if (!byDepth[d]) { byDepth[d] = []; }
+  byDepth[d].push(lay.pos[id].x);
+}
+let layers = 0;
+for (const d of Object.keys(byDepth)) {
+  const xs = byDepth[d].slice().sort(function (a, b) { return a - b; });
+  for (let k = 1; k < xs.length; k++) {
+    T.ok(xs[k] > xs[k - 1], '第 ' + d + ' 层的节点横坐标严格递增，没有重叠');
+  }
+  layers++;
+}
+T.ok(layers >= 3, '至少三层参与了重叠检查');
+
+// ---- z 就是搜索深度 ----
+for (const id of abTree.order) {
+  T.eq(lay.pos[id].z, TM.nodeAt(abTree, id).depth * 1.5, 'z = 深度 × spanZ');
+}
+
+// ---- 父节点在子节点的横向中点 ----
+let midChecked = 0;
+for (const id of abTree.order) {
+  const n = TM.nodeAt(abTree, id);
+  if (n.childIds.length === 0) { continue; }
+  let lo = Infinity, hi = -Infinity;
+  for (const c of n.childIds) { lo = Math.min(lo, lay.pos[c].x); hi = Math.max(hi, lay.pos[c].x); }
+  T.ok(Math.abs(lay.pos[id].x - (lo + hi) / 2) < 1e-9, '父节点居于子节点中点');
+  midChecked++;
+}
+T.ok(midChecked >= 3, '中点检查至少跑了 3 个内部节点');
+
+// ---- 整棵树压在 spanX 之内 ----
+for (const id of abTree.order) {
+  T.ok(Math.abs(lay.pos[id].x) <= 5 + 1e-9, '横坐标压缩在 ±spanX/2 之内');
+}
+
+// ---- 空树 ----
+const el = TM.layout(TM.build(I.run('', { host: {} }).trace, 'search'), { spanX: 10, spanZ: 1.5 });
+T.eq(el.width, 0, '空树宽度为 0');
+
+/* ==================== brief 之外补充的断言（布局）====================
+
+   brief 这一段有一个**致命缺口**：它一条都测不到「横向空间按**子树叶子数**
+   分配」—— 而那正是这个任务存在的全部理由（按节点平均分的话，一棵被剪掉
+   一半的树和一棵完整的树画出来一样满，「剪掉的体积」当场消失）。
+
+   实测过：把分配改成「每个孩子平分父亲的区间」，上面那 716 条断言**一条都
+   不响**，5902 条全绿。原因很直接——那三条（同层不重叠 / 父在孩子中点 /
+   压在 ±spanX/2 内）对**任何**「区间互不相交地铺满、父取孩子中点」的分配
+   都成立，与权重取什么完全无关。
+
+   第二个缺口在 `|x| <= spanX/2` 这条上界：它是个**单边**断言，一个把所有
+   节点都放在 x=0 的实现照样过。上界必须连同「真的顶到边」一起钉。
+
+   下面两组断言只读 pos，不看实现，也不抄实现里的任何中间量。 */
+
+/* ---- ① 叶子等距：这才是「按叶子数分配」的指纹 ----
+   按叶子数分配时每片叶子分到的区间宽度恒是 spanX / 总叶子数，于是从左到右
+   相邻两片叶子的间距**处处相等**；按节点平均分则 200 片叶子的子树与 5 片
+   叶子的子树占同样宽，间距立刻参差不齐。 */
+let abLeaves = 0;
+for (const id of abTree.order) { if (TM.nodeAt(abTree, id).childIds.length === 0) { abLeaves++; } }
+T.ok(abLeaves > 100, '前提：这棵树上有足够多的叶子参与等距检查（' + abLeaves + ' 片）');
+const PITCH = 10 / abLeaves;
+const leafXs = [];
+for (const id of abTree.order) {
+  if (TM.nodeAt(abTree, id).childIds.length === 0) { leafXs.push(lay.pos[id].x); }
+}
+leafXs.sort(function (a, b) { return a - b; });
+for (let k = 1; k < leafXs.length; k++) {
+  T.ok(Math.abs((leafXs[k] - leafXs[k - 1]) - PITCH) < 1e-9,
+    '相邻叶子的间距恒等于 spanX / 总叶子数（第 ' + k + ' 对）');
+}
+/* 上界是**紧的**：最左 / 最右那片叶子各自只让出半格，真的顶到了 ±spanX/2。
+   没有这两条，一个把所有 x 都算成 0 的实现也能通过上面那条 `|x| <= 5`。 */
+T.ok(Math.abs(leafXs[0] - (-5 + PITCH / 2)) < 1e-9, '最左的叶子顶在 −spanX/2 那一格里');
+T.ok(Math.abs(leafXs[leafXs.length - 1] - (5 - PITCH / 2)) < 1e-9, '最右的叶子顶在 +spanX/2 那一格里');
+T.ok(Math.abs(lay.width - (10 - PITCH)) < 1e-9, 'width = 实际跨度 = spanX 少一格叶子宽');
+
+/* ---- ② 每个子树占的横向跨度正比于它的叶子数 ----
+   这是「按子树叶子数分配」的**直接**陈述。叶子数在这里自己重算一遍
+   （只读 childIds），不问模块要 —— 拿独立参照对拍，是这个文件一贯的做法。 */
+const myLeaves = {}, spanLo = {}, spanHi = {};
+for (let k = abTree.order.length - 1; k >= 0; k--) {
+  const n = TM.nodeAt(abTree, abTree.order[k]);
+  if (!n.childIds.length) {
+    myLeaves[n.id] = 1; spanLo[n.id] = lay.pos[n.id].x; spanHi[n.id] = lay.pos[n.id].x;
+    continue;
+  }
+  let sum = 0, a = Infinity, b = -Infinity;
+  for (const c of n.childIds) {
+    sum += myLeaves[c];
+    a = Math.min(a, spanLo[c]); b = Math.max(b, spanHi[c]);
+  }
+  myLeaves[n.id] = sum; spanLo[n.id] = a; spanHi[n.id] = b;
+}
+let widthChecked = 0, widthVaried = {};
+for (const id of abTree.order) {
+  const n = TM.nodeAt(abTree, id);
+  if (!n.childIds.length) { continue; }
+  T.ok(Math.abs((spanHi[id] - spanLo[id]) - (myLeaves[id] - 1) * PITCH) < 1e-9,
+    '节点 ' + id + ' 的子树横向跨度正比于它的叶子数（' + myLeaves[id] + ' 片）');
+  widthVaried[myLeaves[id]] = true;
+  widthChecked++;
+}
+T.ok(widthChecked >= 10, '子树宽度对拍不是空转（查了 ' + widthChecked + ' 个内部节点）');
+/* 兄弟之间叶子数必须真的**不一样**，否则「按叶子数分」与「平均分」在这份
+   fixture 上恰好重合，上面那一堆断言又是空转。 */
+let unequalSibs = 0;
+for (const id of abTree.order) {
+  const cs = TM.nodeAt(abTree, id).childIds;
+  for (const c of cs) { if (myLeaves[c] !== myLeaves[cs[0]]) { unequalSibs++; } }
+}
+T.ok(unequalSibs > 0, '前提：确实存在叶子数不同的兄弟子树（剪枝把它们剪得胖瘦不一）');
+T.ok(Object.keys(widthVaried).length >= 3, '前提：子树叶子数至少有三种取值，不是清一色');
+
+/* ---- ③ 两个 tab 并排时「少掉的体积」不会自己显现 ----
+   这不是缺陷，是这个设计的直接推论：每棵树各自被压进同一个 spanX，所以
+   plain 和 ab 画出来**一样宽**，差别只体现在叶子的疏密上。要让「剪掉的
+   那块」变成一块看得见的空缺，得由**调用方**按叶子数去缩 spanX
+   （layout 的 spanX 是入参，正是为此）。这条断言把这个事实钉在测试里，
+   免得任务 6 想当然地以为并排一放体积就自己出来了。 */
+const layPlain = TM.layout(plainTree, { spanX: 10, spanZ: 1.5 });
+let plainLeaves = 0;
+for (const id of plainTree.order) { if (TM.nodeAt(plainTree, id).childIds.length === 0) { plainLeaves++; } }
+T.ok(plainLeaves > abLeaves, '前提：plain 的叶子比 ab 多（' + plainLeaves + ' > ' + abLeaves + '）');
+T.ok(Math.abs(lay.width - layPlain.width) < 0.05,
+  '同一个 spanX 下两棵树几乎一样宽 —— 体积差不会自己显现，得由调用方缩 spanX');
+T.ok(10 / abLeaves > 10 / plainLeaves,
+  '固定 spanX 下差别只体现为叶子疏密：ab 的叶间距比 plain 大');
+
+// ---- ④ 边界 ----
+T.eq(el.maxDepth, -1, '空树没有任何一层，maxDepth 是 -1（不是 0）');
+T.eq(Object.keys(el.pos).length, 0, '空树的 pos 是空的');
+let layThrew = false;
+try {
+  const l0 = TM.layout(null, null);
+  T.eq(l0.width, 0, 'layout(null, null) 的宽度是 0');
+  T.eq(l0.maxDepth, -1, 'layout(null, null) 没有层');
+  // spanX 非法（容器还没布局好时真的会递 0 / NaN 进来）时退回默认值，不能算出 NaN
+  const bad = TM.layout(abTree, { spanX: 0, spanZ: NaN });
+  T.ok(isFinite(bad.pos[abTree.rootId].x) && isFinite(bad.pos[abTree.rootId].z),
+    'spanX=0 / spanZ=NaN 时退回默认值，坐标仍是有限数');
+  T.ok(bad.width > 0, '退回默认值之后树仍有正的宽度');
+} catch (e) { layThrew = true; }
+T.ok(!layThrew, 'layout 在空输入 / 非法 opts 上都不抛');
+
+/* 多个顶层帧（via 那棵树有两个顶层节点）也要各占一块，不能挤成一团。 */
+const viaLay = TM.layout(viaTree, { spanX: 10, spanZ: 1.5 });
+const viaTopXs = [];
+for (const id of viaTree.order) {
+  if (TM.nodeAt(viaTree, id).parentId < 0) { viaTopXs.push(viaLay.pos[id].x); }
+}
+T.eq(viaTopXs.length, 2, '前提：via 树有两个顶层节点');
+T.ok(viaTopXs[0] !== viaTopXs[1], '两个顶层帧各占一块横向空间，没有叠在一起');
+for (const id of viaTree.order) {
+  T.ok(Math.abs(viaLay.pos[id].x) <= 5 + 1e-9, '多顶层时同样压在 ±spanX/2 之内');
+}
+
+/* z 只由树深与 spanZ 决定，与 spanX 无关；换一个 spanZ 整棵树等比例拉长。 */
+const lay2 = TM.layout(abTree, { spanX: 4, spanZ: 3 });
+for (const id of abTree.order) {
+  T.eq(lay2.pos[id].z, TM.nodeAt(abTree, id).depth * 3, '换 spanZ 之后 z = 深度 × 新 spanZ');
+  T.ok(Math.abs(lay2.pos[id].x) <= 2 + 1e-9, '换 spanX 之后横坐标压在新的 ±spanX/2 内');
+  T.eq(lay2.pos[id].y, 0, '树铺在 y = 0 的平面上');
+}
+T.eq(lay.maxDepth, 3, 'α-β d3 的 maxDepth 是 3');
+
 T.report();
