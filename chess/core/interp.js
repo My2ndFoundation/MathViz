@@ -1491,6 +1491,41 @@
                  'supports — try rewriting it as a loop.',
                  node.line, node.col, 'runtime');
     }
+    /* 【任务 4.5】进帧之前，先把**调用方**攒下的 pending 单独打包成一步。
+
+       下面那条 push 步的 varDelta 想表达的是"进入 f，参数 x=5"，调试器的
+       帧列表也是这么用它的。但 stepBoundary 打包的是 rec.pending，而
+       pending 里装的是"自上一次语句边界以来的全部改动"——调用方在走到这个
+       调用点之前，完全可能已经往里攒了自己的东西，最典型的就是阶段 5 六道
+       题共同的形状：
+
+           for (let c = 0; c < N; c = c + 1) { go(row + 1); }
+
+       for 的 init（`let c = 0`）之后到循环体第一条语句之间没有任何语句
+       边界（见 For 分支：正常路径要等 update 求值完才 flush），于是 c 的
+       delta 被原样搭进了被调方那条 push 步里。调试器据此把调用方的 c 挂到
+       被调方的帧上，而真正拥有它的那一帧反而看不见它——两类 delta 一旦
+       合并就再也分不开，任何轨迹消费方都修不回来。
+
+       所以在这里主动 flush 一次：多出来的这一步记在**调用方的深度**上
+       （depth.n++ 之前，callDepth 是整条环境链共享的同一个计数器）、
+       frameOp 为 null（它不是帧事件，只是调用方的一条普通语句边界）。
+       之后的形参绑定因此落进一份干净的 pending，push 步的 varDelta 从此
+       名副其实。
+       env 传 fn.closure：stepBoundary 只读 env.rec 与 env.callDepth，这两个
+       在整条环境链上是同一份对象，闭包环境拿到的和调用点拿到的完全一致
+       （callInterpreted 的签名里没有调用点的 env，也不需要为此加一个参数）。
+       行号用 node（调用点）：这条 flush 步表达的是"调用方走到这个调用点、
+       准备进去了"，与紧随其后的 push/pop 用同一行对齐。
+       pending 为空时**不**记这一步——绝大多数调用点都是这种情况（上一条
+       语句刚刚 flush 过），无条件记会凭空给每次调用加一步。 */
+    const callerRec = fn.closure.rec;
+    if (callerRec) {
+      const carried = callerRec.pending;
+      if (carried.varDelta.length || carried.boardOps.length || carried.out !== null) {
+        stepBoundary(fn.closure, node);
+      }
+    }
     depth.n++;
     const callEnv = makeEnv(fn.closure);
     // 形参绑定：多出的实参丢弃、缺失的实参补 undefined——与原生一致。
@@ -1500,14 +1535,17 @@
       declareVar(callEnv, 'let', fn.params[idx], idx < args.length ? args[idx] : undefined, node);
     }
     /* 进帧/出帧标记（frameOp）是调试器「调用栈帧列表」的原始数据。push
-       记在参数绑定之后、hoistFunctionDecls 之前——这样 push 这条 Step 的
+       记在参数绑定之后、提升扫描之前——这样 push 这条 Step 的
        varDelta 恰好是这次调用的形参绑定（"进入 f，参数 x=5"），而函数体
        内部提升声明的嵌套函数则跟 Program 顶层的提升同一个待遇：滚进函数
        体第一条语句自己的 stepBoundary，不需要在这里特殊处理。
        push/pop 都记在调用点（node，即 Call 表达式）的行号上，而不是函数
        定义的行号——两者都发生在「调用序列」的时间线上，用调用点的行更
        容易跟外层代码对上；这是本任务的一个实现选择，brief 没有对 push/
-       pop 的具体行号做断言。 */
+       pop 的具体行号做断言。
+       "varDelta 恰好是形参绑定"这句话只有配合上面那次 flush 才成立——它
+       曾经是一句错话（任务 4.5 的缺陷），别把 flush 那几行当成可有可无的
+       优化删掉。interp.test.js 的「任务 4.5 ①」逐条钉住了这件事。 */
     const frameName = fn.name || '(anonymous)';
     stepBoundary(callEnv, node, 'push', frameName);
     if (fn.expression) {

@@ -625,6 +625,26 @@ const DIFF_SHAPES = [
     expectDiff: -1,
     why: '对外层赋值：旧规则把 t 留在 g 的帧里，新规则判给全局帧' },
 
+  /* 【任务 4.5】阶段 5 六道题共同的形状：递归 + for 头部声明的循环变量，
+     且**循环体第一条语句就是递归调用**。3a 的 callInterpreted 把调用方攒
+     在 pending 里的 `let c = 0` 搭进了被调方的入帧步，于是面板把调用方的
+     循环计数器 c 挂到被调方的帧上（下标 3/5/25），而真正拥有它的那一帧
+     反而看不见它（下标 30/36）。轨迹在源头修好之后，这个形状里没有任何
+     跨帧写，深度窗口与新规则必须逐下标一致——所以 expectDiff 是 0，
+     而这个 0 恰恰是"入帧步只含形参"的等价说法：一旦 Part 1 的 flush 被
+     去掉，深度窗口会把 c 记进被调方的帧、新规则不会，这一条立刻变红。 */
+  { name: 'N 皇后形状：for 头声明 + 循环体首句递归（任务 4.5）',
+    src: ['function go(row) {',
+          '  if (row === 2) { return 1; }',
+          '  for (let c = 0; c < 2; c = c + 1) {',
+          '    go(row + 1);',
+          '  }',
+          '  return 0;',
+          '}',
+          'return go(0);'].join('\n'),
+    expectDiff: 0,
+    why: '没有跨帧写，两套规则必须完全一致；不一致说明入帧步又混进了调用方的 delta' },
+
   { name: 'fact(3) 纯递归',
     src: ['function fact(n) {',
           '  if (n <= 1) { return 1; }',
@@ -685,6 +705,82 @@ T.eq(D.locals(outerCur).k, 2, '外层帧的 k === 2');
 const freshDelta = gt2[inner].varDelta.filter(d => d.name === 'b')[0];
 T.eq('from' in freshDelta, true, '前提：recordVarDelta 恒写全三个键，`from` 键永远存在');
 T.eq(typeof freshDelta.from, 'undefined', '前提：全新绑定的 from 值是 undefined（判据只能看值）');
+
+/* ============================================================
+   ⑰【任务 4.5】循环计数器只出现在拥有它的那一帧里 —— 逐下标验收
+
+   上面 DIFF_SHAPES 的那条 0 分歧是"两套规则一致"，这里再正面钉一次
+   "面板显示的到底对不对"：独立写一个只认深度的参考模型（这个形状里没有
+   任何跨帧写，深度就是唯一正确的归属依据），逐下标与 locals 对拍，并
+   单独盯住 c。 */
+const T45_SRC = ['function go(row) {',
+                 '  if (row === 2) { return 1; }',
+                 '  for (let c = 0; c < 2; c = c + 1) {',
+                 '    go(row + 1);',
+                 '  }',
+                 '  return 0;',
+                 '}',
+                 'return go(0);'].join('\n');
+const t45 = I.run(T45_SRC, { host: {} }).trace;
+T.ok(t45.length > 40, '4.5 前提：这个形状的轨迹足够长（' + t45.length + ' 步）');
+
+/* 参考模型：一摞帧，入帧步的 delta 落进新帧，出帧步的 delta 一律不应用，
+   其余每条步的 delta 落进 stack[step.depth]。 */
+function depthOwnedLocals(trace, i) {
+  const stack = [Object.create(null)];
+  for (let k = 0; k <= i; k++) {
+    const s = trace[k];
+    if (s.frameOp === 'push') {
+      const f = Object.create(null);
+      stack.push(f);
+      for (let m = 0; m < s.varDelta.length; m++) f[s.varDelta[m].name] = s.varDelta[m].to;
+      continue;
+    }
+    if (s.frameOp === 'pop') { if (k < i && stack.length > 1) stack.pop(); continue; }
+    const f = stack[s.depth];
+    for (let m = 0; m < s.varDelta.length; m++) {
+      const d = s.varDelta[m];
+      if (typeof d.to === 'undefined') delete f[d.name]; else f[d.name] = d.to;
+    }
+  }
+  return stack[stack.length - 1];
+}
+
+let t45Mismatch = [];
+let t45CInPush = [];
+let t45CSeen = 0;
+for (let k = 0; k < t45.length; k++) {
+  const c45 = D.create(t45); D.goto(c45, k);
+  const got = D.locals(c45), want = depthOwnedLocals(t45, k);
+  if (JSON.stringify(got) !== JSON.stringify(want)) {
+    t45Mismatch.push({ at: k, got: got, want: want });
+  }
+  if ('c' in got) t45CSeen++;
+  /* 站在入帧步上 = 刚刚进入被调方、形参绑好、函数体一条都没跑。
+     此刻被调方帧里**只能**有形参，绝不能有调用方的循环计数器。 */
+  if (t45[k].frameOp === 'push' && 'c' in got) t45CInPush.push({ at: k, locals: got });
+}
+T.eq(t45Mismatch, [], '4.5③: 逐下标与"按深度归属"参考模型完全一致');
+T.eq(t45CInPush, [], '4.5③: 任何一条入帧步上，被调方帧里都不含调用方的 c');
+T.ok(t45CSeen > 0, '4.5③ 反向哨兵：c 确实在若干下标上是可见的（' + t45CSeen +
+                   ' 处）—— 否则"哪儿都不显示 c"也能让上面两条通过');
+
+/* 拥有 c 的那一帧必须看得见它：每条 `c` 的 delta 步（frameOp 为 null）
+   站上去时，locals().c 必须等于这条 delta 的 to（to 为 undefined 时则是
+   "c 已被拆除"，不该再出现）。修复前下标 30/36 正是在这里失败：c 被记在
+   了别的帧上，站在拥有它的帧上反而读不到。 */
+let t45Own = [];
+for (let k = 0; k < t45.length; k++) {
+  const s = t45[k];
+  if (s.frameOp !== null) continue;
+  const dc = s.varDelta.filter(function (d) { return d.name === 'c'; })[0];
+  if (!dc) continue;
+  const c45 = D.create(t45); D.goto(c45, k);
+  const got = D.locals(c45);
+  const okHere = (typeof dc.to === 'undefined') ? !('c' in got) : got.c === dc.to;
+  if (!okHere) t45Own.push({ at: k, delta: dc, locals: got });
+}
+T.eq(t45Own, [], '4.5③: 每一条 c 的 delta 步上，站在当前帧就能看到这次改动的结果');
 
 // ---- 六个派生函数在空轨迹上也不能抛 ----
 /* 与上面 checkEmptySafe 同样的循环写法：清空编辑器缓冲区是阶段 5 验收

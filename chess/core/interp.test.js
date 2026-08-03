@@ -1062,4 +1062,108 @@ T.eq(I.run('return attacked(1);', {}).result, false,
 diff('function f(a, b) { return [a, b]; } return f(1);', 'M37: 实参少于形参，缺失的补 undefined');
 diff('function f(a) { return a; } return f(1, 2, 3);', 'M37: 实参多于形参，多余的被丢弃');
 
+/* ============================================================
+   任务 4.5 ①：入帧步（frameOp:'push'）的 varDelta 只含本次调用的形参绑定
+
+   3a 的 callInterpreted 在注释里断言过这件事，但它不成立：stepBoundary
+   打包的是 env.rec.pending，而 pending 里可能已经攒着**调用方**自上一次
+   语句边界以来的改动。最典型的形状就是阶段 5 六道题全都在用的
+   「for 头部声明循环变量 + 循环体第一条语句就是递归调用」——for 的
+   init（`let c = 0`）在调用发生之前只进了 pending，还没有任何
+   stepBoundary 把它打包出去，于是它被搭进了被调方那条 push 步里。
+   后果不是"记多了一点"：调试器的变量面板据此把调用方的 c 挂到被调方的
+   帧上（而拥有它的那一帧反而看不到它），而且**任何轨迹消费方都修不回来**
+   ——两类 delta 一旦合并就再也分不开。所以必须在源头分开。 */
+
+/* 一次调用里所有 push 步的 varDelta 名字表；顺带把 frameName 带出来。 */
+function pushDeltas(src) {
+  return I.run(src, { host: {} }).trace
+    .map(function (s, k) { return { k: k, s: s }; })
+    .filter(function (e) { return e.s.frameOp === 'push'; })
+    .map(function (e) {
+      return { at: e.k, depth: e.s.depth, fn: e.s.frameName,
+               names: e.s.varDelta.map(function (d) { return d.name; }) };
+    });
+}
+
+/* 阶段 5 六道题共同的形状：递归 + for 头部声明的循环变量。 */
+const T45_LOOPCALL = [
+  'function go(row) {',
+  '  if (row === 2) { return 1; }',
+  '  for (let c = 0; c < 2; c = c + 1) {',
+  '    go(row + 1);',
+  '  }',
+  '  return 0;',
+  '}',
+  'return go(0);'].join('\n');
+
+{
+  const pushes = pushDeltas(T45_LOOPCALL);
+  T.ok(pushes.length > 1, '4.5①前提：这个形状确实产生了多次入帧');
+  const bad = pushes.filter(function (p) { return JSON.stringify(p.names) !== '["row"]'; });
+  T.eq(bad, [], '4.5①: go 的每一条入帧步的 varDelta 都只有形参 row —— ' +
+                '调用方 for 头部的 c 不得被搭进被调方的帧');
+}
+
+/* 通用化：一批形状里，每条 push 步的 varDelta 名字必须恰好等于被调函数的
+   形参名单（顺序也一致，declareVar 是按形参顺序跑的）。这样将来任何一种
+   「调用点之前攒了未打包的改动」的新形状都会在这里失败，而不是只堵住
+   上面那一个具体程序。 */
+const T45_PARAM_SHAPES = [
+  { name: 'for 头部声明 + 循环体首句递归', src: T45_LOOPCALL, params: { go: ['row'] } },
+  { name: '同一条语句里先赋值再调用',
+    src: ['function f(a, b) { return a + b; }',
+          'let t = 0;',
+          'for (let i = 0; i < 3; i = i + 1) { t = f(i, 1); }',
+          'return t;'].join('\n'),
+    params: { f: ['a', 'b'] } },
+  { name: 'for…of 头部绑定 + 体内调用',
+    src: ['function g(v) { return v * 2; }',
+          'let s = 0;',
+          'for (const v of [1, 2, 3]) { s = s + g(v); }',
+          'return s;'].join('\n'),
+    params: { g: ['v'] } },
+  { name: '声明语句的初始化式里直接调用（init 与调用在同一条语句）',
+    src: ['function h(x) { return x + 1; }',
+          'const r = h(1);',
+          'return r;'].join('\n'),
+    params: { h: ['x'] } },
+  { name: '嵌套调用：实参本身是一次调用',
+    src: ['function inner(p) { return p; }',
+          'function outer(q) { return q; }',
+          'return outer(inner(3));'].join('\n'),
+    params: { inner: ['p'], outer: ['q'] } },
+  { name: '无形参函数的入帧步必须是空 delta',
+    src: ['function noop() { return 1; }',
+          'let z = 9;',
+          'for (let i = 0; i < 2; i = i + 1) { noop(); }',
+          'return z;'].join('\n'),
+    params: { noop: [] } },
+];
+for (let s45 = 0; s45 < T45_PARAM_SHAPES.length; s45++) {
+  const shape = T45_PARAM_SHAPES[s45];
+  const pushes = pushDeltas(shape.src);
+  T.ok(pushes.length > 0, '4.5① 形状「' + shape.name + '」确实有入帧步');
+  const wrong = pushes.filter(function (p) {
+    return JSON.stringify(p.names) !== JSON.stringify(shape.params[p.fn]);
+  });
+  T.eq(wrong, [], '4.5① 形状「' + shape.name + '」：每条入帧步的 varDelta 恰好是该函数的形参名单');
+}
+
+/* 分出去的那条 delta 不能凭空消失——它属于**调用方**，必须以调用方的深度
+   单独成一步留在轨迹里。只断言"push 干净了"是不够的：把 pending 直接丢掉
+   同样能让上面几条通过，而那会让面板永远看不到 c 的初始值。 */
+{
+  const tr45 = I.run(T45_LOOPCALL, { host: {} }).trace;
+  const c0 = tr45.filter(function (s) {
+    return s.varDelta.some(function (d) { return d.name === 'c' && d.to === 0; });
+  });
+  T.ok(c0.length > 0, '4.5①: `let c = 0` 的 delta 仍然在轨迹里（没有被丢掉）');
+  T.eq(c0.filter(function (s) { return s.frameOp !== null; }), [],
+       '4.5①: 承载 `let c = 0` 的那些步都不是进/出帧步');
+  /* 深度必须是**调用方**的深度。for 头部在 go 的第一层调用体里跑，
+     所以第一条 c=0 的深度是 1（不是被调方的 2）。 */
+  T.eq(c0[0].depth, 1, '4.5①: 调用方攒下的 delta 记在调用方的深度上');
+}
+
 T.report();
