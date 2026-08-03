@@ -99,18 +99,27 @@ def fallback_check() -> int:
 
 
 def core_tests() -> int:
-    """跑 core/ 与 games/ 下的全部 *.test.js。
+    """跑 core/ 与 games/ 下的全部 *.test.js（**含子目录**）。
 
     棋谱校验门（games/games.test.js，规格 §7 门 2）与内核测试同等重要：
     30 局棋谱里抄错的一步，只有它能当场抓住。
+
+    用 rglob 而不是 glob：glob 不下钻，`core/algos/minimax.test.js` 因此
+    整个落在门外——本地手跑是绿的，这道门却一次都没跑到它，而它正是
+    阶段 4 最核心的那条对拍测试（「剪枝不许改变答案」）。阶段 5 还要往
+    `core/algos/` 里再加六个算法，这个洞不补会变成六倍大。
+    报错用相对 ROOT 的路径而不是 test.name：加了子目录之后光看文件名
+    分不清是哪一层的（`algos/minimax.test.js` vs `minimax.test.js`）。
     """
     rc = 0
-    tests = sorted((ROOT / 'core').glob('*.test.js')) + sorted((ROOT / 'games').glob('*.test.js'))
+    tests = sorted((ROOT / 'core').rglob('*.test.js')) + sorted((ROOT / 'games').rglob('*.test.js'))
     for test in tests:
         proc = subprocess.run(['node', str(test)])
         if proc.returncode != 0:
-            print(f'ERROR: {test.name} 未通过', file=sys.stderr)
+            print(f'ERROR: {test.relative_to(ROOT)} 未通过', file=sys.stderr)
             rc = 1
+    print(f'core/games 测试：{len(tests)} 个测试文件全部通过' if rc == 0
+          else f'core/games 测试：{len(tests)} 个测试文件，有未通过的')
     return rc
 
 
