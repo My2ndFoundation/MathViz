@@ -160,13 +160,8 @@ T.eq(whitespaceTrace.length, 0, '前提：纯空白源码同样产出长度为 0
    用循环而不是一堆并排的 ad-hoc 用例，这样以后新增一个 mover 时，
    这条测试天然把它也覆盖进去，不需要有人记得手动加一行。 */
 function checkEmptySafe(label, makeCur) {
-  const cur = makeCur();
-  let threw = false, ret;
-  try { ret = D.goto(cur, 3); } catch (e) { threw = true; }
-  T.ok(!threw, label + '.goto：空轨迹上不抛异常');
-  T.eq(cur.i, 0, label + '.goto：空轨迹上下标不变');
-
   const movers = [
+    ['goto', function (c) { return D.goto(c, 3); }],
     ['step(+1)', function (c) { return D.step(c, 1); }],
     ['step(-1)', function (c) { return D.step(c, -1); }],
     ['stepIn', function (c) { return D.stepIn(c); }],

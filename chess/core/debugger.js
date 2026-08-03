@@ -16,13 +16,17 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  /* create(trace) → cur：trace 至少有一条 Step（interp.run 对任何非空
-     程序都会记至少一条),cur.i 从 0 起步——「停在第一步」是调试器打开
-     一段轨迹时唯一自然的初始状态。breakpoints 用一个普通对象当
-     Set-like（key 是行号的字符串形式），不用真正的 Set，是为了在没有
-     Set 的极旧环境（这个子项目全程 node/浏览器双跑，但没理由多依赖
-     一个未必到处都有的构造器）里也一样成立——反正这里只需要
-     增/删/查三个操作。 */
+  /* create(trace) → cur：trace **不**保证非空——空源码或纯空白源码
+     （`''`、`'   '`）经 interp.run(...) 产出的 trace 长度就是 0（清空
+     编辑器缓冲区是阶段 3b 真实可达的状态，不是理论边角）。cur.i 仍然从
+     0 起步——「停在第一步」是唯一自然的初始状态，即使这个"第一步"在
+     空轨迹上根本不存在也一样，因为 create() 本身不解引用 trace，只有
+     真正要读某个下标对应的 Step 时才需要关心这件事（每个这么做的函数
+     自己负责在空轨迹上短路，见 goto/stepOver/stepOut 各自的注释）。
+     breakpoints 用一个普通对象当 Set-like（key 是行号的字符串形式），
+     不用真正的 Set，是为了在没有 Set 的极旧环境（这个子项目全程
+     node/浏览器双跑，但没理由多依赖一个未必到处都有的构造器）里也一样
+     成立——反正这里只需要增/删/查三个操作。 */
   function create(trace) {
     return { trace: trace, i: 0, breakpoints: {} };
   }
