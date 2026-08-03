@@ -147,4 +147,55 @@ if (here.i < trace.length - 1) {
   T.ok(movedToNext === true || movedToNext === false, 'runTo 到达末尾时返回值仍是合法布尔');
 }
 
+// ---- 空轨迹：清空的编辑器缓冲区（'' 或纯空白源码）产出 trace.length===0 ----
+/* 这是真实可达的场景，不是构造出来的边角——先用真实解释器验证前提，
+   否则如果哪天 interp.js 的空源码行为变了，这条测试应该大声失败，而不是
+   悄悄测着一个已经不成立的假设。 */
+const emptyTrace = I.run('', { host: {} }).trace;
+T.eq(emptyTrace.length, 0, '前提：空源码产出长度为 0 的 trace（否则下面全部测试没有意义）');
+const whitespaceTrace = I.run('   \n\t  ', { host: {} }).trace;
+T.eq(whitespaceTrace.length, 0, '前提：纯空白源码同样产出长度为 0 的 trace');
+
+/* 每个 mover 加上 toggleBreak/hasBreak 都必须在空轨迹上安全 no-op——
+   用循环而不是一堆并排的 ad-hoc 用例，这样以后新增一个 mover 时，
+   这条测试天然把它也覆盖进去，不需要有人记得手动加一行。 */
+function checkEmptySafe(label, makeCur) {
+  const cur = makeCur();
+  let threw = false, ret;
+  try { ret = D.goto(cur, 3); } catch (e) { threw = true; }
+  T.ok(!threw, label + '.goto：空轨迹上不抛异常');
+  T.eq(cur.i, 0, label + '.goto：空轨迹上下标不变');
+
+  const movers = [
+    ['step(+1)', function (c) { return D.step(c, 1); }],
+    ['step(-1)', function (c) { return D.step(c, -1); }],
+    ['stepIn', function (c) { return D.stepIn(c); }],
+    ['stepOver', function (c) { return D.stepOver(c); }],
+    ['stepOut', function (c) { return D.stepOut(c); }],
+    ['runTo', function (c) { return D.runTo(c); }],
+  ];
+  for (let m = 0; m < movers.length; m++) {
+    const name = movers[m][0], fn = movers[m][1];
+    const c = makeCur();
+    let mThrew = false, mRet;
+    try { mRet = fn(c); } catch (e) { mThrew = true; }
+    T.ok(!mThrew, label + '.' + name + '：空轨迹上不抛异常');
+    T.eq(c.i, 0, label + '.' + name + '：空轨迹上下标不变');
+    T.eq(mRet, false, label + '.' + name + '：空轨迹上返回 false（没有发生真正的移动）');
+  }
+
+  const bpCur = makeCur();
+  let bpThrew = false;
+  try {
+    T.eq(D.hasBreak(bpCur, 1), false, label + '.hasBreak：空轨迹上初始没有断点');
+    D.toggleBreak(bpCur, 1);
+    T.eq(D.hasBreak(bpCur, 1), true, label + '.toggleBreak：空轨迹上仍然能设置断点（不依赖轨迹内容）');
+  } catch (e) { bpThrew = true; }
+  T.ok(!bpThrew, label + '.toggleBreak/hasBreak：空轨迹上不抛异常');
+}
+
+checkEmptySafe('空源码派生的空轨迹', function () { return D.create(emptyTrace); });
+checkEmptySafe('纯空白源码派生的空轨迹', function () { return D.create(whitespaceTrace); });
+checkEmptySafe('手搓的字面量空数组', function () { return D.create([]); });
+
 T.report();

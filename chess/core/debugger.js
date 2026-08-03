@@ -27,10 +27,15 @@
     return { trace: trace, i: 0, breakpoints: {} };
   }
 
-  /* 把下标夹到 [0, trace.length-1]。trace 长度恒 >= 1（run() 对任何非空
-     语句序列至少产出一条 Step；一个完全空程序在这个子集里也会因为
-     顶层 evalBlockBody 至少跑一次语句边界——具体保证由 interp.js 负责，
-     这里不重复校验，只管夹范围）。
+  /* 把下标夹到 [0, trace.length-1]。trace 长度**不**恒 >= 1——空白或纯空白
+     源码（`''`、`'   '`）会让 interp.run(...).trace 长度是 0（已用
+     `I.run('', {host:{}})` 验证过，不是猜测），这是可达的真实场景：阶段
+     3b 的编辑器允许清空缓冲区。`create([])` 之后 `cur.i` 落在 0，指向一个
+     不存在的元素——本模块的每一个 mover 都必须在这种输入下安全 no-op，
+     不能抛异常（清空编辑器不该让调试面板崩掉）。
+     当 trace.length === 0 时，`trace.length - 1 === -1`，`Math.min` 与
+     `Math.max` 这两行会把 clamped 算成 0——与 `cur.i` 的初始值一致，
+     天然落进下面的"未移动"分支返回 false，不需要专门的空轨迹分支。
      返回值是「下标是否真的变了」，不是「参数是否合法」——goto(cur, cur.i)
      应该返回 false：调用方（比如 UI 层判断要不要重绘）关心的是有没有
      发生真正的移动。 */
@@ -68,16 +73,24 @@
   }
 
   /* 步过 = 前进到 depth <= 当前深度的下一步——如果紧跟着的是被调用函数
-     内部（depth 更深），一路跳过整段调用，直到深度回落到不高于当前。 */
+     内部（depth 更深），一路跳过整段调用，直到深度回落到不高于当前。
+     空轨迹（trace.length === 0）必须最先判掉：`cur.trace[cur.i]` 在这种
+     输入下是 `undefined`，advanceWhile 自己的边界检查（`cur.i >=
+     trace.length - 1`）虽然也能在空轨迹上安全返回 false，但那是在
+     `.depth` 读取之后才会跑到的地方——base 那一行会在到达那个检查之前
+     就先对 undefined 取 `.depth`，抛 TypeError。 */
   function stepOver(cur) {
+    if (cur.trace.length === 0) return false;
     const base = cur.trace[cur.i].depth;
     return advanceWhile(cur, function (s) { return s.depth <= base; });
   }
 
   /* 步出 = 前进到 depth < 当前深度的下一步。在最外层（depth 已经是 0，
      不会再有更浅的下一步）时，advanceWhile 找不到满足条件的位置，
-     退到 trace.length-1——效果就是"跑到末尾"，与主流调试器一致。 */
+     退到 trace.length-1——效果就是"跑到末尾"，与主流调试器一致。
+     空轨迹判空的理由同 stepOver。 */
   function stepOut(cur) {
+    if (cur.trace.length === 0) return false;
     const base = cur.trace[cur.i].depth;
     return advanceWhile(cur, function (s) { return s.depth < base; });
   }
