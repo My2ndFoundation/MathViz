@@ -20,6 +20,8 @@ FALLBACK_ID_RE = re.compile(r"id:\s*'([\w-]+)'")
 # node --check -（从 stdin 读）报错时行号前缀是 [stdin]:<n>；把 <n> 换算回
 # 该脚本块在原文件里的真实行号，见 node_check() 里的用法。
 STDIN_LINE_RE = re.compile(r'^\[stdin\]:(\d+)$', re.MULTILINE)
+ALGOS_BLOCK_RE = re.compile(
+    r'/\* >>> GENERATED:ALGOS \*/\n(.*?)\n/\* <<< GENERATED:ALGOS \*/', re.DOTALL)
 
 
 def node_check() -> int:
@@ -57,6 +59,68 @@ def node_check() -> int:
         print(f'ERROR: {name} 语法检查失败\n{err}', file=sys.stderr)
     if not failed:
         print(f'node --check：{len(tools)} 个文件、{total_blocks} 个脚本块通过')
+    return 1 if failed else 0
+
+
+def algos_roundtrip_check() -> int:
+    """ALGOS 内联的是**字符串**，不是代码（inline_core.js_string_literal，规格 §2.1）。
+
+    inline_core.main(check_only=True) 的「内联副本与编辑源是否一致」只能
+    抓「忘了重新跑生成脚本」——它是拿*同一个*转义函数重新生成一遍再逐字
+    比对，如果转义函数本身有 bug（漏转义 `</script`、`\\u2028` 处理错、
+    JSON 转义少一层……），重新生成一遍还是那个坏结果，两边照样"一致"，
+    这道门会眼睁睁放过一个正在悄悄改坏算法源码的 bug。
+
+    这里换一种独立的验证方式：不比较"生成了什么"，而是把内联块**当真的
+    JS 跑起来**，求值出 ALGOS 对象，再拿每个 key 的值跟 core/algos/ 下
+    对应源文件按字节比较。用 node 求值而不是自己解析转义序列，是因为
+    "转义序列该怎么解码"这件事的唯一权威就是 JS 引擎本身——用 Python
+    重新实现一遍转义规则，等于又造了一份可能跟 js_string_literal 各自
+    漂移的平行实现。
+
+    当前没有工具页带 ALGOS 标记区（工具④要到阶段 4 Task 6 才创建），
+    这道检查此时跑 0 次、静默通过——这是预期状态，不是漏检：
+    render() 那道通用门已经确认了"没有标记区的文件不该被这个 tag 影响"，
+    这里只是同一件事在 ALGOS 专属校验里的自然结果。
+    """
+    tools = sorted((ROOT / 'tools').glob('*.html'))
+    checked_files = 0
+    checked_algos = 0
+    failed = []
+    for path in tools:
+        text = path.read_text(encoding='utf-8')
+        m = ALGOS_BLOCK_RE.search(text)
+        if not m:
+            continue
+        checked_files += 1
+        script = m.group(1) + '\nprocess.stdout.write(JSON.stringify(ALGOS));'
+        proc = subprocess.run(['node', '-e', script], capture_output=True, text=True)
+        if proc.returncode != 0:
+            failed.append((path.name, 'node 求值 ALGOS 失败：' + proc.stderr.strip()))
+            continue
+        try:
+            algos = json.loads(proc.stdout)
+        except json.JSONDecodeError as e:
+            failed.append((path.name, 'ALGOS 对象序列化失败：' + str(e)))
+            continue
+        for name, content in algos.items():
+            src = inline_core.ALGOS_DIR / name
+            if not src.exists():
+                failed.append((path.name, f'{name} 在 core/algos/ 下已不存在，内联副本是孤儿'))
+                continue
+            expected = src.read_text(encoding='utf-8')
+            if content != expected:
+                failed.append((path.name, f'{name} 往返求值后与源文件字节不一致'))
+            else:
+                checked_algos += 1
+
+    for name, err in failed:
+        print(f'ERROR: {name} 的 ALGOS 往返校验失败\n{err}', file=sys.stderr)
+    if not failed:
+        if checked_files:
+            print(f'ALGOS 往返校验：{checked_files} 个文件、{checked_algos} 份算法源码字节级一致')
+        else:
+            print('ALGOS 往返校验：当前没有工具页带 ALGOS 标记区，跳过')
     return 1 if failed else 0
 
 
@@ -132,13 +196,16 @@ def core_tests() -> int:
 
 
 if __name__ == '__main__':
-    # 四道门都要跑到底、都要报——不能用 `or` 短路。之前 `a() or b() or c()`
+    # 五道门都要跑到底、都要报——不能用 `or` 短路。之前 `a() or b() or c()`
     # 一旦 a() 非零就直接跳过 b()/c()，意味着一份过期的内联副本（或任何语法
     # 错误）会让 406 条断言的 core_tests() 门根本不执行，问题只报出第一个，
-    # 最有分量的那道门被悄悄跳过了。这里四个都无条件跑，各自打印自己的
-    # ERROR，最后按「任一失败则整体失败」汇总退出码。
+    # 最有分量的那道门被悄悄跳过了。这里五个都无条件跑，各自打印自己的
+    # ERROR，最后按「任一失败则整体失败」汇总退出码。algos_roundtrip_check
+    # 是阶段 4 新加的第五道门：见该函数文档字符串，它抓的是 inline_core 的
+    # 生成结果一致性检查本身抓不住的一类 bug（转义函数把内容改坏了）。
     rc_inline = inline_core.main(check_only=True)
     rc_node = node_check()
+    rc_algos = algos_roundtrip_check()
     rc_fallback = fallback_check()
     rc_core = core_tests()
-    sys.exit(1 if (rc_inline or rc_node or rc_fallback or rc_core) else 0)
+    sys.exit(1 if (rc_inline or rc_node or rc_algos or rc_fallback or rc_core) else 0)
