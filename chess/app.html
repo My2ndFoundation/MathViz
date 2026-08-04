@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Chess teaching tools — navigation shell. 国际象棋教学工具导航壳。">
+<!-- 版本记录（changelog，新→旧）：
+     1.0.0  2026-08-04  首发：子项目导航壳。左侧按阶段分组列出工具，右侧 iframe 装
+                        工具整页；home 项装 chess/index.html 当画廊。?tool=<id> 深链、
+                        ?lang= 贯穿壳与工具、Ctrl/Cmd+B 与 [ 折叠侧边栏。
+                        工具页一行未改，仍可独立打开。 -->
+<meta name="tool-version" content="1.0.0">
+<title>Chess Teaching Tools · 国际象棋教学工具</title>
+<!-- 子项目导航壳。**不是工具**，所以不进 chess/chess-tools.json（主站的 app.html
+     同样不在 tools.json 里）。结构照搬主站 app.html：侧边栏 + iframe 舞台。
+     用 iframe 而不是把工具注入本页——CLAUDE.md 写明的理由：每个工具是一整页，
+     有自己的顶层 state/cam、全屏 canvas 与键盘绑定，两个塞进同一个文档必然互踩。
+     设计令牌与 i18n 语义与 chess/index.html 逐字同源。 -->
+<style>
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+  --sb-w:246px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;overflow:hidden}
+body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn);-webkit-font-smoothing:antialiased}
+
+.shell{display:flex;height:100vh;height:100dvh;width:100%}
+.sidebar{flex:0 0 var(--sb-w);width:var(--sb-w);height:100%;display:flex;flex-direction:column;
+  background:linear-gradient(180deg,rgba(12,21,38,.96),rgba(5,7,13,.96));
+  border-right:1px solid var(--panel-line);transition:margin-left .22s ease}
+.shell.hid .sidebar{margin-left:calc(-1 * var(--sb-w))}
+
+.sb-head{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:14px 12px 10px;border-bottom:1px solid var(--panel-line)}
+.brand{display:block;text-decoration:none;color:inherit}
+.brand .eyebrow{font-size:9.5px;letter-spacing:.2em;color:rgba(159,176,200,.62);text-transform:uppercase}
+.brand .name{margin-top:3px;font-family:var(--font-math);font-weight:600;font-size:17px;
+  letter-spacing:.04em;color:#eaf1fb;transition:color .15s}
+.brand:hover .name{color:#bfefff}
+.iconbtn{flex:none;width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;
+  background:rgba(5,7,13,.6);border:1px solid var(--panel-line);border-radius:8px;
+  color:var(--ui-slate);font-size:12px;cursor:pointer;transition:border-color .15s,color .15s}
+.iconbtn:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.iconbtn:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:2px}
+
+.sb-list{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:6px 8px 14px}
+.sb-list::-webkit-scrollbar{width:8px}
+.sb-list::-webkit-scrollbar-thumb{background:rgba(148,163,184,.24);border-radius:8px}
+
+.grp{margin:13px 6px 5px;font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;
+  color:rgba(159,176,200,.55)}
+.item{display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+  padding:8px 10px;margin:2px 0;border-radius:10px;cursor:pointer;
+  background:transparent;border:1px solid transparent;color:var(--ui-slate);
+  font-family:var(--font-cn);font-size:12.5px;line-height:1.35;transition:background .15s,border-color .15s,color .15s}
+.item:hover{background:rgba(45,212,234,.07);border-color:rgba(148,163,184,.2);color:#eaf1fb}
+.item:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:-2px}
+.item .dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--c,var(--ui-slate));
+  box-shadow:0 0 8px var(--c,transparent)}
+.item .tx{flex:1;min-width:0}
+.item.on{background:rgba(45,212,234,.12);border-color:rgba(45,212,234,.42);color:#fff}
+.item.on .tx{font-weight:600}
+.item.home{margin-bottom:2px}
+.item.home .dot{background:transparent;border:1.5px dashed rgba(159,176,200,.55);box-shadow:none;
+  width:9px;height:9px}
+
+.sb-foot{display:flex;align-items:center;gap:8px;padding:10px 12px;
+  border-top:1px solid var(--panel-line)}
+.sb-foot .sp{flex:1}
+.sb-foot a,.sb-foot button{font-family:var(--font-mono);font-size:11px;letter-spacing:.04em;
+  color:rgba(159,176,200,.8);text-decoration:none;background:rgba(5,7,13,.6);
+  border:1px solid var(--panel-line);border-radius:7px;padding:4px 9px;cursor:pointer;
+  transition:border-color .15s,color .15s}
+.sb-foot a:hover,.sb-foot button:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.sb-foot a:focus-visible,.sb-foot button:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:2px}
+
+.stage{position:relative;flex:1;min-width:0;height:100%;background:var(--bg-deep)}
+#frame{display:block;width:100%;height:100%;border:0;background:var(--bg-deep)}
+
+.edge{position:fixed;left:0;top:50%;transform:translateY(-50%);z-index:30;
+  display:none;align-items:center;justify-content:center;width:22px;height:56px;
+  background:rgba(13,20,36,.86);border:1px solid var(--panel-line);border-left:0;
+  border-radius:0 10px 10px 0;color:var(--ui-slate);font-size:11px;cursor:pointer;
+  transition:background .15s,color .15s,border-color .15s}
+.edge:hover{background:rgba(20,30,52,.94);color:#bfefff;border-color:rgba(45,212,234,.5)}
+.edge:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:2px}
+.shell.hid .edge{display:flex}
+
+/* 窄屏：侧边栏浮在舞台之上，点击遮罩收起 */
+.scrim{display:none}
+@media (max-width:760px){
+  .sidebar{position:fixed;left:0;top:0;z-index:25;box-shadow:0 0 60px rgba(0,0,0,.6)}
+  .shell:not(.hid) .scrim{display:block;position:fixed;inset:0;z-index:20;background:rgba(5,7,13,.55)}
+}
+</style>
+</head>
+<body>
+
+<div class="shell" id="shell">
+  <aside class="sidebar" id="sidebar" aria-label="Chess tools">
+    <div class="sb-head">
+      <a class="brand" id="brandLink" href="../index.html">
+        <div class="eyebrow">Interactive Chess</div>
+        <div class="name" id="brandName">Chess</div>
+      </a>
+      <button class="iconbtn" id="btnHide" type="button">❮</button>
+    </div>
+    <nav class="sb-list" id="navList"></nav>
+    <div class="sb-foot">
+      <button id="btnLang" type="button">中</button>
+      <span class="sp"></span>
+      <a id="btnAlone" href="index.html" target="_blank" rel="noopener">↗</a>
+    </div>
+  </aside>
+
+  <div class="scrim" id="scrim"></div>
+  <button class="edge" id="btnShow" type="button">❯</button>
+
+  <main class="stage">
+    <iframe id="frame" title="Chess tool" allow="fullscreen"></iframe>
+  </main>
+</div>
+
+<script>
+'use strict';
+
+/* ================= i18n =================
+   与 chess/index.html 同源的那 15 行（它自己也是从 chess/core/viz-engine.js
+   抄来的）。语义必须一致：存储键 chess-lang，两处兜底都是 en 不是 zh——
+   否则缺 key 时英文页面会突然冒出中文。 */
+var LANG_KEY = 'chess-lang';
+var NAV_KEY = 'chess-nav';
+function resolveLang() {
+  try {
+    var q = new URLSearchParams(location.search).get('lang');
+    if (q === 'en' || q === 'zh') return q;
+    var s = localStorage.getItem(LANG_KEY);
+    if (s === 'en' || s === 'zh') return s;
+  } catch (e) { /* file:// 下 localStorage 可能不可用 */ }
+  return 'en';
+}
+var LANG = resolveLang();
+function t(s) { return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.en) : s; }
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/* ================= 回退列表 =================
+   运行时优先 fetch('chess-tools.json')；file:// 下 fetch 会因同源限制失败，
+   靠这份内嵌副本兜底——一个在 file:// 下只剩 home 一项的导航壳等于没有。
+   代价是这份副本与 chess/index.html 里的那份都要跟注册表同步，由
+   chess/scripts/check.py 的 fallback_check() 逐页比对 id 集合来保证。 */
+var FALLBACK = [
+  {
+    id: 'chess-moves-geometry', file: 'tools/chess-moves-geometry.html', accent: 'rose', phase: 1,
+    kicker: { en: 'Rules', zh: '规则' },
+    title: { en: 'Geometry of Movement', zh: '走法的几何本质' },
+    tag: { en: 'attack domain · min-move field · mobility', zh: '攻击域 · 最少步数场 · 机动性' }
+  },
+  {
+    id: 'chess-rules-check-mate', file: 'tools/chess-rules-check-mate.html', accent: 'violet', phase: 1,
+    kicker: { en: 'Rules', zh: '规则' },
+    title: { en: 'Rules, Legality and Mate', zh: '规则、合法性与将杀' },
+    tag: { en: 'pseudo-legal minus legal · castling · mate', zh: '伪合法减合法 · 易位 · 将杀' }
+  },
+  {
+    id: 'chess-game-replay', file: 'tools/chess-game-replay.html', accent: 'emerald', phase: 2,
+    kicker: { en: 'Games', zh: '棋局' },
+    title: { en: 'Reading a Game', zh: '读懂一局棋' },
+    tag: { en: '30 games · piece traces · evaluation curves · heat map', zh: '30 局棋谱 · 子力轨迹 · 评估曲线 · 热力图' }
+  },
+  {
+    id: 'chess-search-minimax', file: 'tools/chess-search-minimax.html', accent: 'orange', phase: 4,
+    kicker: { en: 'Search', zh: '搜索' },
+    title: { en: 'Game Trees and Search', zh: '博弈树与搜索' },
+    tag: { en: 'minimax · alpha-beta · move ordering · Shannon number', zh: '极小极大 · α-β 剪枝 · 走法排序 · 香农数' }
+  }
+];
+var TOOLS = FALLBACK;
+
+/* 阶段标签与 chess/index.html 的 PHASE_LABELS 逐条同源（它已经有阶段 4 了）。
+   缺的阶段有兜底，阶段 5 的工具一进注册表就能自己长出分组，不必回来改这里。 */
+var PHASE_LABELS = {
+  1: { en: 'Phase 1 · Rules Crash Course', zh: '阶段 1 · 规则速成' },
+  2: { en: 'Phase 2 · Game Replay', zh: '阶段 2 · 棋谱回放' },
+  4: { en: 'Phase 4 · Search and Game Trees', zh: '阶段 4 · 搜索与博弈树' }
+};
+function phaseLabel(n) { return PHASE_LABELS[n] || { en: 'Phase ' + n, zh: '阶段 ' + n }; }
+
+var L = {
+  title: { en: 'Chess Teaching Tools · MathViz', zh: '国际象棋教学工具 · MathViz' },
+  brand: { en: 'Chess', zh: '国际象棋' },
+  home: { en: 'All tools · Gallery', zh: '全部工具 · 画廊' },
+  hide: { en: 'Hide sidebar', zh: '收起侧栏' },
+  show: { en: 'Show sidebar', zh: '展开侧栏' },
+  alone: { en: 'Open current tool in a new tab', zh: '在新标签页单独打开当前工具' },
+  back: { en: 'Back to MathViz', zh: '返回 MathViz' }
+};
+
+/* ================= DOM 引用与状态 ================= */
+var shell = document.getElementById('shell');
+var navList = document.getElementById('navList');
+var frame = document.getElementById('frame');
+var curId = null;      // null = home（iframe 里装画廊）
+var syncing = false;   // 区分「壳驱动的换页」与「使用者在画廊里点了卡片」
+
+/* ================= 查表 ================= */
+function byId(id) {
+  for (var i = 0; i < TOOLS.length; i++) { if (TOOLS[i].id === id) return TOOLS[i]; }
+  return null;
+}
+function fileOf(id) { var d = byId(id); return d ? d.file : null; }
+
+/* accent 白名单——不能靠 esc() 兜底：accent 被拼进 style="" 属性值内部
+   （--c:var(--trace-<accent>)），esc() 只转义 & < > "，一个像
+   `x); background:url(//evil/leak?` 这样的 CSS 层面 payload 一个都不含，
+   会原样穿透进 style 并被当成任意 CSS 声明执行。 chess-tools.json 今天是
+   仓库自控内容，但它是运行时 fetch 进来的，check.py 也不校验 accent，
+   所以必须在插值点就收紧成闭集；未知值一律退到 cyan（四个真实工具都不用
+   这个色，退回它时一眼能看出「这项没配对」，而不是悄悄套错颜色）。 */
+var ACCENTS = { cyan: 1, rose: 1, violet: 1, emerald: 1, orange: 1 };
+function safeAccent(a) { return ACCENTS.hasOwnProperty(a) ? a : 'cyan'; }
+
+/* ================= 侧边栏渲染 =================
+   分组依据是 phase（主站 app.html 用的是 cat）。阶段顺序按数值升序，
+   不写死 1/2——阶段 4/5 的工具进了注册表就自己长出分组。 */
+function renderNav() {
+  var html = '<button class="item home' + (curId === null ? ' on' : '') + '" data-id="">' +
+             '<span class="dot"></span><span class="tx">' + esc(t(L.home)) + '</span></button>';
+
+  var phases = [];
+  for (var i = 0; i < TOOLS.length; i++) {
+    var p = TOOLS[i].phase || 1;
+    if (phases.indexOf(p) < 0) phases.push(p);
+  }
+  phases.sort(function (a, b) { return a - b; });
+
+  for (var k = 0; k < phases.length; k++) {
+    var ph = phases[k];
+    html += '<div class="grp">' + esc(t(phaseLabel(ph))) + '</div>';
+    for (var j = 0; j < TOOLS.length; j++) {
+      var d = TOOLS[j];
+      if ((d.phase || 1) !== ph) continue;
+      html += '<button class="item' + (d.id === curId ? ' on' : '') + '"' +
+              ' data-id="' + esc(d.id) + '"' +
+              ' style="--c:var(--trace-' + safeAccent(d.accent) + ')"' +
+              ' title="' + esc(t(d.tag)) + '">' +
+              '<span class="dot"></span><span class="tx">' + esc(t(d.title)) + '</span></button>';
+    }
+  }
+  navList.innerHTML = html;
+}
+
+/* ================= 从 iframe 的路径反推 id =================
+   使用者在画廊（home）里点了一张卡片时，导航不是壳发起的——iframe 自己换了
+   页面。载入回调里靠文件名反查 id，才能把侧边栏高亮与地址栏同步过去。 */
+function idFromPath(path) {
+  var f = String(path).split('/').pop();
+  for (var i = 0; i < TOOLS.length; i++) {
+    if (TOOLS[i].file.split('/').pop() === f) return TOOLS[i].id;
+  }
+  return null;
+}
+
+function srcFor(id) {
+  var f = id ? fileOf(id) : 'index.html';
+  return (f || 'index.html') + '?lang=' + LANG;
+}
+
+/* 换页面用 location.replace 而不是赋值 frame.src——这一条抄自主站 app.html，
+   理由也照抄：赋值 src 会往「联合会话历史」里塞一条 iframe 记录，与壳自己的
+   pushState 交错，后退键就会出现「地址与侧栏都退了、画面还停在上一个工具」的
+   错位。replace 不产生历史记录，历史完全由壳掌握。
+   try/catch 不是防跨源——location.replace 本身就是少数几个跨源仍可访问的
+   成员，file:// 下一样调用得通，不会抛。catch 兜的是 contentWindow 本身
+   为假值这种边缘情形（iframe 尚未挂好窗口对象），此时才退回赋值 src。 */
+function setFrame(url) {
+  try {
+    if (frame.contentWindow) { frame.contentWindow.location.replace(url); return; }
+  } catch (e) { /* 理论上的边缘情形，见上 */ }
+  frame.src = url;
+}
+
+function renderChrome() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.getElementById('brandName').textContent = t(L.brand);
+  document.getElementById('brandLink').href = '../index.html?lang=' + LANG;
+  document.getElementById('brandLink').title = t(L.back);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+  document.getElementById('btnHide').title = t(L.hide) + ' (Ctrl+B)';
+  document.getElementById('btnShow').title = t(L.show) + ' (Ctrl+B)';
+  var d = curId ? byId(curId) : null;
+  document.title = d ? t(d.title) + ' · MathViz' : t(L.title);
+  var alone = document.getElementById('btnAlone');
+  alone.title = t(L.alone);
+  alone.href = (d ? d.file : 'index.html') + '?lang=' + LANG;
+}
+
+/* ================= 地址栏同步 =================
+   换工具、iframe 自己换页后的回同步、切语言、别处切语言——四条路径都要把
+   当前的 curId 与 LANG 写回地址栏，所以只留这一份实现：地址栏在任何时刻都是
+   一条完整可复制的链接（tool 与 lang 同时在），不会因为某一条路径漏写一个
+   参数而退化。push 只在「换工具」时为真——那才算一次导航；切语言与回同步
+   都用 replaceState，否则后退键会退到「同一页只是语言不同」这种空档上。 */
+function syncUrl(push) {
+  try {
+    var u = new URL(location.href);
+    if (curId) u.searchParams.set('tool', curId); else u.searchParams.delete('tool');
+    u.searchParams.set('lang', LANG);
+    history[push ? 'pushState' : 'replaceState']({ tool: curId }, '', u);
+  } catch (e) {}
+}
+
+function go(id, push) {
+  if (id && !byId(id)) id = null;      // 未知 id 一律落回 home，不留 undefined
+  curId = id || null;
+  syncing = true;
+  setFrame(srcFor(curId));
+  renderNav();
+  renderChrome();
+  if (push !== false) syncUrl(true);
+  if (window.innerWidth <= 760) setSidebarOpen(false, false);
+}
+
+/* 侧边栏点击：事件委托到容器上，renderNav() 每次重画都不必重新绑。
+   点已经是当前项的那一个——不出手：go() 无条件会重推一条历史（地址不变
+   但 history.length 白长一条）并重新 setFrame() 同一个 URL（iframe 硬重
+   载，工具内部状态——回放进度、相机、当前 tab——全丢）。这个判断只放在
+   点击这一条路径：boot() 首次调用 go(id,false) 时 curId 还是 null，若把
+   守卫塞进 go() 本身，无 query 的首次加载会被当成「已经在这」而提前返回，
+   iframe 就永远不会被指向画廊；popstate 同理也不能加这层判断。「点到已经
+   在的那项就不动」只在使用者主动点击时才成立。 */
+navList.addEventListener('click', function (e) {
+  var btn = e.target.closest ? e.target.closest('.item') : null;
+  if (!btn) return;
+  var id = btn.dataset.id || null;
+  if (id === curId) return;
+  go(id, true);
+});
+
+/* 后退/前进 */
+window.addEventListener('popstate', function (e) {
+  var id = (e.state && e.state.tool) || null;
+  if (!id) {
+    try { id = new URLSearchParams(location.search).get('tool'); } catch (err) { id = null; }
+  }
+  go(id, false);
+});
+
+/* iframe 载入后回同步：使用者在画廊里点卡片时，导航不是壳发起的 */
+frame.addEventListener('load', function () {
+  if (syncing) { syncing = false; return; }
+  var id = null;
+  try { id = idFromPath(frame.contentWindow.location.pathname); } catch (e) { return; }
+  if (id === curId) return;
+  curId = id;
+  renderNav();
+  renderChrome();
+  syncUrl(false);
+});
+
+/* ================= 侧边栏显隐 =================
+   remember 默认 true，由调用方按语义传 false：窄屏（≤760px）上的自动收起
+   是布局行为，不是「使用者选择了收起」，不该被记进 NAV_KEY——go() 换页后的
+   那次、以及 .scrim 上的那次（遮罩只在 ≤760px 存在）都属于这一类。
+   折叠按钮、快捷键与「恢复上次状态」都在下面几段里调用它。 */
+function setSidebarOpen(open, remember) {
+  shell.classList.toggle('hid', !open);
+  if (remember !== false) {
+    try { localStorage.setItem(NAV_KEY, open ? 'open' : 'hid'); } catch (e) {}
+  }
+}
+
+function boot() {
+  var id = null;
+  try { id = new URLSearchParams(location.search).get('tool'); } catch (e) {}
+  go(id, false);
+  try { history.replaceState({ tool: curId }, '', location.href); } catch (e) {}
+}
+boot();
+
+function toggleSidebar() { setSidebarOpen(shell.classList.contains('hid')); }
+
+document.getElementById('btnHide').addEventListener('click', function () { setSidebarOpen(false); });
+document.getElementById('btnShow').addEventListener('click', function () { setSidebarOpen(true); });
+/* 遮罩只在 ≤760px 存在，点它收起属于布局行为，不记进 NAV_KEY——与 go() 一致 */
+document.getElementById('scrim').addEventListener('click', function () { setSidebarOpen(false, false); });
+
+/* ================= 键盘 =================
+   只认两枚：Ctrl/Cmd+B 与 [。chess 工具已经占了 1–9（视角）、T（切页签）、
+   Space（播放/暂停）、F（翻转棋盘）、r（重置），阶段 4/5 的调试器还要占
+   F5/F9/F10/F11——壳不许碰这些。isTyping() 挡住代码编辑器里敲 [ 的情形。 */
+function isTyping(el) {
+  if (!el) return false;
+  var tag = (el.tagName || '').toUpperCase();
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+function hotkey(e) {
+  if (isTyping(e.target)) return;
+  var mod = e.ctrlKey || e.metaKey;
+  if ((mod && (e.key === 'b' || e.key === 'B')) || (!mod && !e.altKey && e.key === '[')) {
+    e.preventDefault();
+    toggleSidebar();
+  }
+}
+document.addEventListener('keydown', hotkey);
+
+/* 工具在 iframe 里，键盘事件落在它的文档上，壳收不到——载入后把同一个
+   handler 也挂进去（同源才行，跨源会抛，try/catch 兜住）。 */
+frame.addEventListener('load', function () {
+  try { frame.contentDocument.addEventListener('keydown', hotkey); } catch (e) {}
+});
+
+/* 恢复上次的折叠状态。不 remember，否则「恢复」这件事本身会写一次存储。 */
+try {
+  if (localStorage.getItem(NAV_KEY) === 'hid') setSidebarOpen(false, false);
+} catch (e) {}
+
+/* ================= 语言 =================
+   切换要同时做两件事：① 重渲壳自己的文案 ② 重设 iframe 的 ?lang=。
+   只做①会得到「壳是中文、工具是英文」。 */
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  renderNav();
+  renderChrome();
+  syncing = true;
+  setFrame(srcFor(curId));
+  syncUrl(false);
+}
+document.getElementById('btnLang').addEventListener('click', function () {
+  setLang(LANG === 'zh' ? 'en' : 'zh');
+});
+
+/* 工具页（chess/core/viz-engine.js 造的那个）与画廊自己都有一枚 #btnLang，
+   iframe 里点的是它们的，不是壳的——两枚同时可见。同源写 localStorage 会在
+   其它 window 触发 storage 事件（规范只排除发起写入的那个 window），所以壳
+   收得到自家 iframe 的那次写入。收到就跟着改 LANG、重渲侧栏与 chrome、把
+   地址栏的 lang 带上，但绝不 setFrame()。
+   事件里读不出写入者是谁，而写入者有两种：可能是我们自己的 iframe，也可能是
+   另一个标签页里独立打开的 chess 工具（它写的是同一个 chess-lang 键）。前者
+   下不重指 iframe 是必须的——触发事件的正是它那次自我重渲染，再 setFrame()
+   等于重载工具、扔掉它刚刚的状态；后者下 iframe 里那一页确实还停在旧语言上，
+   代价是它要等到下次换页才跟上，仍比无条件重载丢状态划算。
+   newValue 要挡 null（storage 被清空）和非 en/zh（别的 key、别的写入）。 */
+window.addEventListener('storage', function (e) {
+  if (e.key !== LANG_KEY) return;
+  if (e.newValue !== 'en' && e.newValue !== 'zh') return;
+  if (e.newValue === LANG) return;
+  LANG = e.newValue;
+  renderNav();
+  renderChrome();
+  syncUrl(false);
+});
+
+/* 优先取 chess-tools.json（有服务器时永远最新）；file:// 或离线时 fetch 失败，
+   静默沿用内嵌的 FALLBACK，不弹错误、不阻塞渲染（boot() 已经先渲染过一次）。
+   覆盖之后要重渲侧边栏——注册表里可能多出 FALLBACK 还没有的工具。curId 不动：
+   它此刻装的那一页是有效的，重新 go() 会白白重载一次 iframe。 */
+(function () {
+  try {
+    fetch('chess-tools.json', { cache: 'no-cache' }).then(function (r) {
+      return r.ok ? r.json() : null;
+    }).then(function (j) {
+      if (j && j.tools && j.tools.length) {
+        TOOLS = j.tools;
+        /* 新注册表可能不再含 curId 指向的工具（下架、编辑）。只纠正内存里的 id，
+           不动 iframe——它此刻装的那一页依然是有效画面，frame 不该跟着重载。 */
+        if (curId && !byId(curId)) curId = null;
+        renderNav();
+        renderChrome();
+        /* 反方向的同一件事：内嵌的 FALLBACK 落后于注册表时（部署错位——
+           check.py 只在提交时把两者钉在一起），boot() 会把一个它还不认识的
+           ?tool= 判成未知 id 落回画廊。此刻新注册表认得它，就把这条深链补上。
+           只在还没装任何工具时才补——已经装上工具的情形归上面那条「不动
+           iframe」管，不能因为注册表到货就把使用者正在看的一页重载掉。 */
+        if (!curId) {
+          var want = null;
+          try { want = new URLSearchParams(location.search).get('tool'); } catch (e2) {}
+          if (want && byId(want)) { go(want, false); syncUrl(false); }
+        }
+      }
+    })['catch'](function () {});
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>
