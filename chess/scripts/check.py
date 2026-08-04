@@ -30,6 +30,12 @@ ALGOS_BLOCK_RE = re.compile(
 # 从来没有被任何语法门覆盖过——一个纯 JS 驱动的导航页，语法错了就是整页白屏，
 # 而所有门都报绿。
 ROOT_PAGE_MIN = 2
+# tools/ 下今天有 7 个页面，这里钉一个地板值而不是精确值——目录会随每个
+# 阶段继续长（阶段 5 还要再加工具），精确计数只会在下次发布时变成误报。
+# 没有这道守卫，node_check() 的 tools glob 一旦目错目录（改名/挪走），
+# 结果不会是显眼的 0，而是「根级 2 个」照样凑出一个像模像样的总数，
+# 七个工具页悄悄全部失踪却没人发现——跟 ROOT_PAGE_MIN 要防的是同一类坑。
+TOOL_PAGE_MIN = 7
 def root_pages() -> list:
     """chess/ 根目录下的 html 页面，按文件名排序。
 
@@ -56,7 +62,13 @@ def node_check() -> int:
               f'（index.html 与 app.html）——glob 漏了或文件被挪走了',
               file=sys.stderr)
         return 1
-    tools = sorted((ROOT / 'tools').glob('*.html')) + pages
+    tool_pages = sorted((ROOT / 'tools').glob('*.html'))
+    if len(tool_pages) < TOOL_PAGE_MIN:
+        print(f'ERROR: chess/tools/ 下只找到 {len(tool_pages)} 个页面，至少要 {TOOL_PAGE_MIN} 个'
+              f'——glob 漏了或目录被挪走了',
+              file=sys.stderr)
+        return 1
+    tools = tool_pages + pages
     failed = []
     total_blocks = 0
     for path in tools:
