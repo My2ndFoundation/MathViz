@@ -26,6 +26,9 @@
   --trace-violet:#a78bfa;
   --trace-emerald:#34d399;
   --trace-orange:#fb923c;
+  /* 调色板之外的第六个值，**不是给任何工具用的**：safeAccent() 认不出的 accent
+     退到它。刻意刺眼、刻意不属于任何工具——见下面 safeAccent 处的注释。 */
+  --trace-unpaired:#ff2fd0;
   --ui-slate:#9fb0c8;
   --ui-bright:#e2e8f0;
   --panel-bg:rgba(13,20,36,.74);
@@ -190,16 +193,28 @@ var FALLBACK = [
     kicker: { en: 'Search', zh: '搜索' },
     title: { en: 'Game Trees and Search', zh: '博弈树与搜索' },
     tag: { en: 'minimax · alpha-beta · move ordering · Shannon number', zh: '极小极大 · α-β 剪枝 · 走法排序 · 香农数' }
+  },
+  {
+    id: 'chess-board-algorithms', file: 'tools/chess-board-algorithms.html', accent: 'cyan', phase: 5,
+    kicker: { en: 'Algorithms', zh: '算法' },
+    title: { en: 'Classic Problems on the Board', zh: '棋盘上的经典算法' },
+    tag: { en: "N-Queens · Knight's Tour · shortest path", zh: 'N 皇后 · 骑士巡游 · 最短路' }
   }
 ];
 var TOOLS = FALLBACK;
 
-/* 阶段标签与 chess/index.html 的 PHASE_LABELS 逐条同源（它已经有阶段 4 了）。
-   缺的阶段有兜底，阶段 5 的工具一进注册表就能自己长出分组，不必回来改这里。 */
+/* 阶段标签与 chess/index.html 的 PHASE_LABELS 逐条同源（两边都已到阶段 5）。
+   缺的阶段有兜底（phaseLabel 会写出「阶段 N」），所以一个新阶段的工具进了注册表
+   就先能自己长出分组、不会白屏；但兜底出来的是个没有名字的栏目标题，加了新阶段
+   仍要回到这两处补一行——阶段 5 就是这么补的。
+   编号跟的是规格里的**建设阶段**，不是侧栏的第几组：阶段 3 建的是解释器
+   与调试器面板（core/ 里的两个模块），本身不产出工具页，所以表里没有 3。
+   分组按 phase 排序渲染，缺号不会留下空组。 */
 var PHASE_LABELS = {
   1: { en: 'Phase 1 · Rules Crash Course', zh: '阶段 1 · 规则速成' },
   2: { en: 'Phase 2 · Game Replay', zh: '阶段 2 · 棋谱回放' },
-  4: { en: 'Phase 4 · Search and Game Trees', zh: '阶段 4 · 搜索与博弈树' }
+  4: { en: 'Phase 4 · Search and Game Trees', zh: '阶段 4 · 搜索与博弈树' },
+  5: { en: 'Phase 5 · Classic Problems on the Board', zh: '阶段 5 · 棋盘上的经典算法' }
 };
 function phaseLabel(n) { return PHASE_LABELS[n] || { en: 'Phase ' + n, zh: '阶段 ' + n }; }
 
@@ -232,10 +247,23 @@ function fileOf(id) { var d = byId(id); return d ? d.file : null; }
    `x); background:url(//evil/leak?` 这样的 CSS 层面 payload 一个都不含，
    会原样穿透进 style 并被当成任意 CSS 声明执行。 chess-tools.json 今天是
    仓库自控内容，但它是运行时 fetch 进来的，check.py 也不校验 accent，
-   所以必须在插值点就收紧成闭集；未知值一律退到 cyan（四个真实工具都不用
-   这个色，退回它时一眼能看出「这项没配对」，而不是悄悄套错颜色）。 */
+   所以必须在插值点就收紧成闭集。
+
+   ⚠ 退路曾经是 cyan，理由是「四个真实工具都不用这个色，退回它时一眼能看出
+   这项没配对」。阶段 5 的工具⑤ 用掉了 cyan（五工具五色），那个哨兵当场失效：
+   一个拼错了 accent 的条目会显示成跟工具⑤ 一样的青色，看上去完全正常。
+   新的不变量因此不再依赖「哪个调色板颜色恰好没人用」——退路换成调色板之外的
+   `--trace-unpaired`，一块刺眼的洋红，取的是三维渲染里 missing texture 的老规矩：
+   它**永远**不会是任何工具的品牌色，无论以后加多少个工具、用掉多少种颜色。
+   要维持这条不变量只需一件事：给新工具选 accent 时只能从 ACCENTS 的五个键里选，
+   不许把 unpaired 加进这张表。
+
+   ⚠ 作用域：这条不变量**只在这一页成立**。`--trace-unpaired` 只定义在本文件的
+   `:root`（第 31 行），chess/index.html 的 `:root` 里没有这个变量，那一页也没有
+   safeAccent()——它把 d.accent 直接插进 style。所以「退路永远不会是任何工具的品牌色」
+   说的是本页的退路，不是整个 chess 子站的性质；别照着这段话去推断另一页也设了防线。 */
 var ACCENTS = { cyan: 1, rose: 1, violet: 1, emerald: 1, orange: 1 };
-function safeAccent(a) { return ACCENTS.hasOwnProperty(a) ? a : 'cyan'; }
+function safeAccent(a) { return ACCENTS.hasOwnProperty(a) ? a : 'unpaired'; }
 
 /* ================= 侧边栏渲染 =================
    分组依据是 phase（主站 app.html 用的是 cat）。阶段顺序按数值升序，

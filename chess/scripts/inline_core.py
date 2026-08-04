@@ -93,6 +93,31 @@ def pattern(tag: str) -> re.Pattern:
         re.DOTALL)
 
 
+# ALGOS 不用上面的 pattern()：那个函数假设标记是固定字符串，而 ALGOS 的开始
+# 标记要携带一份逐页清单（规格 §2.1，2026-08-04 更新）——
+# `GENERATED:ALGOS queens.js,tour-dfs.js`。group(1) 捕获"ALGOS"和收尾
+# " */" 之间的原文（可能为空、可能带清单），两处都要用：校验时 strip() 取
+# 干净的清单，重建开始标记时用**原文、不 strip()**——这样如果原作者手写的
+# 清单前后恰好没多余空格（她本来就没有），重建结果和原文逐字节相同；不然
+# 每次跑生成脚本都会因为标记这一行的空白抖动而显得"内容变了"。
+#
+# ⚠ **区间体不能要求非空**（2026-08-04 修）。这条正则原来写的是
+#     …ALGOS(.*?) \*/\n.*?\n/\* <<< GENERATED:ALGOS \*/
+# 两个 `\n` 之间必须有内容，于是**两条标记贴在一起的空区间根本不匹配**——
+# 而"新建一页时先把两条标记写上、内容留给生成脚本填"恰恰是空区间唯一的
+# 来源，也就是每一页的第一次。后果不是报错，是三样都没发生：没内联、
+# `missing` 里也没有它（ALGOS 在 OPTIONAL_TAGS 里），check.py 的 ALGOS 往返
+# 门更是连这个文件都扫不到。阶段 5 工具⑤ 建页当天实测：门报"ALGOS 往返校验：
+# 1 个文件"（那一个是工具④），而新页带着一个空的 ALGOS 块照样全绿——页面在
+# 浏览器里 `ALGOS` 是 undefined、当场死。这正是 Task 1 要消灭的那类失败
+# （"该咬合的门对新写法视而不见"）换了个形状活下来。
+# 现在收尾 `\n` 收进区间体自己（`(.*?)` 直接抵到收尾标记），空区间照样匹配、
+# 照样被填。回归夹具见 check.py 的 algos_marker_shape_check()。
+ALGOS_MARK_RE = re.compile(
+    r'/\* >>> GENERATED:ALGOS(.*?) \*/\n.*?/\* <<< GENERATED:ALGOS \*/',
+    re.DOTALL)
+
+
 def render(text: str) -> tuple[str, list[str]]:
     """返回注入后的文本与本文件缺失的标记列表。"""
     missing = []
@@ -115,19 +140,49 @@ def render(text: str) -> tuple[str, list[str]]:
             parts.append(p.read_text(encoding='utf-8').rstrip())
         text = pat.sub(lambda _m: block('GAMES', '\n'.join(parts)), text, count=1)
 
-    pat = pattern('ALGOS')
-    if pat.search(text):
-        # 按文件名排序，不看目录遍历顺序——这是个 dict 字面量，key 顺序
-        # 不影响运行时行为，但排序让生成结果在不同机器/文件系统上确定、
-        # diff 也稳定。排除 *.test.js：那是给 node 跑的，不是给她读的算法。
-        algo_files = sorted(p for p in ALGOS_DIR.glob('*.js')
-                             if not p.name.endswith('.test.js'))
-        if not algo_files:
-            raise SystemExit(f'ERROR: 缺少算法源码 {ALGOS_DIR.relative_to(ROOT.parent)}/*.js')
-        entries = [f"  '{p.name}': {js_string_literal(p.read_text(encoding='utf-8'))}"
-                   for p in algo_files]
+    m = ALGOS_MARK_RE.search(text)
+    if m:
+        # 清单从标记行本身来，不再扫目录——工具④只执行 minimax.js，阶段 5
+        # 之后工具④所在页如果还像以前那样把 core/algos/ 整个目录都塞进去，
+        # 会带着四份它永远不会跑的算法（queens/tour-dfs/tour-warnsdorff/
+        # knight-path），体积白白变大不说，读到的人也会疑惑"这些是干嘛的"。
+        # 于是"内联哪些文件"从"目录里有什么"改成"这一页显式要什么"。
+        raw_list = m.group(1).strip()
+        if not raw_list:
+            # 旧语法（裸标记，不带清单）落到这里：strip 之后清单是空的，不管
+            # 原文是完全没写还是只写了几个空格，一律当成"忘了写清单"报错，
+            # 不悄悄退化成"内联整个目录"——那正是这次改动要停掉的旧行为，
+            # 静默兼容旧语法等于让改动名存实亡。
+            raise SystemExit(
+                'ERROR: GENERATED:ALGOS 标记缺少清单——语法已改为逐页显式列出'
+                '文件名（例如 GENERATED:ALGOS minimax.js），不再自动内联整个'
+                'core/algos/ 目录，请在标记行里补上清单')
+        names = [n.strip() for n in raw_list.split(',')]
+        if any(not n for n in names):
+            # 多余的逗号（清单开头/结尾，或连续两个逗号）split 出来会有空
+            # 字符串——这不是"少内联一份"就能蒙混过去的错，清单本身已经
+            # 写错了，当场报错，不要悄悄丢弃这个空位。
+            raise SystemExit(
+                f'ERROR: GENERATED:ALGOS 清单里有空文件名（多余的逗号？）：'
+                f'{raw_list!r}')
+        entries = []
+        for name in names:
+            src = ALGOS_DIR / name
+            if not src.exists():
+                # 清单里写的名字必须跟 core/algos/ 下的文件名逐字节相同——
+                # 拼错一个字符就该在这里当场炸掉，而不是让页面带着一个悄悄
+                # 少一份的 ALGOS 对象上线，等 interp.js 某天执行到
+                # ALGOS['queens.js'] 才发现它是 undefined。
+                raise SystemExit(
+                    f'ERROR: GENERATED:ALGOS 清单里的 {name!r} 在 '
+                    f'{ALGOS_DIR.relative_to(ROOT.parent)}/ 下不存在')
+            entries.append(f"  '{name}': {js_string_literal(src.read_text(encoding='utf-8'))}")
         body = 'const ALGOS = {\n' + ',\n'.join(entries) + '\n};'
-        text = pat.sub(lambda _m: block('ALGOS', body), text, count=1)
+        # 开始标记原样重建（用未 strip 的 m.group(1)），收尾标记是固定字符串——
+        # 跟 block() 的形状一致，只是开始标记这半句现在是变量而不是常量 tag。
+        header = f'/* >>> GENERATED:ALGOS{m.group(1)} */'
+        replacement = header + '\n' + body.rstrip() + '\n' + '/* <<< GENERATED:ALGOS */'
+        text = ALGOS_MARK_RE.sub(lambda _m: replacement, text, count=1)
 
     return text, missing
 

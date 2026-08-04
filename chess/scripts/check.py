@@ -20,8 +20,13 @@ FALLBACK_ID_RE = re.compile(r"id:\s*'([\w-]+)'")
 # node --check -（从 stdin 读）报错时行号前缀是 [stdin]:<n>；把 <n> 换算回
 # 该脚本块在原文件里的真实行号，见 node_check() 里的用法。
 STDIN_LINE_RE = re.compile(r'^\[stdin\]:(\d+)$', re.MULTILINE)
+# 区间体是 group(2)，**不要求非空**：空区间（两条标记贴在一起）也要匹配得上。
+# 理由与 inline_core.ALGOS_MARK_RE 那一段完全相同，那里写着完整的事故记录——
+# 两份正则必须同形，否则一份能看见的东西另一份看不见，就又出现"一道门以为
+# 另一道门管了"的缝。空区间在这里会走进 `node -e` 并因为 ALGOS 未定义而报
+# "node 求值 ALGOS 失败"，这是**期望行为**：要么内联、要么响亮地报错。
 ALGOS_BLOCK_RE = re.compile(
-    r'/\* >>> GENERATED:ALGOS \*/\n(.*?)\n/\* <<< GENERATED:ALGOS \*/', re.DOTALL)
+    r'/\* >>> GENERATED:ALGOS(.*?) \*/\n(.*?)/\* <<< GENERATED:ALGOS \*/', re.DOTALL)
 
 # 根级页面 = chess/index.html 与 chess/app.html。它们不在 tools/ 下，于是
 # 长期躲过了这个文件里的两道门：node_check() 只 glob('tools/*.html')，而 CI
@@ -155,6 +160,72 @@ def js_string_literal_html_safety_check() -> int:
     return 1 if failed else 0
 
 
+def algos_marker_shape_check() -> int:
+    """带 `ALGOS` 标记的页面必须**要么被内联、要么当场报错**，绝不能两样都不发生。
+
+    这道门守的是 `inline_core.ALGOS_MARK_RE` 的形状，不是任何一份 html 的内容——
+    所以它跟下面的 `algos_roundtrip_check` 分工不同、不能互相替代：那一道是"页面
+    里跑起来的 ALGOS 跟磁盘上的源文件是不是同一份字节"，前提是**先能扫到那个
+    区间**；这一道守的正是"扫得到"本身。
+
+    事故（2026-08-04，阶段 5 建工具⑤ 当天）：正则原来要求两条标记之间必须有
+    内容（`\\n.*?\\n`），而新建一页时先把两条标记贴着写上、内容留给生成脚本填，
+    恰恰产出一个空区间。于是 `render()` 里 `ALGOS_MARK_RE.search()` 为假，
+    ALGOS 分支整个跳过；`missing` 里也不会有它（ALGOS 在 OPTIONAL_TAGS 里，
+    而且那条路径根本没走到）；`algos_roundtrip_check` 用同形的正则，同样扫不到，
+    于是打印"1 个文件"（那一个是工具④）并通过。三道门一起对一页视而不见，
+    页面带着 `const ALGOS` 从未被定义的 `<script>` 上线——退出码 0。
+
+    夹具全部在内存里构造，不依赖 chess/tools 下有没有某个文件：改坏了正则这道门
+    立刻红，不必等下一个人建新页时才暴露。
+    """
+    algo = 'queens.js'      # 只要求 core/algos/ 下真的有这一份（它是阶段 5 的第一份）
+    head = '/* >>> GENERATED:ALGOS ' + algo + ' */\n'
+    foot = '/* <<< GENERATED:ALGOS */\n'
+    empty_block = '// before\n' + head + foot + '// after\n'
+
+    failed = []
+    # ① 空区间必须被内联——这是这道门存在的全部理由。
+    filled, missing = inline_core.render(empty_block)
+    if filled == empty_block:
+        failed.append('空区间（两条标记贴在一起）没有被内联，而且没有报错——'
+                      '静默跳过又回来了')
+    if 'const ALGOS = {' not in filled or ("'" + algo + "'") not in filled:
+        failed.append('空区间内联之后，区间里没有出现 const ALGOS = { …ic 那份源码 }')
+    if 'ALGOS' in missing:
+        failed.append('ALGOS 被报成 missing——它在 OPTIONAL_TAGS 里，不该走这条路')
+    # 标记行本身要逐字节重建（Task 1 定下的性质，别在修空区间时把它弄丢）。
+    if head not in filled or foot not in filled:
+        failed.append('内联之后两条标记行不再与原文逐字节相同')
+    # 区间之外的内容一个字都不许动。
+    if not filled.startswith('// before\n') or not filled.endswith('// after\n'):
+        failed.append('内联改到了标记区间之外的文本')
+
+    # ② 已经填好的区间再跑一遍必须逐字节不变（幂等）——否则每次跑生成脚本
+    #    都会把所有页面判成"内容变了"，而 `--check` 会在 CI 上永远红。
+    again, _ = inline_core.render(filled)
+    if again != filled:
+        failed.append('对已填好的区间重复内联不是幂等的')
+
+    # ③ Task 1 定下的两个响亮错误必须仍然响亮。**空区间下也要响**——
+    #    修好①之后这两条才第一次真正覆盖到空区间（以前根本走不到）。
+    for label, marker in (('缺清单的裸标记', '/* >>> GENERATED:ALGOS */\n'),
+                          ('清单里写了不存在的文件', '/* >>> GENERATED:ALGOS nosuchfile.js */\n')):
+        for shape, body in (('空区间', ''), ('已填内容', 'const ALGOS = {};\n')):
+            try:
+                inline_core.render(marker + body + foot)
+            except SystemExit:
+                continue
+            failed.append(f'{label} + {shape}：没有报错，安静地通过了')
+
+    for err in failed:
+        print(f'ERROR: ALGOS 标记形状检查失败\n  {err}', file=sys.stderr)
+    if not failed:
+        print('ALGOS 标记形状检查：空区间会被内联，填好的区间幂等，'
+              '缺清单/清单写错在空区间与非空区间上都当场报错')
+    return 1 if failed else 0
+
+
 def algos_roundtrip_check() -> int:
     """ALGOS 内联的是**字符串**，不是代码（inline_core.js_string_literal，规格 §2.1）。
 
@@ -170,6 +241,16 @@ def algos_roundtrip_check() -> int:
     "转义序列该怎么解码"这件事的唯一权威就是 JS 引擎本身——用 Python
     重新实现一遍转义规则，等于又造了一份可能跟 js_string_literal 各自
     漂移的平行实现。
+
+    标记按页列清单之后（规格 §2.1，2026-08-04 更新），这里再加一条独立
+    于 inline_core 的校验：把标记行本身的清单跟求值出来的 ALGOS 对象的
+    key 集合互相核对，两边**恰好相等**，多一个少一个都算错。「独立」
+    是关键——inline_core.main(check_only=True) 那道门也会重新生成一遍
+    再逐字比对，但它用的是同一份 inline_core.render()，如果清单解析或
+    校验逻辑本身有 bug（比如漏掉了某种越界情况），重新生成一遍还是那个
+    坏结果，两边照样"一致"。这里从标记行的原始文本独立解析一遍清单，
+    不经过 inline_core 的任何函数，才能真正测出"页面上跑起来的 ALGOS
+    对象，是不是标记行说的那几个文件，一个不多一个不少"。
 
     **本函数的校验范围止于 JS 求值等价，不覆盖 HTML 嵌入安全**：`node -e`
     是纯 JS 解析器，从不经过 HTML 分词器，天生看不见"分词器提前进入
@@ -193,7 +274,13 @@ def algos_roundtrip_check() -> int:
         if not m:
             continue
         checked_files += 1
-        script = m.group(1) + '\nprocess.stdout.write(JSON.stringify(ALGOS));'
+        # 标记行自己的清单，从原始文本独立解析——不调用 inline_core 的任何
+        # 函数，见上面文档字符串：要测的正是"标记说的"和"页面上跑起来的"
+        # 是否对得上，如果连解析清单都复用 inline_core，这道门就退化成
+        # "inline_core 跟自己比对"，测不出 inline_core 本身的 bug。
+        expected_names = set(n.strip() for n in m.group(1).strip().split(','))
+        expected_names.discard('')
+        script = m.group(2) + '\nprocess.stdout.write(JSON.stringify(ALGOS));'
         proc = subprocess.run(['node', '-e', script], capture_output=True, text=True)
         if proc.returncode != 0:
             failed.append((path.name, 'node 求值 ALGOS 失败：' + proc.stderr.strip()))
@@ -202,6 +289,17 @@ def algos_roundtrip_check() -> int:
             algos = json.loads(proc.stdout)
         except json.JSONDecodeError as e:
             failed.append((path.name, 'ALGOS 对象序列化失败：' + str(e)))
+            continue
+        actual_names = set(algos.keys())
+        if actual_names != expected_names:
+            missing = expected_names - actual_names
+            extra = actual_names - expected_names
+            detail = []
+            if missing:
+                detail.append(f'标记清单里有、ALGOS 对象里没有：{sorted(missing)}')
+            if extra:
+                detail.append(f'ALGOS 对象里有、标记清单里没有：{sorted(extra)}')
+            failed.append((path.name, 'ALGOS 键集合与标记清单不一致——' + '；'.join(detail)))
             continue
         for name, content in algos.items():
             src = inline_core.ALGOS_DIR / name
@@ -315,21 +413,25 @@ def core_tests() -> int:
 
 
 if __name__ == '__main__':
-    # 六道门都要跑到底、都要报——不能用 `or` 短路。之前 `a() or b() or c()`
+    # 七道门都要跑到底、都要报——不能用 `or` 短路。之前 `a() or b() or c()`
     # 一旦 a() 非零就直接跳过 b()/c()，意味着一份过期的内联副本（或任何语法
     # 错误）会让 406 条断言的 core_tests() 门根本不执行，问题只报出第一个，
-    # 最有分量的那道门被悄悄跳过了。这里六个都无条件跑，各自打印自己的
+    # 最有分量的那道门被悄悄跳过了。这里七个都无条件跑，各自打印自己的
     # ERROR，最后按「任一失败则整体失败」汇总退出码。
     # js_string_literal_html_safety_check 与 algos_roundtrip_check 是阶段 4
     # 新加的两道门：前者查转义结果对 HTML 分词器是否安全（`<!--` + 裸
     # `<script` 那类坑，`node -e` 天生看不见），后者查转义结果求值出来的
     # 值是否与源文件字节一致——两者分工互补，各自的文档字符串里写清楚了
     # 为什么不能互相替代。
+    # algos_marker_shape_check 是阶段 5 新加的第七道，守的是**扫不扫得到**
+    # 那个区间——上面两道都以"已经扫到了"为前提，空区间那次事故正是从这个
+    # 前提底下漏过去的。
     rc_inline = inline_core.main(check_only=True)
     rc_node = node_check()
     rc_html_safety = js_string_literal_html_safety_check()
+    rc_marker = algos_marker_shape_check()
     rc_algos = algos_roundtrip_check()
     rc_fallback = fallback_check()
     rc_core = core_tests()
-    sys.exit(1 if (rc_inline or rc_node or rc_html_safety or rc_algos or
-                    rc_fallback or rc_core) else 0)
+    sys.exit(1 if (rc_inline or rc_node or rc_html_safety or rc_marker or
+                    rc_algos or rc_fallback or rc_core) else 0)
