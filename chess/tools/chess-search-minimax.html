@@ -8,9 +8,10 @@
 <meta name="engine-version" content="chess-1.2.0">
 <title>Game Trees and Search</title>
 <!--
-  工具④ `chess-search-minimax` —— 规格 §4④。**阶段 4 Task 6 只建到 tree /
-  prune 两个 tab**；`order` / `shannon` 是 Task 7，登记进
-  chess/chess-tools.json 与 chess/index.html 是 Task 8。在 Task 8 之前它
+  工具④ `chess-search-minimax` —— 规格 §4④。四个 tab 齐了：`tree` / `prune`
+  （Task 6）、`order` / `shannon`（Task 7，另含 §4④ 的评估分解与 §2.8 的
+  Export .js）。登记进 chess/chess-tools.json 与 chess/index.html 是 Task 8。
+  在 Task 8 之前它
   故意不被登记，但**没有**下划线前缀：`_` 前缀那几页（_skeleton /
   _piece-preview / _debugger-preview）是永远不登记的脚手架，这一页只是
   还没轮到。
@@ -61,6 +62,10 @@ body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)
 #divider::after{content:"";position:absolute;left:3px;top:0;bottom:0;width:1px;background:rgba(45,212,234,0)}
 #divider:hover::after,#divider.drag::after{background:rgba(45,212,234,.55)}
 body.folded #split,body.folded #divider{display:none}
+/* `shannon` 页签**没有调试器**（规格 §4④：「此 tab 无调试器，是纯图表」）。
+   它不是「折叠起来了」——那是使用者按 `\` 的临时状态，回到别的页签要还原；
+   这里是这一页签本来就没有代码面板。所以另起一个 class，两种状态互不覆盖。 */
+body.nosplit #split,body.nosplit #divider{display:none}
 
 .sp-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .sp-title{margin-right:auto;min-width:0}
@@ -95,7 +100,7 @@ body.folded #split,body.folded #divider{display:none}
   background:var(--panel-bg);border:1px solid var(--panel-line);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
-body.folded .tabs{left:50%}
+body.folded .tabs,body.nosplit .tabs{left:50%}
 .tab{border:1px solid transparent;background:transparent;color:#b8c6da;
   font-size:12.5px;font-family:var(--font-cn);padding:6px 15px;border-radius:999px;cursor:pointer;
   transition:color .15s,border-color .15s,background .15s}
@@ -163,7 +168,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   font-size:11px;color:rgba(159,176,200,.85);background:rgba(9,14,26,.66);
   border:1px solid var(--panel-line);border-radius:10px;padding:8px 11px;
   backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
-body.folded .legend{left:16px}
+body.folded .legend,body.nosplit .legend{left:16px}
 .legend div{display:flex;align-items:center;gap:7px;line-height:1.7}
 .legend i{width:9px;height:9px;border-radius:2px;background:var(--c);box-shadow:0 0 6px var(--c)}
 
@@ -174,7 +179,7 @@ body.folded .legend{left:16px}
   transform:translateX(-50%);z-index:2;pointer-events:none;max-width:calc(100vw - var(--code-w) - 24px);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   user-select:none;font-size:10.5px;letter-spacing:.04em;color:rgba(159,176,200,.55)}
-body.folded .hint{left:50%;max-width:calc(100vw - 24px);color:rgba(159,176,200,.75)}
+body.folded .hint,body.nosplit .hint{left:50%;max-width:calc(100vw - 24px);color:rgba(159,176,200,.75)}
 
 /* 正在重跑解释器时的遮罩：深度 4 的纯 minimax 要跑满 200,000 步
    （node 实测 ~235 ms，浏览器同量级），主线程会实打实地卡住那么久。
@@ -183,7 +188,7 @@ body.folded .hint{left:50%;max-width:calc(100vw - 24px);color:rgba(159,176,200,.
   z-index:6;display:none;padding:7px 14px;border-radius:999px;
   background:rgba(12,21,38,.92);border:1px solid rgba(251,191,36,.45);
   color:#fcd34d;font-size:11.5px;font-family:var(--font-mono);pointer-events:none}
-body.folded .busy{left:50%}
+body.folded .busy,body.nosplit .busy{left:50%}
 body.busy .busy{display:block}
 
 @media (max-width:900px){
@@ -235,6 +240,11 @@ body.busy .busy{display:block}
          「重置模拟」按钮，给它挂上 resetSim 并在每次切语言时改写它的文案。
          这个按钮是 §2.8 的「还原为原始版本」，与引擎那个是两回事。 -->
     <button class="btn" id="btnRevert">Reset</button>
+    <!-- §2.8 的 `Export .js`：导出的文件她可以直接在 node 里跑。
+         **不跟着 Run 一起禁用。** 解释器认的是 JavaScript 的一个子集
+         （§2.6），她写一个三元运算符，Run 会禁用而 node 跑得好好的——
+         那正是最该让她把文件拿出去跑一跑的时刻。 -->
+    <button class="btn" id="btnExport">Export .js</button>
   </div>
   <div class="sp-status" id="status"></div>
   <div id="editorHost"></div>
@@ -6176,6 +6186,13 @@ const ALGOS = {
 
     tabTree:  { zh: '博弈树', en: 'Game tree' },
     tabPrune: { zh: 'α-β 剪枝', en: 'α-β pruning' },
+    tabOrder: { zh: '走法排序', en: 'Move ordering' },
+    tabShannon: { zh: '香农数', en: 'Shannon number' },
+    /* 读数区的并排行现在有三格，页签全名并排会把每一行都撑到折行。
+       这里是同一批页签的短名，只在读数里用。 */
+    shortTree:  { zh: '纯 minimax', en: 'plain' },
+    shortPrune: { zh: 'α-β', en: 'α-β' },
+    shortOrder: { zh: '排序', en: 'ordered' },
 
     brandTree: { zh: '纯极小极大：每一次 search() 调用就是树上的一个节点。',
                  en: 'Plain minimax: every search() call is one node on the tree.' },
@@ -6187,7 +6204,18 @@ const ALGOS = {
     tipsPrune:{ zh: '打开「未剪枝轮廓」：绿色框是不剪枝时这棵树该有的宽度，框里空掉的那一块就是 α-β 省下的。断点打在 `if (beta <= alpha) { break; }` 上，按 F5 直接跑到剪枝发生的那一刻；按 4 切到「侧视 45°」，一整片枝子塌下去的样子最有体积感。',
                 en: 'Turn on “un-pruned outline”: the green frame is how wide this tree would be without pruning, and the empty part inside it is what α-β saved. Set a breakpoint on `if (beta <= alpha) { break; }` and press F5 to land exactly where a branch gets cut; key 4, “Side 45°”, is where a whole swathe of branches collapsing reads with the most volume.' },
 
+    brandOrder:{ zh: '同一个 α-β，只是先试吃子：窄掉的那一块是排序换来的。',
+                 en: 'The same α-β, capture moves tried first: the extra missing block is what ordering bought.' },
+    brandShannon:{ zh: '把刚才那棵树放进指数里看：剪枝减半的是指数，不是问题。',
+                   en: 'Put that tree back into the exponent: pruning halves the exponent, it does not remove it.' },
+
+    tipsOrder:{ zh: '这棵树跑的是同一个 α-β，只多了「先试吃子」那一段。α-β 能砍掉多少，全看好棋被试到得有多早——早点收窄 alpha/beta 这个窗口，后面的分支一照面就出局。看读数区最后那张「按深度」的小表：省下的比例随深度增长，这就是 O(b^d) 与 O(b^(d/2)) 的差别，不是一个固定的倍数。深度 1 那一格反而是负的——那一层没有东西可剪，排序只是白排。',
+                en: 'This tree runs the same α-β, plus one block that tries captures first. How much α-β can cut depends entirely on how early a good move is tried — narrow the alpha/beta window early and later branches lose at first sight. Look at the per-depth table at the bottom of the readout: the saving grows with depth. That is the difference between O(b^d) and O(b^(d/2)) — not a fixed multiple. At depth 1 it is negative: nothing to prune there, so sorting is pure overhead.' },
+    tipsShannon:{ zh: '纵轴是 10 的多少次方，一格就是十倍。绿线是不剪枝的 b 的 d 次方，紫线是排序完美时 α-β 的 b 的 d/2 次方（b 是分支因子，读数区第一行写着它）——指数减半，正好是把能算到的深度翻倍，仅此而已。玫瑰色那条贴地的短线是你刚才在别的页签上看的那棵树：在这张图上它几乎贴着零。这一页没有代码面板，也没有可以单步的东西——它就是那个「剪不完」的理由本身。（这张图是平的，只有一个视角，按 1 回正。）',
+                 en: 'The vertical axis is the power of ten; one gridline is ten times more. The green curve is b^d without pruning; the violet one is b^(d/2), α-β with perfect ordering (b is the branching factor, first line of the readout) — the exponent is halved, which exactly doubles the reachable depth, and that is all it does. The rose tick near the floor is the tree you were just watching on the other tabs; on this axis it is barely off zero. There is no code panel here and nothing to step through — this page is the reason the pruning never finishes. (The chart is flat and has a single view; press 1 to come back to it.)' },
+
     vPlan: { zh: '树形俯视', en: 'Tree plan' },
+    vChart:{ zh: '正视', en: 'Top' },
     vFront:{ zh: '正视', en: 'Top' },
     vTable:{ zh: '桌面 45°', en: 'Table 45°' },
     vSide: { zh: '侧视 45°', en: 'Side 45°' },
@@ -6268,6 +6296,67 @@ const ALGOS = {
        过）。标签逐字照搬那个模块定下的名字。 */
     roMv:      { zh: '枚举出来的走法', en: 'Moves enumerated' },
 
+    /* ---- §4④ 的评估分解：「子力值 + 中心控制，两项，都能在读数区看到分解」 ----
+       三个数一行，两项加起来必须等于总分——这一行的全部意义就是那个等号。 */
+    roEval:      { zh: '评估分解', en: 'Evaluation' },
+    roEvalMat:   { zh: '子力值', en: 'material' },
+    roEvalCen:   { zh: '中心控制', en: 'centre' },
+    roEvalSum:   { zh: '合计', en: 'total' },
+    roEvalWhere0:{ zh: '起始局面', en: 'starting position' },
+    roEvalWhereN:{ zh: '游标所在的节点 · 树深 %D', en: 'the node at the cursor · tree depth %D' },
+    /* 「中心控制」这一项是**减出来的**，不是照着公式抄的——她可以把 evaluate
+       改成任何样子，任何新加的位置项都会落进这一格。说清楚，别让这个名字
+       在她改过之后变成一句错话。 */
+    roEvalHow:   { zh: '子力值 = 你那张 <b>VAL</b> 表按盘上的子求和；中心控制 = <b>evaluate</b> 给的总分 − 子力值（位置项都归在这一格）。改 evaluate 里那个 12，这一行立刻跟着变。',
+                   en: 'Material is your own <b>VAL</b> table summed over the pieces on the board; centre is what <b>evaluate</b> returns minus that (any positional term lands here). Change the 12 inside evaluate and this line moves with it.' },
+    roEvalNoVal: { zh: '读不出你这份源码里的 <b>VAL</b> 表，所以拆不开两项，只能给出 evaluate 的总分。',
+                   en: 'Cannot read a <b>VAL</b> table out of your source, so the two terms cannot be separated; only the total from evaluate is shown.' },
+    roEvalNone:  { zh: '读不出这份源码的评估分解：需要一个顶层的 <b>return</b> 和一个叫 <b>evaluate</b> 的函数。',
+                   en: 'Cannot read an evaluation out of this source: it needs a top-level <b>return</b> and a function called <b>evaluate</b>.' },
+
+    /* ---- 走法排序那一课 ---- */
+    roSaveHead: { zh: '排序省下的比例（按深度）', en: 'What ordering saves, by depth' },
+    roSaveNodes:{ zh: '节点', en: 'nodes' },
+    roSaveSteps:{ zh: '步数', en: 'steps' },
+    roSaveGrows:{ zh: '省下的比例<b>随深度增长</b>——α-β 把指数从 <i>b</i><sup>d</sup> 压向 <i>b</i><sup>d/2</sup>，而好的走法排序决定它能压到多接近一半。所以这不是一个固定的倍数，是一条越走越开的缝。',
+                  en: 'The saving <b>grows with depth</b> — α-β pushes the exponent from <i>b</i><sup>d</sup> toward <i>b</i><sup>d/2</sup>, and good move ordering decides how close to half it gets. Not a fixed multiple: a gap that widens.' },
+    roSaveNeg:  { zh: '深度 %D 是负的：那一层没有东西可剪，排序只是白排一遍。',
+                  en: 'At depth %D it is negative: nothing to prune on that layer, so sorting is pure overhead.' },
+    roSaveBusy: { zh: '正在按深度把两份源码各跑一遍…', en: 'Running both sources at every depth…' },
+    roSaveNoSub:{ zh: '有一份源码的最后一行不再是 <b>return search(棋盘, 深度, …)</b>，换不了深度，所以这张表只能给出当前这一格。',
+                  en: 'One of the sources no longer ends in <b>return search(board, depth, …)</b>, so the depth cannot be substituted and this table only has the current row.' },
+
+    /* ---- 香农数那一页（纯图表） ---- */
+    shBranch:  { zh: '分支因子', en: 'Branching factor' },
+    shGame:    { zh: '一整局棋（%P 个半步）', en: 'A whole game (%P plies)' },
+    shPlies:   { zh: '个半步', en: 'plies' },
+    /* 这两条同时用在**画布上**（fillText）、图例里（textContent）和读数区，
+       所以写成纯文本：三处里有两处渲染不了标签，为一处的斜体让另外两处印出
+       一串尖括号是本末倒置。读数区里真正需要 serif 斜体的那句在 roSaveGrows。 */
+    shNoPrune: { zh: '不剪枝 b^d', en: 'no pruning, b^d' },
+    shAB:      { zh: '完美排序的 α-β  b^(d/2)', en: 'α-β, perfect ordering, b^(d/2)' },
+    shCompute: { zh: '每秒 10⁹ 个节点、从宇宙诞生算到现在', en: 'a billion nodes a second since the Big Bang' },
+    shAtoms:   { zh: '可观测宇宙的原子数', en: 'atoms in the observable universe' },
+    shShannon: { zh: '香农数（一整局棋的博弈树）', en: 'the Shannon number (the game tree of one game)' },
+    shOurs:    { zh: '你刚才看的那棵树', en: 'the tree you were just watching' },
+    shRefs:    { zh: '参照线（算力 / 原子 / 香农数）', en: 'reference lines (compute / atoms / Shannon)' },
+    shReach:   { zh: '算得完的深度', en: 'Depth you could finish' },
+    /* 「翻倍」这句说的是**指数**：b^(d/2) 与 b^d 在同一个预算下解出来的 d
+       相差一倍，这是恒等式，不依赖任何一次测量。两个具体的数各自是那条
+       不等式的整数解（向下取整），所以它们之间差不差 1 都不影响上面那句话。 */
+    shDouble:  { zh: '指数减半，同一个预算能算到的深度就翻一倍：不剪枝算得完 <b>%A</b> 个半步，完美排序的 α-β 算得完 <b>%B</b> 个半步。翻倍很了不起——可一整局是 <b>%P</b> 个半步。',
+                 en: 'Halving the exponent doubles the depth the same budget can finish: without pruning you can finish <b>%A</b> plies, with perfectly ordered α-β <b>%B</b>. Doubling is a lot — and a whole game is <b>%P</b> plies.' },
+    shOursLine:{ zh: '这一页的两条线都从零开始爬。你在别的页签上看的那棵树最大 <b>%N</b> 个节点 = 10<sup>%L</sup>——在这根纵轴上它几乎贴着地面。',
+                 en: 'Both curves here start from zero. The largest tree on the other tabs is <b>%N</b> nodes = 10<sup>%L</sup> — on this axis it barely leaves the floor.' },
+    shOffChart:{ zh: '出了这张图（约第 %D 个半步）', en: 'off this chart (around ply %D)' },
+    shAxisY:   { zh: '要看的局面数（10 的幂）', en: 'positions to look at (powers of ten)' },
+    shAxisX:   { zh: '往下看几个半步', en: 'plies searched ahead' },
+
+    exportBtn: { zh: '导出 .js', en: 'Export .js' },
+    exportOk:  { zh: '已导出 <b>%F</b> —— 在终端里 <b>node %F</b> 就能跑，它会把算出来的分数打印出来。文件里除了你的源码，只多了一层 <b>run()</b> 包装和一行 console.log（理由写在文件头几行）。',
+                 en: 'Exported <b>%F</b> — run <b>node %F</b> in a terminal and it prints the score it computed. Besides your own source the file adds only a <b>run()</b> wrapper and one console.log (the reason is in the file header).' },
+    exportFail:{ zh: '导出失败：', en: 'Export failed: ' },
+
     legMax:   { zh: '轮到白走 · 取极大', en: 'White to move · take the max' },
     legMin:   { zh: '轮到黑走 · 取极小', en: 'Black to move · take the min' },
     legOpen:  { zh: '还在调用栈上', en: 'still on the call stack' },
@@ -6284,9 +6373,15 @@ const ALGOS = {
      引擎的模型是「所有页签共用一份 state」，但这两个页签各自跑的是**一份
      不同的程序**（plain / ab），各有自己的轨迹、游标、树与布局。共用的只有
      深度滑杆、四个显示开关和相机——那与引擎的模型仍然一致。 */
+  /* **TABS 只列跑算法的页签。** `shannon` 不在里面：它不跑解释器、不建树、
+     没有源码也没有游标（规格 §4④「此 tab 无调试器，是纯图表」）。凡是
+     `TABS.forEach` 的地方（建树、布局、并排读数、探针的总账）说的都是
+     「每一份被跑过的程序」，把一张图表塞进那个循环只会让每一处都要写
+     一个 if。页签列表是 SCENES 的键，那里才是四个。 */
   const TABS = [
     { id: 'tree',  mode: 'plain' },
     { id: 'prune', mode: 'ab' },
+    { id: 'order', mode: 'ordered' },
   ];
   const S = Object.create(null);
   TABS.forEach(function (tb) {
@@ -6298,6 +6393,11 @@ const ALGOS = {
   });
 
   let activeId = null;              // 编辑器/调试器此刻挂在哪个页签上
+  /* 此刻显示的是哪个页签（**含 shannon**）。`activeId` 只在跑算法的三个
+     页签之间移动——切到纯图表时它停在上一个算法页签上不动，因为编辑器和
+     调试器仍然挂在那份程序上，回来时一切照旧。两个变量不能合并：一个回答
+     「画哪一页」，另一个回答「调试器在调谁」。 */
+  let uiTab = null;
   let curDepth = 0;                 // 已经建好的深度（0 = 还没建过）
   let refTabId = TABS[0].id;        // 参照树（叶子最多的那棵）在哪个页签
   let refLeaves = 1;
@@ -6323,6 +6423,137 @@ const ALGOS = {
       if (lines[k].indexOf('beta <= alpha') >= 0) out[k + 1] = true;
     }
     return out;
+  }
+
+  /* ================= 从**她那份源码**里问出两件事 =================
+
+     两处功能（§4④ 的评估分解、`order` 的按深度扫表）都需要拿她此刻编辑器里
+     那份源码去问一个它本来没打算回答的问题：「这个局面 evaluate 给几分」、
+     「同一份算法在深度 3 是多少步」。
+
+     **绝不照着公式再抄一份。** §2.8 明确邀请她改这份源码；一份写死的
+     `s += VAL[p]; if (中心四格) s += 12;` 在她把 12 改成 40 的那一秒就开始
+     说谎，而那一秒恰恰是她最需要读数区说真话的时候（生成的源码里就写着
+     「这个 12 是拍脑袋定的，改它」）。
+
+     做法是**改写顶层那一行 return**，别的一个字不动。生成的源码里，函数体
+     全部有缩进，顶层只有最后那一句 `return search(board, D, …);` 顶格写。
+     所以「最后一行顶格的 return」就是它，不需要解析 AST。
+     她要是把那一行改没了 / 缩进了 / 换了写法，这里认不出来——那就**明说
+     认不出来**，绝不猜。 */
+
+  /* 顶层 return 在第几行（找不到返回 −1）。 */
+  function topReturnLine(lines) {
+    for (let k = lines.length - 1; k >= 0; k--) {
+      if (/^return\b/.test(lines[k])) return k;
+    }
+    return -1;
+  }
+  /* 把顶层 return 换成 `return <expr>;`，其余逐字保留。 */
+  function withTail(src, expr) {
+    const lines = src.split('\n');
+    const k = topReturnLine(lines);
+    if (k < 0) return null;
+    return lines.slice(0, k).join('\n') + '\nreturn ' + expr + ';';
+  }
+  /* 只把顶层 `return search(棋盘, 深度, …)` 里那个**深度字面量**换掉。
+     不重写整行：棋盘变量叫什么、后面还有几个参数，都是她的事。 */
+  function withDepth(src, d) {
+    const lines = src.split('\n');
+    const k = topReturnLine(lines);
+    if (k < 0) return null;
+    const m = lines[k].match(/^(return\s+search\s*\(\s*[A-Za-z_$][\w$]*\s*,\s*)(\d+)(\s*,)/);
+    if (!m) return null;
+    lines[k] = lines[k].replace(m[0], m[1] + d + m[3]);
+    return lines.join('\n');
+  }
+
+  /* 拿她的源码求一个表达式的值。失败一律返回 undefined（调用方据此说
+     「读不出」），不抛。**结果缓存**：读数区每 120 ms 重画一次，而这两个
+     探针各要重新词法分析一遍整份源码（实测 VAL 探针 19 步 / 2.5 ms，
+     evaluate 探针 152 步 / 2.1 ms，时间几乎全在解析上）。 */
+  const probeCache = Object.create(null);
+  function probe(src, expr) {
+    const key = expr + '\n>>>\n' + src;
+    if (key in probeCache) return probeCache[key];
+    let v;
+    try {
+      const s2 = withTail(src, expr);
+      v = s2 === null ? undefined : I.run(s2, { host: {} }).result;
+    } catch (e) { v = undefined; }
+    /* 缓存不清空：键里带着整份源码，改一个字就是另一个键。一次会话里
+       她能敲出的不同版本数量级是几十，每个值是一个数或一个 6 元数组。 */
+    probeCache[key] = v;
+    return v;
+  }
+
+  /* §4④ 的两项分解。**哪个局面**：游标此刻停在的那个节点的局面。
+     理由三条：
+       1. 它是她眼睛正看着的那一个——读数区解释的应当是屏幕上那件事；
+       2. 走到叶子（depth === 0）时，`search` 返回的就是 `evaluate(bd)`，
+          于是这一行的「合计」正好等于树上那个节点头上回传的橙色数字，
+          分解与树当面对上；
+       3. 还没进搜索时（第 0 步）它退回起始局面——一打开页面看到的就是
+          「子力值 0 ＋ 中心控制 12 ＝ 12」。
+     一条规则同时盖住了「根」「叶子」「中间任何一步」。 */
+  /* 读数区每 120 ms 重画一次，而 `cursorBoard` 要走 `D.locals` ——它按整条
+     轨迹回放 varDelta，实测在深度 4 的 200,000 步截断轨迹上单次 **15.6 ms**
+     （`D.callStack` 另加 1.2 ms）。游标没动的时候把它重算一遍是纯浪费，还
+     恰好浪费在全工具最吃紧的那一格上。按「哪个页签 + 第几步 + 哪份源码」
+     记一格：游标一动才重算，一次一格，与 debugger.js 自己的刷新同量级。 */
+  let evalMemo = null;
+  function evalBreakdown(st) {
+    const key = activeId + '|' + (st.cur ? st.cur.i : -1);
+    if (evalMemo && evalMemo.key === key && evalMemo.src === st.src) return evalMemo.val;
+    const val = computeBreakdown(st);
+    evalMemo = { key: key, src: st.src, val: val };
+    return val;
+  }
+  function computeBreakdown(st) {
+    const bd = cursorBoard(st);
+    if (!bd) return null;
+    /* 棋盘会被拼成一个数组字面量塞进探针源码里。只允许有限的数字进去——
+       她可以往那 16 格里放任何东西，而拼进源码的东西必须是数据，不是一段
+       会被求值的表达式。有一格不是数字就整条读不出，不猜。 */
+    for (let k = 0; k < bd.length; k++) {
+      if (typeof bd[k] !== 'number' || !isFinite(bd[k])) return { bd: bd, total: null, mat: null };
+    }
+    const total = probe(st.src, 'evaluate([' + bd.join(', ') + '])');
+    if (typeof total !== 'number' || !isFinite(total)) return { bd: bd, total: null, mat: null };
+    const VAL = probe(st.src, 'VAL');
+    if (!Array.isArray(VAL)) return { bd: bd, total: total, mat: null };
+    let mat = 0;
+    for (let k = 0; k < bd.length; k++) {
+      const p = bd[k];
+      if (!p || typeof p !== 'number') continue;
+      const v = VAL[Math.abs(p)];
+      if (typeof v !== 'number' || !isFinite(v)) return { bd: bd, total: total, mat: null };
+      mat += p > 0 ? v : -v;
+    }
+    return { bd: bd, total: total, mat: mat, cen: total - mat };
+  }
+
+  /* 游标此刻在哪个局面上。最内层那个 `search` 帧的 `bd`（`locals` 给的是
+     **入帧那一刻的快照**，正是这个节点的局面——算法用的是 make/unmake，
+     活数组一直在变，快照不受影响）。一个 search 帧都没开着就退回起始局面。 */
+  function cursorBoard(st) {
+    if (!st || !st.res) return null;
+    const cur = st.cur;
+    const stack = D.callStack(cur);
+    for (let k = stack.length - 1; k >= 0; k--) {
+      if (stack[k].name !== ENTRY) continue;
+      const bd = D.locals(cur, k + 1).bd;          // depth 0 是全局帧，故 +1
+      if (Array.isArray(bd)) return bd;
+    }
+    return st.board;
+  }
+  /* 树深 = 这是第几个 search 帧（根是 0）。没有帧时返回 −1（= 起始局面）。 */
+  function cursorTreeDepth(st) {
+    if (!st || !st.res) return -1;
+    const stack = D.callStack(st.cur);
+    let n = 0;
+    for (let k = 0; k < stack.length; k++) if (stack[k].name === ENTRY) n++;
+    return n - 1;
   }
 
   /* 跑一份源码，把这个页签的全部派生状态重建出来。**同步的**：深度 4 的
@@ -6354,6 +6585,19 @@ const ALGOS = {
 
     const root = st.tree.rootId >= 0 ? TM.nodeAt(st.tree, st.tree.rootId) : null;
     st.rootValue = root ? root.value : null;
+
+    /* 起始局面：全局帧里那个 `board`。取**轨迹末尾**那一刻的全局帧——
+       它是个 const，`locals` 给的是声明那一刻的快照（make/unmake 在活数组
+       上来回改，快照不跟着变），所以任何一步取到的都是同一份。取末尾只是
+       因为第 0 步时它还没被声明。她改了那 16 个数字，这里就跟着换。 */
+    st.board = null;
+    if (res.trace.length) {
+      const probeCur = D.create(res.trace);
+      D.goto(probeCur, res.trace.length - 1);
+      const g = D.locals(probeCur, 0);
+      if (Array.isArray(g.board)) st.board = g.board;
+    }
+    invalidateSweep();
 
     const next = D.create(res.trace);
     if (keepBreakpoints) next.breakpoints = st.cur.breakpoints;
@@ -6496,7 +6740,10 @@ const ALGOS = {
   }
 
   function availRect() {
-    const folded = document.body.classList.contains('folded');
+    /* `nosplit` = 当前页签本来就没有代码面板（shannon）；`folded` = 使用者
+       按了 `\`。两者都让可见区从 0 开始，但它们不是同一件事，所以分开写。 */
+    const folded = document.body.classList.contains('folded') ||
+                   document.body.classList.contains('nosplit');
     const x0 = folded ? 0 : document.getElementById('split').getBoundingClientRect().width;
     const x1 = rightEdge();
     return { x0: x0, y0: 46, w: Math.max(1, x1 - x0), h: Math.max(1, window.innerHeight - 46 - 26) };
@@ -6504,18 +6751,31 @@ const ALGOS = {
 
   /* 借引擎的 makeCam 算回正视角的相机：临时换、算完换回。不自己再抄一遍
      球坐标→基向量的公式（本仓库反复吃过「同一段数学两处各写一份」的亏）。 */
+  /* 取景基准跟着页签走：树页签用树形俯视，`shannon` 用它自己的正视
+     （理由写在 SH_VIEWS 上面）。两处都是「这个页签 views 的第一项」。 */
+  function homeView() { return uiTab === 'shannon' ? SHANNON_HOME : HOME_VIEW; }
   function homeCam() {
-    const live = E.cam, saved = {};
-    for (const k in HOME_VIEW) { saved[k] = live[k]; live[k] = HOME_VIEW[k]; }
+    const live = E.cam, saved = {}, hv = homeView();
+    for (const k in hv) { saved[k] = live[k]; live[k] = hv[k]; }
     const C = E.makeCam();
     for (const k in saved) live[k] = saved[k];
     return C;
   }
 
   function sceneBox(C) {
+    /* 图表页签的画框在 x–y 平面上（z=0），树的在 x–z 平面上（y=0）。
+       两者的包围盒不能共用一份角点：拿树的角点去框图表，纵向高度是 0。 */
+    if (uiTab === 'shannon') {
+      const mx = (SH_X1 - SH_X0) * 0.10, my = (SH_Y1 - SH_Y0) * 0.12;
+      return projBox(C, [[SH_X0 - mx, SH_Y0 - my, 0], [SH_X1 + mx, SH_Y0 - my, 0],
+                         [SH_X1 + mx, SH_Y1 + my, 0], [SH_X0 - mx, SH_Y1 + my, 0]]);
+    }
     const hx = SPAN_BASE / 2 * 1.08;
     const hz = zCenter() + 0.9;
-    const corners = [[-hx, 0, -hz], [hx, 0, -hz], [hx, 0, hz], [-hx, 0, hz]];
+    return projBox(C, [[-hx, 0, -hz], [hx, 0, -hz], [hx, 0, hz], [-hx, 0, hz]]);
+  }
+
+  function projBox(C, corners) {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (let k = 0; k < corners.length; k++) {
       const p = E.proj(C, corners[k]);
@@ -6795,13 +7055,38 @@ const ALGOS = {
     ctx.restore();
   }
 
+  /* ---------------- 换页签时要办的事 ----------------
+     引擎的 switchTab 只管相机、文案和读数；「这一页有没有代码面板」「取景框
+     该按哪个基准算」「图例画哪一组」是本页自己的事。引擎没有给出 tab 变更的
+     回调，所以在每个场景的 draw 开头认一次——每帧一次，变了才做事。 */
+  function setUiTab(id) {
+    if (id === uiTab) return;
+    const wasChart = uiTab === 'shannon';
+    uiTab = id;
+    document.body.classList.toggle('nosplit', id === 'shannon');
+    /* 纯图表页上没有调试器可看，让它继续按时间推进游标只会让人回来时
+       发现自己不在离开时那一步。停表，不倒带。 */
+    if (id === 'shannon' && dbg && dbg.isPlaying()) dbg.setPlaying(false);
+    paintLegend();
+    updateFit();                       // 可见区变了（代码面板进出）+ 取景基准变了
+    /* 从图表页回来：代码面板刚从 display:none 里出来，编辑器在隐藏期间
+       量不到字符宽度（getBoundingClientRect 全是 0），波浪线与括号框会被
+       跳过不画。与 `\` 展开时是同一件事，同一个补救。 */
+    if (wasChart && ed) ed.refresh();
+  }
+
   /* 每一帧：先把调试器的时钟推一格，再在取景变换里把树画出来。 */
   function frameFor(id) {
     return function (C) {
+      setUiTab(id);
       /* 深度滑杆的轮询挂在这里，**不另起第二条 rAF 循环**——CLAUDE.md 记过
          那笔账（_piece-preview 起了第二条循环，两条各画一遍同一块 canvas）。
          引擎每帧只调当前页签的 draw 一次，所以这里恰好是每帧一次。 */
       pollDepth();
+      /* 按深度那张表在这里补算。放在绘制路径上而不是只放在切页签那一刻：
+         她可能就停在这一页按 Run（那会作废这张表），那时没有第二次
+         「切到 order」可以挂。ensureSweep 自己判空、判 busy，早退是常态。 */
+      if (id === 'order' && !sweep) ensureSweep();
       /* 播放的时钟出口就是引擎的 state.dt（已 clamp 到 [0, 0.05]）。
          绝不自己用 performance.now() 再算一遍帧时长，更不按帧计数——
          开发者的外接屏是 30 Hz，按帧计数在那台机器上会慢一半。 */
@@ -6811,6 +7096,77 @@ const ALGOS = {
       ctx.scale(fit.s, fit.s);
       try { drawScene(C, id); } finally { ctx.restore(); }
     };
+  }
+
+  /* ================= 「按深度扫一遍」：省下的比例是怎么长起来的 =================
+
+     规格 §4④ 要的是「O(b^d) 与 O(b^(d/2)) 的**实物证明**」。只报当前这一格
+     的比率证明不了任何指数关系——一个数说不出「越来越省」。所以 `order`
+     页签把 α-β 与吃子优先序在**每一个深度**上各跑一遍，把比例排成一列：
+     18% → 24% → 43%（出厂源码实测），那条越走越开的缝才是这一课。
+
+     **跑的是她此刻的源码**，不是出厂源码：把顶层那行 return 里的深度字面量
+     换掉（withDepth），别的一个字不动。她改过 VAL、改过评估、改过排序，
+     这张表跟着她改。换不动（她重写了最后一行）就整张表只留当前这一格并
+     明说原因，绝不偷偷退回出厂源码假装还在测她的东西。
+
+     当前深度那一格**不重跑**，直接用页签自己的结果——否则同一个深度会在
+     面板上出现两个可能不同的数字。
+
+     代价：出厂源码全扫一遍（ab + ordered × 4 个深度，减掉当前那一格）在
+     node 里约 250 ms。所以它是**惰性**的：只在真的切到 `order` 页签时才算，
+     算之前先把 busy 胶囊画出来。 */
+  let sweep = null;          // [{ depth, ab, ordered }] 或 null（还没算 / 已作废）
+  let sweepNoSub = false;    // 有一份源码换不了深度
+  function invalidateSweep() { sweep = null; }
+
+  function runAtDepth(id, d) {
+    const st = S[id];
+    if (d === curDepth) {
+      if (!st.res || !st.tree) return null;
+      return { steps: st.res.trace.length, nodes: st.tree.order.length,
+               trunc: !!st.res.trace.truncated };
+    }
+    const src = withDepth(st.src, d);
+    if (src === null) { sweepNoSub = true; return null; }
+    let r;
+    try { r = I.run(src, { host: {} }); } catch (e) { return null; }
+    return { steps: r.trace.length, nodes: TM.build(r.trace, ENTRY).order.length,
+             trunc: !!r.trace.truncated };
+  }
+
+  function computeSweep() {
+    sweepNoSub = false;
+    const rows = [];
+    for (let d = DEPTH_MIN; d <= DEPTH_MAX; d++) {
+      rows.push({ depth: d, ab: runAtDepth('prune', d), ordered: runAtDepth('order', d) });
+    }
+    sweep = rows;
+  }
+
+  /* 惰性补算：先把 busy 胶囊画出来（主线程要卡 ~250 ms），算完把状态行
+     **原样**还回去——它可能正挂着一条语法错误，不能被一句「运行完成」盖掉。 */
+  function ensureSweep() {
+    if (sweep || busy) return;
+    const kind = statusKind, html = statusEl.innerHTML;
+    withBusy(function () {
+      computeSweep();
+      statusKind = kind;
+      setStatus(html, kind === 'idle' ? '' : kind);
+    });
+  }
+
+  /* 省下的比例。两边有一边是截断轨迹就返回 null——截断的步数不是「跑完要
+     多少步」，拿它算比例会凭空报出一个好看的省量。 */
+  function saving(a, b, field) {
+    if (!a || !b || a.trunc || b.trunc) return null;
+    if (!(a[field] > 0)) return null;
+    return (a[field] - b[field]) / a[field];
+  }
+  function pctSigned(x) {
+    if (x == null) return '—';
+    const n = Math.round(x * 100);
+    return (n < 0 ? '−' : '') + Math.abs(n) + '%';
   }
 
   /* ================= 读数 ================= */
@@ -6844,8 +7200,10 @@ const ALGOS = {
   function bval(text, color) {
     return '<b style="--c:' + color + '">' + text + '</b>';
   }
+  /* 并排读数里用**短名**：三格并排时页签全名会把每一行都撑到折行。 */
+  const SHORT = { tree: STR.shortTree, prune: STR.shortPrune, order: STR.shortOrder };
   function pair(id, text) {
-    return '<span class="dim">' + t(id === 'tree' ? STR.tabTree : STR.tabPrune) + '</span> ' + text;
+    return '<span class="dim">' + t(SHORT[id]) + '</span> ' + text;
   }
 
   /* 把 tightestGap 的世界间距换算成**此刻屏幕上**的像素：用活相机投影那一层
@@ -6915,6 +7273,10 @@ const ALGOS = {
       lines.push('<span style="color:' + C_CUT + '">' + t(STR.roCutNow) + '</span>');
     }
 
+    /* ---- §4④ 的评估分解 ---- */
+    lines.push('<span class="rule"></span>');
+    evalLines(st).forEach(function (l) { lines.push(l); });
+
     /* ---- 说明性的几句，都只在真的成立时才出现 ---- */
     if (st.res && st.res.trace.truncated) {
       lines.push('<span class="warn">' + t(STR.truncMsg) + '</span>');
@@ -6959,6 +7321,266 @@ const ALGOS = {
     }
     if (st.tree && st.tree.order.length === 0) {
       lines.push('<span class="warn">' + t(STR.noEntry) + '</span>');
+    }
+    /* `order` 页签独有的那一课：省下的比例怎么随深度长起来。 */
+    if (id === 'order') sweepLines().forEach(function (l) { lines.push(l); });
+    return lines.join('<br>');
+  }
+
+  /* ---- §4④「子力值 + 中心控制，两项，都能在读数区看到分解」 ---- */
+  function evalLines(st) {
+    const out = [];
+    const d = cursorTreeDepth(st);
+    const where = d < 0 ? t(STR.roEvalWhere0)
+                        : t(STR.roEvalWhereN).replace('%D', String(d));
+    const b = evalBreakdown(st);
+    out.push('<span class="dim">' + t(STR.roEval) + ' · ' + where + '</span>');
+    if (!b || b.total === null) {
+      out.push('<span class="warn">' + t(STR.roEvalNone) + '</span>');
+      return out;
+    }
+    if (b.mat === null) {
+      out.push('<span class="dim">' + t(STR.roEvalSum) + '</span> ' + bval(fmtInt(b.total), C_VALUE));
+      out.push('<span class="dim">' + t(STR.roEvalNoVal) + '</span>');
+      return out;
+    }
+    /* 两项用读数区的正文色，只有「合计」上橙色——橙色在这一页已经有一个
+       确定的含义（回传的分数），而叶子上回传的正是这个合计。不为了让这一行
+       热闹而发明第七种颜色（设计系统原则 3）。 */
+    out.push('<span class="dim">' + t(STR.roEvalMat) + '</span> ' + fmtInt(b.mat) +
+             ' <span class="dim">＋</span> ' +
+             '<span class="dim">' + t(STR.roEvalCen) + '</span> ' + fmtInt(b.cen) +
+             ' <span class="dim">＝</span> ' + bval(fmtInt(b.total), C_VALUE));
+    out.push('<span class="dim">' + t(STR.roEvalHow) + '</span>');
+    return out;
+  }
+
+  /* ---- 「按深度」那张小表 ---- */
+  function sweepLines() {
+    const out = ['<span class="rule"></span>',
+                 '<span class="dim">' + t(STR.roSaveHead) + '</span>'];
+    if (!sweep) { out.push('<span class="warn">' + t(STR.roSaveBusy) + '</span>'); return out; }
+    ['nodes', 'steps'].forEach(function (field) {
+      const cells = sweep.map(function (r) {
+        const v = pctSigned(saving(r.ab, r.ordered, field));
+        const txt = r.depth + ':' + v;
+        return r.depth === curDepth ? '<b style="--c:' + C_CUT + '">' + txt + '</b>' : txt;
+      });
+      out.push('<span class="dim">' + t(field === 'nodes' ? STR.roSaveNodes : STR.roSaveSteps) +
+               '</span> ' + cells.join(' '));
+    });
+    /* 「随深度增长」这句只在**这张表此刻真的这样**时才说。她可以把排序改坏，
+       那时这句话就是错的，于是它不出现——一句在任何输入下都成立的话，胜过
+       一句出厂时成立的话。 */
+    const ss = sweep.map(function (r) { return saving(r.ab, r.ordered, 'steps'); });
+    let grows = true, seen = 0;
+    for (let k = 1; k < ss.length; k++) {
+      if (ss[k] == null || ss[k - 1] == null) continue;
+      seen++;
+      if (ss[k] < ss[k - 1] - 1e-9) grows = false;
+    }
+    if (seen >= 2 && grows) out.push('<span class="dim">' + t(STR.roSaveGrows) + '</span>');
+    for (let k = 0; k < sweep.length; k++) {
+      if (ss[k] != null && ss[k] < 0) {
+        out.push('<span class="dim">' + t(STR.roSaveNeg).replace('%D', String(sweep[k].depth)) + '</span>');
+        break;
+      }
+    }
+    if (sweepNoSub) out.push('<span class="warn">' + t(STR.roSaveNoSub) + '</span>');
+    return out;
+  }
+
+  /* ================= `shannon`：纯图表，没有调试器 =================
+
+     规格 §4④ 给这一页的内容是「分支因子 35 的指数爆炸 vs 可观测宇宙原子数
+     （**此 tab 无调试器，是纯图表**）」，顿悟那句是「α-β 剪掉的体积是肉眼
+     可见的一块；而香农数说明为什么永远剪不完」。
+
+     所以这一页画两条线：不剪枝的 b^d，和排序完美时 α-β 的 b^(d/2)。
+     **α-β 减半的是指数**——同一个预算下它把能算到的深度翻一倍，仅此而已。
+     翻倍是真的很多，而一整局棋是 80 个半步：两条线都在它之前很久就撞穿了
+     所有参照线。前三个页签里「肉眼可见的那一块」在这张纵轴上小到贴着地面
+     （玫瑰色那根短线，数字是从那几个页签实测来的，不是写死的）。
+
+     数字全部由具名常量算出来，没有一个是打进文案里的：
+       · 分支因子 35 —— 香农 1950 年那篇论文里的估计；
+       · 一整局 80 个半步 —— 同一篇论文的 40 回合；
+       · 宇宙年龄 138 亿年，每秒 10⁹ 个节点 —— 「算得完」的上限；
+       · 可观测宇宙原子数 10^80、香农数 10^120 —— 两条参照线。 */
+  const SH_B = 35;                                   // 平均分支因子
+  const SH_PLIES = 80;                               // 一整局的半步数（40 回合）
+  const SH_LOGMAX = 130;                             // 纵轴上界：log10（装得下 35^80 ≈ 10^123.5）
+  const SH_LOGB = Math.log(SH_B) / Math.LN10;        // log10(35) ≈ 1.5441
+  const SH_NPS = 1e9;                                // 每秒能看多少个局面
+  const SH_AGE_S = 13.8e9 * 365.25 * 24 * 3600;      // 宇宙年龄，秒
+  const SH_LOG_COMPUTE = Math.log(SH_NPS * SH_AGE_S) / Math.LN10;
+  const SH_LOG_ATOMS = 80;
+  const SH_LOG_SHANNON = 120;
+  const SH_REFS = [
+    { log: SH_LOG_COMPUTE, label: STR.shCompute },
+    { log: SH_LOG_ATOMS,   label: STR.shAtoms },
+    { log: SH_LOG_SHANNON, label: STR.shShannon },
+  ];
+  const C_REF = 'rgba(159,176,200,0.55)';            // 参照线：中性色，不是一条「曲线」
+
+  /* 图在世界坐标里的画框。它铺在 **x–y 平面**上（z 恒为 0）——与树不同，
+     树铺在 x–z 上。相机的选择完全由这一条决定，理由写在 SH_VIEWS 上面。 */
+  const SH_X0 = -5.8, SH_X1 = 5.8, SH_Y0 = -3.2, SH_Y1 = 3.2;
+  function shX(ply) { return SH_X0 + (SH_X1 - SH_X0) * ply / SH_PLIES; }
+  function shY(l)   { return SH_Y0 + (SH_Y1 - SH_Y0) * Math.min(l, SH_LOGMAX) / SH_LOGMAX; }
+  function shP(C, ply, l) { return E.proj(C, [shX(ply), shY(l), 0]); }
+
+  /* 上标数字：`10⁸⁰` 比 `10^80` 少一个要解释的符号。 */
+  const SUPS = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+  function sup(n) {
+    return String(Math.round(n)).split('').map(function (c) { return SUPS[+c] || c; }).join('');
+  }
+  function pow10(l) { return '10' + sup(l); }
+
+  /* 一条曲线要爬到 log = l 需要几个半步。exp 是 1（不剪枝）或 0.5（α-β）。 */
+  function plyFor(l, exp) { return l / (SH_LOGB * exp); }
+  /* 「算得完的深度」= 满足 b^(exp·d) ≤ 预算 的最大整数 d。 */
+  function reachDepth(exp) { return Math.floor(plyFor(SH_LOG_COMPUTE, exp)); }
+
+  /* 别的页签上此刻最大的那棵树有多少个节点。**实测来的**：她改了源码、
+     换了深度，这根短线就跟着动。 */
+  function ourNodes() {
+    let n = 0;
+    TABS.forEach(function (tb) {
+      const s = S[tb.id];
+      if (s.tree && s.tree.order.length > n) n = s.tree.order.length;
+    });
+    return n;
+  }
+
+  function shLine(pts, color, width, dash) {
+    if (pts.length < 2) return;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(width, px(width));
+    if (dash) ctx.setLineDash([px(dash[0]), px(dash[1])]);
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k][0], pts[k][1]);
+    ctx.stroke();
+    ctx.restore();
+  }
+  function shText(s, p, color, align, baseline, size) {
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.font = px(size || 11) + 'px ' + FONT_MONO;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(s, p[0], p[1]);
+    ctx.restore();
+  }
+
+  function drawShannon(C) {
+    /* ---- 网格与两根轴 ---- */
+    for (let l = 0; l <= SH_LOGMAX; l += 20) {
+      const a = shP(C, 0, l), b = shP(C, SH_PLIES, l);
+      if (a && b) shLine([a, b], 'rgba(148,163,184,0.10)', 1);
+      if (a) shText(pow10(l), [a[0] - px(6), a[1]], 'rgba(159,176,200,0.5)', 'right', 'middle', 10);
+    }
+    for (let d = 0; d <= SH_PLIES; d += 10) {
+      const a = shP(C, d, 0), b = shP(C, d, SH_LOGMAX);
+      if (a && b) shLine([a, b], 'rgba(148,163,184,0.08)', 1);
+      if (a) shText(String(d), [a[0], a[1] + px(7)], 'rgba(159,176,200,0.5)', 'center', 'top', 10);
+    }
+    const o = shP(C, 0, 0), xEnd = shP(C, SH_PLIES, 0), yTop = shP(C, 0, SH_LOGMAX);
+    if (o && xEnd) shLine([o, xEnd], 'rgba(148,163,184,0.35)', 1);
+    if (o && yTop) shLine([o, yTop], 'rgba(148,163,184,0.35)', 1);
+    if (xEnd) shText(t(STR.shAxisX), [xEnd[0], xEnd[1] + px(22)], 'rgba(159,176,200,0.62)', 'right', 'top', 11);
+    if (yTop) shText(t(STR.shAxisY), [yTop[0], yTop[1] - px(8)], 'rgba(159,176,200,0.62)', 'left', 'bottom', 11);
+
+    /* ---- 三条参照线 ---- */
+    SH_REFS.forEach(function (r) {
+      const a = shP(C, 0, r.log), b = shP(C, SH_PLIES, r.log);
+      if (!a || !b) return;
+      shLine([a, b], C_REF, 1.1, [5, 4]);
+      shText(t(r.label) + ' · ' + pow10(r.log), [b[0], b[1] - px(4)], C_REF, 'right', 'bottom', 11);
+    });
+
+    /* ---- 两条曲线 ----
+       颜色沿用这一页已经定下的含义，不新发明：绿 = 不剪枝时该有的量
+       （树页签里的「未剪枝轮廓」就是这个绿），紫 = 剪掉之后的量。 */
+    [{ exp: 1, color: C_GHOST, label: STR.shNoPrune },
+     { exp: 0.5, color: C_CUT, label: STR.shAB }].forEach(function (cv) {
+      const pts = [];
+      for (let d = 0; d <= SH_PLIES; d++) {
+        const l = d * SH_LOGB * cv.exp;
+        if (l > SH_LOGMAX) break;
+        const p = shP(C, d, l);
+        if (p) pts.push(p);
+      }
+      shLine(pts, cv.color, 2.0);
+      if (pts.length) {
+        const tip = pts[pts.length - 1];
+        shText(t(cv.label), [tip[0] - px(6), tip[1] - px(6)],
+               cv.color, 'right', 'bottom', 11);
+      }
+      /* 每条曲线穿过参照线的那一点：打一个点、写上是第几个半步。
+         这是「指数减半 = 深度翻倍」在图上唯一读得出来的地方。 */
+      SH_REFS.forEach(function (r) {
+        const d = plyFor(r.log, cv.exp);
+        if (d > SH_PLIES) return;
+        const p = shP(C, d, r.log);
+        if (!p) return;
+        ctx.save();
+        ctx.fillStyle = cv.color;
+        ctx.beginPath();
+        ctx.arc(p[0], p[1], Math.max(2.6, px(3)), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        shText(String(Math.floor(d)), [p[0] + px(6), p[1] + px(3)], cv.color, 'left', 'top', 10);
+      });
+    });
+
+    /* ---- 你刚才看的那棵树 ---- */
+    const n = ourNodes();
+    if (n > 0) {
+      const l = Math.log(n) / Math.LN10;
+      const a = shP(C, 0, l), b = shP(C, SH_PLIES * 0.16, l);
+      if (a && b) {
+        shLine([a, b], C_SPINE, 1.8);
+        shText(t(STR.shOurs) + ' · ' + fmtInt(n), [b[0] + px(6), b[1]], C_SPINE, 'left', 'middle', 11);
+      }
+    }
+  }
+
+  function shannonReadout() {
+    const lines = [];
+    lines.push('<span class="dim">' + t(STR.shBranch) + ' <i>b</i></span> ' + bval(String(SH_B), C_GHOST));
+    lines.push('<span class="dim">' + t(STR.shGame).replace('%P', String(SH_PLIES)) + '</span> ' +
+               bval(pow10(SH_PLIES * SH_LOGB), C_GHOST) + ' <span class="dim">·</span> ' +
+               t(STR.shAB) + ' ' + bval(pow10(SH_PLIES * SH_LOGB / 2), C_CUT));
+    lines.push('<span class="rule"></span>');
+    lines.push('<span class="dim">' + t(STR.shReach) + '</span> ' +
+               bval(String(reachDepth(1)) + ' ' + t(STR.shPlies), C_GHOST) +
+               ' <span class="dim">·</span> ' +
+               bval(String(reachDepth(0.5)) + ' ' + t(STR.shPlies), C_CUT));
+    lines.push('<span class="dim">' + t(STR.shDouble)
+      .replace('%A', String(reachDepth(1)))
+      .replace('%B', String(reachDepth(0.5)))
+      .replace('%P', String(SH_PLIES)) + '</span>');
+    lines.push('<span class="rule"></span>');
+    /* 两条曲线各在哪一步撞上原子数那条线。α-β 那一条在这张图上根本到不了，
+       就说它到不了、以及大约在哪儿——不把它画到图外再假装读得出来。 */
+    SH_REFS.forEach(function (r) {
+      const d1 = plyFor(r.log, 1), d2 = plyFor(r.log, 0.5);
+      const cell = function (d, color) {
+        if (d > SH_PLIES) return '<span class="dim">' + t(STR.shOffChart).replace('%D', String(Math.floor(d))) + '</span>';
+        return bval(String(Math.floor(d)), color);
+      };
+      lines.push('<span class="dim">' + t(r.label) + ' ' + pow10(r.log) + '</span> ' +
+                 cell(d1, C_GHOST) + ' <span class="dim">·</span> ' + cell(d2, C_CUT));
+    });
+    const n = ourNodes();
+    if (n > 0) {
+      lines.push('<span class="rule"></span>');
+      lines.push('<span class="dim">' + t(STR.shOursLine)
+        .replace('%N', fmtInt(n))
+        .replace('%L', (Math.log(n) / Math.LN10).toFixed(1)) + '</span>');
     }
     return lines.join('<br>');
   }
@@ -7033,6 +7655,35 @@ const ALGOS = {
        枝子砍掉之后那一块塌下去的样子在这个角度上最有体积感。 */
     side:  { label: STR.vSide,  az: 0, el: Math.PI / 4,   dist: 16, tx: 0, ty: 0, tz: 0 },
   };
+  /* ---------------- `shannon` 的相机：自己按 §5.3 的判据定，不继承 ----------------
+
+     §5.3 的判据原话是「**这一页的主体是不是一块棋盘**」，不是「这一页有没有
+     棋盘」。三个树页签走的是例外条款，理由是它们的主体是一棵沿 z 生长的树，
+     正视顺着 z 看进去会把五层压成一条线（实测纵向张开 0.00）。
+
+     **这一页两个都不是。** 它的主体是一张二维图：横轴是半步数、纵轴是
+     log10(局面数)，画在世界的 **x–y 平面**上，z 恒为 0。**第三根轴上什么
+     都没有**——不是「有东西但看不清」，是根本没有东西。
+
+     于是判据反过来给出一个干净的答案：正视 `az=0, el=0` 沿 z 轴（正是这张
+     图的法线）正对看进去，横轴纵轴都不缩、刻度直读。这与 §5.3 给棋盘定的
+     第一视角**恰好是同一个相机**，但理由完全不同：棋盘是因为「盘面铺在
+     x–y 上、法线是 z」，这张图是因为「图铺在 x–y 上、法线是 z」。同一个
+     几何事实，不是继承来的规矩。
+
+     **由此，views 只有一项。** §5.3 那张表里的桌面 45°（`el=−π/4`）在这里
+     只会把一张平面图斜过来：两根轴一起缩，10 的幂读不准，半步数读不准，
+     换不来任何东西——第三根轴上没有内容可以「立起来」，所以 §5.3 那条
+     「凡是把第三根轴立起来的 tab 必须提供沿那根轴的侧视」在这一页上不成立
+     （它没有把任何轴立起来）。给一个只会让人读错的按钮，不如不给：这一页
+     只有一个视角，拖歪了按 `1`（或双击）回来。dist 沿用 §5.3 正视的 14。
+
+     取景框（updateFit）的基准也跟着换成它。树那边有一条警告说「基准不能
+     换成正视」——那条只对树成立：树的包围盒四个角 y 全是 0，正视下高度是 0。
+     这张图的包围盒四个角 y = ±3.2，正视下高度是实的，正是该用的基准。 */
+  const SHANNON_HOME = { az: 0, el: 0, dist: 14, tx: 0, ty: 0, tz: 0 };
+  const SH_VIEWS = { front: Object.assign({ label: STR.vChart }, SHANNON_HOME) };
+
   const TOGGLES = [
     { key: 'spine',  label: STR.tgSpine,  color: C_SPINE, checked: true },
     { key: 'cuts',   label: STR.tgCuts,   color: C_CUT,   checked: true },
@@ -7052,6 +7703,31 @@ const ALGOS = {
       draw: frameFor('prune'),
       readout: function () { return readoutFor('prune'); },
     },
+    /* `order` 与 `prune` 跑的是**同一个 α-β**，只多了「先试吃子」那一段
+       （minimax.js 的插入点一）。所以它的主体同样是一棵树，视角、开关、
+       画法全部沿用——要看的差别在树的宽度和读数区那张按深度的小表里，
+       不在别的地方。 */
+    order: {
+      label: STR.tabOrder, brand: STR.brandOrder, tips: STR.tipsOrder,
+      views: VIEWS, toggles: TOGGLES,
+      draw: frameFor('order'),
+      readout: function () { return readoutFor('order'); },
+    },
+    /* 纯图表（§4④）：没有源码、没有游标、没有开关，深度滑杆也与它无关
+       （`params: []` 把滑杆藏起来——这一页的横轴一路到 80 个半步，一个
+       1–4 的滑杆摆在旁边只会让人以为两者有关系）。 */
+    shannon: {
+      label: STR.tabShannon, brand: STR.brandShannon, tips: STR.tipsShannon,
+      views: SH_VIEWS, params: [],
+      draw: function (C) {
+        setUiTab('shannon');
+        ctx.save();
+        ctx.translate(fit.tx, fit.ty);
+        ctx.scale(fit.s, fit.s);
+        try { drawShannon(C); } finally { ctx.restore(); }
+      },
+      readout: shannonReadout,
+    },
   };
 
   const PARAMS = [
@@ -7063,6 +7739,7 @@ const ALGOS = {
   const statusEl = document.getElementById('status');
   const btnRun = document.getElementById('btnRun');
   const btnRevert = document.getElementById('btnRevert');
+  const btnExport = document.getElementById('btnExport');
 
   function setStatus(html, cls) {
     statusEl.className = 'sp-status' + (cls ? ' ' + cls : '');
@@ -7225,10 +7902,81 @@ const ALGOS = {
     });
   });
 
+  /* ================= §2.8 的 `Export .js` =================
+
+     规格原话：「另提供 `Export .js`——导出的文件她可以直接在 `node` 里跑，
+     因为那本来就是真 JS。」
+
+     「本来就是真 JS」这句是对的。**原样能不能跑，实测过，答案分两种**
+     （她读到的这份东西是一段**程序体**，最后一行是顶层 `return`——解释器的
+     `run` 就是这么定义入口的，见 §2.6）：
+
+       · 默认的 CommonJS（`node file.js`，没有 `"type": "module"`）：**跑得动**。
+         node 把每个 CJS 文件包在一个函数里，顶层 return 因此合法。但那个
+         return 的值**没有任何人接**——退出码 0、一行输出都没有。「跑了」和
+         「看得见结果」是两回事，只做到前一半等于交了一个哑巴文件。
+       · ESM（`.mjs`，或目录里有 `"type": "module"` 的 `package.json`）：
+         **`SyntaxError: Illegal return statement`**，直接跑不起来。
+
+     所以包一层 `function run() { … }` 再 `console.log(run())`：两种模块制式
+     下都跑得起来，而且真的把答案打出来。**她的字节一个不动**（不缩进、不
+     改写），只在前后各加几行，而且导出文件的头注释里把这件事说清楚。
+
+     不跟 Run 一起禁用：解释器只认 JavaScript 的一个子集，她写个三元运算符
+     Run 就灭了，可 node 跑得好好的——那正是最该把文件拿出去跑一跑的时刻。 */
+  function exportName(st) {
+    return 'minimax-' + st.mode + '-d' + curDepth + '.js';
+  }
+  function exportText(st, name) {
+    return [
+      '// ' + name,
+      '// 从「博弈树与搜索」(chess-search-minimax v' + VERSION + ') 导出。',
+      '//',
+      '// 中间那一段是你在编辑器里读到的源码，一个字节都没改。',
+      '// 唯一的加工是把它包进 run() 再 console.log 一次。为什么要包：',
+      '//   编辑器里的那份是一段「程序体」，最后一行是顶层 return。',
+      '//   直接存成 .js 用 node 跑，它不会报错 —— 但那个 return 的值没人接，',
+      '//   你会看到一片空白；换成 ESM（.mjs 或 "type": "module"）则直接',
+      '//   报 SyntaxError: Illegal return statement。包一层，两种情况都对。',
+      '//',
+      '// 跑它：   node ' + name,
+      '',
+      'function run() {',
+      st.src,
+      '}',
+      '',
+      'console.log(run());',
+      '',
+    ].join('\n');
+  }
+  btnExport.addEventListener('click', function () {
+    const st = S[activeId];
+    if (!st) return;
+    const name = exportName(st);
+    try {
+      const blob = new Blob([exportText(st, name)], { type: 'text/javascript;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      /* 立刻撤销会在部分浏览器里赶在下载真正开始之前把 blob 收掉。 */
+      setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+      statusKind = 'ok';
+      setStatus(t(STR.exportOk).replace(/%F/g, esc(name)), 'ok');
+    } catch (e) {
+      statusKind = 'bad';
+      setStatus(esc(t(STR.exportFail) + e.message), 'bad');
+    }
+  });
+
   /* ================= 启动 ================= */
   if (!AM) {
     setStatus(esc(t(STR.bootFail) + (bootErr ? bootErr.message : '')), 'bad');
     btnRun.disabled = true;
+    btnExport.disabled = true;     // 没有源码可导（生成器都没起来）
     return;
   }
 
@@ -7291,6 +8039,9 @@ const ALGOS = {
   window.addEventListener('keydown', function (e) {
     if (e.key !== '\\' || e.ctrlKey || e.metaKey || e.altKey) return;
     if (document.activeElement === ed.textarea) return;
+    /* 纯图表页上代码面板本来就不在，折叠没有东西可折。让它悄悄置上
+       `folded`，回到别的页签时那一页就莫名其妙是折起来的。 */
+    if (uiTab === 'shannon') return;
     e.preventDefault();
     document.body.classList.toggle('folded');
     updateFit();                                        // 排在 toggle 之后：availRect 读的就是这个 class
@@ -7306,22 +8057,35 @@ const ALGOS = {
      顺序跑，引擎的先跑完、LANG 已经是新值，然后这里重取本页自己的文案。 */
   document.getElementById('btnLang').addEventListener('click', relabel);
 
-  function relabel() {
-    btnRun.textContent = t(STR.run);
-    btnRevert.textContent = t(STR.reset);
-    document.getElementById('hint').textContent = t(STR.hint);
-    document.getElementById('busy').textContent = t(STR.busy);
+  /* 图例跟着页签走：树页签七行，纯图表页四行。同一块地方画两组不同的含义
+     不是省地方，是因为它们**本来就是两组不同的东西**——图表上没有「还在
+     调用栈上」这回事，树上也没有「可观测宇宙的原子数」。 */
+  function paintLegend() {
     const lg = document.getElementById('legend');
     lg.textContent = '';
-    [[C_MAX, STR.legMax], [C_MIN, STR.legMin], [C_OPEN, STR.legOpen], [C_SPINE, STR.legSpine],
-     [C_CUT, STR.legCut], [C_GHOST, STR.legGhost], [C_VALUE, STR.legValue]].forEach(function (e2) {
+    const rows = uiTab === 'shannon'
+      ? [[C_GHOST, STR.shNoPrune], [C_CUT, STR.shAB], [C_REF, STR.shRefs], [C_SPINE, STR.shOurs]]
+      : [[C_MAX, STR.legMax], [C_MIN, STR.legMin], [C_OPEN, STR.legOpen], [C_SPINE, STR.legSpine],
+         [C_CUT, STR.legCut], [C_GHOST, STR.legGhost], [C_VALUE, STR.legValue]];
+    rows.forEach(function (e2) {
       const rowEl = document.createElement('div');
       const dot = document.createElement('i');
       dot.style.setProperty('--c', e2[0]);
       rowEl.appendChild(dot);
-      rowEl.appendChild(document.createTextNode(t(e2[1])));
+      /* 图例里 <i>b</i><sup>d</sup> 这类记号在这一行是纯文本（图例整块是
+         createTextNode 拼的），去掉标签只留字面。 */
+      rowEl.appendChild(document.createTextNode(t(e2[1]).replace(/<[^>]+>/g, '')));
       lg.appendChild(rowEl);
     });
+  }
+
+  function relabel() {
+    btnRun.textContent = t(STR.run);
+    btnRevert.textContent = t(STR.reset);
+    btnExport.textContent = t(STR.exportBtn);
+    document.getElementById('hint').textContent = t(STR.hint);
+    document.getElementById('busy').textContent = t(STR.busy);
+    paintLegend();
     if (statusKind === 'bad') { const e3 = ed.getError() || (activeId && S[activeId].err); if (e3) setStatus(errText(e3), 'bad'); }
     else if (statusKind === 'ok') setStatus(runText(S[activeId]), 'ok');
     else if (statusKind === 'busy') setStatus(t(STR.busy), 'busy');
@@ -7336,6 +8100,9 @@ const ALGOS = {
      多个 agent 共用一个浏览器会话，本项目已经发生过一次探针落在别人页面上、
      读数被记到错误的文件名下（CLAUDE.md「并行开工纪律」第 3 条）。 */
   window.__treeProbe = function () {
+    /* `tab` 是**此刻显示的页签**（含 shannon）；`algoTab` 是编辑器/调试器
+       挂在哪份程序上。在三个算法页签上两者相等，Task 6 写下的那些
+       `tab:'tree'` / `tab:'prune'` 断言因此原样成立。 */
     const id = activeId, st = S[id];
     syncView();
     const stat = st && st.view ? TM.statsAt(st.view) : null;
@@ -7351,9 +8118,11 @@ const ALGOS = {
       stepsAll[tb.id] = s.res ? s.res.trace.length : null;
       valueAll[tb.id] = s.rootValue;
     });
+    const b = st ? evalBreakdown(st) : null;
     return {
       tool: 'chess-search-minimax',
-      tab: id,
+      tab: uiTab,
+      algoTab: id,
       mode: st ? st.mode : null,
       depth: curDepth,
       i: cache ? cache.i : null,
@@ -7387,7 +8156,26 @@ const ALGOS = {
       speed: dbg.speed(),
       toggles: { spine: !!E.state.spine, cuts: !!E.state.cuts,
                  ghost: !!E.state.ghost, values: !!E.state.values },
+      /* §4④ 的评估分解。`mat === null` = 读不出她那张 VAL 表；
+         `total === null` = 连 evaluate 都问不出来。两者都不是 0。 */
+      evalAt: b ? { depth: cursorTreeDepth(st), board: b.bd,
+                    material: b.mat === null ? null : b.mat,
+                    centre: b.mat === null ? null : b.cen,
+                    total: b.total } : null,
+      /* `order` 的按深度扫表。null = 还没算（切到那一页才算）。 */
+      sweep: sweep ? sweep.map(function (r) {
+        return { depth: r.depth, ab: r.ab, ordered: r.ordered,
+                 saveNodes: saving(r.ab, r.ordered, 'nodes'),
+                 saveSteps: saving(r.ab, r.ordered, 'steps') };
+      }) : null,
+      sweepNoSub: sweepNoSub,
+      /* 纯图表页上那几个由常量算出来的量，供断言「它们是算的不是写的」。 */
+      shannon: { b: SH_B, plies: SH_PLIES, logGame: +(SH_PLIES * SH_LOGB).toFixed(2),
+                 reachPlain: reachDepth(1), reachAB: reachDepth(0.5),
+                 logCompute: +SH_LOG_COMPUTE.toFixed(2), ourNodes: ourNodes() },
+      exportName: st ? exportName(st) : null,
       folded: document.body.classList.contains('folded'),
+      nosplit: document.body.classList.contains('nosplit'),
       busy: document.body.classList.contains('busy'),
       lang: document.documentElement.lang,
       codeWidth: Math.round(document.getElementById('split').getBoundingClientRect().width),
