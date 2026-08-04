@@ -183,8 +183,62 @@ T.throws(function () {
   E.parse('// >>> BLANK id=a level=1 fill="1;" hint="甲" hintEn="A"\n// <<< BLANK');
 }, '空挖空体 —— 抛');
 
-/* hintAt 属于 Task 3，确认它确实还没导出（约束 7：用 typeof） */
-T.ok(typeof E.hintAt === 'undefined', 'hintAt 属于 Task 3，本任务不导出');
+/* ---------- hintAt ---------- */
+
+const hb = E.parse([
+  '// >>> BLANK id=h level=1 fill="return true;" hint="会被攻击吗？" hintEn="Is it attacked?"',
+  'if (cols[c]) { return false; }',
+  'return !diagDown[r + c];',
+  '// <<< BLANK',
+].join('\n')).blanks[0];
+
+const h1 = E.hintAt(hb, 1);
+T.ok(h1.zh.indexOf('会被攻击吗？') >= 0, '第 1 级就是文字提示（中文）');
+T.ok(h1.en.indexOf('Is it attacked?') >= 0, '第 1 级就是文字提示（英文）');
+
+const h2 = E.hintAt(hb, 2);
+T.ok(h2.zh.indexOf('cols') >= 0, '第 2 级点出了 cols');
+T.ok(h2.zh.indexOf('diagDown') >= 0, '第 2 级点出了 diagDown');
+T.ok(h2.zh.indexOf('return') === -1, '第 2 级不列关键字，只列变量');
+T.ok(h2.zh.indexOf('if') === -1, '第 2 级不列关键字（if 不是变量）');
+
+const h3 = E.hintAt(hb, 3);
+T.ok(h3.zh.indexOf('if') >= 0, '第 3 级保留了控制流关键字');
+T.ok(h3.zh.indexOf('cols[c]') === -1, '第 3 级把表达式挖掉了');
+T.ok(h3.zh.indexOf('…') >= 0, '第 3 级用省略号标出被挖掉的位置');
+
+const h4 = E.hintAt(hb, 4);
+T.ok(h4.zh.indexOf('!diagDown[r + c]') >= 0, '第 4 级是完整答案');
+T.eq(h4.zh.indexOf('…'), -1, '第 4 级没有省略号');
+
+T.throws(function () { E.hintAt(hb); }, 'hintAt 少了 level —— 抛');
+T.throws(function () { E.hintAt(undefined, 1); }, 'hintAt 少了 blank —— 抛');
+T.throws(function () { E.hintAt(hb, 0); }, 'level=0 越界 —— 抛');
+T.throws(function () { E.hintAt(hb, 5); }, 'level=5 越界 —— 抛');
+
+/* 第 3 级骨架对嵌套括号、多语句、赋值也要机械生成得对——不只是单个
+   if+return 那一种最简形状。这里用一段人工构造的挖空体（不是任何一道
+   真题）覆盖：`if` 条件带嵌套括号、赋值 `=` 与比较 `===`/`<=` 混在一起、
+   `while` 循环。 */
+const hb2 = E.parse([
+  '// >>> BLANK id=k level=2 fill="return 0;" hint="骨架覆盖更多形状" hintEn="skeleton covers more shapes"',
+  'let total = 0;',
+  'while (idx < n) {',
+  '  if (arr[fn(idx)] === target) { total = total + 1; }',
+  '  idx = idx + 1;',
+  '}',
+  'return total;',
+  '// <<< BLANK',
+].join('\n')).blanks[0];
+const h3b = E.hintAt(hb2, 3);
+T.ok(h3b.zh.indexOf('let total = …;') >= 0, '骨架：简单赋值的右侧被挖掉，`let`/变量名保留');
+T.ok(h3b.zh.indexOf('while (…) {') >= 0, '骨架：while 保留、括号里的比较被挖掉');
+T.ok(h3b.zh.indexOf('if (…) { total = …; }') >= 0,
+  '骨架：if 的嵌套括号条件整体挖掉，赋值右侧也挖掉，大括号原样保留');
+T.ok(h3b.zh.indexOf('idx = …;') >= 0, '骨架：第二个赋值同样挖掉右侧');
+T.ok(h3b.zh.indexOf('return …;') >= 0, '骨架：末尾的 return 也挖掉');
+T.ok(h3b.zh.indexOf('arr[fn(idx)]') === -1, '骨架：if 条件里的嵌套调用没有残留');
+T.ok(h3b.zh.indexOf('target') === -1, '骨架：if 条件里的比较对象没有残留');
 
 /* ---------- judge ---------- */
 

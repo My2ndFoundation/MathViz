@@ -115,13 +115,14 @@
      所以：如果提取出来的值里**还留着**字面双引号，说明这一行的引号配对
      跟作者想的不是一回事，当场抛，让作者自己把引号去掉。
 
-     **已知缺口（本轮裁定范围之外，见 task-2-report.md）**：这条哨兵只挡得住
-     「字面引号后面没有空白」那一形。如果字面引号后面紧跟空白、而且这个属性
-     恰好是行内最后一个（`… hint="他说" 你好的场景"`），token 会在那个引号处
-     收尾，后面那截变成一个没人认领的 token 被丢掉——提取出来的值是「他说」，
-     里面一个引号都没有，哨兵看不见它。真正封住它需要另一条规则：
-     `>>> BLANK` 之后的每个 token 都必须是已知的 `key=` 形状，否则抛。
-     `exercise.test.js` 里有一条断言把这个现状钉住了。 */
+     **这条哨兵只挡得住 C 形**：字面引号后面没有空白，整段被 `tokenize`
+     吞成一个 token，值里残留着字面引号，靠上面那个 `indexOf('"')` 检查抓。
+     字面引号后面紧跟空白、且该属性恰好是行内最后一个的那一形（A 形，
+     `… hint="他说" 你好的场景"`），token 会在那个引号处收尾，后面那截变成
+     一个没人认领的 token——提取出来的值是「他说」，一个引号都没有，这条
+     哨兵看不见它。A 形由下面的 `assertKnownTokens` 关上：那个没人认领的
+     token 不是任何已知属性名开头，会在那里被当场抓住。两条哨兵互补、各管
+     一形，缺一形就漏——完整对照见 `assertKnownTokens` 自己的注释。 */
   function scanQuoted(line, key) {
     const marker = key + '="';
     const tokens = tokenize(line);
@@ -630,5 +631,211 @@
     return { status: 'pass', divergence: null };
   }
 
-  return { parse: parse, judge: judge };
+  /* ================= hintAt：分级提示，逐级给，不一次给完 =================
+
+     规格 §2.9：文字提示 → 点名涉及了哪几个变量 → 参考答案的结构骨架（保留
+     控制流、挖掉表达式）→ 完整答案。**任何时候都可以直接跳到第 4 级看
+     答案**——这是自学工具，不是考试，卡住而推进不了只会让人把页面关掉。
+
+     `level` 是提示阶梯（1..4），跟 `Blank.level` 那个 1..3 的**难度**不是
+     同一件事——同一个挖空可以是难度 1、但提示已经要到第 4 级；调用方自己
+     记着「这道题现在点到第几级」，这里不替它记。
+
+     第 3 级的骨架是**机械生成**的，不是另写一份简化答案：跟「参考答案
+     就是源码本身」是同一条纪律——另写一份就会有第二份东西可以跟源码漂移
+     （Task 1 的执行者就在自己头注释里踩过这条线，见文件头）。生成规则：
+     把 `if (…)` / `while (…)` / `for (…)` 括号里的内容、以及 `return` 和
+     `=` 右边的表达式，全部换成 `…`，其余原样保留——缩进、大括号、分号都
+     不动，控制流的形状还在，只有「算出什么」被挖掉了。
+
+     第 3 级和第 4 级的**正文是源码**，中英两侧的正文完全相同，两侧唯一的
+     差别是正文前面那句说明用的语言。第 1 级直接读 `blank.hint.{zh,en}`——
+     那本来就是出题者分别写好的两句话，不需要也不应该合成一份。第 2 级的
+     变量清单是从代码里扫出来的标识符，本身也不是要翻译的文本，中英只是
+     前面的引导句不同。 */
+
+  const HINT_L2_KEYWORDS = [
+    'if', 'else', 'for', 'while', 'return', 'const', 'let', 'function',
+    'true', 'false', 'null',
+  ];
+
+  /* 第 2 级：挖空体里出现过的变量名——扫出所有标识符，去掉 ES 关键字表，
+     去重，保留首次出现的顺序（顺序本身是线索：先出现的往往是先读到的
+     那一个）。不区分「这是个变量」还是「这是个函数名/属性名」——分级提示
+     只是引导使用者去读代码里的哪几个名字，不是做静态类型分析。 */
+  function variablesIn(body) {
+    const seen = Object.create(null);
+    const names = [];
+    const re = /[A-Za-z_$][A-Za-z0-9_$]*/g;
+    let m;
+    while ((m = re.exec(body)) !== null) {
+      const name = m[0];
+      if (HINT_L2_KEYWORDS.indexOf(name) !== -1) continue;
+      if (seen[name]) continue;
+      seen[name] = true;
+      names.push(name);
+    }
+    return names;
+  }
+
+  /* 找 `str[openIdx]`（必须是 '('）对应的那个 ')'，跳过字符串字面量内部的
+     括号（挖空体是算法源码，字符串里不会有转义引号，遇到引号就找下一个
+     同符号收尾即可）。找不到配对返回 -1——正常来自 `parse()` 的挖空体
+     语法完整，不会走到这条分支，这里只是不让畸形输入死循环。 */
+  function matchParen(str, openIdx) {
+    let depth = 0;
+    for (let i = openIdx; i < str.length; i++) {
+      const c = str[i];
+      if (c === '"' || c === "'" || c === '`') {
+        const quote = c;
+        i++;
+        while (i < str.length && str[i] !== quote) i++;
+        continue;
+      }
+      if (c === '(') depth++;
+      else if (c === ')') {
+        depth--;
+        if (depth === 0) return i;
+      }
+    }
+    return -1;
+  }
+
+  /* 从 idx 开始找这条语句结束的分号——跳过嵌套的 `(` `[` `{`，因为它们内部
+     可能藏着别的分号（比如数组字面量里的一个匿名函数）。找不到分号收尾
+     就到字符串末尾（比如挖空体最后一行没写分号）。 */
+  function statementEnd(str, idx) {
+    let depth = 0;
+    for (let i = idx; i < str.length; i++) {
+      const c = str[i];
+      if (c === '(' || c === '[' || c === '{') depth++;
+      else if (c === ')' || c === ']' || c === '}') { if (depth > 0) depth--; }
+      else if (c === ';' && depth === 0) return i;
+    }
+    return str.length;
+  }
+
+  /* 第 3 级：结构骨架，逐字符扫过挖空体机械生成——不调用任何解析器，只是
+     一台「认得几个关键字」的抄写机：遇到 `if`/`while`/`for` 就把它后面那对
+     括号里的内容整体换成 `…`；遇到 `return`，或者一个真正表示赋值的 `=`
+     （排除 `==` `===` `!=` `<=` `>=` `=>`，也排除 `+=` 这类复合赋值的第二
+     个字符——那不是这里要认的「裸 =」），就把它右边到语句结尾的内容换成
+     `…`；其余字符原样照抄。
+
+     之所以逐字符扫而不是几条正则拼起来：`if (…)` 的括号可能嵌套
+     （`if (a(b))`），正则处理不了任意深度的嵌套括号，手写的
+     `matchParen`/`statementEnd` 用深度计数就能正确处理。 */
+  function skeletonOf(body) {
+    let out = '';
+    let i = 0;
+    const n = body.length;
+    const idRe = /^[A-Za-z_$][A-Za-z0-9_$]*/;
+
+    while (i < n) {
+      const idMatch = idRe.exec(body.slice(i));
+
+      if (idMatch && (idMatch[0] === 'if' || idMatch[0] === 'while' || idMatch[0] === 'for')) {
+        out += idMatch[0];
+        i += idMatch[0].length;
+        let j = i;
+        while (j < n && /\s/.test(body[j])) j++;
+        out += body.slice(i, j);
+        i = j;
+        if (body[i] === '(') {
+          const close = matchParen(body, i);
+          if (close === -1) { out += body.slice(i); i = n; break; }
+          out += '(…)';
+          i = close + 1;
+        }
+        continue;
+      }
+
+      if (idMatch && idMatch[0] === 'return') {
+        out += 'return';
+        i += 'return'.length;
+        const end = statementEnd(body, i);
+        const rhs = body.slice(i, end);
+        out += rhs.trim() === '' ? rhs : ' …';
+        i = end;
+        continue;
+      }
+
+      if (body[i] === '=') {
+        const prevCh = out.length ? out[out.length - 1] : '';
+        const nextCh = body[i + 1];
+        const isPartOfWiderOperator = /[=!<>+\-*/%&|^]/.test(prevCh) || nextCh === '=' || nextCh === '>';
+        if (!isPartOfWiderOperator) {
+          out += '=';
+          i += 1;
+          let j = i;
+          while (j < n && /[ \t]/.test(body[j])) j++;
+          out += body.slice(i, j) || ' ';
+          i = j;
+          const end = statementEnd(body, i);
+          const rhs = body.slice(i, end);
+          out += rhs.trim() === '' ? rhs : '…';
+          i = end;
+          continue;
+        }
+      }
+
+      out += body[i];
+      i++;
+    }
+    return out;
+  }
+
+  /* hintAt(blank, level) → { zh, en }
+     `blank` 必须是 `parse()` 产出的挖空对象（要有 `body` 和
+     `hint.{zh,en}`），`level` 必须是 1..4 的整数。两个参数缺一个、或
+     `level` 越界（含 0、5、非整数），都按约束 6 大声抛——分级提示也是
+     「找不到就抛，不猜」的场景：猜一个默认级别只会让人以为自己看到的是
+     完整提示。 */
+  function hintAt(blank, level) {
+    if (!blank || typeof blank !== 'object' || typeof blank.body !== 'string' ||
+        !blank.hint || typeof blank.hint.zh !== 'string' || typeof blank.hint.en !== 'string') {
+      throw new Error(
+        'hintAt(blank, level) 少了 blank，或者它不是 parse() 产出的挖空对象' +
+        '（要有 body 和 hint.{zh,en}），收到：' +
+        (blank === null || blank === undefined ? String(blank) : typeof blank)
+      );
+    }
+    if (level === undefined) {
+      throw new Error('hintAt(blank, level) 少了 level（1..4 的提示阶梯）');
+    }
+    if (!(level === 1 || level === 2 || level === 3 || level === 4)) {
+      throw new Error(
+        'hintAt 的 level 必须是 1、2、3 或 4，收到：' + JSON.stringify(level) +
+        '\n  （这是提示阶梯，不是 blank.level 那个 1..3 的难度——两者不是一回事）'
+      );
+    }
+
+    if (level === 1) {
+      return { zh: blank.hint.zh, en: blank.hint.en };
+    }
+
+    if (level === 2) {
+      const vars = variablesIn(blank.body);
+      const zhList = vars.length ? vars.join('、') : '（这段代码里没有普通变量名）';
+      const enList = vars.length ? vars.join(', ') : '(no plain variable names in this snippet)';
+      return {
+        zh: '涉及的变量：' + zhList,
+        en: 'Variables involved: ' + enList,
+      };
+    }
+
+    const body = level === 3 ? skeletonOf(blank.body) : blank.body;
+    const zhLabel = level === 3
+      ? '参考答案的结构骨架（控制流保留，把算出什么的部分挖成 …）：'
+      : '完整答案：';
+    const enLabel = level === 3
+      ? 'Structural skeleton of the reference answer (control flow kept, expressions blanked as …):'
+      : 'The full answer:';
+    return {
+      zh: zhLabel + '\n' + body,
+      en: enLabel + '\n' + body,
+    };
+  }
+
+  return { parse: parse, judge: judge, hintAt: hintAt };
 });
