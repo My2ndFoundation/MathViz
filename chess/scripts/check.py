@@ -23,6 +23,23 @@ STDIN_LINE_RE = re.compile(r'^\[stdin\]:(\d+)$', re.MULTILINE)
 ALGOS_BLOCK_RE = re.compile(
     r'/\* >>> GENERATED:ALGOS \*/\n(.*?)\n/\* <<< GENERATED:ALGOS \*/', re.DOTALL)
 
+# 根级页面 = chess/index.html 与 chess/app.html。它们不在 tools/ 下，于是
+# 长期躲过了这个文件里的两道门：node_check() 只 glob('tools/*.html')，而 CI
+# 的语法门（.github/workflows/registry-sync.yml）扫的是主站的 app.html /
+# index.html / outputs/*.html，不含 chess/。两边合起来的结果是 chess/index.html
+# 从来没有被任何语法门覆盖过——一个纯 JS 驱动的导航页，语法错了就是整页白屏，
+# 而所有门都报绿。
+ROOT_PAGE_MIN = 2
+def root_pages() -> list:
+    """chess/ 根目录下的 html 页面，按文件名排序。
+
+    钉住「至少 ROOT_PAGE_MIN 个」而不是只写一句 glob：本仓库已经栽过两次同类
+    的坑——core_tests() 用 glob 而非 rglob，于是 core/algos/minimax.test.js
+    整个测试文件在门外躺着没人跑，直到阶段 4 的实现者报上来。遍历漏光了会
+    安静地全绿，正是这道门要防的失败模式本身。
+    """
+    return sorted(ROOT.glob('*.html'))
+
 
 def node_check() -> int:
     """逐个脚本块跑 node --check，而不是拼成一份大源码再跑一次。
@@ -33,7 +50,13 @@ def node_check() -> int:
     形状：拼接会把报错行号错报到人手写的那块代码上。这里改成每块单独检查，
     再把该块在文件里的真实起始行加回报错信息里的行号，使其始终对得上。
     """
-    tools = sorted((ROOT / 'tools').glob('*.html'))
+    pages = root_pages()
+    if len(pages) < ROOT_PAGE_MIN:
+        print(f'ERROR: chess/ 根级页面只找到 {len(pages)} 个，至少要 {ROOT_PAGE_MIN} 个'
+              f'（index.html 与 app.html）——glob 漏了或文件被挪走了',
+              file=sys.stderr)
+        return 1
+    tools = sorted((ROOT / 'tools').glob('*.html')) + pages
     failed = []
     total_blocks = 0
     for path in tools:
@@ -190,7 +213,7 @@ def algos_roundtrip_check() -> int:
 
 
 def fallback_check() -> int:
-    """chess/index.html 内嵌的 FALLBACK 列表，id 集合必须与 chess-tools.json 一致。
+    """每个根级页面内嵌的 FALLBACK 列表，id 集合必须与 chess-tools.json 一致。
 
     放在这里而不是 core/ 或 games/ 下的某个 *.test.js：这道检查跨的是两份
     非 JS-模块的静态资产（一份 html 里手写的 JS 字面量、一份 json），不像
@@ -204,27 +227,46 @@ def fallback_check() -> int:
     地和 chess-tools.json 分岔，而任何 file:// 冒烟测试都不会触发这条分支
     去暴露它（本机预览通常走 http server，不是 file://）。
     """
-    index_path = ROOT / 'index.html'
     tools_path = ROOT / 'chess-tools.json'
-    index_text = index_path.read_text(encoding='utf-8')
-    m = re.search(r'var FALLBACK = \[(.*?)\n\];', index_text, re.DOTALL)
-    if not m:
-        print('ERROR: index.html 里找不到 FALLBACK 数组', file=sys.stderr)
-        return 1
-    fallback_ids = set(FALLBACK_ID_RE.findall(m.group(1)))
     registry = json.loads(tools_path.read_text(encoding='utf-8'))
     registry_ids = {t['id'] for t in registry['tools']}
-    if fallback_ids != registry_ids:
-        missing = registry_ids - fallback_ids
-        extra = fallback_ids - registry_ids
-        print('ERROR: index.html 的 FALLBACK 与 chess-tools.json 的 id 集合不一致', file=sys.stderr)
-        if missing:
-            print(f'  FALLBACK 里缺失：{sorted(missing)}', file=sys.stderr)
-        if extra:
-            print(f'  FALLBACK 里多余（chess-tools.json 里已经没有）：{sorted(extra)}', file=sys.stderr)
+
+    pages = root_pages()
+    if len(pages) < ROOT_PAGE_MIN:
+        print(f'ERROR: chess/ 根级页面只找到 {len(pages)} 个，至少要 {ROOT_PAGE_MIN} 个',
+              file=sys.stderr)
         return 1
-    print(f'FALLBACK 一致性：{len(registry_ids)} 个 id 全部对上')
-    return 0
+
+    rc = 0
+    copies = 0
+    for page in pages:
+        text = page.read_text(encoding='utf-8')
+        m = re.search(r'var FALLBACK = \[(.*?)\n\];', text, re.DOTALL)
+        if not m:
+            print(f'ERROR: {page.name} 里找不到 FALLBACK 数组'
+                  f'（每个根级页面都要能在 file:// 下自己渲染出导航）', file=sys.stderr)
+            rc = 1
+            continue
+        copies += 1
+        fallback_ids = set(FALLBACK_ID_RE.findall(m.group(1)))
+        if fallback_ids != registry_ids:
+            missing = registry_ids - fallback_ids
+            extra = fallback_ids - registry_ids
+            print(f'ERROR: {page.name} 的 FALLBACK 与 chess-tools.json 的 id 集合不一致',
+                  file=sys.stderr)
+            if missing:
+                print(f'  FALLBACK 里缺失：{sorted(missing)}', file=sys.stderr)
+            if extra:
+                print(f'  FALLBACK 里多余（chess-tools.json 里已经没有）：{sorted(extra)}',
+                      file=sys.stderr)
+            rc = 1
+
+    if copies < ROOT_PAGE_MIN:
+        print(f'ERROR: 只找到 {copies} 份内嵌 FALLBACK，至少要 {ROOT_PAGE_MIN} 份', file=sys.stderr)
+        rc = 1
+    if rc == 0:
+        print(f'FALLBACK 一致性：{copies} 份内嵌副本 · {len(registry_ids)} 个 id 全部对上')
+    return rc
 
 
 def core_tests() -> int:
