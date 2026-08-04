@@ -286,11 +286,14 @@ function srcFor(id) {
 /* 换页面用 location.replace 而不是赋值 frame.src——这一条抄自主站 app.html，
    理由也照抄：赋值 src 会往「联合会话历史」里塞一条 iframe 记录，与壳自己的
    pushState 交错，后退键就会出现「地址与侧栏都退了、画面还停在上一个工具」的
-   错位。replace 不产生历史记录，历史完全由壳掌握。跨源时回落到 src。 */
+   错位。replace 不产生历史记录，历史完全由壳掌握。
+   try/catch 不是防跨源——location.replace 本身就是少数几个跨源仍可访问的
+   成员，file:// 下一样调用得通，不会抛。catch 兜的是 contentWindow 本身
+   为假值这种边缘情形（iframe 尚未挂好窗口对象），此时才退回赋值 src。 */
 function setFrame(url) {
   try {
     if (frame.contentWindow) { frame.contentWindow.location.replace(url); return; }
-  } catch (e) { /* 跨源（file://）时读 contentWindow 会抛 */ }
+  } catch (e) { /* 理论上的边缘情形，见上 */ }
   frame.src = url;
 }
 
@@ -327,11 +330,20 @@ function go(id, push) {
   if (window.innerWidth <= 760) setSidebarOpen(false, false);
 }
 
-/* 侧边栏点击：事件委托到容器上，renderNav() 每次重画都不必重新绑 */
+/* 侧边栏点击：事件委托到容器上，renderNav() 每次重画都不必重新绑。
+   点已经是当前项的那一个——不出手：go() 无条件会重推一条历史（地址不变
+   但 history.length 白长一条）并重新 setFrame() 同一个 URL（iframe 硬重
+   载，工具内部状态——回放进度、相机、当前 tab——全丢）。这个判断只放在
+   点击这一条路径：boot() 首次调用 go(id,false) 时 curId 还是 null，若把
+   守卫塞进 go() 本身，无 query 的首次加载会被当成「已经在这」而提前返回，
+   iframe 就永远不会被指向画廊；popstate 同理也不能加这层判断。「点到已经
+   在的那项就不动」只在使用者主动点击时才成立。 */
 navList.addEventListener('click', function (e) {
   var btn = e.target.closest ? e.target.closest('.item') : null;
   if (!btn) return;
-  go(btn.dataset.id || null, true);
+  var id = btn.dataset.id || null;
+  if (id === curId) return;
+  go(id, true);
 });
 
 /* 后退/前进 */
