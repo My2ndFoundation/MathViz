@@ -625,7 +625,7 @@ function go(id, push) {
       history.pushState({ tool: curId }, '', u);
     } catch (e) {}
   }
-  if (window.innerWidth <= 760) setSidebarOpen(false);
+  if (window.innerWidth <= 760) setSidebarOpen(false, false);
 }
 
 /* 侧边栏点击：事件委托到容器上，renderNav() 每次重画都不必重新绑 */
@@ -669,13 +669,21 @@ function boot() {
 boot();
 ```
 
-- [ ] **Step 3: 加一个临时的 `setSidebarOpen` 桩，让本 task 可独立运行**
+- [ ] **Step 3: 加 `setSidebarOpen()`**
 
-`go()` 里调了 `setSidebarOpen()`，它的正式实现在 Task 4。在 `boot();` **之前**插入这一行桩，Task 4 会把它替换成真实实现：
+`go()` 在窄屏上要收起侧边栏，所以这个函数属于本 task。写在 `boot();` **之前**（函数声明会提升，位置不影响运行；放在这里是为了让读的人先看见它、再看见调用它的 `boot()`）：
 
 ```js
-/* 桩：正式实现见下一段（折叠与键盘）。先声明是为了让 go() 在本阶段就能跑通。 */
-function setSidebarOpen(open) { shell.classList.toggle('hid', !open); }
+/* ================= 侧边栏显隐 =================
+   remember 默认 true，由调用方按语义传 false：go() 在窄屏上的那次自动收起
+   是布局行为，不是「使用者选择了收起」，不该被记进 NAV_KEY。
+   折叠按钮、快捷键与「恢复上次状态」在下一段（Task 4）接上来。 */
+function setSidebarOpen(open, remember) {
+  shell.classList.toggle('hid', !open);
+  if (remember !== false) {
+    try { localStorage.setItem(NAV_KEY, open ? 'open' : 'hid'); } catch (e) {}
+  }
+}
 ```
 
 - [ ] **Step 4: 语法门**
@@ -707,21 +715,14 @@ git commit -m "feat(chess): iframe 导航、?tool= 深链与历史 —— 换页
 - Modify: `chess/app.html`
 
 **Interfaces:**
-- Consumes: Task 3 的 `go()` / `renderChrome()` / `srcFor()` / `setFrame()`、Task 2 的 `renderNav()`
-- Produces: `setSidebarOpen(open, remember)`（替换 Task 3 的桩）、`setLang(l)`、`hotkey(e)`
+- Consumes: Task 3 的 `go()` / `renderChrome()` / `srcFor()` / `setFrame()` / `setSidebarOpen(open, remember)`、Task 2 的 `renderNav()`
+- Produces: `toggleSidebar()`、`isTyping(el)`、`hotkey(e)`、`setLang(l)`
 
-- [ ] **Step 1: 用正式实现替换 Task 3 的 `setSidebarOpen` 桩**
+- [ ] **Step 1: 接折叠的三个触发点与键盘**
 
-删除 Task 3 Step 3 那两行桩，替换为：
+`setSidebarOpen()` 已在 Task 3 就位，本步只接它的触发点。在 `boot();` 之后追加：
 
 ```js
-/* ================= 侧边栏显隐 ================= */
-function setSidebarOpen(open, remember) {
-  shell.classList.toggle('hid', !open);
-  if (remember !== false) {
-    try { localStorage.setItem(NAV_KEY, open ? 'open' : 'hid'); } catch (e) {}
-  }
-}
 function toggleSidebar() { setSidebarOpen(shell.classList.contains('hid')); }
 
 document.getElementById('btnHide').addEventListener('click', function () { setSidebarOpen(false); });
