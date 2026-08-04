@@ -4,17 +4,24 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="0.1.0">
+<!-- 版本记录（changelog，新→旧）：
+     1.0.0  2026-08-04  首发：tree / prune / order / shannon 四个页签。左边是 minimax
+                        与 α-β 的真实源码在解释器里单步跑，右边是同一次搜索的博弈树；
+                        树的横向宽度按叶子数缩放，所以「剪掉的体积」是肉眼可见的一块。
+                        深度 4 上纯 minimax 撞上解释器的 200,000 步上限、α-β 从容跑完，
+                        这一格被当成课来讲而不是当成故障。另含评估函数的两项分解
+                        （子力值 + 中心控制，都从她此刻的源码里问出来）、按深度的
+                        排序省量小表、Export .js（导出的文件能直接在 node 里跑）。 -->
+<meta name="tool-version" content="1.0.0">
 <meta name="engine-version" content="chess-1.2.0">
 <title>Game Trees and Search</title>
 <!--
   工具④ `chess-search-minimax` —— 规格 §4④。四个 tab 齐了：`tree` / `prune`
   （Task 6）、`order` / `shannon`（Task 7，另含 §4④ 的评估分解与 §2.8 的
-  Export .js）。登记进 chess/chess-tools.json 与 chess/index.html 是 Task 8。
-  在 Task 8 之前它
-  故意不被登记，但**没有**下划线前缀：`_` 前缀那几页（_skeleton /
-  _piece-preview / _debugger-preview）是永远不登记的脚手架，这一页只是
-  还没轮到。
+  Export .js）。Task 8 已把它登记进 chess/chess-tools.json 与 chess/index.html
+  的 FALLBACK 列表（accent `orange`、phase 4）。它没有下划线前缀是有原因的：
+  `_` 前缀那几页（_skeleton / _piece-preview / _debugger-preview）是永远不
+  登记的脚手架，这一页从一开始就只是还没轮到。
 
   §1.5 的分栏：本子项目在调试器工具上明确推翻了设计系统「canvas 全屏、
   UI 只浮在其上、永不切分」这一条，代价是必须保留「一键折叠回全屏画布」——
@@ -45,6 +52,13 @@
   --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
   --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
   --code-w:46vw;
+  /* 右侧参数面板占掉的横向宽度（.panel 的 width 298 + right 14）。页签栏要
+     居中在**真正看得见的那一块**上，而那一块的右界是这块面板的左边，不是
+     窗口右边——JS 里的 rightEdge() 早就这么算了，CSS 这边原来漏了，于是
+     1440 宽下页签栏（z-index 5）压住面板（z-index 3）118 px，面板标题
+     「Parameters & Views」被吃掉大半。窄屏媒体查询里面板挪到底部，这时
+     它归 0。 */
+  --panel-w:312px;
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none}
@@ -94,13 +108,13 @@ body.nosplit #split,body.nosplit #divider{display:none}
 #dbgHost{flex:1 1 0;min-height:190px}
 
 /* ---- 页签：居中于**画布那一块**，不是整窗 ---- */
-.tabs{position:fixed;top:16px;left:calc(var(--code-w) + (100vw - var(--code-w)) / 2);
+.tabs{position:fixed;top:16px;left:calc(var(--code-w) + (100vw - var(--code-w) - var(--panel-w)) / 2);
   transform:translateX(-50%);z-index:5;
   display:flex;gap:4px;padding:4px;border-radius:999px;
   background:var(--panel-bg);border:1px solid var(--panel-line);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
-body.folded .tabs,body.nosplit .tabs{left:50%}
+body.folded .tabs,body.nosplit .tabs{left:calc((100vw - var(--panel-w)) / 2)}
 .tab{border:1px solid transparent;background:transparent;color:#b8c6da;
   font-size:12.5px;font-family:var(--font-cn);padding:6px 15px;border-radius:999px;cursor:pointer;
   transition:color .15s,border-color .15s,background .15s}
@@ -175,24 +189,45 @@ body.folded .legend,body.nosplit .legend{left:16px}
 /* 提示条居中于画布那一块；**保持一行、装不下就省略号**（3b 验收的结论：
    折行会长到图例那一带，两块字叠在一起比截断难看得多，而同一串快捷键在
    调试器读数行里本来就完整写着）。 */
-.hint{position:fixed;left:calc(var(--code-w) + (100vw - var(--code-w)) / 2);bottom:10px;
-  transform:translateX(-50%);z-index:2;pointer-events:none;max-width:calc(100vw - var(--code-w) - 24px);
+.hint{position:fixed;left:calc(var(--code-w) + (100vw - var(--code-w) - var(--panel-w)) / 2);bottom:10px;
+  transform:translateX(-50%);z-index:2;pointer-events:none;max-width:calc(100vw - var(--code-w) - var(--panel-w) - 24px);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   user-select:none;font-size:10.5px;letter-spacing:.04em;color:rgba(159,176,200,.55)}
-body.folded .hint,body.nosplit .hint{left:50%;max-width:calc(100vw - 24px);color:rgba(159,176,200,.75)}
+body.folded .hint,body.nosplit .hint{left:calc((100vw - var(--panel-w)) / 2);
+  max-width:calc(100vw - var(--panel-w) - 24px);color:rgba(159,176,200,.75)}
 
 /* 正在重跑解释器时的遮罩：深度 4 的纯 minimax 要跑满 200,000 步
    （node 实测 ~235 ms，浏览器同量级），主线程会实打实地卡住那么久。
    与其让人以为工具挂了，不如先画一句话再去跑。 */
-.busy{position:fixed;left:calc(var(--code-w) + (100vw - var(--code-w)) / 2);top:74px;transform:translateX(-50%);
+/* 选择器写 `#busy` 而不是 `.busy`：状态由 `document.body.classList.add('busy')`
+   打开，而 `.busy{…display:none…}` **同样命中 body 自己**——浏览器验收当场
+   量到的后果有两层，都不是小事：
+     ① 整页 `display:none`。这个胶囊存在的理由正是「与其让人以为工具挂了，
+        不如先画一句话再去跑」，而它实际做的是把那句话连同整页一起藏起来。
+     ② `updateFit()` 就跑在这段窗口里（Run / 换深度都在 withBusy 内）。
+        body 不可见时 `#split` 与 `#panel` 的 getBoundingClientRect() 全是 0，
+        `availRect()` 于是量到整窗 1440 而不是 456——算出来的 fit.s 大 3.16 倍，
+        树画到可见区外面去，而且**一直保持到下一次 resize** 才纠正。
+   id 选择器不可能匹配 body，这类碰撞从此不可能再发生。 */
+#busy{position:fixed;left:calc(var(--code-w) + (100vw - var(--code-w) - var(--panel-w)) / 2);top:74px;transform:translateX(-50%);
   z-index:6;display:none;padding:7px 14px;border-radius:999px;
   background:rgba(12,21,38,.92);border:1px solid rgba(251,191,36,.45);
   color:#fcd34d;font-size:11.5px;font-family:var(--font-mono);pointer-events:none}
-body.folded .busy,body.nosplit .busy{left:50%}
-body.busy .busy{display:block}
+body.folded #busy,body.nosplit #busy{left:calc((100vw - var(--panel-w)) / 2)}
+body.busy #busy{display:block}
 
 @media (max-width:900px){
+  :root{--panel-w:0px}   /* 面板挪到底部，不再占横向宽度：页签栏改回按整窗居中 */
   .panel{left:10px;right:10px;top:auto;bottom:10px;width:auto;max-height:46vh}
+  /* 面板挪到底部之后它横跨整窗，而 #split 原来一路铺到 bottom:0——两块就叠在
+     一起，参数面板正好压住调用栈、变量、输出和那一排单步按钮（800×600 下实测）。
+     让代码面板在面板上方收住：窄屏于是变成「左代码 / 右画布 / 下面板」三块互不
+     重叠，规格 §10 风险表里「窄屏自动切为上下分栏」那一条在这里的最小兑现。
+     画布那一侧由 availRect() 用同一个判据减掉底部面板的高度。 */
+  /* 收住之后编辑器与调试器的 min-height 之和（150 + 190）多半装不下，flex 子项
+     会**溢出到盒子外面**去盖住面板——比不收还糟。所以同时给一条纵向滚动：
+     窄屏上代码面板变成一块可滚动的区域，两块面板从此谁也不压谁。 */
+  #split{bottom:calc(46vh + 18px);overflow-y:auto}
   .legend{display:none}
   .hint{display:none}
 }
@@ -6159,7 +6194,11 @@ const ALGOS = {
   }
 
   /* ---------------- 常量 ---------------- */
-  const VERSION = '0.1.0';
+  /* 与 <meta name="tool-version"> 同值：面板角标读的是这里传进 E.init 的
+     VERSION，**不是** meta（设计系统 §10 写的「从 meta 读取」在 chess 这套
+     引擎里不成立——工具① 的 1.1.0 changelog 记着这笔账：1.0.2 那次只改了
+     meta、忘了这个常量，角标停在 1.0.1 整整两版）。改版本必须两处一起动。 */
+  const VERSION = '1.0.0';
   const ENTRY = 'search';           // TreeModel.build 认哪个函数名当树节点
   const SPAN_BASE = 10;             // 「参照树」（叶子最多的那棵）铺满的横向总宽
   const SPAN_Z = 2.2;               // 每一层树深在 z 轴上的间距（z = 调用栈深度，§1.4）
@@ -6217,6 +6256,8 @@ const ALGOS = {
   const C_MIN   = '#94a3b8';        // slate   轮到黑走 → 取极小
   const C_EDGE  = 'rgba(148,163,184,0.30)';
   const C_OPEN  = '#7dd3fc';        // 还开着的帧（在调用栈上）
+  /* 「你点中的是这一帧」。中性色不进四色体系：这是一次选中，不是一条数据。 */
+  const C_SELECT = '#e2e8f0';       // ui-bright
 
   const FONT_MONO = 'ui-monospace,"SF Mono",Menlo,Consolas,monospace';
 
@@ -6341,6 +6382,11 @@ const ALGOS = {
                      en: 'Individual nodes are <b>not meant</b> to be distinguishable here — the density is the point.' },
     roLabelsOff: { zh: '节点太多，分数标签已自动关闭（≤ %M 个才画）。',
                    en: 'Too many nodes; score labels are off automatically (drawn only up to %M).' },
+    /* 「节点数够少」并不等于「写得下」：深度 2 只有 57 个节点，可 48 片叶子
+       挤在三百多像素里，相邻两片约 7 px，而「−9,988」这个标签本身 40 px 宽。
+       挤掉的那些不能不吭声——藏了几个就说几个，并给出让它们回来的办法。 */
+    roLabelsThin: { zh: '这一格还有 <b>%K</b> 个分数标签没地方写（会压住旁边那个），所以没画。把深度调小、把代码面板收窄、或者拉近相机，它们就回来了。',
+                    en: 'Another <b>%K</b> score labels have nowhere to go here — drawing them would sit on top of the next one, so they are left out. Lower the depth, narrow the code panel or zoom in and they come back.' },
     /* 「**枚举出来的**走法」，不是「一共有多少走法」，更不是分支因子之和——
        tree-model.js 给不出后两者（depth===0 的早退叶子有合法走法却从没枚举
        过）。标签逐字照搬那个模块定下的名字。 */
@@ -6776,6 +6822,10 @@ const ALGOS = {
   const HOME_VIEW = { az: 0, el: 1.45, dist: 16, tx: 0, ty: 0, tz: 0 };
   const FIT_MARGIN = 0.88;
   let fit = { s: 1, tx: 0, ty: 0 };
+  /* 上一帧因为没地方写而没画的标签个数（分数标签 + 剪枝桩上的「−k」）。
+     由 drawTree() 写、updateReadout() 读——frame() 里 draw() 恒在
+     updateReadout() 之前，所以读到的永远是刚画的那一帧。 */
+  let labelsHidden = 0;
 
   /* ---------------- 分栏宽度：夹在一处，两个调用点 ----------------
 
@@ -6796,9 +6846,20 @@ const ALGOS = {
      那一截，所以两处都从这里取。
      宽屏时面板贴右边，要减掉；窄屏时 CSS 把它挪到底部，这时它不占横向——
      靠它自己的 left 判断，不靠猜媒体查询的断点。 */
+  /* 参数面板此刻是贴在右边还是被媒体查询挪到了底部——**量出来**，不猜断点。
+     两处要用同一个判据：横向的可见区右界（rightEdge）与纵向的下界（availRect）。 */
+  function panelIsRight() {
+    return document.getElementById('panel').getBoundingClientRect().left > window.innerWidth * 0.5;
+  }
   function rightEdge() {
     const pr = document.getElementById('panel').getBoundingClientRect();
-    return (pr.left > window.innerWidth * 0.5) ? pr.left - 10 : window.innerWidth;
+    return panelIsRight() ? pr.left - 10 : window.innerWidth;
+  }
+  /* 面板在底部时它横跨整窗，画布的下界就是它的上沿——不减掉的话树的下半截
+     会画到面板底下去（800×600 下实测：树画到 y=370，而面板从 y=314 就开始）。 */
+  function bottomEdge() {
+    const pr = document.getElementById('panel').getBoundingClientRect();
+    return panelIsRight() ? window.innerHeight - 26 : Math.max(1, pr.top - 10);
   }
   function clampCodeWidth(px) {
     const cap = Math.min(window.innerWidth * 0.78, rightEdge() - CANVAS_MIN);
@@ -6816,7 +6877,7 @@ const ALGOS = {
                    document.body.classList.contains('nosplit');
     const x0 = folded ? 0 : document.getElementById('split').getBoundingClientRect().width;
     const x1 = rightEdge();
-    return { x0: x0, y0: 46, w: Math.max(1, x1 - x0), h: Math.max(1, window.innerHeight - 46 - 26) };
+    return { x0: x0, y0: 46, w: Math.max(1, x1 - x0), h: Math.max(1, bottomEdge() - 46) };
   }
 
   /* 借引擎的 makeCam 算回正视角的相机：临时换、算完换回。不自己再抄一遍
@@ -6969,6 +7030,10 @@ const ALGOS = {
        一遍 `pushStep <= i && (popStep < 0 || popStep >= i)` 就是把一条已经
        有权威实现的不变式复制成第二份，迟早分岔。 */
     const spine = TM.spineAt(view);
+    /* 调试器此刻的一份快照，整个 drawScene 共用一份：脊尖的光晕看它的 `line`
+       判在不在剪枝行，选中环看它的 `selected` / `varsFrameId`。取一次就够，
+       它在一帧之内不会变。 */
+    const dbgCache = dbg ? dbg.state() : null;
     const openSet = Object.create(null);
     for (let k = 0; k < spine.length; k++) openSet[spine[k]] = true;
     const dense = ids.length > 420;
@@ -7051,15 +7116,39 @@ const ALGOS = {
         /* 最内层那一帧再加一圈光晕；走到 `if (beta <= alpha)` 那一行时
            换成紫色——「就是这一行」。 */
         const tipS = pts[pts.length - 1];
-        const cache = dbg ? dbg.state() : null;
-        const onCut = !!(cache && cache.line != null && st.cutLines[cache.line]);
+        const onCut = !!(dbgCache && dbgCache.line != null && st.cutLines[dbgCache.line]);
         haloDot(tipS, onCut ? C_CUT : C_SPINE, rNode + 4.5);
       }
     }
 
-    /* ---- 分数标签：节点一多就自动关掉。这不是省事——同层最近的两个只差
-           一两个像素时，标签会糊成一条线，比不画更糟（读数区会把此刻实测的
-           那个像素间距写出来）。 ---- */
+    /* ---- 点了调用栈里的某一帧 → 树上对应那个节点套一圈 ----
+       能这么直接对上，是因为**节点身份就是入帧步的下标**（§1.4）：
+       debugger.js 的 `varsFrameId` 给的正是那个下标，两边是同一个数，不用
+       再维护第二套映射。选中的若是 genMoves / evaluate 这类不建节点的帧，
+       `P` 里查不到，于是**什么也不画**——不猜、也不退回最内层那一个。
+       颜色取中性的 ui-bright：这是一次「选中」，不是一条数据曲线，不该去抢
+       四色里的任何一个（设计系统「一条曲线一个颜色」那条规矩的另一面）。
+       画在脊之后、标签之前，且不受「当前调用路径」开关影响——那个开关关掉
+       的是路径，不是「我此刻在看哪一帧」。 */
+    if (dbgCache && dbgCache.selected && dbgCache.varsFrameId >= 0) {
+      const sSel = P[dbgCache.varsFrameId];
+      if (sSel) {
+        haloDot(sSel, C_SELECT, rNode + 7);
+        haloDot(sSel, C_SELECT, rNode + 3.5);
+      }
+    }
+
+    /* ---- 分数标签：两道闸 ----
+       ① 可见节点多于 LABEL_MAX 就整片关掉（深度 3 / 4）。
+       ② **这一道是浏览器验收当场加的。** 闸① 数的是节点，可决定读不读得出来
+          的是**此刻这一行有没有地方写**：深度 2 只有 57 个节点、闸① 放行，但
+          48 片叶子挤在三百多像素里，相邻两片相距约 7 px，而「−9,988」这样一个
+          标签本身就有 40 px 宽——最底下那一行糊成了一条谁也读不出的墨迹。
+          于是第二道闸按同一层从左往右扫：一个标签只有在不压住已经画下的那个
+          时才画。**游标所在的那个节点（脊的最内端）先占位**——「读数区的合计
+          ＝ 树上那个节点头上的橙色数字」这条对照必须永远看得见，哪怕它周围
+          全被挤掉。被挤掉的不是消失了，读数区会说清楚这一格藏了几个。 ---- */
+    labelsHidden = 0;
     if (E.state.values && ids.length <= LABEL_MAX) {
       ctx.save();
       ctx.font = px(11) + 'px ' + FONT_MONO;
@@ -7067,6 +7156,8 @@ const ALGOS = {
       ctx.textBaseline = 'bottom';
       ctx.fillStyle = C_VALUE;
       const gap = px(3);
+      const tipId = (E.state.spine && spine.length) ? spine[spine.length - 1] : null;
+      const cand = [];
       for (let k = 0; k < ids.length; k++) {
         const n = nodes[ids[k]], s = P[n.id];
         if (!s) continue;
@@ -7082,22 +7173,64 @@ const ALGOS = {
            本身就是信号」这条纪律对「不知道」（null）和「不是个数」是同一
            条，两种情况都绝不能画出一个 NaN。 */
         if (typeof n.value !== 'number' || !isFinite(n.value)) continue;
-        ctx.fillText(fmtInt(n.value), s[0], s[1] - rNode - gap);
+        const txt = fmtInt(n.value);
+        cand.push({ txt: txt, x: s[0], y: s[1] - rNode - gap, w: ctx.measureText(txt).width,
+                    up: true, tip: n.id === tipId });
       }
+      let keep = thinLabels(cand, gap);
+      labelsHidden = cand.length - keep.length;
+      for (let k = 0; k < keep.length; k++) ctx.fillText(keep[k].txt, keep[k].x, keep[k].y);
       /* 剪枝桩上写「−k」：k 是这个节点少看了几个分支，来自 mvCount −
-         已展开的孩子数，判不出来的节点根本不在 cutIds 里。 */
+         已展开的孩子数，判不出来的节点根本不在 cutIds 里。同一道不重叠闸。 */
       if (cutIds) {
         ctx.fillStyle = C_CUT;
         ctx.textBaseline = 'top';
+        const cc = [];
         for (let k = 0; k < cutIds.length; k++) {
           const n = nodes[cutIds[k]], p = st.lay.pos[n.id];
           const b = E.proj(C, [p.x, 0, p.z + SPAN_Z * 0.45 - zCenter()]);
           if (!b) continue;
-          ctx.fillText('−' + (n.mvCount - n.childIds.length), b[0], b[1] + px(5));
+          const txt = '−' + (n.mvCount - n.childIds.length);
+          cc.push({ txt: txt, x: b[0], y: b[1] + px(5), w: ctx.measureText(txt).width,
+                    up: false, tip: false });
         }
+        const kc = thinLabels(cc, gap);
+        labelsHidden += cc.length - kc.length;
+        for (let k = 0; k < kc.length; k++) ctx.fillText(kc[k].txt, kc[k].x, kc[k].y);
       }
       ctx.restore();
     }
+  }
+
+  /* 从左往右扫，压住已经收下的那个就不收；`tip` 的那一个先占位。返回收下的
+     那些，调用方按差值报「藏了几个」。
+     **占位判的是矩形，不是同一层里的区间。** 一开始按树深分行判，结果在
+     `Top`（正视）那个视角上原形毕露：那一格所有层都投影到同一条屏幕横线，
+     层内互不重叠、层间叠成一团墨。这里不认「层」这个概念，只认它此刻落在
+     屏幕的哪一块——视角怎么转都不用再改一次。
+     宽高与坐标都在**当前变换的单位**里量（字号已由 px() 补偿过），不必再乘
+     fit.s：两边同一套单位，比出来的就是屏幕上的关系。
+     `up` = 文字画在锚点上方（textBaseline 'bottom'），false 则在下方。 */
+  function thinLabels(cand, pad) {
+    const a = cand.slice().sort(function (p, q) { return p.x - q.x; });
+    const lh = px(12);
+    const box = function (c) {
+      return [c.x - c.w / 2 - pad, c.x + c.w / 2 + pad,
+              c.up ? c.y - lh : c.y - pad, c.up ? c.y + pad : c.y + lh];
+    };
+    const boxes = [], out = [];
+    const take = function (c) { boxes.push(box(c)); out.push(c); };
+    const free = function (c) {
+      const b = box(c);
+      for (let k = 0; k < boxes.length; k++) {
+        const o = boxes[k];
+        if (b[0] < o[1] && b[1] > o[0] && b[2] < o[3] && b[3] > o[2]) return false;
+      }
+      return true;
+    };
+    for (let k = 0; k < a.length; k++) if (a[k].tip) take(a[k]);
+    for (let k = 0; k < a.length; k++) if (!a[k].tip && free(a[k])) take(a[k]);
+    return out;
   }
 
   function fillDots(pts, color, r) {
@@ -7389,6 +7522,10 @@ const ALGOS = {
     }
     if (E.state.values && visN > LABEL_MAX) {
       lines.push('<span class="dim">' + t(STR.roLabelsOff).replace('%M', String(LABEL_MAX)) + '</span>');
+    } else if (E.state.values && labelsHidden > 0 && id === uiTab) {
+      /* `labelsHidden` 是**刚画完的那一帧**留下的，只对当前页签成立——别的
+         页签这一格根本没画过，拿它去说话就是编。 */
+      lines.push('<span class="dim">' + t(STR.roLabelsThin).replace('%K', fmtInt(labelsHidden)) + '</span>');
     }
     if (st.tree && st.tree.order.length === 0) {
       lines.push('<span class="warn">' + t(STR.noEntry) + '</span>');
