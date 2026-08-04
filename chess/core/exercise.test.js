@@ -84,34 +84,53 @@ T.eq(collide.blanks[0].hint.en, 'mentions id=5 and level=9 too', 'hintEn 同样�
    `scanQuoted` 不支持转义（有意的设计边界）。但「不支持」有两种落法：
    静默截断，或者当场抛。静默截断是最坏的一种——Task 4/5 要手写六条真实
    中文提示文案，作者随手打了一个英文引号，提示就少半句而没有任何提示。
-   下面两条先把当前行为钉住，再谈怎么改（见文件里 scanQuoted 的注释）。 */
+   两条**互补**的哨兵各挡一形，缺一形就漏（见 exercise.js 里两处注释）。 */
 
 /* C 形：字面引号后面**没有**空白 —— token 化会把整段吞成一个 token，
-   于是提取出来的值里**留着**字面引号。这一条在补哨兵之前是绿的（值被
-   静默读成带引号的一串），补上哨兵之后改成 T.throws。 */
+   于是提取出来的值里**留着**字面引号，由 scanQuoted 的哨兵抓。 */
 T.throws(function () {
   E.parse([
     '// >>> BLANK id=a level=1 fill="1;" hintEn="X" hint="他说"你好"的场景"',
     'x;',
     '// <<< BLANK',
   ].join('\n'));
-}, '引号值里残留字面双引号 —— 抛，不静默取一个含引号的怪值');
+}, 'C 形：引号值里残留字面双引号 —— 抛，不静默取一个含引号的怪值');
 
 /* A 形：字面引号后面**紧跟空白**、且该属性是行内**最后一个** ——
    token 在那个引号处收尾，后面的「你好的场景"」变成一个没人认领的 token
-   被丢掉，hint 被无声截断成「他说」。**这是一个已知缺口，下面这条断言
-   记录的是现状、不是期望行为。** 上面那条哨兵（值里残留引号就抛）覆盖不到
-   它：这里提取出来的值是「他说」，里面一个引号都没有。封住它需要另一条
-   规则（>>> BLANK 之后每个 token 都必须是已知的 key= 形状，否则抛），
-   属于本轮裁定之外的范围，已在 task-2-report.md 里报出待裁定。
-   等它被封住时，下面这条会变红 —— 那正是提醒你把它改成 T.throws 的信号。 */
-const quoteGap = E.parse([
-  '// >>> BLANK id=a level=1 fill="1;" hintEn="X" hint="他说" 你好的场景"',
+   被丢掉，hint 从前被无声截断成「他说」。C 形那条哨兵**看不见**它（提取出来
+   的值是「他说」，里面一个引号都没有），要靠 token 白名单那条抓。 */
+T.throws(function () {
+  E.parse([
+    '// >>> BLANK id=a level=1 fill="1;" hintEn="X" hint="他说" 你好的场景"',
+    'x;',
+    '// <<< BLANK',
+  ].join('\n'));
+}, 'A 形：引号后跟空白且属性在行尾 —— 抛，不再把 hint 无声截断成半句');
+
+/* 白名单不是「凡是没见过的都抛」的粗暴规则会误伤的那种：带引号的值里全是
+   空白和符号也照样是一个完整 token。这两条是它的防误伤底线。 */
+const spacey = E.parse([
+  '// >>> BLANK id=a level=2 fill="for (let i = 0; i < n; i = i + 1) { }" ' +
+    'hint="先想清楚：这一格 会不会 被攻击" hintEn="think first: is this square attacked"',
   'x;',
   '// <<< BLANK',
 ].join('\n'));
-T.eq(quoteGap.blanks[0].hint.zh, '他说',
-  '【现状记录，非期望】引号后跟空白且属性在行尾：hint 被静默截断（缺口待裁定）');
+T.eq(spacey.blanks[0].fill, 'for (let i = 0; i < n; i = i + 1) { }',
+  '带一堆空白和符号的 fill 仍然是一个完整 token');
+T.eq(spacey.blanks[0].hint.zh, '先想清楚：这一格 会不会 被攻击',
+  '中文提示里的空格不会把 token 切开');
+T.eq(spacey.blanks[0].hint.en, 'think first: is this square attacked',
+  'hintEn 与 hint 不会前缀互撞');
+
+/* 认不出来的属性名也抛 —— 这条规则同时挡住了「写错属性名」这类笔误 */
+T.throws(function () {
+  E.parse([
+    '// >>> BLANK id=a level=1 fill="1;" hint="甲" hintEn="A" tip="乙"',
+    'x;',
+    '// <<< BLANK',
+  ].join('\n'));
+}, '指令行上出现认不出来的属性名 —— 抛');
 
 /* ---------- parse：每一条都必须大声失败（约束 6） ---------- */
 
@@ -196,8 +215,9 @@ T.eq(vWrong.divergence.kind, 'boardOps', '第一处分歧出现在棋盘事件�
 T.ok(vWrong.divergence.refStep >= 0, '分歧点带着参考侧的步号');
 T.ok(vWrong.divergence.herStep >= 0, '分歧点带着她那一侧的步号');
 
-/* 分歧点必须能真的把调试器送到两条轨道各自的位置上（§2.9 第 4 条）：
-   实测这一处是参考第 76 步、她第 79 步 —— 同一件事、不同步号。 */
+/* 分歧点必须能真的把调试器送到两条轨道各自的位置上（§2.9 第 4 条）。
+   实测曾为参考第 76 步、她第 79 步；这里只保证两者**不必相等**，不把那两个
+   数字硬钉进断言（源码稍一改动它们就会漂，钉住只会得到一条脆断言）。 */
 T.ok(vWrong.divergence.refStep !== vWrong.divergence.herStep,
   '两条轨迹的步号通常不相等，两个都得报出来');
 T.eq(typeof vWrong.divergence.opIndex, 'number', 'boardOps 分歧带展平后的事件序号');
@@ -205,7 +225,19 @@ T.eq(vWrong.divergence.ref.sq, vWrong.divergence.her.sq, '这一处两边动的�
 T.eq(vWrong.divergence.ref.to, 'cut', '参考认为这一格被攻击（cut）');
 T.eq(vWrong.divergence.her.to, 'ok', '她的版本认为这一格安全（ok）—— 这就是那句话');
 T.ok(typeof vWrong.divergence.ref.from === 'undefined',
-  '比较用的取值里没有 from —— 它是影子盘算出来的派生量，不参与判定');
+  '比较用的取值里没有 from —— 它由影子盘的前缀唯一决定，进了比较也提供不出新信息');
+
+/* boardOps 那两个步号是**真正的第一处分歧**：报出来的那一步上，两边确实各自
+   写下了这条对不上的棋盘事件。这条把「能说成分歧的那一步」钉死在 boardOps 上。 */
+function opsAt(run, step) {
+  return (run.trace[step].boardOps || []).map(function (o) {
+    return [o.kind, o.sq, o.to].join('|');
+  });
+}
+T.ok(opsAt(REF, vWrong.divergence.refStep).indexOf('mark|6|cut') >= 0,
+  'refStep 那一步上，参考确实写下了报出来的那条事件');
+T.ok(opsAt(RW, vWrong.divergence.herStep).indexOf('mark|6|ok') >= 0,
+  'herStep 那一步上，她确实写下了报出来的那条事件');
 
 /* 等价改写：把 && 拆成三条 if —— 行为必须完全相同 */
 const EQUIV = Q.source({ N: 5 }).replace(
@@ -254,6 +286,24 @@ T.eq(vCountOnly.divergence.kind, 'counters', '这时分歧类型是 counters');
 T.eq(vCountOnly.divergence.opIndex, null, 'counters 分歧没有棋盘事件序号');
 T.eq(vCountOnly.divergence.ref.value, 10, 'counters 分歧并排显示参考的末值');
 T.eq(vCountOnly.divergence.her.value, 23, 'counters 分歧并排显示她的末值');
+T.eq(vCountOnly.divergence.ref.name, 'solutions', 'counters 分歧带着计数器名字，UI 才知道在显示哪一个');
+
+/* counters 的 refStep/herStep **不是**「分歧的第一步」——比的是末值，
+   没有第一步可言。它们的契约是「该计数器**最后一次被赋值**的那一步」。
+   下面两条把这个语义钉住（不钉具体数字：源码一改就漂）：报出来的那一步上
+   确实有一条给它赋这个值的 varDelta，而且**再往后不会有第二条**。 */
+function assertLastAssign(run, step, name, value, who) {
+  const deltas = (run.trace[step].varDelta || []).filter(function (d) { return d.name === name; });
+  T.ok(deltas.length > 0 && deltas[deltas.length - 1].to === value,
+    who + '：报出来的那一步上确实有一条把 ' + name + ' 赋成 ' + value + ' 的 varDelta');
+  let later = 0;
+  for (let s = step + 1; s < run.trace.length; s++) {
+    later += (run.trace[s].varDelta || []).filter(function (d) { return d.name === name; }).length;
+  }
+  T.eq(later, 0, who + '：那一步之后 ' + name + ' 再没有被赋过值 —— 它确实是「末次赋值处」');
+}
+assertLastAssign(REF, vCountOnly.divergence.refStep, 'solutions', 10, 'counters/参考侧');
+assertLastAssign(RW, vCountOnly.divergence.herStep, 'solutions', 23, 'counters/她那一侧');
 
 /* result 单独起作用 */
 const vResOnly = E.judge(REF, RW, { result: true, boardOps: false, counters: [] });
@@ -261,10 +311,62 @@ T.eq(vResOnly.status, 'fail', '只比 result 也能抓到漏查斜线');
 T.eq(vResOnly.divergence.kind, 'result', '这时分歧类型是 result');
 T.eq(vResOnly.divergence.ref, 10, 'result 分歧直接给两边的返回值');
 T.eq(vResOnly.divergence.her, 23, 'result 分歧直接给两边的返回值');
+/* result 的步号契约：各自的**末步**，不是分歧处（返回值不发生在某一步）。 */
+T.eq(vResOnly.divergence.refStep, REF.trace.length - 1, 'result 分歧给参考轨迹的末步');
+T.eq(vResOnly.divergence.herStep, RW.trace.length - 1, 'result 分歧给她那条轨迹的末步');
 
-/* 从没出现过的计数器：两边都是 null（「不知道」），不算分歧 */
-const vGhost = E.judge(REF, same, { result: false, boardOps: false, counters: ['nosuchcounter'] });
-T.eq(vGhost.status, 'pass', '两边都没有这个计数器 —— null 对 null，不是分歧');
+/* ---------- judge：计数器名字对不上（参考侧是权威） ----------
+   旧版本在这里有一个静默的「永远判对」：两边 lastCounter 都返回 null 就算
+   相同，于是一个打错字的计数器名会让 10 解 vs 23 解判成 pass。
+   注意反例必须用**真的不一样**的两次运行（RW，不是 same）——拿 same 当反例
+   的断言分不清「null 对 null 不算分歧」和「这条判定什么都没比」。 */
+
+T.throws(function () {
+  E.judge(REF, RW, { result: false, boardOps: false, counters: ['solutionz'] });
+}, '计数器名字在参考轨迹里从未出现 —— 抛（出题配置错误，不许静默判对）');
+
+/* 配置错误不该因为 boardOps 恰好先分歧就被吞掉：三项全开时也照样抛 */
+T.throws(function () {
+  E.judge(REF, RW, { result: true, boardOps: true, counters: ['solutionz'] });
+}, '名字打错时，即使 boardOps 会先分歧也照样抛 —— 配置错误不被结果吞掉');
+
+/* 参考里有、她那边一次都没出现（她把变量改名了）：这是一处真分歧，不是相等 */
+const RENAMED = I.run(Q.source({ N: 5 }).split('solutions').join('total'), { host: {} });
+T.eq(RENAMED.result, 10, '改名版本本身跑得对（10 解），只是不再有这个变量名');
+const vRenamed = E.judge(REF, RENAMED, { result: false, boardOps: false, counters: ['solutions'] });
+T.eq(vRenamed.status, 'fail', '参考里有、她那边从没出现过 —— fail，不是「都不知道所以相等」');
+T.eq(vRenamed.divergence.kind, 'counters', '这一处的分歧类型是 counters');
+T.eq(vRenamed.divergence.her.value, null, '她那一侧的取值是 null（从没出现过）');
+T.eq(vRenamed.divergence.herStep, null, '她那一侧没有可跳过去的位置 —— null，不编步号');
+T.eq(typeof vRenamed.divergence.refStep, 'number', '参考那一侧的步号照报');
+
+/* 上面那一组**分辨不出** `found` 与 `value === null` 的区别：参考末值是 10，
+   `sameValue(10, null)` 本来就不等，把 found 那条分支删掉它照样是绿的
+   （变异测过，确实不红）。真正只有这条分支管得着的情形是**参考末值恰好
+   就是 null**：那时「她根本没有这个变量」与「她数出来是 null」在数值上
+   一模一样，只有 found 分得开。用手搭轨迹把它打出来。 */
+function fakeCounterRun(perStepDeltas, truncated) {
+  const trace = perStepDeltas.map(function (deltas) {
+    return { line: 0, depth: 0, frameOp: null, frameName: null,
+             varDelta: deltas, boardOps: [], out: null };
+  });
+  trace.truncated = truncated === true;
+  return { result: null, trace: trace };
+}
+const ONLY_C = { result: false, boardOps: false, counters: ['c'] };
+const refNull = fakeCounterRun([[{ name: 'c', from: 0, to: null }]], false);
+const herNever = fakeCounterRun([[{ name: 'other', from: 0, to: 1 }]], false);
+const herNull = fakeCounterRun([[{ name: 'c', from: 0, to: null }]], false);
+
+const vNullVsNever = E.judge(refNull, herNever, ONLY_C);
+T.eq(vNullVsNever.status, 'fail',
+  '参考末值是 null、她那边根本没有这个变量 —— fail（「没有」不等于「数出来是 null」）');
+/* 这一条要在「判成 pass」时给出**干净的失败**而不是崩在读 null 上——
+   它正是用来盯 found 那条分支的，信号不能是一句堆栈。 */
+T.eq(vNullVsNever.divergence ? vNullVsNever.divergence.herStep : '没有分歧点', null,
+  '她那一侧仍然没有步号');
+T.eq(E.judge(refNull, herNull, ONLY_C).status, 'pass',
+  '两边都真的把它数成了 null —— 这才算相等');
 
 /* 判定顺序：boardOps 在前（它能给出步号，反馈最有用） */
 const vOrder = E.judge(REF, RW, CHECK);

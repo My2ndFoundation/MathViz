@@ -142,10 +142,48 @@
     return undefined;
   }
 
+  /* 指令行上允许出现的全部属性名。它同时是下面那条白名单哨兵的依据。 */
+  const KNOWN_KEYS = ['id', 'level', 'fill', 'hint', 'hintEn'];
+
+  /* 白名单哨兵：`// >>> BLANK` 之后的每个 token 都必须是 `<已知属性名>=…`
+     的形状，否则抛。
+
+     这是跟 `scanQuoted` 那条哨兵**互补**的另一半，两条都必须留着：
+
+       · `scanQuoted` 那条管「token 里残留字面双引号」——引号后面没有空白，
+         整段被吞成一个 token，值里带着引号。
+       · 这一条管「引号后面紧跟空白」——token 在那个引号处收尾，后面那截
+         变成一个没人认领的 token。值里一个引号都没有，那条看不见它；
+         而这里看得见：多出来的那个 token 不是任何一个已知属性名开头。
+         `… hint="他说" 你好的场景"` 正是这一形，从前会被无声截断成
+         「他说」，现在当场抛。
+
+     不会误伤合法输入：带引号的属性哪怕值里全是空白和符号，`tokenize` 也会
+     整段吞成一个 token（`fill="for (let i = 0; i < n; i++) {}"` 验过）；
+     `hintEn=` 与 `hint=` 也不会前缀互撞——`hintEn="X"` 的开头是 `hintEn=`，
+     不是 `hint=`。 */
+  function assertKnownTokens(line, lineNo, raw) {
+    const tokens = tokenize(line.slice(OPEN_PREFIX.length));
+    for (let t = 0; t < tokens.length; t++) {
+      let known = false;
+      for (let k = 0; k < KNOWN_KEYS.length; k++) {
+        if (tokens[t].indexOf(KNOWN_KEYS[k] + '=') === 0) { known = true; break; }
+      }
+      if (!known) {
+        throw new Error(
+          '第 ' + lineNo + ' 行：BLANK 指令里有一段认不出来的内容 "' + tokens[t] + '"' +
+          '\n  指令行上只允许 ' + KNOWN_KEYS.join('= / ') + '= 这五个属性。' +
+          '最常见的原因是某个引号值里写了字面双引号，把那一段切断了。\n  ' + raw
+        );
+      }
+    }
+  }
+
   /* 解析一行 `// >>> BLANK ...` 指令，返回属性对象；任何一条缺失都抛。
      lineNo 是这一行的 1-based 行号，raw 是这一行的原文——都是为了让
      报错能一眼定位。 */
   function parseOpenLine(line, lineNo, raw) {
+    assertKnownTokens(line, lineNo, raw);
     const id = scanBare(line, 'id');
     if (id === undefined) {
       throw new Error('第 ' + lineNo + ' 行：BLANK 指令缺 id=\n  ' + raw);
@@ -282,10 +320,15 @@
   /* ================= judge：比行为，不比文本 =================
 
      「错了」是没用的反馈。两个版本的完整轨迹都在手上，所以这里做的是别的
-     事：找出她的版本和参考版本**行为分歧的第一步**，把两条轨道各自的步号
-     一起报出来，让调试器能直接跳过去两边并排显示。她看到的是「跑到第 47
-     步为止你和参考完全一致，第 48 步参考认为这一格被攻击、你的版本认为它
-     安全」，而不是一个红叉。
+     事：把两条轨道各自的步号一起报出来，让调试器能直接跳过去两边并排显示。
+     她看到的是「跑到第 47 步为止你和参考完全一致，第 48 步参考认为这一格被
+     攻击、你的版本认为它安全」，而不是一个红叉。
+
+     **「分歧的第一步」这句话只对 `kind === 'boardOps'` 成立**，别把它当成三种
+     分歧的共同承诺——`counters` 和 `result` 比的是**末值**，本来就没有「第一步」
+     可言，它们的 `refStep`/`herStep` 是「能跳过去的合理位置」而不是「分道扬镳
+     的位置」。逐 kind 的精确定义写在 `judge` 自己的注释里，UI 上的措辞要照那份
+     写，别一律说成「分歧的那一步」。
 
      ---- 比什么 ----
 
@@ -325,9 +368,13 @@
      显示成「错」。 */
 
   /* 把整条 trace 的 boardOps 展平成一条事件流。
-     只带 kind / sq / to 三个字段进来比 —— `from` 是解释器用影子盘算出来的
-     前值，是派生量：同一串操作在不同执行路径下算出的 from 可能不同，拿它
-     判定会把行为相同的两个版本判成不同。step 只用来报位置，不参与比较。 */
+     只带 kind / sq / to 三个字段进来比。**丢掉 `from` 的理由是它提供不出
+     任何新信息**，不是「它会造成假分歧」：`from` 完全由解释器的影子盘决定，
+     而影子盘是「初始空盘 + 前缀 (kind, sq, to) 序列」的纯函数——前缀相同则
+     `from` 必然相同，所以在逐条对齐比较里它永远只会跟着 `(kind, sq, to)` 一起
+     相等或一起不等。把它带进来只会让比较变慢、让并排显示多一列噪声。
+     （实测：参考版与等价改写版把 `from` 一起比，599 条仍逐条一致。）
+     step 只用来报位置，不参与比较。 */
   function flattenBoardOps(trace) {
     const flat = [];
     for (let i = 0; i < trace.length; i++) {
@@ -345,19 +392,25 @@
   }
 
   /* 某个变量的末值：遍历 trace 的 varDelta，取这个名字最后一次的 `to`。
-     从头到尾没出现过 → `{ value: null, step: null }`，**不是 0** —— null 说的
-     是「不知道」，0 说的是「数出来是零」，把前者写成后者就是在编造事实。 */
+     返回 `{ found, value, step }`。
+
+     **`found` 必须跟 `value === null` 分开**：从头到尾没出现过 → `found:false`、
+     `value:null`，而 null 说的是「不知道」，不是 0（0 说的是「数出来是零」，
+     把前者写成后者就是在编造事实）。两边都 `found:false` 时**绝不能判成相等**
+     ——那会让一个名字打错的计数器变成「永远判对」，比 check 三项全关还糟：
+     全关至少是显式写下来的，打错字是静默的。谁来管这件事见 judge。 */
   function lastCounter(trace, name) {
+    let found = false;
     let value = null;
     let step = null;
     for (let i = 0; i < trace.length; i++) {
       const deltas = trace[i] && trace[i].varDelta;
       if (!deltas) continue;
       for (let j = 0; j < deltas.length; j++) {
-        if (deltas[j].name === name) { value = deltas[j].to; step = i; }
+        if (deltas[j].name === name) { found = true; value = deltas[j].to; step = i; }
       }
     }
-    return { value: value, step: step };
+    return { found: found, value: value, step: step };
   }
 
   /* 结构化相等。计数器和返回值大多是数字，但没道理假设它一定是——数组和
@@ -447,14 +500,33 @@
        status ∈ 'pass' | 'fail' | 'unknown'
        divergence = null（pass / unknown）或 { kind, refStep, herStep, opIndex, ref, her }
          kind    ∈ 'boardOps' | 'counters' | 'result'
-         refStep / herStep  两条轨迹**各自**的 0-based 步号（同一件事她可能
-                            发生在第 60 步、参考在第 48 步，所以两个都报；
-                            调用方要用它们把两条轨道各自定位，而不是拿一个
-                            游标同时推两条）。某一侧根本没有对应位置时是 null。
          opIndex 展平后的棋盘事件序号（kind === 'boardOps' 时是数字，否则 null）
+
+       `refStep` / `herStep` 永远是两条轨迹**各自**的 0-based 步号（同一件事她
+       可能发生在第 60 步、参考在第 48 步，所以两个都报；调用方要用它们把两条
+       轨道**各自**定位，而不是拿一个游标同时推两条）。某一侧根本没有对应位置
+       时是 null。
+
+       **但这两个步号「是什么」逐 kind 不同，UI 措辞必须跟着分**：
+
+         kind        refStep / herStep 的含义            能不能说成「分歧的那一步」
+         ----------  -----------------------------------  ------------------------
+         'boardOps'  两边第一条对不上的棋盘事件所在的步    **能** —— 这是真正的第一处分歧
+         'counters'  两边**最后一次给该计数器赋值**的步    **不能** —— 比的是末值，没有
+                                                           「第一步」；这只是「她最后一次
+                                                           数数的地方 / 参考最后一次数数的
+                                                           地方」，两边并排看得通
+         'result'    两边各自的**末步**（trace.length-1）  **不能** —— 只是「能跳过去的
+                                                           位置」，返回值不发生在某一步
+
+       想要 counters 也给出真正的第一处分歧，得改成比取值序列而不是末值——
+       那是另一件事（会把「在不同位置累加、末值相同」的合法等价改写判错），
+       没有做。**在做出来之前，别在 UI 上把 counters/result 的步号说成
+       「分歧的那一步」。**
+
          ref / her 那一处两边的取值，供 UI 并排显示：
                    boardOps → { step, kind, sq, to }（某一侧没有就是 null）
-                   counters → { name, value }
+                   counters → { name, value }（她那边从没出现过这个名字时 value 是 null）
                    result   → 返回值本身 */
   function judge(refRun, herRun, check) {
     assertRun(refRun, 'refRun');
@@ -464,6 +536,27 @@
     const refTrunc = refRun.trace.truncated === true;
     const herTrunc = herRun.trace.truncated === true;
     const anyTrunc = refTrunc || herTrunc;
+
+    /* ---- 0. 计数器名字先对着参考轨迹核一遍（参考侧是权威）
+
+       名字在参考轨迹里从未出现，就不是「两边都不知道，算相等」——那是**出题
+       配置错误**：这条判定不管比什么都会判对，等于没判，而且方向比 check 三项
+       全关更糟（全关是显式写下来的，打错一个字母是静默的）。按约束 6 大声失败。
+
+       放在所有比较**之前**，不放在 counters 那一段里：配置错误不应该因为
+       boardOps 恰好先分歧了就被吞掉。参考侧自己被截断时不查——那时候「没出现
+       过」也可能只是还没跑到，分不清就不下结论。 */
+    if (!refTrunc) {
+      for (let i = 0; i < check.counters.length; i++) {
+        if (!lastCounter(refRun.trace, check.counters[i]).found) {
+          throw new Error(
+            'check.counters 里的 "' + check.counters[i] + '" 在参考轨迹里从未出现过。' +
+            '\n  参考侧是权威：它没有这个变量名，说明这一题的判定配置写错了' +
+            '（多半是拼错）。放着不管的话，这条判定会永远判对。'
+          );
+        }
+      }
+    }
 
     // ---- 1. 棋盘事件（最先比：它能给出步号，反馈最有用）
     if (check.boardOps) {
@@ -502,12 +595,16 @@
         const name = check.counters[i];
         const r = lastCounter(refRun.trace, name);
         const h = lastCounter(herRun.trace, name);
-        if (!sameValue(r.value, h.value)) {
+        /* 参考里有、她那边一次都没出现（多半是把变量改名了）：这是一处**真
+           分歧**，不是「两边都不知道，算相等」。她那一侧没有可跳过去的位置，
+           herStep 与 value 都是 null。 */
+        if (!h.found || !sameValue(r.value, h.value)) {
           return {
             status: 'fail',
             divergence: divergence(
               'counters', r.step, h.step, null,
-              { name: name, value: r.value }, { name: name, value: h.value }
+              { name: name, value: r.value },
+              { name: name, value: h.found ? h.value : null }
             ),
           };
         }
