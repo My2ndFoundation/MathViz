@@ -218,7 +218,7 @@ var shell = document.getElementById('shell');
 var navList = document.getElementById('navList');
 var frame = document.getElementById('frame');
 var curId = null;      // null = home（iframe 里装画廊）
-var syncing = false;   // 见 Task 3：区分「壳驱动的换页」与「使用者在画廊里点了卡片」
+var syncing = false;   // 区分「壳驱动的换页」与「使用者在画廊里点了卡片」
 
 /* ================= 查表 ================= */
 function byId(id) {
@@ -231,7 +231,7 @@ function fileOf(id) { var d = byId(id); return d ? d.file : null; }
    （--c:var(--trace-<accent>)），esc() 只转义 & < > "，一个像
    `x); background:url(//evil/leak?` 这样的 CSS 层面 payload 一个都不含，
    会原样穿透进 style 并被当成任意 CSS 声明执行。 chess-tools.json 今天是
-   仓库自控内容，但 Task 4 接了运行时 fetch，check.py 也不校验 accent，
+   仓库自控内容，但它是运行时 fetch 进来的，check.py 也不校验 accent，
    所以必须在插值点就收紧成闭集；未知值一律退到 cyan（四个真实工具都不用
    这个色，退回它时一眼能看出「这项没配对」，而不是悄悄套错颜色）。 */
 var ACCENTS = { cyan: 1, rose: 1, violet: 1, emerald: 1, orange: 1 };
@@ -312,6 +312,21 @@ function renderChrome() {
   alone.href = (d ? d.file : 'index.html') + '?lang=' + LANG;
 }
 
+/* ================= 地址栏同步 =================
+   换工具、iframe 自己换页后的回同步、切语言、别处切语言——四条路径都要把
+   当前的 curId 与 LANG 写回地址栏，所以只留这一份实现：地址栏在任何时刻都是
+   一条完整可复制的链接（tool 与 lang 同时在），不会因为某一条路径漏写一个
+   参数而退化。push 只在「换工具」时为真——那才算一次导航；切语言与回同步
+   都用 replaceState，否则后退键会退到「同一页只是语言不同」这种空档上。 */
+function syncUrl(push) {
+  try {
+    var u = new URL(location.href);
+    if (curId) u.searchParams.set('tool', curId); else u.searchParams.delete('tool');
+    u.searchParams.set('lang', LANG);
+    history[push ? 'pushState' : 'replaceState']({ tool: curId }, '', u);
+  } catch (e) {}
+}
+
 function go(id, push) {
   if (id && !byId(id)) id = null;      // 未知 id 一律落回 home，不留 undefined
   curId = id || null;
@@ -319,14 +334,7 @@ function go(id, push) {
   setFrame(srcFor(curId));
   renderNav();
   renderChrome();
-  if (push !== false) {
-    try {
-      var u = new URL(location.href);
-      if (curId) u.searchParams.set('tool', curId); else u.searchParams.delete('tool');
-      u.searchParams.set('lang', LANG);
-      history.pushState({ tool: curId }, '', u);
-    } catch (e) {}
-  }
+  if (push !== false) syncUrl(true);
   if (window.innerWidth <= 760) setSidebarOpen(false, false);
 }
 
@@ -364,17 +372,14 @@ frame.addEventListener('load', function () {
   curId = id;
   renderNav();
   renderChrome();
-  try {
-    var u = new URL(location.href);
-    if (curId) u.searchParams.set('tool', curId); else u.searchParams.delete('tool');
-    history.replaceState({ tool: curId }, '', u);
-  } catch (e) {}
+  syncUrl(false);
 });
 
 /* ================= 侧边栏显隐 =================
-   remember 默认 true，由调用方按语义传 false：go() 在窄屏上的那次自动收起
-   是布局行为，不是「使用者选择了收起」，不该被记进 NAV_KEY。
-   折叠按钮、快捷键与「恢复上次状态」在下一段（Task 4）接上来。 */
+   remember 默认 true，由调用方按语义传 false：窄屏（≤760px）上的自动收起
+   是布局行为，不是「使用者选择了收起」，不该被记进 NAV_KEY——go() 换页后的
+   那次、以及 .scrim 上的那次（遮罩只在 ≤760px 存在）都属于这一类。
+   折叠按钮、快捷键与「恢复上次状态」都在下面几段里调用它。 */
 function setSidebarOpen(open, remember) {
   shell.classList.toggle('hid', !open);
   if (remember !== false) {
@@ -394,7 +399,8 @@ function toggleSidebar() { setSidebarOpen(shell.classList.contains('hid')); }
 
 document.getElementById('btnHide').addEventListener('click', function () { setSidebarOpen(false); });
 document.getElementById('btnShow').addEventListener('click', function () { setSidebarOpen(true); });
-document.getElementById('scrim').addEventListener('click', function () { setSidebarOpen(false); });
+/* 遮罩只在 ≤760px 存在，点它收起属于布局行为，不记进 NAV_KEY——与 go() 一致 */
+document.getElementById('scrim').addEventListener('click', function () { setSidebarOpen(false, false); });
 
 /* ================= 键盘 =================
    只认两枚：Ctrl/Cmd+B 与 [。chess 工具已经占了 1–9（视角）、T（切页签）、
@@ -436,24 +442,23 @@ function setLang(l) {
   renderChrome();
   syncing = true;
   setFrame(srcFor(curId));
-  try {
-    var u = new URL(location.href);
-    u.searchParams.set('lang', l);
-    history.replaceState({ tool: curId }, '', u);
-  } catch (e) {}
+  syncUrl(false);
 }
 document.getElementById('btnLang').addEventListener('click', function () {
   setLang(LANG === 'zh' ? 'en' : 'zh');
 });
 
 /* 工具页（chess/core/viz-engine.js 造的那个）与画廊自己都有一枚 #btnLang，
-   iframe 里点的是它们的，不是壳的——两枚同时可见。同源 iframe 写 localStorage
-   会在父窗口触发 storage 事件（规范只排除发起写入的那个 window，即 iframe
-   自己，壳能收到）。收到就跟着改 LANG、重渲侧栏与 chrome、把地址栏的
-   lang 带上，但绝不 setFrame()：iframe 已经自己重渲染过了，触发这个事件的
-   正是那次重渲染，再 setFrame() 等于重新加载工具、扔掉它刚刚的状态——
-   Task 3 修过同一类 bug。newValue 要挡 null（storage 被清空）和非 en/zh
-   （别的 origin 写的别的 key）。 */
+   iframe 里点的是它们的，不是壳的——两枚同时可见。同源写 localStorage 会在
+   其它 window 触发 storage 事件（规范只排除发起写入的那个 window），所以壳
+   收得到自家 iframe 的那次写入。收到就跟着改 LANG、重渲侧栏与 chrome、把
+   地址栏的 lang 带上，但绝不 setFrame()。
+   事件里读不出写入者是谁，而写入者有两种：可能是我们自己的 iframe，也可能是
+   另一个标签页里独立打开的 chess 工具（它写的是同一个 chess-lang 键）。前者
+   下不重指 iframe 是必须的——触发事件的正是它那次自我重渲染，再 setFrame()
+   等于重载工具、扔掉它刚刚的状态；后者下 iframe 里那一页确实还停在旧语言上，
+   代价是它要等到下次换页才跟上，仍比无条件重载丢状态划算。
+   newValue 要挡 null（storage 被清空）和非 en/zh（别的 key、别的写入）。 */
 window.addEventListener('storage', function (e) {
   if (e.key !== LANG_KEY) return;
   if (e.newValue !== 'en' && e.newValue !== 'zh') return;
@@ -461,11 +466,7 @@ window.addEventListener('storage', function (e) {
   LANG = e.newValue;
   renderNav();
   renderChrome();
-  try {
-    var u = new URL(location.href);
-    u.searchParams.set('lang', LANG);
-    history.replaceState({ tool: curId }, '', u);
-  } catch (err) {}
+  syncUrl(false);
 });
 
 /* 优先取 chess-tools.json（有服务器时永远最新）；file:// 或离线时 fetch 失败，
@@ -484,6 +485,16 @@ window.addEventListener('storage', function (e) {
         if (curId && !byId(curId)) curId = null;
         renderNav();
         renderChrome();
+        /* 反方向的同一件事：内嵌的 FALLBACK 落后于注册表时（部署错位——
+           check.py 只在提交时把两者钉在一起），boot() 会把一个它还不认识的
+           ?tool= 判成未知 id 落回画廊。此刻新注册表认得它，就把这条深链补上。
+           只在还没装任何工具时才补——已经装上工具的情形归上面那条「不动
+           iframe」管，不能因为注册表到货就把使用者正在看的一页重载掉。 */
+        if (!curId) {
+          var want = null;
+          try { want = new URLSearchParams(location.search).get('tool'); } catch (e2) {}
+          if (want && byId(want)) { go(want, false); syncUrl(false); }
+        }
       }
     })['catch'](function () {});
   } catch (e) {}
