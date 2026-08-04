@@ -142,6 +142,45 @@ for (const [name, M] of [['dfs', D], ['warnsdorff', W]]) {
   T.eq(p.places, p.clears, '3x5 ' + name + '：每一次落子最后都被收了回去');
 }
 
+/* ---- 3×5：两边的**棋盘事件逐项相同**，只有步数不同 ----
+
+   这是整个阶段最干净的一份教学素材，而在这条断言写下来之前没有任何测试钉住它：
+   同一块盘、同一个起点，Warnsdorff 与朴素 DFS 落在棋盘上的事件**一件不多一件不少**
+   —— try / ok / cut / back 四种标记逐项相等，place 与 clear 也逐项相等 ——
+   唯一的差别是解释器步数（实测 34,988 vs 120,650）。也就是说：这一档上启发式
+   一寸便宜都没占到，多出来的八万多步**全部**是它自己那套 degree() + 排序的开销。
+   「启发式的代价」在这里被单独隔离出来，其它一切变量都被摁住了。
+
+   这件事是**涌现**出来的，不是哪一份源码写死的：3×5 上根本没有巡游，两边都得把
+   整棵树查遍，于是访问集合必然相同、顺序不同。任何一次改动只要让某一边的剪枝
+   变强/变弱，这条就会红——它正是要在那时候红。
+
+   写成逐项比较而不是写死 1,019 / 395 / 624 / 395：**要钉的是「两边相等」这件事**，
+   数字本身是它的后果。写死了反而会在无关的实现调整上误报。步数那一条只断言
+   「不相等」，同理——它多出来多少不是重点，重点是它确实多花了钱。 */
+function boardTally(M, W_, H_) {
+  const r = I.run(M.source({ W: W_, H: H_, start: 0 }), { host: {} });
+  const o = { try: 0, ok: 0, cut: 0, back: 0, place: 0, clear: 0 };
+  for (let i = 0; i < r.trace.length; i++) {
+    for (const op of r.trace[i].boardOps) {
+      if (op.kind === 'mark') { o[op.to] = (o[op.to] || 0) + 1; }
+      else { o[op.kind] = (o[op.kind] || 0) + 1; }
+    }
+  }
+  return { ops: o, steps: r.trace.length, truncated: !!r.trace.truncated };
+}
+const t35d = boardTally(D, 3, 5), t35w = boardTally(W, 3, 5);
+T.ok(!t35d.truncated && !t35w.truncated,
+     '3x5：这条对比只有在两边都跑完时才成立（截断的轨迹比的是「谁先撞墙」）');
+T.ok(t35d.ops.try > 0 && t35d.ops.back > 0,
+     '3x5：棋盘事件计数没有空转（try ' + t35d.ops.try + ' / back ' + t35d.ops.back + '）');
+T.eq(t35w.ops, t35d.ops,
+     '3x5：两边落在棋盘上的事件逐项相同 —— 启发式一寸便宜都没占到（' +
+     JSON.stringify(t35d.ops) + '）');
+T.ok(t35w.steps > t35d.steps,
+     '3x5：唯一的差别是步数，而且贵的是启发式那一边（' +
+     t35d.steps + ' → ' + t35w.steps + '）—— 那个差价就是 degree() + 排序的全部开销');
+
 /* ======== 以下三段是简报之外补的，不改上面任何一条 ======== */
 
 // ---- 缺参数当场抛（阶段 5 约束 6：省略参数已经是本仓库抓到过三次的缺陷类）----
