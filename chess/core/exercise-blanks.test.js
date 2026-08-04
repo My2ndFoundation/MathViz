@@ -243,35 +243,41 @@ T.eq(kpPlaceRight, 0,
    （跟 queens 的 undo 落在 `if (safe(...))` 里面是同一件事）。所以每个挖空
    还要**单独**拿自己的占位跑一次，别的挖空用参考答案。
 
-   `stubOnly` 从 `parse()` 出来的挖空对象里取 `fill` 与 `body`，**不把占位文本
-   再抄一遍**。这一条是被突变测试逼出来的：先前这里写死了 `if (true) {`，
-   于是把源码里的 `fill=` 改成简报那个恒假版之后，整套测试仍然全绿 —— 断言
-   钉的是测试自己抄的那份文本，不是源码里声明的那一份。 */
-function stubOnly(src, id) {
+   下面从 `parse()` 出来的挖空对象里取 `fill` 与 `body`，**不把占位文本再抄
+   一遍**。这一条是被突变测试逼出来的：先前这里写死了 `if (true) {`，于是把
+   源码里的 `fill=` 改成简报那个恒假版之后，整套测试仍然全绿 —— 断言钉的是
+   测试自己抄的那份文本，不是源码里声明的那一份。
+
+   **「这个 id 在不在」只查一次，查在循环外面。** 修复轮 1 之前它在 63 次目标格
+   循环**里面**，于是删掉一个挖空会红 67 条，其中 63 条是同一行重复 —— 红的
+   条数不再说明问题有多大，失败清单也没法读了。挖空清单是**每份源码一样**的
+   （`source()` 只换 W/START/TARGET 三行常量），本来就没有逐档查的道理。 */
+function blankOf(src, id) {
   const blanks = E.parse(src).blanks;
-  for (let i = 0; i < blanks.length; i++) {
-    if (blanks[i].id === id) return src.replace(blanks[i].body, blanks[i].indent + blanks[i].fill);
-  }
-  /* 找不到这个 id 就记一条失败、把原样源码还回去，**不抛**。抛出去的话
-     `T.report()` 根本跑不到，上面那几条「id 是不是说好的那个」的断言明明已经
-     红了却一个字都印不出来，整轮只剩一段栈回溯 —— 跟 threeGates 里不设防的
-     `wrong.divergence.refStep` 是同一种失败形态。还回原样源码不会掩盖什么：
-     后面「占位单独跑时一个都没答对」那几条会跟着一起红，而第一条指名道姓的
-     就是真正的原因。 */
-  T.ok(false, 'stubOnly：源码里没有 id=' + id + ' 这个挖空（挖空清单变了？）');
-  return src;
+  for (let i = 0; i < blanks.length; i++) if (blanks[i].id === id) return blanks[i];
+  /* 找不到就记一条失败、返回 null，**不抛**。抛出去的话 `T.report()` 根本跑不到，
+     上面那几条「id 是不是说好的那个」的断言明明已经红了却一个字都印不出来，
+     整轮只剩一段栈回溯 —— 跟 threeGates 里不设防的 `wrong.divergence.refStep`
+     是同一种失败形态。 */
+  T.ok(false, 'knightPath：源码里没有 id=' + id + ' 这个挖空（挖空清单变了？）');
+  return null;
 }
+const KP_IDS = ['on-board', 'seen-test'];
+const kpBlankOf = {};
+for (let k = 0; k < KP_IDS.length; k++) kpBlankOf[KP_IDS[k]] = blankOf(kpSrc, KP_IDS[k]);
+
 const kpOnlyBad = { 'on-board': [], 'seen-test': [] };
 const kpOnlyRight = { 'on-board': 0, 'seen-test': 0 };
 let kpOnlyOffBoard = 0;
 for (let target = 1; target <= 63; target++) {
   const src = KP.source({ W: 8, start: 0, target: target });
   const refResult = I.run(src, { host: {} }).result;
-  const ids = ['on-board', 'seen-test'];
-  for (let k = 0; k < ids.length; k++) {
-    const p = I.run(stubOnly(src, ids[k]), { host: {} });
-    if (p.trace.truncated || p.result === undefined) kpOnlyBad[ids[k]].push(target);
-    if (p.result === refResult) kpOnlyRight[ids[k]]++;
+  for (let k = 0; k < KP_IDS.length; k++) {
+    const b = kpBlankOf[KP_IDS[k]];
+    if (!b) continue;   // 上面已经为它记过一条失败，别再重复 63 遍
+    const p = I.run(src.replace(b.body, b.indent + b.fill), { host: {} });
+    if (p.trace.truncated || p.result === undefined) kpOnlyBad[KP_IDS[k]].push(target);
+    if (p.result === refResult) kpOnlyRight[KP_IDS[k]]++;
     for (let i = 0; i < p.trace.length; i++) {
       const ops = p.trace[i].boardOps || [];
       for (let j = 0; j < ops.length; j++) if (ops[j].sq < 0 || ops[j].sq > 63) kpOnlyOffBoard++;
@@ -304,7 +310,14 @@ threeGates('knightPath/on-board', kpSrc, CHECK_KP,
   { refStep: 1371, herStep: 1364, opIndex: 133 },
   /* 四条边拆成四条 if 再 return true —— 跟 queens/safe-return 那条同形，也同样
      有牙齿：实测 6,592 步 vs 参考 5,086 步，形状真的不同，一个偷偷改成顺带比
-     trace.length 的判定会在这里红。 */
+     trace.length 的判定会在这里红。
+
+     **这是有意偏离规格 §2.9 的挖空表**：那里给的等价改写是
+     `return !(x < 0 || x >= W || y < 0 || y >= W)`（德摩根一次）。那一版确实也
+     被判对，但它**没有牙齿** —— 一个表达式换成另一个表达式，语句数不变、步数
+     跟参考一模一样，于是一个偷偷变严的判定在它上面照样绿。换成四条 if 是同一
+     道题的另一份正确答案（她真会这么写），而且形状真的不同。规格那一版在下面
+     单独钉了一条，它说的是另一件事：德摩根改写也必须判对。 */
   function (s) {
     return s.replace('  return x >= 0 && x < W && y >= 0 && y < W;',
       [
@@ -335,6 +348,15 @@ threeGates('knightPath/seen-test', kpSrc, CHECK_KP,
       ].join('\n'));
   });
 
+/* 规格 §2.9 挖空表给 `on-board` 的那份等价改写（德摩根一次）也留着单独钉一条：
+   它没牙齿（实测 5,086 步，跟参考**一模一样**），但它说的是另一件事 —— 同一个
+   条件反过来写也必须判对。跟 queens/undo 那条「三条赋值换顺序」同一个用意。 */
+const kpDeMorgan = kpSrc.replace('  return x >= 0 && x < W && y >= 0 && y < W;',
+                                 '  return !(x < 0 || x >= W || y < 0 || y >= W);');
+T.ok(kpDeMorgan !== kpSrc, 'knightPath/on-board：德摩根改写确实改动了源码');
+T.eq(E.judge(I.run(kpSrc, { host: {} }), I.run(kpDeMorgan, { host: {} }), CHECK_KP).status,
+     'pass', 'knightPath/on-board：规格给的德摩根改写也判对');
+
 /* ---------- tourKnight（Warnsdorff 那一份） ---------- */
 
 const TW = require('./algos/tour-warnsdorff.js');
@@ -353,27 +375,36 @@ const twSrc = TW.source({ W: 3, H: 4, start: 0 });
    是 `Exercise.parse(src).placeholder` 一份，所有挖空一起解析，没有「按难度
    挑一个」的入口。实测确认过：把两组指令按计划写进同一份源码，`parse` 抛。
 
-   为什么不换个位置给第二个挖空 —— 三条约束把它挤没了：
+   **换个位置给第二个挖空是办得到的，只是没有好落点。** 修复轮 1 之前这里写的
+   是「三条约束把它挤没了」，那是**错的** —— 审查找到了反例，实测复现过。
+   把话说准确（注释会被当成定论读，本项目在这上面反复交过学费）：
 
      ① 挖空只能落在 Warnsdorff **独有**的那两段（`degree()` 与排序那一段），
         否则 tour-dfs.js 与本文件「除了那一个主意逐字相同」的对照就多出噪声，
-        而那份并排 diff 是这一课本身。
+        而那份并排 diff 是这一课本身。**这一条是硬的。**
      ② 排序那一段**规格明令不挖**（换成插入排序是货真价实的等价改写，但并列
         时的打破方式不同，会走出另一条同样合法的巡游而被判错 —— §7.4「判定
-        过严」的教科书案例）。
-     ③ 剩下唯一的非嵌套落点是量出路数那一行 `degs.push(degree(cand[i]));`。
-        它的占位**跑不完**：任何让 degs 变成常数的占位都会让排序退化成不排，
-        这一份就变回朴素回溯 —— 实测 4×5 撞 200,000 上限、`result` 是
-        `undefined`，而参考在那块盘上 7,283 步就走完了。这正是 Task 4 在 queens
-        的 `fill="return true;"` 上踩过的那条线。
+        过严」的教科书案例）。**这一条也是硬的。**
+     ③ 剩下的落点是量出路数那一行 `degs.push(degree(cand[i]));`。**它做得到**，
+        条件是占位不能是常数：常数占位（`degs.push(0);`）会让候选全部并列、
+        选择排序一次不交换，这一份退化成朴素回溯 —— 实测 3×4 1,304 · 3×5 51,012 ·
+        **4×5 撞 200,000 上限**、`result` 是 `undefined`，而参考在那块盘上 7,283
+        步就走完（Task 4 在 queens 的 `fill="return true;"` 上踩的同一条线）。
+        但把静态出路数**内联**算一遍的占位就跑得完：实测 2,583 / 101,052 /
+        5,848 / 撞墙，参考跑得完的三块它都跑得完。
+
+        **不采用它，是因为那个占位很糟，不是因为办不到**：它比挖空体长十倍；
+        它要把这道题正在问的那段八方向循环原样抄进占位里（等于把答案写在占位
+        上）；教的还是跟 `degree-fn` 同一课；而且它落在规格叫人别动的那一段
+        （排序）的正中间。
 
    所以这里交一个：`degree-fn`（3 级）。**留它而不是留 1 级那个是有理由的**：
    3 级在整个阶段 6 只出现这一次，丢了它「三个难度级都覆盖」就没了；而 1 级
    另有三个（queens/safe-return、knightPath 的两个）。填整个函数本来也要求她
    把那一句计数写出来，1 级那道题的内容并没有丢。
 
-   **这是一处需要控制者裁定的偏差**，不是就地改掉的东西：报告里写了三种走法
-   与各自的实测代价。 */
+   控制者已裁定按这个走（修复轮 1）：五个挖空定案，阶段 6 的完成标准与规格
+   §2.9 的挖空表各订正一行。 */
 const twBlanks = E.parse(twSrc).blanks;
 T.eq(twBlanks.length, 1, 'tour-warnsdorff 声明了一个挖空（两个会嵌套，parse 会抛）');
 T.eq(twBlanks[0] ? twBlanks[0].id : null, 'degree-fn', 'tour-warnsdorff 那个挖空的 id');
@@ -407,43 +438,69 @@ for (let b = 0; b < TOUR_BOARDS.length; b++) {
 
    这一条把简报给的 `fill`（返回常数 0 的同签名函数）挡在门外。实测四块盘：
 
-     盘     参考              占位 `return 0;`        占位（现在这一版）
-     3×4     3,092 ✓ true      1,393 ✓ true            2,672 ✓ true
-     3×5   120,650 ✓ false    54,461 ✓ false         104,501 ✓ false
-     4×5     7,283 ✓ true    200,000 ✗撞墙             6,059 ✓ true
-     3×7   200,000 ✗撞墙     200,000 ✗撞墙           200,000 ✗撞墙
+     盘     参考            占位 `return 0;`   占位「只差 !visited」  占位（现在这一版）
+     3×4     3,092 ✓ true    1,393 ✓ true       2,672 ✓ true          9,115 ✓ true
+     3×5   120,650 ✓ false  54,461 ✓ false    104,501 ✓ false        62,715 ✓ false
+     4×5     7,283 ✓ true  200,000 ✗撞墙       6,059 ✓ true        131,559 ✓ true
+     3×7   200,000 ✗撞墙   200,000 ✗撞墙     200,000 ✗撞墙        200,000 ✗撞墙
 
    返回常数的占位在 4×5 上撞墙，而参考在那块盘上 7,283 步就走完 —— 跟 Task 4
-   在 queens 上遇到的是同一条线。原因值得写下来，因为它同时解释了该换成什么：
-   degree 一返回常数，候选就全部并列，那段选择排序一次也不交换，**这一份就
-   逐字退化成 tour-dfs**。实测钉过：`return 0;` 的占位版在 3×4 与 3×5 上的
-   棋盘事件流与 tour-dfs 的**逐条相同**（40 条 / 3,223 条）。
+   在 queens 上遇到的是同一条线。原因值得写下来：degree 一返回常数，候选就全部
+   并列，那段选择排序一次也不交换，**这一份就逐字退化成 tour-dfs**。实测钉过：
+   `return 0;` 的占位版在 3×4 与 3×5 上的棋盘事件流与 tour-dfs 的**逐条相同**
+   （40 条 / 3,223 条）。
 
-   所以现在的 `fill` 是「数出路数，但忘了看踩没踩过」—— 只丢掉 `!visited`
-   那一项的天真版本。它保住了启发式的形状（静态出路数仍然让角落优先），
-   四块盘上都不比参考差；同时它仍然是**错的**，而且错得正是这道题要教的那
-   一件事：Warnsdorff 的出路数必须随着马走过的路变小，不然它就只是一张
-   跟局面无关的常数表。 */
-const twPlaceRows = [];
+   **但「撞墙」与「近乎完整的天真实现」不是仅有的两条路** —— 第三列那一版
+   （只丢掉 `!visited` 一项）是修复轮 1 之前用的，它跑得最省，可是它与参考只差
+   一个子句，而中文提示又把那个子句点了名，**等于把答案写了两遍**：这一阶段唯一
+   的 3 级挖空实际上变成了 1 级，规格「三个难度级都覆盖」那句话就不成立了。
+
+   现在的 `fill` 是第三条路：**按边界猜的角落偏好启发式**（从 8 开始，靠一条边
+   减 2）。它不泄露八方向循环、不泄露 `onBoard` 调用、不泄露计数 —— 留下的是
+   货真价实的 3 级工作量；它仍然是错的，错的正是这道题要教的那件事（出路数必须
+   随着马走过的路变小，按边界猜出来的数从头到尾不变）；四块盘上都不比参考差。
+
+   代价是 4×5 那 131,559 步：参考的 18 倍、占 200,000 上限的 66%。绝对量级上跟
+   queens 的 N=8（156,772 步、78%，本来就是出厂默认体验）同一档。下面那条**余量
+   断言**把它钉在 150,000 之下 —— 将来任何把它推过线的改动会大声失败，而不是
+   变成一次神秘的截断。 */
+const twRefTrunc = [];
 for (let b = 0; b < TOUR_BOARDS.length; b++) {
   const W = TOUR_BOARDS[b][0], H = TOUR_BOARDS[b][1];
   const src = TW.source({ W: W, H: H, start: 0 });
   const ref = I.run(src, { host: {} });
   const p = I.run(E.parse(src).placeholder, { host: {} });
   const tag = W + '×' + H;
-  twPlaceRows.push(tag + ' 参考 ' + ref.trace.length + (ref.trace.truncated ? '✂' : '') +
-                   ' / 占位 ' + p.trace.length + (p.trace.truncated ? '✂' : ''));
-  if (!ref.trace.truncated) {
-    T.ok(!p.trace.truncated, 'tourKnight 占位版在 ' + tag + ' 上跑得完（参考在这块盘上跑得完）');
-    T.ok(p.result !== undefined, 'tourKnight 占位版在 ' + tag + ' 上有返回值');
-  } else {
-    /* 3×7：参考自己就撞墙。这一条不是「放过占位版」，而是把「判据为什么
-       只能是相对的」钉成事实 —— 哪天参考在这块盘上跑得完了，它会红，
-       上面那张表也就该重量一遍。 */
-    T.ok(true, 'tourKnight 在 ' + tag + ' 上参考自己就撞墙，占位版不比它差是唯一说得通的判据');
+  const shown = tag + '：参考 ' + ref.trace.length + (ref.trace.truncated ? '✂' : '') +
+                ' / 占位 ' + p.trace.length + (p.trace.truncated ? '✂' : '');
+  if (ref.trace.truncated) twRefTrunc.push(tag);
+  else {
+    T.ok(!p.trace.truncated, 'tourKnight 占位版在 ' + tag + ' 上跑得完（参考在这块盘上跑得完）· ' + shown);
+    T.ok(p.result !== undefined, 'tourKnight 占位版在 ' + tag + ' 上有返回值 · ' + shown);
   }
 }
-T.eq(twPlaceRows.length, 4, 'tourKnight 占位版四块盘都量过：' + twPlaceRows.join(' · '));
+/* 相对判据的**前提**本身也要钉住，而且要在分支外面钉 —— 「哪几块盘上参考自己
+   撞墙」是一句关于这个工具的事实，不是一个可以写在 else 里无条件绿掉的说法。
+   （写在 `else { T.ok(ref.trace.truncated, …) }` 里就是同义反复：能进那个分支
+   就已经说明它撞墙了。修复轮 1 的审查在别处指出过同一种写法，这里是同一个坑，
+   自查时才发现也踩了一次。）
+   哪天参考在 3×7 上跑得完、或者在别的盘上开始撞墙，这一条会红，上面那张表和
+   整条相对判据就都该重想一遍。 */
+T.eq(twRefTrunc.join(','), '3×7',
+     'tourKnight：四块盘里只有 3×7 是参考自己撞墙的那一块 —— 相对判据的前提');
+
+/* ---- 余量断言：4×5 的占位版离 200,000 上限还有多远 ----
+
+   实测 131,559 步，占上限的 66%，**剩约 68,000 步**。钉在 150,000 之下留了
+   约 18,000 步的缓冲：往生成源码里加语句、或者把角落偏好改得更钝，都会先撞
+   这条断言而不是先撞 `Interp.STEP_LIMIT`。撞这条断言看到的是「expected true」
+   加一个具体步数，撞上限看到的只是 `result === undefined`。 */
+{
+  const p45 = I.run(E.parse(TW.source({ W: 4, H: 5, start: 0 })).placeholder, { host: {} });
+  T.ok(p45.trace.length < 150000,
+       'tourKnight 占位版 4×5 的步数留着余量（< 150,000；实测 ' + p45.trace.length +
+       '，离 200,000 上限还剩 ' + (200000 - p45.trace.length) + ' 步）');
+}
 
 /* 占位版必须是**错的**。tourKnight 这里不能像 knightPath 那样钉「一个都没答
    对」：它的返回值只是 true / false，3×4 上占位版照样找得到一条巡游、`result`

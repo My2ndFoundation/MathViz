@@ -120,13 +120,26 @@
 
    **计划和规格 §2.9 给这一题排的是两个挖空**（另一个是 level=1 的
    `degree-count`，挖 `degree()` 里那一句 `if (!visited[…]) { d = d + 1; }`）。
-   **那两个不可能同时存在**：后者的挖空体被前者整个包在里面，而 `parse()`
-   见到嵌套的 `>>> BLANK` 会当场抛。换个位置也躲不掉 —— 挖空只能落在
-   Warnsdorff 独有的两段里（否则并排 diff 就多出噪声），而排序那一段规格
-   明令不挖，剩下唯一的非嵌套落点 `degs.push(degree(cand[i]));` 的占位跑不完
-   （见下一段）。所以这里留了 3 级那一个：3 级在整个阶段 6 只出现这一次，
-   而 1 级另有三个；填整个函数本来也要求她把那一句计数写出来。完整的取舍
-   与实测数据在 `exercise-blanks.test.js` 里那段长注释和 task-5 报告里。
+   **这两个不可能同时存在**：后者的挖空体被前者整个包在里面，而 `parse()`
+   见到嵌套的 `>>> BLANK` 会当场抛。这一条是硬的（规格 §2.9 那张表本身要求
+   把一个挖空嵌进另一个里，是规格的缺陷，不是这里的实现选择）。
+
+   而**换个位置是能办到的，只是没有好落点** —— 别把它读成「不可能」：
+
+     · 挖空只能落在 Warnsdorff 独有的两段里，否则 `tour-dfs.js` 与本文件的
+       并排 diff 就多出噪声，而那份 diff 是这一课本身。
+     · 排序那一段规格明令不挖（§7.4「判定过严」的教科书案例）。
+     · 剩下的落点是量出路数那一行 `degs.push(degree(cand[i]));`。它**做得到**：
+       只要占位不是常数，而是把静态出路数**内联**算一遍，四块盘实测
+       2,583 / 101,052 / 5,848 / 撞墙 —— 参考跑得完的三块它都跑得完。
+       不采用是因为那个占位很糟：它比挖空体长十倍，而且要把这道题正在问的
+       那段循环**原样抄进提示里**（等于把答案写在占位上），教的还是跟
+       `degree-fn` 同一课。（常数占位 `degs.push(0);` 则四块盘里 4×5 撞墙 ——
+       候选全并列、排序一次不交换，这一份就退化成朴素回溯。）
+
+   所以这里留了 3 级那一个：3 级在整个阶段 6 只出现这一次，而 1 级另有三个；
+   填整个函数本来也要求她把那一句计数写出来。完整的取舍与实测数据在
+   `exercise-blanks.test.js` 里那段长注释和 task-5 报告里。
 
    **`fill` 跟计划给的不一样，是实测逼出来的。** 计划给的是「返回常数 0 的
    同签名函数」。degree 一返回常数，候选就全部并列，那段选择排序一次也不
@@ -134,11 +147,26 @@
    占位版在 3×4 与 3×5 上的棋盘事件流与 tour-dfs 的逐条相同（40 条 / 3,223
    条）。后果是 4×5 上撞 200,000 上限、`result` 变成 `undefined`，而参考在
    那块盘上 7,283 步就走完了 —— 违反「占位版必须仍能跑」（Task 4 在 queens
-   的 `fill="return true;"` 上踩的是同一条线）。现在的 `fill` 是「数出路数，
-   但忘了看踩没踩过」的天真版本：保住了启发式的形状，四块盘上都不比参考差
-   （3×4 2,672 · 3×5 104,501 · 4×5 6,059 · 3×7 撞墙，而参考在 3×7 上也撞墙），
-   同时它仍然是错的，错的正是这道题要教的那件事 —— 出路数必须随着马走过的
-   路变小，否则它只是一张跟局面无关的常数表。
+   的 `fill="return true;"` 上踩的是同一条线）。
+
+   但「近乎完整的天真实现」与「4×5 撞墙」**不是仅有的两条路**（修复轮 1 之前
+   这里就是这么写的，那个二分是假的）。现在用的 `fill` 是第三条：**按边界猜的
+   角落偏好启发式** —— 从 8 开始，靠一条边就减 2。它
+
+     · **不泄露** `DX/DY` 的八方向循环、不泄露 `onBoard` 调用、不泄露计数，
+       于是这道 3 级题留下的是货真价实的 3 级工作量（先前那版只差一个
+       `!visited` 子句，而中文提示又把那个子句点了名，等于把答案写了两遍
+       —— 那样这一阶段唯一的 3 级挖空实际是 1 级）；
+     · 仍然是**错的**，而且错得正是这道题要教的那件事：出路数必须随着马走过的
+       路变小，靠边界猜出来的数从头到尾不变；
+     · 四块盘实测 3×4 9,115 · 3×5 62,715 · **4×5 131,559** · 3×7 撞墙
+       （参考在 3×7 上也撞墙），参考跑得完的三块它都跑得完。
+
+   **4×5 那 131,559 步是这个选择的代价**：参考的 18 倍、占 200,000 上限的 66%，
+   离上限还剩约 68,000 步。绝对量级上它跟 queens 的 N=8（156,772 步、78%，
+   本来就是出厂默认体验）是同一档，浏览器里跑得动。`exercise-blanks.test.js`
+   有一条**余量断言**把它钉在 150,000 之下：将来任何把它推过线的改动会**大声
+   失败**，而不是变成一次神秘的截断。
 
    指令是注释，**一步都不产生**：插入前后四块盘的步数、结果与整条棋盘事件流
    逐条相同（见下表），把两行指令剥回去再跑也一致。
@@ -236,7 +264,7 @@
     '/* 站在 sq 上，还有几个「没踩过」的格子可以去？这个数就叫它的出路数。',
     '   整个 Warnsdorff 就靠这一个数：出路数越小的格子越急，越要先去。',
     '   想确认它真的在起作用：把下面排序那一段删掉，这份就退回成朴素回溯了。 */',
-    '// >>> BLANK id=degree-fn level=3 fill="function degree(sq) { const x = sq % W; const y = (sq - x) / W; let d = 0; for (let k = 0; k < 8; k = k + 1) { if (onBoard(x + DX[k], y + DY[k])) { d = d + 1; } } return d; }" hint="站在 sq 上，八个方向里有几个既落在盘上、又还没踩过？占位那一版只数了「落在盘上」，漏掉了「还没踩过」—— 于是它数出来的是这一格天生的出路数，跟马走到哪儿了毫无关系。" hintEn="Standing on sq, how many of the eight directions land on the board AND are still unvisited? The placeholder counts only the first half, so it reports the square birth degree, a number that never changes no matter where the knight has already been."',
+    '// >>> BLANK id=degree-fn level=3 fill="function degree(sq) { const x = sq % W; const y = (sq - x) / W; let d = 8; if (x === 0) { d = d - 2; } if (x === W - 1) { d = d - 2; } if (y === 0) { d = d - 2; } if (y === H - 1) { d = d - 2; } return d; }" hint="整个 Warnsdorff 就靠这一个数：马此刻站在 sq 上，接下来**真的**还能去几个格子。占位那一版一个方向都没看过 —— 它只按 sq 靠不靠边猜了一个数，于是不管马已经走到哪儿，它给出的数从头到尾都一样。" hintEn="All of Warnsdorff rests on this one number: with the knight standing on sq right now, how many squares can it actually move to next. The placeholder never looks at a single direction — it just guesses from how close sq sits to an edge, so the number it hands back never budges as the knight\'s tour goes on."',
     'function degree(sq) {',
     '  const x = sq % W;',
     '  const y = (sq - x) / W;',
