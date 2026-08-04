@@ -14,7 +14,7 @@
 
 - **单文件、零依赖**：`chess/app.html` 不得引入任何外部脚本/样式/字体；不得有构建步骤。
 - **不改工具页**：`chess/tools/*.html` 一个字节都不动。工具必须仍能被独立打开。
-- **不改主站除一行外的任何东西**：主站唯一允许的改动是 `index.html` 里 `id="chessCard"` 那个 `<a>` 的 `href`。不得碰 `tools.json`、`app.html`、`scripts/sync_registry.py`（规格 §9 的 YAGNI 条款）。
+- **不改主站除 Chess 卡片链接外的任何东西**：主站唯一允许的改动是 `index.html` 里 `id="chessCard"` 那张卡片的 `href`（静态属性 + `renderPage()` 里覆写它的那一行，共两处）。不得碰 `tools.json`、`app.html`、`scripts/sync_registry.py`（规格 §9 的 YAGNI 条款）。
 - **默认语言 en**：`resolveLang()` 与 `t()` 的两处兜底都是 `'en'`，不是 `'zh'`。`localStorage` 键是 `'chess-lang'`。语义必须与 `chess/core/viz-engine.js` 一致。
 - **所有面向使用者的文案是 `{zh, en}` 对象**，经 `t()` 渲染；语言切换即时生效，不许等刷新。
 - **设计令牌照抄**：`:root` 里的 CSS 变量与 `chess/index.html` 的那一份逐字一致（`--bg-deep` `#05070d`、`--bg-mid` `#0c1526`、`--trace-cyan` `#2dd4ea`、`--trace-rose` `#fb7185`、`--trace-violet` `#a78bfa`、`--trace-emerald` `#34d399`、`--trace-orange` `#fb923c`、`--ui-slate` `#9fb0c8`、`--ui-bright` `#e2e8f0`、`--panel-bg` `rgba(13,20,36,.74)`、`--panel-line` `rgba(148,163,184,.16)`，三个字体栈同样照抄）。
@@ -52,8 +52,8 @@ FALLBACK 一致性：2 份内嵌副本 · 4 个 id 全部对上
 |---|---|
 | `chess/app.html`（新建） | 导航壳：侧边栏渲染、iframe 导航、深链、语言、折叠。唯一的新文件。 |
 | `chess/scripts/check.py`（改） | 两道 gate 扩到根级页面：`node --check` 与 FALLBACK 一致性。 |
-| `chess/index.html`（改，仅 2 处） | 工具卡片的 `href` 改为跳进壳；`.back` 链接不动。 |
-| `index.html`（主站，改 1 行） | `id="chessCard"` 的 `href` 指向 `chess/app.html`。 |
+| `chess/index.html`（**不改**） | 原计划要改工具卡片的 `href`，执行时撤回（见 Task 5 Step 1）。本分支一行未动。 |
+| `index.html`（主站，改 2 处） | `id="chessCard"` 的静态 `href` 指向 `chess/app.html`；`renderPage()` 里那一行按 `IN_SHELL` 分流（壳内指 `chess/index.html`，顶层指 `chess/app.html`）。 |
 
 ---
 
@@ -833,41 +833,51 @@ git commit -m "feat(chess): 语言贯穿壳与 iframe、折叠与两枚快捷键
 ## Task 5: 接线两个 index.html，全量验收
 
 **Files:**
-- Modify: `chess/index.html`（`card()` 函数里的 `href`，约第 205 行）
-- Modify: `index.html`（主站，`id="chessCard"` 的 `href`，约第 146 行）
+- ~~Modify: `chess/index.html`~~ —— Step 1 已撤回，本文件一行未改
+- Modify: `index.html`（主站，**两处**：`id="chessCard"` 的静态 `href`，约第 146 行；`renderPage()` 里覆写它的那一行，约第 970 行）
 
 **Interfaces:**
 - Consumes: Task 3 的 `?tool=` 深链约定
 
-- [ ] **Step 1: 落地页的工具卡片改为跳进壳**
+- [ ] ~~**Step 1: 落地页的工具卡片改为跳进壳**~~ —— **已撤回，不要执行**
 
-`chess/index.html` 的 `card()` 里这一行：
+> **撤回理由**（执行期发现，与 Task 3 的实测结论直接冲突）：壳的 `idFromPath()`
+> 是拿 iframe 的 `pathname` 去比对注册表里各工具文件的 basename 的，这条反查
+> **只在 iframe 导航到工具文件时才成立**。把画廊卡片指向 `app.html?tool=…`，
+> 意味着 iframe 里再装一层壳（画廊本身就装在 `chess/app.html` 的 iframe 里）：
+> 屏幕上会同时出现两条侧边栏，反查也再无对应文件可查。
+> 原来的 `d.file` href 才是对的，且它的行为在 Task 3 已经实测过——在画廊里点
+> 卡片，壳的 load 回调反查到 id，侧边栏高亮与地址栏都跟着走。
+> 步骤保留不删：计划是「当时相信什么」的记录，划掉并写明为什么，比抹掉有用。
+
+（以下为撤回前的原文，仅供追溯，**不要照做**：）
 
 ```js
-    return '<a class="card" style="--c:var(--trace-' + d.accent + ')" href="' + d.file + '?lang=' + LANG + '">' +
+    /* 原打算把 d.file 换成 app.html?tool=<id>&lang=<LANG> —— 会造成壳套壳，已撤回 */
 ```
 
-改为：
+- [ ] **Step 2: 主站卡片改指壳（两处，且 `renderPage()` 那处要分流）**
 
-```js
-    /* 跳进壳而不是直接开工具页：落地页此刻可能正被装在 chess/app.html 的
-       iframe 里当画廊，壳的 load 回调会反查 id 把侧边栏高亮同步过去；直接
-       开工具页在壳外也一样工作（?tool= 深链由壳解析）。 */
-    return '<a class="card" style="--c:var(--trace-' + d.accent + ')" href="app.html?tool=' + d.id + '&lang=' + LANG + '">' +
-```
+主站 `index.html` 里 Chess 卡片的 `href` 声明在**两个**地方：HTML 里的静态属性，
+以及 `renderPage()` 里每次渲染都会覆写它的那一行。只改一处等于没改。
 
-- [ ] **Step 2: 主站卡片改指壳**
-
-`index.html`（主站根目录）里：
-
-```html
-    <a class="card" style="--c:var(--trace-cyan)" href="chess/index.html" id="chessCard">
-```
-
-改为：
+① 静态属性（约第 146 行）——直接指壳，**不需要**条件分流：它只对无 JS 与
+爬虫生效，而那类访问按定义就是顶层（导航壳本身要有 JS 才存在）：
 
 ```html
     <a class="card" style="--c:var(--trace-cyan)" href="chess/app.html" id="chessCard">
+```
+
+② `renderPage()` 里那一行（约第 970 行）——必须按 `IN_SHELL` 分流，理由与本页
+工具卡片的 `href` helper 完全相同（那个 helper 就在下面三行，注释已写明规则）：
+主站 `index.html` 自己会被主站 `app.html` 的 iframe 装进去，此时再指向
+`chess/app.html` 就是壳套壳，屏幕上两条侧边栏。壳内指向 `chess/index.html`
+那张扁平画廊（它在嵌套里显示正常），顶层才指 `chess/app.html`。两支都带 `?lang=`：
+
+```js
+  document.getElementById('chessCard').href = IN_SHELL
+    ? 'chess/index.html?lang=' + LANG
+    : 'chess/app.html?lang=' + LANG;
 ```
 
 - [ ] **Step 3: 两道 gate 都跑**
@@ -890,8 +900,8 @@ Expected: 都是 `0`。`sync_registry.py` 不受影响——Chess 卡片是手�
 - [ ] **Step 5: 提交**
 
 ```bash
-git add chess/index.html index.html
-git commit -m "feat(chess): 落地页卡片与主站入口都指向导航壳"
+git add index.html
+git commit -m "feat(chess): 主站入口指向导航壳"
 ```
 
 ---
@@ -904,4 +914,4 @@ git commit -m "feat(chess): 落地页卡片与主站入口都指向导航壳"
 - [ ] `chess/tools/` 下没有任何文件被改动（`git diff --stat main...HEAD` 里不出现 `chess/tools/`）
 - [ ] 四个工具单独打开仍正常
 - [ ] `file://` 下壳的导航完整可用
-- [ ] 主站除 `index.html` 的一行 `href` 外没有任何改动
+- [ ] 主站除 `index.html` 里 Chess 卡片的 `href`（两处）外没有任何改动

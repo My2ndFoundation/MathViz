@@ -2,7 +2,8 @@
 
 **日期**：2026-08-04
 **状态**：已与使用者逐段确认，待写实现计划
-**范围**：新增 `chess/app.html`；改 `chess/index.html` 的工具卡片链接；改主站 `index.html` 一行 `href`；补 `chess/scripts/check.py` 两道门。
+**范围**：新增 `chess/app.html`；改主站 `index.html` 的 Chess 卡片 `href`（静态属性 + `renderPage()` 里覆写它的那一行，共两处）；补 `chess/scripts/check.py` 两道门。
+（原本还列了「改 `chess/index.html` 的工具卡片链接」，执行期撤回——见 §2 架构表与实现计划的 Task 5 Step 1。）
 
 ---
 
@@ -28,8 +29,10 @@ chess 子项目只有一层。`chess/index.html` 是一张按阶段分组的落�
 
 ```
 chess/app.html          新增：侧边栏 + iframe 舞台
-chess/index.html        内容不动，只改工具卡片的 href（跳进壳）
-index.html（主站）      改一行 href：chess/index.html → chess/app.html
+chess/index.html        一行不改（原打算把工具卡片指向 app.html?tool=，会造成壳套壳，已撤回）
+index.html（主站）      改两处 Chess 卡片 href：静态属性指 chess/app.html；
+                        renderPage() 里那一行按 IN_SHELL 分流（壳内指
+                        chess/index.html，顶层指 chess/app.html）
 chess/scripts/check.py  补两道门（§5）
 chess/tools/*.html      一行不改
 ```
@@ -55,7 +58,7 @@ chess/tools/*.html      一行不改
 - `chess/app.html?tool=chess-game-replay` → 直接装该工具
 - `?lang=en|zh` 贯穿全程
 
-切工具与切语言都用 `history.replaceState` 更新地址栏（照搬主站 `app.html` 的做法），因此任意状态都可以直接复制链接分享。iframe 载入后回读 `contentWindow.location.pathname` 反推 `id`，以便使用者在画廊里点卡片时侧边栏高亮跟着走——这一段主站已有现成实现。
+切工具用 `history.pushState`（后退键必须能走回上一个工具），切语言与「iframe 自己换了页之后的回同步」用 `history.replaceState`（那两件事不是导航，不该多一条历史记录）。两条路径都把 `tool` 与 `lang` 一起写回地址栏，因此任意状态都可以直接复制链接分享。iframe 载入后回读 `contentWindow.location.pathname` 反推 `id`，以便使用者在画廊里点卡片时侧边栏高亮跟着走——这一段主站已有现成实现。
 
 ### 2.3 语言
 
@@ -71,7 +74,7 @@ chess/tools/*.html      一行不改
 
 ### 2.5 明确不做（YAGNI）
 
-- **搜索框**：主站 62 个工具需要，chess 3 个（阶段 5 之后 5 个）不需要
+- **搜索框**：主站 62 个工具需要，chess 4 个（阶段 5 之后 6 个）不需要
 - **录制桥**（主站的 `REC.Bridge`）：chess 没有这套东西
 - **ghost 占位卡片**：落地页已经有了，侧边栏只列注册表里真实存在的工具
 - **壳自己的键盘视角/播放控制**：那些属于工具，壳不代劳
@@ -83,7 +86,7 @@ chess/tools/*.html      一行不改
 1. 先用内嵌的 `FALLBACK` 数组渲染一次
 2. 再 `fetch('chess-tools.json')`，成功就覆盖重渲，失败静默沿用
 
-**为什么必须内嵌一份**：`file://` 下 `fetch` 因同源限制失败。「可离线、双击就能开」是这三个工具的卖点之一，壳不能例外——一个在 `file://` 下只剩 home 一项的导航壳，等于没有。
+**为什么必须内嵌一份**：`file://` 下 `fetch` 因同源限制失败。「可离线、双击就能开」是这几个工具的卖点之一，壳不能例外——一个在 `file://` 下只剩 home 一项的导航壳，等于没有。
 
 ## 4. 这里唯一有真实腐烂风险的地方
 
@@ -124,7 +127,7 @@ tools = sorted((ROOT / 'tools').glob('*.html'))     # 第 36 行、第 86 行
 
 - `chess/app.html` **不进** `chess-tools.json`
 - 它在文件头带一段 changelog 注释 + `<meta name="tool-version">`，起于 `1.0.0`，供追溯
-- 三个工具的版本**不动**（它们一行没改）
+- 四个已注册工具的版本**不动**（它们一行没改）
 
 主站 `index.html` 里的 Chess 卡片是手写的 `<a id="chessCard" href="chess/index.html">`，不在 `TOOLS` 数组里（该文件的注释写明「chess/ 有自己的注册表，不受 `sync_registry.py` 管辖」），所以改它的 `href` 不影响 `sync_registry.py --check`。
 
@@ -134,19 +137,19 @@ tools = sorted((ROOT / 'tools').glob('*.html'))     # 第 36 行、第 86 行
 
 **机器**
 
-- `python3 chess/scripts/check.py` exit 0，且输出里语法门的文件数从 6 变 8、FALLBACK 门报「2 份副本」
+- `python3 chess/scripts/check.py` exit 0，且输出里语法门的文件数从 7 变 9、脚本块数从 14 变 16（基线在阶段 4 合并后实测，不是本规格初稿时的 6→8），FALLBACK 门报「2 份内嵌副本 · 4 个 id 全部对上」
 - `python3 scripts/sync_registry.py --check` exit 0
 - **变异验证两道新门确实有牙**：故意在 `app.html` 的 FALLBACK 里删掉一个 id、故意写一处语法错，各自必须变红；把 `ROOT/*.html` 那一路改回单文件，数量断言必须变红
 
 **浏览器**
 
 - `?tool=<id>` 深链直达对应工具
-- 点侧边栏能在三个工具之间切换，高亮跟随
+- 点侧边栏能在四个工具之间切换，高亮跟随
 - `home` 项装回画廊；在画廊里点卡片，侧边栏高亮与地址栏跟着走
 - 语言切换：壳与 iframe 内的工具同时改变
 - 折叠条与 `Ctrl/Cmd+B` / `[`
 - `file://` 下（无服务器）仍能完整导航——走 FALLBACK
-- 三个工具**独立打开**仍然正常，与壳无关
+- 四个工具**独立打开**仍然正常，与壳无关
 
 ## 8. 与阶段 4 的关系
 
