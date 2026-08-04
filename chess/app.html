@@ -446,6 +446,28 @@ document.getElementById('btnLang').addEventListener('click', function () {
   setLang(LANG === 'zh' ? 'en' : 'zh');
 });
 
+/* 工具页（chess/core/viz-engine.js 造的那个）与画廊自己都有一枚 #btnLang，
+   iframe 里点的是它们的，不是壳的——两枚同时可见。同源 iframe 写 localStorage
+   会在父窗口触发 storage 事件（规范只排除发起写入的那个 window，即 iframe
+   自己，壳能收到）。收到就跟着改 LANG、重渲侧栏与 chrome、把地址栏的
+   lang 带上，但绝不 setFrame()：iframe 已经自己重渲染过了，触发这个事件的
+   正是那次重渲染，再 setFrame() 等于重新加载工具、扔掉它刚刚的状态——
+   Task 3 修过同一类 bug。newValue 要挡 null（storage 被清空）和非 en/zh
+   （别的 origin 写的别的 key）。 */
+window.addEventListener('storage', function (e) {
+  if (e.key !== LANG_KEY) return;
+  if (e.newValue !== 'en' && e.newValue !== 'zh') return;
+  if (e.newValue === LANG) return;
+  LANG = e.newValue;
+  renderNav();
+  renderChrome();
+  try {
+    var u = new URL(location.href);
+    u.searchParams.set('lang', LANG);
+    history.replaceState({ tool: curId }, '', u);
+  } catch (err) {}
+});
+
 /* 优先取 chess-tools.json（有服务器时永远最新）；file:// 或离线时 fetch 失败，
    静默沿用内嵌的 FALLBACK，不弹错误、不阻塞渲染（boot() 已经先渲染过一次）。
    覆盖之后要重渲侧边栏——注册表里可能多出 FALLBACK 还没有的工具。curId 不动：
@@ -455,7 +477,14 @@ document.getElementById('btnLang').addEventListener('click', function () {
     fetch('chess-tools.json', { cache: 'no-cache' }).then(function (r) {
       return r.ok ? r.json() : null;
     }).then(function (j) {
-      if (j && j.tools && j.tools.length) { TOOLS = j.tools; renderNav(); renderChrome(); }
+      if (j && j.tools && j.tools.length) {
+        TOOLS = j.tools;
+        /* 新注册表可能不再含 curId 指向的工具（下架、编辑）。只纠正内存里的 id，
+           不动 iframe——它此刻装的那一页依然是有效画面，frame 不该跟着重载。 */
+        if (curId && !byId(curId)) curId = null;
+        renderNav();
+        renderChrome();
+      }
     })['catch'](function () {});
   } catch (e) {}
 })();
