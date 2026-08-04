@@ -12,6 +12,11 @@ const I = require('./interp.js');
    这里重复一遍是有意的：测试不该 require 一个 html。Task 7 要在页面里
    加一条注释指回这个文件。 */
 const CHECK_QUEENS = { result: true, boardOps: true, counters: ['solutions'] };
+/* knightPath 与 tourKnight 都没有需要单独盯的计数器：前者的返回值就是距离，
+   后者的返回值就是「找没找到」。`counters: []` 是**声明**不是遗漏 —— judge 的
+   assertCheck 在三项全关时会抛，这两题 result 与 boardOps 都开着。 */
+const CHECK_KP = { result: true, boardOps: true, counters: [] };
+const CHECK_TOUR = { result: true, boardOps: true, counters: [] };
 
 /* 三关的通用跑法。variant 是 (src) => src 的改写函数。
 
@@ -88,8 +93,8 @@ T.ok(qPlace.result !== undefined, 'queens 占位版有返回值（虽然答案�
    简报原本给的 `fill="return true;"`（恒真）等于把剪枝整个拿掉，搜索树
    退化成满的 N^N 棵树。实测（`I.run(placeholder, { host: {} })`）：
 
-     N=4  7,444 步   trunc=false  result=256
-     N=5  85,186 步  trunc=false  result=3125
+     N=4  8,124 步   trunc=false  result=256
+     N=5  92,996 步  trunc=false  result=3125
      N=6  200,000 步 trunc=true   result=undefined
      N=7  200,000 步 trunc=true   result=undefined
      N=8  200,000 步 trunc=true   result=undefined
@@ -172,5 +177,342 @@ const undoReorder = qSrc.replace(
 T.ok(undoReorder !== qSrc, 'queens/undo：换顺序的改写确实改动了源码');
 T.eq(E.judge(I.run(qSrc, { host: {} }), I.run(undoReorder, { host: {} }), CHECK_QUEENS).status,
      'pass', 'queens/undo：三条赋值换顺序也判对');
+
+/* ---------- knightPath ---------- */
+
+const KP = require('./algos/knight-path.js');
+
+/* 用的是工具页 knightPath 那一档的默认值（`KP_W = 8` / `KP_START = 0` /
+   目标格滑杆的初值 `W*W-1`）。它同时是 knight-path.js 文件头实测表里最贵的
+   一档：5,086 步、距离 6、整块盘都铺遍。插指令行前后逐格相同。 */
+const kpSrc = KP.source({ W: 8, start: 0, target: 63 });
+
+const kpBlanks = E.parse(kpSrc).blanks;
+T.eq(kpBlanks.length, 2, 'knightPath 声明了两个挖空');
+T.eq(kpBlanks[0] ? kpBlanks[0].id : null, 'on-board', 'knightPath 第一个挖空的 id（按出现顺序）');
+T.eq(kpBlanks[0] ? kpBlanks[0].level : null, 1, 'knightPath 的 on-board 是 1 级');
+T.eq(kpBlanks[1] ? kpBlanks[1].id : null, 'seen-test', 'knightPath 第二个挖空的 id');
+T.eq(kpBlanks[1] ? kpBlanks[1].level : null, 1, 'knightPath 的 seen-test 是 1 级');
+
+/* ---- 占位版必须仍然能跑：**目标格滑杆全程**（1..63），不是一档 ----
+
+   两个 `fill` 都跟简报给的**相反**，两处都是实测逼出来的，各挡一种事故：
+
+   ① `on-board` 简报给的是 `fill="return true;"`（恒真）。它不截断（滑杆全程
+      最多 9,726 步），所以「占位版能跑完」这一条抓不住它 —— 抓住它的是下面那条
+      **越界格子事件**：恒真的 onBoard 会让 `nb = ny * W + nx` 算出 −15、68 这类
+      **棋盘上根本不存在的格子号**，滑杆全程实测 10,561 条 mark 事件落在
+      `sq < 0 || sq > 63` 上。棋盘层会被要求去画不存在的格子（`Debugger.boardState`
+      不校验 sq，它只是一张以 sq 为键的表）。附带的第二件事：恒真版在 63 个目标格
+      里有 38 个**答案照样对**，一个「按 Run 就给出正确读数」的占位版会让 Check
+      看起来像在刁难人。改成 `return false;`：越界事件 0 条、结果恒为 −1（到不了）、
+      滑杆全程最多 280 步。
+
+   ② `seen-test` 简报给的是 `fill="if (false) {"`（永不认为碰过）。它也不截断
+      （最多 52,998 步），但它 **63 个目标格全部答对** —— 逐层同步的 BFS 即使
+      把「碰过没有」整个关掉，第一次生成目标格的那一层仍然正好是最短距离，
+      于是占位版跑出来的读数跟参考一模一样。占位版的答案不能是对的。
+      改成 `if (true) {`（一律当成碰过）：一层都铺不出去，结果恒为 −1，最多 288 步。
+
+   共同的形状跟 queens 的 `return false;` 一致：占位一律往**过紧**的方向倒，
+   不往过松的方向倒。过紧只是搜不出东西，过松会漫出棋盘或撞上限。 */
+const kpPlaceBad = [];
+let kpPlaceOffBoard = 0;
+let kpPlaceRight = 0;
+for (let target = 1; target <= 63; target++) {
+  const src = KP.source({ W: 8, start: 0, target: target });
+  const p = I.run(E.parse(src).placeholder, { host: {} });
+  if (p.trace.truncated || p.result === undefined) kpPlaceBad.push(target);
+  if (p.result === I.run(src, { host: {} }).result) kpPlaceRight++;
+  for (let i = 0; i < p.trace.length; i++) {
+    const ops = p.trace[i].boardOps || [];
+    for (let j = 0; j < ops.length; j++) {
+      if (ops[j].sq < 0 || ops[j].sq > 63) kpPlaceOffBoard++;
+    }
+  }
+}
+T.eq(kpPlaceBad.length, 0,
+     'knightPath 占位版在目标格滑杆全程（1..63）都跑得完、都有返回值' +
+     (kpPlaceBad.length ? '；出问题的目标格：' + kpPlaceBad.join(',') : ''));
+T.eq(kpPlaceOffBoard, 0,
+     'knightPath 占位版一次都没有往棋盘外的格子号上写事件（挡住 fill="return true;"）');
+T.eq(kpPlaceRight, 0,
+     'knightPath 占位版在滑杆全程一个目标格都没答对（挡住 fill="if (false) {"）');
+
+/* `on-board` 的占位是恒假，于是全盘占位时 `seen-test` 那一段一步都跑不到
+   （跟 queens 的 undo 落在 `if (safe(...))` 里面是同一件事）。所以每个挖空
+   还要**单独**拿自己的占位跑一次，别的挖空用参考答案。
+
+   `stubOnly` 从 `parse()` 出来的挖空对象里取 `fill` 与 `body`，**不把占位文本
+   再抄一遍**。这一条是被突变测试逼出来的：先前这里写死了 `if (true) {`，
+   于是把源码里的 `fill=` 改成简报那个恒假版之后，整套测试仍然全绿 —— 断言
+   钉的是测试自己抄的那份文本，不是源码里声明的那一份。 */
+function stubOnly(src, id) {
+  const blanks = E.parse(src).blanks;
+  for (let i = 0; i < blanks.length; i++) {
+    if (blanks[i].id === id) return src.replace(blanks[i].body, blanks[i].indent + blanks[i].fill);
+  }
+  /* 找不到这个 id 就记一条失败、把原样源码还回去，**不抛**。抛出去的话
+     `T.report()` 根本跑不到，上面那几条「id 是不是说好的那个」的断言明明已经
+     红了却一个字都印不出来，整轮只剩一段栈回溯 —— 跟 threeGates 里不设防的
+     `wrong.divergence.refStep` 是同一种失败形态。还回原样源码不会掩盖什么：
+     后面「占位单独跑时一个都没答对」那几条会跟着一起红，而第一条指名道姓的
+     就是真正的原因。 */
+  T.ok(false, 'stubOnly：源码里没有 id=' + id + ' 这个挖空（挖空清单变了？）');
+  return src;
+}
+const kpOnlyBad = { 'on-board': [], 'seen-test': [] };
+const kpOnlyRight = { 'on-board': 0, 'seen-test': 0 };
+let kpOnlyOffBoard = 0;
+for (let target = 1; target <= 63; target++) {
+  const src = KP.source({ W: 8, start: 0, target: target });
+  const refResult = I.run(src, { host: {} }).result;
+  const ids = ['on-board', 'seen-test'];
+  for (let k = 0; k < ids.length; k++) {
+    const p = I.run(stubOnly(src, ids[k]), { host: {} });
+    if (p.trace.truncated || p.result === undefined) kpOnlyBad[ids[k]].push(target);
+    if (p.result === refResult) kpOnlyRight[ids[k]]++;
+    for (let i = 0; i < p.trace.length; i++) {
+      const ops = p.trace[i].boardOps || [];
+      for (let j = 0; j < ops.length; j++) if (ops[j].sq < 0 || ops[j].sq > 63) kpOnlyOffBoard++;
+    }
+  }
+}
+T.eq(kpOnlyBad['on-board'].length, 0,
+     'knightPath 只把 on-board 换成占位时，滑杆全程跑得完、有返回值' +
+     (kpOnlyBad['on-board'].length ? '；出问题的目标格：' + kpOnlyBad['on-board'].join(',') : ''));
+T.eq(kpOnlyBad['seen-test'].length, 0,
+     'knightPath 只把 seen-test 换成占位时，滑杆全程跑得完、有返回值' +
+     (kpOnlyBad['seen-test'].length ? '；出问题的目标格：' + kpOnlyBad['seen-test'].join(',') : ''));
+T.eq(kpOnlyRight['on-board'], 0,
+     'knightPath 的 on-board 占位单独跑时，滑杆全程一个目标格都没答对');
+T.eq(kpOnlyRight['seen-test'], 0,
+     'knightPath 的 seen-test 占位单独跑时，滑杆全程一个目标格都没答对' +
+     '（挡住 fill="if (false) {" —— 那一版 63 个目标格全答对）');
+T.eq(kpOnlyOffBoard, 0,
+     'knightPath 两个挖空各自单独占位时，也一次都没往棋盘外的格子号上写事件');
+
+threeGates('knightPath/on-board', kpSrc, CHECK_KP,
+  /* 漏掉 `y < W` 那一项：上边界没人管了，波纹从棋盘顶上漫出去。 */
+  function (s) {
+    return s.replace('  return x >= 0 && x < W && y >= 0 && y < W;',
+                     '  return x >= 0 && x < W && y >= 0;');
+  },
+  /* 实测值，不是推导值：第 133 条棋盘事件上参考在看 sq=61（g8），她的版本在看
+     **sq=68 —— 一个 8×8 棋盘上不存在的格子号**，参考侧第 1,371 步（她那边第
+     1,364 步；她少几步是因为漏查一项，`&&` 短路得更早）。 */
+  { refStep: 1371, herStep: 1364, opIndex: 133 },
+  /* 四条边拆成四条 if 再 return true —— 跟 queens/safe-return 那条同形，也同样
+     有牙齿：实测 6,592 步 vs 参考 5,086 步，形状真的不同，一个偷偷改成顺带比
+     trace.length 的判定会在这里红。 */
+  function (s) {
+    return s.replace('  return x >= 0 && x < W && y >= 0 && y < W;',
+      [
+        '  if (x < 0) { return false; }',
+        '  if (x >= W) { return false; }',
+        '  if (y < 0) { return false; }',
+        '  if (y >= W) { return false; }',
+        '  return true;',
+      ].join('\n'));
+  });
+
+threeGates('knightPath/seen-test', kpSrc, CHECK_KP,
+  /* `>= 0` 写成 `> 0`：dist 恰好是 0 的那一格 —— 出发格 —— 不再算「碰过」。 */
+  function (s) {
+    return s.replace('        if (dist[nb] >= 0) {', '        if (dist[nb] > 0) {');
+  },
+  /* 实测值：第 14 条棋盘事件上参考说 sq=0（a1，出发格）是 cut、她的版本说是 ok，
+     参考侧第 361 步（她那边第 363 步）。分歧落在出发格上正是这个错法的定义 ——
+     报出来的那一条事件本身就把 bug 指出来了。 */
+  { refStep: 361, herStep: 363, opIndex: 14 },
+  /* 换一种说法问同一件事（`!== -1`），顺手取个名字。实测 5,386 步 vs 参考
+     5,086 步 —— 多一条语句，步数真的不同。 */
+  function (s) {
+    return s.replace('        if (dist[nb] >= 0) {',
+      [
+        '        const already = dist[nb] !== -1;',
+        '        if (already) {',
+      ].join('\n'));
+  });
+
+/* ---------- tourKnight（Warnsdorff 那一份） ---------- */
+
+const TW = require('./algos/tour-warnsdorff.js');
+const TD = require('./algos/tour-dfs.js');
+/* 四块盘就是工具页 `TOUR_BOARDS` 的四档；3×4 是滑杆初值。 */
+const TOUR_BOARDS = [[3, 4], [3, 5], [4, 5], [3, 7]];
+const twSrc = TW.source({ W: 3, H: 4, start: 0 });
+
+/* ---- 这里只有**一个**挖空，不是简报和规格 §2.9 说的两个 ----
+
+   计划与规格给 tourKnight 排了两个挖空：`degree-count`（1 级，`degree()` 里
+   那一句 `if (!visited[…]) { d = d + 1; }`）与 `degree-fn`（3 级，整个
+   `degree()` 函数）。**这两个挖空不可能同时存在**：后者的挖空体把前者整个
+   包在里面，而 `exercise.js` 的 `parse()` 见到嵌套的 `>>> BLANK` 会当场抛
+   （「BLANK 指令嵌套」，exercise.test.js 里有一条专门钉着它）。Task 6 拿到的
+   是 `Exercise.parse(src).placeholder` 一份，所有挖空一起解析，没有「按难度
+   挑一个」的入口。实测确认过：把两组指令按计划写进同一份源码，`parse` 抛。
+
+   为什么不换个位置给第二个挖空 —— 三条约束把它挤没了：
+
+     ① 挖空只能落在 Warnsdorff **独有**的那两段（`degree()` 与排序那一段），
+        否则 tour-dfs.js 与本文件「除了那一个主意逐字相同」的对照就多出噪声，
+        而那份并排 diff 是这一课本身。
+     ② 排序那一段**规格明令不挖**（换成插入排序是货真价实的等价改写，但并列
+        时的打破方式不同，会走出另一条同样合法的巡游而被判错 —— §7.4「判定
+        过严」的教科书案例）。
+     ③ 剩下唯一的非嵌套落点是量出路数那一行 `degs.push(degree(cand[i]));`。
+        它的占位**跑不完**：任何让 degs 变成常数的占位都会让排序退化成不排，
+        这一份就变回朴素回溯 —— 实测 4×5 撞 200,000 上限、`result` 是
+        `undefined`，而参考在那块盘上 7,283 步就走完了。这正是 Task 4 在 queens
+        的 `fill="return true;"` 上踩过的那条线。
+
+   所以这里交一个：`degree-fn`（3 级）。**留它而不是留 1 级那个是有理由的**：
+   3 级在整个阶段 6 只出现这一次，丢了它「三个难度级都覆盖」就没了；而 1 级
+   另有三个（queens/safe-return、knightPath 的两个）。填整个函数本来也要求她
+   把那一句计数写出来，1 级那道题的内容并没有丢。
+
+   **这是一处需要控制者裁定的偏差**，不是就地改掉的东西：报告里写了三种走法
+   与各自的实测代价。 */
+const twBlanks = E.parse(twSrc).blanks;
+T.eq(twBlanks.length, 1, 'tour-warnsdorff 声明了一个挖空（两个会嵌套，parse 会抛）');
+T.eq(twBlanks[0] ? twBlanks[0].id : null, 'degree-fn', 'tour-warnsdorff 那个挖空的 id');
+T.eq(twBlanks[0] ? twBlanks[0].level : null, 3, 'tour-warnsdorff 的 degree-fn 是 3 级（整个函数）');
+
+/* 嵌套确实抛 —— 上面那段话里最要紧的一句，钉住它，别让它退化成一段传说。 */
+T.throws(function () {
+  E.parse(twSrc.replace('      if (!visited[ny * W + nx]) { d = d + 1; }',
+    [
+      '      // >>> BLANK id=degree-count level=1 fill="d = d + 0;" hint="甲" hintEn="A"',
+      '      if (!visited[ny * W + nx]) { d = d + 1; }',
+      '      // <<< BLANK',
+    ].join('\n')));
+}, 'tourKnight：把 degree-count 再挖一道就嵌套了 —— parse 当场抛');
+
+/* tour-dfs 是只读对照，一个挖空都不许有（§2.9 阶段 6 第 1 条）。
+   四块盘各查一次：`source()` 是按盘拼字符串的，只查一块盘查不出「某块盘上
+   多了一段」这种事。 */
+for (let b = 0; b < TOUR_BOARDS.length; b++) {
+  const W = TOUR_BOARDS[b][0], H = TOUR_BOARDS[b][1];
+  T.eq(E.parse(TD.source({ W: W, H: H, start: 0 })).blanks.length, 0,
+       'tour-dfs 在 ' + W + '×' + H + ' 上没有挖空 —— 它是只读对照');
+}
+
+/* ---- 占位版：四块盘逐块量，判据是「不比参考差」 ----
+
+   tourKnight 的门槛跟 queens 不一样，因为**参考自己就在 3×7 上撞墙**
+   （200,000 步、`result` 是 `undefined`，规格 §4⑤ 的第三段弧线就是这件事）。
+   所以这里不能写死「占位版永不截断」—— 那条断言会因为一件跟挖空毫无关系的
+   事而红。判据是：**参考跑得完的盘，占位版也要跑得完**。
+
+   这一条把简报给的 `fill`（返回常数 0 的同签名函数）挡在门外。实测四块盘：
+
+     盘     参考              占位 `return 0;`        占位（现在这一版）
+     3×4     3,092 ✓ true      1,393 ✓ true            2,672 ✓ true
+     3×5   120,650 ✓ false    54,461 ✓ false         104,501 ✓ false
+     4×5     7,283 ✓ true    200,000 ✗撞墙             6,059 ✓ true
+     3×7   200,000 ✗撞墙     200,000 ✗撞墙           200,000 ✗撞墙
+
+   返回常数的占位在 4×5 上撞墙，而参考在那块盘上 7,283 步就走完 —— 跟 Task 4
+   在 queens 上遇到的是同一条线。原因值得写下来，因为它同时解释了该换成什么：
+   degree 一返回常数，候选就全部并列，那段选择排序一次也不交换，**这一份就
+   逐字退化成 tour-dfs**。实测钉过：`return 0;` 的占位版在 3×4 与 3×5 上的
+   棋盘事件流与 tour-dfs 的**逐条相同**（40 条 / 3,223 条）。
+
+   所以现在的 `fill` 是「数出路数，但忘了看踩没踩过」—— 只丢掉 `!visited`
+   那一项的天真版本。它保住了启发式的形状（静态出路数仍然让角落优先），
+   四块盘上都不比参考差；同时它仍然是**错的**，而且错得正是这道题要教的那
+   一件事：Warnsdorff 的出路数必须随着马走过的路变小，不然它就只是一张
+   跟局面无关的常数表。 */
+const twPlaceRows = [];
+for (let b = 0; b < TOUR_BOARDS.length; b++) {
+  const W = TOUR_BOARDS[b][0], H = TOUR_BOARDS[b][1];
+  const src = TW.source({ W: W, H: H, start: 0 });
+  const ref = I.run(src, { host: {} });
+  const p = I.run(E.parse(src).placeholder, { host: {} });
+  const tag = W + '×' + H;
+  twPlaceRows.push(tag + ' 参考 ' + ref.trace.length + (ref.trace.truncated ? '✂' : '') +
+                   ' / 占位 ' + p.trace.length + (p.trace.truncated ? '✂' : ''));
+  if (!ref.trace.truncated) {
+    T.ok(!p.trace.truncated, 'tourKnight 占位版在 ' + tag + ' 上跑得完（参考在这块盘上跑得完）');
+    T.ok(p.result !== undefined, 'tourKnight 占位版在 ' + tag + ' 上有返回值');
+  } else {
+    /* 3×7：参考自己就撞墙。这一条不是「放过占位版」，而是把「判据为什么
+       只能是相对的」钉成事实 —— 哪天参考在这块盘上跑得完了，它会红，
+       上面那张表也就该重量一遍。 */
+    T.ok(true, 'tourKnight 在 ' + tag + ' 上参考自己就撞墙，占位版不比它差是唯一说得通的判据');
+  }
+}
+T.eq(twPlaceRows.length, 4, 'tourKnight 占位版四块盘都量过：' + twPlaceRows.join(' · '));
+
+/* 占位版必须是**错的**。tourKnight 这里不能像 knightPath 那样钉「一个都没答
+   对」：它的返回值只是 true / false，3×4 上占位版照样找得到一条巡游、`result`
+   照样是 true —— 巧合而已，两条路线并不一样。所以这里钉的是判定的结论：
+   四块盘上占位版都不许被判成 `pass`（跑得完的三块是 fail，3×7 两边都撞墙，
+   分歧若没出现在截断之前就是 unknown —— 那也不是「对」）。 */
+for (let b = 0; b < TOUR_BOARDS.length; b++) {
+  const W = TOUR_BOARDS[b][0], H = TOUR_BOARDS[b][1];
+  const src = TW.source({ W: W, H: H, start: 0 });
+  const v = E.judge(I.run(src, { host: {} }),
+                    I.run(E.parse(src).placeholder, { host: {} }), CHECK_TOUR);
+  T.ok(v.status !== 'pass',
+       'tourKnight 占位版在 ' + W + '×' + H + ' 上不被判对（实测 ' + v.status + '）');
+}
+
+/* knightPath 同理，一档就够（它的占位恒返回 −1，答案本来就没得巧合）。 */
+T.eq(E.judge(I.run(kpSrc, { host: {} }),
+             I.run(E.parse(kpSrc).placeholder, { host: {} }), CHECK_KP).status,
+     'fail', 'knightPath 占位版被判错');
+
+threeGates('tourKnight/degree-fn', twSrc, CHECK_TOUR,
+  /* `return d;` 写成 `return 8 - d;`：出路数被整个倒过来，Warnsdorff 从「先去
+     最急的」变成「先去最闲的」。它仍然是回溯搜索，仍然会找到答案（实测 16,977
+     步、true），只是路线完全不同 —— 正是这道题要她看见的那件事。 */
+  function (s) { return s.replace('  return d;', '  return 8 - d;'); },
+  /* 实测值：第 3 条棋盘事件上参考在试 sq=7、她的版本在试 sq=5，参考侧第 273 步
+     （她那边第 274 步）。分歧来得这么早是对的 —— 排序反过来，第一格的候选顺序
+     当场就不一样了。 */
+  { refStep: 273, herStep: 274, opIndex: 3 },
+  /* 等价改写：**倒着遍历八个方向**，而且改成「先全数、再减掉踩过的」。
+     两处都只改数法、不改数出来的值 —— 这是这道题最容易写坏的地方：degree 的
+     返回值要参与排序，任何改变并列打破方式的「等价」改写都会走出另一条同样
+     合法的巡游而被判错（规格里「Warnsdorff 那段排序故意不挖」是同一个坑的
+     大号版本）。实测 3,202 步 vs 参考 3,092 步：形状不同、值相同，正是第 ③ 关
+     要的那种改写。 */
+  function (s) {
+    return s.replace(
+      [
+        'function degree(sq) {',
+        '  const x = sq % W;',
+        '  const y = (sq - x) / W;',
+        '  let d = 0;',
+        '  for (let k = 0; k < 8; k = k + 1) {',
+        '    const nx = x + DX[k];',
+        '    const ny = y + DY[k];',
+        '    if (onBoard(nx, ny)) {',
+        '      if (!visited[ny * W + nx]) { d = d + 1; }',
+        '    }',
+        '  }',
+        '  return d;',
+        '}',
+      ].join('\n'),
+      [
+        'function degree(sq) {',
+        '  const x = sq % W;',
+        '  const y = (sq - x) / W;',
+        '  let total = 0;',
+        '  let used = 0;',
+        '  for (let k = 7; k >= 0; k = k - 1) {',
+        '    const nx = x + DX[k];',
+        '    const ny = y + DY[k];',
+        '    if (onBoard(nx, ny)) {',
+        '      total = total + 1;',
+        '      if (visited[ny * W + nx]) { used = used + 1; }',
+        '    }',
+        '  }',
+        '  return total - used;',
+        '}',
+      ].join('\n'));
+  });
 
 T.report();

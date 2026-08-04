@@ -73,13 +73,28 @@
    · 子集约束（规格 §2.6）：**没有三元运算符**，`a ? b : c` 会抛 unsupported，
      一律展开成 if/else；数组只有 `push` / `pop` 和 `length` 与下标读写。
 
-   · §2.9 将来要挖的两道缝，先留好、先记在这里（**现在不写 `// >>> BLANK`
-     标记** —— 挖哪几行是练习设计的决定，今天没有任何消费者）：
-       ① `onBoard(x, y)` 单独成一个函数，函数体只有一行 —— 跟 `queens.js` 的
-          `safe(r, c)` 同一道缝（level=1「填一个表达式」）。
-       ② `expand()` 里那一句 `dist[nb] = d + 1;`。把 `d + 1` 写成别的什么，
-          程序照常跑完、照常返回一个数，只是那个数不对了 —— 正是挖空练习要的
-          那种「跑得完但答错」，判定靠比结果而不是比文本。
+   · **两组 `// >>> BLANK` 指令现在就写在下面的 `BODY` 里**（§2.9），由
+     `core/exercise.js` 的 `parse()` 消费。两个都是 level=1「填一个表达式」：
+       ① `id=on-board` —— `onBoard(x, y)` 那一行返回式，跟 `queens.js` 的
+          `safe(r, c)` 同一道缝。
+       ② `id=seen-test` —— `expand()` 里那一句 `if (dist[nb] >= 0) {`：
+          「这一格碰过没有」。它就是整个 BFS 的开关，写错了程序照常跑完、
+          照常返回一个数，只是那个数不对 —— 正是挖空练习要的那种「跑得完
+          但答错」，判定靠比行为而不是比文本。
+
+     指令是注释，**一步都不产生**：插入前后 a1→h8 是 5,086 步 / 距离 6、
+     a1→d4 是 347 步 / 距离 2，与上面那张实测表逐格相同；把四行指令剥回去
+     再跑，步数、结果与整条棋盘事件流逐条一致。
+
+     **两个 `fill` 都跟计划给的相反，各挡一种事故**（实测，滑杆全程 1..63）：
+     恒真的 `onBoard`（计划给的 `fill="return true;"`）会让 `nb` 算出 −15、
+     68 这种**棋盘上不存在的格子号**，滑杆全程 10,561 条棋盘事件落在盘外，
+     而且 63 个目标格里有 38 个答案照样对；`fill="if (false) {"` 更甚 ——
+     它 63 个目标格**全部答对**（逐层同步的 BFS 即使把「碰过没有」整个关掉，
+     第一次生成目标格的那一层仍然正好是最短距离）。一个按 Run 就给出正确
+     读数的占位版会让 Check 看起来像在刁难人。现在用的是 `return false;`
+     与 `if (true) {`：一律往**过紧**的方向倒，结果恒为 −1，滑杆全程最多
+     288 步、盘外事件 0 条。三关六条断言在 `core/exercise-blanks.test.js`。
 
    ---- 实测步数与结果（`Interp.STEP_LIMIT` = 200,000）----
 
@@ -161,7 +176,9 @@
     '',
     '// (x, y) 还在棋盘上吗？出界的方向连看都不用看。',
     'function onBoard(x, y) {',
+    '  // >>> BLANK id=on-board level=1 fill="return false;" hint="四条边都要查：x 要落在 0 到 W−1 之间，y 也一样。少查一条边，波纹就会漫到棋盘外面去 —— 那外面的格子号码根本不存在。" hintEn="All four edges have to be checked: x must land between 0 and W−1, and so must y. Miss one edge and the wave spills off the board, into square numbers that do not exist."',
     '  return x >= 0 && x < W && y >= 0 && y < W;',
+    '  // <<< BLANK',
     '}',
     '',
     '/* frontier 是「正好 d 步能到的那一整层格子」。',
@@ -181,7 +198,9 @@
     '      if (onBoard(nx, ny)) {',
     '        const nb = ny * W + nx;',
     '        mark(nb, "try");     // 正在看这个邻居：先点亮，再问它是不是第一次碰到',
+    '        // >>> BLANK id=seen-test level=1 fill="if (true) {" hint="dist[nb] 记的是「走到这一格最少几步」，−1 的意思是还没碰过它。碰过的就不必再看了。留神出发格记的是 0 —— 它也是碰过的。" hintEn="dist[nb] holds the fewest moves needed to reach that square, and −1 means it has not been touched yet. A square that has been touched needs no second look. Watch out for the starting square: it holds 0, and 0 counts as touched."',
     '        if (dist[nb] >= 0) {',
+    '        // <<< BLANK',
     '          /* 早就到过它了。而且更早到达它的那一层比现在这一层近，',
     '             所以从这边再走过去只会更长 —— 看都不用再看。 */',
     '          mark(nb, "cut");',
