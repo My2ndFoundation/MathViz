@@ -22,25 +22,29 @@
 - **每次改完跑 `python3 chess/scripts/check.py`，必须 exit 0。**
 - **提交只 stage 明确路径**，禁止 `git add -A` / `git commit -a`（仓库有并行 session）。
 
-## 基线数字（在 `origin/main` = `30e4c38` 上实测，不是估的）
+## 基线数字（在 `origin/main` = `02c9990`，即阶段 4 合并之后实测，不是估的）
 
 ```
-node --check：6 个文件、12 个脚本块通过
-FALLBACK 一致性：3 个 id 全部对上
+node --check：7 个文件、14 个脚本块通过
+FALLBACK 一致性：4 个 id 全部对上
 ```
 
 本计划完成后应为：
 
 ```
-node --check：8 个文件、14 个脚本块通过
-FALLBACK 一致性：2 份内嵌副本 · 3 个 id 全部对上
+node --check：9 个文件、16 个脚本块通过
+FALLBACK 一致性：2 份内嵌副本 · 4 个 id 全部对上
 ```
 
-`6 → 8` 是加上 `chess/index.html` 与 `chess/app.html` 两个根级页面；`12 → 14` 是这两页各含一个 `<script>` 块。
+`7 → 9` 是加上 `chess/index.html` 与 `chess/app.html` 两个根级页面；`14 → 16` 是这两页各含一个 `<script>` 块（`chess/tools/` 下 7 个文件各 2 块 = 14，已逐文件核过）。
 
-## 与阶段 4 的冲突面
+**注意 `4 个 id`**：阶段 4 已交付并注册了工具④ `chess-search-minimax`（`accent: orange`、`phase: 4`）。`chess/app.html` 的 `FALLBACK` 必须是**四条**，少一条门就会红——这正是这道门存在的意义。
 
-Task 1 改 `chess/scripts/check.py`，而 `claude/chess-phase4` 那条线此刻也在改这个文件。**Task 1 单独成一个 commit**，便于在阶段 4 合并后 rebase 或择时摘取。其余 task 不碰这个文件。
+## 与阶段 4 的关系
+
+阶段 4 已合并（PR #86，`02c9990`），本分支已 rebase 到其上，`check.py` 的冲突面因此消失——Task 1 直接改的就是合并后的版本。`check.py` 仍单独成一个 commit，理由改为「它是门的改动，与壳的改动性质不同，分开便于回溯」。
+
+阶段 4 同时给 `check.py` 加了两道新门（`js_string_literal` HTML 安全检查、`ALGOS` 往返校验），本计划不碰它们；`algos_roundtrip_check()` 里另有一处 `(ROOT / 'tools').glob('*.html')`（约第 151 行），那是在校验工具页内联的算法源码，**不应**扩到根级页面——根级页面里没有 `ALGOS`。只改 `node_check()` 与 `fallback_check()` 两处。
 
 ## File Structure
 
@@ -373,15 +377,22 @@ var FALLBACK = [
     kicker: { en: 'Games', zh: '棋局' },
     title: { en: 'Reading a Game', zh: '读懂一局棋' },
     tag: { en: '30 games · piece traces · evaluation curves · heat map', zh: '30 局棋谱 · 子力轨迹 · 评估曲线 · 热力图' }
+  },
+  {
+    id: 'chess-search-minimax', file: 'tools/chess-search-minimax.html', accent: 'orange', phase: 4,
+    kicker: { en: 'Search', zh: '搜索' },
+    title: { en: 'Game Trees and Search', zh: '博弈树与搜索' },
+    tag: { en: 'minimax · alpha-beta · move ordering · Shannon number', zh: '极小极大 · α-β 剪枝 · 走法排序 · 香农数' }
   }
 ];
 var TOOLS = FALLBACK;
 
-/* 阶段标签与 chess/index.html 的 PHASE_LABELS 同一份含义；缺的阶段有兜底，
-   阶段 4/5 的工具一进注册表就能自己长出分组，不必回来改这里。 */
+/* 阶段标签与 chess/index.html 的 PHASE_LABELS 逐条同源（它已经有阶段 4 了）。
+   缺的阶段有兜底，阶段 5 的工具一进注册表就能自己长出分组，不必回来改这里。 */
 var PHASE_LABELS = {
-  1: { en: 'Phase 1 · Rules', zh: '阶段 1 · 规则速成' },
-  2: { en: 'Phase 2 · Games', zh: '阶段 2 · 棋谱回放' }
+  1: { en: 'Phase 1 · Rules Crash Course', zh: '阶段 1 · 规则速成' },
+  2: { en: 'Phase 2 · Game Replay', zh: '阶段 2 · 棋谱回放' },
+  4: { en: 'Phase 4 · Search and Game Trees', zh: '阶段 4 · 搜索与博弈树' }
 };
 function phaseLabel(n) { return PHASE_LABELS[n] || { en: 'Phase ' + n, zh: '阶段 ' + n }; }
 
@@ -413,8 +424,8 @@ Run: `python3 chess/scripts/check.py; echo "exit=$?"`
 Expected: `exit=0`，输出里出现：
 
 ```
-node --check：8 个文件、14 个脚本块通过
-FALLBACK 一致性：2 份内嵌副本 · 3 个 id 全部对上
+node --check：9 个文件、16 个脚本块通过
+FALLBACK 一致性：2 份内嵌副本 · 4 个 id 全部对上
 ```
 
 - [ ] **Step 7: 变异验证——三处，每处必须让门变红**
@@ -522,14 +533,14 @@ renderNav();
 - [ ] **Step 2: 语法门必须仍然绿**
 
 Run: `python3 chess/scripts/check.py; echo "exit=$?"`
-Expected: `exit=0`，仍是 `node --check：8 个文件、14 个脚本块通过`
+Expected: `exit=0`，仍是 `node --check：9 个文件、16 个脚本块通过`
 
 - [ ] **Step 3: 浏览器验收**
 
 用 preview 打开 `chess/app.html`（本 worktree 内的路径），确认：
-- 侧边栏出现四项：`All tools · Gallery`、分组标题 `Phase 1 · Rules` 下两项、分组标题 `Phase 2 · Games` 下一项
+- 侧边栏出现五项：`All tools · Gallery`，分组 `Phase 1 · Rules Crash Course` 下两项、`Phase 2 · Game Replay` 下一项、`Phase 4 · Search and Game Trees` 下一项
 - `All tools · Gallery` 是高亮态（`curId === null`）
-- 三个工具项各自的色点颜色不同（rose / violet / emerald）
+- 四个工具项各自的色点颜色不同（rose / violet / emerald / orange）
 - 舞台是空的（iframe 还没接，Task 3 才接）
 
 - [ ] **Step 4: 提交**
@@ -675,7 +686,7 @@ Expected: `exit=0`
 - [ ] **Step 5: 浏览器验收**
 
 - 直接打开 `chess/app.html`：iframe 里装的是 `chess/index.html` 画廊，侧边栏 home 项高亮
-- 点侧边栏三个工具，各自装进 iframe，高亮跟随，地址栏出现 `?tool=<id>&lang=en`
+- 点侧边栏四个工具，各自装进 iframe，高亮跟随，地址栏出现 `?tool=<id>&lang=en`
 - 直接打开 `chess/app.html?tool=chess-game-replay`：进来就是回放工具，对应项高亮
 - 打开 `chess/app.html?tool=不存在的id`：安静落回 home，不报错、不白屏
 - 点几个工具后按浏览器后退键：地址、侧边栏高亮、iframe 画面三者同步后退（不出现「地址退了画面没退」）
@@ -868,11 +879,11 @@ Expected: 都是 `0`。`sync_registry.py` 不受影响——Chess 卡片是手�
 - 从主站 `index.html` 点 Chess 卡片 → 落在 `chess/app.html`，iframe 里是画廊
 - 在画廊里点任一工具卡片 → 壳装上该工具，侧边栏高亮与地址栏同步
 - `chess/app.html?tool=chess-moves-geometry` 深链直达
-- 三个工具在侧边栏之间互切
+- 四个工具在侧边栏之间互切
 - 语言切换壳与工具同步
 - 折叠 + `Ctrl/Cmd+B` + `[`
 - **`file://` 下（不起服务器）重跑上面全部**：走 FALLBACK，导航必须完整可用
-- **三个工具单独打开**（`chess/tools/chess-game-replay.html`）仍然正常，与壳无关
+- **四个工具单独打开**（含 `chess/tools/chess-search-minimax.html`）仍然正常，与壳无关
 - 工具页自己的键（`1`–`9` / `T` / `Space` / `F`）在壳里仍然有效
 
 - [ ] **Step 5: 提交**
@@ -886,10 +897,10 @@ git commit -m "feat(chess): 落地页卡片与主站入口都指向导航壳"
 
 ## 完成标准
 
-- [ ] `python3 chess/scripts/check.py` exit 0，输出为 `node --check：8 个文件、14 个脚本块通过` 与 `FALLBACK 一致性：2 份内嵌副本 · 3 个 id 全部对上`
+- [ ] `python3 chess/scripts/check.py` exit 0，输出为 `node --check：9 个文件、16 个脚本块通过` 与 `FALLBACK 一致性：2 份内嵌副本 · 4 个 id 全部对上`
 - [ ] `python3 scripts/sync_registry.py --check` exit 0
 - [ ] Task 1 Step 7 的三处变异各自确认让门变红，且都已改回
 - [ ] `chess/tools/` 下没有任何文件被改动（`git diff --stat main...HEAD` 里不出现 `chess/tools/`）
-- [ ] 三个工具单独打开仍正常
+- [ ] 四个工具单独打开仍正常
 - [ ] `file://` 下壳的导航完整可用
 - [ ] 主站除 `index.html` 的一行 `href` 外没有任何改动
