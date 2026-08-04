@@ -130,7 +130,8 @@ chess/
 /* >>> GENERATED:GAMES */ … /* <<< */      （仅回放工具）
 /* >>> GENERATED:INTERP */ … /* <<< */     （仅 ④⑤）
 /* >>> GENERATED:DEBUGGER */ … /* <<< */   （仅 ④⑤）
-/* >>> GENERATED:ALGOS queens,tourKnight */ … /* <<< */   （仅 ④⑤，算法源码以字符串内联）
+/* >>> GENERATED:ALGOS queens,tour-dfs,tour-warnsdorff,knight-path */ … /* <<< */
+                                           （仅 ④⑤，算法源码以字符串内联；按页列清单）
 ```
 
 这是照抄仓库现有 `scripts/sync_registry.py` 的纪律，同样接进 `.githooks/pre-commit` 与 CI。运行时每个 html 完全自足，`file://` 双击可用。
@@ -142,7 +143,7 @@ chess/
 **`ALGOS` 标记按页列清单**（2026-08-04 定）。第一版是整目录倾倒——只有一份算法源码时无感，但工具⑤ 一落地就会让工具④ 带上四份它从不执行的算法、工具⑤ 带上 `minimax.js`。标记行自己写明这一页要哪几份：
 
 ```
-/* >>> GENERATED:ALGOS queens,tourKnight */ … /* <<< GENERATED:ALGOS */
+/* >>> GENERATED:ALGOS queens,tour-dfs,tour-warnsdorff,knight-path */ … /* <<< GENERATED:ALGOS */
 ```
 
 漏写一个键**当场报错**，而不是静默少内联一份（那会变成运行时才发现的 `ALGOS['queens.js'] === undefined`）。`check.py` 的往返校验也因此能逐页对应，而不是把所有页面对着同一份目录校验。
@@ -192,7 +193,8 @@ drawBoard(C, { files: 8, ranks: 8, origin, cell, coords: true, mask: null })
 drawPiece(C, { piece, square, scale, alpha, facing })
 ```
 
-- 默认 `8×8`；N 皇后 `files=ranks=N`，N ∈ [4, 12]；骑士巡游 `5×5 / 6×6 / 8×8`；博弈树用 `4×4` 简化盘
+- 默认 `8×8`；N 皇后 `files=ranks=N`，**N ∈ [4, 8]**；骑士巡游 **`3×4` / `4×5` / `3×7`**（**非方形**）；博弈树用 `4×4` 简化盘
+  - 两处范围都是 §4⑤ 实测收窄的：N=9 与巡游的 5×5 以上在 `STEP_LIMIT` 下跑不完。**巡游的盘不再是方形**，所以 `files !== ranks` 是常态而不是边角情况——坐标标注与取景都要按这个测
 - 坐标标注随尺寸自适应（`a`–`h` 自动扩到 `a`–`l`）
 - `mask` 预留给"带禁区的棋盘"这类变体题
 
@@ -448,6 +450,8 @@ check: { result: true, boardOps: true, counters: ['solutions'] }
 | `kingDominate` | 最少 9 王支配全盘 | 贪心 vs 精确，差距可见 | 选取轮次 | 盘面 | 待定 |
 
 **两种巡游是同一个键 `tourKnight`，同屏并排**——同一个问题、同一块盘、两份可以逐行对比的源码。这是「算法设计」这件事本身最直观的一课，所以它们必须同时在屏幕上，而不是两个要来回切的 tab。
+
+**它仍然是两份 `algos/*.js`**（`tour-dfs.js` 与 `tour-warnsdorff.js`），因为要对比的正是两份源码本身；一个键持有两份源码，是 `PROBLEMS` 里唯一这样的条目。所以那条「一题 = 一个键 + 一个文件」的口径对它要写成 `sources: ['tour-dfs.js', 'tour-warnsdorff.js']`——**架构要能表达这件事，而不是逼它拆成两个键**，否则同屏对比就散了。
 
 #### 实测参数（阶段 5 设计时量出来的，不是估的）
 
