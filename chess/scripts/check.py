@@ -21,7 +21,7 @@ FALLBACK_ID_RE = re.compile(r"id:\s*'([\w-]+)'")
 # 该脚本块在原文件里的真实行号，见 node_check() 里的用法。
 STDIN_LINE_RE = re.compile(r'^\[stdin\]:(\d+)$', re.MULTILINE)
 ALGOS_BLOCK_RE = re.compile(
-    r'/\* >>> GENERATED:ALGOS \*/\n(.*?)\n/\* <<< GENERATED:ALGOS \*/', re.DOTALL)
+    r'/\* >>> GENERATED:ALGOS(.*?) \*/\n(.*?)\n/\* <<< GENERATED:ALGOS \*/', re.DOTALL)
 
 # 根级页面 = chess/index.html 与 chess/app.html。它们不在 tools/ 下，于是
 # 长期躲过了这个文件里的两道门：node_check() 只 glob('tools/*.html')，而 CI
@@ -171,6 +171,16 @@ def algos_roundtrip_check() -> int:
     重新实现一遍转义规则，等于又造了一份可能跟 js_string_literal 各自
     漂移的平行实现。
 
+    标记按页列清单之后（规格 §2.1，2026-08-04 更新），这里再加一条独立
+    于 inline_core 的校验：把标记行本身的清单跟求值出来的 ALGOS 对象的
+    key 集合互相核对，两边**恰好相等**，多一个少一个都算错。「独立」
+    是关键——inline_core.main(check_only=True) 那道门也会重新生成一遍
+    再逐字比对，但它用的是同一份 inline_core.render()，如果清单解析或
+    校验逻辑本身有 bug（比如漏掉了某种越界情况），重新生成一遍还是那个
+    坏结果，两边照样"一致"。这里从标记行的原始文本独立解析一遍清单，
+    不经过 inline_core 的任何函数，才能真正测出"页面上跑起来的 ALGOS
+    对象，是不是标记行说的那几个文件，一个不多一个不少"。
+
     **本函数的校验范围止于 JS 求值等价，不覆盖 HTML 嵌入安全**：`node -e`
     是纯 JS 解析器，从不经过 HTML 分词器，天生看不见"分词器提前进入
     转义状态、把收尾 `</script>` 吃掉"这一类坑（`<!--` + 后面裸 `<script`
@@ -193,7 +203,13 @@ def algos_roundtrip_check() -> int:
         if not m:
             continue
         checked_files += 1
-        script = m.group(1) + '\nprocess.stdout.write(JSON.stringify(ALGOS));'
+        # 标记行自己的清单，从原始文本独立解析——不调用 inline_core 的任何
+        # 函数，见上面文档字符串：要测的正是"标记说的"和"页面上跑起来的"
+        # 是否对得上，如果连解析清单都复用 inline_core，这道门就退化成
+        # "inline_core 跟自己比对"，测不出 inline_core 本身的 bug。
+        expected_names = set(n.strip() for n in m.group(1).strip().split(','))
+        expected_names.discard('')
+        script = m.group(2) + '\nprocess.stdout.write(JSON.stringify(ALGOS));'
         proc = subprocess.run(['node', '-e', script], capture_output=True, text=True)
         if proc.returncode != 0:
             failed.append((path.name, 'node 求值 ALGOS 失败：' + proc.stderr.strip()))
@@ -202,6 +218,17 @@ def algos_roundtrip_check() -> int:
             algos = json.loads(proc.stdout)
         except json.JSONDecodeError as e:
             failed.append((path.name, 'ALGOS 对象序列化失败：' + str(e)))
+            continue
+        actual_names = set(algos.keys())
+        if actual_names != expected_names:
+            missing = expected_names - actual_names
+            extra = actual_names - expected_names
+            detail = []
+            if missing:
+                detail.append(f'标记清单里有、ALGOS 对象里没有：{sorted(missing)}')
+            if extra:
+                detail.append(f'ALGOS 对象里有、标记清单里没有：{sorted(extra)}')
+            failed.append((path.name, 'ALGOS 键集合与标记清单不一致——' + '；'.join(detail)))
             continue
         for name, content in algos.items():
             src = inline_core.ALGOS_DIR / name
