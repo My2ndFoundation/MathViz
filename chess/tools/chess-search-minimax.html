@@ -6166,6 +6166,47 @@ const ALGOS = {
   const LABEL_MAX = 96;             // 可见节点多于这个数就不再画分数标签（见下）
   const DEPTH_MIN = 1, DEPTH_MAX = 4, DEPTH_DEFAULT = 2;
 
+  /* ---------------- `shannon` 那一页的量 ----------------
+
+     规格 §4④ 给那一页的内容是「分支因子 35 的指数爆炸 vs 可观测宇宙原子数
+     （**此 tab 无调试器，是纯图表**）」，顿悟那句是「α-β 剪掉的体积是肉眼
+     可见的一块；而香农数说明为什么永远剪不完」。
+
+     那一页画两条线：不剪枝的 b^d，和排序完美时 α-β 的 b^(d/2)。**α-β 减半
+     的是指数**——同一个预算下它把能算到的深度翻一倍，仅此而已。翻倍是真的
+     很多，而一整局棋是 80 个半步。前三个页签里「肉眼可见的那一块」在那根
+     纵轴上小到贴着地面（玫瑰色那根短线，数字是从那几个页签实测来的）。
+
+     **这几个常量声明在这里、而不是跟绘制代码放在一起，是因为文案要用它们。**
+     `STR.shCompute`、`STR.tipsShannon` 里出现的每一个数字都是从下面这些名字
+     拼出来的（见 STR 声明之后那一段），不是各写一份字面量——网格线的间隔
+     `SH_GRID` 尤其如此：提示语里「一格是多少倍」与 drawShannon 的循环步长
+     必须永远是同一个数，第一版这两处各写各的，差了 10^20 倍。 */
+  const SH_B = 35;                                   // 平均分支因子（香农 1950）
+  const SH_PLIES = 80;                               // 一整局的半步数（同一篇论文的 40 回合）
+  const SH_LOGMAX = 130;                             // 纵轴上界：log10（装得下 35^80 ≈ 10^123.5）
+  const SH_GRID = 20;                                // 相邻两条横网格线相差几个数量级
+  const SH_LOGB = Math.log(SH_B) / Math.LN10;        // log10(35) ≈ 1.5441
+  const SH_NPS = 1e9;                                // 「算得完」的上限：每秒能看多少个局面
+  const SH_AGE_GY = 13.8;                            // 宇宙年龄，十亿年
+  const SH_AGE_S = SH_AGE_GY * 1e9 * 365.25 * 24 * 3600;
+  const SH_LOG_COMPUTE = Math.log(SH_NPS * SH_AGE_S) / Math.LN10;
+  const SH_LOG_ATOMS = 80;                           // 可观测宇宙的原子数
+  const SH_LOG_SHANNON = 120;                        // 香农数
+
+  /* 上标数字：`10⁸⁰` 比 `10^80` 少一个要解释的符号。
+     **pow10 向下取整，不四舍五入。** 「10 的多少次方」问的是这个数落在哪
+     两个整幂之间，35^80 = 10^123.53 该读成 10¹²³（在 10¹²³ 与 10¹²⁴ 之间），
+     四舍五入成 10¹²⁴ 是把它报大了。 */
+  const SUPS = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+  function sup(n) {
+    return String(Math.round(n)).split('').map(function (c) { return SUPS[+c] || c; }).join('');
+  }
+  /* +1e-9：`Math.log(1e9)/Math.LN10` 实际是 8.999999999999998，直接 floor
+     会把 10⁹ 印成 10⁸。这个 epsilon 只吃掉浮点噪声，对 123.53 这类真正落在
+     两个整幂之间的值没有影响。 */
+  function pow10(l) { return '10' + sup(Math.floor(l + 1e-9)); }
+
   /* 一个含义 = 一个颜色，图例/曲线/读数三处复用同一个字面量（设计系统原则 3）。
      开关的颜色顺序照 rose → violet → emerald → orange 钉死。 */
   const C_SPINE = '#fb7185';        // rose    当前调用路径（调试器的调用栈）
@@ -6211,8 +6252,17 @@ const ALGOS = {
 
     tipsOrder:{ zh: '这棵树跑的是同一个 α-β，只多了「先试吃子」那一段。α-β 能砍掉多少，全看好棋被试到得有多早——早点收窄 alpha/beta 这个窗口，后面的分支一照面就出局。看读数区最后那张「按深度」的小表：省下的比例随深度增长，这就是 O(b^d) 与 O(b^(d/2)) 的差别，不是一个固定的倍数。深度 1 那一格反而是负的——那一层没有东西可剪，排序只是白排。',
                 en: 'This tree runs the same α-β, plus one block that tries captures first. How much α-β can cut depends entirely on how early a good move is tried — narrow the alpha/beta window early and later branches lose at first sight. Look at the per-depth table at the bottom of the readout: the saving grows with depth. That is the difference between O(b^d) and O(b^(d/2)) — not a fixed multiple. At depth 1 it is negative: nothing to prune there, so sorting is pure overhead.' },
-    tipsShannon:{ zh: '纵轴是 10 的多少次方，一格就是十倍。绿线是不剪枝的 b 的 d 次方，紫线是排序完美时 α-β 的 b 的 d/2 次方（b 是分支因子，读数区第一行写着它）——指数减半，正好是把能算到的深度翻倍，仅此而已。玫瑰色那条贴地的短线是你刚才在别的页签上看的那棵树：在这张图上它几乎贴着零。这一页没有代码面板，也没有可以单步的东西——它就是那个「剪不完」的理由本身。（这张图是平的，只有一个视角，按 1 回正。）',
-                 en: 'The vertical axis is the power of ten; one gridline is ten times more. The green curve is b^d without pruning; the violet one is b^(d/2), α-β with perfect ordering (b is the branching factor, first line of the readout) — the exponent is halved, which exactly doubles the reachable depth, and that is all it does. The rose tick near the floor is the tree you were just watching on the other tabs; on this axis it is barely off zero. There is no code panel here and nothing to step through — this page is the reason the pruning never finishes. (The chart is flat and has a single view; press 1 to come back to it.)' },
+    /* ⚠ 「一格是多少倍」由 SH_GRID 拼出来，**不写字面量**。第一版这里写的是
+       「一格就是十倍」，而网格线画在每 %d 个数量级上——差了 10^%d 倍，而且
+       差在唯一一页专门教她读对数轴的地方。%GRID% / %GRIDX% 在 STR 声明之后
+       被替换成常量的值（见下面那段）。 */
+    tipsShannon:{ zh: '纵轴是 10 的多少次方：相邻两条网格线相差 %GRID% 个数量级，也就是一格 10 的 %GRID% 次方倍。绿线是不剪枝的 b 的 d 次方，紫线是排序完美时 α-β 的 b 的 d/2 次方（b 是分支因子，读数区第一行写着它）——指数减半，正好是把能算到的深度翻倍，仅此而已。玫瑰色那条贴地的短线是你刚才在别的页签上看的那棵树：在这张图上它几乎贴着零。这一页没有代码面板，也没有可以单步的东西——它就是那个「剪不完」的理由本身。（这张图是平的，只有一个视角，按 1 回正。）',
+                 en: 'The vertical axis is the power of ten: adjacent gridlines are %GRID% orders of magnitude apart, so one gridline up is ten to the %GRID% times more. The green curve is b^d without pruning; the violet one is b^(d/2), α-β with perfect ordering (b is the branching factor, first line of the readout) — the exponent is halved, which exactly doubles the reachable depth, and that is all it does. The rose tick near the floor is the tree you were just watching on the other tabs; on this axis it is barely off zero. There is no code panel here and nothing to step through — this page is the reason the pruning never finishes. (The chart is flat and has a single view; press 1 to come back to it.)' },
+    /* 图表页自己的提示条。§4④ 说这一页无调试器，可 STR.hint 还在广告
+       F10/F11/F9/F5 和折叠键——而 `body.nosplit .hint` 恰好把它从 .55 提亮到
+       .75，于是一串在这一页全都无效的指示是它最显眼的时候。 */
+    hintChart: { zh: '这一页是纯图表：没有代码、没有断点、没有单步。拖拽旋转 · 按 1 或双击回正 · T 换页签',
+                 en: 'This page is a pure chart: no code, no breakpoints, no stepping. Drag to rotate · 1 or double-click to reset · T for tabs' },
 
     vPlan: { zh: '树形俯视', en: 'Tree plan' },
     vChart:{ zh: '正视', en: 'Top' },
@@ -6353,6 +6403,8 @@ const ALGOS = {
     shAxisX:   { zh: '往下看几个半步', en: 'plies searched ahead' },
 
     exportBtn: { zh: '导出 .js', en: 'Export .js' },
+    exportHead: { zh: '// %F\n// 从「博弈树与搜索」(chess-search-minimax v%V) 导出。\n//\n// 中间那一段是你在编辑器里读到的源码，一个字节都没改。\n// 唯一的加工是把它包进 run() 再 console.log 一次。为什么要包：\n//   编辑器里的那份是一段「程序体」，最后一行是顶层 return。\n//   直接存成 .js 用 node 跑，它不会报错 —— 但那个 return 的值没人接，\n//   你会看到一片空白；换成 ESM（.mjs 或 \"type\": \"module\"）则直接\n//   报 SyntaxError: Illegal return statement。包一层，两种情况都对。\n//\n// 跑它：   node %F\n//\n// ⚠ 如果工具页上这一格写着「超出 200,000 步上限，搜索没有跑完」，而这个\n//   文件在 node 里几毫秒就把答案打了出来 —— 两边都没有说谎。那 200,000\n//   是**解释器**的步数上限（防死循环，见工具的代码面板），是那台调试器\n//   的限度，不是这个算法的。node 直接跑原生 JS，没有那道闸。\n//   「不剪枝跑不完」说的是「在一台逐步可看的机器上跑不完」；把深度再加\n//   几层，node 也一样跑不完 —— 那才是指数本身的限度（见「香农数」那一页）。',
+                  en: '// %F\n// Exported from "Game Trees and Search" (chess-search-minimax v%V).\n//\n// The middle section is the source you read in the editor, byte for byte.\n// The only addition is a run() wrapper plus one console.log. Why wrap it:\n//   what the editor shows is a program *body* whose last line is a\n//   top-level return. Saved as-is and run with node it does NOT fail --\n//   but nothing receives that return value, so you get no output at all;\n//   and as ESM (.mjs, or \"type\": \"module\") it is an outright\n//   SyntaxError: Illegal return statement. Wrapped, both cases work.\n//\n// Run it:   node %F\n//\n// NOTE If the tool said "over the 200,000-step ceiling; the search did not\n//   finish" for this tab, and yet this file prints an answer in a few\n//   milliseconds, neither is lying. The 200,000 is the *interpreter\'s*\n//   step budget (a runaway-loop guard) -- the limit of that debugger, not\n//   of this algorithm. node runs native JS and has no such gate.\n//   "Plain minimax cannot finish" means "cannot finish on a machine you\n//   can single-step". Add a few more plies and node cannot finish either\n//   -- that is the exponent itself (see the "Shannon number" tab).' },
     exportOk:  { zh: '已导出 <b>%F</b> —— 在终端里 <b>node %F</b> 就能跑，它会把算出来的分数打印出来。文件里除了你的源码，只多了一层 <b>run()</b> 包装和一行 console.log（理由写在文件头几行）。',
                  en: 'Exported <b>%F</b> — run <b>node %F</b> in a terminal and it prints the score it computed. Besides your own source the file adds only a <b>run()</b> wrapper and one console.log (the reason is in the file header).' },
     exportFail:{ zh: '导出失败：', en: 'Export failed: ' },
@@ -6368,6 +6420,24 @@ const ALGOS = {
     depthAxis: { zh: '深度', en: 'depth' },
   };
   const t = function (s) { return E.t(s); };
+  /* ---------------- 文案里的数字：只有一个来源 ----------------
+     下面这几条 STR 里出现的数字，全部由上面那几个具名常量在这里拼进去。
+     写在 STR 声明之后而不是声明之中，是因为 STR 是个字面量对象、里面不方便
+     求值；写在这里等价，而且把「哪几条文案带数字」集中成一小段，改常量时
+     一眼看得见要连带看哪几句。**注意是就地改字段，不是整体替换对象**——
+     下面的 SH_REFS 按引用持有 STR.shCompute，换掉对象它就拿着旧的了。 */
+  (function () {
+    const g = String(SH_GRID);
+    STR.tipsShannon.zh = STR.tipsShannon.zh.replace(/%GRID%/g, g);
+    STR.tipsShannon.en = STR.tipsShannon.en.replace(/%GRID%/g, g);
+    const nps = pow10(Math.log(SH_NPS) / Math.LN10);          // 「10⁹」
+    const gy = String(Math.round(SH_AGE_GY * 10));            // 138（亿年）
+    STR.shCompute.zh = '每秒 ' + nps + ' 个节点、从 ' + gy + ' 亿年前算到现在';
+    STR.shCompute.en = nps + ' nodes a second for all ' + SH_AGE_GY + ' billion years';
+    /* shAtoms / shShannon 里没有数字（10^80 / 10^120 由参照线自己的 pow10
+       打出来），所以不必在这里拼。 */
+  })();
+
 
   /* ---------------- 页签与每个页签自己的状态 ----------------
      引擎的模型是「所有页签共用一份 state」，但这两个页签各自跑的是**一份
@@ -7068,6 +7138,7 @@ const ALGOS = {
        发现自己不在离开时那一步。停表，不倒带。 */
     if (id === 'shannon' && dbg && dbg.isPlaying()) dbg.setPlaying(false);
     paintLegend();
+    paintHint();
     updateFit();                       // 可见区变了（代码面板进出）+ 取景基准变了
     /* 从图表页回来：代码面板刚从 display:none 里出来，编辑器在隐藏期间
        量不到字符宽度（getBoundingClientRect 全是 0），波浪线与括号框会被
@@ -7392,30 +7463,8 @@ const ALGOS = {
 
   /* ================= `shannon`：纯图表，没有调试器 =================
 
-     规格 §4④ 给这一页的内容是「分支因子 35 的指数爆炸 vs 可观测宇宙原子数
-     （**此 tab 无调试器，是纯图表**）」，顿悟那句是「α-β 剪掉的体积是肉眼
-     可见的一块；而香农数说明为什么永远剪不完」。
-
-     所以这一页画两条线：不剪枝的 b^d，和排序完美时 α-β 的 b^(d/2)。
-     **α-β 减半的是指数**——同一个预算下它把能算到的深度翻一倍，仅此而已。
-     翻倍是真的很多，而一整局棋是 80 个半步：两条线都在它之前很久就撞穿了
-     所有参照线。前三个页签里「肉眼可见的那一块」在这张纵轴上小到贴着地面
-     （玫瑰色那根短线，数字是从那几个页签实测来的，不是写死的）。
-
-     数字全部由具名常量算出来，没有一个是打进文案里的：
-       · 分支因子 35 —— 香农 1950 年那篇论文里的估计；
-       · 一整局 80 个半步 —— 同一篇论文的 40 回合；
-       · 宇宙年龄 138 亿年，每秒 10⁹ 个节点 —— 「算得完」的上限；
-       · 可观测宇宙原子数 10^80、香农数 10^120 —— 两条参照线。 */
-  const SH_B = 35;                                   // 平均分支因子
-  const SH_PLIES = 80;                               // 一整局的半步数（40 回合）
-  const SH_LOGMAX = 130;                             // 纵轴上界：log10（装得下 35^80 ≈ 10^123.5）
-  const SH_LOGB = Math.log(SH_B) / Math.LN10;        // log10(35) ≈ 1.5441
-  const SH_NPS = 1e9;                                // 每秒能看多少个局面
-  const SH_AGE_S = 13.8e9 * 365.25 * 24 * 3600;      // 宇宙年龄，秒
-  const SH_LOG_COMPUTE = Math.log(SH_NPS * SH_AGE_S) / Math.LN10;
-  const SH_LOG_ATOMS = 80;
-  const SH_LOG_SHANNON = 120;
+     数值常量与两个小工具函数在文件上方（STR 之前）——文案要拿它们拼出来，
+     所以它们必须先于 STR 求值。这里只剩几何、参照线表与绘制。 */
   const SH_REFS = [
     { log: SH_LOG_COMPUTE, label: STR.shCompute },
     { log: SH_LOG_ATOMS,   label: STR.shAtoms },
@@ -7429,13 +7478,6 @@ const ALGOS = {
   function shX(ply) { return SH_X0 + (SH_X1 - SH_X0) * ply / SH_PLIES; }
   function shY(l)   { return SH_Y0 + (SH_Y1 - SH_Y0) * Math.min(l, SH_LOGMAX) / SH_LOGMAX; }
   function shP(C, ply, l) { return E.proj(C, [shX(ply), shY(l), 0]); }
-
-  /* 上标数字：`10⁸⁰` 比 `10^80` 少一个要解释的符号。 */
-  const SUPS = '⁰¹²³⁴⁵⁶⁷⁸⁹';
-  function sup(n) {
-    return String(Math.round(n)).split('').map(function (c) { return SUPS[+c] || c; }).join('');
-  }
-  function pow10(l) { return '10' + sup(l); }
 
   /* 一条曲线要爬到 log = l 需要几个半步。exp 是 1（不剪枝）或 0.5（α-β）。 */
   function plyFor(l, exp) { return l / (SH_LOGB * exp); }
@@ -7477,7 +7519,7 @@ const ALGOS = {
 
   function drawShannon(C) {
     /* ---- 网格与两根轴 ---- */
-    for (let l = 0; l <= SH_LOGMAX; l += 20) {
+    for (let l = 0; l <= SH_LOGMAX; l += SH_GRID) {
       const a = shP(C, 0, l), b = shP(C, SH_PLIES, l);
       if (a && b) shLine([a, b], 'rgba(148,163,184,0.10)', 1);
       if (a) shText(pow10(l), [a[0] - px(6), a[1]], 'rgba(159,176,200,0.5)', 'right', 'middle', 10);
@@ -7927,19 +7969,12 @@ const ALGOS = {
   function exportName(st) {
     return 'minimax-' + st.mode + '-d' + curDepth + '.js';
   }
+  /* 头注释走 t()：§1.6 定的默认语言是**英文**，而这十来行原来是写死的中文。
+     状态行（已经过 t()）用英文告诉她「理由写在文件头几行」，她打开文件却
+     读不懂那几行——那比不写还糟。 */
   function exportText(st, name) {
     return [
-      '// ' + name,
-      '// 从「博弈树与搜索」(chess-search-minimax v' + VERSION + ') 导出。',
-      '//',
-      '// 中间那一段是你在编辑器里读到的源码，一个字节都没改。',
-      '// 唯一的加工是把它包进 run() 再 console.log 一次。为什么要包：',
-      '//   编辑器里的那份是一段「程序体」，最后一行是顶层 return。',
-      '//   直接存成 .js 用 node 跑，它不会报错 —— 但那个 return 的值没人接，',
-      '//   你会看到一片空白；换成 ESM（.mjs 或 "type": "module"）则直接',
-      '//   报 SyntaxError: Illegal return statement。包一层，两种情况都对。',
-      '//',
-      '// 跑它：   node ' + name,
+      t(STR.exportHead).replace(/%F/g, name).replace('%V', VERSION),
       '',
       'function run() {',
       st.src,
@@ -8032,6 +8067,29 @@ const ALGOS = {
     window.addEventListener('pointerup', onUp);
   });
 
+  /* ---- 图表页上拦掉调试器的五个键 ----
+
+     `D.mount` 没有传 keyTarget，debugger.js 于是把 onKey 绑在 **window** 上
+     （它的默认值）。`shannon` 没有代码面板、没有调用栈、没有任何可看的东西，
+     但那五个键照样在工作：在这一页连按十几下 F11，什么也不会发生，等切回
+     `prune` 才发现游标已经离开她当时停的那一步十几步远——正是上面
+     `dbg.setPlaying(false)` 那一行想避免的事，只是换了个入口。
+
+     **捕获期拦截。** debugger.js 的监听器挂在冒泡期，window 的捕获期在整条
+     传播链的最前面，所以 stopPropagation 一定拦得住；不用去改 core/ 里那份
+     共用的模块，也不用让工具页去猜它内部的绑定细节。
+     preventDefault 同样必须调：F5 不拦就变成刷新整页。
+     取舍与 `\` 那一条同源——那个键在编辑器里让位（它是文本），这五个键在
+     没有调试器的页签上让位（那里没有它们要操作的东西）。 */
+  const DBG_KEYS = { F5: 1, F9: 1, F10: 1, F11: 1 };
+  window.addEventListener('keydown', function (e) {
+    if (uiTab !== 'shannon') return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!DBG_KEYS[e.key]) return;
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+
   /* ---- `\` 折叠回全屏画布（§1.5 的承诺） ----
      编辑器有焦点时放行：那时 `\` 是一个要打进代码里的字符，不是快捷键。
      这与 debugger.js 那五个调试键的取舍是同一条原则的两面——调试键在
@@ -8079,11 +8137,17 @@ const ALGOS = {
     });
   }
 
+  /* 提示条也跟着页签走。图表页上那一串调试快捷键一个都不适用，而
+     `body.nosplit .hint` 恰好把提示条提亮——最不该读的一句变成最显眼的一句。 */
+  function paintHint() {
+    document.getElementById('hint').textContent = t(uiTab === 'shannon' ? STR.hintChart : STR.hint);
+  }
+
   function relabel() {
     btnRun.textContent = t(STR.run);
     btnRevert.textContent = t(STR.reset);
     btnExport.textContent = t(STR.exportBtn);
-    document.getElementById('hint').textContent = t(STR.hint);
+    paintHint();
     document.getElementById('busy').textContent = t(STR.busy);
     paintLegend();
     if (statusKind === 'bad') { const e3 = ed.getError() || (activeId && S[activeId].err); if (e3) setStatus(errText(e3), 'bad'); }
