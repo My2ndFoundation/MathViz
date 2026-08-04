@@ -130,7 +130,7 @@ chess/
 /* >>> GENERATED:GAMES */ … /* <<< */      （仅回放工具）
 /* >>> GENERATED:INTERP */ … /* <<< */     （仅 ④⑤）
 /* >>> GENERATED:DEBUGGER */ … /* <<< */   （仅 ④⑤）
-/* >>> GENERATED:ALGOS queens,tour-dfs,tour-warnsdorff,knight-path */ … /* <<< */
+/* >>> GENERATED:ALGOS queens.js,tour-dfs.js,tour-warnsdorff.js,knight-path.js */ … /* <<< */
                                            （仅 ④⑤，算法源码以字符串内联；按页列清单）
 ```
 
@@ -143,10 +143,10 @@ chess/
 **`ALGOS` 标记按页列清单**（2026-08-04 定）。第一版是整目录倾倒——只有一份算法源码时无感，但工具⑤ 一落地就会让工具④ 带上四份它从不执行的算法、工具⑤ 带上 `minimax.js`。标记行自己写明这一页要哪几份：
 
 ```
-/* >>> GENERATED:ALGOS queens,tour-dfs,tour-warnsdorff,knight-path */ … /* <<< GENERATED:ALGOS */
+/* >>> GENERATED:ALGOS queens.js,tour-dfs.js,tour-warnsdorff.js,knight-path.js */ … /* <<< GENERATED:ALGOS */
 ```
 
-漏写一个键**当场报错**，而不是静默少内联一份（那会变成运行时才发现的 `ALGOS['queens.js'] === undefined`）。`check.py` 的往返校验也因此能逐页对应，而不是把所有页面对着同一份目录校验。
+清单里写的是**文件名（含 `.js`）**，与 `ALGOS` 对象的键逐字相同——写成裸名再由脚本补 `.js` 是一条隐式约定，而隐式约定正是这个项目反复付过学费的东西。漏写一个键**当场报错**，而不是静默少内联一份（那会变成运行时才发现的 `ALGOS['queens.js'] === undefined`）。`check.py` 的往返校验也因此能逐页对应，而不是把所有页面对着同一份目录校验。
 
 ### 2.2 引擎裁剪
 
