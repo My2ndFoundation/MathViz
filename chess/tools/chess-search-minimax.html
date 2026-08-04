@@ -6242,14 +6242,30 @@ const ALGOS = {
                  en: '%N frames never close, so “how many were cut” is genuinely unknowable here (at least %K).' },
     /* 这三句是面板上的**正文**，不是 markdown——不写星号强调，要强调就用
        <b>（读数区的 b 走 .readout b 那条样式）。 */
-    roNoPrune: { zh: '深度 1 这一层的孩子全是叶子，<b>没有东西可剪</b>。α-β 在这一格反而比纯 minimax 多花 19 步（1,492 对 1,473）：剪枝不是魔法，它是拿记账换搜索。',
-                 en: 'At depth 1 every child is a leaf — <b>there is nothing to prune</b>. α-β actually costs 19 steps more than plain minimax here (1,492 vs 1,473): pruning is not magic, it trades bookkeeping for search.' },
+    /* 深度 1 那句反例的数字**必须现算**。原来这里写死了「1,492 对 1,473」——
+       那是出厂源码的实测值，可是 §2.8 明确邀请她改这份源码，改完之后这两个
+       数就是假的，而它偏偏又是整页最想让人相信的一句。定性的部分写死没问题
+       （那一层的孩子全是叶子，这是深度 1 的定义），定量的部分一律现算。 */
+    roNoPrune: { zh: '深度 1 这一层的孩子全是叶子，<b>没有东西可剪</b>——剪枝那两行一次也切不掉分支，只增加执行步数。剪枝不是魔法，它是拿记账换搜索。',
+                 en: 'At depth 1 every child is a leaf — <b>there is nothing to prune</b>. Those two pruning lines never cut a single branch here; they only add steps. Pruning is not magic, it trades bookkeeping for search.' },
+    roNoPruneWorse: { zh: '这一格实测：纯 minimax <b>%A</b> 步，α-β <b>%B</b> 步——剪枝反而<b>多花 %E 步</b>。',
+                      en: 'Measured here: plain minimax <b>%A</b> steps, α-β <b>%B</b> steps — pruning costs <b>%E more</b>.' },
+    roNoPruneSame:  { zh: '这一格实测：纯 minimax <b>%A</b> 步，α-β <b>%B</b> 步。',
+                      en: 'Measured here: plain minimax <b>%A</b> steps, α-β <b>%B</b> steps.' },
     roTruncWidth: { zh: '深度 4 的纯 minimax 树只是被截断前记下来的那一段，真正的树比画出来的更宽——所以上面那个百分比是<b>保守</b>的。',
                     en: 'At depth 4 the plain tree is only the part recorded before the cut-off; the real tree is wider than what is drawn, so the percentage above <b>understates</b> the saving.' },
-    roDense:   { zh: '这一格有 %N 个节点，同层最近的两个只差约 1 像素——分不出单个节点是<b>诚实的</b>画法，看的就是那团密度本身。',
-                 en: 'This view has %N nodes and the closest pair in a layer is about 1 px apart. Individual nodes are <b>not meant</b> to be distinguishable — the density is the point.' },
+    /* 「约 1 像素」原来也写死了——它其实同时取决于画布宽度、分栏宽度和取景
+       缩放，拖一下分隔条就不再成立。现算：取同层最近的一对节点，按**当前
+       相机与取景变换**换算成屏幕像素。「此刻」两个字是有意的。 */
+    roDense:   { zh: '这一格有 <b>%N</b> 个节点，此刻同层最近的两个只差约 <b>%P</b> 像素。',
+                 en: 'This view has <b>%N</b> nodes; right now the closest pair within a layer is about <b>%P</b> px apart.' },
+    roDenseHonest: { zh: '分不出单个节点是<b>诚实的</b>画法——看的就是那团密度本身。',
+                     en: 'Individual nodes are <b>not meant</b> to be distinguishable here — the density is the point.' },
     roLabelsOff: { zh: '节点太多，分数标签已自动关闭（≤ %M 个才画）。',
                    en: 'Too many nodes; score labels are off automatically (drawn only up to %M).' },
+    /* 「**枚举出来的**走法」，不是「一共有多少走法」，更不是分支因子之和——
+       tree-model.js 给不出后两者（depth===0 的早退叶子有合法走法却从没枚举
+       过）。标签逐字照搬那个模块定下的名字。 */
     roMv:      { zh: '枚举出来的走法', en: 'Moves enumerated' },
 
     legMax:   { zh: '轮到白走 · 取极大', en: 'White to move · take the max' },
@@ -6372,8 +6388,33 @@ const ALGOS = {
          maxDepth = -1、pos 为空，传什么都画不出东西；给个正数只是避免
          layout 走它自己的「非正数退回默认 10」分支而显得像有意为之。 */
       st.lay = TM.layout(st.tree, { spanX: st.spanX > 0 ? st.spanX : 0.001, spanZ: SPAN_Z });
+      st.tight = tightestGap(st.lay);
     });
     ghostBands = depthBands(S[refTabId]);
+  }
+
+  /* 同层最近的两个节点相距多远（世界单位），以及那发生在哪一层的 z。
+     只在重新布局时算一次——它与游标、相机都无关。读数区拿它换算成「此刻
+     屏幕上差几个像素」，好让「分不出单个节点」那句话有个真数字撑着，而不是
+     写死一个出厂时量到的「约 1 像素」。 */
+  function tightestGap(lay) {
+    if (!lay || lay.maxDepth < 0) return null;
+    const byDepth = Object.create(null);
+    for (const id in lay.pos) {
+      const p = lay.pos[id];
+      (byDepth[p.z] = byDepth[p.z] || []).push(p.x);
+    }
+    let best = null;
+    for (const z in byDepth) {
+      const xs = byDepth[z];
+      if (xs.length < 2) continue;
+      xs.sort(function (a, b) { return a - b; });
+      for (let k = 1; k < xs.length; k++) {
+        const d = xs[k] - xs[k - 1];
+        if (d > 0 && (best === null || d < best.gap)) best = { gap: d, z: +z };
+      }
+    }
+    return best;
   }
 
   /* 参照树每一层的横向范围 → 画成一圈轮廓。被剪掉的分支根本没有节点可画，
@@ -6422,13 +6463,42 @@ const ALGOS = {
   const FIT_MARGIN = 0.88;
   let fit = { s: 1, tx: 0, ty: 0 };
 
+  /* ---------------- 分栏宽度：夹在一处，两个调用点 ----------------
+
+     上限比 3b 那页多一条：这一页右边还压着一块参数面板，只按 78% 夹的话
+     拖到底时画布只剩十几个像素（量过：1440 窗口、code-w = 1,100 时可见区
+     宽 18 px，取景框把树缩到 s = 0.02，看上去像树没了，而不是像面板太宽）。
+     再留 CANVAS_MIN 给画布。下限 300 仍然优先——窄窗口上两个上限都可能比它小。
+
+     codeW === null 表示**还没有人拖过**，宽度归 CSS 的 `46vw` 管。那是个
+     相对单位，本来就跟着窗口走，不需要（也不该）被换算成像素钉死；一旦
+     拖过一次就变成像素值，从此每次 resize 都要重夹一遍。 */
+  const CANVAS_MIN = 380;
+  let codeW = null;
+
+  /* 可见区的右边界。**夹分栏宽度与算取景框读的必须是同一个数**——第一版
+     的 cap 写的是 `innerWidth − 380`，可是右边还压着一块 ~300 px 的参数
+     面板，于是「留 380 给画布」实际只留下 58 px（量到的）。差的正是面板
+     那一截，所以两处都从这里取。
+     宽屏时面板贴右边，要减掉；窄屏时 CSS 把它挪到底部，这时它不占横向——
+     靠它自己的 left 判断，不靠猜媒体查询的断点。 */
+  function rightEdge() {
+    const pr = document.getElementById('panel').getBoundingClientRect();
+    return (pr.left > window.innerWidth * 0.5) ? pr.left - 10 : window.innerWidth;
+  }
+  function clampCodeWidth(px) {
+    const cap = Math.min(window.innerWidth * 0.78, rightEdge() - CANVAS_MIN);
+    return Math.max(300, Math.min(cap, px));
+  }
+  function applyCodeWidth(px) {
+    codeW = clampCodeWidth(px);
+    document.documentElement.style.setProperty('--code-w', codeW + 'px');
+  }
+
   function availRect() {
     const folded = document.body.classList.contains('folded');
     const x0 = folded ? 0 : document.getElementById('split').getBoundingClientRect().width;
-    /* 右侧参数面板：宽屏时它贴在右边，要从可见区里减掉；窄屏时 CSS 把它
-       挪到底部，这时它不占横向，靠 left 判断，不靠猜断点。 */
-    const pr = document.getElementById('panel').getBoundingClientRect();
-    const x1 = (pr.left > window.innerWidth * 0.5) ? pr.left - 10 : window.innerWidth;
+    const x1 = rightEdge();
     return { x0: x0, y0: 46, w: Math.max(1, x1 - x0), h: Math.max(1, window.innerHeight - 46 - 26) };
   }
 
@@ -6475,6 +6545,23 @@ const ALGOS = {
 
   function worldOf(p) { return [p.x, 0, p.z - zCenter()]; }
 
+  /* ---------------- px(v)：「我要屏幕上的 v 像素」 ----------------
+
+     所有绘制都发生在 `ctx.scale(fit.s, fit.s)` 之内，所以这里写下的每一个
+     长度都会再乘一次 fit.s。对几何（节点半径、连线）那是对的——取景框缩小
+     的时候整幅画一起缩，本来就该如此。**对文字不对**：字号有一条与取景缩放
+     无关的绝对可读下限。实测的 fit.s 是 0.9016 / 0.5489 / 0.2403（分栏宽度
+     300 / 620 / 900），写死的 `11px` 于是渲染成 9.9 / 6.0 / **2.6** 像素。
+     更糟的是分数标签只在 ≤ 96 个节点时才画（即深度 ≤ 2），而那恰恰是「代码
+     面板拉得很宽」的常见配置——2.6 px 是常态，不是边角。
+
+     px(11) 把「11 个屏幕像素」换算成在这个变换里该写的数。文字的偏移量也要
+     一起换算，否则字号补回来了、间距还是缩着的。
+     几何不整体补偿，但给一条**下限**：线宽 0.6 → s=0.24 时只剩 0.14 px，
+     节点半径 1.15 → 0.28 px，两者都会淡到看不见。Math.max(原值, px(下限))
+     只在缩得太小的时候顶上来，正常尺度下不生效。 */
+  function px(v) { return v / (fit.s > 0 ? fit.s : 1); }
+
   /* 一次性把可见节点的屏幕坐标算出来，后面每一遍（边、剪枝桩、节点、脊、
      标签）都从这张表里取。深度 4 有 1,243 个节点，每遍各投影一次就是五倍
      的无谓开销。 */
@@ -6504,8 +6591,8 @@ const ALGOS = {
     ctx.save();
     ctx.strokeStyle = C_GHOST;
     ctx.globalAlpha = 0.42;
-    ctx.lineWidth = 1.1;
-    ctx.setLineDash([5, 4]);
+    ctx.lineWidth = Math.max(1.1, px(1));
+    ctx.setLineDash([px(5), px(4)]);
     ctx.beginPath();
     ctx.moveTo(left[0][0], left[0][1]);
     for (let k = 1; k < left.length; k++) ctx.lineTo(left[k][0], left[k][1]);
@@ -6521,7 +6608,7 @@ const ALGOS = {
     const x = -SPAN_BASE / 2 - 0.45;
     ctx.save();
     ctx.fillStyle = 'rgba(159,176,200,0.62)';
-    ctx.font = '11px ' + FONT_MONO;
+    ctx.font = px(11) + 'px ' + FONT_MONO;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     for (let d = 0; d <= md; d++) {
@@ -6555,7 +6642,7 @@ const ALGOS = {
     const openSet = Object.create(null);
     for (let k = 0; k < spine.length; k++) openSet[spine[k]] = true;
     const dense = ids.length > 420;
-    const rNode = dense ? 1.15 : (ids.length > 140 ? 1.9 : 3.0);
+    const rNode = Math.max(dense ? 1.15 : (ids.length > 140 ? 1.9 : 3.0), px(0.6));
 
     if (E.state.ghost) drawGhost(C);
     drawDepthAxis(C, st);
@@ -6563,7 +6650,7 @@ const ALGOS = {
     /* ---- 边：一条路径画完所有的边（1,243 个节点时这是唯一撑得住的画法） ---- */
     ctx.save();
     ctx.strokeStyle = C_EDGE;
-    ctx.lineWidth = dense ? 0.6 : 1.0;
+    ctx.lineWidth = Math.max(dense ? 0.6 : 1.0, px(0.5));
     ctx.beginPath();
     for (let k = 0; k < ids.length; k++) {
       const n = nodes[ids[k]];
@@ -6583,10 +6670,11 @@ const ALGOS = {
     if (cutIds) {
       ctx.save();
       ctx.strokeStyle = C_CUT;
-      ctx.lineWidth = 1.2;
-      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = Math.max(1.2, px(1));
+      ctx.setLineDash([px(3), px(3)]);
       ctx.globalAlpha = 0.85;
       ctx.beginPath();
+      const arm = Math.max(3.2, px(2.6));          // 叉的半臂长，同样有屏幕下限
       for (let k = 0; k < cutIds.length; k++) {
         const n = nodes[cutIds[k]], p = st.lay.pos[n.id];
         const a = P[n.id];
@@ -6594,8 +6682,8 @@ const ALGOS = {
         if (!a || !b) continue;
         ctx.moveTo(a[0], a[1]);
         ctx.lineTo(b[0], b[1]);
-        ctx.moveTo(b[0] - 3.2, b[1] - 3.2); ctx.lineTo(b[0] + 3.2, b[1] + 3.2);
-        ctx.moveTo(b[0] + 3.2, b[1] - 3.2); ctx.lineTo(b[0] - 3.2, b[1] + 3.2);
+        ctx.moveTo(b[0] - arm, b[1] - arm); ctx.lineTo(b[0] + arm, b[1] + arm);
+        ctx.moveTo(b[0] + arm, b[1] - arm); ctx.lineTo(b[0] - arm, b[1] + arm);
       }
       ctx.stroke();
       ctx.restore();
@@ -6621,7 +6709,7 @@ const ALGOS = {
       if (pts.length) {
         ctx.save();
         ctx.strokeStyle = C_SPINE;
-        ctx.lineWidth = 2.2;
+        ctx.lineWidth = Math.max(2.2, px(1.6));    // 脊是最重要的一条线，别让它缩没
         ctx.shadowColor = C_SPINE;
         ctx.shadowBlur = 8;
         ctx.beginPath();
@@ -6639,14 +6727,16 @@ const ALGOS = {
       }
     }
 
-    /* ---- 分数标签：节点一多就自动关掉。这不是省事——1,243 个节点时同层
-           最近的两个只差约 1 像素，标签会糊成一条线，比不画更糟。 ---- */
+    /* ---- 分数标签：节点一多就自动关掉。这不是省事——同层最近的两个只差
+           一两个像素时，标签会糊成一条线，比不画更糟（读数区会把此刻实测的
+           那个像素间距写出来）。 ---- */
     if (E.state.values && ids.length <= LABEL_MAX) {
       ctx.save();
-      ctx.font = '11px ' + FONT_MONO;
+      ctx.font = px(11) + 'px ' + FONT_MONO;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
       ctx.fillStyle = C_VALUE;
+      const gap = px(3);
       for (let k = 0; k < ids.length; k++) {
         const n = nodes[ids[k]], s = P[n.id];
         if (!s) continue;
@@ -6656,8 +6746,13 @@ const ALGOS = {
            这是**有意**的：值就写在出帧步的 varDelta 里，那一刻它已经读得到，
            而那一帧按调用栈的算法确实还要在栈上多待一步。同一步里「已经知道
            它的值」和「它还在栈上」两件事都成立，不矛盾。 */
-        if (n.popStep < 0 || n.popStep > i || n.value === null) continue;
-        ctx.fillText(fmtInt(n.value), s[0], s[1] - rNode - 3);
+        if (n.popStep < 0 || n.popStep > i) continue;
+        /* `value` 未必是数字：§2.8 明确邀请她改这份源码，`best` 里最后装的
+           是什么，这一层管不着。画不成一个分数就**一个字都不写**——「缺席
+           本身就是信号」这条纪律对「不知道」（null）和「不是个数」是同一
+           条，两种情况都绝不能画出一个 NaN。 */
+        if (typeof n.value !== 'number' || !isFinite(n.value)) continue;
+        ctx.fillText(fmtInt(n.value), s[0], s[1] - rNode - gap);
       }
       /* 剪枝桩上写「−k」：k 是这个节点少看了几个分支，来自 mvCount −
          已展开的孩子数，判不出来的节点根本不在 cutIds 里。 */
@@ -6668,7 +6763,7 @@ const ALGOS = {
           const n = nodes[cutIds[k]], p = st.lay.pos[n.id];
           const b = E.proj(C, [p.x, 0, p.z + SPAN_Z * 0.45 - zCenter()]);
           if (!b) continue;
-          ctx.fillText('−' + (n.mvCount - n.childIds.length), b[0], b[1] + 5);
+          ctx.fillText('−' + (n.mvCount - n.childIds.length), b[0], b[1] + px(5));
         }
       }
       ctx.restore();
@@ -6691,7 +6786,7 @@ const ALGOS = {
   function haloDot(p, color, r) {
     ctx.save();
     ctx.strokeStyle = color;
-    ctx.lineWidth = 1.6;
+    ctx.lineWidth = Math.max(1.6, px(1.2));
     ctx.shadowColor = color;
     ctx.shadowBlur = 12;
     ctx.beginPath();
@@ -6720,10 +6815,24 @@ const ALGOS = {
 
   /* ================= 读数 ================= */
 
+  /* 整数格式化。**非数字一律画「—」，绝不画 "NaN"。**
+     不是洁癖：`n.value` / `st.rootValue` 归根到底是使用者那份源码里 `best`
+     的值，而 §2.8 明确邀请她去改那份源码——把 `best` 改成一个字符串、一个
+     数组，这里就会拿到它。原来只判 `n == null`，`Math.round('abc')` 于是
+     一路走到 `"NaN"` 印在面板上：那既不是「不知道」也不是一个数，只是一句
+     没人看得懂的错话。 */
   function fmtInt(n) {
-    if (n == null) return '—';
+    if (n == null || typeof n !== 'number' || !isFinite(n)) return '—';
     const s = Math.abs(Math.round(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     return (n < 0 ? '−' : '') + s;                 // U+2212，不是 ASCII 连字符
+  }
+  /* 分数（极小极大值）比计数多一档：它**可以**是个非数字，而那与「不知道」
+     不是一回事。null 仍然是「—」；不是数字就照实把它显示出来（走调试器的
+     fmtVal，与变量区同一套写法），不假装它是未知，也不假装它是数。 */
+  function fmtScore(v) {
+    if (v == null) return '—';
+    if (typeof v === 'number' && isFinite(v)) return fmtInt(v);
+    return esc(D.fmtVal(v));
   }
   function pct(a, b) {
     if (!(b > 0)) return '—';
@@ -6737,6 +6846,17 @@ const ALGOS = {
   }
   function pair(id, text) {
     return '<span class="dim">' + t(id === 'tree' ? STR.tabTree : STR.tabPrune) + '</span> ' + text;
+  }
+
+  /* 把 tightestGap 的世界间距换算成**此刻屏幕上**的像素：用活相机投影那一层
+     上相距 gap 的两个点，再乘取景缩放 fit.s。相机一动、分隔条一拖它就变，
+     这正是读数里要写「此刻」的原因。 */
+  function tightGapPx(st) {
+    if (!st || !st.tight) return null;
+    const C = E.makeCam(), z = st.tight.z - zCenter();
+    const a = E.proj(C, [0, 0, z]), b = E.proj(C, [st.tight.gap, 0, z]);
+    if (!a || !b) return null;
+    return Math.abs(b[0] - a[0]) * fit.s;
   }
 
   /* 两个页签并排一行。左 plain 右 ab，顺序固定，跟页签一致。 */
@@ -6762,6 +6882,13 @@ const ALGOS = {
     lines.push(row(STR.roPruned, function (s) {
       return bval(fmtInt(s.total ? s.total.pruned : null), C_CUT);
     }));
+    /* 「枚举出来的走法」——tree-model.js 定的名字，逐字沿用。它跟 pruned
+       一起变 null（有帧永远不关闭时，那些帧枚举了多少同样无从知道）。
+       它是剪枝那一课的分母：mvEnumerated − pruned 恰好是真的展开出来的
+       孩子总数。 */
+    lines.push(row(STR.roMv, function (s) {
+      return bval(fmtInt(s.total ? s.total.mvEnumerated : null), C_MIN);
+    }));
     lines.push(row(STR.roWidth, function (s) {
       return bval(s.lay ? pct(s.lay.width, refW) : '—', C_GHOST);
     }));
@@ -6771,7 +6898,7 @@ const ALGOS = {
       return bval(fmtInt(n), trunc ? '#fcd34d' : C_MAX) + (trunc ? ' <span class="warn">✂</span>' : '');
     }));
     lines.push(row(STR.roValue, function (s) {
-      return bval(s.rootValue == null ? '—' : fmtInt(s.rootValue), C_VALUE);
+      return bval(fmtScore(s.rootValue), C_VALUE);
     }));
 
     lines.push('<span class="rule"></span>');
@@ -6797,13 +6924,35 @@ const ALGOS = {
         t(STR.roUnknown).replace('%N', String(stat.unknown)).replace('%K', fmtInt(stat.prunedKnown)) +
         '</span>');
     }
-    if (curDepth === 1) lines.push('<span class="dim">' + t(STR.roNoPrune) + '</span>');
+    if (curDepth === 1) {
+      lines.push('<span class="dim">' + t(STR.roNoPrune) + '</span>');
+      /* 步数现算，不写死：她可能已经改过源码了。差值为正才说「反而多花」，
+         否则只并排列出两个数——一句在任何输入下都成立的话，胜过一句出厂时
+         成立的话。 */
+      const a = S.tree.res ? S.tree.res.trace.length : null;
+      const b = S.prune.res ? S.prune.res.trace.length : null;
+      if (a != null && b != null) {
+        const worse = b > a;
+        lines.push('<span class="dim">' +
+          t(worse ? STR.roNoPruneWorse : STR.roNoPruneSame)
+            .replace('%A', fmtInt(a)).replace('%B', fmtInt(b)).replace('%E', fmtInt(b - a)) +
+          '</span>');
+      }
+    }
     if (S[refTabId].res && S[refTabId].res.trace.truncated) {
       lines.push('<span class="dim">' + t(STR.roTruncWidth) + '</span>');
     }
     const visN = stat.visited;          // 与 visibleAt(view).length 同一个数，不必再切一份数组
     if (visN > 420) {
-      lines.push('<span class="dim">' + t(STR.roDense).replace('%N', fmtInt(visN)) + '</span>');
+      const gapPx = tightGapPx(st);
+      lines.push('<span class="dim">' + t(STR.roDense)
+        .replace('%N', fmtInt(visN))
+        .replace('%P', gapPx == null ? '—' : gapPx.toFixed(1)) + '</span>');
+      /* 「分不出单个节点」这句**只在它此刻为真时**才说。她拉近了、或者把
+         代码面板收窄了，间距就不再是一两个像素，那时这句话是错的。 */
+      if (gapPx != null && gapPx < 3) {
+        lines.push('<span class="dim">' + t(STR.roDenseHonest) + '</span>');
+      }
     }
     if (E.state.values && visN > LABEL_MAX) {
       lines.push('<span class="dim">' + t(STR.roLabelsOff).replace('%M', String(LABEL_MAX)) + '</span>');
@@ -6833,8 +6982,16 @@ const ALGOS = {
        桌面 45° az=0 el=−π/4 各层屏幕 y =  154.6  84.6 0.0 −104.1 −235.5 → 张开 390.14
        侧视 45° az=0 el=+π/4 各层屏幕 y = −146.5 −79.8 0.0  96.9  217.3 → 张开 363.77
 
-     **正视下整棵树塌成一条横线**，一层都看不见。所以这两个 tab 走例外条款，
-     第一项取「树形俯视」。（工具⑤ 不走例外——它真的画棋盘。）
+     **正视下整棵树塌成一条横线**，一层都看不见。所以这两个 tab 走例外条款
+     （由使用者裁定），第一项取「树形俯视」。（工具⑤ 不走例外——它真的画棋盘。）
+
+     §5.3 那条例外的原话是「它的第一项仍是**侧视**」——「树形俯视」正是这里
+     的侧视，两个名字说的是同一件事。§5.3 的「侧视」指的是**相对那根被立
+     起来的轴**：正视顺着它看进去（所以看不见），侧视横着看它（所以那一层
+     结构铺开在屏幕上）。工具③ 的 eval 曲线沿 z 生长，横着看它就是从侧面；
+     这棵树也沿 z 生长，但它是平铺在 y=0 上的，横着看它得从上方看下去——
+     同样是「视线垂直于深度轴」，只是这个平面的法线是 y，所以叫「俯」。
+     上表的纵向张开 491.93（对 正视的 0.00）就是这条关系的度数。
 
      ---- 仰角为什么是正的（与棋盘 tab 相反）----
 
@@ -7094,6 +7251,13 @@ const ALGOS = {
      窗口一改大小就静默少闪一片，而面板看不出任何异常。
      （chess/core/debugger.js 在 refresh 导出上有一段 ⚠⚠ 注释专门记这件事。） */
   function onResize() {
+    /* **窗口变小时必须重夹一次分栏宽度。** 只在拖拽里夹是不够的：存进
+       `--code-w` 的是一个像素值，在 1440 的窗口上拖到 1,100 px 之后把窗口
+       缩到 800（或者把平板转过来），#split 仍然是 1,100 px 宽，
+       availRect() 的 w 被 Math.max(1, 800 − 1100) 兜成 1，取景框把树缩到
+       s ≈ 0.002 —— 与拖到底时一模一样的「树没了」，只是触发方向相反。
+       所以夹的逻辑抽成 clampCodeWidth()，**两个调用点**：拖拽与 resize。 */
+    if (codeW !== null) applyCodeWidth(codeW);
     updateFit();
     ed.refresh();
     dbg.redraw();
@@ -7107,13 +7271,7 @@ const ALGOS = {
     divider.setPointerCapture(e.pointerId);
     divider.classList.add('drag');
     const onMove = function (ev) {
-      /* 上限比 3b 那页多一条：这一页右边还压着一块参数面板，只按 78% 夹的话
-         拖到底时画布只剩十几个像素宽（量过：1440 窗口、code-w=1100 时可见区
-         宽 18 px，取景框把树缩到 s=0.02，看上去像树没了而不是像面板太宽）。
-         再留 380 px 给树。下限 300 仍然优先——窄窗口上两个上限都可能小于它。 */
-      const cap = Math.min(window.innerWidth * 0.78, window.innerWidth - 380);
-      const w = Math.max(300, Math.min(cap, ev.clientX));
-      document.documentElement.style.setProperty('--code-w', w + 'px');
+      applyCodeWidth(ev.clientX);
       updateFit();                 // 可见区变了就重算取景框（不是每帧算）
     };
     const onUp = function () {
