@@ -5872,8 +5872,16 @@ const ALGOS = {
      dist / (dist − zTop)。21 × 0.55 = 11.55 在 dist=14 下就是 5.7 倍——棋盘会被
      缩到看不见，而且什么错都不报。所以塔高必须跟着层数走，见 tourKnight 的 spanZ。 */
   const SPAN_Z = 0.55;
+  /* ⚠ 这里的回退**不是**「坏值也照跑」：`spanZ` 与 `sideView` 是静态字面量，
+     不吃任何运行期数据——要么永远对，要么永远错。所以判据下在启动那一次
+     （`validateDecl()`，坏了整页停住），而不是每帧喊一次。这个回退只是为了
+     在那道门把页面停住之前不产生 NaN，绝不是它的免罪符。
+     实测过不加那道门的后果：`spanZ: '0.24'`（写成了字符串）→ 这里安静地回到
+     0.55 → 21 层的塔在正视下把包围盒撑到棋盘宽度的 **5.71 倍**（用引擎自己的
+     makeCam/proj 量的：z=0 时 834 px，z=21×0.24 时 1,303 px = 1.56×，
+     z=21×0.55 时 4,765 px = 5.71×），棋盘缩到看不见，而且一个字都不说。 */
   function spanZOf(P) {
-    return (P && typeof P.spanZ === 'number' && P.spanZ > 0) ? P.spanZ : SPAN_Z;
+    return (P && typeof P.spanZ === 'number' && isFinite(P.spanZ) && P.spanZ > 0) ? P.spanZ : SPAN_Z;
   }
   /* 棋子代号 → BoardRender 的 signed int code。**这是这一页最容易静默失效的一处**：
      `place(sq, "wQ")` 传的是字符串，而 `BoardRender.drawPiece` 认的是数字
@@ -5917,6 +5925,10 @@ const ALGOS = {
     atLine:  { zh: '第 %L 行', en: 'line %L' },
     bootFail:{ zh: '算法源码生成器没能启动，这一页跑不起来：',
                en: 'The algorithm source generator failed to start; this page cannot run: ' },
+    /* 题目声明本身写错了（`spanZ` / `sideView` 这类**静态字面量**字段）。它们不吃
+       任何运行期数据，所以错就是永远错——整页停住比每帧喊一句更诚实，也更难忽略。 */
+    declFail:{ zh: '这一页有一处题目声明是错的，所以整页停在这里：',
+               en: 'One of this page’s problem declarations is wrong, so the whole page stops here: ' },
     /* 源码**生成**失败（`PROBLEMS[pid].source()` 抛了），跟解释执行失败不是一回事：
        她的代码还没被跑过一行，问题出在这一页把源码拼出来的那一步。 */
     srcFail: { zh: '这道题的源码没能生成（%F），所以左边是空的：',
@@ -5924,8 +5936,10 @@ const ALGOS = {
     /* 声明式钩子（board / readout / zOf）抛了。**这一类以前被吞成默认值**：board()
        抛 → 静默的 8×8、readout() 抛 → 空字符串、zOf 抛 → 少画一层塔。对一个论点
        就是「绝不静默失败」的页面，那是错的默认。 */
-    hookFail: { zh: '这道题的 %W() 抛了异常，界面上少了东西（不是你的代码的问题）：',
-                en: 'This problem’s %W() threw, so part of the view is missing (not your code): ' },
+    /* 「没能交差」而不是「抛了异常」：这条消息同时要盖住**抛出**和**返回了个不能用
+       的东西**两种情形（`board()` 忘了写 return 就是后者，而且是更常见的那一种）。 */
+    hookFail: { zh: '这道题的 %W() 没能交差，界面上少了东西（不是你的代码的问题）：',
+                en: 'This problem’s %W() did not deliver, so part of the view is missing (not your code): ' },
 
     /* ---- 显示开关（四条都是"画不画"，不是"算什么"） ---- */
     tgMarks:  { zh: '四种状态', en: 'The four states' },
@@ -6333,12 +6347,24 @@ const ALGOS = {
   /* 视角表：默认就是上面那三条。**一道题可以换掉 `side`**，而这不是装饰性的选项：
      默认的侧视沿世界 x 轴看进去，可并排多块棋盘正是沿 x 轴摆开的，于是「唯一能
      读出深度塔的那个视角」恰好也是「两块盘完全重合的那个视角」。见 tourKnight
-     的 sideView。第一条（front）仍然是双击回正的家，键的顺序不动。 */
+     的 sideView。第一条（front）仍然是双击回正的家，键的顺序不动。
+
+     ⚠ **底子必须是 `VIEWS.side` 本身，不是一个手写的 `{tx:0, ty:0, tz:0}`。**
+     实测过写成后者的后果：一个只想覆盖一根轴的 `sideView: { az: 0 }` 会得到
+     `el` / `dist` 全是 undefined 的相机 —— 引擎的 applyView 把它们补进 tween，
+     一帧之后 `cam.el` / `cam.dist` 变成 NaN、`makeCam().eye` 变成 [NaN,NaN,NaN]、
+     `proj()` 全是 NaN，画布整块变白**而且没有任何提示**，连按回「正视」都救不回来
+     （tween 的起点已经是 NaN 了）。铺在 VIEWS.side 之上，部分覆盖就是部分覆盖。
+     非有限的键在这里被丢掉只是为了不产生 NaN；真正把这类声明拦下来的是启动
+     那一次的 validateDecl()。 */
   function viewsFor(P) {
     if (!P.sideView) return VIEWS;
-    return Object.assign({}, VIEWS, {
-      side: Object.assign({ label: STR.vSide, tx: 0, ty: 0, tz: 0 }, P.sideView),
+    const side = Object.assign({}, VIEWS.side);
+    Object.keys(P.sideView).forEach(function (k) {
+      const v = P.sideView[k];
+      if (typeof v === 'number' && isFinite(v)) side[k] = v;
     });
+    return Object.assign({}, VIEWS, { side: side });
   }
 
   const SCENES = Object.create(null);
@@ -6376,6 +6402,9 @@ const ALGOS = {
      0 步 → `ed.setValue('')` 的 onChange 把 Run 重新点亮 → 绿色的
      「Ran · 0 steps」把红字盖掉。破页于是长得跟正常页一模一样。 */
   let bootErr = null;
+  /* 引导失败有两个来源，报错的口吻不一样：'algos' 是算法源码生成器没起来，
+     'decl' 是这一页自己的题目声明写错了。 */
+  let bootErrKind = 'algos';
   let statusLocked = false;
 
   function curP() { return uiTab ? PROBLEMS[uiTab] : null; }
@@ -6508,18 +6537,32 @@ const ALGOS = {
     };
   }
   const BOARD_GAP = 1.6;        // 并排两块棋盘之间留几格宽
+  /* 把「board() 交回来的是个什么东西」说清楚。**不用 JSON.stringify**：
+     `{files: undefined}` 会被它序列化成 `{}`，而「忘了写 return」正是要一眼
+     认出来的那一种，不能让它长得像「返回了个空对象」。 */
+  function describeBoardSpec(spec) {
+    if (spec === undefined) return 'undefined —— board() 忘了写 return？';
+    if (spec === null) return 'null';
+    if (typeof spec !== 'object') return typeof spec + ' ' + String(spec);
+    return 'files=' + String(spec.files) + ' ranks=' + String(spec.ranks);
+  }
   function layoutTracks(pid) {
     const P = PROBLEMS[pid], st = S[pid], pv = paramsOf(pid);
-    let spec = null;
-    /* `P.board()` 抛了 → **不画棋盘**，并且说出来。以前这里退回一个静默的 8×8：
-       一块尺寸完全错误、却长得像模像样的棋盘，是这一页能出的最坏的一种错——
-       她会拿着它去数格子。`layout` 留 null，drawProblem / sceneBox / onBoardClick
-       三处都已经跳过 null，于是画面上什么都没有，红色状态牌在说为什么。 */
-    try { spec = P.board(pv); } catch (e) { hookFail(pid, 'board', e); }
+    let spec = null, threw = false;
+    /* `P.board()` 交不出一块棋盘 → **不画棋盘**，并且说出来。以前这里退回一个
+       静默的 8×8：一块尺寸完全错误、却长得像模像样的棋盘，是这一页能出的最坏
+       的一种错——她会拿着它去数格子。`layout` 留 null，drawProblem / sceneBox /
+       onBoardClick 三处都已经跳过 null，于是画面上什么都没有，红色状态牌在说为什么。
+
+       ⚠ **「有没有报过」的判据是 `threw`，不是 `spec` 真不真。** 这两件事写成
+       一件的后果实测过：`board()` 忘了写 `return`（Task 6 接 knightPath 时活生生
+       的风险）→ 抛没抛都没有、`spec` 是 undefined → `if (spec)` 假 → **一句话都
+       不说**，画布全白、状态牌绿的、读数区照常、探针 `hookError: null`。
+       正是这段注释上面声称在防的那种失败，被这一个条件亲手放了进来。 */
+    try { spec = P.board(pv); } catch (e) { threw = true; hookFail(pid, 'board', e); }
     if (!spec || !isFinite(spec.files) || !isFinite(spec.ranks) ||
         spec.files < 1 || spec.ranks < 1) {
-      if (spec) hookFail(pid, 'board', new Error('返回了不能当棋盘用的尺寸：' +
-        JSON.stringify({ files: spec.files, ranks: spec.ranks })));
+      if (!threw) hookFail(pid, 'board', new Error('没有交出一块能用的棋盘：' + describeBoardSpec(spec)));
       st.tracks.forEach(function (tk) { tk.layout = null; });
       return;
     }
@@ -6974,7 +7017,7 @@ const ALGOS = {
   function paintBootFail() {
     if (!bootErr) return;
     statusLocked = false;
-    setStatus(esc(t(STR.bootFail) + bootErr.message), 'bad');
+    setStatus(esc(t(bootErrKind === 'decl' ? STR.declFail : STR.bootFail) + bootErr.message), 'bad');
     statusLocked = true;
   }
   function errText(err) {
@@ -7077,7 +7120,16 @@ const ALGOS = {
         if (k !== activeTrack) return;
         btnRun.disabled = !!err;               // 规格 §2.8：有语法错时 Run 禁用
         if (err) { statusKind = 'bad'; setStatus(errText(err), 'bad'); }
-        else if (statusKind === 'bad') { statusKind = 'idle'; setStatus(t(STR.ready), ''); }
+        else if (statusKind === 'bad') {
+          /* ⚠ 只清掉**编辑器自己刚放上去的**那条红。钩子失败与轨道错误跟她打的字
+             毫无关系，不能被一句灰色的 Ready 洗掉 —— 实测过：`board()` 忘了写
+             return 时 hookFail 刚写完红字，紧接着 syncEditorSlots 的 setValue 会
+             同步触发这里，红字当场变成 Ready，而画布是空的。又一条「绿盖红」。 */
+          const st2 = curS();
+          if (st2 && (st2.hookErr || st2.tracks.some(function (x) { return !!x.err; }))) return;
+          statusKind = 'idle';
+          setStatus(t(STR.ready), '');
+        }
       },
     });
     cap.addEventListener('click', function () { setActiveTrack(k); });
@@ -7497,11 +7549,67 @@ const ALGOS = {
   /* ================= 启动 ================= */
   /* `bootErr` 的声明在上面「每道题的运行状态」那一节，不在这里 —— 它有三个
      写在启动之前的读者。 */
-  try {
+
+  /* ---------------- 题目声明的静态字段：**在这里一次判死** ----------------
+
+     `spanZ` 与 `sideView` 跟 `board()` / `readout()` / `zOf()` 不是一类东西：
+     后者吃运行期数据（参数、标记），可以这一档对、那一档错，所以它们的判据
+     只能落在每帧路径上（hookFail）；前者是**静态字面量**——要么永远对，要么
+     永远错。对这一类，「每帧喊一句」既晚又吵，把整页停住才是诚实的。
+
+     不这样做的后果都实测过、都是**完全静默**的：
+       · `spanZ: '0.24'`（写成了字符串）→ spanZOf 安静回到 0.55 → 21 层的塔在
+         正视下把包围盒撑到棋盘宽度的 5.71 倍，棋盘缩到看不见，状态牌还是绿的。
+       · `sideView: { az: 0 }`（只覆盖一根轴）→ 一帧之后 cam.el / cam.dist 变
+         NaN、proj() 全 NaN、画布整块变白，而且连按回「正视」都救不回来。
+       · `sideView: { elev: 0.3 }`（键名拼错）→ 什么也不会发生，按钮点了没反应。
+     三条都属于阶段 5 约束 6 点名的那一类：少给/给错一个参数要**大声**失败。
+
+     只校验**声明了的**字段：没写就是用默认值，那是正常用法，不是错误。
+     部分覆盖是合法的（viewsFor 铺在 VIEWS.side 之上），所以这里不要求写全。 */
+  const SIDE_VIEW_KEYS = { az: 1, el: 1, dist: 1, tx: 1, ty: 1, tz: 1 };
+  function validateDecl() {
+    const has = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
     PIDS.forEach(function (pid) {
-      PROBLEMS[pid].sources.forEach(function (file) { loadAlgo(file); });
+      const P = PROBLEMS[pid], at = 'PROBLEMS.' + pid + '.';
+      if (has(P, 'spanZ')) {
+        const v = P.spanZ;
+        if (typeof v !== 'number' || !isFinite(v) || v <= 0) {
+          throw new Error(at + 'spanZ 必须是一个大于 0 的有限数字，收到 ' +
+            (typeof v) + ' ' + String(v) + '。它默默退回 ' + SPAN_Z +
+            ' 会让层数多的深度塔在正视下把取景放大好几倍，棋盘缩到看不见而且什么都不报。');
+        }
+      }
+      if (has(P, 'sideView')) {
+        const sv = P.sideView;
+        if (!sv || typeof sv !== 'object') {
+          throw new Error(at + 'sideView 必须是一个 { az, el, dist } 这样的对象，收到 ' +
+            (typeof sv) + ' ' + String(sv) + '。');
+        }
+        Object.keys(sv).forEach(function (k) {
+          if (!SIDE_VIEW_KEYS[k]) {
+            throw new Error(at + 'sideView 里有一个认不出的键 “' + k +
+              '” —— 只认 az / el / dist / tx / ty / tz。拼错的键会被静默忽略，' +
+              '那个视角按钮于是点了没反应，也不报错。');
+          }
+          const v = sv[k];
+          if (typeof v !== 'number' || !isFinite(v)) {
+            throw new Error(at + 'sideView.' + k + ' 必须是有限数字，收到 ' +
+              (typeof v) + ' ' + String(v) + '。非数字会让相机变成 NaN、整块画布变白。');
+          }
+        });
+      }
     });
-  } catch (e) { bootErr = e; }
+  }
+
+  try { validateDecl(); } catch (e) { bootErrKind = 'decl'; bootErr = e; }
+  if (!bootErr) {
+    try {
+      PIDS.forEach(function (pid) {
+        PROBLEMS[pid].sources.forEach(function (file) { loadAlgo(file); });
+      });
+    } catch (e) { bootErrKind = 'algos'; bootErr = e; }
+  }
 
   if (bootErr) {
     /* 引导失败是**终局**：状态牌锁死、两个按钮都禁掉、绘制循环整帧短路
@@ -7652,13 +7760,25 @@ const ALGOS = {
      浏览器会话，本项目已经发生过一次探针落在别人页面上、读数被记到错误的文件名
      下（CLAUDE.md「并行开工纪律」第 3 条）。 */
   window.__algoProbe = function () {
-    /* ⚠ 先对齐一次再读。「一个游标推两条轨迹」是在绘制循环里做的，而浏览器面板
-       没被 fronted 时 rAF 会被节流到十几秒一帧 —— 那种时候直接读，非活动轨道的
-       `i` 还停在上一次绘制的位置，验收会读到一个屏幕上从未出现过的中间态。
-       syncTracks() 幂等且只有 O(1) 的 goto，在这里补一次是安全的。 */
-    if (!bootErr) syncTracks();
+    /* ⚠ 先记下 sync 之前的游标，再对齐，再读。
+
+       为什么要对齐：「一个游标推两条轨迹」是在绘制循环里做的，而浏览器面板没被
+       fronted 时 rAF 会被节流到十几秒一帧 —— 那种时候直接读，非活动轨道的 `i`
+       还停在上一次绘制的位置，验收会读到一个屏幕上从未出现过的中间态。
+
+       ⚠⚠ 但**只对齐是不行的**：`tracks[k].i` 正是验收要用来断言「一个游标推两条
+       轨迹」的字段，而探针自己把那个相等制造了出来 —— 把 frameFor 里的
+       syncTracks() 整个删掉，那条断言照样全绿。一条永远为真的断言不是断言。
+       所以两个读数都给：`iBeforeSync` 是**绘制循环留下的**状态（要断言的是它），
+       `i` 是对齐之后的一致状态（读别的字段时要的是它）；`syncedByProbe` 是这一次
+       探针自己搬动了几条轨道 —— 在能正常出帧的环境里它必须是 0，那就是绘制循环
+       真的在干活的证据，也是这条断言可以被证伪的地方。 */
     const pid = uiTab, st = pid ? S[pid] : null;
     const tks = st ? st.tracks : [];
+    const iBefore = tks.map(function (x) { return x.cur.i; });
+    if (!bootErr) syncTracks();
+    let syncedByProbe = 0;
+    for (let k = 0; k < tks.length; k++) if (tks[k].cur.i !== iBefore[k]) syncedByProbe++;
     const tk = tks[activeTrack] || tks[0] || null;
     const c = tk ? boardAt(tk) : null;
     const cache = dbg ? dbg.state() : null;
@@ -7683,6 +7803,9 @@ const ALGOS = {
       params: pv,
       N: typeof pv.N === 'number' ? pv.N : null,
       track: activeTrack,
+      /* 这次调用里探针自己搬动了几条轨道。能正常出帧的环境里必须是 0 ——
+         不是 0 就说明绘制循环没在对齐（或者根本没在出帧），而不是「对齐好了」。 */
+      syncedByProbe: syncedByProbe,
       /* **每条轨道各自的**步数 / 截断 / 结果 / 棋盘事件计数（Task 7 的 tourKnight
          断言全从这里读）。截断的那条 `result` 是 null —— 不可知，不是 0、不是 false。
          `ops` 是整趟跑下来的棋盘事件按种类计数：3×5 上两条轨道的 ops 应当逐项
@@ -7693,6 +7816,9 @@ const ALGOS = {
                  truncated: !!(x.res && x.res.trace.truncated),
                  result: x.res && x.res.result !== undefined ? x.res.result : null,
                  i: x.cur.i, len: x.cur.trace.length,
+                 /* 绘制循环留下的原始游标（**没有**被这次探针调整过）。
+                    「一个游标推两条轨迹」要断言的是这一个，不是上面那个。 */
+                 iBeforeSync: iBefore[k],
                  line: D.currentLine(x.cur),
                  ops: trackOps(x),
                  boards: x.layout ? { files: x.layout.files, ranks: x.layout.ranks } : null,
