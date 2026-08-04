@@ -389,6 +389,76 @@ function boot() {
   try { history.replaceState({ tool: curId }, '', location.href); } catch (e) {}
 }
 boot();
+
+function toggleSidebar() { setSidebarOpen(shell.classList.contains('hid')); }
+
+document.getElementById('btnHide').addEventListener('click', function () { setSidebarOpen(false); });
+document.getElementById('btnShow').addEventListener('click', function () { setSidebarOpen(true); });
+document.getElementById('scrim').addEventListener('click', function () { setSidebarOpen(false); });
+
+/* ================= 键盘 =================
+   只认两枚：Ctrl/Cmd+B 与 [。chess 工具已经占了 1–9（视角）、T（切页签）、
+   Space（播放/暂停）、F（翻转棋盘）、r（重置），阶段 4/5 的调试器还要占
+   F5/F9/F10/F11——壳不许碰这些。isTyping() 挡住代码编辑器里敲 [ 的情形。 */
+function isTyping(el) {
+  if (!el) return false;
+  var tag = (el.tagName || '').toUpperCase();
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+function hotkey(e) {
+  if (isTyping(e.target)) return;
+  var mod = e.ctrlKey || e.metaKey;
+  if ((mod && (e.key === 'b' || e.key === 'B')) || (!mod && !e.altKey && e.key === '[')) {
+    e.preventDefault();
+    toggleSidebar();
+  }
+}
+document.addEventListener('keydown', hotkey);
+
+/* 工具在 iframe 里，键盘事件落在它的文档上，壳收不到——载入后把同一个
+   handler 也挂进去（同源才行，跨源会抛，try/catch 兜住）。 */
+frame.addEventListener('load', function () {
+  try { frame.contentDocument.addEventListener('keydown', hotkey); } catch (e) {}
+});
+
+/* 恢复上次的折叠状态。不 remember，否则「恢复」这件事本身会写一次存储。 */
+try {
+  if (localStorage.getItem(NAV_KEY) === 'hid') setSidebarOpen(false, false);
+} catch (e) {}
+
+/* ================= 语言 =================
+   切换要同时做两件事：① 重渲壳自己的文案 ② 重设 iframe 的 ?lang=。
+   只做①会得到「壳是中文、工具是英文」。 */
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  renderNav();
+  renderChrome();
+  syncing = true;
+  setFrame(srcFor(curId));
+  try {
+    var u = new URL(location.href);
+    u.searchParams.set('lang', l);
+    history.replaceState({ tool: curId }, '', u);
+  } catch (e) {}
+}
+document.getElementById('btnLang').addEventListener('click', function () {
+  setLang(LANG === 'zh' ? 'en' : 'zh');
+});
+
+/* 优先取 chess-tools.json（有服务器时永远最新）；file:// 或离线时 fetch 失败，
+   静默沿用内嵌的 FALLBACK，不弹错误、不阻塞渲染（boot() 已经先渲染过一次）。
+   覆盖之后要重渲侧边栏——注册表里可能多出 FALLBACK 还没有的工具。curId 不动：
+   它此刻装的那一页是有效的，重新 go() 会白白重载一次 iframe。 */
+(function () {
+  try {
+    fetch('chess-tools.json', { cache: 'no-cache' }).then(function (r) {
+      return r.ok ? r.json() : null;
+    }).then(function (j) {
+      if (j && j.tools && j.tools.length) { TOOLS = j.tools; renderNav(); renderChrome(); }
+    })['catch'](function () {});
+  } catch (e) {}
+})();
 </script>
 </body>
 </html>
