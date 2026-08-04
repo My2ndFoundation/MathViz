@@ -117,4 +117,20 @@ T.eq(KINDS.back, clears, '每一次「回溯撤销」都真的收回了一个后
 /* 不要写成 indexOf('?')：注释里一个中文问号就会让它无端变红。
    上面的 I.parse 已经证明了子集合法性（三元会抛 unsupported）。 */
 
+/* ---- 缺参数当场抛（阶段 5 约束 6：省略参数已经是本仓库抓到过五次的缺陷类）----
+
+   这一份是四个模块里最早写的，写下的时候约束 6 那一轮教训还没发生，于是
+   `source()` 的校验**实现了却没有被任何一条断言钉住**：今天谁给 N 加一个
+   默认值（哪怕只是 `const N = o.N === undefined ? 8 : o.N;`），上面所有对拍、
+   撞墙、编舞的断言仍旧全绿——它们每一条都显式传了 N。那正是这道题最不能出的
+   错：界面写着 6、跑的却是 8（见 queens.js `source()` 头上的注释）。
+   形状与 tour.test.js / knight-path.test.js 同源。 */
+T.throws(function () { Q.source(); }, '连 opts 都没有也当场抛');
+T.throws(function () { Q.source({}); }, '缺 N 当场抛 —— N 没有默认值');
+T.throws(function () { Q.source({ N: 0 }); }, 'N < 1 当场抛');
+T.throws(function () { Q.source({ N: 4.5 }); }, 'N 不是整数当场抛');
+T.throws(function () { Q.source({ N: '8' }); }, 'N 是字符串当场抛（不许悄悄当 8 用）');
+/* 但**不**拿 N_MIN / N_MAX 当校验边界：N=9 撞墙那一条要靠 source(9) 真吐源码。
+   （上面的 wall 那一段已经跑过它了，这里只把这个取舍写明。） */
+
 T.report();
