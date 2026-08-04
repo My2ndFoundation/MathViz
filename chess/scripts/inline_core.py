@@ -60,10 +60,23 @@ def js_string_literal(text: str) -> str:
         （`<\\/script`）：在 JS 字符串字面量里 `\\/` 就是 `/`，字符串的值
         不变，但 HTML 分词器不再认得这个子串。大小写不敏感地匹配（浏览器
         闭合标签时也不区分大小写），用捕获组保留原始大小写。
+      · `<!--`：单独出现时无害，但**跟后面某处的裸 `<script`（哪怕隔着
+        任意多字符）组合在一起**会要命——HTML 分词器一进入 script data
+        escaped / double-escaped 状态，模板自己真正的收尾 `</script>`
+        就不再被当成闭合标签，而是被状态机吃掉、状态翻转，闭合标签往后
+        错位，整个页面从这里开始被当成脚本文本吞掉。这在浏览器里实测
+        复现过：`document.scripts.length` 从预期的 2 变成 1，`ALGOS`
+        与后续全局变量都是 undefined。检查「有没有 `</script`」防不住
+        这一类——触发条件恰恰是**一个 `</script` 都没有**。在 `!` 前插
+        一个反斜杠（`<\\!--`）就地拆掉这个子串，同一招数：JS 字符串里
+        `\\!` 就是 `!`，字符串的值不变，但从源头上不让分词器进入那个
+        状态机，比事后证明"清一色只有一个 `</script`"更彻底——那种证明
+        只覆盖了已经想到的构造，防不住换一种没有 `</script` 的组合。
     """
     s = json.dumps(text, ensure_ascii=False)
     s = s.replace('\u2028', '\\u2028').replace('\u2029', '\\u2029')
     s = re.sub(r'</(script)', r'<\\/\1', s, flags=re.IGNORECASE)
+    s = s.replace('<!--', '<\\!--')
     return s
 
 

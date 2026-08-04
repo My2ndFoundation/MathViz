@@ -62,6 +62,64 @@ def node_check() -> int:
     return 1 if failed else 0
 
 
+def js_string_literal_html_safety_check() -> int:
+    """js_string_literal() 的转义是否真的让内联块在 **HTML 分词器** 眼里安全。
+
+    这道检查跟下面的 algos_roundtrip_check 分工不同、互补，不能互相替代：
+    algos_roundtrip_check 走的是 `node -e`，那是纯 JS 解析——只要字符串
+    值算得对，它就满意，它压根不经过 HTML 分词器，对分词器层面的坑
+    **结构性看不见**。而这个函数是为了补那个盲区存在的。
+
+    真实事故（阶段 4 复现过）：一段文本只要同时含有 `<!--` 和后面某处
+    （哪怕隔着任意多字符）一个裸的 `<script`，HTML 分词器就会从那个
+    `<!--` 起进入 script-data-escaped / double-escaped 状态，模板自己
+    真正的收尾 `</script>` 不再被当成闭合标签，而是被状态机吃掉、状态
+    翻转——闭合标签错位，整个页面从这里开始被当脚本文本吞掉。用真实
+    浏览器复现过：`document.scripts.length` 从预期的 2 掉到 1，后一个
+    `<script>` 里的全局变量全部 undefined。**这个构造里一次 `</script`
+    都不出现**——查"有没有 `</script`"防不住它，得直接查有没有裸 `<!--`。
+
+    所以这里不比较"值对不对"（那是 algos_roundtrip_check 的活），而是
+    直接在**编码后的字符串本身**里查两类危险子串还在不在：
+      1. 裸 `<!--`——分词器进入转义状态的触发点。
+      2. 大小写不敏感的 `</script`——分词器提前闭合标签的触发点。
+    两个都不该在 js_string_literal() 的输出里出现，不管输入里有什么。
+    这是个不依赖任何 html 文件是否存在的直接单元检查：改坏了转义函数，
+    这道门立刻红，不必等 Task 6 那样的工具页出现才暴露。
+    """
+    cases = {
+        '<!-- 后面隔着文字接一个裸 <script（无 </script）':
+            'before <!-- comment-ish text then later a bare <script tag, no closer here',
+        '单独的 <!--（对照组，本身不必然出事，但也不该漏转义）':
+            'a <!-- b',
+        '</script 各种大小写与空格变体':
+            '</script> </SCRIPT> </ScRiPt> </script  >',
+        '<!-- 与 </script 同时出现':
+            '<!-- start --> mid </script> tail',
+    }
+    failed = []
+    for label, text in cases.items():
+        lit = inline_core.js_string_literal(text)
+        if '<!--' in lit:
+            failed.append(f'{label}：转义结果里仍有裸 <!--')
+        if re.search(r'</script', lit, re.IGNORECASE):
+            failed.append(f'{label}：转义结果里仍有 </script（大小写不敏感）')
+        # 顺手确认值本身没被这两条新规则悄悄改坏——用 node 求值回来对比。
+        script = f'const V = {lit};\nprocess.stdout.write(JSON.stringify(V));'
+        proc = subprocess.run(['node', '-e', script], capture_output=True, text=True)
+        if proc.returncode != 0:
+            failed.append(f'{label}：node 求值失败：{proc.stderr.strip()}')
+            continue
+        if json.loads(proc.stdout) != text:
+            failed.append(f'{label}：转义/求值往返后值变了')
+
+    for err in failed:
+        print(f'ERROR: js_string_literal HTML 安全检查失败\n  {err}', file=sys.stderr)
+    if not failed:
+        print(f'js_string_literal HTML 安全检查：{len(cases)} 个构造全部安全且值不变')
+    return 1 if failed else 0
+
+
 def algos_roundtrip_check() -> int:
     """ALGOS 内联的是**字符串**，不是代码（inline_core.js_string_literal，规格 §2.1）。
 
@@ -78,10 +136,17 @@ def algos_roundtrip_check() -> int:
     重新实现一遍转义规则，等于又造了一份可能跟 js_string_literal 各自
     漂移的平行实现。
 
-    当前没有工具页带 ALGOS 标记区（工具④要到阶段 4 Task 6 才创建），
-    这道检查此时跑 0 次、静默通过——这是预期状态，不是漏检：
-    render() 那道通用门已经确认了"没有标记区的文件不该被这个 tag 影响"，
-    这里只是同一件事在 ALGOS 专属校验里的自然结果。
+    **本函数的校验范围止于 JS 求值等价，不覆盖 HTML 嵌入安全**：`node -e`
+    是纯 JS 解析器，从不经过 HTML 分词器，天生看不见"分词器提前进入
+    转义状态、把收尾 `</script>` 吃掉"这一类坑（`<!--` + 后面裸 `<script`
+    的组合就是一个真实例子）。这一类由上面的 js_string_literal_html_safety_check
+    覆盖——不要以为这里的"往返一致"已经证明了转义在 HTML 语境下也安全。
+
+    没有任何工具页带 ALGOS 标记区时，这道检查跑 0 次、静默通过——这是
+    存在性探测（presence detection），不是漏检：render() 那道通用门
+    已经确认了"没有标记区的文件不该被这个 tag 影响"，这里只是同一件事
+    在 ALGOS 专属校验里的自然结果。工具④（chess-search-minimax.html）
+    落地后这道门开始真正咬合，逐个标记区跑起来。
     """
     tools = sorted((ROOT / 'tools').glob('*.html'))
     checked_files = 0
@@ -196,16 +261,21 @@ def core_tests() -> int:
 
 
 if __name__ == '__main__':
-    # 五道门都要跑到底、都要报——不能用 `or` 短路。之前 `a() or b() or c()`
+    # 六道门都要跑到底、都要报——不能用 `or` 短路。之前 `a() or b() or c()`
     # 一旦 a() 非零就直接跳过 b()/c()，意味着一份过期的内联副本（或任何语法
     # 错误）会让 406 条断言的 core_tests() 门根本不执行，问题只报出第一个，
-    # 最有分量的那道门被悄悄跳过了。这里五个都无条件跑，各自打印自己的
-    # ERROR，最后按「任一失败则整体失败」汇总退出码。algos_roundtrip_check
-    # 是阶段 4 新加的第五道门：见该函数文档字符串，它抓的是 inline_core 的
-    # 生成结果一致性检查本身抓不住的一类 bug（转义函数把内容改坏了）。
+    # 最有分量的那道门被悄悄跳过了。这里六个都无条件跑，各自打印自己的
+    # ERROR，最后按「任一失败则整体失败」汇总退出码。
+    # js_string_literal_html_safety_check 与 algos_roundtrip_check 是阶段 4
+    # 新加的两道门：前者查转义结果对 HTML 分词器是否安全（`<!--` + 裸
+    # `<script` 那类坑，`node -e` 天生看不见），后者查转义结果求值出来的
+    # 值是否与源文件字节一致——两者分工互补，各自的文档字符串里写清楚了
+    # 为什么不能互相替代。
     rc_inline = inline_core.main(check_only=True)
     rc_node = node_check()
+    rc_html_safety = js_string_literal_html_safety_check()
     rc_algos = algos_roundtrip_check()
     rc_fallback = fallback_check()
     rc_core = core_tests()
-    sys.exit(1 if (rc_inline or rc_node or rc_algos or rc_fallback or rc_core) else 0)
+    sys.exit(1 if (rc_inline or rc_node or rc_html_safety or rc_algos or
+                    rc_fallback or rc_core) else 0)
