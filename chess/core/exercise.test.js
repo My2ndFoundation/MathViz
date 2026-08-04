@@ -240,6 +240,24 @@ T.ok(h3b.zh.indexOf('return …;') >= 0, '骨架：末尾的 return 也挖掉');
 T.ok(h3b.zh.indexOf('arr[fn(idx)]') === -1, '骨架：if 条件里的嵌套调用没有残留');
 T.ok(h3b.zh.indexOf('target') === -1, '骨架：if 条件里的比较对象没有残留');
 
+/* 第 2 级：字符串字面量的内容不能被当成变量列出来（审查修复轮 1）。
+   `queens.js` 里回溯撤销那三行是文件头明确标注的真实挖空候选，逐字照抄：
+   `mark(sq, "back")` 的 "back" 是传给宿主的状态字符串，不是代码里的名字——
+   `variablesIn` 原来直接拿整段原始文本跑标识符正则，没有跳过引号内部，
+   于是 "back" 被当成变量列进第 2 级提示，混进一个假名字。 */
+const hbRetreat = E.parse([
+  '// >>> BLANK id=retreat level=1 fill="return;" hint="回溯要做什么？" hintEn="what does backtracking do?"',
+  '      cols[c] = 0; diagDown[r + c] = 0; diagUp[r - c + N] = 0;',
+  '      mark(sq, "back");',
+  '      clear(sq);',
+  '// <<< BLANK',
+].join('\n')).blanks[0];
+const h2Retreat = E.hintAt(hbRetreat, 2);
+T.ok(h2Retreat.zh.indexOf('back') === -1,
+  '字符串字面量 "back" 的内容不出现在变量清单里（它是传给宿主的状态串，不是变量名）');
+T.ok(h2Retreat.zh.indexOf('cols') >= 0 && h2Retreat.zh.indexOf('mark') >= 0 && h2Retreat.zh.indexOf('clear') >= 0,
+  '真正的变量/函数名（cols、mark、clear……）照常列出来，不是把字符串一并挖掉了事');
+
 /* ---------- judge ---------- */
 
 const I = require('./interp.js');

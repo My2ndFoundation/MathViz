@@ -659,16 +659,47 @@
     'true', 'false', 'null',
   ];
 
+  /* 把字符串/模板字面量的引号和内容整段换成等长空格，其余字符原样保留
+     （保留原始下标和总长度，只是不需要靠它定位什么，只是图个简单）。
+     `variablesIn` 靠它把标识符正则挡在字符串外——`mark(sq, "back")` 的
+     `"back"` 是传给宿主的一个字面量字符串，不是代码里的名字，混进变量
+     清单会把「这段代码用到了 back 这个变量」这种假象喂给使用者。跟
+     `matchParen`/`skeletonOf` 里跳引号的写法同一个思路（遇到引号找下一个
+     同符号收尾），不单独另起一套转义规则——这些挖空体都是算法源码，不会
+     有转义引号。 */
+  function blankOutQuoted(str) {
+    let out = '';
+    let i = 0;
+    while (i < str.length) {
+      const c = str[i];
+      if (c === '"' || c === "'" || c === '`') {
+        const quote = c;
+        out += ' ';
+        i++;
+        while (i < str.length && str[i] !== quote) { out += ' '; i++; }
+        if (i < str.length) { out += ' '; i++; }
+        continue;
+      }
+      out += c;
+      i++;
+    }
+    return out;
+  }
+
   /* 第 2 级：挖空体里出现过的变量名——扫出所有标识符，去掉 ES 关键字表，
      去重，保留首次出现的顺序（顺序本身是线索：先出现的往往是先读到的
-     那一个）。不区分「这是个变量」还是「这是个函数名/属性名」——分级提示
-     只是引导使用者去读代码里的哪几个名字，不是做静态类型分析。 */
+     那一个）。扫描前先用 `blankOutQuoted` 把字符串字面量的内容挖掉，
+     不然 `mark(sq, "back")` 这类调用会把宿主桥接用的状态字符串
+     （"back"/"cut"/"ok"……）当成变量列出来——那不是代码里的名字，是传给
+     宿主的一个字面量。不区分「这是个变量」还是「这是个函数名/属性名」——
+     分级提示只是引导使用者去读代码里的哪几个名字，不是做静态类型分析。 */
   function variablesIn(body) {
     const seen = Object.create(null);
     const names = [];
     const re = /[A-Za-z_$][A-Za-z0-9_$]*/g;
+    const scanned = blankOutQuoted(body);
     let m;
-    while ((m = re.exec(body)) !== null) {
+    while ((m = re.exec(scanned)) !== null) {
       const name = m[0];
       if (HINT_L2_KEYWORDS.indexOf(name) !== -1) continue;
       if (seen[name]) continue;
