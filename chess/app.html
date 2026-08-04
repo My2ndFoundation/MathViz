@@ -267,7 +267,116 @@ function renderNav() {
   navList.innerHTML = html;
 }
 
-renderNav();
+/* ================= 从 iframe 的路径反推 id =================
+   使用者在画廊（home）里点了一张卡片时，导航不是壳发起的——iframe 自己换了
+   页面。载入回调里靠文件名反查 id，才能把侧边栏高亮与地址栏同步过去。 */
+function idFromPath(path) {
+  var f = String(path).split('/').pop();
+  for (var i = 0; i < TOOLS.length; i++) {
+    if (TOOLS[i].file.split('/').pop() === f) return TOOLS[i].id;
+  }
+  return null;
+}
+
+function srcFor(id) {
+  var f = id ? fileOf(id) : 'index.html';
+  return (f || 'index.html') + '?lang=' + LANG;
+}
+
+/* 换页面用 location.replace 而不是赋值 frame.src——这一条抄自主站 app.html，
+   理由也照抄：赋值 src 会往「联合会话历史」里塞一条 iframe 记录，与壳自己的
+   pushState 交错，后退键就会出现「地址与侧栏都退了、画面还停在上一个工具」的
+   错位。replace 不产生历史记录，历史完全由壳掌握。跨源时回落到 src。 */
+function setFrame(url) {
+  try {
+    if (frame.contentWindow) { frame.contentWindow.location.replace(url); return; }
+  } catch (e) { /* 跨源（file://）时读 contentWindow 会抛 */ }
+  frame.src = url;
+}
+
+function renderChrome() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.getElementById('brandName').textContent = t(L.brand);
+  document.getElementById('brandLink').href = '../index.html?lang=' + LANG;
+  document.getElementById('brandLink').title = t(L.back);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+  document.getElementById('btnHide').title = t(L.hide) + ' (Ctrl+B)';
+  document.getElementById('btnShow').title = t(L.show) + ' (Ctrl+B)';
+  var d = curId ? byId(curId) : null;
+  document.title = d ? t(d.title) + ' · MathViz' : t(L.title);
+  var alone = document.getElementById('btnAlone');
+  alone.title = t(L.alone);
+  alone.href = (d ? d.file : 'index.html') + '?lang=' + LANG;
+}
+
+function go(id, push) {
+  if (id && !byId(id)) id = null;      // 未知 id 一律落回 home，不留 undefined
+  curId = id || null;
+  syncing = true;
+  setFrame(srcFor(curId));
+  renderNav();
+  renderChrome();
+  if (push !== false) {
+    try {
+      var u = new URL(location.href);
+      if (curId) u.searchParams.set('tool', curId); else u.searchParams.delete('tool');
+      u.searchParams.set('lang', LANG);
+      history.pushState({ tool: curId }, '', u);
+    } catch (e) {}
+  }
+  if (window.innerWidth <= 760) setSidebarOpen(false, false);
+}
+
+/* 侧边栏点击：事件委托到容器上，renderNav() 每次重画都不必重新绑 */
+navList.addEventListener('click', function (e) {
+  var btn = e.target.closest ? e.target.closest('.item') : null;
+  if (!btn) return;
+  go(btn.dataset.id || null, true);
+});
+
+/* 后退/前进 */
+window.addEventListener('popstate', function (e) {
+  var id = (e.state && e.state.tool) || null;
+  if (!id) {
+    try { id = new URLSearchParams(location.search).get('tool'); } catch (err) { id = null; }
+  }
+  go(id, false);
+});
+
+/* iframe 载入后回同步：使用者在画廊里点卡片时，导航不是壳发起的 */
+frame.addEventListener('load', function () {
+  if (syncing) { syncing = false; return; }
+  var id = null;
+  try { id = idFromPath(frame.contentWindow.location.pathname); } catch (e) { return; }
+  if (id === curId) return;
+  curId = id;
+  renderNav();
+  renderChrome();
+  try {
+    var u = new URL(location.href);
+    if (curId) u.searchParams.set('tool', curId); else u.searchParams.delete('tool');
+    history.replaceState({ tool: curId }, '', u);
+  } catch (e) {}
+});
+
+/* ================= 侧边栏显隐 =================
+   remember 默认 true，由调用方按语义传 false：go() 在窄屏上的那次自动收起
+   是布局行为，不是「使用者选择了收起」，不该被记进 NAV_KEY。
+   折叠按钮、快捷键与「恢复上次状态」在下一段（Task 4）接上来。 */
+function setSidebarOpen(open, remember) {
+  shell.classList.toggle('hid', !open);
+  if (remember !== false) {
+    try { localStorage.setItem(NAV_KEY, open ? 'open' : 'hid'); } catch (e) {}
+  }
+}
+
+function boot() {
+  var id = null;
+  try { id = new URLSearchParams(location.search).get('tool'); } catch (e) {}
+  go(id, false);
+  try { history.replaceState({ tool: curId }, '', location.href); } catch (e) {}
+}
+boot();
 </script>
 </body>
 </html>
