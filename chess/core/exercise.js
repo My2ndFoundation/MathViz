@@ -55,32 +55,69 @@
   /* 属性扫描器：不用一条大正则扫整行，逐个 key 去找。
      阶段 5 的教训：`[\w\-.,]*` 这类字符类不含空格，一份写成
      "a.js, b.js" 的清单会被静默截断——这里的做法是每种取值方式
-     （裸值 vs 双引号串）各自扫描到明确的终止符，找不到就抛，不猜。 */
+     （裸值 vs 双引号串）各自扫描到明确的终止符，找不到就抛，不猜。
 
-  /* 从 line 里，紧跟在 'key=' 之后，读一个裸值：读到下一个空白（或行尾）为止。
-     找不到 'key=' 就返回 undefined（调用方判断缺失并抛）。 */
-  function scanBare(line, key) {
-    const marker = key + '=';
-    const at = line.indexOf(marker);
-    if (at === -1) return undefined;
-    let i = at + marker.length;
-    const start = i;
-    while (i < line.length && !/\s/.test(line[i])) i++;
-    if (i === start) return undefined; // key= 后面立刻是空白或行尾：空裸值
-    return line.slice(start, i);
+     修复轮 1 的教训：光靠 `line.indexOf('id=')` 找子串不够——如果某个
+     引号值内部恰好含有 `id=` 这样的文字（比如中文提示写「设 id=5 的
+     场景」），`indexOf` 会先命中引号**内部**那个 `id=`，把提示文案的一
+     截读成 id 的值，不抛也不报。加一条「前面必须是空白」的边界挡不住
+     这个反例：引号内那个 `id=` 前面恰好也是空白（自然的中文断句空格）。
+     真正的边界不是字符，是「引号内 / 引号外」——所以先按引号把整行切成
+     token（`key="…"` 整段算一个不可分的 token，token 之间以引号外的
+     空白分隔），再只在 token **起始处**匹配 `key=`。 */
+
+  /* 把一行按「引号外的空白」切成 token；`key="…"` 这类带引号的属性会被
+     整段吞成一个 token（哪怕引号内部有空白也不会被切开）。 */
+  function tokenize(line) {
+    const tokens = [];
+    let i = 0;
+    while (i < line.length) {
+      while (i < line.length && /\s/.test(line[i])) i++;
+      if (i >= line.length) break;
+      const start = i;
+      while (i < line.length && !/\s/.test(line[i])) {
+        if (line[i] === '"') {
+          i++;
+          while (i < line.length && line[i] !== '"') i++;
+          if (i < line.length) i++; // 吞掉闭合引号
+        } else {
+          i++;
+        }
+      }
+      tokens.push(line.slice(start, i));
+    }
+    return tokens;
   }
 
-  /* 从 line 里，紧跟在 'key="' 之后，读到下一个 '"' 为止（不支持转义——
-     这些指令是源码作者手写的注释，不是任意用户输入）。
-     找不到 'key="' 或找不到闭合引号就返回 undefined。 */
+  /* 找到以 'key=' 开头的那个 token，读裸值：token 里 'key=' 之后的全部
+     内容（token 本身已经是「到下一个引号外空白为止」，无需再截断）。
+     找不到这样的 token，或值是空字符串，返回 undefined。 */
+  function scanBare(line, key) {
+    const marker = key + '=';
+    const tokens = tokenize(line);
+    for (let t = 0; t < tokens.length; t++) {
+      if (tokens[t].indexOf(marker) === 0) {
+        const value = tokens[t].slice(marker.length);
+        return value === '' ? undefined : value;
+      }
+    }
+    return undefined;
+  }
+
+  /* 找到以 'key="' 开头的那个 token，读引号内的内容（不支持转义——这些
+     指令是源码作者手写的注释，不是任意用户输入）。找不到这样的 token，
+     或 token 没有以闭合引号收尾（说明这条指令本身写坏了），返回
+     undefined。 */
   function scanQuoted(line, key) {
     const marker = key + '="';
-    const at = line.indexOf(marker);
-    if (at === -1) return undefined;
-    const start = at + marker.length;
-    const end = line.indexOf('"', start);
-    if (end === -1) return undefined;
-    return line.slice(start, end);
+    const tokens = tokenize(line);
+    for (let t = 0; t < tokens.length; t++) {
+      const tok = tokens[t];
+      if (tok.indexOf(marker) === 0 && tok.length > marker.length && tok[tok.length - 1] === '"') {
+        return tok.slice(marker.length, tok.length - 1);
+      }
+    }
+    return undefined;
   }
 
   /* 解析一行 `// >>> BLANK ...` 指令，返回属性对象；任何一条缺失都抛。

@@ -59,6 +59,27 @@ T.eq(two.blanks[1].body, 'y;\nz;', '多行挖空体用换行连接');
 T.eq(two.blanks[1].startLine, 6, '第二个挖空体的起始行号');
 T.eq(two.blanks[1].endLine, 7, '第二个挖空体的结束行号');
 
+/* ---------- parse：属性乱序 + 提示文案里含子串 "id="/"level="（修复轮 1） ----------
+   审查抓到的洞：scanBare/scanQuoted 原来用 line.indexOf('id=') 找子串，
+   如果 hint 文案里恰好写了「设 id=5 的场景」，会先命中引号内部那个 id=，
+   把它当成 id 的值——不抛、不报，静默取错。这条不需要属性乱序也能触发，
+   但顺时把「属性顺序不作要求」也一并覆盖：id/level 放到 hint/fill 后面。 */
+
+const collide = E.parse([
+  '// >>> BLANK fill="1;" hint="设 id=5 的场景，注意 level=9 只是举例，fill= 也一样" id=a level=1 hintEn="mentions id=5 and level=9 too"',
+  'x;',
+  '// <<< BLANK',
+].join('\n'));
+T.eq(collide.blanks.length, 1, '属性乱序 + 提示文案含 id=/level=/fill= 子串：仍然找到一个挖空');
+T.eq(collide.blanks[0].id, 'a', 'id 取到的是真正的 id= token，不是 hint 文案里的 "id=5"');
+T.eq(collide.blanks[0].level, 1, 'level 取到的是真正的 level= token，不是 hint 文案里的 "level=9"');
+T.eq(collide.blanks[0].fill, '1;', 'fill 取到的是真正的 fill= token，不是 hint 文案里提到的 "fill="');
+T.ok(
+  collide.blanks[0].hint.zh.indexOf('id=5') >= 0 && collide.blanks[0].hint.zh.indexOf('level=9') >= 0,
+  'hint.zh 完整保留了文案里的 id=5 / level=9，没有被当成属性吃掉'
+);
+T.eq(collide.blanks[0].hint.en, 'mentions id=5 and level=9 too', 'hintEn 同样完整保留');
+
 /* ---------- parse：每一条都必须大声失败（约束 6） ---------- */
 
 T.throws(function () { E.parse(); }, 'parse() 少了 source —— 抛');
