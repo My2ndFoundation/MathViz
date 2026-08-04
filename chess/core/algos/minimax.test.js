@@ -153,4 +153,23 @@ for (const depth of [1, 2, 3]) {
    而那正是这一课本身（上面已经断言过 truncated）。 */
 T.eq(survive.result, -12, 'depth 4 的极小极大值是公布的 −12（问 α-β，因为 plain 在这一格跑不完）');
 
+/* ---- 导出出去的 POSITIONS 改不动 ----
+   它是**导出**的，而 source() 每次都从它身上取开局：外面改一个数字，此后
+   每一次 source() 都悄悄换了局面，而界面上仍写着「同一个开局」。
+   source() 里那句 `.slice()` 防不住这件事（它护的是生成出来的 board 不与表
+   共享引用，方向正好相反），所以表自己得冻上。
+   这里断言的是**结果**（表没变、source() 没变），不是抛不抛：严格模式下写
+   冻结对象抛、非严格下静默失败，本模块管不着调用方用哪种。 */
+/* 只比生成源码里那一行开局，不比整份字符串：整份比出来的失败信息是几百行
+   源码，看的人根本读不出哪里变了。 */
+const boardLine = function () { return /const board = \[.*\];/.exec(A.source({ mode: 'plain', depth: 2 }))[0]; };
+const beforeTamper = boardLine();
+try { A.POSITIONS.H[0] = 99; } catch (e) { /* 严格模式：抛出来正是想要的 */ }
+try { A.POSITIONS.EVIL = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; } catch (e) {}
+T.eq(A.POSITIONS.H[0], 5, '外面改不动 POSITIONS.H 里的数字');
+T.ok(!A.POSITIONS.EVIL, '外面也塞不进新的局面');
+T.eq(boardLine(), beforeTamper, '所以 source() 生成的开局不会被外面改掉');
+T.eq(I.run(A.source({ mode: 'plain', depth: 2 }), { host: {} }).result, EXPECTED[2],
+     '被改过一手之后跑出来的仍是公布的那个值');
+
 T.report();

@@ -34,6 +34,36 @@
      反过来不同层的两个节点也可以撞上同一个 depth。
      扫轨迹时自己维护一个 search 帧栈即可——那是**精确**的，不是近似的。 */
 
+  /* ==================== 缺参数：当场抛，不许静默 ====================
+
+     本模块导出的三个入口各有一个必填参数，省掉任何一个都会**静默**产出一个
+     看起来很正常的错状态 —— 同一个形状在这个阶段已经栽过三次，每次换一种
+     算术身份：
+       · `build(trace)`     entryName 缺席 → 一个帧名都对不上 → 空树，order 长度 0；
+       · `createView(tree)` trace 缺席 → `clampTo` 里 `min(-1, …)` → 视图永远冻在
+         第 0 步，此后 seek 到哪里都还是 0；
+       · `seek(view)`       `undefined | 0 === 0` → 游标被悄悄倒回 0 并整棵重建。
+         这个最凶：seek 是面板**每帧**都要调的同步点，而 `TM.seek(view)` 读起来
+         活像「刷新一下视图」。
+     三处都不报错，也都不会在下一步炸掉，只是从此读出来的数字全是假的。
+
+     所以统一一条策略：**必填参数缺席 = 调用方的 bug，立刻抛。**
+     不选「原样返回」—— 那只对 seek 讲得通，build / createView 根本没有「原样」
+     可返回；一个模块里两套策略，下一个人只会记住宽松的那套。抛在模块边界上
+     是合适的：这类错只可能来自代码，不可能来自数据，而这套接口在阶段 5 会被
+     六个算法各调一遍。
+
+     **这与 null 契约不是一回事，千万别混。** null 是**数据**在说「轨迹里读不
+     出来」（mvCount / value / statsAt().pruned），它必须能一路传到面板上画成
+     「—」；缺参数是**代码**写错了，下游拿它做不出任何对的事。所以显式的 null
+     照旧宽容 —— `build(null, 'search')` 给空树、`createView(null, null)` 给一个
+     空视图（清空编辑器缓冲区在 3b 是真实可达的状态，不该让面板崩掉）——
+     抛的只有 `undefined`（以及同样会被 `| 0` 悄悄吃掉的 NaN）。 */
+  function badArg(sig, arg, hint) {
+    throw new Error('TreeModel.' + sig + '：必填参数 ' + arg + ' 缺席或类型不对（' + hint +
+                    '）。这是调用方的 bug，不是数据里的「不知道」。');
+  }
+
   /* ---------------- 从 varDelta 里读局部量 ----------------
 
      Step 里**没有返回值这一项**（3a 的 Step 只有 line/depth/frameOp/
@@ -128,6 +158,11 @@
      其余顶层帧照常建节点、parentId 也是 -1，只是从 rootId 出发走不到它们。
      本阶段的源码只跑一次搜索，这里不为它专门设计，但也不悄悄丢掉。 */
   function build(trace, entryName) {
+    /* entryName 必填：认不到帧名就是一棵空树，而空树在面板上跟「这段程序
+       确实没递归」长得一模一样。trace 缺席则照旧宽容（空轨迹是真实状态）。 */
+    if (typeof entryName !== 'string' || entryName === '') {
+      badArg('build(trace, entryName)', 'entryName', '要一个非空字符串，例如 "search"');
+    }
     const tr = trace || [];
     const nodes = Object.create(null);
     const order = [];
@@ -399,9 +434,15 @@
 
   /* createView(tree, trace) → view。游标落在 0（与 Debugger.create 一致：
      「停在第一步」是唯一自然的初始状态，哪怕空轨迹上这一步并不存在）。
-     tree / trace 缺席都不抛：这个模块的输入是外面递进来的东西，清空编辑器
-     缓冲区在 3b 是真实可达的状态，不该让面板崩掉。 */
+     tree / trace **显式给 null** 都不抛：这个模块的输入是外面递进来的东西，
+     清空编辑器缓冲区在 3b 是真实可达的状态，不该让面板崩掉。
+     但**省掉参数**要抛（见文件上方那段）：`createView(tree)` 会把视图冻死在
+     第 0 步，之后 seek 到任何地方都还是 0，而且一声不吭。 */
   function createView(tree, trace) {
+    if (tree === undefined || trace === undefined) {
+      badArg('createView(tree, trace)', tree === undefined ? 'tree' : 'trace',
+             '没有树/轨迹时请显式传 null 或 []；省略参数会把视图永远冻在第 0 步');
+    }
     const tr = tree && tree.order ? tree : { nodes: Object.create(null), rootId: -1, order: [] };
     const view = {
       tree: tr,
@@ -443,8 +484,18 @@
      测试正是拿全量当参照把这一条钉死的。 */
   const REBUILD_MAX = 2048;
 
-  /* seek(view, i) → view（返回 view 本身，方便链式调用；不是新对象）。 */
+  /* seek(view, i) → view（返回 view 本身，方便链式调用；不是新对象）。
+
+     i 必填且必须是有限数字：`undefined | 0` 与 `NaN | 0` 都是 0，省掉它等于
+     「悄悄把游标倒回开头再整棵重建」，而这是面板每帧都会走的那条路。
+     越界照旧夹（clampTo），夹是**数据**范围的事，缺参数是代码的事。 */
   function seek(view, i) {
+    if (!view || !view.tree) {
+      badArg('seek(view, i)', 'view', '要一个 createView() 建出来的视图');
+    }
+    if (typeof i !== 'number' || !isFinite(i)) {
+      badArg('seek(view, i)', 'i', '要一个有限数字；undefined / NaN 会被 `| 0` 悄悄变成 0');
+    }
     const to = clampTo(view, i);
     if (!view.seeked) { view.seeked = true; rebuild(view, to); return view; }
     if (to === view.i) return view;

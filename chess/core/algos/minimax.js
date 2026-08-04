@@ -57,6 +57,17 @@
     H: [5, 0, 2, 0, 0, 1, 1, 0, 0, 0, -1, -1, 0, -2, 0, -5],
   };
 
+  /* 冻起来。POSITIONS 是**导出出去**的（见文件末尾那个 return），而 source()
+     每次都从它身上取开局：`AM.POSITIONS.H[0] = 99` 会静默换掉此后每一次
+     source() 的局面 —— 界面上写着「同一个开局」，跑的却不是，正是这个工具
+     最不能出的错。
+     逐个冻数组，不只冻外层：冻外层只挡得住「换掉整张表」，挡不住「改表里
+     那 16 个数字」。阶段 5 往 POSITIONS 里加局面时也自动罩得住。
+     （非严格模式的调用方写它是静默失败、严格模式下抛 —— 两种情形下表都
+     没变，这就够了；本模块管不着调用方用哪种模式。） */
+  for (const k of Object.keys(POSITIONS)) { Object.freeze(POSITIONS[k]); }
+  Object.freeze(POSITIONS);
+
   const DEFAULT_POSITION = 'H';
 
   /* 生成出来的源码里，被吃掉的分值表与走向表 —— 顶层常量，每次递归都不重算。
@@ -276,8 +287,12 @@
      界面上会显示「α-β」而实际跑的是纯 minimax，这正是本工具最不能出的错。
      position 可以给 POSITIONS 里的名字（缺省 'H'），也可以直接给 16 个数字
      —— 后者是给「让使用者自己摆一个局面」留的口子。
-     读 POSITIONS 时切一份副本：生成的源码只是把数字打印出来，但别人若拿到
-     POSITIONS.H 的引用改了它，下一次 source() 就悄悄换了局面。 */
+     读 POSITIONS 时切一份副本：这一刀护的是**下面这个 board**，让它与那张表
+     不共享引用 —— 它挡不住外面改表（那件事由上面的 Object.freeze 挡，两处
+     防的是相反的方向，别把它们记混）。board 在本函数里眼下只被 length / join
+     读一次，所以这份副本今天防的是将来：谁在这里改 board、或把它返回出去，
+     都不会顺手改到登记处。`o.position` 那一支的 `[].slice.call` 还多做一件事
+     —— 把类数组规整成真数组，好让下面的 length / join 有确定的行为。 */
   function source(opts) {
     const o = opts || {};
     const mode = o.mode === undefined ? 'plain' : o.mode;

@@ -636,7 +636,73 @@ for (const [t2, lbl] of [[abTree, 'ab'], [plainTree, 'plain'], [cutTree, 'cut'],
   }
 }
 
-// ---- 边界：createView 什么都不给也不抛 ----
+/* ---- 另一档：关闭了、有孩子、却读不到走法数 = 使用者把变量改名了 ----
+
+   cutOf 里 `-1` 那条臂是 acc.unreadable 的**唯一**产地，而 unreadable 又是
+   「一条没被截断的轨迹却报 pruned === null」的唯一通路。上面六份 fixture
+   一条都覆不到它：实测把 `return n.childIds.length ? -1 : 0;` 换成
+   `return 0;`，整套 8,117 条断言照样全绿 —— 那条臂等于没测。
+
+   而它守的根本不是边角：规格 §2.8 明写这份源码就是拿给她改的（「改算法、
+   当场重跑」），把 `ms` 改个名是**第一等的使用者动作**。阶段 5 的六个算法
+   各有各的变量名，这一条是它们共同的守卫。
+
+   做法：把 ab d3 那份源码里的 `ms` 整体改名成 `moves` 再跑一遍 —— 算法一个
+   字节没变，只是 tree-model 认的那个名字对不上了。 */
+const renRun = I.run(abSrc.replace(/\bms\b/g, 'moves'), { host: {} });
+T.eq(renRun.result, 136, '前提：改名不改变算法，答案仍是 136');
+T.ok(!renRun.trace.truncated, '前提：改名后的轨迹没有被截断（这一档必须与截断那一档分得开）');
+const renTree = TM.build(renRun.trace, 'search');
+const renView = TM.createView(renTree, renRun.trace);
+TM.seek(renView, renRun.trace.length - 1);
+const renStats = TM.statsAt(renView);
+T.eq(renStats.visited, abStats.visited, '改名不改变搜索本身：访问的节点数与基线相同');
+T.ok(renStats.unknown > 0, '改名之后确实有节点判不出走法数：' + renStats.unknown);
+T.eq(renStats.pruned, null, '有节点判不出来时，剪枝总数报 null —— 不许拿已知数冒充总数');
+T.ok(renStats.pruned !== 0, '尤其不是 0（基线是 ' + abStats.pruned + '，报 0 就是虚报「一个都没剪」）');
+T.eq(renStats.mvEnumerated, null, '「枚举了多少走法」同样跟着变 null');
+T.eq(renStats.prunedKnown, 0, '一个走法数都读不到，已确认的剪枝数是 0');
+/* truncated 必须仍是 false：改名与截断是两种不同的「不知道」，
+   面板要靠它区分「这趟没跑完」和「这份源码我读不懂」。 */
+T.eq(renStats.truncated, false, '改名不是截断：truncated 仍是 false');
+/* unknown 的来源逐个数出来对拍 —— 不看 cutOf，只看树上的节点，
+   两边各算各的。 */
+let renUnreadable = 0;
+for (const id of renTree.order) {
+  const n = TM.nodeAt(renTree, id);
+  if (n.popStep >= 0 && n.mvCount === null && n.childIds.length > 0) { renUnreadable++; }
+}
+T.ok(renUnreadable > 0, '「关闭了、有孩子、却读不到走法数」这一档真的被走到了（否则上面全是空转）');
+T.eq(renUnreadable, renStats.unknown, '它的个数正是 statsAt 报的 unknown');
+T.eq(TM.prunedAt(renView), [], '一个都判不出来时，prunedAt 指认不出任何被剪的节点');
+
+/* ==================== 缺参数必须当场抛，不许静默产出错状态 ====================
+
+   同一个形状本阶段栽过三次（playSteps 的 cap 把累加器毒成 NaN、refresh
+   静默重播 UI 基线、以及下面这三个）。三处的共同点是**省掉一个参数得到的
+   不是异常，而是一个看起来很正常的错状态**：
+     · seek(view)        游标从 120000 被 `undefined | 0` 悄悄倒回 0；
+     · createView(tree)  视图永远冻在第 0 步；
+     · build(trace)      空树。
+   现在统一抛。同时钉住**边界的另一半**：显式的 null（数据在说「没有」）
+   照旧宽容，不能顺手把 null 契约也一起收紧了。 */
+const gTrace = abTrace, gTree = abTree;
+T.throws(function () { TM.build(gTrace); }, 'build(trace) 省掉 entryName 当场抛，不再默默给一棵空树');
+T.throws(function () { TM.build(gTrace, ''); }, 'entryName 是空串同样抛（空串也认不到任何帧）');
+T.throws(function () { TM.build(gTrace, 42); }, 'entryName 不是字符串同样抛');
+T.throws(function () { TM.createView(gTree); }, 'createView(tree) 省掉 trace 当场抛，不再默默冻在第 0 步');
+T.throws(function () { TM.createView(); }, 'createView() 什么都不给也抛');
+const gView = TM.createView(gTree, gTrace);
+TM.seek(gView, 20000);
+T.throws(function () { TM.seek(gView); }, 'seek(view) 省掉下标当场抛，不再把游标倒回 0');
+T.throws(function () { TM.seek(gView, NaN); }, 'seek(view, NaN) 同样抛（NaN | 0 也是 0，同一个坑）');
+T.throws(function () { TM.seek(undefined, 3); }, 'seek 不给 view 也抛');
+T.eq(gView.i, 20000, '而且抛出来的那几次一点没动游标 —— 失败是响的，不是半生效的');
+/* null 契约不受影响：null 是**数据**说的「没有/不知道」，不是调用方写错了。 */
+T.eq(TM.build(null, 'search').order, [], 'build(null, entryName) 照旧给空树，不抛');
+T.eq(TM.statsAt(TM.createView(null, null)).visited, 0, 'createView(null, null) 照旧给空视图，不抛');
+
+// ---- 边界：createView(null, null) 也不抛 ----
 let noThrow = true;
 try {
   const v0 = TM.createView(null, null);
