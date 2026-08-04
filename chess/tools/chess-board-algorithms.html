@@ -5885,6 +5885,10 @@ const ALGOS = {
     atLine:  { zh: '第 %L 行', en: 'line %L' },
     bootFail:{ zh: '算法源码生成器没能启动，这一页跑不起来：',
                en: 'The algorithm source generator failed to start; this page cannot run: ' },
+    /* 源码**生成**失败（`PROBLEMS[pid].source()` 抛了），跟解释执行失败不是一回事：
+       她的代码还没被跑过一行，问题出在这一页把源码拼出来的那一步。 */
+    srcFail: { zh: '这道题的源码没能生成（%F），所以左边是空的：',
+               en: 'The source for this problem could not be generated (%F), which is why the editor is empty: ' },
 
     /* ---- 显示开关（四条都是"画不画"，不是"算什么"） ---- */
     tgMarks:  { zh: '四种状态', en: 'The four states' },
@@ -6130,12 +6134,24 @@ const ALGOS = {
      两块棋盘并排、同一个游标推两条轨迹）。所以状态一律按**轨道**（track）存，
      哪怕今天只有一条——单条特判会让 Task 5 把这一段重写一遍。 */
   const S = Object.create(null);
-  PIDS.forEach(function (pid) { S[pid] = { tracks: [], sig: null, err: null }; });
+  PIDS.forEach(function (pid) { S[pid] = { tracks: [], sig: null }; });
 
   let uiTab = null;             // 此刻显示的是哪道题
   let activeTrack = 0;          // 编辑器/调试器挂在这道题的第几条轨道上
-  let statusKind = 'idle';      // idle | ok | bad | busy —— 切语言时按它重画
+  let statusKind = 'idle';      // idle | ok | bad | busy | boot —— 切语言时按它重画
   let jumpNote = null;          // 点棋盘反向定位之后那一句话
+
+  /* ⚠ `bootErr` / `statusLocked` **在这里声明**，不在下面「启动」那一节 ——
+     `setStatus` / `attachEditor` / `frameFor` 都要读它们，而那三个函数写在启动
+     之前。写成 `let` 又放在文件末尾，就是一个 TDZ 陷阱等着下一次重排。
+
+     引导失败必须是**粘住的**：一旦 `statusLocked` 立起来，setStatus 就再也写不进
+     状态牌了。这条锁不是洁癖 —— 它挡掉的是一条真实走过的路：引导失败 → 第一帧
+     `setUiTab → ensureBuilt` → 源码生成抛在一个被吞掉的地方 → 空源码「成功」跑出
+     0 步 → `ed.setValue('')` 的 onChange 把 Run 重新点亮 → 绿色的
+     「Ran · 0 steps」把红字盖掉。破页于是长得跟正常页一模一样。 */
+  let bootErr = null;
+  let statusLocked = false;
 
   function curP() { return uiTab ? PROBLEMS[uiTab] : null; }
   function curS() { return uiTab ? S[uiTab] : null; }
@@ -6164,25 +6180,38 @@ const ALGOS = {
     return tk;
   }
 
+  /* 生成一条轨道的源码。**`P.source()` 的每一个调用点都得走这里** —— 它是
+     这一页唯一的源码入口，Task 5/6 还要再接三份源码（tour-dfs / tour-warnsdorff /
+     knight-path）走同一条通道。
+
+     ⚠ 以前这条通道不会报错：抛出被记进一个没有任何读者的 `S[pid].err`，`src`
+     留成 `''`，而 `I.run('')` **不抛异常**、返回 `{result: undefined, trace: []}`
+     —— 于是「源码生成失败」在界面上长得跟「运行成功、零步」一模一样。现在它
+     变成这条轨道自己的 `tk.err`（showTrackStatus / relabel / 探针都读它）。 */
+  function genSource(P, pv, file) {
+    try {
+      return { src: P.source(pv, MODS, file), err: null };
+    } catch (e) {
+      return { src: '', err: { category: 'source', file: file, line: null,
+                               message: (e && e.message) ? e.message : String(e) } };
+    }
+  }
+
   /* 按当前参数把一道题整个重建。参数没变就什么也不做（每帧都会问一次）。 */
   function buildProblem(pid, force) {
     const P = PROBLEMS[pid], st = S[pid], sig = paramSig(pid);
     if (!force && st.sig === sig && st.tracks.length) return false;
     const pv = paramsOf(pid);
-    st.err = null;
     const files = P.sources;
     st.tracks = files.map(function (file, k) {
       const old = st.tracks[k];
       const tk = old || { index: k, file: file, src: '', res: null, cur: D.create([]), err: null, bcache: null };
       tk.file = file;
-      let src = '';
-      try {
-        src = P.source(pv, MODS, file);
-      } catch (e) {
-        st.err = e;
-        src = '';
-      }
-      return runTrack(tk, src, true);
+      const g = genSource(P, pv, file);
+      /* runTrack 开头会把 tk.err 清成 null，所以生成错误只能在它之后盖上去。 */
+      const done = runTrack(tk, g.src, true);
+      if (g.err) done.err = g.err;
+      return done;
     });
     st.sig = sig;
     layoutTracks(pid);
@@ -6591,6 +6620,11 @@ const ALGOS = {
   /* 每一帧：先把调试器的时钟推一格，再在取景变换里把棋盘画出来。 */
   function frameFor(pid) {
     return function (C) {
+      /* ⚠ 引导失败之后这一页**什么都不建、什么都不画**。尤其不能走到
+         `setUiTab → ensureBuilt`：那一步会让 `P.source` 抛在 buildProblem 的
+         catch 里，然后一路「成功」跑出空轨迹、把红色的引导失败洗成绿色的
+         「Ran · 0 steps」。破页必须看起来就是破的。 */
+      if (bootErr) return;
       setUiTab(pid);
       pollParams();
       /* 播放的时钟出口就是引擎的 state.dt（已 clamp 到 [0, 0.05]）。绝不自己用
@@ -6609,11 +6643,27 @@ const ALGOS = {
   const btnRun = document.getElementById('btnRun');
   const btnRevert = document.getElementById('btnRevert');
 
+  /* 状态牌**唯一**的写入口。锁上之后谁也写不进来 —— 见上面 statusLocked 那段。 */
   function setStatus(html, cls) {
+    if (statusLocked) return;
     statusEl.className = 'sp-status' + (cls ? ' ' + cls : '');
     statusEl.innerHTML = html;
   }
+  /* 引导失败那一条：自己开锁写一次、再锁回去。切语言时 relabel 会再调一次，
+     所以它跟别的消息一样跟着语言走（以前它不跟 —— bootErr 分支从不设
+     statusKind，relabel 那串 if 于是一条也命中不了）。 */
+  function paintBootFail() {
+    if (!bootErr) return;
+    statusLocked = false;
+    setStatus(esc(t(STR.bootFail) + bootErr.message), 'bad');
+    statusLocked = true;
+  }
   function errText(err) {
+    /* 源码生成失败要排在最前面：它的 line 是 null，落到下面那条会被说成
+       「编辑器内部出错」，而这跟编辑器一点关系都没有。 */
+    if (err.category === 'source') {
+      return esc(t(STR.srcFail).replace('%F', err.file || '?') + err.message);
+    }
     if (err.category === 'internal' || err.line == null) {
       return esc(t(STR.internal) + ': ' + err.message);
     }
@@ -6634,13 +6684,22 @@ const ALGOS = {
     return s;
   }
   function showTrackStatus(tk) {
-    if (tk && tk.err) { statusKind = 'bad'; setStatus(errText(tk.err), 'bad'); }
-    else { statusKind = 'ok'; setStatus(runText(tk), 'ok'); }
+    if (tk && tk.err) {
+      statusKind = 'bad';
+      setStatus(errText(tk.err), 'bad');
+      /* 源码根本没生成出来，编辑器是空的 —— 让 Run 可点，就等于给她一条
+         「跑空程序 → 绿色的 0 步」的路，把刚说完的错误再洗掉一遍。
+         她一旦动手写点什么，下面的 onChange 会照常把它重新点亮。 */
+      if (tk.err.category === 'source') btnRun.disabled = true;
+    } else { statusKind = 'ok'; setStatus(runText(tk), 'ok'); }
   }
 
   const ed = Ed.mount(document.getElementById('editorHost'), {
     value: '',
     onChange: function (value, err) {
+      /* 引导失败之后不再有「当前轨道」可言，而 `ed.setValue('')` 会同步触发一次
+         onChange —— 这里不挡住，Run 就会在破页上被重新点亮。 */
+      if (bootErr) { btnRun.disabled = true; return; }
       const tk = curTrack();
       if (tk) tk.src = value;
       btnRun.disabled = !!err;                 // 规格 §2.8：有语法错时 Run 禁用
@@ -6705,6 +6764,10 @@ const ALGOS = {
       towerTop = 1;
       attachEditor();
       updateFit();
+      /* 新参数把源码生成搞挂了，就说那件事 —— 别用一句绿色的「参数改成 N=7」
+         把它盖掉（attachEditor 刚刚才把它写上去）。 */
+      const tk = curTrack();
+      if (tk && tk.err) { showTrackStatus(tk); return; }
       statusKind = 'ok';
       setStatus(t(STR.paramChanged).replace('%V', esc(sig)) + '<br>' + runText(curTrack()), 'ok');
     });
@@ -6735,9 +6798,11 @@ const ALGOS = {
     const tk = curTrack(), P = curP();
     if (!tk || !P) return;
     withBusy(function () {
-      let src = '';
-      try { src = P.source(paramsOf(uiTab), MODS, tk.file); } catch (e) { src = tk.src; }
-      runTrack(tk, src, true);
+      /* 同一条通道的另一个调用点 —— 也必须能报错。以前这里失败会退回 tk.src，
+         按钮于是「按了等于没按」，而且一个字都不说。 */
+      const g = genSource(P, paramsOf(uiTab), tk.file);
+      runTrack(tk, g.err ? tk.src : g.src, true);
+      if (g.err) tk.err = g.err;
       ed.setValue(tk.src);
       dbg.setCursor(tk.cur);
       towerTop = 1;
@@ -6893,7 +6958,8 @@ const ALGOS = {
   })();
 
   /* ================= 启动 ================= */
-  let bootErr = null;
+  /* `bootErr` 的声明在上面「每道题的运行状态」那一节，不在这里 —— 它有三个
+     写在启动之前的读者。 */
   try {
     PIDS.forEach(function (pid) {
       PROBLEMS[pid].sources.forEach(function (file) { loadAlgo(file); });
@@ -6901,8 +6967,13 @@ const ALGOS = {
   } catch (e) { bootErr = e; }
 
   if (bootErr) {
-    setStatus(esc(t(STR.bootFail) + bootErr.message), 'bad');
+    /* 引导失败是**终局**：状态牌锁死、两个按钮都禁掉、绘制循环整帧短路
+       （见 frameFor）。三处缺一不可 —— 少任何一处，下一帧就会把这一页
+       「治好」成一个空棋盘 + 绿色状态的正常页。 */
+    statusKind = 'boot';
+    paintBootFail();
     btnRun.disabled = true;
+    btnRevert.disabled = true;
   }
 
   E.init({
@@ -7016,12 +7087,13 @@ const ALGOS = {
     paintHint();
     document.getElementById('busy').textContent = t(STR.busy);
     paintLegend();
-    if (statusKind === 'bad') {
+    if (bootErr) paintBootFail();              // 唯一能穿过 statusLocked 的那条
+    else if (statusKind === 'bad') {
       const e2 = ed.getError() || (curTrack() && curTrack().err);
       if (e2) setStatus(errText(e2), 'bad');
     } else if (statusKind === 'ok') setStatus(runText(curTrack()), 'ok');
     else if (statusKind === 'busy') setStatus(t(STR.busy), 'busy');
-    else if (!bootErr) setStatus(t(STR.ready), '');
+    else setStatus(t(STR.ready), '');
     if (dbg) dbg.relabel();
   }
   relabel();
@@ -7101,7 +7173,11 @@ const ALGOS = {
       fit: { s: +fit.s.toFixed(4), tx: Math.round(fit.tx), ty: Math.round(fit.ty) },
       readout: document.getElementById('readout').textContent,
       status: statusEl.textContent,
+      /* 状态牌的**颜色**也要能被断言：「红色粘住了」这件事光看文字看不出来。 */
+      statusClass: statusEl.className,
+      statusLocked: statusLocked,
       runDisabled: !!btnRun.disabled,
+      revertDisabled: !!btnRevert.disabled,
       bootError: bootErr ? bootErr.message : null,
       version: VERSION,
     };
@@ -7111,7 +7187,23 @@ const ALGOS = {
      面板的 rAF 会被节流到十几秒一帧，「播放按时间推进、不按帧计数」这条断言在
      那个环境里没有注入点就根本没法做。语义与真实路径完全一致：同一个 tick()、
      同一个累加器。例：__algoTick(1) 在 10 步/秒下恰好前进 10 步。 */
-  window.__algoTick = function (dt) { dbg.tick(dt); };
+  window.__algoTick = function (dt) {
+    /* ⚠ **少传一个参数必须大声失败**（阶段 5 硬约束 6）。这条通道原本是静默的：
+       `__algoTick()` → `dbg.tick(undefined)` → `playSteps` 里的 `dt > 0 ? dt : 0`
+       → 前进 0 步、不抛、返回 undefined。而 Task 7 的整个时序验收就靠这个导出：
+       它安静地不动，读到的就是「按时间推进」这条断言被验证过了的假象。
+       `debugger.js` 一行不改（本阶段的硬约束），所以这道门立在这里。 */
+    if (arguments.length === 0) {
+      throw new TypeError('__algoTick(dt) 少了参数 —— dt 的单位是秒，例：__algoTick(1)。' +
+        '省略它只会静默前进 0 步。');
+    }
+    if (typeof dt !== 'number' || !isFinite(dt) || dt < 0) {
+      throw new TypeError('__algoTick(dt) 的 dt 必须是有限的非负数字（秒），收到：' +
+        (typeof dt) + ' ' + String(dt));
+    }
+    if (bootErr) throw new Error('这一页引导失败了，没有可推进的轨迹：' + bootErr.message);
+    dbg.tick(dt);
+  };
 })();
 </script>
 </body>
