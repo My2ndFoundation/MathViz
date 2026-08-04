@@ -5,6 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <!-- 版本记录（changelog，新→旧）：
+     1.0.1  2026-08-04  窄屏（<900px）左栏叠字与调试器塌陷。状态牌 .sp-status 是 flex
+                        子项，默认 `0 1 auto`——空间不够时**收缩而不是撑破盒子**，
+                        于是 2–6 行文字被压回 min-height:30px 的牌子里，溢出来盖在
+                        下面那行 .ed-cap 上，两层字完全不可读；#split 上那条
+                        `overflow-y:auto` 也从来没生效过——子项肯收缩，scrollHeight
+                        就永远等于 clientHeight。同一个成因让 .dbg-grid（自带
+                        min-height:0）被单步按钮的折行挤到只剩 5px，CALL STACK /
+                        VARIABLES / OUTPUT 塌成三条细条。改法：四块一律不收缩、
+                        编辑器与调试器内的三块各给 definite 高度、装不下交给 #split
+                        滚，并显式画出滚动条（macOS 覆盖式滚动条静止时是隐形的）。
+                        宽屏 1280×800 与 1440×900 逐像素比对无变化。
      1.0.0  2026-08-04  首发。PROBLEMS 注册表（tab / 滑杆 / 图例 / 读数 / 相机 / 棋盘尺寸
                         全部由声明生成，渲染与 tab 机制里不出现任何一道题的名字）、
                         分栏调试器、真棋盘真棋子，三道题：
@@ -17,7 +28,7 @@
                           BFS 的递归深度本身就是最短步数。
                         截断的轨迹一律写「—」与「没跑完」，绝不把「不知道」印成 0。
                         本版同时把工具登记进 chess-tools.json 与两份 FALLBACK 镜像。 -->
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.0.1">
 <meta name="engine-version" content="chess-1.2.0">
 <title>Classic Problems on the Board</title>
 <!--
@@ -67,10 +78,18 @@ body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)
 #scene.dragging{cursor:grabbing}
 
 /* ---- 左侧代码面板（§1.5 的分栏；不透明，不是浮层） ---- */
+/* `overflow-y:auto` 写在基础规则里、不只写在窄屏那条媒体查询里：竖直方向装不下
+   不是窄屏独有的（矮窗口一样会）。它必须和「子项一律不收缩」成对出现——见
+   .sp-status 与下面媒体查询里的注释，少一条就退回叠字。 */
 #split{position:fixed;left:0;top:0;bottom:0;width:var(--code-w);z-index:3;
-  display:flex;flex-direction:column;gap:8px;padding:12px;
+  display:flex;flex-direction:column;gap:8px;padding:12px;overflow-y:auto;
   background:var(--split-bg);border-right:1px solid var(--panel-line);
   box-shadow:14px 0 40px rgba(0,0,0,.45)}
+/* 窄屏里 #split 几乎一定要滚。macOS 的覆盖式滚动条静止时是隐形的，被滚到折叠线
+   以下的调试器于是等同于"不存在"——所以显式画一条，配色沿用 .dbg-list 那套。
+   不溢出时 overflow-y:auto 本来就不画，宽屏因此看不见任何变化。 */
+#split::-webkit-scrollbar{width:8px}
+#split::-webkit-scrollbar-thumb{background:rgba(148,163,184,.26);border-radius:4px}
 #divider{position:fixed;left:var(--code-w);top:0;bottom:0;width:7px;margin-left:-3px;z-index:4;
   cursor:col-resize;background:transparent}
 #divider::after{content:"";position:absolute;left:3px;top:0;bottom:0;width:1px;background:rgba(45,212,234,0)}
@@ -92,9 +111,14 @@ body.folded #split,body.folded #divider{display:none}
 .btn.run{border-color:rgba(52,211,153,.5);color:#a7f3d0}
 .btn.run:hover:not(:disabled){border-color:rgba(52,211,153,.9);color:#d1fae5}
 
+/* `flex:0 0 auto` 是这张牌的命根子。flex 子项默认是 `0 1 auto`——空间不够时
+   **收缩，而不是撑破盒子**。窄屏里 #split 被底部面板收住，一紧张浏览器就把这张
+   牌压回 min-height:30px，可 2–6 行文字照旧画出来，正好盖在下面那行 .ed-cap 上，
+   两层字叠成一团。#split 的 overflow-y 救不了它：子项收缩之后 scrollHeight 不会
+   变大，滚动条永远不出现。钉住不收缩，牌子才按内容撑开，溢出才真的落到 #split。 */
 .sp-status{font-family:var(--font-mono);font-size:11px;line-height:1.6;color:rgba(159,176,200,.85);
   padding:6px 9px;border-radius:8px;background:rgba(8,13,24,.55);border:1px solid var(--panel-line);
-  min-height:30px;word-break:break-word}
+  flex:0 0 auto;min-height:30px;word-break:break-word}
 .sp-status.bad{color:#fca5a5;border-color:rgba(248,113,113,.4)}
 .sp-status.ok{color:#a7f3d0}
 .sp-status.busy{color:#fcd34d;border-color:rgba(251,191,36,.4)}
@@ -228,9 +252,26 @@ body.busy #busy{display:block}
   /* 面板挪到底部之后它横跨整窗，而 #split 原来一路铺到 bottom:0——两块会叠在一起，
      参数面板正好压住调用栈、变量、输出和那一排单步按钮。让代码面板在面板上方收住：
      窄屏于是变成「左代码 / 右棋盘 / 下面板」三块互不重叠。画布那一侧由 availRect()
-     用同一个判据减掉底部面板的高度。收住之后编辑器与调试器的 min-height 之和多半
-     装不下，flex 子项会溢出到盒子外面去盖住面板——所以同时给一条纵向滚动。 */
-  #split{bottom:calc(46vh + 18px);overflow-y:auto}
+     用同一个判据减掉底部面板的高度。 */
+  #split{bottom:calc(46vh + 18px)}
+  /* 收住之后四块的高度之和多半装不下。这里原来只留了一条 overflow-y 就算数了，
+     可 flex 子项默认是**收缩**而不是撑破盒子：谁都不肯变大，scrollHeight 就等于
+     clientHeight，那条滚动条永远不会出现，挤出来的字直接叠到下一块上。所以先把
+     四块一律钉成不收缩，装不下就真的交给 #split 去滚。 */
+  #split>*{flex-shrink:0}
+  #editorHost{flex-basis:200px}
+  /* 调试器不给死高度，改成按内容撑开（flex-basis:auto），再给中间那三块一个
+     definite 的地板——因为塌下去的从来不是 #dbgHost 自己，而是 .dbg-grid：它
+     自带 min-height:0、可收缩，窄栏里单步按钮一折成三行就被挤到只剩 5px，
+     CALL STACK / VARIABLES / OUTPUT 于是成了三条看不见的细条。钉死 150px
+     （820×900 下量的，正好两行），按钮怎么折都轮不到它让位；同时高度是
+     definite 的，三块内部各自的滚动条还在，输出再长也不会把面板顶穿。 */
+  #dbgHost{flex-basis:auto}
+  #dbgHost .dbg-grid{flex:0 0 150px}
+  /* 输出块同理，而且必须给 definite 高度：它按内容长，而调试器每步都把
+     `list.scrollTop = scrollHeight` 拉到底——那句话只有在列表自己能滚的时候
+     才有意义。不钉住的话长输出会把整根 #split 顶成几千像素。 */
+  #dbgHost .dbg-out{flex:0 0 110px}
   .legend{display:none}
   .hint{display:none}
 }
@@ -5803,7 +5844,7 @@ const ALGOS = {
      **不是** meta（设计系统 §10 写的「从 meta 读取」在 chess 这套引擎里不成立——
      工具① 的 1.1.0 changelog 记着这笔账：1.0.2 那次只改了 meta、忘了这个常量，
      角标停在 1.0.1 整整两版）。改版本必须两处一起动。 */
-  const VERSION = '1.0.0';
+  const VERSION = '1.0.1';
 
   /* ---------------- 算法源码生成器从哪来 ----------------
 
