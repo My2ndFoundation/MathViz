@@ -44,10 +44,12 @@
 指令的最终形状：
 
 ```js
-// >>> BLANK id=safe-return level=1 fill="return true;" hint="这一格会被已放置的皇后攻击吗？" hintEn="Is this square attacked by a queen already placed?"
+// >>> BLANK id=safe-return level=1 fill="return false;" hint="这一格会被已放置的皇后攻击吗？" hintEn="Is this square attacked by a queen already placed?"
 return !cols[c] && !diagDown[r + c] && !diagUp[r - c + N];
 // <<< BLANK
 ```
+
+> **`fill` 是 `return false;`，不是 `return true;`（落地后订正，规格 §2.9 同步写明）。** 恒真等于把剪枝整个拿掉，搜索树退化成满的 `N^N`：实测 N≥6 当场撞上 `STEP_LIMIT` 被截断、`result` 是 `undefined`，"占位版必须仍然能跑"这条自己就不成立了。占位一律往**过紧**的方向倒（`knightPath` 的两个空同理），过紧只是搜不出东西，过松会漫出棋盘或撞上限。
 
 ## File Structure
 
@@ -464,13 +466,13 @@ git commit -m "feat(chess): exercise.js 的 hintAt —— 四级提示，骨架�
 - Consumes: `E.parse` / `E.judge`
 - Produces: `chess/core/exercise-blanks.test.js` 的断言形状——Task 5 照抄它给另外四个挖空用
 
-**背景**：`chess/core/algos/queens.js` 的源码是一个字符串数组 `BODY`，`source({N})` 把 `HEAD` + N 的声明 + `BODY` 拼起来。**指令行也是数组里的一个字符串元素**，例如 `'// >>> BLANK id=safe-return level=1 fill="return true;" hint="…" hintEn="…"',`。
+**背景**：`chess/core/algos/queens.js` 的源码是一个字符串数组 `BODY`，`source({N})` 把 `HEAD` + N 的声明 + `BODY` 拼起来。**指令行也是数组里的一个字符串元素**，例如 `'// >>> BLANK id=safe-return level=1 fill="return false;" hint="…" hintEn="…"',`。
 
 两个挖空：
 
 | id | 位置 | level | fill | 等价改写 | 错误变体 |
 |---|---|---|---|---|---|
-| `safe-return` | `safe()` 的那一行 `return` | 1 | `return true;` | 拆成三条 `if (…) return false;` 再 `return true;` | 把 `!diagUp[r - c + N]` 换成 `true`（漏查一条斜线）|
+| `safe-return` | `safe()` 的那一行 `return` | 1 | `return false;`（**不是 `return true;`** —— 见上文那条订正）| 拆成三条 `if (…) return false;` 再 `return true;` | 把 `!diagUp[r - c + N]` 换成 `true`（漏查一条斜线）|
 | `undo` | 回溯撤销那三行赋值 | 2 | `cols[c] = 0;` | 三条赋值换顺序 | 只还原 `cols`，不还原两条斜线 |
 
 - [ ] **Step 1: 写失败的测试**

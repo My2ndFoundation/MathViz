@@ -264,7 +264,7 @@
     '/* 站在 sq 上，还有几个「没踩过」的格子可以去？这个数就叫它的出路数。',
     '   整个 Warnsdorff 就靠这一个数：出路数越小的格子越急，越要先去。',
     '   想确认它真的在起作用：把下面排序那一段删掉，这份就退回成朴素回溯了。 */',
-    '// >>> BLANK id=degree-fn level=3 fill="function degree(sq) { const x = sq % W; const y = (sq - x) / W; let d = 8; if (x === 0) { d = d - 2; } if (x === W - 1) { d = d - 2; } if (y === 0) { d = d - 2; } if (y === H - 1) { d = d - 2; } return d; }" hint="整个 Warnsdorff 就靠这一个数：马此刻站在 sq 上，接下来**真的**还能去几个格子。占位那一版一个方向都没看过 —— 它只按 sq 靠不靠边猜了一个数，于是不管马已经走到哪儿，它给出的数从头到尾都一样。" hintEn="All of Warnsdorff rests on this one number: with the knight standing on sq right now, how many squares can it actually move to next. The placeholder never looks at a single direction — it just guesses from how close sq sits to an edge, so the number it hands back never budges as the knight\'s tour goes on."',
+    '// >>> BLANK id=degree-fn level=3 fill="function degree(sq) { const x = sq % W; const y = (sq - x) / W; let d = 8; if (x === 0) { d = d - 2; } if (x === W - 1) { d = d - 2; } if (y === 0) { d = d - 2; } if (y === H - 1) { d = d - 2; } return d; }" hint="整个 Warnsdorff 就靠这一个数：马此刻站在 sq 上，接下来到底还能去几个格子 —— 数的是真能落脚的那几个，踩过的一概不算。占位那一版一个方向都没看过，它只按 sq 靠不靠边猜了一个数，于是马已经走到哪儿它根本不管，给出的数从头到尾都一样。" hintEn="All of Warnsdorff rests on this one number: with the knight standing on sq right now, how many squares can it actually move to next. The placeholder never looks at a single direction — it just guesses from how close sq sits to an edge, so the number it hands back never budges as the knight\'s tour goes on."',
     'function degree(sq) {',
     '  const x = sq % W;',
     '  const y = (sq - x) / W;',

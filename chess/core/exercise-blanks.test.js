@@ -26,13 +26,24 @@ const CHECK_TOUR = { result: true, boardOps: true, counters: [] };
 
 /* 三关的通用跑法。variant 是 (src) => src 的改写函数。
 
-   `wrongDiv` 是**一个对象**而不是一个裸的步号：`{ refStep, herStep, opIndex }`。
+   `wrongDiv` 是**一个对象**而不是一个裸的步号：
+   `{ refStep, herStep, opIndex, refSq, herSq, refTo, herTo }`。
    从前这里只收一个 `wrongStepExpected`，而调用处的注释却在描述「第 6 条棋盘
    事件上参考说 sq=6 是 cut」这种关于 `kind` / `opIndex` 的事 —— 注释声称钉住
    的东西比断言实际钉住的多，那正是注释开始漂移的方式。用具名字段而不是再加
-   几个位置参数：位置参数一多，抄第五遍的时候顺序就会错；也**不要**把三个数
+   几个位置参数：位置参数一多，抄第五遍的时候顺序就会错；也**不要**把几个数
    包成一个对象去一次性 `T.eq` —— `_test.js` 的 eq 比的是 `JSON.stringify`，
-   键的顺序不同就会红成一条看不懂的失败。三条标量断言，各报各的。 */
+   键的顺序不同就会红成一条看不懂的失败。标量断言，各报各的。
+
+   ⚠ **`sq` 与 `to` 也在里面，而且 ref 与 her 各钉一份。** 修这条之前只钉了
+   `kind`/`refStep`/`herStep`/`opIndex`，于是五处调用点的注释里那句「参考在看
+   sq=X、她的版本在看 sq=Y」一条断言都没有 —— 跟上一段说的是同一种漂移，只差
+   一个字段。最要紧的是 knightPath/on-board：她那侧 `sq=68`（8×8 上不存在的
+   格子号）**就是那道挖空的全部教学点**。顺带一提，queens/safe-return 那处
+   `opIndex === 6` 与 `refSq === 6` 相等纯属巧合，钉住之后就不会有人误读成
+   「sq 早就被 opIndex 顺带钉住了」。
+   `d.ref` / `d.her` 在长度不等的那条分支里**可以是 null**（judge 里 `r`/`h`
+   两个三目），所以取值要连 `d.ref` 一起防，不能只防 `d`。 */
 function threeGates(name, refSrc, check, wrongFn, wrongDiv, equivFn) {
   const ref = I.run(refSrc, { host: {} });
   T.ok(!ref.trace.truncated, name + '：参考运行未截断');
@@ -68,6 +79,14 @@ function threeGates(name, refSrc, check, wrongFn, wrongDiv, equivFn) {
        name + ' ②：分歧步精确匹配（她那侧第 ' + wrongDiv.herStep + ' 步）');
   T.eq(d ? d.opIndex : null, wrongDiv.opIndex,
        name + ' ②：分歧落在第 ' + wrongDiv.opIndex + ' 条棋盘事件上');
+  T.eq(d && d.ref ? d.ref.sq : null, wrongDiv.refSq,
+       name + ' ②：那一条事件上参考在看 sq=' + wrongDiv.refSq);
+  T.eq(d && d.her ? d.her.sq : null, wrongDiv.herSq,
+       name + ' ②：那一条事件上她的版本在看 sq=' + wrongDiv.herSq);
+  T.eq(d && d.ref ? d.ref.to : null, wrongDiv.refTo,
+       name + ' ②：参考给那一格的判词是 ' + wrongDiv.refTo);
+  T.eq(d && d.her ? d.her.to : null, wrongDiv.herTo,
+       name + ' ②：她的版本给那一格的判词是 ' + wrongDiv.herTo);
 
   // ③ 等价改写被判对
   const equivSrc = equivFn(refSrc);
@@ -84,10 +103,16 @@ const qSrc = Q.source({ N: 5 });
 /* 声明的挖空确实能被解析出来，且 id 与 level 是说好的那些 */
 const qBlanks = parseZh(qSrc).blanks;
 T.eq(qBlanks.length, 2, 'queens 声明了两个挖空');
-T.eq(qBlanks[0].id, 'safe-return', 'queens 第一个挖空的 id');
-T.eq(qBlanks[0].level, 1, 'queens 第一个挖空是 1 级');
-T.eq(qBlanks[1].id, 'undo', 'queens 第二个挖空的 id');
-T.eq(qBlanks[1].level, 2, 'queens 第二个挖空是 2 级');
+/* ⚠ 下标必须走三目，理由跟 blankOf 里那段、跟 threeGates 里不设防的
+   `wrong.divergence` 是同一条：源码里少声明一个挖空时，裸的 `qBlanks[0].id`
+   会抛 TypeError，`T.report()` 一次都跑不到 —— 上面那条 `length === 2` 明明
+   已经红了，却一个字都印不出来，整轮只剩一段栈回溯。实测（把 safe-return
+   的两行指令删掉）确认过。knightPath 与 tourKnight 两处本来就是这么写的，
+   只有这里走了形。 */
+T.eq(qBlanks[0] ? qBlanks[0].id : null, 'safe-return', 'queens 第一个挖空的 id');
+T.eq(qBlanks[0] ? qBlanks[0].level : null, 1, 'queens 第一个挖空是 1 级');
+T.eq(qBlanks[1] ? qBlanks[1].id : null, 'undo', 'queens 第二个挖空的 id');
+T.eq(qBlanks[1] ? qBlanks[1].level : null, 2, 'queens 第二个挖空是 2 级');
 
 /* 占位版必须仍然能跑（她按 Run 时什么都没填也不该报错） */
 const qPlace = I.run(parseZh(qSrc).placeholder, { host: {} });
@@ -138,8 +163,10 @@ threeGates('queens/safe-return', qSrc, CHECK_QUEENS,
   function (s) { return s.replace('!diagUp[r - c + N]', 'true'); },
   /* 实测值，不是推导值：漏查 diagUp 之后，第 6 条棋盘事件上参考说 sq=6 是
      cut、她的版本说是 ok，参考侧发生在第 76 步（她那边第 79 步）。
-     这句话里的每一个数现在都被上面那四条断言钉住了。 */
-  { refStep: 76, herStep: 79, opIndex: 6 },
+     这句话里的每一个数现在都被上面那八条断言钉住了 —— 包括两个 sq 与两个
+     判词，它们从前只在这段注释里存在。 */
+  { refStep: 76, herStep: 79, opIndex: 6,
+    refSq: 6, herSq: 6, refTo: 'cut', herTo: 'ok' },
   function (s) {
     return s.replace(
       '  return !cols[c] && !diagDown[r + c] && !diagUp[r - c + N];',
@@ -159,7 +186,8 @@ threeGates('queens/undo', qSrc, CHECK_QUEENS,
   /* 实测值：只还原 cols、两条斜线一直占着，第 52 条棋盘事件上参考说 sq=8
      是 ok、她的版本说是 cut，参考侧第 276 步（她那边第 265 步）。
      同上，这句话里的每一个数都被钉住了。 */
-  { refStep: 276, herStep: 265, opIndex: 52 },
+  { refStep: 276, herStep: 265, opIndex: 52,
+    refSq: 8, herSq: 8, refTo: 'ok', herTo: 'cut' },
   /* 简报原本给的等价改写是「三条赋值换顺序」。它确实被判对，但**没有牙齿**：
      换顺序不增不减语句，实测步数 2,621，跟参考**一模一样**。于是一个偷偷
      变严的判定（比如改成顺带比 trace.length）根本不会被这条断言抓到——
@@ -310,10 +338,14 @@ threeGates('knightPath/on-board', kpSrc, CHECK_KP,
     return s.replace('  return x >= 0 && x < W && y >= 0 && y < W;',
                      '  return x >= 0 && x < W && y >= 0;');
   },
-  /* 实测值，不是推导值：第 133 条棋盘事件上参考在看 sq=61（g8），她的版本在看
-     **sq=68 —— 一个 8×8 棋盘上不存在的格子号**，参考侧第 1,371 步（她那边第
-     1,364 步；她少几步是因为漏查一项，`&&` 短路得更早）。 */
-  { refStep: 1371, herStep: 1364, opIndex: 133 },
+  /* 实测值，不是推导值：第 133 条棋盘事件上参考在看 sq=61（**f8**：编号是
+     `sq = y*W + x`，61 % 8 = 5 → f 列，(61 − 5) / 8 = 7 → 第 8 行；从前这里
+     写的是 g8，算错了一个字母），她的版本在看 **sq=68 —— 一个 8×8 棋盘上不
+     存在的格子号**，参考侧第 1,371 步（她那边第 1,364 步；她少几步是因为漏查
+     一项，`&&` 短路得更早）。两边的判词都是 try：分歧不在「怎么判」，而在
+     **判的是哪一格**，这正是漏掉边界检查的样子。 */
+  { refStep: 1371, herStep: 1364, opIndex: 133,
+    refSq: 61, herSq: 68, refTo: 'try', herTo: 'try' },
   /* 四条边拆成四条 if 再 return true —— 跟 queens/safe-return 那条同形，也同样
      有牙齿：实测 6,592 步 vs 参考 5,086 步，形状真的不同，一个偷偷改成顺带比
      trace.length 的判定会在这里红。
@@ -343,7 +375,8 @@ threeGates('knightPath/seen-test', kpSrc, CHECK_KP,
   /* 实测值：第 14 条棋盘事件上参考说 sq=0（a1，出发格）是 cut、她的版本说是 ok，
      参考侧第 361 步（她那边第 363 步）。分歧落在出发格上正是这个错法的定义 ——
      报出来的那一条事件本身就把 bug 指出来了。 */
-  { refStep: 361, herStep: 363, opIndex: 14 },
+  { refStep: 361, herStep: 363, opIndex: 14,
+    refSq: 0, herSq: 0, refTo: 'cut', herTo: 'ok' },
   /* 换一种说法问同一件事（`!== -1`），顺手取个名字。实测 5,386 步 vs 参考
      5,086 步 —— 多一条语句，步数真的不同。 */
   function (s) {
@@ -534,8 +567,9 @@ threeGates('tourKnight/degree-fn', twSrc, CHECK_TOUR,
   function (s) { return s.replace('  return d;', '  return 8 - d;'); },
   /* 实测值：第 3 条棋盘事件上参考在试 sq=7、她的版本在试 sq=5，参考侧第 273 步
      （她那边第 274 步）。分歧来得这么早是对的 —— 排序反过来，第一格的候选顺序
-     当场就不一样了。 */
-  { refStep: 273, herStep: 274, opIndex: 3 },
+     当场就不一样了。两边判词都是 try，不同的只是**先试哪一格**。 */
+  { refStep: 273, herStep: 274, opIndex: 3,
+    refSq: 7, herSq: 5, refTo: 'try', herTo: 'try' },
   /* 等价改写：**倒着遍历八个方向**，而且改成「先全数、再减掉踩过的」。
      两处都只改数法、不改数出来的值 —— 这是这道题最容易写坏的地方：degree 的
      返回值要参与排序，任何改变并列打破方式的「等价」改写都会走出另一条同样
