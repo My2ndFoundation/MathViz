@@ -7650,6 +7650,11 @@ const ALGOS = {
 
   let uiTab = null;             // 此刻显示的是哪道题
   let activeTrack = 0;          // 编辑器/调试器挂在这道题的第几条轨道上
+  /* 重建**搬动过几次** activeTrack。修复轮 1 加的：一次无条件的重置让「换个
+     参数就把单步弹回左栏」溜进了正常模式，而报告把它判成了「行为不变」。
+     一个能被读出来的计数器让这件事从此可以被证伪 —— 正常模式下换参数它必须
+     一直是 0，进练习模式（tourKnight 的 0 号轨道变成只读对照）时它必须涨 1。 */
+  let activeMovedByRebuild = 0;
   let statusKind = 'idle';      // idle | ok | bad | busy | boot —— 切语言时按它重画
   let jumpNote = null;          // 点棋盘反向定位之后那一句话
 
@@ -7839,7 +7844,19 @@ const ALGOS = {
     st.ex = exerciseOn();
     st.sig = sig;
     layoutTracks(pid);
-    if (pid === uiTab) activeTrack = firstEditable(pid);
+    /* ⚠ **只在活动轨道真的没法用了的时候才挪它。**
+       这一行原先是无条件的 `activeTrack = firstEditable(pid)`，而 buildProblem
+       每换一次参数就跑一遍 —— 实测（base 6db3472 vs HEAD fe765db 同一份脚本
+       对跑）：在 tourKnight 上把单步/断点/Run 点到右栏的 Warnsdorff，**只要动
+       一下盘面滑杆就被弹回左栏的朴素 DFS，而且一个字都不说**。阶段 5 的
+       buildProblem 根本不碰 activeTrack，那是一处本轮引入的正常模式回归。
+       该挪的只有两种情形：轨道数变少了（下标悬空），或者它此刻落在只读对照上
+       （进练习模式时 tourKnight 的 0 号轨道就变成了对照）。
+       动没动过要能被断言，所以顺手记一次 —— 正常模式下换参数它必须是 0。 */
+    if (pid === uiTab && (!st.tracks[activeTrack] || isContrast(st.tracks[activeTrack]))) {
+      const next = firstEditable(pid);
+      if (next !== activeTrack) { activeTrack = next; activeMovedByRebuild++; }
+    }
     return true;
   }
 
@@ -9410,6 +9427,11 @@ const ALGOS = {
       params: pv,
       N: typeof pv.N === 'number' ? pv.N : null,
       track: activeTrack,
+      /* 重建一共搬动过几次活动轨道（累计值，不是每次调用清零）。
+         **正常模式下换参数它必须纹丝不动** —— 那正是修复轮 1 那条回归的判据：
+         换一次盘面滑杆就把单步从右栏弹回左栏，光看 `track` 只能看到一个 0，
+         看不出这个 0 是她自己选的还是被重建改的。 */
+      activeMovedByRebuild: activeMovedByRebuild,
       /* 这次调用里探针自己搬动了几条轨道。能正常出帧的环境里必须是 0 ——
          不是 0 就说明绘制循环没在对齐（或者根本没在出帧），而不是「对齐好了」。 */
       syncedByProbe: syncedByProbe,
