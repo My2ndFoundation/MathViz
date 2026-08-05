@@ -40,9 +40,36 @@
      <indent><fill>
 
    `indent` 取挖空体第一行的前导空白，两行占位都用它，这样占位版在编辑器
-   里缩进跟原文一致。注释行只写中文——英文由 UI 层在 `lang=en` 时按同一份
-   `Blank.hint.en` 重新渲染那一行文字，不重新生成占位源码、不重跑解释器
-   （规格 §2.9 / 计划 Task 7）。 */
+   里缩进跟原文一致。
+
+   ---- 占位注释那一行的语言：`lang` 是必填参数，没有默认值 ----
+
+   这一行以前写死成中文（`'/* 在这里写：' + attrs.hint.zh`），**而英文才是这套
+   工具的默认语言**（规格 §1.6）——五条精心写的 `hintEn` 于是在编辑器里一个字
+   都读不到，页面上还什么都不报。所以 `parse(source, lang)` 的第二个参数是必填
+   的：一个默认成 'zh' 的语言参数会让同一个缺陷换个地方原样复活，而一个默认成
+   'en' 的又会让中文使用者的提示悄悄消失。**要哪种语言，调用方自己说。**
+
+   两侧渲染同一个函数 `noteLine(blank, lang)`，它也被导出：UI 切语言时**不重新
+   生成占位源码、更不重跑解释器**（那要几百毫秒），而是拿 `noteLine(b,'zh')` 与
+   `noteLine(b,'en')` 两份文本在编辑器现有内容里逐行对换。使用者自己改过的那些
+   行对不上任何一份，原样留着——切语言不会吃掉她写了一半的答案。
+
+   ---- 第三份产出 `clean`：正常模式该显示的源码 ----
+
+   `parse()` 交三样东西：
+
+     blanks       挖空清单
+     placeholder  练习模式的源码：挖空体换成「占位注释 + fill」
+     clean        正常模式的源码：**只剥掉两行 `// >>> BLANK` / `// <<< BLANK`
+                  指令，挖空体原样保留**
+
+   `clean` 不是锦上添花：`algos/*.js` 的 `source()` 吐出来的原文里就嵌着指令行，
+   而工具⑤ 正常模式直接把那份原文喂给编辑器——今天打开 queens，`function safe`
+   里就摆着两行五百来字符的 `// >>> BLANK id=… fill="…" hint="…" hintEn="…"`。
+   那是给解析器看的元数据，不是给人读的代码，而且 `fill=`/`hint=` 把答案和提示
+   一起写在了她眼前。剥掉它们必须走这里，不能让页面自己写一条正则——同一段
+   「什么算指令行」的知识分成两份，迟早分岔。 */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.Exercise = factory();
@@ -217,13 +244,56 @@
     return { id: id, level: level, fill: fill, hint: { zh: hintZh, en: hintEn } };
   }
 
-  /* parse(source) → { blanks: Blank[], placeholder: string }
-     source 必须是字符串，缺了或类型不对直接抛（约束 6：省略参数不许
-     默默变成什么都不做）。 */
-  function parse(source) {
-    if (typeof source !== 'string') {
-      throw new Error('parse(source) 少了 source，或者 source 不是字符串，收到：' + typeof source);
+  /* 占位注释那一行（**含缩进**），中英各一份。导出给 UI 层：切语言时用它把
+     编辑器里那一行原地换掉，不重新生成源码、不重跑解释器（见文件头）。
+
+     `blank` 要是 `parse()` 产出的挖空对象，`lang` 必填。两个都当场校验：
+     少一个就静默给出一行别的语言的注释，正是这个函数存在的理由。 */
+  function noteLine(blank, lang) {
+    if (!blank || typeof blank !== 'object' || !blank.hint ||
+        typeof blank.hint.zh !== 'string' || typeof blank.hint.en !== 'string' ||
+        typeof blank.indent !== 'string' || typeof blank.level !== 'number') {
+      throw new Error(
+        'noteLine(blank, lang) 少了 blank，或者它不是 parse() 产出的挖空对象' +
+        '（要有 indent / level / hint.{zh,en}），收到：' +
+        (blank === null || blank === undefined ? String(blank) : typeof blank)
+      );
     }
+    assertLang(lang, 'noteLine(blank, lang)');
+    if (lang === 'zh') {
+      return blank.indent + '/* 在这里写：' + blank.hint.zh +
+        '  （第 ' + blank.level + ' 级；Check 会跑你的版本和参考版本，比行为不比写法） */';
+    }
+    return blank.indent + '/* Write your answer here: ' + blank.hint.en +
+      '  (level ' + blank.level + '; Check runs your version and the reference one, ' +
+      'comparing behaviour, not wording) */';
+  }
+
+  /* 语言参数**没有默认值**。理由写在文件头：默认成哪一种，都是让「占位注释
+     写死一种语言」这个已经犯过的错换个地方原样复活。 */
+  function assertLang(lang, who) {
+    if (lang === undefined || lang === null) {
+      throw new Error(
+        who + ' 少了 lang —— 占位注释要用哪种语言没有默认值，必须写明 "zh" 或 "en"' +
+        '（英文是这套工具的默认语言，默认成中文会让 hintEn 一个字都读不到）'
+      );
+    }
+    if (lang !== 'zh' && lang !== 'en') {
+      throw new Error(who + ' 的 lang 只认 "zh" 或 "en"，收到：' + JSON.stringify(lang));
+    }
+  }
+
+  /* parse(source, lang) → { blanks: Blank[], placeholder: string, clean: string }
+     source 必须是字符串，lang 必须是 'zh' 或 'en'，缺了或类型不对直接抛
+     （约束 6：省略参数不许默默变成什么都不做）。
+
+       placeholder  练习模式的源码（挖空体 → 占位注释 + fill，注释用 lang）
+       clean        正常模式的源码（只剥掉两行指令，挖空体原样保留）*/
+  function parse(source, lang) {
+    if (typeof source !== 'string') {
+      throw new Error('parse(source, lang) 少了 source，或者 source 不是字符串，收到：' + typeof source);
+    }
+    assertLang(lang, 'parse(source, lang)');
 
     const rawLines = source.split('\n');
     const blanks = [];
@@ -231,6 +301,10 @@
 
     // 输出行的缓冲区：普通行原样进来，挖空段落被替换成占位块。
     const outLines = [];
+    /* 正常模式那一份：**唯一被删掉的是两行指令**，挖空体一行不动。
+       两个缓冲区在同一趟里各自填各自的，不做第二遍扫描——「什么算指令行」
+       只判一次，两份产出就不可能对这件事有不同意见。 */
+    const cleanLines = [];
 
     let i = 0; // 0-based 索引，行号 = i + 1
     let openAt = -1; // 若非 -1，表示当前正处在一个挖空体内部，值是 >>> 指令行的 0-based 索引
@@ -291,9 +365,12 @@
           endLine: bodyEnd, // bodyEnd 是 0-based 指向 <<< 行，即挖空体最后一行的 1-based 行号
         });
 
-        outLines.push(indent + '/* 在这里写：' + attrs.hint.zh +
-          '  （第 ' + attrs.level + ' 级；Check 会跑你的版本和参考版本，比行为不比写法） */');
+        outLines.push(noteLine(blanks[blanks.length - 1], lang));
         outLines.push(indent + attrs.fill);
+        /* clean 这一份：挖空体原样收进去（上面那一段普通行分支在挖空体内部
+           什么都不收，所以这里补齐——收的是 rawLines 的原文，不是 body 拼接
+           出来的字符串，两者只在「行尾有没有 \r」这类事情上会不一样）。 */
+        for (let b = bodyStart; b < bodyEnd; b++) cleanLines.push(rawLines[b]);
 
         openAt = -1;
         i++;
@@ -302,8 +379,10 @@
 
       // 普通行：若在挖空体内部，跳过（不进入占位版，也不单独判 body 是否为空——
       // 已经在 <<< 处按整段校验过了）；否则原样进入占位版。
+      // clean 那一份不分内外，普通行一律原样收下（挖空体在 <<< 那里一起补）。
       if (openAt === -1) {
         outLines.push(raw);
+        cleanLines.push(raw);
       }
       i++;
     }
@@ -315,7 +394,7 @@
       );
     }
 
-    return { blanks: blanks, placeholder: outLines.join('\n') };
+    return { blanks: blanks, placeholder: outLines.join('\n'), clean: cleanLines.join('\n') };
   }
 
   /* ================= judge：比行为，不比文本 =================
@@ -868,5 +947,5 @@
     };
   }
 
-  return { parse: parse, judge: judge, hintAt: hintAt };
+  return { parse: parse, judge: judge, hintAt: hintAt, noteLine: noteLine };
 });

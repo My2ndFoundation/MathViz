@@ -8,6 +8,12 @@ const T = require('./_test.js');
 const E = require('./exercise.js');
 const I = require('./interp.js');
 
+/* `parse(source, lang)` 的第二个参数是必填的（占位注释那一行的语言，见
+   exercise.js 的文件头）。这个文件里的断言比的全是**行为**，跟占位注释是
+   中文还是英文毫无关系，所以统一走这个包装，省得每个调用点重复一遍。
+   语言本身的断言在 exercise.test.js 里，那边直接调 `E.parse(src, lang)`。 */
+function parseZh(src) { return E.parse(src, 'zh'); }
+
 /* 每道挖空题的 check 声明必须与工具页 PROBLEMS 里的那一份一致。
    这里重复一遍是有意的：测试不该 require 一个 html。Task 7 要在页面里
    加一条注释指回这个文件。 */
@@ -76,7 +82,7 @@ const Q = require('./algos/queens.js');
 const qSrc = Q.source({ N: 5 });
 
 /* 声明的挖空确实能被解析出来，且 id 与 level 是说好的那些 */
-const qBlanks = E.parse(qSrc).blanks;
+const qBlanks = parseZh(qSrc).blanks;
 T.eq(qBlanks.length, 2, 'queens 声明了两个挖空');
 T.eq(qBlanks[0].id, 'safe-return', 'queens 第一个挖空的 id');
 T.eq(qBlanks[0].level, 1, 'queens 第一个挖空是 1 级');
@@ -84,7 +90,7 @@ T.eq(qBlanks[1].id, 'undo', 'queens 第二个挖空的 id');
 T.eq(qBlanks[1].level, 2, 'queens 第二个挖空是 2 级');
 
 /* 占位版必须仍然能跑（她按 Run 时什么都没填也不该报错） */
-const qPlace = I.run(E.parse(qSrc).placeholder, { host: {} });
+const qPlace = I.run(parseZh(qSrc).placeholder, { host: {} });
 T.ok(!qPlace.trace.truncated, 'queens 占位版能跑完，不截断');
 T.ok(qPlace.result !== undefined, 'queens 占位版有返回值（虽然答案不对）');
 
@@ -113,7 +119,7 @@ T.ok(qPlace.result !== undefined, 'queens 占位版有返回值（虽然答案�
    `return false;`，并把这一条断言从一个 N 加宽到整条滑杆 —— 简报那两条
    在 N=5 下是绿的，加宽才是这个修正的牙齿。 */
 for (const N of [4, 5, 6, 7, 8]) {
-  const p = I.run(E.parse(Q.source({ N: N })).placeholder, { host: {} });
+  const p = I.run(parseZh(Q.source({ N: N })).placeholder, { host: {} });
   T.ok(!p.trace.truncated, 'queens 占位版 N=' + N + ' 跑得完，不截断');
   T.ok(p.result !== undefined, 'queens 占位版 N=' + N + ' 有返回值（虽然答案不对）');
 }
@@ -187,7 +193,7 @@ const KP = require('./algos/knight-path.js');
    一档：5,086 步、距离 6、整块盘都铺遍。插指令行前后逐格相同。 */
 const kpSrc = KP.source({ W: 8, start: 0, target: 63 });
 
-const kpBlanks = E.parse(kpSrc).blanks;
+const kpBlanks = parseZh(kpSrc).blanks;
 T.eq(kpBlanks.length, 2, 'knightPath 声明了两个挖空');
 T.eq(kpBlanks[0] ? kpBlanks[0].id : null, 'on-board', 'knightPath 第一个挖空的 id（按出现顺序）');
 T.eq(kpBlanks[0] ? kpBlanks[0].level : null, 1, 'knightPath 的 on-board 是 1 级');
@@ -221,7 +227,7 @@ let kpPlaceOffBoard = 0;
 let kpPlaceRight = 0;
 for (let target = 1; target <= 63; target++) {
   const src = KP.source({ W: 8, start: 0, target: target });
-  const p = I.run(E.parse(src).placeholder, { host: {} });
+  const p = I.run(parseZh(src).placeholder, { host: {} });
   if (p.trace.truncated || p.result === undefined) kpPlaceBad.push(target);
   if (p.result === I.run(src, { host: {} }).result) kpPlaceRight++;
   for (let i = 0; i < p.trace.length; i++) {
@@ -253,7 +259,7 @@ T.eq(kpPlaceRight, 0,
    条数不再说明问题有多大，失败清单也没法读了。挖空清单是**每份源码一样**的
    （`source()` 只换 W/START/TARGET 三行常量），本来就没有逐档查的道理。 */
 function blankOf(src, id) {
-  const blanks = E.parse(src).blanks;
+  const blanks = parseZh(src).blanks;
   for (let i = 0; i < blanks.length; i++) if (blanks[i].id === id) return blanks[i];
   /* 找不到就记一条失败、返回 null，**不抛**。抛出去的话 `T.report()` 根本跑不到，
      上面那几条「id 是不是说好的那个」的断言明明已经红了却一个字都印不出来，
@@ -405,14 +411,14 @@ const twSrc = TW.source({ W: 3, H: 4, start: 0 });
 
    控制者已裁定按这个走（修复轮 1）：五个挖空定案，阶段 6 的完成标准与规格
    §2.9 的挖空表各订正一行。 */
-const twBlanks = E.parse(twSrc).blanks;
+const twBlanks = parseZh(twSrc).blanks;
 T.eq(twBlanks.length, 1, 'tour-warnsdorff 声明了一个挖空（两个会嵌套，parse 会抛）');
 T.eq(twBlanks[0] ? twBlanks[0].id : null, 'degree-fn', 'tour-warnsdorff 那个挖空的 id');
 T.eq(twBlanks[0] ? twBlanks[0].level : null, 3, 'tour-warnsdorff 的 degree-fn 是 3 级（整个函数）');
 
 /* 嵌套确实抛 —— 上面那段话里最要紧的一句，钉住它，别让它退化成一段传说。 */
 T.throws(function () {
-  E.parse(twSrc.replace('      if (!visited[ny * W + nx]) { d = d + 1; }',
+  parseZh(twSrc.replace('      if (!visited[ny * W + nx]) { d = d + 1; }',
     [
       '      // >>> BLANK id=degree-count level=1 fill="d = d + 0;" hint="甲" hintEn="A"',
       '      if (!visited[ny * W + nx]) { d = d + 1; }',
@@ -425,7 +431,7 @@ T.throws(function () {
    多了一段」这种事。 */
 for (let b = 0; b < TOUR_BOARDS.length; b++) {
   const W = TOUR_BOARDS[b][0], H = TOUR_BOARDS[b][1];
-  T.eq(E.parse(TD.source({ W: W, H: H, start: 0 })).blanks.length, 0,
+  T.eq(parseZh(TD.source({ W: W, H: H, start: 0 })).blanks.length, 0,
        'tour-dfs 在 ' + W + '×' + H + ' 上没有挖空 —— 它是只读对照');
 }
 
@@ -469,7 +475,7 @@ for (let b = 0; b < TOUR_BOARDS.length; b++) {
   const W = TOUR_BOARDS[b][0], H = TOUR_BOARDS[b][1];
   const src = TW.source({ W: W, H: H, start: 0 });
   const ref = I.run(src, { host: {} });
-  const p = I.run(E.parse(src).placeholder, { host: {} });
+  const p = I.run(parseZh(src).placeholder, { host: {} });
   const tag = W + '×' + H;
   const shown = tag + '：参考 ' + ref.trace.length + (ref.trace.truncated ? '✂' : '') +
                 ' / 占位 ' + p.trace.length + (p.trace.truncated ? '✂' : '');
@@ -496,7 +502,7 @@ T.eq(twRefTrunc.join(','), '3×7',
    这条断言而不是先撞 `Interp.STEP_LIMIT`。撞这条断言看到的是「expected true」
    加一个具体步数，撞上限看到的只是 `result === undefined`。 */
 {
-  const p45 = I.run(E.parse(TW.source({ W: 4, H: 5, start: 0 })).placeholder, { host: {} });
+  const p45 = I.run(parseZh(TW.source({ W: 4, H: 5, start: 0 })).placeholder, { host: {} });
   T.ok(p45.trace.length < 150000,
        'tourKnight 占位版 4×5 的步数留着余量（< 150,000；实测 ' + p45.trace.length +
        '，离 200,000 上限还剩 ' + (200000 - p45.trace.length) + ' 步）');
@@ -511,14 +517,14 @@ for (let b = 0; b < TOUR_BOARDS.length; b++) {
   const W = TOUR_BOARDS[b][0], H = TOUR_BOARDS[b][1];
   const src = TW.source({ W: W, H: H, start: 0 });
   const v = E.judge(I.run(src, { host: {} }),
-                    I.run(E.parse(src).placeholder, { host: {} }), CHECK_TOUR);
+                    I.run(parseZh(src).placeholder, { host: {} }), CHECK_TOUR);
   T.ok(v.status !== 'pass',
        'tourKnight 占位版在 ' + W + '×' + H + ' 上不被判对（实测 ' + v.status + '）');
 }
 
 /* knightPath 同理，一档就够（它的占位恒返回 −1，答案本来就没得巧合）。 */
 T.eq(E.judge(I.run(kpSrc, { host: {} }),
-             I.run(E.parse(kpSrc).placeholder, { host: {} }), CHECK_KP).status,
+             I.run(parseZh(kpSrc).placeholder, { host: {} }), CHECK_KP).status,
      'fail', 'knightPath 占位版被判错');
 
 threeGates('tourKnight/degree-fn', twSrc, CHECK_TOUR,

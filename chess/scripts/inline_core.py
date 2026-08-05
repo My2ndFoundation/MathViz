@@ -28,6 +28,7 @@ SOURCES = {
     'DEBUGGER': ROOT / 'core' / 'debugger.js',
     'EDITOR': ROOT / 'core' / 'editor.js',
     'TREE-MODEL': ROOT / 'core' / 'tree-model.js',
+    'EXERCISE': ROOT / 'core' / 'exercise.js',
 }
 
 # 只有部分工具有这些标记区；其余 html 缺它们是正常的，不该 WARN。
@@ -35,7 +36,9 @@ SOURCES = {
 # （tools/_debugger-preview.html）与将来的工具 ④⑤ 上——阶段 1/2 的三个
 # 工具没有这三块是正常的，不该 WARN。TREE-MODEL / ALGOS 只出现在阶段 4
 # 的工具④（chess-search-minimax.html，Task 6 才创建）与工具⑤上。
-OPTIONAL_TAGS = {'REPLAY', 'GAMES', 'INTERP', 'DEBUGGER', 'EDITOR', 'TREE-MODEL', 'ALGOS'}
+# EXERCISE（挖空练习的解析/判定/提示）只出现在工具⑤ 上——只有它有挖空。
+OPTIONAL_TAGS = {'REPLAY', 'GAMES', 'INTERP', 'DEBUGGER', 'EDITOR', 'TREE-MODEL', 'ALGOS',
+                 'EXERCISE'}
 
 
 def js_string_literal(text: str) -> str:

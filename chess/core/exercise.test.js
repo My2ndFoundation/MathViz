@@ -2,6 +2,12 @@
 const T = require('./_test.js');
 const E = require('./exercise.js');
 
+/* `parse(source, lang)` 的第二个参数是必填的（见文件末尾「占位注释的语言」
+   那一节）。下面绝大多数断言跟语言无关，统一走这个包装；**语言本身的断言
+   直接调 `E.parse(src, lang)`**，不走包装，否则那几条就在验证包装而不是
+   验证 parse。 */
+function parseZh(src) { return E.parse(src, 'zh'); }
+
 /* ---------- parse：正常路径 ---------- */
 
 const SRC = [
@@ -12,7 +18,7 @@ const SRC = [
   '}',
 ].join('\n');
 
-const p = E.parse(SRC);
+const p = parseZh(SRC);
 T.eq(p.blanks.length, 1, 'parse 找到一个挖空');
 T.eq(p.blanks[0].id, 'safe-return', 'id 解析正确');
 T.eq(p.blanks[0].level, 1, 'level 是数字 1，不是字符串');
@@ -38,12 +44,12 @@ T.ok(p.placeholder.indexOf('BLANK') === -1, '占位版里不再有 BLANK 指令'
 T.ok(p.placeholder.indexOf('diagDown') === -1, '占位版里不再有参考答案');
 
 /* 没有挖空的源码：blanks 为空，placeholder 与原文逐字节相同 */
-const plain = E.parse('const a = 1;\nreturn a;');
+const plain = parseZh('const a = 1;\nreturn a;');
 T.eq(plain.blanks.length, 0, '没有指令时挖空清单为空');
 T.eq(plain.placeholder, 'const a = 1;\nreturn a;', '没有指令时占位版就是原文');
 
 /* 多个挖空 */
-const two = E.parse([
+const two = parseZh([
   '// >>> BLANK id=a level=1 fill="1;" hint="甲" hintEn="A"',
   'x;',
   '// <<< BLANK',
@@ -65,7 +71,7 @@ T.eq(two.blanks[1].endLine, 7, '第二个挖空体的结束行号');
    把它当成 id 的值——不抛、不报，静默取错。这条不需要属性乱序也能触发，
    但顺时把「属性顺序不作要求」也一并覆盖：id/level 放到 hint/fill 后面。 */
 
-const collide = E.parse([
+const collide = parseZh([
   '// >>> BLANK fill="1;" hint="设 id=5 的场景，注意 level=9 只是举例，fill= 也一样" id=a level=1 hintEn="mentions id=5 and level=9 too"',
   'x;',
   '// <<< BLANK',
@@ -89,7 +95,7 @@ T.eq(collide.blanks[0].hint.en, 'mentions id=5 and level=9 too', 'hintEn 同样�
 /* C 形：字面引号后面**没有**空白 —— token 化会把整段吞成一个 token，
    于是提取出来的值里**留着**字面引号，由 scanQuoted 的哨兵抓。 */
 T.throws(function () {
-  E.parse([
+  parseZh([
     '// >>> BLANK id=a level=1 fill="1;" hintEn="X" hint="他说"你好"的场景"',
     'x;',
     '// <<< BLANK',
@@ -101,7 +107,7 @@ T.throws(function () {
    被丢掉，hint 从前被无声截断成「他说」。C 形那条哨兵**看不见**它（提取出来
    的值是「他说」，里面一个引号都没有），要靠 token 白名单那条抓。 */
 T.throws(function () {
-  E.parse([
+  parseZh([
     '// >>> BLANK id=a level=1 fill="1;" hintEn="X" hint="他说" 你好的场景"',
     'x;',
     '// <<< BLANK',
@@ -110,7 +116,7 @@ T.throws(function () {
 
 /* 白名单不是「凡是没见过的都抛」的粗暴规则会误伤的那种：带引号的值里全是
    空白和符号也照样是一个完整 token。这两条是它的防误伤底线。 */
-const spacey = E.parse([
+const spacey = parseZh([
   '// >>> BLANK id=a level=2 fill="for (let i = 0; i < n; i = i + 1) { }" ' +
     'hint="先想清楚：这一格 会不会 被攻击" hintEn="think first: is this square attacked"',
   'x;',
@@ -125,7 +131,7 @@ T.eq(spacey.blanks[0].hint.en, 'think first: is this square attacked',
 
 /* 认不出来的属性名也抛 —— 这条规则同时挡住了「写错属性名」这类笔误 */
 T.throws(function () {
-  E.parse([
+  parseZh([
     '// >>> BLANK id=a level=1 fill="1;" hint="甲" hintEn="A" tip="乙"',
     'x;',
     '// <<< BLANK',
@@ -134,34 +140,34 @@ T.throws(function () {
 
 /* ---------- parse：每一条都必须大声失败（约束 6） ---------- */
 
-T.throws(function () { E.parse(); }, 'parse() 少了 source —— 抛');
-T.throws(function () { E.parse(123); }, 'parse(非字符串) —— 抛');
+T.throws(function () { parseZh(); }, 'parse() 少了 source —— 抛');
+T.throws(function () { parseZh(123); }, 'parse(非字符串) —— 抛');
 T.throws(function () {
-  E.parse('// >>> BLANK level=1 fill="1;" hint="甲" hintEn="A"\nx;\n// <<< BLANK');
+  parseZh('// >>> BLANK level=1 fill="1;" hint="甲" hintEn="A"\nx;\n// <<< BLANK');
 }, '缺 id —— 抛');
 T.throws(function () {
-  E.parse('// >>> BLANK id=a fill="1;" hint="甲" hintEn="A"\nx;\n// <<< BLANK');
+  parseZh('// >>> BLANK id=a fill="1;" hint="甲" hintEn="A"\nx;\n// <<< BLANK');
 }, '缺 level —— 抛');
 T.throws(function () {
-  E.parse('// >>> BLANK id=a level=1 hint="甲" hintEn="A"\nx;\n// <<< BLANK');
+  parseZh('// >>> BLANK id=a level=1 hint="甲" hintEn="A"\nx;\n// <<< BLANK');
 }, '缺 fill —— 抛');
 T.throws(function () {
-  E.parse('// >>> BLANK id=a level=1 fill="1;" hintEn="A"\nx;\n// <<< BLANK');
+  parseZh('// >>> BLANK id=a level=1 fill="1;" hintEn="A"\nx;\n// <<< BLANK');
 }, '缺 hint —— 抛');
 T.throws(function () {
-  E.parse('// >>> BLANK id=a level=1 fill="1;" hint="甲"\nx;\n// <<< BLANK');
+  parseZh('// >>> BLANK id=a level=1 fill="1;" hint="甲"\nx;\n// <<< BLANK');
 }, '缺 hintEn —— 抛（英文是默认语言，缺了比缺中文更严重）');
 T.throws(function () {
-  E.parse('// >>> BLANK id=a level=4 fill="1;" hint="甲" hintEn="A"\nx;\n// <<< BLANK');
+  parseZh('// >>> BLANK id=a level=4 fill="1;" hint="甲" hintEn="A"\nx;\n// <<< BLANK');
 }, 'level=4 越界 —— 抛');
 T.throws(function () {
-  E.parse('// >>> BLANK id=a level=1 fill="1;" hint="甲" hintEn="A"\nx;');
+  parseZh('// >>> BLANK id=a level=1 fill="1;" hint="甲" hintEn="A"\nx;');
 }, '有 >>> 没有 <<< —— 抛');
 T.throws(function () {
-  E.parse('x;\n// <<< BLANK');
+  parseZh('x;\n// <<< BLANK');
 }, '有 <<< 没有 >>> —— 抛');
 T.throws(function () {
-  E.parse([
+  parseZh([
     '// >>> BLANK id=a level=1 fill="1;" hint="甲" hintEn="A"',
     '// >>> BLANK id=b level=1 fill="2;" hint="乙" hintEn="B"',
     'x;',
@@ -170,7 +176,7 @@ T.throws(function () {
   ].join('\n'));
 }, '嵌套 —— 抛');
 T.throws(function () {
-  E.parse([
+  parseZh([
     '// >>> BLANK id=a level=1 fill="1;" hint="甲" hintEn="A"',
     'x;',
     '// <<< BLANK',
@@ -180,12 +186,12 @@ T.throws(function () {
   ].join('\n'));
 }, '重复 id —— 抛（localStorage 的键靠它，撞了会互相覆盖）');
 T.throws(function () {
-  E.parse('// >>> BLANK id=a level=1 fill="1;" hint="甲" hintEn="A"\n// <<< BLANK');
+  parseZh('// >>> BLANK id=a level=1 fill="1;" hint="甲" hintEn="A"\n// <<< BLANK');
 }, '空挖空体 —— 抛');
 
 /* ---------- hintAt ---------- */
 
-const hb = E.parse([
+const hb = parseZh([
   '// >>> BLANK id=h level=1 fill="return true;" hint="会被攻击吗？" hintEn="Is it attacked?"',
   'if (cols[c]) { return false; }',
   'return !diagDown[r + c];',
@@ -220,7 +226,7 @@ T.throws(function () { E.hintAt(hb, 5); }, 'level=5 越界 —— 抛');
    if+return 那一种最简形状。这里用一段人工构造的挖空体（不是任何一道
    真题）覆盖：`if` 条件带嵌套括号、赋值 `=` 与比较 `===`/`<=` 混在一起、
    `while` 循环。 */
-const hb2 = E.parse([
+const hb2 = parseZh([
   '// >>> BLANK id=k level=2 fill="return 0;" hint="骨架覆盖更多形状" hintEn="skeleton covers more shapes"',
   'let total = 0;',
   'while (idx < n) {',
@@ -245,7 +251,7 @@ T.ok(h3b.zh.indexOf('target') === -1, '骨架：if 条件里的比较对象没�
    `mark(sq, "back")` 的 "back" 是传给宿主的状态字符串，不是代码里的名字——
    `variablesIn` 原来直接拿整段原始文本跑标识符正则，没有跳过引号内部，
    于是 "back" 被当成变量列进第 2 级提示，混进一个假名字。 */
-const hbRetreat = E.parse([
+const hbRetreat = parseZh([
   '// >>> BLANK id=retreat level=1 fill="return;" hint="回溯要做什么？" hintEn="what does backtracking do?"',
   '      cols[c] = 0; diagDown[r + c] = 0; diagUp[r - c + N] = 0;',
   '      mark(sq, "back");',
@@ -510,5 +516,89 @@ T.throws(function () { E.judge(REF, same, { result: true, boardOps: true, counte
          'check.counters 里有空名字 —— 抛');
 T.throws(function () { E.judge({ result: 1 }, same, CHECK); }, 'refRun 没有 trace —— 抛');
 T.throws(function () { E.judge(REF, { result: 1 }, CHECK); }, 'herRun 没有 trace —— 抛');
+
+/* ================= clean：正常模式该显示的那一份源码 =================
+
+   `algos/*.js` 的 `source()` 吐出来的原文里就嵌着 `// >>> BLANK …` 指令行，
+   而工具⑤ 正常模式过去把那份原文原样喂给编辑器 —— 五百多字符的元数据摆在
+   `function safe` 里，`fill=` 与 `hint=` 把占位实现和提示一起写在她眼前。
+   `clean` 剥的正是这两行，**挖空体一行不动**（正常模式跑的、看的，仍然是
+   参考答案本身）。 */
+
+const cl = E.parse(SRC, 'zh');
+T.eq(cl.clean, [
+  'function safe(r, c) {',
+  '  return !cols[c] && !diagDown[r + c];',
+  '}',
+].join('\n'), 'clean 剥掉两行指令、挖空体原样保留');
+T.ok(cl.clean.indexOf('BLANK') === -1, 'clean 里不再有 BLANK 指令');
+T.ok(cl.clean.indexOf('hintEn=') === -1, 'clean 里不再有 hintEn= 这类元数据');
+T.ok(cl.clean.indexOf('fill=') === -1, 'clean 里不再有 fill=（占位实现不该泄进正常模式）');
+/* clean **不是** placeholder：后者把挖空体换成了 fill，前者原样留着参考答案。
+   两者写成同一份是这次最容易犯的错，所以正反各钉一条。 */
+T.ok(cl.clean.indexOf('!diagDown[r + c]') >= 0, 'clean 保留了参考答案本身');
+T.ok(cl.placeholder.indexOf('!diagDown[r + c]') === -1, '而 placeholder 里没有参考答案');
+T.ok(cl.clean !== cl.placeholder, 'clean 与 placeholder 是两份不同的源码');
+/* 行数：原文 5 行减去两行指令 = 3 行。挖空体既没被删也没被复制。 */
+T.eq(cl.clean.split('\n').length, 3, 'clean 的行数 = 原文行数 − 2×挖空数');
+
+/* 没有挖空的源码：clean 与原文逐字节相同（一个空文件也不该被「整理」一遍） */
+T.eq(parseZh('const a = 1;\nreturn a;').clean, 'const a = 1;\nreturn a;',
+     '没有指令时 clean 就是原文');
+/* 两个挖空：两对指令都被剥掉，两段挖空体都留着，中间那行也在原位 */
+const twoClean = parseZh([
+  '// >>> BLANK id=a level=1 fill="1;" hint="甲" hintEn="A"',
+  'x;',
+  '// <<< BLANK',
+  'mid;',
+  '// >>> BLANK id=b level=2 fill="2;" hint="乙" hintEn="B"',
+  'y;',
+  'z;',
+  '// <<< BLANK',
+].join('\n')).clean;
+T.eq(twoClean, 'x;\nmid;\ny;\nz;', '两个挖空：四行指令全剥掉，三段代码顺序不变');
+
+/* ================= 占位注释的语言：lang 是必填参数 =================
+
+   这一行以前写死成中文，**而英文是默认语言**（§1.6）—— 五条 hintEn 在
+   编辑器里一个字都读不到，页面上还什么都不报。 */
+
+const pZh = E.parse(SRC, 'zh');
+const pEn = E.parse(SRC, 'en');
+const noteZh = pZh.placeholder.split('\n')[1];
+const noteEn = pEn.placeholder.split('\n')[1];
+T.ok(noteZh.indexOf('会被攻击吗？') >= 0, 'lang="zh" 的占位注释带的是 hint.zh');
+T.ok(noteZh.indexOf('Is it attacked?') === -1, 'lang="zh" 的占位注释里没有英文提示');
+T.ok(noteEn.indexOf('Is it attacked?') >= 0, 'lang="en" 的占位注释带的是 hint.en');
+T.ok(noteEn.indexOf('会被攻击吗？') === -1, 'lang="en" 的占位注释里没有中文提示');
+T.ok(noteEn !== noteZh, '两种语言的占位注释确实不是同一行字');
+/* 除了那一行注释，两份占位源码必须逐行相同 —— 语言只影响注释，不影响代码。
+   （否则「切语言不重跑解释器」就不成立了：跑的东西变了。） */
+const zhRest = pZh.placeholder.split('\n').filter(function (_l, i) { return i !== 1; });
+const enRest = pEn.placeholder.split('\n').filter(function (_l, i) { return i !== 1; });
+T.eq(enRest.join('\n'), zhRest.join('\n'), '两种语言的占位源码除注释那一行外逐字节相同');
+/* clean 与语言无关：正常模式显示的是源码本身，没有占位注释可言。 */
+T.eq(pEn.clean, pZh.clean, 'clean 不随语言变（它里面根本没有占位注释）');
+
+/* 缺 lang / 写错 lang 一律当场抛：默认成哪一种都是让同一个缺陷换个地方复活 */
+T.throws(function () { E.parse(SRC); }, 'parse() 少了 lang —— 抛');
+T.throws(function () { E.parse(SRC, 'fr'); }, 'parse() 的 lang 写了别的语言 —— 抛');
+T.throws(function () { E.parse(SRC, 'EN'); }, 'parse() 的 lang 大小写不对 —— 抛（不猜）');
+T.throws(function () { E.parse(SRC, null); }, 'parse() 的 lang 是 null —— 抛');
+
+/* noteLine：UI 切语言时靠它把编辑器里那一行原地换掉（不重跑解释器）。
+   它必须**逐字节**等于 placeholder 里的那一行，否则对换就会对不上，
+   切一次语言之后那一行就再也换不回来了。 */
+T.eq(E.noteLine(pZh.blanks[0], 'zh'), noteZh, 'noteLine(zh) 与 placeholder 里那一行逐字节相同');
+T.eq(E.noteLine(pZh.blanks[0], 'en'), noteEn, 'noteLine(en) 与 lang="en" 的那一行逐字节相同');
+T.ok(E.noteLine(pZh.blanks[0], 'zh').indexOf('  ') === 0, 'noteLine 带着挖空体的缩进');
+T.throws(function () { E.noteLine(pZh.blanks[0]); }, 'noteLine 少了 lang —— 抛');
+T.throws(function () { E.noteLine(pZh.blanks[0], 'de'); }, 'noteLine 的 lang 认不出 —— 抛');
+T.throws(function () { E.noteLine(undefined, 'zh'); }, 'noteLine 少了 blank —— 抛');
+T.throws(function () { E.noteLine({ hint: { zh: 'a', en: 'b' } }, 'zh'); },
+         'noteLine 的 blank 缺 indent / level —— 抛（那会静默少一截缩进）');
+/* 难度级要写进注释里：她得知道这一空是第几级的（1..3 与提示阶梯 1..4 无关）。 */
+T.ok(E.noteLine(pZh.blanks[0], 'zh').indexOf('第 1 级') >= 0, 'zh 注释里写明第几级');
+T.ok(E.noteLine(pZh.blanks[0], 'en').indexOf('level 1') >= 0, 'en 注释里写明第几级');
 
 T.report();
