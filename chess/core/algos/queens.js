@@ -61,13 +61,21 @@
      「它是在哪个 depth 写下的」，再把 depth 大于当前 Step.depth 的标记压暗
      或不画即可 —— 通用、不需要知道算法在做什么，别的两道题也照用。
 
-   · **`safe(r, c)` 单独成一个函数，函数体只有一行**。§2.9 将来要挖的就是
-     那一行（level=1「填一个表达式」），参考答案就是它自己。
+   · **`safe(r, c)` 单独成一个函数，函数体只有一行**。§2.9 挖的就是那一行
+     （`id=safe-return`、level=1「填一个表达式」），参考答案就是它自己。
      这道缝验过：把那一行换成一个恒假的表达式，程序**照常跑完**，
      `result` 变成 0 —— 不抛、不截断，正是挖空练习要的那种「跑得完但答错」，
-     判定靠比结果而不是靠比文本（§2.9）。
-     **这里现在不写 `// >>> BLANK` 标记** —— 挖哪几行是练习设计的决定，
-     今天还没有任何消费者，先留好这道缝并把它记在这里。
+     判定靠比结果而不是靠比文本（§2.9）。占位的 `fill` 用的正是这个恒假式
+     （`return false;`）：恒**真**的那一版反过来会把剪枝整个拿掉，搜索树
+     退化成满的 N^N 棵树，实测 N>=6 就撞上 200,000 步上限被截断、`result`
+     是 `undefined` —— 占位版连「跑得完」都做不到。
+
+     **两组 `// >>> BLANK` 指令现在就写在下面的 `BODY` 里**（`safe-return`
+     与 `undo`），由 `core/exercise.js` 的 `parse()` 消费。它们是注释，
+     **一步都不产生**：插入前后 N=4..8 的步数与解数逐格相同（770 / 2,621 /
+     9,500 / 37,049 / 156,772，解 2 / 10 / 4 / 40 / 92），把四行指令剥回去
+     再跑也逐字节一致 —— 「参考答案就是这份正在跑的源码本身」这个支点没有
+     被动过。三关六条断言在 `core/exercise-blanks.test.js`。
 
    · 子集约束（规格 §2.6）：**没有三元运算符**，`a ? b : c` 会抛
      unsupported，一律展开成 if/else；数组只有 `push` 和 `length`。
@@ -159,7 +167,9 @@
     '   这一行就是整道题的全部规则，别的都是围着它转的脚手架。',
     '   想确认它真的在起作用：把 diagUp 那一段删掉再跑，解数立刻就不对了。 */',
     'function safe(r, c) {',
+    '  // >>> BLANK id=safe-return level=1 fill="return false;" hint="三条线都空着才算安全：cols[c] 是这一列，diagDown[r + c] 和 diagUp[r - c + N] 是那两条斜线。表里是 1 就说明那条线上已经有后了 —— 三张表一张都不能少查。" hintEn="A square is safe only when all three lines are clear: cols[c] for the column, diagDown[r + c] and diagUp[r - c + N] for the two diagonals. A 1 in any of the three tables means that line already has a queen on it."',
     '  return !cols[c] && !diagDown[r + c] && !diagUp[r - c + N];',
+    '  // <<< BLANK',
     '}',
     '',
     '/* 把第 r 行到最上面一行全部摆好。',
@@ -186,7 +196,9 @@
     '      /* 回溯撤销：不管上面那一行找没找到解，都要把这一格原样还回去。',
     '         不还的话，接下来试第 c+1 列时会看到一个早就不该存在的后，',
     '         再往后数出来的每一个「解」都是假的。 */',
+    '      // >>> BLANK id=undo level=2 fill="cols[c] = 0;" hint="摆上去的时候三张表一起登记成了 1，撤销就要把这三张表一起还回 0。少还一张，那条线在这一支之后就一直被占着 —— 后面每一步读到的都是一张早就不该是这样的表。" hintEn="Placing the queen set all three tables to 1, so undoing has to clear all three back to 0. Miss one and that line stays blocked for the rest of the search, and every later step reads a table that should have been cleared long ago."',
     '      cols[c] = 0; diagDown[r + c] = 0; diagUp[r - c + N] = 0;',
+    '      // <<< BLANK',
     '      mark(sq, "back");',
     '      clear(sq);',
     '    } else {',
