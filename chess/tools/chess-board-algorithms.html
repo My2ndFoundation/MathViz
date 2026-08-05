@@ -160,6 +160,35 @@ body.folded #split,body.folded #divider{display:none}
 .ed-slot.ro{opacity:.78}
 .ed-slot.ro .ed-cap{cursor:default}
 .ed-slot.ro .ed-cap:hover{color:rgba(159,176,200,.6)}
+
+/* ---- 分级提示（§2.9）：只在练习模式下露面 ----
+   位置是**紧挨着编辑器下沿**，不是右侧参数面板：第 3、4 级的正文是源码
+   （骨架 / 完整答案），要等宽字体与横向滚动，而右侧面板只有 298 px 宽、
+   还得跟读数抢地方。占位注释那一行写的「提示见下面」，下面指的就是这里。
+   `flex:0 0 auto` 与上面那张状态牌同理：flex 子项默认收缩，不钉住就会被
+   压扁成一条，而里面 2–20 行字照旧画出来叠到调试器上。 */
+#exHost{flex:0 0 auto;display:none;flex-direction:column;gap:6px;max-height:26vh;overflow-y:auto;
+  padding:7px 9px;border-radius:9px;background:rgba(8,13,24,.5);border:1px solid var(--panel-line)}
+#exHost.on{display:flex}
+.ex-head{display:flex;align-items:baseline;gap:8px;font-family:var(--font-mono);font-size:10.5px;
+  letter-spacing:.04em;color:#9be8f7}
+.ex-head .n{color:rgba(159,176,200,.6);font-size:10px;font-family:var(--font-cn);letter-spacing:0}
+.ex-head .warn{color:#fcd34d;font-family:var(--font-cn);letter-spacing:0}
+.ex-row{display:flex;flex-direction:column;gap:5px;padding:5px 7px;border-radius:8px;
+  border:1px solid rgba(148,163,184,.16)}
+.ex-row.done{border-color:rgba(52,211,153,.35)}
+.ex-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ex-id{font-family:var(--font-mono);font-size:11px;color:#7dd3fc}
+.ex-diff{font-size:10.5px;color:rgba(159,176,200,.6)}
+.ex-meta{font-family:var(--font-mono);font-size:10px;color:rgba(159,176,200,.55);margin-left:auto}
+.ex-meta.ok{color:#a7f3d0}
+.btn.ex-btn{padding:3px 8px;font-size:11px}
+.ex-lead{font-size:10.5px;color:rgba(159,176,200,.7)}
+.ex-body{font-size:11.5px;line-height:1.65;color:#c6d2e4;white-space:pre-wrap;word-break:break-word}
+/* 第 3、4 级的正文是源码：等宽、不折行、**自己横向滚**（约束：宽内容不许把
+   整块面板撑破）。 */
+.ex-body.code{font-family:var(--font-mono);font-size:11px;line-height:1.55;color:#a7f3d0;
+  white-space:pre;overflow-x:auto;padding:6px 8px;border-radius:6px;background:rgba(2,6,14,.6)}
 #dbgHost{flex:1 1 0;min-height:190px}
 
 /* ---- 页签：居中于**画布那一块**，不是整窗 ---- */
@@ -284,6 +313,8 @@ body.busy #busy{display:block}
      CALL STACK / VARIABLES / OUTPUT 于是成了三条看不见的细条。钉死 150px
      （820×900 下量的，正好两行），按钮怎么折都轮不到它让位；同时高度是
      definite 的，三块内部各自的滚动条还在，输出再长也不会把面板顶穿。 */
+  /* 窄屏里 #split 只剩上半截，提示面板再收一档，否则会把调试器挤没。 */
+  #exHost{max-height:20vh}
   #dbgHost{flex-basis:auto}
   #dbgHost .dbg-grid{flex:0 0 150px}
   /* 输出块同理，而且必须给 definite 高度：它按内容长，而调试器每步都把
@@ -346,6 +377,9 @@ body.busy #busy{display:block}
   </div>
   <div class="sp-status" id="status"></div>
   <div id="editorHost"></div>
+  <!-- §2.9 的分级提示：只在练习模式下露面（脚本切 .on）。它挨着编辑器下沿，
+       因为占位注释那一行只留了一句「提示见下面」—— 下面指的就是这里。 -->
+  <div id="exHost"></div>
   <div id="dbgHost"></div>
 </div>
 <div id="divider"></div>
@@ -5883,19 +5917,40 @@ body.busy #busy{display:block}
 
    ---- 占位块的形状 ----
 
-     <indent>/ * 在这里写：<hint.zh>  （第 <level> 级；Check 会跑你的版本和参考版本，比行为不比写法） * /
+     <indent>/ * 在这里写 —— <id> · 提示见下面的「提示」 * /
      <indent><fill>
 
    `indent` 取挖空体第一行的前导空白，两行占位都用它，这样占位版在编辑器
    里缩进跟原文一致。
 
+   ---- 这一行为什么这么短：完整提示归提示面板，注释行只留一句路标 ----
+
+   它曾经把 `hint` 整段写进去（外加一句「第 N 级；Check 会跑你的版本和参考版本」）。
+   实测的后果：**英文那一行长 292–428 个字符**，而编辑器可视宽度是 302 px、
+   `scrollWidth` 3,229 px —— 一行注释要横向滚十屏，而英文恰恰是这套工具的默认
+   语言（§1.6），也就是说默认看到的是最难读的那一种。中文那几行只有 113–154 字符，
+   两侧差了近三倍，谁都不会在中文界面上发现这件事。
+
+   所以分工改成：**完整提示（含分级）由 `hintAt` 交给页面的提示面板**，注释行
+   只剩一句路标 —— 说明「这里要你写」、是哪一个空、去哪儿看提示。三件事都是
+   短的，中英加起来 33 / 55 个字符。
+
+   `<id>` 必须在这一行里，两个理由都是硬的：
+     ① 一道题可以有两个空（queens / knightPath 都是），注释行不带 id 就**逐字节
+        相同**，而 UI 拿它当锚点（切语言时原地对换、第 4 级「填进去」时定位她的
+        答案）—— 两行一样，两个空就会互相顶掉。
+     ② 提示面板的每一行也按 id 标题，屏幕上下两处对得上。
+   `parse()` 已经保证同一份源码里 id 不重复（`seenIds`），所以「注释行唯一」
+   是它免费给的。
+
    ---- 占位注释那一行的语言：`lang` 是必填参数，没有默认值 ----
 
-   这一行以前写死成中文（`'/* 在这里写：' + attrs.hint.zh`），**而英文才是这套
-   工具的默认语言**（规格 §1.6）——五条精心写的 `hintEn` 于是在编辑器里一个字
-   都读不到，页面上还什么都不报。所以 `parse(source, lang)` 的第二个参数是必填
-   的：一个默认成 'zh' 的语言参数会让同一个缺陷换个地方原样复活，而一个默认成
-   'en' 的又会让中文使用者的提示悄悄消失。**要哪种语言，调用方自己说。**
+   这一行以前写死成中文，**而英文才是这套工具的默认语言**（规格 §1.6）——
+   五条精心写的 `hintEn` 于是在编辑器里一个字都读不到，页面上还什么都不报。
+   所以 `parse(source, lang)` 的第二个参数是必填的：一个默认成 'zh' 的语言参数
+   会让同一个缺陷换个地方原样复活，而一个默认成 'en' 的又会让中文使用者的提示
+   悄悄消失。**要哪种语言，调用方自己说。**（`hintEn` 今天真正的读者是
+   `hintAt(blank, 1)` —— 提示面板，不是这一行。）
 
    两侧渲染同一个函数 `noteLine(blank, lang)`，它也被导出：UI 切语言时**不重新
    生成占位源码、更不重跑解释器**（那要几百毫秒），而是拿 `noteLine(b,'zh')` 与
@@ -6092,28 +6147,33 @@ body.busy #busy{display:block}
   }
 
   /* 占位注释那一行（**含缩进**），中英各一份。导出给 UI 层：切语言时用它把
-     编辑器里那一行原地换掉，不重新生成源码、不重跑解释器（见文件头）。
+     编辑器里那一行原地换掉，不重新生成源码、不重跑解释器（见文件头）；第 4 级
+     的「填进去」也拿它当锚点找她那段答案。
+
+     **它只是一句路标，不是提示本身** —— 完整提示（分四级）归 `hintAt`，理由
+     写在文件头「这一行为什么这么短」那一节：写进来的那一版英文单行 292–428 字符，
+     在 302 px 宽的编辑器里横向滚十屏。
 
      `blank` 要是 `parse()` 产出的挖空对象，`lang` 必填。两个都当场校验：
-     少一个就静默给出一行别的语言的注释，正是这个函数存在的理由。 */
+     少一个就静默给出一行别的语言的注释，正是这个函数存在的理由。
+     `level` / `hint` 今天不出现在这一行里，仍然照查 —— 那是「这确实是 parse()
+     产出的挖空对象」的形状检查，不是这句话用得着它们。 */
   function noteLine(blank, lang) {
     if (!blank || typeof blank !== 'object' || !blank.hint ||
         typeof blank.hint.zh !== 'string' || typeof blank.hint.en !== 'string' ||
-        typeof blank.indent !== 'string' || typeof blank.level !== 'number') {
+        typeof blank.indent !== 'string' || typeof blank.level !== 'number' ||
+        typeof blank.id !== 'string' || blank.id === '') {
       throw new Error(
         'noteLine(blank, lang) 少了 blank，或者它不是 parse() 产出的挖空对象' +
-        '（要有 indent / level / hint.{zh,en}），收到：' +
+        '（要有 id / indent / level / hint.{zh,en}），收到：' +
         (blank === null || blank === undefined ? String(blank) : typeof blank)
       );
     }
     assertLang(lang, 'noteLine(blank, lang)');
     if (lang === 'zh') {
-      return blank.indent + '/* 在这里写：' + blank.hint.zh +
-        '  （第 ' + blank.level + ' 级；Check 会跑你的版本和参考版本，比行为不比写法） */';
+      return blank.indent + '/* 在这里写 —— ' + blank.id + ' · 提示见下面的「提示」 */';
     }
-    return blank.indent + '/* Write your answer here: ' + blank.hint.en +
-      '  (level ' + blank.level + '; Check runs your version and the reference one, ' +
-      'comparing behaviour, not wording) */';
+    return blank.indent + '/* Your answer here — ' + blank.id + ' · see Hints below */';
   }
 
   /* 语言参数**没有默认值**。理由写在文件头：默认成哪一种，都是让「占位注释
@@ -7010,6 +7070,12 @@ const ALGOS = {
                  en: 'The program’s **return value** differs: reference %A, yours %B.' },
     chkResultAt:{ zh: '（返回值不发生在某一步，所以两条轨道停在各自的末步：参考第 %R 步、你第 %H 步。）',
                   en: '(A return value does not happen at a step, so each track is parked at its own last step: %R on the reference side, %H on yours.)' },
+    /* judge 报了一种这一页还不认识的 `kind`。**这一条必须存在**：三种 kind 的
+       措辞逐条分开写了之后，最后那个 else 曾经是「其余一律按 result 措辞」——
+       exercise.js 哪天多出第四种可观测行为，屏幕上就会指着它说「返回值不同」，
+       而 judge 从没说过这句话。认不出来就说认不出来，别替 judge 说话。 */
+    chkOther:  { zh: '判定报了一种这一页还不认识的分歧（kind = %K）—— 这是工具该跟上的地方，不是你的代码的问题。',
+                 en: 'The check reported a kind of divergence this page does not know yet (kind = %K) — that is the tool falling behind, not a problem with your code.' },
     /* unknown：**不是「错」**。 */
     chkUnknown:{ zh: '**跑不完，判不了。**', en: '**It does not finish, so it cannot be judged.**' },
     chkUnknownWhy:{ zh: '有一边撞上了 200,000 步的上限，而在被截断之前两边没有任何分歧 —— 所以这不是"错"，是"不知道"。让它跑得完再按一次。',
@@ -7028,6 +7094,41 @@ const ALGOS = {
                   en: 'The reference version stays on the step the check parked it at; stepping and clicking act on your board.' },
     chkSplit:  { zh: '判定之后两条轨道**各走各的**：参考停在它那一步，你的这条跟着单步走。',
                  en: 'After a check the two tracks are **on their own cursors**: the reference stays on its step; yours follows the debugger.' },
+
+    /* ---- 分级提示与存档（§2.9 阶段 6 第 5 条）----
+
+       §2.9 的原话是这一整段的判据：提示逐级给，不一次给完；**任何时候都可以
+       直接看答案并继续**。所以每一行都有两个按钮：一个往下走一级，一个直接跳到
+       第 4 级。措辞里一次「先自己想想」都不许有 —— 这是自学工具，不是考试。 */
+    exHints:   { zh: '提示', en: 'Hints' },
+    exHintBtn: { zh: '提示', en: 'Hint' },
+    /* 提示阶梯（1..4）与 blank.level（1..3 的难度）**不是一回事**，所以两处的
+       措辞刻意不同：这一条说「第几级提示」，下一条说「难度几」。 */
+    exStage:   { zh: '第 %L / 4 级提示', en: 'hint %L of 4' },
+    exNoHint:  { zh: '还没看提示', en: 'no hint yet' },
+    exAnswer:  { zh: '直接看答案', en: 'Show the answer' },
+    exFill:    { zh: '填进编辑器', en: 'Fill it in' },
+    exDiff:    { zh: '难度 %L / 3', en: 'difficulty %L of 3' },
+    exTries:   { zh: '按过 %N 次 Check', en: '%N check(s)' },
+    exNoTry:   { zh: '还没按过 Check', en: 'no check yet' },
+    exSolved:  { zh: '已判对', en: 'solved' },
+    exWhy:     { zh: '提示级别与尝试次数记在这台浏览器里。**随时可以直接看答案再往下走** —— 这是自学工具，不是考试。',
+                 en: 'Hint levels and attempt counts are kept in this browser. **You can jump straight to the answer and carry on** — this is a tool for learning, not an exam.' },
+    exFilled:  { zh: '答案已经填进编辑器了（%B）—— 按 Run 或 Check 看看它到底做了什么。',
+                 en: 'The answer is in the editor now (%B) — press Run or Check and watch what it actually does.' },
+    /* 「填进去」定位不了她那段答案时**什么都不改**，并说清楚为什么。绝不
+       瞎猜一行覆盖掉 —— 答案就摆在上面那一格里，复制粘贴一秒钟的事，
+       而猜错一行会把她写的东西吃掉。 */
+    exFillNote:{ zh: '找不到 %B 那一行占位注释了（多半被改过或删掉了），所以一个字都没敢动。答案就在上面那一格里，复制粘贴进去就行。',
+                 en: 'The placeholder comment line for %B is gone (edited or deleted), so nothing was touched. The answer is in the box above — copy it in.' },
+    exFillTail:{ zh: '%B 那一空**下面**的代码也被改过，划不出「你写的是哪几行」，所以一个字都没敢动。答案就在上面那一格里，复制粘贴进去就行。',
+                 en: 'The code **below** the %B blank has been edited too, so there is no way to tell which lines are your answer; nothing was touched. The answer is in the box above — copy it in.' },
+    /* 存档：读得出来就说读出来了，读不出来就说为什么。 */
+    exRestored:{ zh: '上次写到一半的答案已经从这台浏览器里恢复。', en: 'Your half-finished answer was restored from this browser.' },
+    exStale:   { zh: '这台浏览器里存着的那份是按 %V 写的，现在是 %W —— 参数一换源码就是另一份，所以没有恢复。',
+                 en: 'The copy saved in this browser was written for %V, and the parameters are now %W — a different parameter means a different source, so it was not restored.' },
+    exNoStore: { zh: '这个浏览器不让存东西（多半是隐私模式），所以刷新一次就得重写 —— 别的一切照常。',
+                 en: 'This browser will not let the page store anything (private mode, most likely), so a reload loses your answer. Everything else works as usual.' },
 
     /* ---- 显示开关（四条都是"画不画"，不是"算什么"） ---- */
     tgMarks:  { zh: '四种状态', en: 'The four states' },
@@ -7607,16 +7708,210 @@ const ALGOS = {
 
   /* 一条练习轨道随身带的东西：挖空清单，加上占位注释那几行的**中英两份原文**。
      后者是切语言时**原地对换**用的 —— 不重新生成源码、更不重跑解释器
-     （queens N=8 一次 Run 是两百毫秒，切一次语言等那么久是不能接受的）。 */
+     （queens N=8 一次 Run 是两百毫秒，切一次语言等那么久是不能接受的）。
+
+     `pristine` 是**这条轨道刚生成出来时的占位版原文**。第 4 级的「填进编辑器」
+     靠它划出「她写的是哪几行」：拿她此刻的文本跟这一份对齐，挖空之外的部分
+     一模一样时，中间剩下的那几行就是她的答案（见 answerRange）。没有它就只能
+     猜「注释行下面那一行是她的答案」—— 而她的答案可以是三行，猜错就是吃掉她
+     写的东西。 */
   function exStateOf(parsed) {
     return {
       blanks: parsed.blanks,
       lang: curLang(),
+      pristine: parsed.placeholder,
       notes: {
         zh: parsed.blanks.map(function (b) { return Exercise.noteLine(b, 'zh'); }),
         en: parsed.blanks.map(function (b) { return Exercise.noteLine(b, 'en'); }),
       },
     };
+  }
+
+  /* ================= localStorage：**这一页唯一碰它的一段** =================
+     （§2.9 阶段 6 第 5 条；全局硬约束：`chess/core/exercise.js` 里一次都不许出现）
+
+     ---- 键是两个，不是一个 ----
+
+       chess.exercise.v1.<problem>.src      { text, paramSig, lang }
+       chess.exercise.v1.<problem>.<blank>  { attempts, hintLevel, solvedAt }
+
+     **文本一题一份**，不是一空一份：queens 与 knightPath 各有两个挖空，而可编辑
+     的单元是**整份源码**（阶段 6 第 2 条「整份源码照旧可编辑」）—— 一份文本没法
+     拆给两个键，硬拆就是把同一个字符串存两遍，然后等它们分岔。
+     `attempts` / `hintLevel` / `solvedAt` 反过来**确实是按挖空的**：§2.9 要这份
+     数据是为了将来做「哪些概念她反复卡住」的回顾，那要的正是这三个，不是文本。
+
+     `paramSig` 不是锦上添花：改一个 N，源码就是另一份了，把 N=6 写的答案倒进
+     N=8 的编辑器只会得到一段对不上号的代码。对不上就**不恢复并说清楚**
+     （见 STR.exStale），不猜。
+
+     一份键的形状要是变了：**换 `v1` 前缀，不做迁移**（§2.9 原文）。
+
+     ---- 读不出来一律当作没有，绝不抛 ----
+
+     这是这一页唯一一处「静默降级」是对的地方 —— 她的浏览器存储坏了，不该让
+     整个工具打不开。但每一条降级都在控制台留一句 `console.warn`：静默的是界面，
+     不是日志。localStorage 整个不可用（隐私模式 / 关了存储）时退到一份内存副本：
+     功能照常，只是刷新一次就没了（页面会明说，见 STR.exNoStore）。
+
+     ---- 只在练习模式下写 ----
+
+     `saveSrc` / `saveBlank` 开头都有 `exerciseOn()` 那道闸。正常模式下这一页一个
+     字节都不往存储里写。 */
+  const LS_PREFIX = 'chess.exercise.v1.';
+  const memStore = Object.create(null);      // localStorage 不可用时的替身（只活一次会话）
+  let lsOk = null;                           // null = 还没试过；true/false = 试过了
+  let lsWarned = false;
+
+  /* 能不能用？**要真写一次才算数** —— Safari 隐私模式下 `localStorage` 这个对象
+     是在的，`setItem` 才抛。只探一次，结果记下来。 */
+  function lsAvail() {
+    if (lsOk !== null) return lsOk;
+    try {
+      const probe = LS_PREFIX + '__probe';
+      window.localStorage.setItem(probe, '1');
+      window.localStorage.removeItem(probe);
+      lsOk = true;
+    } catch (e) {
+      lsOk = false;
+      console.warn('[chess-board-algorithms] localStorage 用不了，练习进度只在本次会话里记着：' +
+                   ((e && e.message) ? e.message : String(e)));
+    }
+    return lsOk;
+  }
+  function storeGet(key) {
+    const full = LS_PREFIX + key;
+    let raw = null;
+    if (lsAvail()) {
+      try { raw = window.localStorage.getItem(full); }
+      catch (e) {
+        console.warn('[chess-board-algorithms] 读不出 ' + full + '，当作没有：' +
+                     ((e && e.message) ? e.message : String(e)));
+        return null;
+      }
+    } else {
+      raw = Object.prototype.hasOwnProperty.call(memStore, full) ? memStore[full] : null;
+    }
+    if (raw == null) return null;
+    let v;
+    /* ⚠ 坏掉的存档**不删**：删掉就等于替她扔东西，而且下一次打开会安安静静
+       什么都不说。留着 + 每次开页面 warn 一次，才是"这里有一份读不了的存档"
+       这件事唯一说得出口的形式。 */
+    try { v = JSON.parse(raw); }
+    catch (e) {
+      console.warn('[chess-board-algorithms] 存档 ' + full + ' 不是合法 JSON，当作没有（原文留着没动）：' +
+                   ((e && e.message) ? e.message : String(e)));
+      return null;
+    }
+    if (!v || typeof v !== 'object' || Array.isArray(v)) {
+      console.warn('[chess-board-algorithms] 存档 ' + full + ' 不是一个对象，当作没有：' + raw.slice(0, 80));
+      return null;
+    }
+    return v;
+  }
+  function storeSet(key, val) {
+    const full = LS_PREFIX + key;
+    let raw;
+    try { raw = JSON.stringify(val); }
+    catch (e) { console.warn('[chess-board-algorithms] ' + full + ' 序列化失败，没存：' + e.message); return false; }
+    if (!lsAvail()) { memStore[full] = raw; return true; }
+    try { window.localStorage.setItem(full, raw); return true; }
+    catch (e) {
+      /* 配额满 / 存储被禁：说一次就够，别每次敲键盘都刷一条。 */
+      if (!lsWarned) {
+        lsWarned = true;
+        console.warn('[chess-board-algorithms] 写不进 ' + full + '（多半是配额满了），进度这一次记不下来：' +
+                     ((e && e.message) ? e.message : String(e)));
+      }
+      return false;
+    }
+  }
+  function storeDel(key) {
+    const full = LS_PREFIX + key;
+    if (!lsAvail()) { delete memStore[full]; return; }
+    try { window.localStorage.removeItem(full); }
+    catch (e) { console.warn('[chess-board-algorithms] 删不掉 ' + full + '：' + ((e && e.message) ? e.message : String(e))); }
+  }
+
+  /* ---- 两个键各自的读写。**校验在这里做完**：上面那层只管"是不是一个对象"，
+         "这个对象是不是我们要的形状"归这里。字段坏了就退回默认值，不抛。 ---- */
+  function srcKey(pid) { return pid + '.src'; }
+  function blankKey(pid, id) { return pid + '.' + id; }
+
+  function loadSrc(pid) {
+    const v = storeGet(srcKey(pid));
+    if (!v) return null;
+    if (typeof v.text !== 'string' || typeof v.paramSig !== 'string') {
+      console.warn('[chess-board-algorithms] 存档 ' + LS_PREFIX + srcKey(pid) +
+                   ' 缺 text / paramSig，当作没有');
+      return null;
+    }
+    return { text: v.text, paramSig: v.paramSig, lang: (v.lang === 'zh' || v.lang === 'en') ? v.lang : null };
+  }
+  function saveSrc(pid, text) {
+    if (!exerciseOn() || !pid) return false;          // 正常模式一个字节都不碰
+    return storeSet(srcKey(pid), { text: text, paramSig: paramSig(pid), lang: curLang() });
+  }
+  function dropSrc(pid) { if (pid) storeDel(srcKey(pid)); }
+
+  /* 一个挖空的进度。**读不出来 = 全新开始**，而不是报错：这三个数丢了顶多是
+     少记一笔，不该挡住她做题。 */
+  function loadBlank(pid, id) {
+    const v = storeGet(blankKey(pid, id)) || {};
+    const n = (typeof v.attempts === 'number' && isFinite(v.attempts) && v.attempts >= 0)
+      ? Math.floor(v.attempts) : 0;
+    const lv = (v.hintLevel === 0 || v.hintLevel === 1 || v.hintLevel === 2 ||
+                v.hintLevel === 3 || v.hintLevel === 4) ? v.hintLevel : 0;
+    const at = (typeof v.solvedAt === 'number' && isFinite(v.solvedAt)) ? v.solvedAt : null;
+    return { attempts: n, hintLevel: lv, solvedAt: at };
+  }
+  function saveBlank(pid, id, rec) {
+    if (!exerciseOn() || !pid) return false;
+    return storeSet(blankKey(pid, id), {
+      attempts: rec.attempts, hintLevel: rec.hintLevel, solvedAt: rec.solvedAt,
+    });
+  }
+  /* ================= localStorage 到此为止 ================= */
+
+  /* 占位注释那几行的中英原地对换。**两处共用**：切语言（retextNotes）与「从存档
+     恢复」（存的时候可能是另一种语言）。查得到表的那几行才换 —— 她自己改过的行
+     对不上任何一份，原样留着。 */
+  function swapNoteLines(text, from, to) {
+    const map = Object.create(null);
+    for (let i = 0; i < from.length && i < to.length; i++) map[from[i]] = to[i];
+    return String(text).split('\n').map(function (ln) {
+      return Object.prototype.hasOwnProperty.call(map, ln) ? map[ln] : ln;
+    }).join('\n');
+  }
+
+  /* 把上次写到一半的答案拿回来。返回这条轨道**真正要跑**的那份源码。
+
+     ⚠ **参数对不上就不恢复。** 改一个 N，源码就是另一份了（这一页本来就会说
+     「参数改成 N=8：源码按新参数重新生成了，自己改过的内容会被覆盖」）——
+     把 N=6 写的答案倒进 N=8 的编辑器只会得到一段对不上号的代码。对不上就
+     不恢复、并把原因记下来由提示面板说出口，不猜。 */
+  function restoreSrc(pid, tk, g) {
+    const st = S[pid];
+    if (!exerciseOn() || tk.role === 'contrast' || !g.ex || !g.ex.blanks.length) return g.src;
+    const rec = loadSrc(pid);
+    if (!rec) { st.restore = { kind: 'none' }; return g.src; }
+    const now = paramSig(pid);
+    if (rec.paramSig !== now) {
+      st.restore = { kind: 'stale', was: rec.paramSig, now: now };
+      return g.src;
+    }
+    /* 存的时候是另一种语言 → 占位注释那几行换成当前语言的。换掉的只是注释，
+       程序一个字节的行为都没变（同 retextNotes）。 */
+    const lang = curLang();
+    const text = (rec.lang && rec.lang !== lang)
+      ? swapNoteLines(rec.text, g.ex.notes[rec.lang], g.ex.notes[lang])
+      : rec.text;
+    /* ⚠ 存的跟刚生成的**一模一样** → 什么都没恢复，别说恢复了。onChange 那边
+       已经挡掉了"原样存一份"，这里再挡一次旧存档：这句话是说给人听的，说错了
+       比不说更糟。 */
+    if (text === g.src) { st.restore = { kind: 'none' }; return g.src; }
+    st.restore = { kind: 'ok' };
+    return text;
   }
 
   /* Task 7/8 的入口：这道题此刻每条轨道上有哪些挖空。正常模式下 blanks 都是空
@@ -7723,7 +8018,14 @@ const ALGOS = {
   /* `judge` 是**上一次 Check 的结果**（`{ status, div, herIndex, refIndex, herSrc }`），
      null = 还没判过。它存的是**数据不是文案**：读数区与状态牌每次都从它重新渲染，
      所以切语言那一下判定结论也跟着换语言，不需要重跑任何东西。 */
-  PIDS.forEach(function (pid) { S[pid] = { tracks: [], sig: null, hookErr: null, ex: false, judge: null }; });
+  /* `prog` 是**这道题每个挖空的进度**（`{ attempts, hintLevel, solvedAt }`，按挖空
+     id 索引），建轨道时从 localStorage 一次读齐、之后渲染只读内存，改动时同时
+     写回。`restore` 记的是这一次重建**有没有把上次写到一半的答案拿回来**、
+     没拿回来是为什么（提示面板顶上那句话读它）。 */
+  PIDS.forEach(function (pid) {
+    S[pid] = { tracks: [], sig: null, hookErr: null, ex: false, judge: null,
+               prog: Object.create(null), restore: null };
+  });
 
   let uiTab = null;             // 此刻显示的是哪道题
   let activeTrack = 0;          // 编辑器/调试器挂在这道题的第几条轨道上
@@ -7906,6 +8208,7 @@ const ALGOS = {
        是 `files.length`，接在末尾的那条参考轨道自然被截掉（它是 st.tracks 的最后
        一项，这是 attachRefTrack 的不变量）。 */
     st.judge = null;
+    st.restore = null;                 // 这一次重建有没有恢复存档，下面重新答一遍
     const pv = paramsOf(pid);
     const files = sourcesFor(P);
     st.tracks = files.map(function (entry, k) {
@@ -7929,11 +8232,23 @@ const ALGOS = {
         tk.err = g.err;
         return tk;
       }
-      /* runTrack 开头会把 tk.err 清成 null，所以生成错误只能在它之后盖上去。 */
-      const done = runTrack(tk, g.src, true);
+      /* runTrack 开头会把 tk.err 清成 null，所以生成错误只能在它之后盖上去。
+         ⚠ 跑的是 `restoreSrc` 交出来的那一份：她上次写到一半的答案（存档里
+         有、而且是按同一组参数写的）优先于刚生成的占位版。恢复出来的东西可能
+         有语法错 —— 那也照原样跑、照原样报，那是她的代码，不该被悄悄换掉。 */
+      const done = runTrack(tk, restoreSrc(pid, tk, g), true);
       if (g.err) done.err = g.err;
       return done;
     });
+    /* 每个挖空的进度一次读齐（提示级别 / 尝试次数 / 判对时间），之后渲染只读
+       内存这一份。正常模式下不读 —— 那时候根本没有"空"可言。 */
+    st.prog = Object.create(null);
+    if (exerciseOn()) {
+      st.tracks.forEach(function (tk) {
+        if (!isEdit(tk) || !tk.ex) return;
+        tk.ex.blanks.forEach(function (b) { st.prog[b.id] = loadBlank(pid, b.id); });
+      });
+    }
     st.ex = exerciseOn();
     st.sig = sig;
     layoutTracks(pid);
@@ -8679,6 +8994,27 @@ const ALGOS = {
            当场被清成空串，下一次 Check 拿一份空程序当参考（`I.run('')` 不抛，
            安安静静给你 0 步的轨迹）。 */
         if (tk && !isReference(tk)) tk.src = value;   // 每块编辑器只写**它自己那条**轨道
+        /* ---- 存档：**练习模式下、有空可填的那条轨道**，每改一下就写一次 ----
+           不做防抖：一次写的是三四 KB，比一次重绘便宜得多，而防抖会留下一个
+           "刚打完最后一个字就刷新 → 那几个字没了"的窗口。正常模式一个字节都
+           不碰（saveSrc 自己那道闸也再挡一次）。
+
+           ⚠ **跟占位版一模一样就把存档扔掉，不写。** 每次进练习模式、每次换
+           页签，syncEditorSlots 都会 setValue 一次原样的占位版，同步触发这里 ——
+           照写不误的话，光是点开一道题就会存下一份"她的答案"，而下一次打开时
+           面板会指着它说「上次写到一半的答案已经恢复」。那是一句假话。 */
+        if (tk && exerciseOn() && isEdit(tk) && tk.ex && tk.ex.blanks.length) {
+          if (tk.ex.pristine !== value) saveSrc(uiTab, value);
+          else {
+            /* ⚠ 只扔**同一组参数下**的那份存档（她真的把自己写的删回了原样）。
+               参数不同的那一份要留着：她刚把滑杆从 N=6 挪到 N=8，屏幕上这份
+               原样的 N=8 占位版并不代表她扔掉了 N=6 那份答案 —— 滑杆挪回去
+               就该还在。（同一组参数下另写一份答案仍然会盖掉它：一个题目一份
+               文本，见 localStorage 那一节。） */
+            const rec = loadSrc(uiTab);
+            if (rec && rec.paramSig === paramSig(uiTab)) dropSrc(uiTab);
+          }
+        }
         /* 非活动那一块的语法错不该锁住 Run：Run 只重跑活动那一条。她切过去的
            那一刻 setActiveTrack 会重新问一次 getError()，那时才轮到它说话。 */
         if (k !== activeTrack) return;
@@ -8798,6 +9134,10 @@ const ALGOS = {
       /* 折叠期间这块是 display:none，编辑器量不到字符宽度；重新显示要刷一次。 */
       s.ed.refresh();
     });
+    /* 提示面板画的是**活动轨道**上那几个空 —— 跟槽位是同一件事的两半（重建 /
+       切轨道 / 切语言 / Run / Check 都从这里过），所以挂在这里，不必每个调用点
+       各记一次「顺便重画提示」。 */
+    renderExPanel();
   }
 
   /* 把调试器挂到当前题目的当前轨道上。换题目 = 换一份程序：编辑器内容、
@@ -8872,6 +9212,243 @@ const ALGOS = {
       }
     }
   }
+  /* ================= 分级提示（§2.9 阶段 6 第 5 条） =================
+
+     规格的原话：提示逐级给，不一次给完 —— 文字提示 → 点名涉及了哪几个变量 →
+     参考答案的结构骨架 → 完整答案。**任何时候都可以直接看答案并继续。**
+
+     四级的内容一个字都不在这一层：`Exercise.hintAt(blank, level)` 说了算。这里
+     只管三件事 —— 她点到第几级了（存起来）、把那一级画出来、以及第 4 级那个
+     「填进编辑器」按钮真的把答案填进去。
+
+     ⚠ **「先自己想想」这类话一句都没有，而且不许加。** 卡住而无法前进只会让她
+     把页面关掉；每一行都摆着一个「直接看答案」的按钮，就是这条规格的形状。 */
+
+  const exHost = document.getElementById('exHost');
+
+  /* 这道题此刻的进度记录（内存那一份）。挖空是新出现的（换了参数 / 刚进练习
+     模式）就当场补一条 —— 读不出来 = 全新开始，见 loadBlank。 */
+  function progOf(pid, id) {
+    const st = pid ? S[pid] : null;
+    if (!st) return { attempts: 0, hintLevel: 0, solvedAt: null };
+    if (!st.prog[id]) st.prog[id] = loadBlank(pid, id);
+    return st.prog[id];
+  }
+  function setProg(pid, id, patch) {
+    const rec = progOf(pid, id);
+    Object.keys(patch).forEach(function (k) { rec[k] = patch[k]; });
+    saveBlank(pid, id, rec);
+    return rec;
+  }
+
+  /* 提示面板画的是**活动轨道**上那几个空。只读对照没有空（它走 clean），
+     参考轨道连槽位都没有 —— 两者的 `ex` 都是 null，自然一行都不画。 */
+  function exBlanks() {
+    const tk = curTrack();
+    return (exerciseOn() && tk && tk.ex && tk.ex.blanks) ? tk.ex.blanks : [];
+  }
+
+  /* 一级提示的正文。第 3、4 级的正文是源码，要等宽 + 横向滚，所以顺手告诉
+     调用方这一段该不该按代码排版。`hintAt` 的两句正文里第一行是引导句、
+     其余是代码，这里按第一个换行切开 —— 引导句归 UI 的正文段，代码归 <pre>。 */
+  function hintText(b, level) {
+    let s;
+    try { s = t(Exercise.hintAt(b, level)); }
+    catch (e) {
+      /* 提示坏了不该毁掉整块面板：说出来，别静默画个空行。 */
+      return { lead: '', code: '', err: (e && e.message) ? e.message : String(e) };
+    }
+    const nl = s.indexOf('\n');
+    if (level >= 3 && nl >= 0) return { lead: s.slice(0, nl), code: s.slice(nl + 1), err: null };
+    return { lead: s, code: '', err: null };
+  }
+
+  function mkBtn(label, cls, onClick) {
+    const b = document.createElement('button');
+    b.className = 'btn ex-btn' + (cls ? ' ' + cls : '');
+    b.textContent = label;
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  /* 提示面板重画。**不是每帧调**：它挂在 syncEditorSlots 末尾（重建 / 切轨道 /
+     切语言 / Run / Check 都经过那里），一次几十个 DOM 节点。 */
+  function renderExPanel() {
+    const pid = uiTab, blanks = exBlanks();
+    exHost.classList.toggle('on', exerciseOn() && blanks.length > 0);
+    exHost.textContent = '';
+    if (!exerciseOn() || !blanks.length) return;
+
+    const head = document.createElement('div');
+    head.className = 'ex-head';
+    const ht = document.createElement('span');
+    ht.textContent = t(STR.exHints);
+    head.appendChild(ht);
+    const why = document.createElement('span');
+    why.className = 'n';
+    why.innerHTML = applyMarkup(esc(t(STR.exWhy)));
+    head.appendChild(why);
+    exHost.appendChild(head);
+
+    /* 存档说的那句话（恢复了 / 参数对不上 / 这个浏览器不让存）。三种都写在
+       同一行上，因为它们互斥。 */
+    const st = pid ? S[pid] : null;
+    const notes = [];
+    if (st && st.restore && st.restore.kind === 'ok') notes.push({ warn: false, s: t(STR.exRestored) });
+    if (st && st.restore && st.restore.kind === 'stale') {
+      notes.push({ warn: true, s: applyMarkup(t(STR.exStale), { V: st.restore.was, W: st.restore.now }) });
+    }
+    if (!lsAvail()) notes.push({ warn: true, s: t(STR.exNoStore) });
+    notes.forEach(function (n) {
+      const el = document.createElement('div');
+      el.className = 'ex-lead' + (n.warn ? ' warn' : '');
+      if (n.warn) el.style.color = '#fcd34d';
+      el.textContent = n.s;
+      exHost.appendChild(el);
+    });
+
+    blanks.forEach(function (b, i) {
+      const rec = progOf(pid, b.id);
+      const row = document.createElement('div');
+      row.className = 'ex-row' + (rec.solvedAt ? ' done' : '');
+      const top = document.createElement('div');
+      top.className = 'ex-top';
+
+      const id = document.createElement('span');
+      id.className = 'ex-id';
+      id.textContent = b.id;
+      top.appendChild(id);
+
+      const diff = document.createElement('span');
+      diff.className = 'ex-diff';
+      diff.textContent = t(STR.exDiff).replace('%L', String(b.level));
+      top.appendChild(diff);
+
+      /* 往下走一级。到第 4 级就走不动了 —— 那时候按钮变灰，但旁边「直接看答案」
+         那一颗从头到尾都在。 */
+      const next = mkBtn(t(STR.exHintBtn) + (rec.hintLevel ? ' ' + rec.hintLevel + '/4' : ''), '', function () {
+        setProg(pid, b.id, { hintLevel: Math.min(4, rec.hintLevel + 1) });
+        renderExPanel();
+      });
+      next.disabled = rec.hintLevel >= 4;
+      top.appendChild(next);
+
+      /* §2.9：**任何时候都可以直接看答案并继续。** 一颗按钮，不问理由、不弹确认。 */
+      const all = mkBtn(t(STR.exAnswer), '', function () {
+        setProg(pid, b.id, { hintLevel: 4 });
+        renderExPanel();
+      });
+      all.disabled = rec.hintLevel >= 4;
+      top.appendChild(all);
+
+      if (rec.hintLevel >= 4) top.appendChild(mkBtn(t(STR.exFill), 'check', function () { fillAnswer(i); }));
+
+      const meta = document.createElement('span');
+      meta.className = 'ex-meta' + (rec.solvedAt ? ' ok' : '');
+      meta.textContent = (rec.attempts ? t(STR.exTries).replace('%N', fmtInt(rec.attempts)) : t(STR.exNoTry)) +
+                         (rec.solvedAt ? ' · ' + t(STR.exSolved) : '');
+      top.appendChild(meta);
+      row.appendChild(top);
+
+      if (!rec.hintLevel) {
+        const none = document.createElement('div');
+        none.className = 'ex-lead';
+        none.textContent = t(STR.exNoHint);
+        row.appendChild(none);
+      } else {
+        const h = hintText(b, rec.hintLevel);
+        const stage = document.createElement('div');
+        stage.className = 'ex-lead';
+        stage.textContent = t(STR.exStage).replace('%L', String(rec.hintLevel));
+        row.appendChild(stage);
+        if (h.err) {
+          const bad = document.createElement('div');
+          bad.className = 'ex-body';
+          bad.style.color = '#fca5a5';
+          bad.textContent = 'hintAt(' + b.id + ', ' + rec.hintLevel + ')：' + h.err;
+          row.appendChild(bad);
+        } else {
+          if (h.lead) {
+            const lead = document.createElement('div');
+            lead.className = 'ex-body';
+            lead.textContent = h.lead;
+            row.appendChild(lead);
+          }
+          if (h.code) {
+            const pre = document.createElement('div');
+            pre.className = 'ex-body code';
+            pre.textContent = h.code;
+            row.appendChild(pre);
+          }
+        }
+      }
+      exHost.appendChild(row);
+    });
+  }
+
+  /* ---- 第 4 级的「填进编辑器」：她那段答案占哪几行 ----
+
+     这一步唯一难的是**划边界**：占位版给的是「注释行 + 一行 fill」，而她的答案
+     可以是三行、也可以是零行（把 fill 删了）。所以不猜行数，改成两头对齐：
+
+       上边界  这个空的占位注释那一行（id 让它在整份源码里唯一 —— 见 exercise.js
+               「这一行为什么这么短」那一节）。
+       下边界  从**下一个空的注释行**（或文件末尾）往回，跟占位版原文逐行比。
+               占位版里这一空之后、下一空之前的那几行全都对得上，剩下的那一段
+               就是她写的。
+
+     两头有一头对不上（她把注释删了、或者改了空下面的代码）就**一个字都不动**，
+     并说清楚为什么 —— 答案就摆在上面那一格里，复制粘贴一秒钟的事，而猜错一行
+     会把她写的东西吃掉。 */
+  function noteIndexOf(lines, ex, i) {
+    const a = ex.notes.zh[i], b = ex.notes.en[i];
+    for (let n = 0; n < lines.length; n++) if (lines[n] === a || lines[n] === b) return n;
+    return -1;
+  }
+  function answerRange(tk, i, lines) {
+    const ex = tk.ex, pris = ex.pristine.split('\n');
+    const ni = noteIndexOf(lines, ex, i);
+    if (ni < 0) return { err: 'note' };
+    const ni0 = noteIndexOf(pris, ex, i);
+    if (ni0 < 0) return { err: 'note' };            // 占位版自己都找不到：不该发生
+    const last = i + 1 >= ex.blanks.length;
+    const nj = last ? lines.length : noteIndexOf(lines, ex, i + 1);
+    const nj0 = last ? pris.length : noteIndexOf(pris, ex, i + 1);
+    if (nj < 0 || nj0 < 0 || nj <= ni) return { err: 'tail' };
+    const need = nj0 - (ni0 + 2);                   // 占位版里这一空之后的那几行
+    let L = 0;
+    while (L < need && (nj - 1 - L) > ni && lines[nj - 1 - L] === pris[nj0 - 1 - L]) L++;
+    if (L !== need) return { err: 'tail' };
+    return { start: ni + 1, end: nj - L, err: null };
+  }
+
+  function fillAnswer(i) {
+    const tk = curTrack(), pid = uiTab;
+    if (!tk || !tk.ex || !tk.ex.blanks[i]) return false;
+    const b = tk.ex.blanks[i];
+    const lines = ed.getValue().split('\n');
+    const r = answerRange(tk, i, lines);
+    if (r.err) {
+      /* **什么都不改**，并说明是哪一头对不上。 */
+      statusKind = 'bad';
+      setStatus(applyMarkup(esc(t(r.err === 'note' ? STR.exFillNote : STR.exFillTail)), { B: esc(b.id) }), 'bad');
+      return false;
+    }
+    const body = b.body.split('\n');
+    Array.prototype.splice.apply(lines, [r.start, r.end - r.start].concat(body));
+    /* setValue 会同步触发 onChange：她那条轨道的 `src` 跟着换、存档跟着写、
+       上一次判定跟着作废（源码变了，"你在第 76 步分道扬镳"讲的是别的程序）。 */
+    ed.setValue(lines.join('\n'));
+    renderExPanel();
+    /* 填进去的是参考答案，本身不会有语法错 —— 但她**周围**的代码可能正错着，
+       那条红字不能被一句绿色的"填好了"盖掉（这一页的"绿盖红"已经犯过三次）。 */
+    if (!ed.getError()) {
+      statusKind = 'ok';
+      setStatus(applyMarkup(esc(t(STR.exFilled)), { B: esc(b.id) }), 'ok');
+    }
+    return true;
+  }
+
   /* 非活动轨道的「已执行过的行」。`D.visitedLines` 每次都从第 0 步重放整条轨迹
      （200,000 步的轨迹上那是几毫秒），而这里每帧都要——所以**增量**维护：游标
      往前走就补上新走过的行，往回走才重来。 */
@@ -9001,15 +9578,22 @@ const ALGOS = {
     });
   });
 
-  /* §2.8 的 `Reset to original`：把当前轨道的源码换回生成器的输出。本页还没有做
-     §2.8 的 localStorage 持久化（按题目键存需要连参数一起存，改 N 之后旧存档
-     就不再是同一份源码了），所以「还原为原始版本」与「按当前参数重新生成」
-     是同一个动作。 */
+  /* §2.8 的 `Reset to original`：把当前轨道的源码换回生成器的输出。
+
+     ⚠ **它必须把存档一起扔掉。** 练习模式下的存档是按题目键存的，而下一帧
+     `pollParams` 之后的任何一次重建都会去读它 —— 不扔的话，「还原为原始版本」
+     只在屏幕上停留到下一次重建，然后她刚扔掉的那份答案又回来了。
+     扔掉的只有**答案文本**：提示级别与尝试次数是她的进度，不是这份源码的一部分
+     （按了还原不等于她没看过提示）。 */
   btnRevert.addEventListener('click', function () {
     const tk = curTrack(), P = curP();
     if (!tk || !P) return;
     withBusy(function () {
       clearJudge(uiTab);            // 源码换了一份，上一次的判定跟它无关（同 Run）
+      if (exerciseOn()) {
+        dropSrc(uiTab);
+        if (S[uiTab]) S[uiTab].restore = null;   // 「已恢复」那句话跟着这份存档一起没
+      }
       /* 同一条通道的另一个调用点 —— 也必须能报错。以前这里失败会退回 tk.src，
          按钮于是「按了等于没按」，而且一个字都不说。
          ⚠ 走 `prepareSource` 而不是裸的 `genSource`：练习模式下「还原为原始版本」
@@ -9177,12 +9761,20 @@ const ALGOS = {
       if (missing) detail.push('<span class="dim">' + esc(t(STR.chkCountNone)) + '</span>');
       detail.push('<span class="dim">' + applyMarkup(t(STR.chkCountAt),
         { R: stepText(d.refStep), H: stepText(d.herStep) }) + '</span>');
-    } else {
+    } else if (d.kind === 'result') {
       head.push(applyMarkup(t(STR.chkResult), {
         A: esc(D.fmtVal(d.ref)), B: esc(D.fmtVal(d.her)),
       }));
       detail.push('<span class="dim">' + applyMarkup(t(STR.chkResultAt),
         { R: stepText(d.refStep), H: stepText(d.herStep) }) + '</span>');
+    } else {
+      /* ⚠ **认不出来的 kind 不许被措辞成「返回值不同」。** 这一支以前是
+         `else { …chkResult… }` —— exercise.js 今天只发三种 kind，可这整段的
+         全部要点就是**不替 judge 说话**：多出第四种，屏幕上就会指着它说一句
+         judge 从没说过的话，而且没有任何人会发现。认不出来就说认不出来。 */
+      console.error('[chess-board-algorithms] judge 报了一种这一页不认识的 divergence.kind：' +
+                    JSON.stringify(d.kind) + '（judgeRender 要跟着 exercise.js 一起更新）');
+      head.push(applyMarkup(t(STR.chkOther), { K: esc(String(d.kind)) }));
     }
     return { cls: 'bad', head: head, detail: detail };
   }
@@ -9212,8 +9804,16 @@ const ALGOS = {
       // ② 参考版本：同一份源码的挖空体原文（parse().clean），不是编辑器里的东西
       const ref = attachRefTrack(pid, P, tk);
       if (ref.err) {
+        /* ⚠ 这四件事**跟下面 judge 抛的那一支一模一样，不能少**：`attachRefTrack`
+           已经把轨道 push 进去并 layoutTracks 过了，直接 return 会在屏幕上留下
+           第二块空棋盘（而且没有任何一句话解释它是什么）。今天走不到这里
+           （参考版跑不起来这一页就整个是坏的），但"走不到"不该由抄漏三行的人
+           来验证。 */
+        dropRefTrack(pid);
+        syncEditorSlots();
         statusKind = 'bad';
         setStatus(esc(t(STR.chkRefFail) + ref.err.message), 'bad');
+        towerTop = 1; updateFit();
         return;
       }
       // ③ 判定。check 三个开关来自题目声明，配置写错了要大声说（judge 会抛）
@@ -9230,6 +9830,18 @@ const ALGOS = {
       }
       st.judge = { status: v.status, div: v.divergence, herSrc: src,
                    herIndex: st.tracks.indexOf(tk), refIndex: st.tracks.indexOf(ref) };
+      /* ---- 记一笔：这一次判定算作**每个空**各一次尝试 ----
+         判定比的是整个程序的行为，一次 Check 归不到某一个空头上（Task 7 已经
+         把这件事写死在探针的 blankId 上）。所以不假装能归属：每个空各记一次。
+         `pass` 意味着这道题**所有**空都对了，于是 pass 时给每个空盖一次时间戳，
+         `fail`/`unknown` 时不盖 —— unknown 是"不知道"，尤其不许当成判对。
+         跑不起来、判定配置炸了那两条路上根本到不了这里，也就不该记：那两次她
+         什么都没被判过。 */
+      const stamp = v.status === 'pass' ? Date.now() : null;
+      ((tk.ex && tk.ex.blanks) || []).forEach(function (b) {
+        const rec = progOf(pid, b.id);
+        setProg(pid, b.id, { attempts: rec.attempts + 1, solvedAt: stamp || rec.solvedAt });
+      });
       /* ④ 分歧定位：**两条轨道各自 goto**，一个游标推两条到此为止。
          `refStep` 与 `herStep` 通常不相等，各是各的（见 STR.chkOps 那一段）。
          某一侧没有对应位置时是 null —— 那一侧就不动，不拿 0 冒充。 */
@@ -9555,6 +10167,23 @@ const ALGOS = {
           throw new Error(at + 'exerciseSources 里一份 role:"edit" 都没有 —— ' +
             '练习模式下这道题会变成一堆只读文本，Run 与单步都没有落点。');
         }
+        /* ⚠ **一道题只能有一份可编辑源码**，这条限制是 localStorage 的键形状
+           带来的，写在这里而不是等它在运行期悄悄出错：
+
+             chess.exercise.v1.<problem>.src      一份文本
+             chess.exercise.v1.<problem>.<blank>  一个空的进度
+
+           两个键都只按题目名分。两份可编辑源码的话，前者会被两块编辑器轮流
+           覆盖（后写的赢，而且不报），后者更糟 —— 挖空 id 只在**一份源码内**
+           保证不重复（parse 的 seenIds），两份源码里的同名空会共用一条进度记录。
+           真要做两份可编辑源码，得先把键改成按文件分，那时**换 v2 前缀、不做
+           迁移**（§2.9）。 */
+        if (editable > 1) {
+          throw new Error(at + 'exerciseSources 里有 ' + editable + ' 份 role:"edit" —— ' +
+            '今天只支持一份。练习模式的存档键（chess.exercise.v1.<题目>.src 与 ' +
+            '.<挖空 id>）只按题目名分，两份可编辑源码会互相覆盖，而且挖空 id 只在' +
+            '一份源码内保证不重复。要支持两份，先把键改成按文件分并换成 v2 前缀。');
+        }
         if (xs.length > P.sources.length) {
           throw new Error(at + 'exerciseSources 比 sources 还长 —— 编辑器槽位是按' +
             '全页最大轨道数（MAX_TRACKS，从 sources 数出来）一次建齐的，多出来的那几条' +
@@ -9750,14 +10379,12 @@ const ALGOS = {
       tracksOf(pid).forEach(function (tk, k) {
         if (!tk.ex || tk.ex.lang === lang) return;
         const from = tk.ex.notes[tk.ex.lang], to = tk.ex.notes[lang];
-        const map = Object.create(null);
-        for (let i = 0; i < from.length && i < to.length; i++) map[from[i]] = to[i];
-        const swap = function (text) {
-          return text.split('\n').map(function (ln) {
-            return Object.prototype.hasOwnProperty.call(map, ln) ? map[ln] : ln;
-          }).join('\n');
-        };
+        const swap = function (text) { return swapNoteLines(text, from, to); };
         tk.src = swap(tk.src);
+        /* ⚠ **那份占位版原文也要跟着换。** 第 4 级的「填进编辑器」拿它跟编辑器
+           里的文本对齐来划出"她写的是哪几行"（answerRange）—— 一边换了语言、
+           一边没换，对齐当场失败，按钮就变成一句"下面的代码被改过"。 */
+        tk.ex.pristine = swap(tk.ex.pristine);
         /* ⚠ **判定那一刻记下的源码也要跟着换。** 换掉的只是注释那一行，程序一个
            字节的行为都没变 —— 可 `judge.herSrc` 是拿来跟编辑器内容比"她改过了没有"
            的，不换的话下一次 syncEditorSlots 送来的新文本跟它对不上，判定当场作废。
@@ -9941,8 +10568,12 @@ const ALGOS = {
          —— 两者在两种模式下都在。
 
          判定那四个字段（**这是 Task 7 加的**）：
-           blankId  这次判定归到哪个挖空。**只有当她那条轨道恰好只有一个挖空时
-                    才有值**，否则是 null —— 见下面那段注释。
+           blankId  她那条轨道的**挖空清单只有一项时**，那一项的 id；否则 null。
+                    ⚠ 它**不是**「这次判定归到哪个挖空」，两件事差得远：它在按
+                    Check 之前就有值（tourKnight 上实测 `blankId:'degree-fn'` 而
+                    `status:null`），而且它跟判定结果没有任何关系。判定的归属
+                    归不出来（理由见下面那段），所以这里报的只是"这条轨道上就
+                    这么一个空"这件事实。
            status   'pass' | 'fail' | 'unknown'，还没按过 Check 时是 null。
                     ⚠ null（没判过）与 'unknown'（判了，但跑不完）是两回事。
            refStep / herStep  两条轨道各自停在的那一步（`judge` 报的两个步号，
@@ -9958,7 +10589,9 @@ const ALGOS = {
              整个程序的行为，而占位 `fill` 本身就是一个（故意的）错答案 —— 她填对
              了其中一个空，另一个空照样在制造分歧。把某一处分歧归给某一个空，
              需要"这一行属于哪个挖空"的行号归属，而她可以往答案里加行、删行、
-             改动周围。归不出来就说归不出来。 */
+             改动周围。归不出来就说归不出来。
+             （Task 8 的分级提示不受这件事影响：那里的归属是"她点的是哪一个空的
+             提示按钮"，明确得很，跟这里不是同一个问题。） */
           blankId: hb.length === 1 ? hb[0].id : null,
           status: j ? j.status : null,
           refStep: d ? d.refStep : null,
@@ -9974,14 +10607,54 @@ const ALGOS = {
           lang: curLang(),
           count: pid ? blankCount(pid) : 0,
           tracks: pid ? blanksOf(pid) : [],
-          /* 每块编辑器里此刻那几行占位注释的原文：「默认 EN 时读到的是 hintEn」
-             这条断言光看 chars 是断不出来的，得看见字。 */
+          /* 每块编辑器里此刻那几行占位注释的原文。「默认 EN 时那一行是短句、
+             完整提示在提示面板里」这条断言光看 chars 是断不出来的，得看见字
+             （Task 8 之前英文那一行 292–428 字符，横向滚十屏）。 */
           notes: slots.map(function (sl) {
             return sl.ed.getValue().split('\n').filter(function (ln) {
-              return ln.indexOf('/* 在这里写：') >= 0 || ln.indexOf('/* Write your answer here:') >= 0;
+              return ln.indexOf('/* 在这里写 ——') >= 0 || ln.indexOf('/* Your answer here —') >= 0;
             });
           }),
           readOnly: slots.map(function (sl) { return !!sl.ed.textarea.readOnly; }),
+          /* ---- Task 8：分级提示与存档 ----
+             `hints` 读的是**内存那一份进度**（渲染用的就是它），`panel` 读的是
+             **屏幕上真的画出来的东西**。两个都要：前者能断言"存了什么"，后者能
+             断言"她看得见什么" —— 只报前者的话，把 renderExPanel 整个删掉，
+             "第 3 级还在"那条断言照样全绿。 */
+          hints: (function () {
+            const her2 = tks[activeTrack] || null;
+            const bs = (her2 && her2.ex && her2.ex.blanks) || [];
+            return bs.map(function (b) {
+              const rec = progOf(pid, b.id);
+              return { id: b.id, level: b.level, hintLevel: rec.hintLevel,
+                       attempts: rec.attempts, solvedAt: rec.solvedAt };
+            });
+          })(),
+          panel: {
+            visible: exHost.classList.contains('on'),
+            rows: Array.prototype.map.call(exHost.querySelectorAll('.ex-row'), function (row) {
+              const idEl = row.querySelector('.ex-id'), codeEl = row.querySelector('.ex-body.code');
+              return {
+                id: idEl ? idEl.textContent : null,
+                stage: (function () { const s = row.querySelector('.ex-lead'); return s ? s.textContent : null; })(),
+                text: Array.prototype.map.call(row.querySelectorAll('.ex-body'), function (e) {
+                  return e.textContent;
+                }).join('\n'),
+                code: codeEl ? codeEl.textContent : null,
+                buttons: Array.prototype.map.call(row.querySelectorAll('button'), function (b2) {
+                  return { label: b2.textContent, disabled: !!b2.disabled };
+                }),
+              };
+            }),
+            /* 顶上那几句（恢复了 / 参数对不上 / 这个浏览器不让存）。 */
+            notes: Array.prototype.map.call(exHost.children, function (el) {
+              return el.classList.contains('ex-lead') ? el.textContent : null;
+            }).filter(function (x) { return x !== null; }),
+          },
+          /* 存档层此刻的状态。`store` 是 localStorage 能不能用（隐私模式下是
+             false，而功能要照常），`restore` 是这一次重建有没有把答案拿回来。 */
+          store: lsAvail(),
+          restore: st ? st.restore : null,
         };
       })(),
       view: { az: +E.cam.az.toFixed(4), el: +E.cam.el.toFixed(4), dist: +E.cam.dist.toFixed(3) },

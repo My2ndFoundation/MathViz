@@ -38,7 +38,9 @@ const lines = p.placeholder.split('\n');
    （function 行、注释行、return true; 行、闭花括号行），见
    task-1-report.md 的纠正记录。 */
 T.eq(lines.length, 4, '占位版行数 = 4（1 行注释 + 1 行 fill 替换掉 3 行，净减 1 行）');
-T.ok(lines[1].indexOf('会被攻击吗？') >= 0, '占位注释里带着中文提示');
+T.ok(lines[1].indexOf('safe-return') >= 0, '占位注释里点名这是哪一个空');
+T.ok(lines[1].indexOf('会被攻击吗？') === -1,
+     '占位注释里**没有**完整提示 —— 那归 hintAt / 提示面板（见 noteLine 那一节）');
 T.eq(lines[2], '  return true;', 'fill 行用了挖空体的缩进');
 T.ok(p.placeholder.indexOf('BLANK') === -1, '占位版里不再有 BLANK 指令');
 T.ok(p.placeholder.indexOf('diagDown') === -1, '占位版里不再有参考答案');
@@ -567,10 +569,10 @@ const pZh = E.parse(SRC, 'zh');
 const pEn = E.parse(SRC, 'en');
 const noteZh = pZh.placeholder.split('\n')[1];
 const noteEn = pEn.placeholder.split('\n')[1];
-T.ok(noteZh.indexOf('会被攻击吗？') >= 0, 'lang="zh" 的占位注释带的是 hint.zh');
-T.ok(noteZh.indexOf('Is it attacked?') === -1, 'lang="zh" 的占位注释里没有英文提示');
-T.ok(noteEn.indexOf('Is it attacked?') >= 0, 'lang="en" 的占位注释带的是 hint.en');
-T.ok(noteEn.indexOf('会被攻击吗？') === -1, 'lang="en" 的占位注释里没有中文提示');
+T.ok(noteZh.indexOf('在这里写') >= 0, 'lang="zh" 的占位注释是中文那一句');
+T.ok(noteZh.indexOf('Your answer here') === -1, 'lang="zh" 的占位注释里没有英文');
+T.ok(noteEn.indexOf('Your answer here') >= 0, 'lang="en" 的占位注释是英文那一句');
+T.ok(noteEn.indexOf('在这里写') === -1, 'lang="en" 的占位注释里没有中文');
 T.ok(noteEn !== noteZh, '两种语言的占位注释确实不是同一行字');
 /* 除了那一行注释，两份占位源码必须逐行相同 —— 语言只影响注释，不影响代码。
    （否则「切语言不重跑解释器」就不成立了：跑的东西变了。） */
@@ -597,8 +599,37 @@ T.throws(function () { E.noteLine(pZh.blanks[0], 'de'); }, 'noteLine 的 lang �
 T.throws(function () { E.noteLine(undefined, 'zh'); }, 'noteLine 少了 blank —— 抛');
 T.throws(function () { E.noteLine({ hint: { zh: 'a', en: 'b' } }, 'zh'); },
          'noteLine 的 blank 缺 indent / level —— 抛（那会静默少一截缩进）');
-/* 难度级要写进注释里：她得知道这一空是第几级的（1..3 与提示阶梯 1..4 无关）。 */
-T.ok(E.noteLine(pZh.blanks[0], 'zh').indexOf('第 1 级') >= 0, 'zh 注释里写明第几级');
-T.ok(E.noteLine(pZh.blanks[0], 'en').indexOf('level 1') >= 0, 'en 注释里写明第几级');
+T.throws(function () { E.noteLine({ hint: { zh: 'a', en: 'b' }, indent: '', level: 1 }, 'zh'); },
+         'noteLine 的 blank 缺 id —— 抛（没有 id 的注释行两个空会长得一模一样）');
+
+/* ---- 这一行必须短，而且必须点名是哪一个空 ----
+
+   这两组断言钉的是一个**实测过的缺陷**：注释行曾把整段 hint 写进去，英文那一行
+   于是 292–428 字符（编辑器可视宽 302 px、scrollWidth 3,229 px —— 横向滚十屏），
+   而英文是默认语言。中文那几行只有 113–154 字符，两侧差近三倍，光看中文界面
+   永远发现不了。所以：**上限钉在这里，两种语言都钉**。 */
+const NOTE_MAX = 96;   // 含缩进。今天实测最长的是 knight-path 的 seen-test：en 60、zh 44
+[['zh', noteZh], ['en', noteEn]].forEach(function (pair) {
+  T.ok(pair[1].length <= NOTE_MAX,
+       'noteLine(' + pair[0] + ') 不超过 ' + NOTE_MAX + ' 字符（实测 ' + pair[1].length + '）');
+});
+T.ok(noteEn.length <= noteZh.length * 2,
+     '英文那一行不许比中文长出一倍以上 —— 默认语言不该是最难读的那一种');
+T.ok(E.noteLine(pZh.blanks[0], 'zh').indexOf('safe-return') >= 0, 'zh 注释里点名是哪一个空');
+T.ok(E.noteLine(pZh.blanks[0], 'en').indexOf('safe-return') >= 0, 'en 注释里点名是哪一个空');
+/* 两个空的注释行必须**互不相同**：UI 拿这一行当锚点（切语言原地对换、第 4 级
+   「填进去」定位她的答案）。两行一样，两个空就会互相顶掉。 */
+const twoP = parseZh([
+  '// >>> BLANK id=a level=1 fill="1;" hint="甲" hintEn="A"',
+  'x;',
+  '// <<< BLANK',
+  '// >>> BLANK id=b level=1 fill="2;" hint="乙" hintEn="B"',
+  'y;',
+  '// <<< BLANK',
+].join('\n'));
+['zh', 'en'].forEach(function (lg) {
+  T.ok(E.noteLine(twoP.blanks[0], lg) !== E.noteLine(twoP.blanks[1], lg),
+       '同缩进同难度的两个空，' + lg + ' 注释行也不相同（靠 id 区分）');
+});
 
 T.report();

@@ -36,19 +36,40 @@
 
    ---- 占位块的形状 ----
 
-     <indent>/ * 在这里写：<hint.zh>  （第 <level> 级；Check 会跑你的版本和参考版本，比行为不比写法） * /
+     <indent>/ * 在这里写 —— <id> · 提示见下面的「提示」 * /
      <indent><fill>
 
    `indent` 取挖空体第一行的前导空白，两行占位都用它，这样占位版在编辑器
    里缩进跟原文一致。
 
+   ---- 这一行为什么这么短：完整提示归提示面板，注释行只留一句路标 ----
+
+   它曾经把 `hint` 整段写进去（外加一句「第 N 级；Check 会跑你的版本和参考版本」）。
+   实测的后果：**英文那一行长 292–428 个字符**，而编辑器可视宽度是 302 px、
+   `scrollWidth` 3,229 px —— 一行注释要横向滚十屏，而英文恰恰是这套工具的默认
+   语言（§1.6），也就是说默认看到的是最难读的那一种。中文那几行只有 113–154 字符，
+   两侧差了近三倍，谁都不会在中文界面上发现这件事。
+
+   所以分工改成：**完整提示（含分级）由 `hintAt` 交给页面的提示面板**，注释行
+   只剩一句路标 —— 说明「这里要你写」、是哪一个空、去哪儿看提示。三件事都是
+   短的，中英加起来 33 / 55 个字符。
+
+   `<id>` 必须在这一行里，两个理由都是硬的：
+     ① 一道题可以有两个空（queens / knightPath 都是），注释行不带 id 就**逐字节
+        相同**，而 UI 拿它当锚点（切语言时原地对换、第 4 级「填进去」时定位她的
+        答案）—— 两行一样，两个空就会互相顶掉。
+     ② 提示面板的每一行也按 id 标题，屏幕上下两处对得上。
+   `parse()` 已经保证同一份源码里 id 不重复（`seenIds`），所以「注释行唯一」
+   是它免费给的。
+
    ---- 占位注释那一行的语言：`lang` 是必填参数，没有默认值 ----
 
-   这一行以前写死成中文（`'/* 在这里写：' + attrs.hint.zh`），**而英文才是这套
-   工具的默认语言**（规格 §1.6）——五条精心写的 `hintEn` 于是在编辑器里一个字
-   都读不到，页面上还什么都不报。所以 `parse(source, lang)` 的第二个参数是必填
-   的：一个默认成 'zh' 的语言参数会让同一个缺陷换个地方原样复活，而一个默认成
-   'en' 的又会让中文使用者的提示悄悄消失。**要哪种语言，调用方自己说。**
+   这一行以前写死成中文，**而英文才是这套工具的默认语言**（规格 §1.6）——
+   五条精心写的 `hintEn` 于是在编辑器里一个字都读不到，页面上还什么都不报。
+   所以 `parse(source, lang)` 的第二个参数是必填的：一个默认成 'zh' 的语言参数
+   会让同一个缺陷换个地方原样复活，而一个默认成 'en' 的又会让中文使用者的提示
+   悄悄消失。**要哪种语言，调用方自己说。**（`hintEn` 今天真正的读者是
+   `hintAt(blank, 1)` —— 提示面板，不是这一行。）
 
    两侧渲染同一个函数 `noteLine(blank, lang)`，它也被导出：UI 切语言时**不重新
    生成占位源码、更不重跑解释器**（那要几百毫秒），而是拿 `noteLine(b,'zh')` 与
@@ -245,28 +266,33 @@
   }
 
   /* 占位注释那一行（**含缩进**），中英各一份。导出给 UI 层：切语言时用它把
-     编辑器里那一行原地换掉，不重新生成源码、不重跑解释器（见文件头）。
+     编辑器里那一行原地换掉，不重新生成源码、不重跑解释器（见文件头）；第 4 级
+     的「填进去」也拿它当锚点找她那段答案。
+
+     **它只是一句路标，不是提示本身** —— 完整提示（分四级）归 `hintAt`，理由
+     写在文件头「这一行为什么这么短」那一节：写进来的那一版英文单行 292–428 字符，
+     在 302 px 宽的编辑器里横向滚十屏。
 
      `blank` 要是 `parse()` 产出的挖空对象，`lang` 必填。两个都当场校验：
-     少一个就静默给出一行别的语言的注释，正是这个函数存在的理由。 */
+     少一个就静默给出一行别的语言的注释，正是这个函数存在的理由。
+     `level` / `hint` 今天不出现在这一行里，仍然照查 —— 那是「这确实是 parse()
+     产出的挖空对象」的形状检查，不是这句话用得着它们。 */
   function noteLine(blank, lang) {
     if (!blank || typeof blank !== 'object' || !blank.hint ||
         typeof blank.hint.zh !== 'string' || typeof blank.hint.en !== 'string' ||
-        typeof blank.indent !== 'string' || typeof blank.level !== 'number') {
+        typeof blank.indent !== 'string' || typeof blank.level !== 'number' ||
+        typeof blank.id !== 'string' || blank.id === '') {
       throw new Error(
         'noteLine(blank, lang) 少了 blank，或者它不是 parse() 产出的挖空对象' +
-        '（要有 indent / level / hint.{zh,en}），收到：' +
+        '（要有 id / indent / level / hint.{zh,en}），收到：' +
         (blank === null || blank === undefined ? String(blank) : typeof blank)
       );
     }
     assertLang(lang, 'noteLine(blank, lang)');
     if (lang === 'zh') {
-      return blank.indent + '/* 在这里写：' + blank.hint.zh +
-        '  （第 ' + blank.level + ' 级；Check 会跑你的版本和参考版本，比行为不比写法） */';
+      return blank.indent + '/* 在这里写 —— ' + blank.id + ' · 提示见下面的「提示」 */';
     }
-    return blank.indent + '/* Write your answer here: ' + blank.hint.en +
-      '  (level ' + blank.level + '; Check runs your version and the reference one, ' +
-      'comparing behaviour, not wording) */';
+    return blank.indent + '/* Your answer here — ' + blank.id + ' · see Hints below */';
   }
 
   /* 语言参数**没有默认值**。理由写在文件头：默认成哪一种，都是让「占位注释
