@@ -110,6 +110,10 @@ body.folded #split,body.folded #divider{display:none}
 .btn.active{border-color:rgba(45,212,234,.8);background:rgba(45,212,234,.12);color:#9be8f7}
 .btn.run{border-color:rgba(52,211,153,.5);color:#a7f3d0}
 .btn.run:hover:not(:disabled){border-color:rgba(52,211,153,.9);color:#d1fae5}
+/* Check 只在练习模式下露面，用第五个开关那条 cyan（--c-stack）—— 与"练习模式"
+   同色，一眼看得出它俩是同一件事的两半。`display:none` 由脚本按模式切。 */
+.btn.check{border-color:rgba(45,212,234,.5);color:#9be8f7}
+.btn.check:hover:not(:disabled){border-color:rgba(45,212,234,.9);color:#d6f7ff}
 
 /* `flex:0 0 auto` 是这张牌的命根子。flex 子项默认是 `0 1 auto`——空间不够时
    **收缩，而不是撑破盒子**。窄屏里 #split 被底部面板收住，一紧张浏览器就把这张
@@ -122,6 +126,12 @@ body.folded #split,body.folded #divider{display:none}
 .sp-status.bad{color:#fca5a5;border-color:rgba(248,113,113,.4)}
 .sp-status.ok{color:#a7f3d0}
 .sp-status.busy{color:#fcd34d;border-color:rgba(251,191,36,.4)}
+/* 「跑不完，判不了」。**它不能用 .bad** —— judge 的 'unknown' 说的是"不知道"，
+   把它印成红色就是把"不知道"当成"错"，而那正是 exercise.js 里那一整节注释
+   （「null 不许变成布尔值」）在防的事。琥珀色与读数区截断那个 ✂ 同色。
+   另起一个类名而不是复用 .busy：那条是"正在跑"，两件事同色不同义，
+   共用一个类名迟早有人按名字改样式。 */
+.sp-status.unk{color:#fcd34d;border-color:rgba(251,191,36,.4)}
 .sp-status b{color:#7dd3fc}
 
 /* 代码区：一道题有几份源码就并排几块（tourKnight 是唯一持有两份的那一个）。
@@ -326,6 +336,9 @@ body.busy #busy{display:block}
       <span id="brandDesc"></span>
     </div>
     <button class="btn run" id="btnRun">Run</button>
+    <!-- §2.9 的 Check：只在练习模式下露面（脚本切 display）。它按下去要跑**两遍**
+         解释器（她的 + 参考的），所以整段在 withBusy 里。 -->
+    <button class="btn check" id="btnCheck" style="display:none">Check</button>
     <!-- id **不能**叫 btnReset：引擎的 init() 会把 `#btnReset` 认成自己的
          「重置模拟」按钮，给它挂上 resetSim 并在每次切语言时改写它的文案。
          这个按钮是 §2.8 的「还原为原始版本」，与引擎那个是两回事。 -->
@@ -6964,6 +6977,58 @@ const ALGOS = {
     exContrast: { zh: '左边那份**不跑**，只是摆在旁边给你 diff —— 你要填的就是它比右边少的那件事。',
                   en: 'The left one **is not run**; it is there to diff against — what you have to write is the thing it lacks.' },
 
+    /* ---- Check 与分歧定位（§2.9 阶段 6 第 4 条）----
+
+       「错了」是没用的反馈。两个版本的完整轨迹都在手上，所以这里说的是别的话：
+       两边**各自**在第几步、那一处两边各看到了什么。
+
+       ⚠ **措辞逐 kind 分开，不许一律说成「分歧的那一步」。** judge 的注释把这
+       件事写死了：只有 `boardOps` 的 refStep/herStep 是真正第一处分歧；`counters`
+       给的是**该计数器末次赋值处**，`result` 给的是**各自末步**。三种共用一句
+       「第 N 步分歧」就是在编造一件 judge 没说过的事。 */
+    chk:       { zh: '判定', en: 'Check' },
+    chkTip:    { zh: '跑一遍你的版本和参考版本，比行为不比写法',
+                 en: 'Runs your version and the reference one, comparing behaviour, not wording' },
+    chkPass:   { zh: '**对了。** 你的版本和参考版本在棋盘上做的事、计数器的末值、返回值全都一致 —— 写法不必相同。',
+                 en: '**Correct.** Your version and the reference one agree on everything observable: what happens on the board, the final counter values, the return value. The wording need not match.' },
+    chkTeaches:{ zh: '这一空说的是：', en: 'What this blank was about: ' },
+    chkFail:   { zh: '**还不对。**', en: '**Not yet.**' },
+    /* boardOps：**这一条才是真正的「分歧的第一步」。** */
+    chkOps:    { zh: '两边在棋盘上做的前 %N 件事**逐条相同**；就在参考的第 %R 步 / 你的第 %H 步这一处分道扬镳。调试器已经把两条轨道各自停在那里了。',
+                 en: 'You and the reference agree on the first %N board event(s), **one by one**; you part at step %R on the reference side and step %H on yours. The debugger has parked each track on its own step.' },
+    chkOpsRef: { zh: '参考认为', en: 'the reference does' },
+    chkOpsHer: { zh: '你的版本认为', en: 'your version does' },
+    chkOpsEnd: { zh: '到此为止，没有下一件', en: 'nothing more — it stops here' },
+    /* counters / result：比的是**末值**，没有「第一步」可言。 */
+    chkCount:  { zh: '计数器 %C 的**末值**不同：参考 %A，你 %B。',
+                 en: 'The **final value** of counter %C differs: reference %A, yours %B.' },
+    chkCountAt:{ zh: '（比的是末值，不是"分歧的那一步"。两条轨道停的是**各自最后一次给它赋值**的地方：参考第 %R 步、你第 %H 步。）',
+                 en: '(This compares final values, not the first divergent step. Each track is parked where it **last assigned** that counter: step %R on the reference side, step %H on yours.)' },
+    chkCountNone:{ zh: '（你的版本里这个名字一次都没出现过 —— 多半是改名了。）',
+                   en: '(That name never appears in your version at all — most likely renamed.)' },
+    chkResult: { zh: '整个程序的**返回值**不同：参考 %A，你 %B。',
+                 en: 'The program’s **return value** differs: reference %A, yours %B.' },
+    chkResultAt:{ zh: '（返回值不发生在某一步，所以两条轨道停在各自的末步：参考第 %R 步、你第 %H 步。）',
+                  en: '(A return value does not happen at a step, so each track is parked at its own last step: %R on the reference side, %H on yours.)' },
+    /* unknown：**不是「错」**。 */
+    chkUnknown:{ zh: '**跑不完，判不了。**', en: '**It does not finish, so it cannot be judged.**' },
+    chkUnknownWhy:{ zh: '有一边撞上了 200,000 步的上限，而在被截断之前两边没有任何分歧 —— 所以这不是"错"，是"不知道"。让它跑得完再按一次。',
+                    en: 'One side hit the 200,000-step ceiling, and up to the cut there was no divergence at all — so this is not "wrong", it is "unknown". Make it finish, then press Check again.' },
+    chkBad:    { zh: '这道题的判定配置有问题，没法判：', en: 'This problem’s check configuration is broken, so nothing can be judged: ' },
+    chkRefFail:{ zh: '参考版本自己跑不起来 —— 这是工具的问题，不是你的代码：',
+                 en: 'The reference version itself does not run — that is the tool’s problem, not your code: ' },
+    /* 参考那块棋盘的名字。**不走 trackLabel**：它会把参考那块叫成
+       “Warnsdorff 启发式”，而屏幕上她自己那块也叫这个名字。 */
+    trkRef:    { zh: '参考版本', en: 'Reference version' },
+    trkYours:  { zh: '你的版本', en: 'Your version' },
+    chkStep:   { zh: '第 %S 步', en: 'step %S' },
+    /* 两条轨道不再共用游标这件事要说出来 —— 阶段 5 的读数刚教过"两条轨迹共用
+       一个游标"，练习模式下正相反，不说清楚就像是工具坏了。 */
+    chkRefFixed:{ zh: '参考版本停在判定的那一步，不跟着点走 —— 单步与点格子都作用在你那块盘上。',
+                  en: 'The reference version stays on the step the check parked it at; stepping and clicking act on your board.' },
+    chkSplit:  { zh: '判定之后两条轨道**各走各的**：参考停在它那一步，你的这条跟着单步走。',
+                 en: 'After a check the two tracks are **on their own cursors**: the reference stays on its step; yours follows the debugger.' },
+
     /* ---- 显示开关（四条都是"画不画"，不是"算什么"） ---- */
     tgMarks:  { zh: '四种状态', en: 'The four states' },
     tgStale:  { zh: '过期的标记', en: 'Stale marks' },
@@ -7525,7 +7590,16 @@ const ALGOS = {
   /* 这道题此刻要哪几份源码、每份什么角色：
        'edit'      可编辑、跑、有棋盘（正常模式下每一份都是这个角色）
        'contrast'  只读对照，**不跑**、没有棋盘（§2.9 阶段 6 第 1 条）
-     没声明 `exerciseSources` 的题目，练习模式下就是原样那几份全都可编辑。 */
+     没声明 `exerciseSources` 的题目，练习模式下就是原样那几份全都可编辑。
+
+     ⚠ **第三种角色 `'reference'` 不在这里，也不许出现在 `exerciseSources` 里。**
+     它是按下 Check 那一刻由页面自己接上去的一条轨道（见 attachRefTrack），
+     声明层不认识它，理由有两条，都是硬的：
+       ① 它装的是**参考答案**。任何能让它落进编辑器槽位的写法都等于把答案摆在
+          她眼前，练习当场失效 —— 所以它**没有槽位**（syncEditorSlots 把它当
+          `gone`），也因此不占 MAX_TRACKS（那个数是从 sources 数出来的槽位数）。
+       ② 它是判定的产物，随判定生灭：换参数 / 开关 / Run / 改一个字都让它消失。
+          写进声明就成了"这道题永远有三条轨道"，那是另一回事。 */
   function sourcesFor(P) {
     if (exerciseOn() && P.exerciseSources) return P.exerciseSources;
     return P.sources.map(function (f) { return { file: f, role: 'edit' }; });
@@ -7646,7 +7720,10 @@ const ALGOS = {
   const S = Object.create(null);
   /* `ex` 记的是**这组轨道是在哪个模式下建出来的**（不是开关此刻的位置）——
      pollParams 拿它跟开关比，才知道该说「进练习模式」还是「参数改成 …」。 */
-  PIDS.forEach(function (pid) { S[pid] = { tracks: [], sig: null, hookErr: null, ex: false }; });
+  /* `judge` 是**上一次 Check 的结果**（`{ status, div, herIndex, refIndex, herSrc }`），
+     null = 还没判过。它存的是**数据不是文案**：读数区与状态牌每次都从它重新渲染，
+     所以切语言那一下判定结论也跟着换语言，不需要重跑任何东西。 */
+  PIDS.forEach(function (pid) { S[pid] = { tracks: [], sig: null, hookErr: null, ex: false, judge: null }; });
 
   let uiTab = null;             // 此刻显示的是哪道题
   let activeTrack = 0;          // 编辑器/调试器挂在这道题的第几条轨道上
@@ -7655,7 +7732,7 @@ const ALGOS = {
      一个能被读出来的计数器让这件事从此可以被证伪 —— 正常模式下换参数它必须
      一直是 0，进练习模式（tourKnight 的 0 号轨道变成只读对照）时它必须涨 1。 */
   let activeMovedByRebuild = 0;
-  let statusKind = 'idle';      // idle | ok | bad | busy | boot —— 切语言时按它重画
+  let statusKind = 'idle';      // idle | ok | bad | judge | busy | boot —— 切语言时按它重画
   let jumpNote = null;          // 点棋盘反向定位之后那一句话
 
   /* ⚠ `bootErr` / `statusLocked` **在这里声明**，不在下面「启动」那一节 ——
@@ -7779,8 +7856,13 @@ const ALGOS = {
      写一条正则：同一段"什么算指令行"的知识分成两份，迟早分岔。
 
      `parse()` 抛（指令写坏了）与 `source()` 抛是同一类事 —— 源码没交出来，
-     所以复用 'source' 这个 category：编辑器空着，红字说明白为什么。 */
-  function prepareSource(P, pv, file, role) {
+     所以复用 'source' 这个 category：编辑器空着，红字说明白为什么。
+
+     `wantClean` 是 Check 用的那一个出口：**参考版本要的正是正常模式那一份**
+     （`clean` —— 挖空体原样，那就是参考答案），哪怕此刻开着练习模式。写成一个
+     显式参数而不是在调用点自己拼一次 `Exercise.parse(...).clean`：那样页面上就
+     有了第二处知道"参考答案从哪儿来"的代码，两处迟早分岔。 */
+  function prepareSource(P, pv, file, role, wantClean) {
     const g = genSource(P, pv, file);
     if (g.err) return { src: '', ex: null, err: g.err };
     let parsed;
@@ -7790,7 +7872,7 @@ const ALGOS = {
         message: '挖空指令（// >>> BLANK）解析失败：' + ((e && e.message) ? e.message : String(e)) } };
     }
     /* 只读对照那一份走 clean：它摆在旁边是给人 diff 的，本来就没有空要她填。 */
-    const wantBlanks = exerciseOn() && role !== 'contrast';
+    const wantBlanks = !wantClean && exerciseOn() && role !== 'contrast';
     return {
       src: wantBlanks ? parsed.placeholder : parsed.clean,
       ex: wantBlanks ? exStateOf(parsed) : null,
@@ -7803,16 +7885,27 @@ const ALGOS = {
      一块永远不动的死源码上，而且看起来像是工具坏了。 */
   function firstEditable(pid) {
     const tks = tracksOf(pid);
-    for (let k = 0; k < tks.length; k++) if (tks[k].role !== 'contrast') return k;
+    for (let k = 0; k < tks.length; k++) if (isEdit(tks[k])) return k;
     return 0;
   }
   function isContrast(tk) { return !!tk && tk.role === 'contrast'; }
+  /* 判定时接上去的那条参考轨道（见 sourcesFor 头上那段）。它**跑**、有棋盘、
+     有自己的游标，但没有编辑器槽位、不能被选中、不跟着她的游标走。 */
+  function isReference(tk) { return !!tk && tk.role === 'reference'; }
+  /* 「她那几条」：可编辑、会跑、共用一个游标的那些。三个判据里只有这一个是
+     肯定式的 —— 新加一种角色时，忘了改的地方会退到"不是她的"，而不是"是她的"。 */
+  function isEdit(tk) { return !!tk && tk.role !== 'contrast' && tk.role !== 'reference'; }
 
   /* 按当前参数把一道题整个重建。参数没变就什么也不做（每帧都会问一次）。 */
   function buildProblem(pid, force) {
     const P = PROBLEMS[pid], st = S[pid], sig = buildSig(pid);
     if (!force && st.sig === sig && st.tracks.length) return false;
     st.hookErr = null;                 // 上一组参数下的钩子错误不该跟着新参数走
+    /* 上一次 Check 的结论跟着这组参数/这个模式一起作废 —— 换了 N 之后"你在第 76
+       步跟参考分道扬镳"讲的是另一份程序。参考轨道也一起没：下面这行 map 的长度
+       是 `files.length`，接在末尾的那条参考轨道自然被截掉（它是 st.tracks 的最后
+       一项，这是 attachRefTrack 的不变量）。 */
+    st.judge = null;
     const pv = paramsOf(pid);
     const files = sourcesFor(P);
     st.tracks = files.map(function (entry, k) {
@@ -7853,7 +7946,7 @@ const ALGOS = {
        该挪的只有两种情形：轨道数变少了（下标悬空），或者它此刻落在只读对照上
        （进练习模式时 tourKnight 的 0 号轨道就变成了对照）。
        动没动过要能被断言，所以顺手记一次 —— 正常模式下换参数它必须是 0。 */
-    if (pid === uiTab && (!st.tracks[activeTrack] || isContrast(st.tracks[activeTrack]))) {
+    if (pid === uiTab && !isEdit(st.tracks[activeTrack])) {
       const next = firstEditable(pid);
       if (next !== activeTrack) { activeTrack = next; activeMovedByRebuild++; }
     }
@@ -8340,6 +8433,14 @@ const ALGOS = {
   }
   /* 一条轨道叫什么：题目自己说了算（`trackLabel`），没说就用文件名。 */
   function trackTitle(P, tk, k) {
+    /* ⚠ 参考轨道**不问题目**：`trackLabel(file)` 只认文件名，而参考轨道跟她那条
+       用的是同一份文件 —— 问出来的两块棋盘会并排写着同一个名字（"Warnsdorff
+       启发式" / "Warnsdorff 启发式"），而这两块盘的全部意义就是它们不是同一个
+       东西。判定之后她那块也点名叫"你的版本"，两边成对。 */
+    if (isReference(tk)) return t(STR.trkRef);
+    const stT = curS();
+    if (stT && stT.judge && isEdit(tk) && stT.tracks.indexOf(tk) === stT.judge.herIndex &&
+        refIndexOf(uiTab) >= 0) return t(STR.trkYours);
     if (P && typeof P.trackLabel === 'function') {
       let s = null;
       try { s = P.trackLabel(tk.file, k); } catch (e) { hookFail(uiTab, 'trackLabel', e); s = null; }
@@ -8444,6 +8545,13 @@ const ALGOS = {
   const statusEl = document.getElementById('status');
   const btnRun = document.getElementById('btnRun');
   const btnRevert = document.getElementById('btnRevert');
+  const btnCheck = document.getElementById('btnCheck');
+  /* Run 与 Check 的禁用是**同一件事**：两个按钮都要先把编辑器里的东西交给
+     解释器跑一遍，语法错时两个都跑不了。分开写迟早漏一个（而漏掉的那一个
+     按下去只会在控制台里抛一条没人看的异常）。 */
+  function setRunDisabled(v) { btnRun.disabled = v; btnCheck.disabled = v; }
+  /* Check 只在练习模式下露面：正常模式下编辑器里就是参考答案，跟自己判自己。 */
+  function syncCheckButton() { btnCheck.style.display = exerciseOn() ? '' : 'none'; }
 
   /* 状态牌**唯一**的写入口。锁上之后谁也写不进来 —— 见上面 statusLocked 那段。 */
   function setStatus(html, cls) {
@@ -8489,11 +8597,13 @@ const ALGOS = {
      ⚠ 以前这里只看当前那一条（`showTrackStatus(curTrack())`）。一个 pid 两条轨道
      之后那就是个洞：非活动那条重新生成失败，会被绿色的「参数改成 …」原样盖掉，
      而她要等到点开另一份源码才看得见左边是空的。 */
-  /* ⚠ 只报**跑着的**轨道。只读对照没有 `res`，`runText` 会给它一句灰色的
-     "改一改代码，Run 会重新解释执行…" —— 而它根本不能改也不会跑。 */
+  /* ⚠ 只报**她的**轨道。只读对照没有 `res`，`runText` 会给它一句灰色的
+     "改一改代码，Run 会重新解释执行…" —— 而它根本不能改也不会跑；参考轨道虽然
+     真的跑过，但"运行完成 · 156,772 步 · 返回值 4"是**参考答案的解数**，把它写在
+     状态牌上等于顺手把答案报了出来。 */
   function runTextAll(st) {
     if (!st || !st.tracks.length) return t(STR.ready);
-    const live = st.tracks.filter(function (tk) { return !isContrast(tk); });
+    const live = st.tracks.filter(isEdit);
     if (!live.length) return t(STR.ready);
     if (live.length === 1) return runText(live[0]);
     const P = PROBLEMS[uiTab];
@@ -8515,10 +8625,16 @@ const ALGOS = {
       /* 源码根本没生成出来，编辑器是空的 —— 让 Run 可点，就等于给她一条
          「跑空程序 → 绿色的 0 步」的路，把刚说完的错误再洗掉一遍。
          她一旦动手写点什么，下面的 onChange 会照常把它重新点亮。 */
-      if (curTrack() && curTrack().err && curTrack().err.category === 'source') btnRun.disabled = true;
+      if (curTrack() && curTrack().err && curTrack().err.category === 'source') setRunDisabled(true);
       return;
     }
     if (st.hookErr) return;                  // hookFail 刚写过红字，别用绿字盖掉
+    /* 判过了就报判定结论，而不是「运行完成 · 144 步 · 返回值 0」—— 后者对着一个
+       刚被判错的版本说"完成"，是这一页能给的最没用的一句话。
+       **切语言之后这一句要还在**：relabel 认 statusKind 才知道重画哪一条，所以
+       判定自己占一个 kind（见那边那串 if）。 */
+    const jr = judgeRender(uiTab);
+    if (jr) { statusKind = 'judge'; setStatus(jr.head.join('<br>'), jr.cls); return; }
     statusKind = 'ok';
     setStatus(runTextAll(st), 'ok');
   }
@@ -8556,13 +8672,29 @@ const ALGOS = {
       onChange: function (value, err) {
         /* 引导失败之后不再有「当前轨道」可言，而 `setValue('')` 会同步触发一次
            onChange —— 这里不挡住，Run 就会在破页上被重新点亮。 */
-        if (bootErr) { btnRun.disabled = true; return; }
+        if (bootErr) { setRunDisabled(true); return; }
         const tk = tracksOf(uiTab)[k];
-        if (tk) tk.src = value;               // 每块编辑器只写**它自己那条**轨道
+        /* ⚠ **参考轨道不接受写入。** 上面那条 `gone` 分支会对它调一次
+           `setValue('')`，而 setValue 同步触发这里 —— 不挡住的话，参考答案的源码
+           当场被清成空串，下一次 Check 拿一份空程序当参考（`I.run('')` 不抛，
+           安安静静给你 0 步的轨迹）。 */
+        if (tk && !isReference(tk)) tk.src = value;   // 每块编辑器只写**它自己那条**轨道
         /* 非活动那一块的语法错不该锁住 Run：Run 只重跑活动那一条。她切过去的
            那一刻 setActiveTrack 会重新问一次 getError()，那时才轮到它说话。 */
         if (k !== activeTrack) return;
-        btnRun.disabled = !!err;               // 规格 §2.8：有语法错时 Run 禁用
+        /* 判定的结论只对**判定那一刻的那份源码**成立。她一动手，"你在第 76 步跟
+           参考分道扬镳"就变成了一句关于别的程序的话 —— 连同参考那块棋盘一起撤掉。
+
+           ⚠ 两条判据缺一不可，都踩过：
+             · `k === activeTrack`（上面那条早退）—— 隐藏参考槽位时 syncEditorSlots
+               会对**别的**槽位调 `setValue('')`，那一下的 value 是空串，跟 herSrc
+               当然不同。放在早退之前的话，Check 自己在设完 judge 之后调一次
+               syncEditorSlots 就把刚做出来的判定抹掉了（写完当场撞上）。
+             · `value !== herSrc` —— 切轨道 / 切语言 / 刚 Run 完那些 `setValue`
+               送进来的是同一份文本，不该把结论抹掉。 */
+        const stJ = curS();
+        if (stJ && stJ.judge && value !== stJ.judge.herSrc) clearJudge(uiTab);
+        setRunDisabled(!!err);                 // 规格 §2.8：有语法错时 Run 禁用
         if (err) { statusKind = 'bad'; setStatus(errText(err), 'bad'); }
         else if (statusKind === 'bad') {
           /* ⚠ 只清掉**编辑器自己刚放上去的**那条红。钩子失败与轨道错误跟她打的字
@@ -8612,10 +8744,20 @@ const ALGOS = {
   /* 槽位跟着当前题目的轨道走：几条轨道显示几块，标题写清楚哪一块是活动的。
      **每次重建之后都要调**（源码可能整份换了）。 */
   function syncEditorSlots() {
-    const P = curP(), tks = tracksOf(uiTab), multi = tks.length > 1;
+    const P = curP(), tks = tracksOf(uiTab);
+    /* 「并排好几块」的判据是**有槽位的轨道**有几条，不是轨道有几条：判定接上来的
+       参考轨道没有槽位，按轨道数算的话 queens 判一次之后那块孤零零的编辑器就会
+       挂上一句「（单步 / 断点 / Run 作用在这一份上）」—— 屏幕上只有它一块，
+       这句话在跟谁比？ */
+    const multi = tks.filter(function (tk) { return !isReference(tk); }).length > 1;
     slots.forEach(function (s, k) {
       const tk = tks[k];
-      const gone = !tk;
+      /* ⚠ **参考轨道没有槽位。** 它装的是参考答案 —— 摆进任何一块编辑器都等于把
+         答案发给她，这一整个功能当场作废。所以它跟"这个下标上根本没有轨道"走同
+         一条分支：槽位隐藏、内容清空。（今天只有 queens/knightPath 会走到这里：
+         它们只有一份 sources，而槽位是按全页最大轨道数 2 建的，参考轨道恰好落在
+         第 1 号槽位上。） */
+      const gone = !tk || isReference(tk);
       s.wrap.classList.toggle('gone', gone);
       s.wrap.classList.toggle('active', multi && k === activeTrack);
       if (gone) { s.ed.setValue(''); s.lastLine = undefined; s.vis = null; s.visI = -1; return; }
@@ -8662,6 +8804,10 @@ const ALGOS = {
      调试器游标一起换，每条轨道自己的断点跟着自己的 cur 走。 */
   function attachEditor() {
     const tk = curTrack();
+    /* Check 的显隐跟着模式走。挂在这里是因为**每一条重建路径都经过它**
+       （ensureBuiltAsync / pollParams / 启动），而"练习模式开关按下去"正是走
+       pollParams 那一条。 */
+    syncCheckButton();
     syncEditorSlots();
     if (!tk) { dbg.setCursor(D.create([])); return; }
     dbg.setCursor(tk.cur);
@@ -8672,15 +8818,17 @@ const ALGOS = {
   function setActiveTrack(k) {
     const tks = tracksOf(uiTab);
     /* 只读对照不能当活动轨道：单步/断点/Run 落在一份不跑的死源码上，按什么
-       都没反应。点它的标题、点进它的文本里，都从这里被挡住（两个调用点）。 */
-    if (k === activeTrack || !tks[k] || isContrast(tks[k])) return;
+       都没反应。点它的标题、点进它的文本里，都从这里被挡住（两个调用点）。
+       参考轨道同样不能：它连编辑器槽位都没有（点不到它的标题），但**它有棋盘**，
+       而点棋盘也会走到这里（onBoardClick），选中它等于把 Run 落在参考答案上。 */
+    if (k === activeTrack || !isEdit(tks[k])) return;
     activeTrack = k;
     syncEditorSlots();
     dbg.setCursor(tks[k].cur);
     /* 切过来的这一份自己可能有语法错（她刚在上面打了半行）—— 那一刻 onChange
        因为「不是活动轨道」而闭了嘴，现在轮到它说话了。 */
     const e = ed.getError();
-    btnRun.disabled = !!e;
+    setRunDisabled(!!e);
     if (e) { statusKind = 'bad'; setStatus(errText(e), 'bad'); return; }
     showProblemStatus();
   }
@@ -8703,9 +8851,17 @@ const ALGOS = {
     for (let k = 0; k < tks.length; k++) {
       if (k === activeTrack) continue;
       const tk = tks[k], s = slots[k];
-      /* 只读对照没有轨迹可推 —— 跳过它，别给它写执行行标记（它的 `cur` 是空的，
-         `currentLine` 会是 null，写上去只会把那块源码上的高亮乱擦一遍）。 */
-      if (isContrast(tk)) continue;
+      /* ⚠ **判据是"这是她的轨道之一吗"，不是"这不是只读对照吗"。** 两种角色都得
+         在 `D.goto` **之前**跳出去，而且理由完全不同：
+
+           contrast   没有轨迹可推（`cur` 是空的，`currentLine` 是 null），
+                      写上去只会把那块源码上的高亮乱擦一遍。
+           reference  有轨迹、有游标，而且**恰恰不能跟她对齐** —— 判定之后它停在
+                      `divergence.refStep`，她停在 `herStep`，两个数通常不相等
+                      （§2.9 阶段 6 第 4 条：练习模式必须从"一个游标推两条"分叉
+                      出来）。这里少一条判断，下一帧就把它拖回她那一步，而屏幕上
+                      只表现为"两块盘怎么老是一样的"——本任务最典型的失败形态。 */
+      if (!isEdit(tk)) continue;
       D.goto(tk.cur, i);                       // 越界自己夹住，返回值这里用不上
       if (!s) continue;
       const ln = D.currentLine(tk.cur);
@@ -8833,6 +8989,9 @@ const ALGOS = {
     const tk = curTrack(), src = ed.getValue();
     if (!tk) return;
     withBusy(function () {
+      /* 重跑就是换了一条轨迹：上一次判定说的那两个步号讲的是**上一次那条**。
+         参考那块棋盘也一起撤掉——留着它就是屏幕上摆着一块没人解释的盘。 */
+      clearJudge(uiTab);
       runTrack(tk, src, true);
       syncEditorSlots();
       dbg.setCursor(tk.cur);
@@ -8850,6 +9009,7 @@ const ALGOS = {
     const tk = curTrack(), P = curP();
     if (!tk || !P) return;
     withBusy(function () {
+      clearJudge(uiTab);            // 源码换了一份，上一次的判定跟它无关（同 Run）
       /* 同一条通道的另一个调用点 —— 也必须能报错。以前这里失败会退回 tk.src，
          按钮于是「按了等于没按」，而且一个字都不说。
          ⚠ 走 `prepareSource` 而不是裸的 `genSource`：练习模式下「还原为原始版本」
@@ -8860,6 +9020,226 @@ const ALGOS = {
       if (g.err) tk.err = g.err;
       syncEditorSlots();                 // 只有这一块的内容变了，另一块原样不动
       dbg.setCursor(tk.cur);
+      towerTop = 1;
+      updateFit();
+      showProblemStatus();
+    });
+  });
+
+  /* ================= Check：判定与分歧定位（§2.9 阶段 6 第 4 条） =================
+
+     规格里这一段的原话是这个功能存在的理由：
+
+       「错了」是没用的反馈。因为两个版本的完整轨迹都在手上，可以做到更好的事
+       —— 找出她的版本与参考版本行为分歧的第一步，把调试器直接跳到那一步，
+       两边并排显示。
+
+     所以按下 Check 之后屏幕上多出来的不是一个红叉，是**第二块棋盘**：参考那条
+     轨道停在它自己的那一步，她那条停在她自己的那一步，两个步号通常不相等。
+
+     ---- 参考轨道为什么长这样 ----
+
+     它是一条 `role:'reference'` 的轨道，**接在 st.tracks 末尾**（这是不变量，
+     dropRefTrack / buildProblem 都靠它）。它跑、有棋盘、有自己的游标，但是：
+
+       · **没有编辑器槽位**（syncEditorSlots 把它当 gone）—— 它装的是参考答案。
+         任何把它摆进编辑器的写法都等于把答案发给她。这一条也顺手解决了「槽位
+         是按 MAX_TRACKS 一次建齐、而 MAX_TRACKS 是从 sources 数出来的 2」这个
+         接缝：不要槽位的轨道不占槽位，声明层与 validateDecl 一个字都不用改。
+       · **不能被选中**（setActiveTrack 挡住）—— Run / 单步 / 断点落在参考答案上
+         没有任何意义。
+       · **不跟她的游标走**（syncTracks 只推 role:'edit' 的）—— 见那里的注释。
+       · **随判定生灭**：换参数、动开关、Run、Reset、改一个字，它都消失。 */
+
+  /* 参考轨道永远是最后一条（或者没有）。写成一个函数而不是到处 `tracks.length-1`：
+     「它在末尾」这条不变量只有一处知道。 */
+  function refIndexOf(pid) {
+    const tks = tracksOf(pid);
+    return (tks.length && isReference(tks[tks.length - 1])) ? tks.length - 1 : -1;
+  }
+  function dropRefTrack(pid) {
+    if (refIndexOf(pid) < 0) return false;
+    S[pid].tracks.pop();
+    /* 活动轨道理应从来没落在它上面（setActiveTrack 挡着），但下标悬空这件事
+       不值得赌 —— 与 buildProblem 末尾那条守卫同一个判据。 */
+    if (!isEdit(tracksOf(pid)[activeTrack])) activeTrack = firstEditable(pid);
+    layoutTracks(pid);               // 两块盘退回一块，剩下那块要摆回正中
+    return true;
+  }
+  /* 判定作废：结论与参考轨道一起撤。**判定结论没有"半个"状态** —— 留着结论
+     撤掉轨道，读数里那句「调试器已经把两条轨道各自停在那里了」就成了假话。 */
+  function clearJudge(pid) {
+    const st = pid ? S[pid] : null;
+    if (!st) return false;
+    const had = !!st.judge || refIndexOf(pid) >= 0;
+    st.judge = null;
+    if (dropRefTrack(pid) && pid === uiTab) {
+      syncEditorSlots();
+      towerTop = 1;
+      updateFit();
+    }
+    return had;
+  }
+  /* 接上（或就地重跑）参考轨道。源码走 `prepareSource(..., wantClean=true)`：
+     参考答案就是这份源码本身的挖空体，页面这里不认识任何一道题的答案。 */
+  function attachRefTrack(pid, P, tk) {
+    const st = S[pid];
+    let ref = refIndexOf(pid) >= 0 ? st.tracks[st.tracks.length - 1] : null;
+    if (!ref) {
+      ref = { index: st.tracks.length, file: tk.file, role: 'reference', src: '', res: null,
+              cur: D.create([]), err: null, bcache: null, ex: null, layout: null };
+      st.tracks.push(ref);
+    }
+    ref.index = st.tracks.length - 1;
+    ref.file = tk.file;
+    ref.ex = null;
+    const g = prepareSource(P, paramsOf(pid), tk.file, 'edit', true);
+    /* runTrack 开头把 err 清成 null，所以生成错误只能盖在它之后（同 buildProblem）。 */
+    runTrack(ref, g.err ? '' : g.src, false);
+    if (g.err) ref.err = g.err;
+    layoutTracks(pid);
+    return ref;
+  }
+
+  /* 这条轨道上那几个挖空各自在说什么（分级提示的第 1 级，也就是出题者写的
+     `hint.{zh,en}`）。`pass` 那一句「这一空说的是 …」用它 —— 走 Exercise.hintAt
+     而不是直接读 hint，是因为"第 1 级提示是什么"这件事归 exercise.js 定义。 */
+  function blankHints(tk) {
+    const bs = (tk && tk.ex && tk.ex.blanks) || [];
+    const out = [];
+    for (let i = 0; i < bs.length; i++) {
+      try { out.push(t(Exercise.hintAt(bs[i], 1))); } catch (e) { /* 提示坏了不该毁掉判定 */ }
+    }
+    return out;
+  }
+
+  function stepText(n) { return n == null ? '—' : fmtInt(n); }
+  /* 一条棋盘事件写成人话：`mark c3 → cut · 第 76 步`。**转义的是代入的值**
+     （kind / to 来自她那份源码，可以是任何字符串），不是整句。 */
+  function opText(op, L) {
+    if (!op) return '<span class="dim">' + esc(t(STR.chkOpsEnd)) + '</span>';
+    const fr = L ? sqToFR(op.sq, L) : null;
+    const q = fr ? squareName(fr) : String(op.sq);
+    return '<b>' + esc(op.kind + ' ' + q + (op.to == null ? '' : ' → ' + String(op.to))) + '</b>' +
+           ' <span class="dim">· ' + esc(t(STR.chkStep).split('%S').join(fmtInt(op.step))) + '</span>';
+  }
+
+  /* 判定结论 → HTML。**存的是数据、渲染在这里**，所以切一次语言这段话就换一种
+     语言，一步解释器都不用跑。
+       head    状态牌上那几句（也是读数里的开头）
+       detail  只在读数区展开的那几行（两边取值并排）
+       cls     状态牌的类：pass → ok（绿）、fail → bad（红）、
+               unknown → unk（琥珀）。**unknown 绝不用 bad** —— 见 exercise.js
+               「null 不许变成布尔值」那一节。 */
+  function judgeRender(pid) {
+    const st = pid ? S[pid] : null;
+    const j = st && st.judge;
+    if (!j) return null;
+    const her = st.tracks[j.herIndex] || null, ref = st.tracks[j.refIndex] || null;
+    const herL = her ? her.layout : null, refL = ref ? ref.layout : null;
+    const head = [], detail = [];
+
+    if (j.status === 'pass') {
+      head.push(applyMarkup(t(STR.chkPass)));
+      const hints = blankHints(her);
+      if (hints.length) {
+        detail.push('<span class="dim">' + esc(t(STR.chkTeaches)) + '</span>');
+        hints.forEach(function (h) { detail.push('&nbsp;&nbsp;' + esc(h)); });
+      }
+      return { cls: 'ok', head: head, detail: detail };
+    }
+    if (j.status === 'unknown') {
+      head.push(applyMarkup(t(STR.chkUnknown)));
+      detail.push('<span class="dim">' + applyMarkup(t(STR.chkUnknownWhy)) + '</span>');
+      return { cls: 'unk', head: head, detail: detail };
+    }
+
+    head.push(applyMarkup(t(STR.chkFail)));
+    const d = j.div;
+    if (!d) return { cls: 'bad', head: head, detail: detail };   // judge 说 fail 必有 divergence
+
+    if (d.kind === 'boardOps') {
+      /* **只有这一种能说「分歧的那一步」。** */
+      head.push(applyMarkup(t(STR.chkOps), {
+        N: fmtInt(d.opIndex), R: stepText(d.refStep), H: stepText(d.herStep),
+      }));
+      detail.push('&nbsp;&nbsp;<span class="dim">' + esc(t(STR.chkOpsRef)) + '</span> ' + opText(d.ref, refL));
+      detail.push('&nbsp;&nbsp;<span class="dim">' + esc(t(STR.chkOpsHer)) + '</span> ' + opText(d.her, herL));
+    } else if (d.kind === 'counters') {
+      /* 比的是**末值**。她那边一次都没出现过时 herStep 是 null —— 那不是「值是
+         null」，是「根本没有这个名字」，两句话要分开说。 */
+      const missing = d.herStep == null;
+      head.push(applyMarkup(t(STR.chkCount), {
+        C: esc(d.ref.name),
+        A: esc(D.fmtVal(d.ref.value)),
+        B: missing ? '—' : esc(D.fmtVal(d.her.value)),
+      }));
+      if (missing) detail.push('<span class="dim">' + esc(t(STR.chkCountNone)) + '</span>');
+      detail.push('<span class="dim">' + applyMarkup(t(STR.chkCountAt),
+        { R: stepText(d.refStep), H: stepText(d.herStep) }) + '</span>');
+    } else {
+      head.push(applyMarkup(t(STR.chkResult), {
+        A: esc(D.fmtVal(d.ref)), B: esc(D.fmtVal(d.her)),
+      }));
+      detail.push('<span class="dim">' + applyMarkup(t(STR.chkResultAt),
+        { R: stepText(d.refStep), H: stepText(d.herStep) }) + '</span>');
+    }
+    return { cls: 'bad', head: head, detail: detail };
+  }
+
+  /* 按下 Check。**整段在 withBusy 里**：它要跑两遍解释器（她的 + 参考的），
+     queens N=8 的参考版一趟就是 156,772 步。withBusy 先画一帧「正在跑解释器…」
+     再去跑，所以那个停顿是有解释的。 */
+  btnCheck.addEventListener('click', function () {
+    if (!exerciseOn()) return;                      // 正常模式下这个按钮是隐藏的
+    const err = ed.getError();
+    if (err) { statusKind = 'bad'; setStatus(errText(err), 'bad'); return; }
+    const P = curP(), pid = uiTab, tk = curTrack(), src = ed.getValue();
+    if (!P || !tk || !pid) return;
+    withBusy(function () {
+      const st = S[pid];
+      st.judge = null;
+      /* ① 她的版本：**用编辑器里此刻的内容**重跑一遍。不能拿上一次 Run 的轨迹
+         —— 她多半是改完直接按 Check 的，那条轨迹属于改之前那份源码。 */
+      runTrack(tk, src, true);
+      if (tk.err) {                                 // 跑不起来：说那件事，不判
+        dropRefTrack(pid);
+        syncEditorSlots();
+        dbg.setCursor(tk.cur);
+        showProblemStatus();
+        return;
+      }
+      // ② 参考版本：同一份源码的挖空体原文（parse().clean），不是编辑器里的东西
+      const ref = attachRefTrack(pid, P, tk);
+      if (ref.err) {
+        statusKind = 'bad';
+        setStatus(esc(t(STR.chkRefFail) + ref.err.message), 'bad');
+        return;
+      }
+      // ③ 判定。check 三个开关来自题目声明，配置写错了要大声说（judge 会抛）
+      let v;
+      try { v = Exercise.judge(ref.res, tk.res, P.check); }
+      catch (e) {
+        st.judge = null;
+        dropRefTrack(pid);
+        syncEditorSlots();
+        statusKind = 'bad';
+        setStatus(esc(t(STR.chkBad) + ((e && e.message) ? e.message : String(e))), 'bad');
+        towerTop = 1; updateFit();
+        return;
+      }
+      st.judge = { status: v.status, div: v.divergence, herSrc: src,
+                   herIndex: st.tracks.indexOf(tk), refIndex: st.tracks.indexOf(ref) };
+      /* ④ 分歧定位：**两条轨道各自 goto**，一个游标推两条到此为止。
+         `refStep` 与 `herStep` 通常不相等，各是各的（见 STR.chkOps 那一段）。
+         某一侧没有对应位置时是 null —— 那一侧就不动，不拿 0 冒充。 */
+      const d = v.divergence;
+      if (d) {
+        if (d.herStep != null) D.goto(tk.cur, d.herStep);
+        if (d.refStep != null) D.goto(ref.cur, d.refStep);
+      }
+      syncEditorSlots();
+      dbg.setCursor(tk.cur);           // 游标已经挪到位了才挂上去，只重画一次
       towerTop = 1;
       updateFit();
       showProblemStatus();
@@ -8883,6 +9263,9 @@ const ALGOS = {
          完全不同，所以标出来，让题目自己决定怎么说 —— 别让它的一串 null 与
          0 混在真读数里冒充"跑出来的结果"。 */
       contrast: isContrast(tk),
+      /* 判定时接上去的那条参考轨道。readoutApi 靠它把这条挡在题目的读数之外
+         （见那里）—— 留在这里是因为 trackView 是"一条轨道长什么样"的唯一出口。 */
+      reference: isReference(tk),
       trace: res ? res.trace : [],
       steps: res ? res.trace.length : null,
       truncated: !!(res && res.trace.truncated),
@@ -8911,11 +9294,17 @@ const ALGOS = {
     /* `index` 是这条轨道在 `st.tracks` 里的下标 —— 读数里判「哪一条是活动的」
        要拿它跟 `a.active` 比，**不能拿遍历的序号比**：练习模式下题目会先把
        只读对照过滤掉，那之后遍历序号跟 activeTrack 就不是一回事了。 */
+    /* ⚠ **参考轨道不进 `a.tracks`。** 每道题的 readout 都是照着「我这几条轨道」
+       写的（tourKnight 遍历它们、queens 只读 `main`），判定时多出来的那一条一进去
+       就会被当成第三份跑出来的结果印在读数里 —— 而且是**参考答案的解数**。
+       判定要说的话由下面 readoutFor 里那一段统一说，与题目无关。
+       `index` 仍然是它在 st.tracks 里的真下标（要拿它跟 a.active 比），所以先
+       编号再过滤，不能反过来。 */
     const views = st.tracks.map(function (tk, k) {
       const v = trackView(tk, P);
       v.index = k;
       return v;
-    });
+    }).filter(function (v) { return !v.reference; });
     return {
       tracks: views,
       main: views[0] || null,
@@ -8971,6 +9360,18 @@ const ALGOS = {
     if (exerciseOn()) {
       extra.push('<span style="color:' + C_STACK + '">' + exerciseText(pid) + '</span>');
     }
+    /* 判定结论：**两边取值并排的那几行只在这里展开**（状态牌只放开头那两句，
+       它是一张两三行高的牌）。这一段与题目无关 —— 说的全是 judge 交出来的东西，
+       所以写在这里而不是塞进每道题的 readout。 */
+    const jr = judgeRender(pid);
+    if (jr) {
+      extra.push(a.rule());
+      jr.head.forEach(function (h) { extra.push(h); });
+      jr.detail.forEach(function (h) { extra.push(h); });
+      /* 「两条轨道各走各的」要说出来：上面那句 trkSameI 刚教过"共用一个游标"，
+         判定之后正相反，不说清楚就像是工具坏了。只有真的接上了参考轨道才说。 */
+      if (refIndexOf(pid) >= 0) extra.push(a.note(STR.chkSplit));
+    }
     extra.push(a.rule());
     extra.push(dimt(STR.roClick) + (jumpNote ? ' <span style="color:' + C_STACK + '">' + jumpNote + '</span>' : ''));
     return html + '<br>' + extra.join('<br>');
@@ -9006,6 +9407,13 @@ const ALGOS = {
       const hit = BR.pickSquare(C, E, [x, y], L);
       if (!hit) continue;
       const sq = hit.rank * L.files + hit.file;
+      /* ⚠ **参考那块盘不跟着点走。** 它停在 `divergence.refStep` 上，而读数里刚
+         写着「参考停在第 76 步」—— 让 §5.4 的反向定位把它挪走，那句话下一秒就
+         成了假话。说一句就退出（静默不动跟工具坏了长得一样）。 */
+      if (!isEdit(tk)) {
+        jumpNote = esc(t(STR.chkRefFixed));
+        return;
+      }
       /* 点哪块棋盘，单步就落到哪条轨迹上（同一条时是 no-op，不会白重置游标）。 */
       setActiveTrack(k);
       const name = squareName({ f: hit.file, r: hit.rank });
@@ -9208,7 +9616,7 @@ const ALGOS = {
        「治好」成一个空棋盘 + 绿色状态的正常页。 */
     statusKind = 'boot';
     paintBootFail();
-    btnRun.disabled = true;
+    setRunDisabled(true);
     btnRevert.disabled = true;
   }
 
@@ -9338,14 +9746,24 @@ const ALGOS = {
     const lang = curLang();
     let n = 0;
     PIDS.forEach(function (pid) {
-      tracksOf(pid).forEach(function (tk) {
+      const st = S[pid];
+      tracksOf(pid).forEach(function (tk, k) {
         if (!tk.ex || tk.ex.lang === lang) return;
         const from = tk.ex.notes[tk.ex.lang], to = tk.ex.notes[lang];
         const map = Object.create(null);
         for (let i = 0; i < from.length && i < to.length; i++) map[from[i]] = to[i];
-        tk.src = tk.src.split('\n').map(function (ln) {
-          return Object.prototype.hasOwnProperty.call(map, ln) ? map[ln] : ln;
-        }).join('\n');
+        const swap = function (text) {
+          return text.split('\n').map(function (ln) {
+            return Object.prototype.hasOwnProperty.call(map, ln) ? map[ln] : ln;
+          }).join('\n');
+        };
+        tk.src = swap(tk.src);
+        /* ⚠ **判定那一刻记下的源码也要跟着换。** 换掉的只是注释那一行，程序一个
+           字节的行为都没变 —— 可 `judge.herSrc` 是拿来跟编辑器内容比"她改过了没有"
+           的，不换的话下一次 syncEditorSlots 送来的新文本跟它对不上，判定当场作废。
+           实测过（浏览器验收里当场撞上）：填对了、绿色的「对了」，切一次语言就变回
+           一句灰的「运行完成 · 144 步 · 返回值 0」，而她什么都没动。 */
+        if (st && st.judge && st.judge.herIndex === k) st.judge.herSrc = swap(st.judge.herSrc);
         tk.ex.lang = lang;
         n++;
       });
@@ -9356,6 +9774,9 @@ const ALGOS = {
   function relabel() {
     btnRun.textContent = t(STR.run);
     btnRevert.textContent = t(STR.reset);
+    btnCheck.textContent = t(STR.chk);
+    btnCheck.title = t(STR.chkTip);
+    syncCheckButton();
     paintHint();
     document.getElementById('busy').textContent = t(STR.busy);
     paintLegend();
@@ -9371,7 +9792,7 @@ const ALGOS = {
       const e2 = ed.getError();
       if (e2) setStatus(errText(e2), 'bad');
       else showProblemStatus();
-    } else if (statusKind === 'ok') showProblemStatus();
+    } else if (statusKind === 'ok' || statusKind === 'judge') showProblemStatus();
     else if (statusKind === 'busy') setStatus(t(STR.busy), 'busy');
     else setStatus(t(STR.ready), '');
     if (dbg) dbg.relabel();
@@ -9441,6 +9862,9 @@ const ALGOS = {
          相同而 steps 不同，那正是这一题最锋利的一条断言。 */
       tracks: tks.map(function (x, k) {
         return { file: x.file, label: trackTitle(pid ? PROBLEMS[pid] : null, x, k),
+                 /* 'edit' | 'contrast' | 'reference'。判定之后要能一眼看出哪一条
+                    是参考轨道 —— 光看 file 看不出来（它跟她那条是同一份文件）。 */
+                 role: x.role || 'edit',
                  steps: x.res ? x.res.trace.length : null,
                  truncated: !!(x.res && x.res.trace.truncated),
                  result: x.res && x.res.result !== undefined ? x.res.result : null,
@@ -9494,6 +9918,12 @@ const ALGOS = {
         return { visible: !sl.wrap.classList.contains('gone'),
                  active: sl.wrap.classList.contains('active'),
                  caption: sl.cap.textContent,
+                 /* 只读是靠 textarea 的 readOnly 属性做的（editor.js 一行不改），
+                    所以断言也读它本身，不读我们自己记的那个 role。
+                    ⚠ **在这里也留一份**（`exercise.readOnly` 之外）：那一份在退出
+                    练习模式之后整个变成 null，而"退出之后那块编辑器真的解锁了"
+                    恰恰是要在**练习模式之外**断言的一件事。 */
+                 readOnly: !!sl.ed.textarea.readOnly,
                  chars: sl.ed.getValue().length };
       }),
       breakpoints: dbg ? Object.keys(dbg.cursor().breakpoints).map(Number).sort(function (a, b) { return a - b; }) : [],
@@ -9502,25 +9932,58 @@ const ALGOS = {
       toggles: { marks: E.state.marks !== false, stale: E.state.stale !== false,
                  tower: E.state.tower !== false, pieces: E.state.pieces !== false,
                  exercise: exerciseOn() },
-      /* ---- 练习模式（§2.9）。Task 7/8 的验收从这里读 ----
-         `on` 是开关此刻的位置，`blanks` 是**这道题真的解析出来的**挖空
-         （逐轨道，含只读对照那一条 —— 它的 blanks 恒为空数组）。
-         `notes` 是每块编辑器里此刻那几行占位注释的原文：「默认 EN 时读到的
-         是 hintEn」这条断言光看 chars 是断不出来的，得看见字。 */
-      exercise: {
-        on: exerciseOn(),
-        lang: curLang(),
-        count: pid ? blankCount(pid) : 0,
-        tracks: pid ? blanksOf(pid) : [],
-        notes: slots.map(function (sl) {
-          return sl.ed.getValue().split('\n').filter(function (ln) {
-            return ln.indexOf('/* 在这里写：') >= 0 || ln.indexOf('/* Write your answer here:') >= 0;
-          });
-        }),
-        /* 只读是靠 textarea 的 readOnly 属性做的（editor.js 一行不改）——
-           所以断言也读它本身，不读我们自己记的那个 role。 */
-        readOnly: slots.map(function (sl) { return !!sl.ed.textarea.readOnly; }),
-      },
+      /* ---- 练习模式（§2.9）。Task 7/8/9 的验收从这里读 ----
+
+         **没进练习模式时整段是 `null`** —— 不是 `{}`、不是 `false`：一个 `on:false`
+         的对象每个字段都得再给一个"这时候算什么"的答案（blankId 是什么？status
+         是什么？），而正确答案是"这时候没有这回事"，那正是 null 说的话。
+         开关本身的位置读 `toggles.exercise`，编辑器锁没锁读 `slots[k].readOnly`
+         —— 两者在两种模式下都在。
+
+         判定那四个字段（**这是 Task 7 加的**）：
+           blankId  这次判定归到哪个挖空。**只有当她那条轨道恰好只有一个挖空时
+                    才有值**，否则是 null —— 见下面那段注释。
+           status   'pass' | 'fail' | 'unknown'，还没按过 Check 时是 null。
+                    ⚠ null（没判过）与 'unknown'（判了，但跑不完）是两回事。
+           refStep / herStep  两条轨道各自停在的那一步（`judge` 报的两个步号，
+                    通常不相等）。没有分歧、或某一侧没有对应位置时是 null。 */
+      exercise: !exerciseOn() ? null : (function () {
+        const j = st ? st.judge : null;
+        const d = j ? j.div : null;
+        const her = j && st.tracks[j.herIndex] ? st.tracks[j.herIndex] : (tks[activeTrack] || null);
+        const hb = (her && her.ex && her.ex.blanks) || [];
+        return {
+          on: true,
+          /* ⚠ **挖空多于一个时这里是 null，那不是偷懒，是不编造。** judge 比的是
+             整个程序的行为，而占位 `fill` 本身就是一个（故意的）错答案 —— 她填对
+             了其中一个空，另一个空照样在制造分歧。把某一处分歧归给某一个空，
+             需要"这一行属于哪个挖空"的行号归属，而她可以往答案里加行、删行、
+             改动周围。归不出来就说归不出来。 */
+          blankId: hb.length === 1 ? hb[0].id : null,
+          status: j ? j.status : null,
+          refStep: d ? d.refStep : null,
+          herStep: d ? d.herStep : null,
+          /* 分歧属于哪一类：只有 'boardOps' 的两个步号是「分歧的那一步」，
+             'counters' 是末次赋值处、'result' 是各自末步（见 exercise.js）。
+             验收要能把这三种分开，所以报出来。 */
+          kind: d ? d.kind : null,
+          /* 参考轨道在 st.tracks 里的下标，没接上时是 null。「两条轨道停在不同
+             步号」那条断言要拿它和 `tracks[herIndex].i` 去对。 */
+          refTrack: pid && refIndexOf(pid) >= 0 ? refIndexOf(pid) : null,
+          herTrack: j ? j.herIndex : null,
+          lang: curLang(),
+          count: pid ? blankCount(pid) : 0,
+          tracks: pid ? blanksOf(pid) : [],
+          /* 每块编辑器里此刻那几行占位注释的原文：「默认 EN 时读到的是 hintEn」
+             这条断言光看 chars 是断不出来的，得看见字。 */
+          notes: slots.map(function (sl) {
+            return sl.ed.getValue().split('\n').filter(function (ln) {
+              return ln.indexOf('/* 在这里写：') >= 0 || ln.indexOf('/* Write your answer here:') >= 0;
+            });
+          }),
+          readOnly: slots.map(function (sl) { return !!sl.ed.textarea.readOnly; }),
+        };
+      })(),
       view: { az: +E.cam.az.toFixed(4), el: +E.cam.el.toFixed(4), dist: +E.cam.dist.toFixed(3) },
       folded: document.body.classList.contains('folded'),
       busy: document.body.classList.contains('busy'),
@@ -9537,6 +10000,10 @@ const ALGOS = {
       statusClass: statusEl.className,
       statusLocked: statusLocked,
       runDisabled: !!btnRun.disabled,
+      /* Check 有两种"按不了"：语法错（disabled）与正常模式（根本不显示）。
+         两个都报，否则一条"按了没反应"的验收分不清是哪一种。 */
+      checkDisabled: !!btnCheck.disabled,
+      checkVisible: btnCheck.style.display !== 'none',
       revertDisabled: !!btnRevert.disabled,
       bootError: bootErr ? bootErr.message : null,
       version: VERSION,
