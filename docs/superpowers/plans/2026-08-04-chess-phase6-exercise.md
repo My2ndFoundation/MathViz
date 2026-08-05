@@ -53,9 +53,9 @@ return !cols[c] && !diagDown[r + c] && !diagUp[r - c + N];
 
 | 文件 | 职责 |
 |---|---|
-| `chess/core/exercise.js`（新建）| 纯逻辑核。`parse` / `judge` / `hintAt` 三个导出，不认识任何一道题 |
-| `chess/core/exercise.test.js`（新建）| `parse` / `judge` / `hintAt` 的单元测试，含全部大声失败的路径 |
-| `chess/core/exercise-blanks.test.js`（新建）| §7.4 的三项断言 × 六个挖空 = 18 条。要 `require` `exercise.js` 与三份 `algos` |
+| `chess/core/exercise.js`（新建）| 纯逻辑核。`parse` / `judge` / `hintAt` / `noteLine` 四个导出，不认识任何一道题 |
+| `chess/core/exercise.test.js`（新建）| `parse` / `judge` / `hintAt` 的单元测试，含全部大声失败的路径（实测 189 条）|
+| `chess/core/exercise-blanks.test.js`（新建）| §7.4 的三项断言 × **五个**挖空（不是六个，见「本阶段明确不做的事」），加上占位版可跑性、逐档步数、占位注释行长度的扫描 —— 实测 133 条。要 `require` `exercise.js` 与三份 `algos` |
 | `chess/core/algos/queens.js`（改）| 只在 `BODY` 数组里插入 BLANK 指令行 |
 | `chess/core/algos/knight-path.js`（改）| 同上 |
 | `chess/core/algos/tour-warnsdorff.js`（改）| 同上。`tour-dfs.js` **不动**（它是只读对照） |
@@ -936,7 +936,7 @@ git status --short
 逐条确认：
 
 1. 三题各开练习模式，占位行显示正确、Run 能跑
-2. 六个挖空各填一次正确答案 → 全部 `pass`
+2. **五个**挖空各填一次正确答案 → 全部 `pass`
 3. 每题各填一次已知错误 → `fail`，且两条轨道**停在不同步号**（贴探针读数）
 4. 截断路径 → 「跑不完，判不了」，不是「错」
 5. 四级提示逐级展开；第 4 级能一键填入
@@ -961,7 +961,8 @@ git commit -m "feat(chess): 工具⑤ 1.1.0 —— 挖空练习定版"
 ## 阶段 6 完成标准
 
 - [ ] `exercise.test.js` / `exercise-blanks.test.js` / 三个 `algos/*.test.js` 全绿；`check.py` exit 0 七道门；`sync_registry --check` exit 0
-- [ ] 六个挖空各过 §7.4 三关，**十八条断言**，其中六条分歧步是 ±0 精确匹配的实测值
+- [ ] **五个**挖空各过 §7.4 三关（`threeGates` 五次调用），`exercise-blanks.test.js` 实测 **133 条断言**，其中五组分歧步（`refStep` / `herStep` / `opIndex`）是 ±0 精确匹配的实测值
+      <br>↑ 原文写的是「六个挖空、十八条断言」。**是五个**，理由见下面「本阶段明确不做的事」的最后一条。
 - [ ] **插入指令行没有改变任何一格步数**（queens 五档、tourKnight 四块盘、knightPath 两组，与规格 §4⑤ 逐格一致）
 - [ ] 判错时两条轨道**各自**停在自己的那一步（探针里两个步号不相等）
 - [ ] 截断时显示「跑不完，判不了」，不是「错」
@@ -979,3 +980,12 @@ git commit -m "feat(chess): 工具⑤ 1.1.0 —— 挖空练习定版"
 - **不做计分、评级、进度条、成就**（§9）。存下的尝试次数只为将来做「哪些概念反复卡住」的回顾视图。
 - **不做 Export .js**（§2.8 的另一半，与本阶段无依赖关系）。
 - **不改 `chess/scripts/check.py` 的扫描逻辑。** 若新测试文件没被自动收进门，停下来报告。
+- **`tourKnight` 只挖一个空，不挖两个 —— 所以全阶段是五个挖空，不是六个。**（2026-08-05 定，交付时裁定）
+  本计划与规格 §2.9 那张表原本要求 `tourKnight` 出两个空：`degree()` 里的计数行（1 级）与整个
+  `degree()` 函数（3 级）。两者**互相嵌套** —— 3 级那个空的挖空体把 1 级那个空整个包在里面，
+  于是源码里会出现 `>>> BLANK` 套 `>>> BLANK`，而 `parse()` 见到嵌套当场抛（这一条是硬的：
+  允许嵌套就得回答「外层的 `fill` 里那个内层空算谁的」，没有不含糊的答案）。
+  取舍是**留 3 级那个**：整个函数是这一阶段唯一的 3 级挖空，丢掉它三个难度级就不齐了；而
+  1 级的空 `queens/safe-return`、`knightPath/on-board`、`knightPath/seen-test` 已经有三个。
+  最终五个：`queens` 的 `safe-return`(1) / `undo`(2)、`knightPath` 的 `on-board`(1) / `seen-test`(1)、
+  `tourKnight` 的 `degree-fn`(3)。**三个难度级仍然齐全**，这才是那张表真正要保证的事。

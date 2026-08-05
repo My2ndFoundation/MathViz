@@ -578,4 +578,40 @@ threeGates('tourKnight/degree-fn', twSrc, CHECK_TOUR,
       ].join('\n'));
   });
 
+/* ---------- 占位注释那一行有多长：**扫真语料** ----------
+
+   exercise.test.js 里也有一组同样的长度断言，但它钉的是那个文件自己那份合成
+   fixture —— 三份**真**源码的注释行，一条断言都没有。而这条纪律钉的是一个在真
+   语料上实测过的缺陷：注释行曾把整段 hint 原样写进去，英文那一行于是 292–428
+   字符（编辑器可视宽 302 px、scrollWidth 3,229 px，横向要滚十屏），中文那几行
+   只有 113–154 —— 两侧差近三倍，而**英文是默认语言**，光看中文界面永远发现不
+   了。合成 fixture 的 hint 是测试自己写的两个字，它长不起来，也就永远拦不住这
+   件事在真语料上复发。所以这里按 id 逐条扫，两种语言都扫。
+
+   上限与 exercise.test.js 同为 96（含缩进）。今天的实测最大值是 60（knightPath
+   的 seen-test 英文行），留出的余量够再加两个 id 长一点的空。 */
+const NOTE_MAX = 96;
+const NOTE_CORPUS = [['queens', qBlanks], ['knightPath', kpBlanks], ['tourKnight', twBlanks]];
+let noteSeen = 0;
+NOTE_CORPUS.forEach(function (pair) {
+  pair[1].forEach(function (b) {
+    const zh = E.noteLine(b, 'zh'), en = E.noteLine(b, 'en');
+    noteSeen++;
+    T.ok(zh.length <= NOTE_MAX,
+         pair[0] + '/' + b.id + ' 的 zh 占位注释不超过 ' + NOTE_MAX + ' 字符（实测 ' + zh.length + '）');
+    T.ok(en.length <= NOTE_MAX,
+         pair[0] + '/' + b.id + ' 的 en 占位注释不超过 ' + NOTE_MAX + ' 字符（实测 ' + en.length + '）');
+    /* 默认语言不该是最难读的那一种 —— 上面那个缺陷正是从这个比值上露头的。 */
+    T.ok(en.length <= zh.length * 2,
+         pair[0] + '/' + b.id + ' 的英文注释行没比中文长出一倍以上（' + en.length + ' vs ' + zh.length + '）');
+    /* 点名是哪一个空：UI 拿这一行当锚点（切语言原地对换、第 4 级「填进去」定位
+       她那段答案）。两个空的注释行长得一样，它们就会互相顶掉。 */
+    T.ok(zh.indexOf(b.id) >= 0, pair[0] + '/' + b.id + ' 的 zh 注释里点名是哪一个空');
+    T.ok(en.indexOf(b.id) >= 0, pair[0] + '/' + b.id + ' 的 en 注释里点名是哪一个空');
+  });
+});
+/* ⚠ 扫过的条数也要钉住。少 require 一份源码、或者哪天 parse 悄悄少认出一个空，
+   上面那个 forEach 会安安静静地一条断言都不跑，全绿。 */
+T.eq(noteSeen, 5, '真语料里一共扫过 5 个挖空的占位注释行（queens 2 + knightPath 2 + tourKnight 1）');
+
 T.report();

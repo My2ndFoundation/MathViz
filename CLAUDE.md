@@ -43,13 +43,17 @@ There is no build/lint/test toolchain. To develop:
 
 ## Parallel work discipline
 
-Multiple sessions and multiple build agents routinely run against this repo at once. Three rules, each earned the hard way:
+Multiple sessions and multiple build agents routinely run against this repo at once. Five rules, each earned the hard way:
 
 1. **Give every parallel builder its own worktree.** Launch build subagents with `isolation: "worktree"` so each gets an isolated copy of the repo. Distinct `outputs/*.html` files do *not* make concurrent work safe — the collisions happen through shared state, not shared files.
 
 2. **Never `git add -A` / `git commit -a` while other work may be in flight. Stage explicit paths.** A blanket stage sweeps up whatever another session happens to have half-written. This actually happened: a replay-progress fix committed an unrelated tool's mid-build snapshot, and that unfinished file rode a PR onto `main` unregistered. Cheap to avoid, tedious to unpick.
 
 3. **Always pass an explicit `tabId` to browser tools.** Untargeted `javascript_exec` lands on whatever tab is fronted — which may be another agent's page. Two agents have silently driven each other's tools, producing verification numbers attributed to the wrong file. When it matters, assert `TOOL.id` in the probe itself before trusting a measurement.
+
+4. **The scratchpad is shared — prefix every temp file with your task.** The scratchpad directory is per-session in name only: two agents on the same repo path land in the same directory. This actually happened in chess phase 6 — two sessions each wrote `probe-quote.js`, and one silently overwrote the other's driver mid-verification. Name them `t5-probe.js` / `t8-probe.js`, never `probe.js`.
+
+5. **A pre-commit hook that regenerates files can pull another session's uncommitted work into your commit.** `.githooks/pre-commit` re-runs `chess/scripts/inline_core.py`, which reads `chess/core/**/*.js` **off disk** — not from the index. So whatever another session has saved but not committed gets inlined into the HTML the hook then re-stages. This is how one chess phase-6 commit carried off another session's half-written BLANK markers. **"Stage explicit paths" does not stop this** — the hook stages more after you do. Read every path in `git status --short` after the hook runs, not just before.
 
 Before committing, `git status --short` and confirm every listed path is yours.
 
