@@ -28,6 +28,46 @@ STDIN_LINE_RE = re.compile(r'^\[stdin\]:(\d+)$', re.MULTILINE)
 ALGOS_BLOCK_RE = re.compile(
     r'/\* >>> GENERATED:ALGOS(.*?) \*/\n(.*?)/\* <<< GENERATED:ALGOS \*/', re.DOTALL)
 
+# ---- 跑 node 的唯一入口（2026-08-07 加）----
+#
+# Linux 的 execve 对**单个 argv 元素**有 MAX_ARG_STRLEN = 32 页 = 131,072
+# 字节的上限（跟 ARG_MAX 那个总量上限是两回事），超了直接 E2BIG，Python
+# 抛 `OSError: [Errno 7] Argument list too long`。**macOS 没有这个单参数
+# 上限。**
+#
+# 这不是假设，是本仓真实发生过、而且**红了四次合并没人发现**的事故：
+# algos_roundtrip_check 把整个内联 ALGOS 块当一个 `node -e` 参数传出去，
+# 阶段 7 加了三份算法源码把它顶过 128 KiB、阶段 8 的英文又让它翻倍
+# （chess-board-algorithms.html 那一块到了约 225 KB）。于是
+#   · 所有人本地（macOS）`check.py` 一直 exit 0
+#   · CI（ubuntu）从 #97 起一直红，#98 只改了两个 markdown 也红
+# ——「没配钩子的克隆也别想合入漂移」那道防线整整空了四次合并。
+#
+# 所以**脚本一律走 stdin，不走 argv**：管道没有这个上限。真需要 stdin 送
+# 数据时脚本只能落回 argv，那就在这里**当场断言它够小**——把一个只在
+# Linux 上出现的失败，变成一个在开发机上就会响的失败。
+MAX_ARG_STRLEN = 128 * 1024
+
+
+def run_node(script: str, stdin_data: str = None):
+    """跑一段 node 脚本，返回 CompletedProcess。
+
+    stdin_data 为 None 时**脚本走 stdin**（node 无脚本文件参数时会执行
+    stdin），彻底避开 MAX_ARG_STRLEN。需要用 stdin 送数据时，脚本只能走
+    `-e`，此处断言它小于上限——这类探针都是几百字节的定长文本，真写大了
+    是设计错误，应当把大的那一头挪到 stdin 或磁盘。
+    """
+    if stdin_data is None:
+        return subprocess.run(['node'], input=script, capture_output=True, text=True)
+    size = len(script.encode('utf-8'))
+    if size >= MAX_ARG_STRLEN:
+        raise AssertionError(
+            f'要走 argv 的 node 脚本有 {size:,} 字节，超过 Linux 的单参数上限 '
+            f'{MAX_ARG_STRLEN:,}——在 macOS 上跑得动、到 CI 上就是 '
+            f'"Argument list too long"。把大的那一头挪到 stdin 或磁盘。')
+    return subprocess.run(['node', '-e', script], input=stdin_data,
+                          capture_output=True, text=True)
+
 # 根级页面 = chess/index.html 与 chess/app.html。它们不在 tools/ 下，于是
 # 长期躲过了这个文件里的两道门：node_check() 只 glob('tools/*.html')，而 CI
 # 的语法门（.github/workflows/registry-sync.yml）扫的是主站的 app.html /
@@ -146,7 +186,7 @@ def js_string_literal_html_safety_check() -> int:
             failed.append(f'{label}：转义结果里仍有 </script（大小写不敏感）')
         # 顺手确认值本身没被这两条新规则悄悄改坏——用 node 求值回来对比。
         script = f'const V = {lit};\nprocess.stdout.write(JSON.stringify(V));'
-        proc = subprocess.run(['node', '-e', script], capture_output=True, text=True)
+        proc = run_node(script)
         if proc.returncode != 0:
             failed.append(f'{label}：node 求值失败：{proc.stderr.strip()}')
             continue
@@ -281,7 +321,9 @@ def algos_roundtrip_check() -> int:
         expected_names = set(n.strip() for n in m.group(1).strip().split(','))
         expected_names.discard('')
         script = m.group(2) + '\nprocess.stdout.write(JSON.stringify(ALGOS));'
-        proc = subprocess.run(['node', '-e', script], capture_output=True, text=True)
+        # ⚠ 这一段是 225 KB 级的内联块，**必须走 stdin**（见 run_node 顶上
+        #   记的那次「红了四次合并没人发现」的事故）。
+        proc = run_node(script)
         if proc.returncode != 0:
             failed.append((path.name, 'node 求值 ALGOS 失败：' + proc.stderr.strip()))
             continue
@@ -461,8 +503,9 @@ def bilingual_algos_check() -> int:
 
     def normalize(src: str):
         """跑 normalize probe，失败时返回 (None, stderr)，成功时返回 (norm, None)。"""
-        proc = subprocess.run(['node', '-e', NORMALIZE_PROBE], input=src,
-                              capture_output=True, text=True)
+        # 这一处 stdin 让给了数据（拼接过的源码），所以探针只能走 argv——
+        # run_node 会当场断言它够小。
+        proc = run_node(NORMALIZE_PROBE, stdin_data=src)
         if proc.returncode != 0:
             return None, proc.stderr.strip()[:200]
         return proc.stdout, None
