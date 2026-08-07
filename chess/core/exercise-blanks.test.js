@@ -402,7 +402,7 @@ const TW = require('./algos/tour-warnsdorff.js');
 const TD = require('./algos/tour-dfs.js');
 /* 四块盘就是工具页 `TOUR_BOARDS` 的四档；3×4 是滑杆初值。 */
 const TOUR_BOARDS = [[3, 4], [3, 5], [4, 5], [3, 7]];
-const twSrc = TW.source({ W: 3, H: 4, start: 0 });
+const twSrc = TW.source({ W: 3, H: 4, start: 0, lang: 'zh' });
 
 /* ---- 这里只有**一个**挖空，不是简报和规格 §2.9 说的两个 ----
 
@@ -464,7 +464,7 @@ T.throws(function () {
    多了一段」这种事。 */
 for (let b = 0; b < TOUR_BOARDS.length; b++) {
   const W = TOUR_BOARDS[b][0], H = TOUR_BOARDS[b][1];
-  T.eq(parseZh(TD.source({ W: W, H: H, start: 0 })).blanks.length, 0,
+  T.eq(parseZh(TD.source({ W: W, H: H, start: 0, lang: 'zh' })).blanks.length, 0,
        'tour-dfs 在 ' + W + '×' + H + ' 上没有挖空 —— 它是只读对照');
 }
 
@@ -506,7 +506,7 @@ for (let b = 0; b < TOUR_BOARDS.length; b++) {
 const twRefTrunc = [];
 for (let b = 0; b < TOUR_BOARDS.length; b++) {
   const W = TOUR_BOARDS[b][0], H = TOUR_BOARDS[b][1];
-  const src = TW.source({ W: W, H: H, start: 0 });
+  const src = TW.source({ W: W, H: H, start: 0, lang: 'zh' });
   const ref = I.run(src, { host: {} });
   const p = I.run(parseZh(src).placeholder, { host: {} });
   const tag = W + '×' + H;
@@ -535,7 +535,7 @@ T.eq(twRefTrunc.join(','), '3×7',
    这条断言而不是先撞 `Interp.STEP_LIMIT`。撞这条断言看到的是「expected true」
    加一个具体步数，撞上限看到的只是 `result === undefined`。 */
 {
-  const p45 = I.run(parseZh(TW.source({ W: 4, H: 5, start: 0 })).placeholder, { host: {} });
+  const p45 = I.run(parseZh(TW.source({ W: 4, H: 5, start: 0, lang: 'zh' })).placeholder, { host: {} });
   T.ok(p45.trace.length < 150000,
        'tourKnight 占位版 4×5 的步数留着余量（< 150,000；实测 ' + p45.trace.length +
        '，离 200,000 上限还剩 ' + (200000 - p45.trace.length) + ' 步）');
@@ -548,7 +548,7 @@ T.eq(twRefTrunc.join(','), '3×7',
    分歧若没出现在截断之前就是 unknown —— 那也不是「对」）。 */
 for (let b = 0; b < TOUR_BOARDS.length; b++) {
   const W = TOUR_BOARDS[b][0], H = TOUR_BOARDS[b][1];
-  const src = TW.source({ W: W, H: H, start: 0 });
+  const src = TW.source({ W: W, H: H, start: 0, lang: 'zh' });
   const v = E.judge(I.run(src, { host: {} }),
                     I.run(parseZh(src).placeholder, { host: {} }), CHECK_TOUR);
   T.ok(v.status !== 'pass',
@@ -677,10 +677,10 @@ const REAL_SOURCES = [
   ['queens N=8', Q.source({ N: 8, lang: 'zh' })],
   ['knightPath target=63(h8)', KP.source({ W: 8, start: 0, target: 63, lang: 'zh' })],
   ['knightPath target=27(d4)', KP.source({ W: 8, start: 0, target: 27, lang: 'zh' })],
-  ['tourWarnsdorff 3×4', TW.source({ W: 3, H: 4, start: 0 })],
-  ['tourWarnsdorff 3×5', TW.source({ W: 3, H: 5, start: 0 })],
-  ['tourWarnsdorff 4×5', TW.source({ W: 4, H: 5, start: 0 })],
-  ['tourWarnsdorff 3×7', TW.source({ W: 3, H: 7, start: 0 })],
+  ['tourWarnsdorff 3×4', TW.source({ W: 3, H: 4, start: 0, lang: 'zh' })],
+  ['tourWarnsdorff 3×5', TW.source({ W: 3, H: 5, start: 0, lang: 'zh' })],
+  ['tourWarnsdorff 4×5', TW.source({ W: 4, H: 5, start: 0, lang: 'zh' })],
+  ['tourWarnsdorff 3×7', TW.source({ W: 3, H: 7, start: 0, lang: 'zh' })],
 ];
 function stepsOf(src) { return I.run(src, { host: {} }).trace.length; }
 for (const [label, src] of REAL_SOURCES) {

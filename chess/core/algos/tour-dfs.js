@@ -136,61 +136,192 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  /* ================= 双语渲染（规格 §1.6 / §7.5）=================
+
+     ⚠ **这一整段在七份 algos/*.js 里逐字节相同**，check.py 的
+     bilingual_algos_check() 会核对。改这里就得七份一起改。
+     不抽成共用模块，是因为这些文件是被 inline_core.py 当**字符串**逐份
+     内联、再各自求值成 AlgoXxx 全局的 —— 抽出去就凭空多一条求值顺序
+     依赖，而那类缺陷要到浏览器里 ALGOS['queens.js'] 是 undefined 才发作
+     （阶段 5 建页当天撞过一次）。七份重复 + 一道字节级门，是阶段 7
+     king-greedy / king-exact 共用段用过的同一个套路。
+
+     `parts` 的元素只有两种：
+       字符串                 —— 一行，两种语言下逐字相同
+                                 （代码、空行、// >>> BLANK 指令行）
+       { zh: [], en: [] }     —— 一段散文，两边都是**行数组**
+
+     **两边行数必须相等**，不是洁癖：生成的源码是按行索引的 —— 解释器
+     每一步记 line，第 4 级提示靠 pristine 与编辑器逐行对齐划出 answerRange，
+     判定靠 judge.herSrc 比对。行数一差，切一次语言这四样同时指错地方。
+     行数一对齐，轨迹在两种语言下逐字节相同，切语言就只是换掉编辑器里的
+     文本，不重跑解释器。
+
+     BLANK 指令行**不翻译**：它本来就同时带着 hint 与 hintEn，两种语言
+     变体里那一行逐字相同，parse() 一点不用改。所以它是**字符串**片段。 */
+  function render(parts, lang) {
+    if (lang === undefined || lang === null) {
+      throw new Error(
+        'source({ lang }) 少了 lang —— 源码的注释与日志要用哪种语言没有' +
+        '默认值，必须写明 "zh" 或 "en"（默认成任何一种，都是让同一个缺陷' +
+        '换个地方复活）'
+      );
+    }
+    if (lang !== 'zh' && lang !== 'en') {
+      throw new Error('source({ lang }) 的 lang 只认 "zh" 或 "en"，收到：' +
+                      JSON.stringify(lang));
+    }
+    const out = [];
+    for (let i = 0; i < parts.length; i = i + 1) {
+      const p = parts[i];
+      if (typeof p === 'string') { out.push(p); continue; }
+      if (!p || !Array.isArray(p.zh) || !Array.isArray(p.en)) {
+        throw new Error('第 ' + i + ' 个片段既不是字符串、也不是 ' +
+                        '{ zh: [], en: [] }');
+      }
+      if (p.zh.length !== p.en.length) {
+        throw new Error(
+          '第 ' + i + ' 个片段两种语言行数不等：zh ' + p.zh.length + ' 行 / en ' +
+          p.en.length + ' 行 —— 生成的源码按行索引，行数一差，切一次语言 ' +
+          'Step.line / pristine / answerRange / judge.herSrc 同时指错地方' +
+          '（规格 §1.6）'
+        );
+      }
+      const lines = p[lang];
+      for (let j = 0; j < lines.length; j = j + 1) out.push(lines[j]);
+    }
+    return out;
+  }
+
   /* 普通字符串拼，不用模板字面量：这段文本本身会被原样贴进 html，
-     反引号在那个上下文里比在这里更容易出事（照抄 queens.js 的理由）。 */
+     反引号在那个上下文里比在这里更容易出事（照抄 queens.js 的理由）。
+
+     元素两种：字符串（代码 / 空行 / BLANK 指令行，两语逐字相同）与
+     `{ zh: [], en: [] }`（一段散文，两边行数必须相等）—— 见上面 render()。
+     英文不是逐句直译，是照中文那一版的意思与语气重写的，行数对齐落在
+     「段」上：段内句子怎么重组都行，段的行数必须一样。
+
+     ⚠ **两份共用的每一段英文也必须逐字相同**（跟中文那一侧同一条纪律）：
+     tour.test.js 的子序列门阶段 8 起两种语言各跑一次，而并排 diff 这件
+     教学事本身在英文界面下同样要成立 —— 这个工具默认英文。 */
 
   /* ==== 以下 HEAD 与 tour-warnsdorff.js 的 HEAD **行数相同**，
      只有第 1 行的标题和第 12–13 行讲「先试哪一个」的两行不同。 ==== */
   const HEAD = [
-    '/* ============ 骑士巡游 · 朴素回溯 ============',
-    '   马走「日」字：横一竖二，或者横二竖一 —— 绕着它站的那一格一共八个方向。',
-    '   题目是：让马从某一格出发，把整块棋盘每一格都恰好踩一次。',
+    {
+      zh: [
+        '/* ============ 骑士巡游 · 朴素回溯 ============',
+        '   马走「日」字：横一竖二，或者横二竖一 —— 绕着它站的那一格一共八个方向。',
+        '   题目是：让马从某一格出发，把整块棋盘每一格都恰好踩一次。',
+        '',
+        '   格子编号：sq = 行 * W + 列。W 是棋盘的宽（每行几格），H 是高。',
+        '   第 0 行是棋盘最下面那一行，第 0 列是最左边那一列 —— 于是 0 号格',
+        '   就是国际象棋里的 a1。要反推回去：列 = sq % W，行 = (sq - 列) / W。',
+        '   棋盘不必是正方形，3×4 和 4×5 都是正常的棋盘。',
+        '',
+        '   办法是「试错 + 反悔」：挑一个方向走过去，走不通就退回来换一个。',
+        '   旁边那份源码跟这份只差一件事 —— 下一步先试哪一个。',
+        '   这一份：按固定的方向顺序挨个试，谁也不比谁优先。',
+        '   最朴素，也最诚实 —— 它不知道哪条路更有希望，只能一条条走。 */',
+      ],
+      en: [
+        '/* ============ Knight\'s Tour · plain backtracking ============',
+        '   A knight moves in an L: one across and two along, or two across and one — eight',
+        '   directions in all. The task: from one square, step on every square exactly once.',
+        '',
+        '   Squares are numbered sq = row * W + column, where W is the width (squares per',
+        '   row) and H the height. Row 0 is the bottom row and column 0 the leftmost, so',
+        '   square 0 is a1 in chess. To reverse: column = sq % W, row = (sq - column) / W.',
+        '   The board need not be square — 3×4 and 4×5 are perfectly normal boards.',
+        '',
+        '   The method is "try, then take it back": walk one way, and when it leads nowhere,',
+        '   back up and take another. The source beside this differs in one thing only —',
+        '   which square to try first. This one: the fixed direction order, one after',
+        '   another, no favourites — plainest, honest, and blind to which road is best. */',
+      ],
+    },
     '',
-    '   格子编号：sq = 行 * W + 列。W 是棋盘的宽（每行几格），H 是高。',
-    '   第 0 行是棋盘最下面那一行，第 0 列是最左边那一列 —— 于是 0 号格',
-    '   就是国际象棋里的 a1。要反推回去：列 = sq % W，行 = (sq - 列) / W。',
-    '   棋盘不必是正方形，3×4 和 4×5 都是正常的棋盘。',
-    '',
-    '   办法是「试错 + 反悔」：挑一个方向走过去，走不通就退回来换一个。',
-    '   旁边那份源码跟这份只差一件事 —— 下一步先试哪一个。',
-    '   这一份：按固定的方向顺序挨个试，谁也不比谁优先。',
-    '   最朴素，也最诚实 —— 它不知道哪条路更有希望，只能一条条走。 */',
-    '',
-    '/* 棋盘的宽、高，以及马从哪一格出发。',
-    '   能拧的旋钮是两个而不是一个，而工作量随格子数指数增长：',
-    '   3×4 和 4×5 之间只差 8 格，这一份就从「一千步」变成「跑不完」。 */',
+    {
+      zh: [
+        '/* 棋盘的宽、高，以及马从哪一格出发。',
+        '   能拧的旋钮是两个而不是一个，而工作量随格子数指数增长：',
+        '   3×4 和 4×5 之间只差 8 格，这一份就从「一千步」变成「跑不完」。 */',
+      ],
+      en: [
+        '/* The board\'s width and height, and which square the knight starts from.',
+        '   Two knobs to turn here, not one, and the work grows exponentially with squares:',
+        '   3×4 takes a thousand steps; 8 more for 4×5 and this one never finishes. */',
+      ],
+    },
   ];
 
   const BODY = [
     '',
-    '/* 马的八个方向。DX 与 DY 一一对应：第 k 个方向是「横走 DX[k]、竖走 DY[k]」。',
-    '   横一竖二四个、横二竖一四个，绕着起点转一圈 —— 这就是「日」字。 */',
+    {
+      zh: [
+        '/* 马的八个方向。DX 与 DY 一一对应：第 k 个方向是「横走 DX[k]、竖走 DY[k]」。',
+        '   横一竖二四个、横二竖一四个，绕着起点转一圈 —— 这就是「日」字。 */',
+      ],
+      en: [
+        '/* The eight knight directions. DX and DY pair up: direction k is "go DX[k] across',
+        '   and DY[k] along" — four one-and-two, four two-and-one, a full ring around it. */',
+      ],
+    },
     'const DX = [1, 2, 2, 1, -1, -2, -2, -1];',
     'const DY = [2, 1, -1, -2, -2, -1, 1, 2];',
     '',
-    '/* 备忘表：visited[sq] = 1 表示这一格已经踩过了。',
-    '   一格只能踩一次 —— 这是整道题唯一的规则，别的都是围着它转的脚手架。 */',
+    {
+      zh: [
+        '/* 备忘表：visited[sq] = 1 表示这一格已经踩过了。',
+        '   一格只能踩一次 —— 这是整道题唯一的规则，别的都是围着它转的脚手架。 */',
+      ],
+      en: [
+        '/* Lookup table: visited[sq] = 1 means this square has been stepped on already.',
+        '   A square is stepped on once only — the one rule here; the rest is scaffolding. */',
+      ],
+    },
     'const visited = [];',
     'for (let i = 0; i < W * H; i = i + 1) { visited.push(0); }',
     '',
-    '// (x, y) 还在棋盘上吗？出界的方向连试都不用试。',
+    {
+      zh: ['// (x, y) 还在棋盘上吗？出界的方向连试都不用试。'],
+      en: ['// Is (x, y) still on the board? A direction that leaves it is not worth trying.'],
+    },
     'function onBoard(x, y) {',
     '  return x >= 0 && x < W && y >= 0 && y < H;',
     '}',
     '',
-    '/* 马站在 sq 上，这已经是路线上的第 n 格 —— 接着往下走。',
-    '   走得通就返回 true，八个方向都走不通就返回 false 让上一层去换。',
-    '   n 等于总格数时，每一格都踩过了，这一支就是答案。 */',
+    {
+      zh: [
+        '/* 马站在 sq 上，这已经是路线上的第 n 格 —— 接着往下走。',
+        '   走得通就返回 true，八个方向都走不通就返回 false 让上一层去换。',
+        '   n 等于总格数时，每一格都踩过了，这一支就是答案。 */',
+      ],
+      en: [
+        '/* The knight stands on sq, and this is already square n of the route — carry on.',
+        '   Return true if a way through is found, false when all eight directions fail, so',
+        '   the level above switches. When n equals the square count, every square is done. */',
+      ],
+    },
     'function tour(sq, n) {',
     '  const x = sq % W;',
     '  const y = (sq - x) / W;',
     '  visited[sq] = 1;',
-    '  mark(sq, "ok");        // 已确认：这一格进了当前这条路线',
-    '  place(sq, "wN");       // 马真的走到这一格 —— 盘上立刻看得见',
+    {
+      zh: ['  mark(sq, "ok");        // 已确认：这一格进了当前这条路线'],
+      en: ['  mark(sq, "ok");        // Confirmed: this square joins the route being built'],
+    },
+    {
+      zh: ['  place(sq, "wN");       // 马真的走到这一格 —— 盘上立刻看得见'],
+      en: ['  place(sq, "wN");       // The knight really steps here — the board shows it at once'],
+    },
     '  if (n === W * H) {',
     '    return true;',
     '  }',
-    '  /* 从这一格出发，八个方向里哪几个还落在棋盘上 —— 先收成一张候选表。 */',
+    {
+      zh: ['  /* 从这一格出发，八个方向里哪几个还落在棋盘上 —— 先收成一张候选表。 */'],
+      en: ['  /* Which of the eight directions out of here stay on the board: a candidate list. */'],
+    },
     '  const cand = [];',
     '  for (let k = 0; k < 8; k = k + 1) {',
     '    const nx = x + DX[k];',
@@ -200,49 +331,98 @@
     '    }',
     '  }',
     /* ↓↓↓ 这一格就是两份源码唯一不同的地方（tour-warnsdorff.js 在这里
-       多一段按 degree 排序的代码）。上下都必须逐字相同。 ↓↓↓ */
-    '  // 就按 DX/DY 写下来的顺序挨个试 —— 这一份不挑，也不知道该挑谁。',
+       多一段按 degree 排序的代码）。上下都必须逐字相同，**两种语言各自
+       逐字相同**（子序列门阶段 8 起两语各跑一次）。 ↓↓↓ */
+    {
+      zh: ['  // 就按 DX/DY 写下来的顺序挨个试 —— 这一份不挑，也不知道该挑谁。'],
+      en: ['  // Tried in the order DX/DY were written in — no picking, and no idea whom to pick.'],
+    },
     /* ↑↑↑ 差异结束 ↑↑↑ */
     '  for (let i = 0; i < cand.length; i = i + 1) {',
     '    const nsq = cand[i];',
-    '    mark(nsq, "try");    // 正在尝试：先点亮这一格，再看它能不能走',
+    {
+      zh: ['    mark(nsq, "try");    // 正在尝试：先点亮这一格，再看它能不能走'],
+      en: ['    mark(nsq, "try");    // Trying: light the square up first, then see if it works'],
+    },
     '    if (visited[nsq]) {',
-    '      mark(nsq, "cut");  // 被剪枝：踩过的格子不能再踩',
+    {
+      zh: ['      mark(nsq, "cut");  // 被剪枝：踩过的格子不能再踩'],
+      en: ['      mark(nsq, "cut");  // Pruned: a square stepped on cannot be stepped on again'],
+    },
     '    } else {',
     '      if (tour(nsq, n + 1)) {',
-    '        return true;     // 下游走通了 —— 一路把 true 传回去，别的方向不用再试',
+    {
+      zh: ['        return true;     // 下游走通了 —— 一路把 true 传回去，别的方向不用再试'],
+      en: ['        return true;     // Downstream worked — pass true all the way up, no more tries'],
+    },
     '      }',
     '    }',
     '  }',
-    '  /* 回溯撤销：八个方向都试遍了还是走不通，把这一格原样退还 ——',
-    '     备忘表擦掉，马也从这一格撤走。不退的话，接下来别的分支会看到一格',
-    '     根本没人站过的「踩过」，从此每一条路线都是假的。',
-    '     mark 与 clear 是分开的两步：先看到这一格被判「撤销」，下一步马才消失。 */',
+    {
+      zh: [
+        '  /* 回溯撤销：八个方向都试遍了还是走不通，把这一格原样退还 ——',
+        '     备忘表擦掉，马也从这一格撤走。不退的话，接下来别的分支会看到一格',
+        '     根本没人站过的「踩过」，从此每一条路线都是假的。',
+        '     mark 与 clear 是分开的两步：先看到这一格被判「撤销」，下一步马才消失。 */',
+      ],
+      en: [
+        '  /* Taking it back: all eight tried and none worked, so hand this square back the',
+        '     way it came — wipe the table, walk the knight off. Skip that and a later branch',
+        '     meets a "stepped on" square nobody stood on, making every route after it a lie.',
+        '     mark and clear are two steps: marked "taken back" first, knight gone next. */',
+      ],
+    },
     '  visited[sq] = 0;',
     '  mark(sq, "back");',
     '  clear(sq);',
     '  return false;',
     '}',
     '',
-    '// 出发。第一格也要先亮一下，跟后面每一格的待遇一样。',
+    {
+      zh: ['// 出发。第一格也要先亮一下，跟后面每一格的待遇一样。'],
+      en: ['// Off we go. The first square lights up too, treated like every square after it.'],
+    },
     'mark(START, "try");',
     'const found = tour(START, 1);',
     'if (found) {',
-    '  /* 盘上留着的那一整盘马就是答案本身。它们不收 —— 收了就没有答案可看了。',
-    '     想看清顺序：把单步倒着回放一遍，马是按什么次序落上去的一目了然。 */',
-    '  log("找到了：一条踩遍 " + (W * H) + " 格的路线");',
+    {
+      zh: [
+        '  /* 盘上留着的那一整盘马就是答案本身。它们不收 —— 收了就没有答案可看了。',
+        '     想看清顺序：把单步倒着回放一遍，马是按什么次序落上去的一目了然。 */',
+      ],
+      en: [
+        '  /* The knights left standing are the answer itself. They stay — take them off and',
+        '     there is nothing left to look at. For the order, step backwards through the run. */',
+      ],
+    },
+    {
+      zh: ['  log("找到了：一条踩遍 " + (W * H) + " 格的路线");'],
+      en: ['  log("Found it: a route stepping on every square, " + (W * H) + " in all");'],
+    },
     '} else {',
-    '  /* 所有分支都退过了，盘上一匹马都不剩，跟出发前一模一样。 */',
-    '  log("走不通：从这一格出发，没有能踩遍全盘的路线");',
+    {
+      zh: ['  /* 所有分支都退过了，盘上一匹马都不剩，跟出发前一模一样。 */'],
+      en: ['  /* Every branch was taken back: no knight left, exactly as before the start. */'],
+    },
+    {
+      zh: ['  log("走不通：从这一格出发，没有能踩遍全盘的路线");'],
+      en: ['  log("No way through: from this square, no route covers the whole board");'],
+    },
     '}',
     'return found;',
   ];
 
-  /* source({ W, H, start }) → string
+  /* source({ W, H, start, lang }) → string
 
-     三个参数都不给默认值，缺了直接抛（阶段 5 约束 6：公开导出的省略参数
+     四个参数都不给默认值，缺了直接抛（阶段 5 约束 6：公开导出的省略参数
      已经是本仓库抓到过三次的缺陷类）。一个默默变成 8 的 W 会让界面写着
-     5、跑的却是 8，正是这个工具最不能出的错。
+     5、跑的却是 8，正是这个工具最不能出的错；`lang` 默认成任何一种，都是
+     让同一个缺陷换个地方复活（它由 render() 校验，见上面）。
+
+     ⚠ **W / H / start 的校验留在最前，`lang` 的校验在最后**（render() 里）。
+     tour.test.js 那一组「缺参数当场抛」故意一个 lang 都不传、每条都带
+     pattern，钉的正是这个顺序：只给了 H / start 的调用撞上的必须仍旧是
+     「少了 W」。
 
      校验只管「是不是合法的棋盘和格子」，**不管好不好跑** —— 见文件头：
      4×5 撞墙恰恰是要生成出来跑给她看的。 */
@@ -268,11 +448,14 @@
         start < 0 || start >= W * H) {
       throw new Error('start 必须是 0 到 ' + (W * H - 1) + ' 之间的整数，收到：' + start);
     }
-    return HEAD.concat([
-      'const W = ' + W + ';',
-      'const H = ' + H + ';',
-      'const START = ' + start + ';',
-    ]).concat(BODY).join('\n');
+    return render(HEAD, o.lang)
+      .concat([
+        'const W = ' + W + ';',
+        'const H = ' + H + ';',
+        'const START = ' + start + ';',
+      ])
+      .concat(render(BODY, o.lang))
+      .join('\n');
   }
 
   return { source: source };

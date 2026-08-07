@@ -1,13 +1,14 @@
 'use strict';
 const T = require('../_test.js');
 const I = require('../interp.js');
+const E = require('../exercise.js');
 const D = require('./tour-dfs.js');
 const W = require('./tour-warnsdorff.js');
 
 // ---- 两份源码必须在子集里合法 ----
 for (const [name, M] of [['dfs', D], ['warnsdorff', W]]) {
   let err = null;
-  try { I.parse(M.source({ W: 3, H: 4, start: 0 })); } catch (e) { err = e; }
+  try { I.parse(M.source({ W: 3, H: 4, start: 0, lang: 'zh' })); } catch (e) { err = e; }
   T.ok(err === null, name + ' 的源码在子集里合法' + (err ? '：' + err.message : ''));
 }
 
@@ -62,7 +63,7 @@ function isLegalTour(seq, W_, H_) {
 // ---- 3×4 角起：两边都跑得完，且都给出合法巡游 ----
 let legalChecked = 0;
 for (const [name, M] of [['dfs', D], ['warnsdorff', W]]) {
-  const src = M.source({ W: 3, H: 4, start: 0 });
+  const src = M.source({ W: 3, H: 4, start: 0, lang: 'zh' });
   const r = I.run(src, { host: {} });
   T.ok(!r.trace.truncated, '3x4 ' + name + ' 未截断');
   T.eq(r.result, true, '3x4 ' + name + ' 找到巡游');
@@ -85,7 +86,7 @@ T.eq(legalChecked, 2, '两份实现都验过合法性');
    所以直接量落子在轨迹上的分布：第一次落子要发生在开头，最后一次要离第一次
    很远。攒到最后的实现会把两者挤在轨迹尾巴上，这两条同时红。 */
 function placeTiming(M, W_, H_) {
-  const tr = I.run(M.source({ W: W_, H: H_, start: 0 }), { host: {} }).trace;
+  const tr = I.run(M.source({ W: W_, H: H_, start: 0, lang: 'zh' }), { host: {} }).trace;
   let first = -1, last = -1, places = 0, clears = 0;
   for (let i = 0; i < tr.length; i++) {
     for (const op of tr[i].boardOps) {
@@ -106,7 +107,7 @@ for (const [name, M] of [['dfs', D], ['warnsdorff', W]]) {
 
 // ---- 四段弧线：这是这一题的全部内容 ----
 function steps(M, W_, H_) {
-  return I.run(M.source({ W: W_, H: H_, start: 0 }), { host: {} }).trace;
+  return I.run(M.source({ W: W_, H: H_, start: 0, lang: 'zh' }), { host: {} }).trace;
 }
 // 第一段 3×4：朴素的反而更便宜 —— 启发式的代价在小盘上收不回来
 const d34 = steps(D, 3, 4), w34 = steps(W, 3, 4);
@@ -130,9 +131,9 @@ const d35 = steps(D, 3, 5), w35 = steps(W, 3, 5);
 T.ok(!d35.truncated && !w35.truncated,
      '3x5：两边都跑得完（' + d35.length + ' / ' + w35.length + ' 步）');
 for (const [name, M] of [['dfs', D], ['warnsdorff', W]]) {
-  const r = I.run(M.source({ W: 3, H: 5, start: 0 }), { host: {} });
+  const r = I.run(M.source({ W: 3, H: 5, start: 0, lang: 'zh' }), { host: {} });
   T.eq(r.result, false, '3x5 ' + name + '：查遍了，这块盘上没有巡游');
-  const rebuilt = tourPath(M.source({ W: 3, H: 5, start: 0 }), 3, 5);
+  const rebuilt = tourPath(M.source({ W: 3, H: 5, start: 0, lang: 'zh' }), 3, 5);
   T.eq(rebuilt.live.length, 0, '3x5 ' + name + '：跑完盘上一匹马都不剩，全退回去了');
   T.eq(rebuilt.strayClear, 0, '3x5 ' + name + '：没有 clear 过一个本来就没有马的格子');
   const p = placeTiming(M, 3, 5);
@@ -165,7 +166,7 @@ for (const [name, M] of [['dfs', D], ['warnsdorff', W]]) {
    数字本身是它的后果。写死了反而会在无关的实现调整上误报。步数那一条只断言
    「不相等」，同理——它多出来多少不是重点，重点是它确实多花了钱。 */
 function boardTally(M, W_, H_) {
-  const r = I.run(M.source({ W: W_, H: H_, start: 0 }), { host: {} });
+  const r = I.run(M.source({ W: W_, H: H_, start: 0, lang: 'zh' }), { host: {} });
   const o = { try: 0, ok: 0, cut: 0, back: 0, place: 0, clear: 0 };
   for (let i = 0; i < r.trace.length; i++) {
     for (const op of r.trace[i].boardOps) {
@@ -189,17 +190,31 @@ T.ok(t35w.steps > t35d.steps,
 
 /* ======== 以下三段是简报之外补的，不改上面任何一条 ======== */
 
-// ---- 缺参数当场抛（阶段 5 约束 6：省略参数已经是本仓库抓到过三次的缺陷类）----
+/* ---- 缺参数当场抛（阶段 5 约束 6：省略参数已经是本仓库抓到过三次的缺陷类）----
+
+   ⚠ **这一组故意一个 `lang` 都不传，而且每条都带第三参 pattern。** 两件事
+   缺一不可，合起来这一组才同时是**校验顺序**那道门：`source()` 自身那三个
+   参数的校验在最前、`lang` 由 render() 在最后校验 —— 所以一个只给了
+   H / start 的调用撞上的必须仍旧是「少了 W」。
+
+   补上 `lang: 'zh'` 这一组就对 lang 的位置**完全失明**：'zh' 是合法值，
+   lang 校验排在前排在后都照样落到参数那一条、抛同一句话、pattern 照样匹上
+   （Task 4 在 knight-path 上实测过同一件事）。留着 pattern 为 undefined 也
+   一样：那退化成「抛了就算过」，抛的是哪一条根本没人问。
+
+   pattern 之间不许共享前缀（阶段 7 栽过：三条消息同前缀，一个正则匹到每一条，
+   等于没钉是哪一条）。这里六条分成四个互斥的形状：少了 W / 少了 H /
+   少了 start / X 必须是，实测把任一条的 pattern 换到邻居身上都会红。 */
 for (const [name, M] of [['dfs', D], ['warnsdorff', W]]) {
-  T.throws(function () { M.source({ H: 4, start: 0 }); }, name + '：缺 W 当场抛');
-  T.throws(function () { M.source({ W: 3, start: 0 }); }, name + '：缺 H 当场抛');
-  T.throws(function () { M.source({ W: 3, H: 4 }); }, name + '：缺 start 当场抛');
-  T.throws(function () { M.source(); }, name + '：连 opts 都没有也当场抛');
-  T.throws(function () { M.source({ W: 3, H: 4, start: 12 }); }, name + '：start 越界当场抛');
-  T.throws(function () { M.source({ W: 3.5, H: 4, start: 0 }); }, name + '：W 不是整数当场抛');
+  T.throws(function () { M.source({ H: 4, start: 0 }); }, name + '：缺 W 当场抛', /少了 W/);
+  T.throws(function () { M.source({ W: 3, start: 0 }); }, name + '：缺 H 当场抛', /少了 H/);
+  T.throws(function () { M.source({ W: 3, H: 4 }); }, name + '：缺 start 当场抛', /少了 start/);
+  T.throws(function () { M.source(); }, name + '：连 opts 都没有也当场抛', /少了 W/);
+  T.throws(function () { M.source({ W: 3, H: 4, start: 12 }); }, name + '：start 越界当场抛', /start 必须是/);
+  T.throws(function () { M.source({ W: 3.5, H: 4, start: 0 }); }, name + '：W 不是整数当场抛', /W 必须是/);
   // 但**不**校验「跑不跑得完」：撞墙那两格正是要生成出来跑给她看的。
   let err = null;
-  try { M.source({ W: 3, H: 7, start: 0 }); } catch (e) { err = e; }
+  try { M.source({ W: 3, H: 7, start: 0, lang: 'zh' }); } catch (e) { err = e; }
   T.ok(err === null, name + '：明知会撞墙的 3x7 照常吐源码');
 }
 
@@ -209,7 +224,12 @@ for (const [name, M] of [['dfs', D], ['warnsdorff', W]]) {
    文件头里的一句叮嘱守着，是人肉门 —— 而人肉门在这个仓库里已经漏过。
    这里把它变成机器门：剥掉注释与空行之后，**朴素那份的每一行代码都必须
    按原顺序出现在 Warnsdorff 那份里**（后者只是多了 degree() 与排序）。
-   比子序列而不是比行数，是为了不让改一句注释、加一行说明就误报。 */
+   比子序列而不是比行数，是为了不让改一句注释、加一行说明就误报。
+
+   ⚠ **两种语言各跑一次**（阶段 8）。这道门守的是「多出来的那一段就是
+   Warnsdorff」这件事本身，而这个工具**默认英文界面** —— 英文读者看到的
+   那两份源码之间要是没有这个对照关系，这一题就没有了。断言消息里带上
+   lang，否则红了看不出是哪一侧。 */
 function codeLines(src) {
   const out = [];
   let inBlock = false;
@@ -228,20 +248,98 @@ function codeLines(src) {
   }
   return out;
 }
-const dCode = codeLines(D.source({ W: 3, H: 4, start: 0 }));
-const wCode = codeLines(W.source({ W: 3, H: 4, start: 0 }));
-T.ok(dCode.length > 40, '剥注释之后还剩得下代码（' + dCode.length + ' 行），这道门没有空转');
-let cursor = 0, missing = null;
-for (const lineText of dCode) {
-  let j = cursor;
-  while (j < wCode.length && wCode[j] !== lineText) { j++; }
-  if (j >= wCode.length) { missing = lineText; break; }
-  cursor = j + 1;
+function subsequenceGate(lang) {
+  const tag = '[' + lang + '] ';
+  const dCode = codeLines(D.source({ W: 3, H: 4, start: 0, lang: lang }));
+  const wCode = codeLines(W.source({ W: 3, H: 4, start: 0, lang: lang }));
+  T.ok(dCode.length > 40,
+       tag + '剥注释之后还剩得下代码（' + dCode.length + ' 行），这道门没有空转');
+  let cursor = 0, missing = null;
+  for (const lineText of dCode) {
+    let j = cursor;
+    while (j < wCode.length && wCode[j] !== lineText) { j++; }
+    if (j >= wCode.length) { missing = lineText; break; }
+    cursor = j + 1;
+  }
+  T.ok(missing === null,
+       tag + '朴素那份的每一行代码都逐字出现在 Warnsdorff 那份里' +
+       (missing === null ? '' : '，最先对不上的是：' + missing));
+  T.ok(wCode.length > dCode.length,
+       tag + 'Warnsdorff 确实多出了代码（' + dCode.length + ' → ' + wCode.length + ' 行）');
 }
-T.ok(missing === null,
-     '朴素那份的每一行代码都逐字出现在 Warnsdorff 那份里' +
-     (missing === null ? '' : '，最先对不上的是：' + missing));
-T.ok(wCode.length > dCode.length,
-     'Warnsdorff 确实多出了代码（' + dCode.length + ' → ' + wCode.length + ' 行）');
+['zh', 'en'].forEach(subsequenceGate);
+
+/* ---- 双语三道门 × 两份（规格 §7.5）----
+
+   守的是「可执行代码没有偷偷分岔」，**不是**「英文翻得对不对」——后者机器
+   判不了，是人工审查项。 */
+const TOUR_SRC = { dfs: D, warnsdorff: W };
+for (const key of Object.keys(TOUR_SRC)) {
+  const mod = TOUR_SRC[key];
+  const zh = mod.source({ W: 5, H: 5, start: 0, lang: 'zh' });
+  const en = mod.source({ W: 5, H: 5, start: 0, lang: 'en' });
+  T.eq(en.split('\n').length, zh.split('\n').length, key + '：两种语言行数相同');
+  T.eq(T.normalizeSource(en), T.normalizeSource(zh),
+       key + '：抽掉注释与字符串之后，两种语言逐字节相同');
+  T.eq(I.run(en, { host: {} }).trace.length, I.run(zh, { host: {} }).trace.length,
+       key + '：两种语言的解释器步数相同');
+
+  /* 反向：英文必须真的是英文。上面三道门在「en 原样返回中文」时全绿 ——
+     把 lang 接进来却没接上，长得跟接上了一模一样。
+
+     ⚠ 判「有没有中文」的字符类要连中文标点一起管：只写 /[一-鿿]/ 的话
+     `「」。，？、《》；：` 全是 false，一句 "Start the tour here。" 会大摇
+     大摆过门。
+
+     ⚠ 「英文里没有汉字」断言的是**送进编辑器的那一份**（parse().clean）：
+     BLANK 指令行不翻译（它本来就同时带着 hint 与 hintEn），那句中文 hint
+     必然把汉字留在英文变体的原文里，而那一行根本不是读者读的东西。
+     tour-dfs 一个挖空都没有，两份仍旧都走 clean —— 同一件事只留一种写法。
+
+     ⚠ 剥指令行**只许问 parse()，不许自己写一个**：queens.test.js 里原先那个
+     本地 readerFacing() 实测就已经跟 parse() 分岔了，修复轮删掉了。 */
+  T.ok(zh !== en, key + '：两种语言的源码不是同一份');
+  T.ok(/[一-鿿㐀-䶿　-〿＀-￯]/.test(zh), key + '：中文那一份里有汉字');
+  T.ok(!/[一-鿿㐀-䶿　-〿＀-￯]/.test(E.parse(en, 'en').clean),
+       key + '：英文那一份送到编辑器的文本里一个汉字都没有');
+
+  /* ⚠ 第三个参数才是 pattern：`T.throws(fn, label, pattern)`（见 _test.js）。
+     写在第二个位置上 pattern 就是 undefined，退化成「抛了就算过」——
+     这两条要钉的恰恰是**抛的是哪一条**（少了 lang vs 只认两个值）。 */
+  T.throws(function () { mod.source({ W: 5, H: 5, start: 0 }); },
+           key + '：缺 lang 必须抛', /少了 lang/);
+  T.throws(function () { mod.source({ W: 5, H: 5, start: 0, lang: 'fr' }); },
+           key + '：lang=fr 必须抛', /只认/);
+  T.throws(function () { mod.source({ W: 5, H: 5, start: 0, lang: '' }); },
+           key + '：lang 是空串必须抛（空串不当默认值用）', /只认/);
+}
+
+/* ---- hintEn 真的是英文 ----
+
+   tour-warnsdorff 的那一个挖空（degree-fn）的 hintEn 是她在提示面板第 1 级
+   读到的原文，而这个工具**默认英文界面**。上面所有门对 hintEn 的内容一句话
+   都没说：把 hintEn 整段换成中文，那些门全绿放行 —— 指令行在两语间逐字节
+   相同、normalizeSource 把整行当注释抽掉、parse().clean 又把整行剥掉。
+   拿 parse().blanks 的结构去断言，不自己解析指令行（同上一段的理由）。 */
+const twBlanksEn = E.parse(W.source({ W: 3, H: 4, start: 0, lang: 'en' }), 'en').blanks;
+T.eq(twBlanksEn.length, 1, 'parse() 在 Warnsdorff 的英文变体里认出一个挖空');
+let hintEnChecked = 0;
+for (const b of twBlanksEn) {
+  T.ok(!/[一-鿿㐀-䶿　-〿＀-￯]/.test(b.hint.en), b.id + ' 的 hintEn 里一个汉字都没有');
+  T.ok(/[一-鿿㐀-䶿　-〿＀-￯]/.test(b.hint.zh), b.id + ' 的 hint（中文那一支）里有汉字');
+  hintEnChecked++;
+}
+T.eq(hintEnChecked, 1, 'degree-fn 的 hintEn 真的查过（这条防上面那个循环空转）');
+
+/* 下面这两行是**挑出**指令行，不是剥掉 —— parse() 没有对应 API（它只吐
+   blanks / clean / placeholder，不吐原始指令行），所以本地选择器保留。
+   别照着这两行再写一个「剥」的：剥要用 parse().clean，理由见上面。 */
+const twZh34 = W.source({ W: 3, H: 4, start: 0, lang: 'zh' });
+const twEn34 = W.source({ W: 3, H: 4, start: 0, lang: 'en' });
+const pick = function (src) {
+  return src.split('\n').filter(function (l) { return l.trim().indexOf('// >>> BLANK') === 0; });
+};
+T.eq(pick(twEn34).length, 1, '英文变体里有一条 BLANK 指令（degree-fn）');
+T.eq(pick(twEn34), pick(twZh34), 'BLANK 指令行在两种语言下逐字节相同 —— parse() 一点不用改');
 
 T.report();
