@@ -687,16 +687,16 @@ T.eq(TM.prunedAt(renView), [], '一个都判不出来时，prunedAt 指认不出
    现在统一抛。同时钉住**边界的另一半**：显式的 null（数据在说「没有」）
    照旧宽容，不能顺手把 null 契约也一起收紧了。 */
 const gTrace = abTrace, gTree = abTree;
-T.throws(function () { TM.build(gTrace); }, 'build(trace) 省掉 entryName 当场抛，不再默默给一棵空树');
-T.throws(function () { TM.build(gTrace, ''); }, 'entryName 是空串同样抛（空串也认不到任何帧）');
-T.throws(function () { TM.build(gTrace, 42); }, 'entryName 不是字符串同样抛');
-T.throws(function () { TM.createView(gTree); }, 'createView(tree) 省掉 trace 当场抛，不再默默冻在第 0 步');
-T.throws(function () { TM.createView(); }, 'createView() 什么都不给也抛');
+T.throws(function () { TM.build(gTrace); }, 'build(trace) 省掉 entryName 当场抛，不再默默给一棵空树', /参数 entryName 缺席/);
+T.throws(function () { TM.build(gTrace, ''); }, 'entryName 是空串同样抛（空串也认不到任何帧）', /参数 entryName 缺席/);
+T.throws(function () { TM.build(gTrace, 42); }, 'entryName 不是字符串同样抛', /参数 entryName 缺席/);
+T.throws(function () { TM.createView(gTree); }, 'createView(tree) 省掉 trace 当场抛，不再默默冻在第 0 步', /参数 trace 缺席/);
+T.throws(function () { TM.createView(); }, 'createView() 什么都不给也抛', /参数 tree 缺席/);
 const gView = TM.createView(gTree, gTrace);
 TM.seek(gView, 20000);
-T.throws(function () { TM.seek(gView); }, 'seek(view) 省掉下标当场抛，不再把游标倒回 0');
-T.throws(function () { TM.seek(gView, NaN); }, 'seek(view, NaN) 同样抛（NaN | 0 也是 0，同一个坑）');
-T.throws(function () { TM.seek(undefined, 3); }, 'seek 不给 view 也抛');
+T.throws(function () { TM.seek(gView); }, 'seek(view) 省掉下标当场抛，不再把游标倒回 0', /参数 i 缺席/);
+T.throws(function () { TM.seek(gView, NaN); }, 'seek(view, NaN) 同样抛（NaN | 0 也是 0，同一个坑）', /参数 i 缺席/);
+T.throws(function () { TM.seek(undefined, 3); }, 'seek 不给 view 也抛', /参数 view 缺席/);
 T.eq(gView.i, 20000, '而且抛出来的那几次一点没动游标 —— 失败是响的，不是半生效的');
 /* null 契约不受影响：null 是**数据**说的「没有/不知道」，不是调用方写错了。 */
 T.eq(TM.build(null, 'search').order, [], 'build(null, entryName) 照旧给空树，不抛');
