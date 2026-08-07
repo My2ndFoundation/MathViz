@@ -125,12 +125,31 @@ T.eq(KINDS.back, clears, '每一次「回溯撤销」都真的收回了一个后
    默认值（哪怕只是 `const N = o.N === undefined ? 8 : o.N;`），上面所有对拍、
    撞墙、编舞的断言仍旧全绿——它们每一条都显式传了 N。那正是这道题最不能出的
    错：界面写着 6、跑的却是 8（见 queens.js `source()` 头上的注释）。
-   形状与 tour.test.js / knight-path.test.js 同源。 */
-T.throws(function () { Q.source(); }, '连 opts 都没有也当场抛');
-T.throws(function () { Q.source({}); }, '缺 N 当场抛 —— N 没有默认值');
-T.throws(function () { Q.source({ N: 0 }); }, 'N < 1 当场抛');
-T.throws(function () { Q.source({ N: 4.5 }); }, 'N 不是整数当场抛');
-T.throws(function () { Q.source({ N: '8' }); }, 'N 是字符串当场抛（不许悄悄当 8 用）');
+
+   ⚠ **这一组故意一个 `lang` 都不传，而且每条都带第三参 pattern。** 两件事
+   缺一不可，合起来这一组才同时是**校验顺序**那道门：`N` 的校验在 `source()`
+   最前、`lang` 由 `render()` 在最后校验 —— 所以一个只给了 N 的调用撞上的
+   必须仍旧是 N 那条，而一个什么都没给的调用撞上的必须是「少了 N」。
+   补第三参之前（`T.throws(fn, label)`，pattern 是 undefined），这五条退化成
+   「抛了就算过」：实测把 `lang` 校验提到 `N` 之前（沿用 render() 自己的措辞、
+   只改顺序），61 passed / 0 failed **全绿** —— 那时候这里根本没有门。
+   补上 `lang: 'zh'` 也是同一件事的一半：'zh' 是合法值，lang 校验挪到哪里
+   都照样落到 N 那条、抛同一句话、pattern 照样匹上。
+
+   pattern 之间不许共享前缀（阶段 7 栽过：三条消息同前缀，一个正则匹到每一条，
+   等于没钉是哪一条）。这里只有两种形状（少了 N / N 必须是），所以后三条
+   一路匹到消息尾巴上那个**实际收到的值**，彼此才互斥 —— 实测把任一条的
+   pattern 换到邻居身上都会红。
+
+   这一组的形状（不传 lang + 带第三参 pattern）与 tour.test.js:209-214 /
+   knight-path.test.js:188-195 同源；阶段 8 之前这里两样都缺，是最后一轮
+   补齐的。 */
+T.throws(function () { Q.source(); }, '连 opts 都没有也当场抛', /少了 N/);
+T.throws(function () { Q.source({}); }, '缺 N 当场抛 —— N 没有默认值', /少了 N/);
+T.throws(function () { Q.source({ N: 0 }); }, 'N < 1 当场抛', /N 必须是 >= 1 的整数，收到：0$/);
+T.throws(function () { Q.source({ N: 4.5 }); }, 'N 不是整数当场抛', /N 必须是 >= 1 的整数，收到：4\.5$/);
+T.throws(function () { Q.source({ N: '8' }); }, 'N 是字符串当场抛（不许悄悄当 8 用）',
+         /N 必须是 >= 1 的整数，收到：8$/);
 /* 但**不**拿 N_MIN / N_MAX 当校验边界：N=9 撞墙那一条要靠 source(9) 真吐源码。
    （上面的 wall 那一段已经跑过它了，这里只把这个取舍写明。） */
 

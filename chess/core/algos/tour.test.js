@@ -269,6 +269,47 @@ function subsequenceGate(lang) {
 }
 ['zh', 'en'].forEach(subsequenceGate);
 
+/* ---- HEAD（常量块之上、**正是她要并排读的第一屏**）也要有门 ----
+
+   阶段 8 之前这一对**一个 HEAD 比对都没有**（`grep HEAD tour.test.js` 是 0），
+   而同构的姊妹对 king-greedy / king-exact **有**（king.test.js 里 headDiff
+   那一节，两种语言各跑一次）。两对一样的形状，一对有门一对没有。
+
+   上面那道子序列门管不到这里：`codeLines()` 把整段块注释都丢掉，而 HEAD
+   整个就是一段块注释 —— 只改一侧的 HEAD 散文，子序列门一动不动。
+   两份文件头里那句「HEAD 行数相同、只有第 1、12–13 行不同」也不是门，
+   而且**它本身就数漏了一行**：实测两种语言都是 1 / 12 / 13 / 17
+   （第 17 行末尾提到的是哪一份）。声称会腐坏，断言不会。
+
+   HEAD 的下界取常量块的第一行 `const W = 3;` —— 那是 source() 里
+   `render(HEAD, lang)` 与常量数组的接缝，不是另找的一条横线。
+
+   钉两件事：**两份行数相同**，且**逐行 diff 恰好四处、就在第 1/12/13/17 行**。
+   两种语言各跑一次，断言消息里带 lang，否则红了看不出是哪一侧。 */
+function headOf(src, lang, name) {
+  const lines = src.split('\n');
+  const i = lines.indexOf('const W = 3;');
+  T.ok(i > 0, '[' + lang + '] ' + name + ' 里找得到常量块的第一行 `const W = 3;`（HEAD 的下界）');
+  if (i <= 0) { return []; }
+  return lines.slice(0, i);
+}
+function headGate(lang) {
+  const tag = '[' + lang + '] ';
+  const opts = { W: 3, H: 4, start: 0, lang: lang };
+  const hd = headOf(D.source(opts), lang, 'tour-dfs');
+  const hw = headOf(W.source(opts), lang, 'tour-warnsdorff');
+  T.ok(hd.length > 10, tag + 'HEAD 有 ' + hd.length + ' 行，这道门没有空转');
+  T.eq(hd.length, hw.length, tag + '两份 HEAD 行数相同（并排读时上半截逐行对得上）');
+  const diff = [];
+  for (let i = 0; i < Math.max(hd.length, hw.length); i++) {
+    if (hd[i] !== hw[i]) { diff.push(i + 1); }
+  }
+  T.eq(diff, [1, 12, 13, 17],
+       tag + 'HEAD 只有四行不同，就在第 1 / 12 / 13 / 17 行（标题、讲「先试哪一个」的' +
+       '两行、以及末尾提到的是哪一份）；实测不同的是第 ' + diff.join(' / ') + ' 行');
+}
+['zh', 'en'].forEach(headGate);
+
 /* ---- 双语三道门 × 两份（规格 §7.5）----
 
    守的是「可执行代码没有偷偷分岔」，**不是**「英文翻得对不对」——后者机器

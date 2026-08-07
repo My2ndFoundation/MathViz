@@ -254,9 +254,9 @@
       en: [
         '/* The width and height of the board, and where the walls are — every knob this puzzle has.',
         '   Try emptying BLOCKED: **on a bare board the two give exactly the same number** (measured',
-        '   on all eight sizes from 4×4 to 8×8). Kings sit too regularly there, so greed picks the',
-        '   best squares by accident. A gap shows up only with walls, and what counts is not how many',
-        '   there are but **where they sit**: same 6×6, three walls moved, and greed goes 6 to 8. */',
+        '   on all eight sizes from 4×4 to 8×8). Kings sit so regularly there that greed cannot help',
+        '   landing on the best squares. A gap shows up only with walls, and what counts is not how',
+        '   many there are but **where they sit**: same 6×6, three walls moved — greed goes 6 to 8. */',
       ],
     },
   ];

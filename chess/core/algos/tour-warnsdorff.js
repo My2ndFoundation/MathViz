@@ -24,7 +24,7 @@
    之外的一道人肉门，今天量到（3×4 / start 0）是：
 
      `diff` 出来 44 行不同（tour-dfs.js 独有 5 行、本文件独有 39 行），
-     其余 85 行逐字相同。44 行里 8 行是措辞（4 对：标题、讲「先试哪一个」
+     其余 86 行逐字相同。44 行里 8 行是措辞（4 对：标题、讲「先试哪一个」
      的两行、常量注释里举例时提到的是哪一份），另外 36 行就是 ①② 本身
      （对面的 1 行注释 ↔ 本文件的 `degree()` 17 行 + 包着它的两行 BLANK
      指令 + 排序 16 行）。
@@ -293,12 +293,22 @@
 
        · 行尾 `//` 注释里的共用英文（`mark(sq, "ok");  // …` 那一族）
          —— **机器门**。实测：只改本文件一侧那一句，`[en]` 当场红。
-       · 独占整行的散文段（HEAD 两段、各处块注释）
-         —— **人肉门**。只改一侧，两种语言照样 82 passed / 0 failed。
+       · HEAD 里的散文（常量块之上、并排读的第一屏）
+         —— **机器门，阶段 8 最后一轮才补上的**（在那之前 tour.test.js 里
+         `HEAD` 一次都没出现，而姊妹对 king-greedy / king-exact 一直有）。
+         tour.test.js 的 headGate 两种语言各钉一次「行数相同 + diff 恰好在
+         第 1/12/13/17 行」。实测：只改一侧 HEAD 的任意一行，那一侧当场红
+         （zh 与 en 分别验过）。
+       · HEAD 之外、独占整行的散文段（各处块注释）
+         —— **人肉门**。只改一侧，两种语言照样 94 passed / 0 failed
+         （补了 headGate 之后重量的；那之前是 84）。
          改这类共用散文，必须自己记得两份一起改。 */
 
-  /* ==== 以下 HEAD 与 tour-dfs.js 的 HEAD **行数相同**，
-     只有第 1 行的标题和第 12–13 行讲「先试哪一个」的两行不同。 ==== */
+  /* ==== 以下 HEAD 与 tour-dfs.js 的 HEAD **行数相同**（各 17 行），
+     逐行 diff 恰好**四处**：第 1 行的标题、第 12–13 行讲「先试哪一个」的
+     两行、以及第 17 行末尾提到的是哪一份 —— **两种语言下都是这四行**。
+     阶段 8 之前这里写的是「只有第 1、12–13 行不同」，同盘实测漏数了第 17 行。
+     tour.test.js 的 headGate 两种语言各钉这件事一次。 ==== */
   const HEAD = [
     {
       zh: [
@@ -420,9 +430,9 @@
         '   n 等于总格数时，每一格都踩过了，这一支就是答案。 */',
       ],
       en: [
-        '/* The knight stands on sq, and this is already square n of the route — carry on.',
-        '   Return true if a way through is found, false when all eight directions fail, so',
-        '   the level above switches. When n equals the square count, every square is done. */',
+        '/* The knight stands on sq, and this is already square n of the route — carry on. Return true',
+        '   if a way through is found, false when all eight directions fail, so the caller switches.',
+        '   When n equals the square count, every square is stepped on — this branch is the answer. */',
       ],
     },
     'function tour(sq, n) {',

@@ -579,7 +579,7 @@ def bilingual_algos_check() -> int:
 
     # ⚠ `examined` 数的是"尝试过双语检查的文件数"，不是"确认双语通过的文件
     # 数"——①锚线缺失的文件也会先被计入 examined（在 continue 之前）。两者
-    # 在door全绿时数值相同（当前 1 份双语场景下就是如此），但读这行输出时
+    # 在door全绿时数值相同（当前 7 份双语 / 1 份白名单的场景下就是如此），但读这行输出时
     # 要知道：`examined` 更准确的含义是分母，不是"验收通过"的断言，真正
     # 的通过与否看的是整体 rc 和上面有没有打印任何 ERROR。
     print(f'双语 algos 普查：{examined} 份双语 / {len(algos) - examined} 份白名单，'
