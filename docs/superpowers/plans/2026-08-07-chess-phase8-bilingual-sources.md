@@ -41,6 +41,8 @@
 | `chess/core/algos/king-exact.js` | 王支配集精确（160 行） | 双语化 |
 | `chess/core/algos/*.test.js`（5 份） | 各自的测试 | 调用点补 `lang`；加三道双语门 |
 | `chess/core/exercise.test.js` | 挖空测试 | 调用点补 `lang` |
+| `chess/core/exercise-blanks.test.js` | 挖空的三项断言 | 调用点补 `lang`（Task 2 发现的遗漏：6 处 `Q.source`，不补则该测试直接崩） |
+| `chess/tools/chess-board-algorithms.html` | 工具⑤（`inline_core.py` 的生成物） | **每个文案任务都会被钩子重新内联**（`algos/*.js` 是内联进去的字符串）。不重新内联，`check.py` 的 ALGOS 往返门报 ERROR。所以每个文案任务的提交里都会带上它，这是**预期内的**，不是别的会话混进来的东西 |
 | `chess/scripts/check.py` | 总门 | **加** `bilingual_algos_check()`（第八道门） |
 | `chess/tools/chess-board-algorithms.html` | 工具⑤ | `genSource` 传 `lang`；5 个 `PROBLEMS` 声明转发 `lang`；切语言改成整份换文本 |
 | `chess/chess-tools.json` / `chess/index.html` / `chess/app.html` | 三处注册镜像 | 版本 1.2.0 → 1.3.0 |
@@ -304,12 +306,26 @@ const zh6 = Q.source({ N: 6, lang: 'zh' });
 const en6 = Q.source({ N: 6, lang: 'en' });
 T.ok(zh6 !== en6, '两种语言的源码不是同一份');
 T.ok(/[一-鿿]/.test(zh6), '中文那一份里有汉字');
-T.ok(!/[一-鿿]/.test(en6), '英文那一份里一个汉字都没有');
+T.ok(!/[一-鿿]/.test(E.parse(en6, 'en').clean), '英文那一份送到编辑器的文本里一个汉字都没有');
+/* BLANK 指令行不翻译 —— 正着钉一次，别只写在散文里 */
+const blankLines = function (src) {
+  return src.split('\n').filter(function (l) { return /BLANK/.test(l); }).join('\n');
+};
+T.eq(blankLines(en6), blankLines(zh6), '两种语言变体里的 BLANK 指令行逐字节相同');
+
+⚠ **「英文那一份里一个汉字都没有」不能对着 `source()` 的原文断言。** BLANK 指令行**不翻译**（它本来就带 `hint` + `hintEn`），所以带挖空的源码在英文变体里**必然**含汉字——`queens.js` 实测 114 个，全在那两行指令行上。要断言的是**送到她眼前的那一份**，也就是 `Exercise.parse(src, lang).clean`（实测 0 个汉字）。
+
+这是我在计划里让两条自己的裁定打了架，Task 2 的实现者抓到的。带挖空的三份（`queens` 2 个、`knight-path` 2 个、`tour-warnsdorff` 1 个）都受影响；`tour-dfs` / `rook-cover` / `king-*` 没有挖空，原文断言本来也成立，但**统一都走 `clean`**，别留两种写法。
+
+顺带把这件事**正着钉一次**（原计划只写在散文里、没有断言）：两种语言变体里那两行 BLANK 指令**逐字节相同**。
+
+⚠ **剥指令行必须走 `Exercise.parse()`，测试里也不许自己写一条过滤。** 五个 `algos/*.test.js` 今天都没 require 过 `exercise.js`，加一行 `const E = require('../exercise.js');` 即可（两个都是仓库本地模块，「零依赖」说的是外部依赖，不受影响）。理由是规格里已经立过的那一条：**「什么算指令行」这段知识分成两份，迟早分岔**——页面不许自己写正则，测试同样不许。一份会漂移的过滤会让这道门悄悄停止检验它该检验的东西。
+
 
 // ---- lang 必填，且只认两个值 ----
-T.throws(function () { Q.source({ N: 6 }); }, /少了 lang/);
-T.throws(function () { Q.source({ N: 6, lang: 'fr' }); }, /只认/);
-T.throws(function () { Q.source({ N: 6, lang: '' }); }, /只认/);
+T.throws(function () { Q.source({ N: 6 }); }, 'queens：缺 lang 必须抛', /少了 lang/);
+T.throws(function () { Q.source({ N: 6, lang: 'fr' }); }, 'queens：lang=fr 必须抛', /只认/);
+T.throws(function () { Q.source({ N: 6, lang: '' }); }, 'queens：lang=空串必须抛', /只认/);
 ```
 
 同时把这个文件里**所有**已有的 `Q.source({ N: … })` 调用补上 `lang: 'zh'`（`lang` 缺了会抛，一跑就知道漏了哪个）。`exercise.test.js` 里 9 处 `source(` 同样处理。
@@ -460,7 +476,7 @@ node chess/core/algos/queens.test.js
   ];
 ```
 
-⚠ **上面这个 `en` 块是 4 行、`zh` 是 3 行——它会被 `render` 当场抛错。** 这是**故意留在计划里的**：写英文时最常犯的就是这一下，而门会立刻抓住它。把它压成 3 行（或按写作判断重排），别靠加空行凑数。
+⚠ **上面两个 `en` 块的行数都不对，都会被 `render` 当场抛错**：第一段 `en` 13 行 / `zh` 12 行，第二段 `en` 4 行 / `zh` 3 行。这是**故意留在计划里的**：写英文时最常犯的就是这一下，而门会立刻抓住它。两段都压回等行数（或按写作判断重排），别靠加空行凑数。**后面六个任务的示例块同理，别信示例的行数，信 `render` 抛不抛。**
 
 `BODY` 同法改写。**逐字节抄中文**这件事有一道机械校验，见 Step 6。
 
@@ -739,9 +755,15 @@ const kpZh = KP.source({ W: 5, start: 0, target: 24, lang: 'zh' });
 const kpEn = KP.source({ W: 5, start: 0, target: 24, lang: 'en' });
 T.ok(kpZh !== kpEn, '两种语言的源码不是同一份');
 T.ok(/[一-鿿]/.test(kpZh), '中文那一份里有汉字');
-T.ok(!/[一-鿿]/.test(kpEn), '英文那一份里一个汉字都没有');
-T.throws(function () { KP.source({ W: 5, start: 0, target: 24 }); }, /少了 lang/);
-T.throws(function () { KP.source({ W: 5, start: 0, target: 24, lang: 'fr' }); }, /只认/);
+T.ok(!/[一-鿿]/.test(E.parse(kpEn, 'en').clean),
+     '英文那一份送到编辑器的文本里一个汉字都没有');
+T.eq(kpEn.split('\n').filter(l => /BLANK/.test(l)).join('\n'),
+     kpZh.split('\n').filter(l => /BLANK/.test(l)).join('\n'),
+     '两种语言变体里的 BLANK 指令行逐字节相同');
+T.throws(function () { KP.source({ W: 5, start: 0, target: 24 }); },
+         'knight-path：缺 lang 必须抛', /少了 lang/);
+T.throws(function () { KP.source({ W: 5, start: 0, target: 24, lang: 'fr' }); },
+         'knight-path：lang=fr 必须抛', /只认/);
 ```
 
 ⚠ 上面的模块别名 `KP`、参数名与合法取值，**以这个测试文件顶部既有的写法为准**——如果它用的是别的名字或别的盘，照它的改，别照抄本计划里的字面量。
@@ -863,9 +885,12 @@ for (const key of Object.keys(TOUR_SRC)) {
        key + '：两种语言的解释器步数相同');
   T.ok(zh !== en, key + '：两种语言的源码不是同一份');
   T.ok(/[一-鿿]/.test(zh), key + '：中文那一份里有汉字');
-  T.ok(!/[一-鿿]/.test(en), key + '：英文那一份里一个汉字都没有');
-  T.throws(function () { mod.source({ W: 5, H: 5, start: 0 }); }, /少了 lang/);
-  T.throws(function () { mod.source({ W: 5, H: 5, start: 0, lang: 'fr' }); }, /只认/);
+  T.ok(!/[一-鿿]/.test(E.parse(en, 'en').clean),
+       key + '：英文那一份送到编辑器的文本里一个汉字都没有');
+  T.throws(function () { mod.source({ W: 5, H: 5, start: 0 }); },
+           key + '：缺 lang 必须抛', /少了 lang/);
+  T.throws(function () { mod.source({ W: 5, H: 5, start: 0, lang: 'fr' }); },
+           key + '：lang=fr 必须抛', /只认/);
 }
 ```
 
@@ -977,9 +1002,12 @@ const rcZh = RC.source({ W: 5, H: 5, blocked: [6, 8, 12, 16, 18], lang: 'zh' });
 const rcEn = RC.source({ W: 5, H: 5, blocked: [6, 8, 12, 16, 18], lang: 'en' });
 T.ok(rcZh !== rcEn, '两种语言的源码不是同一份');
 T.ok(/[一-鿿]/.test(rcZh), '中文那一份里有汉字');
-T.ok(!/[一-鿿]/.test(rcEn), '英文那一份里一个汉字都没有');
-T.throws(function () { RC.source({ W: 5, H: 5, blocked: [] }); }, /少了 lang/);
-T.throws(function () { RC.source({ W: 5, H: 5, blocked: [], lang: 'fr' }); }, /只认/);
+T.ok(!/[一-鿿]/.test(E.parse(rcEn, 'en').clean),
+     '英文那一份送到编辑器的文本里一个汉字都没有');
+T.throws(function () { RC.source({ W: 5, H: 5, blocked: [] }); },
+         'rook-cover：缺 lang 必须抛', /少了 lang/);
+T.throws(function () { RC.source({ W: 5, H: 5, blocked: [], lang: 'fr' }); },
+         'rook-cover：lang=fr 必须抛', /只认/);
 
 /* ---- 题面不许在重写英文时滑回那个数学错误 ----
    一辆车是二分图的一条**边**；König 给的是最少的**线**，不是最少的车。
@@ -1099,9 +1127,12 @@ for (const key of Object.keys(KING_SRC)) {
   const en0 = mod.source({ W: b0.W, H: b0.H, blocked: b0.blocked, lang: 'en' });
   T.ok(zh0 !== en0, key + '：两种语言的源码不是同一份');
   T.ok(/[一-鿿]/.test(zh0), key + '：中文那一份里有汉字');
-  T.ok(!/[一-鿿]/.test(en0), key + '：英文那一份里一个汉字都没有');
-  T.throws(function () { mod.source({ W: 5, H: 5, blocked: [] }); }, /少了 lang/);
-  T.throws(function () { mod.source({ W: 5, H: 5, blocked: [], lang: 'fr' }); }, /只认/);
+  T.ok(!/[一-鿿]/.test(E.parse(en0, 'en').clean),
+       key + '：英文那一份送到编辑器的文本里一个汉字都没有');
+  T.throws(function () { mod.source({ W: 5, H: 5, blocked: [] }); },
+           key + '：缺 lang 必须抛', /少了 lang/);
+  T.throws(function () { mod.source({ W: 5, H: 5, blocked: [], lang: 'fr' }); },
+           key + '：lang=fr 必须抛', /只认/);
 }
 ```
 
