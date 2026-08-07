@@ -5,6 +5,44 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <!-- 版本记录（changelog，新→旧）：
+     1.2.0  2026-08-07  两道新题，棋盘上第一次出现**墙**。
+                        · rookCover（车与线）——带障碍的盘把一行断成若干**行段**、
+                          一列断成若干**列段**，一个空格同时属于一个行段和一个列段，
+                          那正好是二分图里的一条**边**。于是「最多能摆几辆互相吃不到
+                          的车」= 最大匹配，而 König 定理说「盖住每个空格最少要点亮
+                          几条线（段）」是同一个数。入口函数 `walk(r)` 的递归深度就是
+                          **增广路的长度**——那串「请人挪窝」在棋盘上看得见地横竖交替
+                          走。四档 5×5 空盘 k=5 / 5×5 五堵墙 k=7 / 6×6 九堵墙 k=7 /
+                          6×7 九堵墙 k=9；第一档空盘上匹配根本没上场（增广路最深只有
+                          1 层），那本身就是「这道题为什么必须有障碍」的答案。
+                          ⚠ 摆出来的车顺手也盖住了每一个空格（验过），但那**不是最少
+                          的车数**——一辆车是一条边，一次占住两个点，页面上明写了这句。
+                        · kingDominate（王的支配）——同屏并排**两份源码**的第二个键：
+                          贪心（每次拿新盖住最多空格的那一格，绝不反悔）与精确（迭代
+                          加深，穷尽）。四档 5×5 `[6,12,18]` 4·4 / 6×6 `[6,24,35]` 6·4 /
+                          6×6 `[1,4,24]` 8·4 / 7×7 `[16,24,32]` 8·**跑不完**。中间两档
+                          同尺寸、同墙数、只挪了墙的位置，差距就从 2 拉到 4：贪心吃多大
+                          亏取决于墙摆在哪儿，不是摆了几堵。最后一档是整个工具的落点——
+                          精确那一份撞上 200,000 步上限，读数写「跑不完，判不了」（琥珀，
+                          不是红），页面**没有任何一处说 8 是最优**：8 是够用，不是最少，
+                          而这个工具分辨不了这两件事，所以它一个字都不声称。
+                        · board(st) 现在可以多交一个 `blocked`（挖掉的格子编号），
+                          那几格不画成棋盘格而画成斜纹的**墙**；三道旧题一个字节没动。
+                        · 声明层新立三道门（都在 validateDecl，坏了整页停住）：
+                          多块棋盘的题目必须自己声明 `sideView`（默认侧视正好沿着并排
+                          那根轴看进去，几块盘会完全重合而什么都不报——阶段 5 与阶段 7
+                          各撞过一次，两次都是靠人眼从截图里救回来的）；图例文案与轨道
+                          标题各有一个**显示宽度上限**（长了会把图例撑到面板底下、把
+                          两块盘的标题撞在一起，两者都发生过）；一道题只能有一份**带
+                          挖空的**可编辑源码（存档键只按题目名分，两份会互相覆盖）。
+                        · 页签条两头各切掉一块的问题一并修了，那是加到五个页签之后
+                          才露出来的：`.tabs` 是 position:fixed 且只给了 `left`，
+                          收缩宽度的上限于是变成「视口右缘减去 left」（1500 px 下
+                          561 px），再被 translateX(-50%) 整个搬回一半 —— 两头各伸进
+                          面板 31 / 32 px，屏幕上是「the other answ|（挡住）」和
+                          「（挡住）rameters & Views」。三个页签时 max-content 才
+                          330 px，够不着上限，所以一直没露。现在给它一条真的上限：
+                          画布那一块的宽度（两边各留 12 px），装不下就在自己里面折行。
      1.1.0  2026-08-05  挖空练习（规格 §2.9）。练习模式把关键的那一行从源码里挖走、
                         换成一行占位注释，她自己写回来；按 Check 才判定，判定**只比
                         行为不比文本**——参考版本与她的版本各跑一遍，比返回值、比棋盘
@@ -50,7 +88,7 @@
                           BFS 的递归深度本身就是最短步数。
                         截断的轨迹一律写「—」与「没跑完」，绝不把「不知道」印成 0。
                         本版同时把工具登记进 chess-tools.json 与两份 FALLBACK 镜像。 -->
-<meta name="tool-version" content="1.1.0">
+<meta name="tool-version" content="1.2.0">
 <meta name="engine-version" content="chess-1.2.0">
 <title>Classic Problems on the Board</title>
 <!--
@@ -213,14 +251,37 @@ body.folded #split,body.folded #divider{display:none}
   white-space:pre;overflow-x:auto;padding:6px 8px;border-radius:6px;background:rgba(2,6,14,.6)}
 #dbgHost{flex:1 1 0;min-height:190px}
 
-/* ---- 页签：居中于**画布那一块**，不是整窗 ---- */
+/* ---- 页签：居中于**画布那一块**，不是整窗 ----
+
+   ⚠ `max-width` 这一条是阶段 7 补的，补的是一个**它自己造出来**的坑。
+   `position:fixed` 只给了 `left`，于是这个盒子的收缩宽度上限是「视口右缘减去
+   left」——1500 px 下正好 561 px——然后 `translateX(-50%)` 又把它整个搬回左边
+   一半。于是它实际占的区间是 left±280，**两头都伸进两块面板里**，而那个 561
+   跟"画布那一块有多宽"（这里只有 498 px）毫无关系。
+
+   三个页签的时候看不出来：那时候 max-content 才 330 px 左右，盒子按内容收缩，
+   离两边都还有富余。阶段 7 加到五个页签、英文标签又长，max-content 越过了
+   561，盒子就被撑到那个上限并且开始折行 —— 实测（1500×950、英文）左缘 659
+   压进代码面板 31 px、右缘 1220 压进参数面板 32 px，屏幕上是
+   「the other answ|（挡住）」和「（挡住）rameters & Views」，两头各切掉一块。
+
+   改法是把那个上限换成真的那个数：画布那一块的宽度（两边各留 12 px）。
+   盒子仍然按内容收缩，只是**再也伸不进任何一块面板**；装不下就在自己里面
+   多折一行，那是这个页签条本来就会做的事。折叠代码面板时画布那一块变宽，
+   所以 body.folded 下要跟着换一份。
+
+   ⚠ **这不是一条新发明的规则**：下面 `.hint` 那条提示条早就带着一模一样的
+   两句 max-width（含 body.folded 那一份）—— 同一排 position:fixed 的东西里，
+   只有页签条漏了它。`#busy` 也居中于同一块，但它只有一句话、够不着上限。 */
 .tabs{position:fixed;top:16px;left:calc(var(--code-w) + (100vw - var(--code-w) - var(--panel-w)) / 2);
+  max-width:calc(100vw - var(--code-w) - var(--panel-w) - 24px);
   transform:translateX(-50%);z-index:5;
-  display:flex;gap:4px;padding:4px;border-radius:999px;
+  display:flex;flex-wrap:wrap;justify-content:center;gap:4px;padding:4px;border-radius:999px;
   background:var(--panel-bg);border:1px solid var(--panel-line);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
-body.folded .tabs{left:calc((100vw - var(--panel-w)) / 2)}
+body.folded .tabs{left:calc((100vw - var(--panel-w)) / 2);
+  max-width:calc(100vw - var(--panel-w) - 24px)}
 .tab{border:1px solid transparent;background:transparent;color:#b8c6da;
   font-size:12.5px;font-family:var(--font-cn);padding:6px 15px;border-radius:999px;cursor:pointer;
   transition:color .15s,border-color .15s,background .15s}
@@ -6903,7 +6964,7 @@ const ALGOS = {
      **不是** meta（设计系统 §10 写的「从 meta 读取」在 chess 这套引擎里不成立——
      工具① 的 1.1.0 changelog 记着这笔账：1.0.2 那次只改了 meta、忘了这个常量，
      角标停在 1.0.1 整整两版）。改版本必须两处一起动。 */
-  const VERSION = '1.1.0';
+  const VERSION = '1.2.0';
 
   /* ---------------- 算法源码生成器从哪来 ----------------
 
@@ -7270,15 +7331,24 @@ const ALGOS = {
                              一样：不画棋盘 + 红色状态牌（见 layoutTracks）。
        kinds     []           这道题会用到的 mark 种类，决定图例的行与顺序
        onMark(kind)          → { color, label } 或 null（认不出的种类不画）
+                             `label` 的**显示宽度 ≤ 72**（CJK 算 2），validateDecl 判死：
+                             图例没有 max-width，长了会钻到右上角面板底下（见那道门）
        zOf(m, api)           → 这个标记该抬到第几层（省略 = 它的调用深度）
        zLabel    {zh,en}      z 轴叫什么（queens 是递归深度，knightPath 会是 BFS 层）
        readout(a, st)        → 读数区的 HTML（a 是下面 readoutApi() 给的那个对象）
        check     {result,boardOps,counters}  Check 比哪几样可观测行为（§2.9）
        spanZ     number      （可选）深度塔每层抬多高；层数多的题目必须自己给（见 SPAN_Z）
-       sideView  {az,el,dist}（可选）换掉默认的 `3` 侧视；并排多块棋盘的题目必须给（见 viewsFor）
+       sideView  {az,el,dist}（可选）换掉默认的 `3` 侧视。**`sources` 超过一份就不再是
+                             可选的**：默认侧视正好沿着并排那根轴看进去，几块盘会完全
+                             重合（validateDecl 判死，见那道门里的 0.1 px 对照实验）
        exerciseSources []    （可选）练习模式下改用这份清单，每项 { file, role }
                              role: 'edit'（可编辑、跑、上棋盘）/ 'contrast'（只读、不跑）
+                             **带挖空的可编辑源码只许有一份**——不声明这个字段时
+                             `sourcesFor()` 是「每一份都 edit」，多份源码的题目将来
+                             加挖空就必须在这里把其余几份降成 contrast（validateDecl 判死）
        trackLabel(file, k)   （可选）并排多块棋盘时，每块底下与每份源码顶上写什么
+                             **显示宽度 ≤ 26**（CJK 算 2），validateDecl 判死：
+                             并排两块盘时两条的半宽一相加就撞在一起
        exportName(st)        （可选）将来导出 .js 时的文件名 */
 
   const Q = {
@@ -10942,6 +11012,58 @@ const ALGOS = {
   const SIDE_VIEW_KEYS = { az: 1, el: 1, dist: 1, tx: 1, ty: 1, tz: 1 };
   const CHECK_KEYS = { result: 1, boardOps: 1, counters: 1 };
   const EX_ROLES = { edit: 1, contrast: 1 };
+
+  /* ---- 声明层文案的**显示宽度**上限（阶段 7 Task 6 立的第二道门）----
+
+     `--font-*` 是等宽的这件事不成立，所以这里量的不是像素而是「显示宽度」：
+     CJK / 全角一个字算 2，其余算 1。这只是一个**便宜的近似**，理由与实测都写在
+     下面那道门里 —— 中英两份实测下来每单位 5.6–6.0 px，两种语言落在同一条线上，
+     够用来把「长得离谱」和「正常」分开，而这正是这道门唯一要做的事。
+
+     两个上限都是从今天的实测最长值往上留出余量、并且**必须挡得住已经发生过的
+     那两次坏版面**定出来的（数字见门里的注释）。 */
+  const LEGEND_LABEL_MAX = 72;
+  const TRACK_LABEL_MAX = 26;
+  function dispWidth(s) {
+    let n = 0;
+    /* for…of 走的是码点，不是 UTF-16 码元 —— 别把一个表情符号数成两个字。 */
+    for (const ch of String(s)) {
+      const c = ch.codePointAt(0);
+      n += (c >= 0x1100 && (c <= 0x115f || c === 0x2329 || c === 0x232a ||
+        (c >= 0x2e80 && c <= 0xa4cf && c !== 0x303f) ||
+        (c >= 0xac00 && c <= 0xd7a3) || (c >= 0xf900 && c <= 0xfaff) ||
+        (c >= 0xfe30 && c <= 0xfe6f) || (c >= 0xff00 && c <= 0xff60) ||
+        (c >= 0xffe0 && c <= 0xffe6))) ? 2 : 1;
+    }
+    return n;
+  }
+  /* 一条 {zh,en}（或者一个裸串）在某种语言下真的会被画出来的那段字。
+     **跟 paintLegend 同一条剥标记的正则**：那里画的是 textContent，
+     `<i>x</i>` 里的尖括号不会占宽度，量的时候也不该算进去。 */
+  function labelTextOf(v, lang) {
+    const s = (v && typeof v === 'object') ? v[lang] : v;
+    return typeof s === 'string' ? s.replace(/<[^>]+>/g, '') : null;
+  }
+
+  /* 这份源码里有没有**挖空**（`// >>> BLANK id=…`）。
+
+     读的是内联进来的模块**文本**（ALGOS），不是解析结果 —— 挖空清单要等
+     `P.source(st, M, file)` 生成出源码、再 `Exercise.parse` 一遍才有，而那时候
+     参数、模块、轨道都还没建起来，validateDecl 跑在它们全部之前。
+
+     ⚠ 这是一个**保守的近似**，两个方向都想清楚了：
+       · 认多了（某份源码里有一条永远走不到的挖空）→ 门更早响一步，不是坏事；
+       · 认少了 → 只可能发生在有人把指令写成别的形状，那时 Exercise.parse 会
+         在正常模式下就当场抛（它是**正常模式也要跑**的那一步）。
+     正则要认 `id=`：`tour-warnsdorff.js` 的维护者注释里就有两处裸的
+     `` `// >>> BLANK` 指令 ``，只认前缀会把它们数成挖空。 */
+  const BLANK_DIRECTIVE_RE = /\/\/ >>> BLANK\s+id=/;
+  function fileHasBlanks(file) {
+    if (typeof ALGOS !== 'object' || !ALGOS) return false;
+    const src = ALGOS[file];
+    return typeof src === 'string' && BLANK_DIRECTIVE_RE.test(src);
+  }
+
   function validateDecl() {
     const has = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
     PIDS.forEach(function (pid) {
@@ -11073,6 +11195,141 @@ const ALGOS = {
               (typeof v) + ' ' + String(v) + '。非数字会让相机变成 NaN、整块画布变白。');
           }
         });
+      }
+
+      /* ---- 并排多块棋盘的题目**必须自己给 `sideView`** ----
+
+         这一条是**两次**从截图里用眼睛救回来的（阶段 5 的 `tourKnight` 一次、
+         阶段 7 的 `kingDominate` 一次），而在那两次之间一道门都没有：少写一个
+         **可选**字段，validateDecl 放行、check.py 放行、`node --check` 放行，
+         页面照常起来、状态牌是绿的 —— 只有按下 `3` 才看得见两块棋盘严丝合缝
+         叠成一块，而且叠得太整齐，第一眼像是"这一题只有一块盘"。
+
+         为什么是必然、不是运气不好：默认的 `3` 侧视沿**世界 x 轴**看进去
+         （VIEWS.side 的 az），而 layoutTracks 把并排的几块棋盘正是沿 x 轴摆开的
+         —— 同一根轴，于是"并排"这段位移在屏幕上投影成 0。两次独立的对照实验，
+         都是把 kingDominate 的 sideView 删掉走默认侧视：
+
+           阶段 7 审查（盘心）        0.1 px  ← 声明之后 240.9 px
+           Task 6 复量（格心均值）  1.4–1.8 px ← 声明之后 200.2 px，1500×950 窗口
+
+         两个数不同是量法与窗口不同，说的是同一件事：并排那段位移整个没了。
+
+         **只查"有没有"，不查"摆得对不对"。** 后者是取景问题（盘距、透视、
+         窗口大小都掺一脚），声明层量不出来；而这道门要挡的那个失败模式
+         ——"根本没想到这回事"——只用"有没有"就挡住了。 */
+      if ((P.sources || []).length > 1 && !has(P, 'sideView')) {
+        throw new Error(at + 'sources 有 ' + P.sources.length + ' 份（并排 ' +
+          P.sources.length + ' 块棋盘），却没有声明 sideView —— 默认的 `3` 侧视' +
+          '正好沿着多块棋盘并排的那根世界 x 轴看进去，几块盘会在屏幕上完全重合' +
+          '（两次实测：盘心相距 0.1 px / 格心均值相距 1.4–1.8 px，声明之后分别是 240.9 / 200.2 px），' +
+          '而且什么都不报。' +
+          '照 tourKnight / kingDominate 写一个，例：sideView: { az: 0, el: -1.25, dist: 15 }。');
+      }
+
+      /* ---- 图例文案与轨道标题的**显示宽度上限** ----
+
+         这是阶段 7 的第二个坑，同样是作者看截图才发现的（Task 5 第一版）：
+
+           · 过长的**图例**文案把图例撑到面板底下。`.legend` 是 position:fixed
+             且没有 max-width，两条 106 字的英文让它量到 594.6 px、右缘落在
+             1383 px，而面板左缘在 1368 px —— 截图里第三行末尾当场被切掉。
+           · 过长的**轨道标题**让并排两块盘底下的 caption 撞在一起，读成
+             "…best right nowExact: try…"：那一档两块盘盘心只隔 213 px，而
+             `Greedy: take the best right now` / `Exact: try every arrangement`
+             量出来是 224 / 202 px，两条的半宽和正好把这 213 px 吃满。
+
+         **这道门是一个便宜的近似，不是那两件事本身。** 那两件事都是运行期几何
+         （盘距、面板左缘、窗口宽度、`--code-w` 拖到哪儿都掺一脚），而
+         validateDecl 跑在第一帧之前，一个矩形都还没有。真正的运行期判据不能立在
+         这里，也不该立在别处：窄窗口下 `.legend` 本来就 display:none（媒体查询
+         < 900px），一条"图例右缘要在面板左缘左边"的运行期断言会在**合法**的窄
+         窗口上误报。所以这里立的是声明层唯一量得出来的那样东西 —— 字有多长。
+         阶段 6 给占位注释立的 `NOTE_MAX` 是同一个形状的先例。
+
+         上限怎么来的（实测，1500×950 窗口，中英各跑一遍五道题）：
+
+           图例：今天最长 57（en/kingDominate，319 px）· 48（zh/kingDominate，287 px）
+                 → 每单位 5.6–6.0 px，中英落在同一条线上。上限 72 留 26% 余量，
+                   而坏掉的那一版是 106 —— 挡得住。
+           标题：今天最长 20（en/tourKnight）· 18（zh/kingDominate）
+                 → 上限 26；坏掉的那两条是 31 与 28，两条都挡得住。
+
+         `onMark` / `trackLabel` 抛出来的错**不归这道门**：前者 paintLegend 每次
+         重画都会原地炸（响得很），后者 trackTitle 有 hookFail 接着。这里抛了就
+         跳过长度检查，只做自己那一件事 —— 一道门只有一个失败模式，才说得清。 */
+      (P.kinds || []).forEach(function (k) {
+        let info = null;
+        try { info = P.onMark(k); } catch (e) { return; }
+        if (!info || !info.color) return;
+        ['zh', 'en'].forEach(function (lang) {
+          const s = labelTextOf(info.label, lang);
+          if (s === null) return;
+          const w = dispWidth(s);
+          if (w > LEGEND_LABEL_MAX) {
+            throw new Error(at + 'onMark("' + k + '").label 的 ' + lang +
+              ' 那一份太长了：显示宽度 ' + w + '，上限 ' + LEGEND_LABEL_MAX +
+              '（CJK 算 2）。图例是 position:fixed、没有 max-width 的，' +
+              '这么长的一行会把整块图例撑到右上角面板底下，末尾几个词在屏幕上' +
+              '直接看不见（实测 106 宽 → 594.6 px，右缘 1383 px 压过面板左缘 1368 px）。' +
+              '把要解释的话搬到 tips 或读数里，图例只留名字。原文：' + JSON.stringify(s));
+          }
+        });
+      });
+      if (typeof P.trackLabel === 'function') {
+        (P.sources || []).forEach(function (file, k) {
+          let v = null;
+          try { v = P.trackLabel(file, k); } catch (e) { return; }
+          ['zh', 'en'].forEach(function (lang) {
+            const s = labelTextOf(v, lang);
+            if (s === null) return;
+            const w = dispWidth(s);
+            if (w > TRACK_LABEL_MAX) {
+              throw new Error(at + 'trackLabel("' + file + '") 的 ' + lang +
+                ' 那一份太长了：显示宽度 ' + w + '，上限 ' + TRACK_LABEL_MAX +
+                '（CJK 算 2）。这行字画在每块棋盘底下、居中于盘心，' +
+                '并排两块盘时两条的半宽一相加就会撞在一起，读成一句连起来的乱码' +
+                '（实测 31 与 28 宽的两条 → 224 + 202 px，而那一档盘心只隔 213 px）。' +
+                '标题只写"哪一份"，"它是什么主意"归 tips。原文：' + JSON.stringify(s));
+            }
+          });
+        });
+      }
+
+      /* ---- 一道题只能有一份**带挖空的**可编辑源码 ----
+
+         上面 `exerciseSources` 那一段里已经有一条「只支持一份 role:"edit"」，
+         但它**写在 `if (has(P,'exerciseSources'))` 里面** —— 于是完全不声明那个
+         字段、又有两条可编辑轨道的题目从门旁边整个绕了过去。`kingDominate`
+         就是这样一道题：`sourcesFor()` 对没声明的题目是「原样那几份**全都**
+         edit」，所以它在练习模式下是**两条** role:"edit"，而那条门一次都没看它一眼。
+
+         今天无害，明天不是：`king-greedy.js` / `king-exact.js` 里一个挖空都没有，
+         于是 `restoreSrc` 的 `!g.ex.blanks.length` 当场返回、存进
+         `chess.exercise.v1.kingDominate.src` 的东西根本没人读。哪天给这两份
+         加上挖空，两块编辑器就会共用那一个键**互相覆盖**（后写的赢，而且不报），
+         挖空 id 还只在一份源码内保证不重复。
+
+         所以这道门数的是「**带挖空的**可编辑源码」有几份，不是「可编辑源码」
+         有几份：前者才是 localStorage 那两个键真正会打架的条件，也正因如此它
+         今天对 kingDominate 是放行的 —— 一道在正确的时刻才响的门，比一道
+         今天就把页面停住的门有用。上面那条严格的声明侧检查**原样保留**，
+         这一条只补它够不着的那一半。 */
+      const effSources = has(P, 'exerciseSources')
+        ? P.exerciseSources
+        : (P.sources || []).map(function (f) { return { file: f, role: 'edit' }; });
+      const blanky = [];
+      effSources.forEach(function (e) {
+        if (e && e.role === 'edit' && fileHasBlanks(e.file)) blanky.push(e.file);
+      });
+      if (blanky.length > 1) {
+        throw new Error('PROBLEMS.' + pid + '：练习模式下会有 ' + blanky.length +
+          ' 份**带挖空的**可编辑源码（' + blanky.join(' 与 ') + '）—— 今天只支持一份。' +
+          '存档键 chess.exercise.v1.' + pid + '.src 与 .<挖空 id> 都只按题目名分，' +
+          '两份会互相覆盖而且不报，挖空 id 也只在一份源码内保证不重复。' +
+          '给这道题声明 exerciseSources，让其中一份变成 role:"contrast"' +
+          '（照 tourKnight：一份 edit + 一份只读对照）；' +
+          '真要两份都可编辑，先把键改成按文件分并换成 v2 前缀。');
       }
     });
   }
