@@ -322,8 +322,14 @@ T.eq(Object.keys(R).sort(), ['source'], '导出的键就只有 source 一个');
    守的是「可执行代码没有偷偷分岔」，**不是**「英文翻得对不对」——后者机器
    判不了，是人工审查项。
 
-   盘就用上面 BOARDS 的前两档（空盘 + 五障碍）：这一题离 `STEP_LIMIT`
-   差两个数量级（最贵的一档 2,149 步），两语都跑得完。
+   盘就用上面 BOARDS 的前两档（空盘 722 步 + 五障碍 1,156 步）：离
+   `STEP_LIMIT = 200000` 差两个数量级，两语都跑得完。（这一题最贵的一档是
+   6×7 的 2,149 步，也一样远 —— 但这道门跑的不是它。）
+
+   **这两块盘是必要组合，别只留一块**（修复轮 1，审查实测）：空盘那一档
+   `back = 0`、`walk` 的递归分支一次都不进，压在那条分支上的突变它抓不到；
+   只有第二档（五障碍、back = 2、增广路最深 6 层）走得到。反过来空盘那一档
+   是「匹配没上场」的对照，两块各守各的。
    **`!truncated` 那条前置断言仍然不许删**：一旦哪天两语一起撞上限，下面
    那条步数断言就退化成 `200000 === 200000` —— 截断把两边的步数夹到同一个
    常数上，是这类断言最安静的死法（阶段 8 Task 5 在 `tour-dfs` 5×5 上实测过）。 */
@@ -376,12 +382,37 @@ T.throws(function () { R.source({ W: 5, H: 5, blocked: [], lang: '' }); },
    5/7/7/9，而最少车数是 5/4/5/5 —— 三档反例；最小的反例只有 2×2 挖一格
    （匹配 2、一辆车就盖满）；60 块随机小盘里 49 块的最少车数严格更小。
 
-   所以英文里不许出现「fewest rooks（needed / required）」这一族说法。
    题面只许讲那两句都恰好等于最大匹配的话：
-     ① 最多能摆几辆互相吃不到的车；② 盖住每个空格最少要点亮几条线。 */
-T.ok(!/fewest\s+rooks/i.test(rcEn), '英文题面没有说 "fewest rooks"');
-T.ok(!/minimum\s+number\s+of\s+rooks/i.test(rcEn),
-     '英文题面没有说 "minimum number of rooks"');
-T.ok(/lines?/i.test(rcEn), '英文题面讲的是「线」');
+     ① 最多能摆几辆互相吃不到的车；② 盖住每个空格最少要点亮几条线。
+
+   ⚠ **下面这几条是词表门，不是语义门 —— 别把它们当成「题面是对的」的证明。**
+   它们只查两件字面上的事：
+     (a) 英文里没有出现「最少的车」这一族**列在表里的**说法；
+     (b) 英文里出现了 "line segment(s)"。
+   修复轮 1 之前只有 `fewest rooks` 与 `minimum number of rooks` 两条，审查把
+   Question two 换成 `the smallest number of rooks`（**同一个数学错误，换一组
+   词**）→ **全绿**。所以下面把这一族的常见换法一起列了。
+   但换法是列不完的（"as few rooks as it takes"、"a rook count that is minimal"
+   ……都能绕过），而且 (b) 只问 "line segment" **有没有出现**，不问它出现在
+   哪句话里。**「题面讲的是不是那两件事」这一半是人肉门**，靠的是审查逐句读，
+   不是靠下面这几条。文件里凡是提到这道门的地方都得这么说。
+
+   （反过来这道门也不恒真：抹掉英文里所有 "line segment"，(b) 当场红 ——
+   它拦得住「彻底把『线』丢掉」那一档，只是拦不住换词。） */
+const RC_BANNED_ROOK_COUNT = [
+  ['fewest rooks',             /\bfewest\s+(possible\s+)?rooks\b/i],
+  ['smallest number of rooks', /\bsmallest\s+number\s+of\s+rooks\b/i],
+  ['minimum number of rooks',  /\bminimum\s+number\s+of\s+rooks\b/i],
+  ['least/lowest … rooks',     /\b(least|lowest|minimal)\s+(possible\s+)?(number\s+of\s+)?rooks\b/i],
+  ['smallest/minimum rooks',   /\b(smallest|minimum)\s+(possible\s+)?rooks\b/i],
+  ['rooks … at a minimum',     /\brooks\s+(needed|required)\s+at\s+a\s+minimum\b/i],
+];
+for (let i = 0; i < RC_BANNED_ROOK_COUNT.length; i = i + 1) {
+  const label = RC_BANNED_ROOK_COUNT[i][0], re = RC_BANNED_ROOK_COUNT[i][1];
+  T.ok(!re.test(rcEn), '英文题面没有说「' + label + '」这一族（最少车数 ≠ 最大匹配）');
+}
+/* ⚠ 要词边界：`/lines?/i` 没有边界，`inline` / `baseline` / `outlines` 都能让它
+   变绿。要的是 "line segment(s)" 这个词组本身。 */
+T.ok(/\bline segments?\b/i.test(rcEn), '英文题面讲的是「线（line segment）」');
 
 T.report();

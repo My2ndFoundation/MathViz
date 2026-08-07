@@ -212,9 +212,22 @@
 
      ⚠ **题面那两句在英文里也得站住**（见文件头那一整段订正）：只许说
      ①「最多能摆几辆互相吃不到的车」与 ②「盖住每个空格最少要点亮几条线」，
-     两句都恰好等于最大匹配。**不许说 "fewest rooks" / "minimum number of
-     rooks"** —— 一辆车是二分图的一条**边**，一次占两截，最少车数在四档里
-     有三档严格小于最大匹配。rook-cover.test.js 有三条断言钉着这件事。 */
+     两句都恰好等于最大匹配。**不许说 "fewest rooks" / "smallest number of
+     rooks" / "minimum number of rooks"** 这一族 —— 一辆车是二分图的一条
+     **边**，一次占两截，最少车数在四档里有三档严格小于最大匹配。
+
+     ⚠ **这件事只有一半是自动的，另一半是人肉门。**
+     `rook-cover.test.js` 那一组断言是**词表门**：它查「英文里没出现列在表里
+     的那几种说法」和「英文里出现了 line segment」，仅此而已。修复轮 1 之前
+     表里只有两条，审查把 Question two 换成 `the smallest number of rooks`
+     （同一个数学错误、换一组词）就**全绿**了；表补长了，但换法列不完，而且
+     「line segment 出现在哪句话里」它根本不问。**「题面讲的是不是那两件事」
+     要人逐句读**，别看见那几条绿的就以为它证明了题面是对的。
+
+     ⚠ 另一件跟这个工具的读者有关的事：英文里**不要用 `piece` 指「段」**。
+     在一个国际象棋工具里 `piece` 就是棋子（`knight-path.js` 的英文版正是
+     这么用的），而它会直接撞在「一辆车只管得住它站的那一截」这句上。
+     统一用 `segment`（散文里偶尔用 `stretch`），修复轮 1 清掉了八处。 */
   const HEAD = [
     {
       zh: [
@@ -252,14 +265,14 @@
       ],
       en: [
         '/* ============ Rooks, Row Segments and Column Segments · Maximum Matching ============',
-        '   Some squares are taken by walls a rook cannot pass through. A wall cuts a row into',
-        '   pieces, and a column into pieces too. **A rook only controls the piece it stands on**:',
-        '   it looks both ways down that row and that column, stopping the moment it meets a wall.',
+        '   Some squares are taken by walls a rook cannot pass through. So a wall cuts a row into',
+        '   segments, and a column too. **A rook rules only the segment it stands on**: it looks',
+        '   both ways down that row and that column, stopping the moment it meets a wall.',
         '',
-        '   Give every piece a number: a row segment is a piece of one row cut off by walls, with a',
-        '   number of its own; a column segment is the same inside a column. So every empty square',
-        '   belongs to one row segment and one column segment at once — it is a pair of numbers',
-        '   (row segment, column segment), and a rook standing there takes **both pieces at once**.',
+        '   Give every segment a number: a row segment is a stretch of one row cut off by walls,',
+        '   with a number of its own; a column segment is the same inside a column. Every empty',
+        '   square then belongs to a row segment and a column segment at the same time — it is a',
+        '   pair of numbers (row segment, column segment), and a rook there takes **both at once**.',
         '',
         '   The same thing can be asked two ways, and the answer is the same number — the fun bit:',
         '',
@@ -272,9 +285,9 @@
         '   These two numbers are always equal, and that fact has a name: König’s theorem. The',
         '   program below computes it — in algorithm terms, maximum matching in a bipartite graph.',
         '',
-        '   Once done, the rooks left also happen to cover every empty square. Why? Take an empty',
-        '   square: if neither of its two segments held a rook, one more rook could stand right',
-        '   there — contradicting "at most". So one of the two does hold one, and it is seen.',
+        '   Once done, the rooks left standing also happen to cover every empty square. Why? Take',
+        '   an empty square: if neither of its two segments held a rook, one more rook could stand',
+        '   right there — contradicting "at most". So one of the two does hold one, and it is seen.',
         '   (**Note**: happening to cover is not the same as covering with as few rooks as',
         '   possible — one rook takes two segments at once, so fewer rooks sometimes cover',
         '   everything too. What this program answers is the two questions above.)',
@@ -293,8 +306,8 @@
       ],
       en: [
         '/* The width and height of the board, and the numbers of the walled squares — every knob.',
-        '   Try emptying BLOCKED: a bare board always answers min(W, H) — one rook per row, put',
-        '   anywhere, matching never used. **Walls are required**: they cut rows and columns. */',
+        '   Try emptying BLOCKED: a bare board answers min(W, H) — one rook per row, anywhere,',
+        '   matching unused. **Walls are needed**: they cut rows and columns, so there is work. */',
       ],
     },
   ];
@@ -323,11 +336,11 @@
         '   因为一辆车管不到障碍那一边去。列也照这个法子，从下往上扫一遍。 */',
       ],
       en: [
-        '/* Numbering the pieces — the one abstract jump in this puzzle, so take it slowly.',
-        '   Scan a row left to right, holding the number of the piece you are in right now:',
-        '     hit a wall, throw the number away (write −1); the next empty square opens a **new**',
-        '     piece. On an empty square with no number in hand, take one and file the square there.',
-        '   So **two pieces of one row split by a wall are two different segments**, with',
+        '/* Numbering the segments — the one abstract jump in this puzzle, so take it slowly.',
+        '   Scan a row left to right, holding the number of the segment you are in right now:',
+        '     hit a wall, throw it away (write −1); the next empty square opens a **new** one.',
+        '     On an empty square, take a number if you have none, and log the square under it.',
+        '   So **two stretches of one row split by a wall are two different segments**, with',
         '   different numbers: a rook cannot reach past a wall. Columns: the same, bottom up. */',
       ],
     },
@@ -470,9 +483,9 @@
         '                it moves, this column frees up — that rook steps down and mine steps up.',
         '',
         '   That pass-two chain (I want this column → its holder moves away → that frees a seat →',
-        '   ...) is, on the board, a path alternating **one row piece, one column piece**. Its name',
-        '   is an augmenting path: walk one and exactly one more rook stands (the ones in between',
-        '   only changed squares). Frames stacked on the left = round trips on the right. */',
+        '   ...) is, on the board, a path alternating **one row segment, one column segment**. Its',
+        '   name is an augmenting path: walk one and exactly one more rook stands (the ones in',
+        '   between only changed squares). Frames on the left = round trips on the right. */',
       ],
     },
     'function walk(r) {',
