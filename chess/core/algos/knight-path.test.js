@@ -170,15 +170,29 @@ T.eq(pathChecked, 4, '四组都验过盘上那条路线');
   T.eq(placedPath(8, 27, 27), [27], '这时候盘上只有出发格那一匹马');
 }
 
-/* ---- 缺参数当场抛（阶段 5 约束 6：省略参数已经是本仓库抓到过五次的缺陷类）---- */
-T.throws(function () { K.source({ start: 0, target: 63, lang: 'zh' }); }, '缺 W 当场抛');
-T.throws(function () { K.source({ W: 8, target: 63, lang: 'zh' }); }, '缺 start 当场抛');
-T.throws(function () { K.source({ W: 8, start: 0, lang: 'zh' }); }, '缺 target 当场抛');
-T.throws(function () { K.source(); }, '连 opts 都没有也当场抛');
-T.throws(function () { K.source({ W: 8, start: 64, target: 0, lang: 'zh' }); }, 'start 越界当场抛');
-T.throws(function () { K.source({ W: 8, start: 0, target: 64, lang: 'zh' }); }, 'target 越界当场抛');
-T.throws(function () { K.source({ W: 8, start: -1, target: 0, lang: 'zh' }); }, 'start 为负当场抛');
-T.throws(function () { K.source({ W: 8.5, start: 0, target: 1, lang: 'zh' }); }, 'W 不是整数当场抛');
+/* ---- 缺参数当场抛（阶段 5 约束 6：省略参数已经是本仓库抓到过五次的缺陷类）----
+
+   ⚠ **这一组故意一个 `lang` 都不传，而且每条都带第三参 pattern。** 两件事
+   缺一不可，合起来这一组才同时是**校验顺序**那道门：`source()` 自身那三个
+   参数的校验在最前、`lang` 由 render() 在最后校验 —— 所以一个只给了
+   start / target 的调用撞上的必须仍旧是「少了 W」。
+
+   补第三参之前（`T.throws(fn, label)`，pattern 是 undefined），这八条退化成
+   「抛了就算过」：审查的突变 M10 把 lang 校验提到 W 前面，77 + 175 条断言
+   **全绿** —— 那个设计当时根本没有门。撤掉 lang 也是同一件事的一半：只要这
+   一组还传着 `lang: 'zh'`，lang 校验挪到哪里都照样绿（它一次都不会被撞上）。
+
+   pattern 之间不许共享前缀（阶段 7 栽过：三条消息同前缀，一个正则匹到每一条，
+   等于没钉是哪一条）。这里八条分成四个互斥的形状：少了 W / 少了 start /
+   少了 target / X 必须是，实测把任一条的 pattern 换到另一条上都会红。 */
+T.throws(function () { K.source({ start: 0, target: 63 }); }, '缺 W 当场抛', /少了 W/);
+T.throws(function () { K.source({ W: 8, target: 63 }); }, '缺 start 当场抛', /少了 start/);
+T.throws(function () { K.source({ W: 8, start: 0 }); }, '缺 target 当场抛', /少了 target/);
+T.throws(function () { K.source(); }, '连 opts 都没有也当场抛', /少了 W/);
+T.throws(function () { K.source({ W: 8, start: 64, target: 0 }); }, 'start 越界当场抛', /start 必须是/);
+T.throws(function () { K.source({ W: 8, start: 0, target: 64 }); }, 'target 越界当场抛', /target 必须是/);
+T.throws(function () { K.source({ W: 8, start: -1, target: 0 }); }, 'start 为负当场抛', /start 必须是/);
+T.throws(function () { K.source({ W: 8.5, start: 0, target: 1 }); }, 'W 不是整数当场抛', /W 必须是/);
 // 但**不**校验「跑不跑得完」，也不校验「到不到得了」：那两件事要跑出来给她看。
 {
   let err = null;
@@ -194,8 +208,14 @@ T.ok(typeof K.source === 'function', '导出的形状与 queens / tour 同形：
 /* ---- 双语三道门（规格 §7.5）----
 
    守的是「可执行代码没有偷偷分岔」，**不是**「英文翻得对不对」——后者机器
-   判不了，是人工审查项。三道各有对方才拦得住的漏，理由在 queens.test.js
-   里那段注释写全了，这里不重复。 */
+   判不了，是人工审查项。
+
+   ⚠ **别把 queens.test.js 那句「三道各有对方才拦得住的漏」搬到这里来**：
+   那句话对**这一份**说过头了。这份源码里没有字符串参与控制流，所以步数门
+   在这里**没有独立战果** —— 审查逐条突变实测，凡能让步数门变红的改动，
+   行数门或 normalizeSource 门总会先红。三道仍旧全留着：它们在别的文件上
+   各有战果，而且这份源码哪天长出一条字符串分支，第一个拦住它的就是这里。
+   只是不必在这里给它们记一笔并不存在的战功。 */
 for (const target of [10, 24]) {
   const zh = K.source({ W: 5, start: 0, target: target, lang: 'zh' });
   const en = K.source({ W: 5, start: 0, target: target, lang: 'en' });
@@ -213,7 +233,7 @@ for (const target of [10, 24]) {
 const kpZh = K.source({ W: 5, start: 0, target: 24, lang: 'zh' });
 const kpEn = K.source({ W: 5, start: 0, target: 24, lang: 'en' });
 T.ok(kpZh !== kpEn, '两种语言的源码不是同一份');
-T.ok(/[一-鿿]/.test(kpZh), '中文那一份里有汉字');
+T.ok(/[一-鿿㐀-䶿　-〿＀-￯]/.test(kpZh), '中文那一份里有汉字');
 
 /* ⚠ 「英文那一份里一个汉字都没有」这一条要**扣掉 BLANK 指令行**才成立：
    指令行不翻译（它本来就同时带着 hint 与 hintEn），那两句中文 hint 就必然
@@ -224,7 +244,7 @@ T.ok(/[一-鿿]/.test(kpZh), '中文那一份里有汉字');
    ⚠ 剥指令行这件事**只许问 parse()，不许自己写一个**。queens.test.js 里
    原先有一个本地 `readerFacing()`，实测就已经跟 parse() 分岔了（差的正是
    两行 `// <<< BLANK`），修复轮删掉了。同一段知识只留一份实现。 */
-T.ok(!/[一-鿿]/.test(E.parse(kpEn, 'en').clean),
+T.ok(!/[一-鿿㐀-䶿　-〿＀-￯]/.test(E.parse(kpEn, 'en').clean),
      '送进编辑器的那一份英文源码（parse().clean）里一个汉字都没有');
 
 /* 下面这两行是**挑出**指令行，不是剥掉 —— parse() 没有对应 API（它只吐
@@ -246,8 +266,8 @@ const blanksParsed = E.parse(kpEn, 'en').blanks;
 T.eq(blanksParsed.length, 2, 'parse() 认出两个挖空');
 let hintEnChecked = 0;
 for (const b of blanksParsed) {
-  T.ok(!/[一-鿿]/.test(b.hint.en), b.id + ' 的 hintEn 里一个汉字都没有');
-  T.ok(/[一-鿿]/.test(b.hint.zh), b.id + ' 的 hint（中文那一支）里有汉字');
+  T.ok(!/[一-鿿㐀-䶿　-〿＀-￯]/.test(b.hint.en), b.id + ' 的 hintEn 里一个汉字都没有');
+  T.ok(/[一-鿿㐀-䶿　-〿＀-￯]/.test(b.hint.zh), b.id + ' 的 hint（中文那一支）里有汉字');
   hintEnChecked++;
 }
 T.eq(hintEnChecked, 2, '两个挖空的 hintEn 都真的查过（这条防上面那个循环空转）');

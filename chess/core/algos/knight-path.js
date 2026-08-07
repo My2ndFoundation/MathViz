@@ -255,7 +255,7 @@
       ],
       en: [
         '/* The eight knight directions. DX and DY pair up: direction k is "go DX[k] across',
-        '   and DY[k] along" — four are one-across-two-along, four are two-across-one. */',
+        '   and DY[k] along" — four one-and-two, four two-and-one, a full ring around it. */',
       ],
     },
     'const DX = [1, 2, 2, 1, -1, -2, -2, -1];',
@@ -271,7 +271,7 @@
       en: [
         '/* Two lookup tables:',
         '     dist[sq]  fewest moves from the start to this square; −1 means not yet touched.',
-        '     prev[sq]  which square we came from the first time — it rebuilds the route later.',
+        '     prev[sq]  which square we came from the first time; the route is rebuilt from it.',
         '   A square is confirmed exactly once — the one rule here; the rest is scaffolding. */',
       ],
     },
@@ -341,8 +341,8 @@
         '             更近的每一层刚才都铺过了，如果有更短的走法，早就碰上了。 */',
       ],
       en: [
-        '          /* First time here. It is exactly one move further than this layer,',
-        '             and that is its shortest: every nearer layer has been laid out. */',
+        '          /* First time here, exactly one move further than this layer — that is',
+        '             its shortest: nearer layers are done, so a shorter way would have shown. */',
       ],
     },
     '          dist[nb] = d + 1;',
@@ -419,7 +419,7 @@
     '  }',
     {
       zh: ['  log("最短 " + steps + " 步（盘上那串马就是其中一条走法）");'],
-      en: ['  log("Shortest is " + steps + " moves (the knights on the board are one such route)");'],
+      en: ['  log("Fewest moves: " + steps + " (the knights on the board are one such route)");'],
     },
     '}',
     'return steps;',
@@ -431,9 +431,17 @@
      是本仓库抓到过五次的缺陷类）。一个默默变成 8 的 W 会让界面写着 6、跑的却是
      8，正是这个工具最不能出的错。
 
-     **自身那三个参数的校验仍在最前，`lang` 由 render() 在最后校验**：既有的
-     `T.throws(…, /少了 W/)` 一类调用点因此一行都不用动 —— 一个只给了 start /
-     target 的调用撞上的仍旧是「少了 W」，不是「少了 lang」。
+     **自身那三个参数的校验仍在最前，`lang` 由 render() 在最后校验**，而这个
+     顺序**是有门守着的**：`knight-path.test.js` 的「缺参数当场抛」那一组
+     **一个 lang 都不传**，并且每条都带第三参 pattern（`/少了 W/`、
+     `/start 必须是/` …）。把 lang 的校验挪到 W 前面来，那一组当场红 ——
+     撞上的会变成「少了 lang」，pattern 对不上。
+
+     ⚠ 这一段先前写的是「既有的 `T.throws(…, /少了 W/)` 一类调用点一行都不用
+     动」，那句话**两处都是假的**：本次改动恰恰改了那三行；而且当时那三条
+     `throws` 的第三参是空的，`/少了 W/` 这个调用点在本仓根本不存在，退化成
+     「抛了就算过」。审查的突变 M10（把 lang 校验提到最前）因此 77 + 175 条
+     断言全绿。补上第三参、并把 lang 从那一组里撤掉之后，M10 才真的会红。
 
      校验只管「是不是合法的棋盘和格子」，**不管到不到得了** —— 见文件头：
      2×2 上到不了恰恰是要生成出来跑给她看的。 */
