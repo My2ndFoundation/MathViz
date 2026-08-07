@@ -98,7 +98,7 @@ function threeGates(name, refSrc, check, wrongFn, wrongDiv, equivFn) {
 /* ---------- queens ---------- */
 
 const Q = require('./algos/queens.js');
-const qSrc = Q.source({ N: 5 });
+const qSrc = Q.source({ N: 5, lang: 'zh' });
 
 /* 声明的挖空确实能被解析出来，且 id 与 level 是说好的那些 */
 const qBlanks = parseZh(qSrc).blanks;
@@ -144,7 +144,7 @@ T.ok(qPlace.result !== undefined, 'queens 占位版有返回值（虽然答案�
    `return false;`，并把这一条断言从一个 N 加宽到整条滑杆 —— 简报那两条
    在 N=5 下是绿的，加宽才是这个修正的牙齿。 */
 for (const N of [4, 5, 6, 7, 8]) {
-  const p = I.run(parseZh(Q.source({ N: N })).placeholder, { host: {} });
+  const p = I.run(parseZh(Q.source({ N: N, lang: 'zh' })).placeholder, { host: {} });
   T.ok(!p.trace.truncated, 'queens 占位版 N=' + N + ' 跑得完，不截断');
   T.ok(p.result !== undefined, 'queens 占位版 N=' + N + ' 有返回值（虽然答案不对）');
 }
@@ -670,11 +670,11 @@ T.eq(noteSeen, 5, '真语料里一共扫过 5 个挖空的占位注释行（quee
        （3×4、3×5、4×5、3×7——3×7 那块参考自己会撞 200,000 步的上限，
        但撞墙前 clean 与 src 走的步数依旧该逐一相同）。 */
 const REAL_SOURCES = [
-  ['queens N=4', Q.source({ N: 4 })],
-  ['queens N=5', Q.source({ N: 5 })],
-  ['queens N=6', Q.source({ N: 6 })],
-  ['queens N=7', Q.source({ N: 7 })],
-  ['queens N=8', Q.source({ N: 8 })],
+  ['queens N=4', Q.source({ N: 4, lang: 'zh' })],
+  ['queens N=5', Q.source({ N: 5, lang: 'zh' })],
+  ['queens N=6', Q.source({ N: 6, lang: 'zh' })],
+  ['queens N=7', Q.source({ N: 7, lang: 'zh' })],
+  ['queens N=8', Q.source({ N: 8, lang: 'zh' })],
   ['knightPath target=63(h8)', KP.source({ W: 8, start: 0, target: 63 })],
   ['knightPath target=27(d4)', KP.source({ W: 8, start: 0, target: 27 })],
   ['tourWarnsdorff 3×4', TW.source({ W: 3, H: 4, start: 0 })],

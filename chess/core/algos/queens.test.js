@@ -6,7 +6,7 @@ const Q = require('./queens.js');
 // ---- 源码必须在子集里合法 ----
 for (const N of [4, 6, 8]) {
   let err = null;
-  try { I.parse(Q.source({ N: N })); } catch (e) { err = e; }
+  try { I.parse(Q.source({ N: N, lang: 'zh' })); } catch (e) { err = e; }
   T.ok(err === null, 'N=' + N + ' 的源码在子集里合法' + (err ? '：' + err.message : ''));
 }
 
@@ -16,7 +16,7 @@ for (const N of [4, 6, 8]) {
 const KNOWN = { 4: 2, 5: 10, 6: 4, 7: 40, 8: 92 };
 let checked = 0;
 for (const N of [4, 5, 6, 7, 8]) {
-  const r = I.run(Q.source({ N: N }), { host: {} });
+  const r = I.run(Q.source({ N: N, lang: 'zh' }), { host: {} });
   T.ok(!r.trace.truncated, 'N=' + N + ' 未截断');
   T.eq(r.result, KNOWN[N], 'N=' + N + ' 的解数是 ' + KNOWN[N]);
   checked++;
@@ -24,7 +24,7 @@ for (const N of [4, 5, 6, 7, 8]) {
 T.eq(checked, 5, '五个 N 都对拍过');
 
 // ---- N=9 撞墙：这是这一题的第二课 ----
-const wall = I.run(Q.source({ N: 9 }), { host: {} });
+const wall = I.run(Q.source({ N: 9, lang: 'zh' }), { host: {} });
 T.eq(wall.trace.truncated, true, 'N=9 撞上 STEP_LIMIT —— 回溯是指数的');
 T.ok(typeof wall.result === 'undefined', '截断时没有结果（不是 0，也不是编造的数）');
 
@@ -40,7 +40,7 @@ T.ok(typeof wall.result === 'undefined', '截断时没有结果（不是 0，也
    个不同的满盘格局，且每一个都是合法的 N 皇后布局。 */
 const BOARD_N = 6;
 const ops = [];
-I.run(Q.source({ N: BOARD_N }), { host: {
+I.run(Q.source({ N: BOARD_N, lang: 'zh' }), { host: {
   mark: function (sq, kind) { ops.push(['mark', sq, kind]); },
   place: function (sq, p) { ops.push(['place', sq, p]); },
   clear: function (sq) { ops.push(['clear', sq]); },
@@ -132,5 +132,65 @@ T.throws(function () { Q.source({ N: 4.5 }); }, 'N 不是整数当场抛');
 T.throws(function () { Q.source({ N: '8' }); }, 'N 是字符串当场抛（不许悄悄当 8 用）');
 /* 但**不**拿 N_MIN / N_MAX 当校验边界：N=9 撞墙那一条要靠 source(9) 真吐源码。
    （上面的 wall 那一段已经跑过它了，这里只把这个取舍写明。） */
+
+/* ---- 双语三道门（规格 §7.5）----
+
+   守的是「可执行代码没有偷偷分岔」，**不是**「英文翻得对不对」——后者
+   机器判不了，是人工审查项。三道各有对方才拦得住的漏：
+     ① 结构门漏掉字符串参与控制流（if (label === '皇后') 两语两条分支）
+     ② 行为门漏掉等步改写（i < n → i <= n - 1，同一行、同样步数）
+     ③ 行数门被①蕴含，但单独报 —— 最容易违反、也最容易一眼看懂的那条，
+        混在①的「字节不同」里报等于没报。 */
+for (const N of [4, 6, 8]) {
+  const zh = Q.source({ N: N, lang: 'zh' });
+  const en = Q.source({ N: N, lang: 'en' });
+
+  T.eq(en.split('\n').length, zh.split('\n').length,
+       'N=' + N + '：两种语言行数相同');
+  T.eq(T.normalizeSource(en), T.normalizeSource(zh),
+       'N=' + N + '：抽掉注释与字符串之后，两种语言逐字节相同');
+  T.eq(I.run(en, { host: {} }).trace.length, I.run(zh, { host: {} }).trace.length,
+       'N=' + N + '：两种语言的解释器步数相同');
+}
+
+/* 反向：英文必须真的是英文。上面三道门在「en 原样返回中文」时全绿 ——
+   把 lang 接进来却没接上，长得跟接上了一模一样。 */
+const zh6 = Q.source({ N: 6, lang: 'zh' });
+const en6 = Q.source({ N: 6, lang: 'en' });
+T.ok(zh6 !== en6, '两种语言的源码不是同一份');
+T.ok(/[一-鿿]/.test(zh6), '中文那一份里有汉字');
+
+/* ⚠ 「英文那一份里一个汉字都没有」这一条要**扣掉 BLANK 指令行**才成立，
+   而这不是放水，是简报自己两段之间打了架：Step 4 明写「BLANK 指令行不翻译，
+   它本来就同时带着 hint 与 hintEn」，那 `hint="三条线都空着才算安全…"` 就
+   必然把汉字留在英文变体里 —— 实测正是第 39、68 两行、且只有这两行。
+   而那两行根本不是读者读的东西：`exercise.js` 的 parse() 把 >>> / <<< 两行
+   从 `clean` 里剥掉（见该文件约 85 行），提示由 hintAt 按语言各取一支。
+   所以这里断言的是**送到编辑器里的那一份**，另加一条把「两语这两行逐字节
+   相同」单独钉住 —— 后者才是简报真正想要的不变量，比原样断言更强。 */
+function readerFacing(src) {
+  return src.split('\n')
+    .filter(function (l) { return l.trim().indexOf('// >>> BLANK') !== 0; })
+    .join('\n');
+}
+T.ok(!/[一-鿿]/.test(readerFacing(en6)),
+     '英文那一份里，除 BLANK 指令行外一个汉字都没有');
+const blanksZh = zh6.split('\n').filter(function (l) { return l.trim().indexOf('// >>> BLANK') === 0; });
+const blanksEn = en6.split('\n').filter(function (l) { return l.trim().indexOf('// >>> BLANK') === 0; });
+T.eq(blanksEn.length, 2, '英文变体里有两条 BLANK 指令（safe-return 与 undo）');
+T.eq(blanksEn, blanksZh, 'BLANK 指令行在两种语言下逐字节相同 —— parse() 一点不用改');
+
+/* ---- lang 必填，且只认两个值 ----
+
+   ⚠ 第三个参数才是 pattern：`T.throws(fn, label, pattern)`（见 _test.js）。
+   简报 Step 1 把正则写在第二个位置上，那样 pattern 是 undefined，
+   「抛了就算过」—— 这三条要钉的恰恰是**抛的是哪一条**（少了 lang vs 只认
+   两个值），位置放错就等于没钉。 */
+T.throws(function () { Q.source({ N: 6 }); },
+         'lang 缺了当场抛', /少了 lang/);
+T.throws(function () { Q.source({ N: 6, lang: 'fr' }); },
+         'lang 不是 zh/en 当场抛', /只认/);
+T.throws(function () { Q.source({ N: 6, lang: '' }); },
+         'lang 是空串当场抛（空串不当默认值用）', /只认/);
 
 T.report();

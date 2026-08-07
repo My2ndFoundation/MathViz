@@ -117,6 +117,63 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  /* ================= 双语渲染（规格 §1.6 / §7.5）=================
+
+     ⚠ **这一整段在七份 algos/*.js 里逐字节相同**，check.py 的
+     bilingual_algos_check() 会核对。改这里就得七份一起改。
+     不抽成共用模块，是因为这些文件是被 inline_core.py 当**字符串**逐份
+     内联、再各自求值成 AlgoXxx 全局的 —— 抽出去就凭空多一条求值顺序
+     依赖，而那类缺陷要到浏览器里 ALGOS['queens.js'] 是 undefined 才发作
+     （阶段 5 建页当天撞过一次）。七份重复 + 一道字节级门，是阶段 7
+     king-greedy / king-exact 共用段用过的同一个套路。
+
+     `parts` 的元素只有两种：
+       字符串                 —— 一行，两种语言下逐字相同
+                                 （代码、空行、// >>> BLANK 指令行）
+       { zh: [], en: [] }     —— 一段散文，两边都是**行数组**
+
+     **两边行数必须相等**，不是洁癖：生成的源码是按行索引的 —— 解释器
+     每一步记 line，第 4 级提示靠 pristine 与编辑器逐行对齐划出 answerRange，
+     判定靠 judge.herSrc 比对。行数一差，切一次语言这四样同时指错地方。
+     行数一对齐，轨迹在两种语言下逐字节相同，切语言就只是换掉编辑器里的
+     文本，不重跑解释器。
+
+     BLANK 指令行**不翻译**：它本来就同时带着 hint 与 hintEn，两种语言
+     变体里那一行逐字相同，parse() 一点不用改。所以它是**字符串**片段。 */
+  function render(parts, lang) {
+    if (lang === undefined || lang === null) {
+      throw new Error(
+        'source({ lang }) 少了 lang —— 源码的注释与日志要用哪种语言没有' +
+        '默认值，必须写明 "zh" 或 "en"（默认成任何一种，都是让同一个缺陷' +
+        '换个地方复活）'
+      );
+    }
+    if (lang !== 'zh' && lang !== 'en') {
+      throw new Error('source({ lang }) 的 lang 只认 "zh" 或 "en"，收到：' +
+                      JSON.stringify(lang));
+    }
+    const out = [];
+    for (let i = 0; i < parts.length; i = i + 1) {
+      const p = parts[i];
+      if (typeof p === 'string') { out.push(p); continue; }
+      if (!p || !Array.isArray(p.zh) || !Array.isArray(p.en)) {
+        throw new Error('第 ' + i + ' 个片段既不是字符串、也不是 ' +
+                        '{ zh: [], en: [] }');
+      }
+      if (p.zh.length !== p.en.length) {
+        throw new Error(
+          '第 ' + i + ' 个片段两种语言行数不等：zh ' + p.zh.length + ' 行 / en ' +
+          p.en.length + ' 行 —— 生成的源码按行索引，行数一差，切一次语言 ' +
+          'Step.line / pristine / answerRange / judge.herSrc 同时指错地方' +
+          '（规格 §1.6）'
+        );
+      }
+      const lines = p[lang];
+      for (let j = 0; j < lines.length; j = j + 1) out.push(lines[j]);
+    }
+    return out;
+  }
+
   /* 滑杆的上下限（规格 §4⑤ / 计划 Task 4 的 params）。
      N_MIN = 4 是因为 N=2、N=3 无解 —— 一个永远数出 0 的演示教不了任何东西。
      N_MAX = 8 是因为 N=9 跑不完（见文件头的实测）。
@@ -125,94 +182,197 @@
   const N_MAX = 8;
 
   /* 这里用普通字符串拼，不用模板字面量：这段文本本身会被原样贴进 html，
-     而反引号在那个上下文里比在这里更容易出事（照抄 minimax.js 的理由）。 */
+     而反引号在那个上下文里比在这里更容易出事（照抄 minimax.js 的理由）。
+
+     元素两种：字符串（代码 / 空行 / BLANK 指令行，两语逐字相同）与
+     `{ zh: [], en: [] }`（一段散文，两边行数必须相等）—— 见上面 render()。
+     英文不是逐句直译，是照中文那一版的意思与语气重写的，行数对齐落在
+     「段」上：段内句子怎么重组都行，段的行数必须一样。 */
   const HEAD = [
-    '/* ============ N 皇后 ============',
-    '   在 N×N 的棋盘上摆 N 个后，让它们谁也吃不到谁。',
-    '   后能沿横线、竖线、两条斜线走任意远，所以「谁也吃不到谁」就是：',
-    '   任意两个后不同行、不同列、也不在同一条斜线上。',
+    {
+      zh: [
+        '/* ============ N 皇后 ============',
+        '   在 N×N 的棋盘上摆 N 个后，让它们谁也吃不到谁。',
+        '   后能沿横线、竖线、两条斜线走任意远，所以「谁也吃不到谁」就是：',
+        '   任意两个后不同行、不同列、也不在同一条斜线上。',
+        '',
+        '   格子编号：sq = 行 * N + 列，下面写成 sq = r * N + c。',
+        '   第 0 行是棋盘最下面那一行，第 0 列是最左边那一列 —— 于是 0 号格',
+        '   就是国际象棋里的 a1，右边棋盘上每一格都能这样对上号。',
+        '   要反推回去：列 = sq % N，行 = (sq - 列) / N。',
+        '',
+        '   整个解法只靠一个约定：每一行只放一个后。',
+        '   这样「同行」根本不可能发生，要查的就只剩列和两条斜线了。 */',
+      ],
+      en: [
+        '/* ============ N Queens ============',
+        '   Place N queens on an N×N board so that none of them can capture another.',
+        '   A queen slides any distance along a row, a column or either diagonal, so',
+        '   "nobody can capture anybody" means no two share a row, column or diagonal.',
+        '',
+        '   Squares are numbered sq = row * N + column, written below as r * N + c.',
+        '   Row 0 is the bottom row and column 0 is the leftmost column, so square 0',
+        '   is a1 in chess — every square on the board to the right maps the same way.',
+        '   To go the other way: column = sq % N, row = (sq - column) / N.',
+        '',
+        '   The whole solution rests on one rule: only one queen per row.',
+        '   That makes "same row" impossible, leaving columns and diagonals to check. */',
+      ],
+    },
     '',
-    '   格子编号：sq = 行 * N + 列，下面写成 sq = r * N + c。',
-    '   第 0 行是棋盘最下面那一行，第 0 列是最左边那一列 —— 于是 0 号格',
-    '   就是国际象棋里的 a1，右边棋盘上每一格都能这样对上号。',
-    '   要反推回去：列 = sq % N，行 = (sq - 列) / N。',
-    '',
-    '   整个解法只靠一个约定：每一行只放一个后。',
-    '   这样「同行」根本不可能发生，要查的就只剩列和两条斜线了。 */',
-    '',
-    '/* 棋盘边长。8 皇后就是 N = 8 —— 这是这道题唯一的旋钮。',
-    '   往上加一，工作量大约要乘以 4.5：N=8 十五万步跑得完，N=9 七十万步',
-    '   会直接撞上执行上限。回溯就是这样，不是「慢一点」，是「做不到」。 */',
+    {
+      zh: [
+        '/* 棋盘边长。8 皇后就是 N = 8 —— 这是这道题唯一的旋钮。',
+        '   往上加一，工作量大约要乘以 4.5：N=8 十五万步跑得完，N=9 七十万步',
+        '   会直接撞上执行上限。回溯就是这样，不是「慢一点」，是「做不到」。 */',
+      ],
+      en: [
+        '/* The side of the board. Eight queens means N = 8 — the only dial here.',
+        '   Add one and the work multiplies by about 4.5: N=8 finishes in 150,000 steps,',
+        '   N=9 needs 700,000 and hits the limit. Backtracking is not slow, it is a wall. */',
+      ],
+    },
   ];
 
   const BODY = [
     '',
-    '/* 三张备忘表，记「这条线上已经有后了」。1 = 占了，0 = 还空着。',
-    '     cols[c]              第 c 列',
-    '     diagDown[r + c]      「左上—右下」这族斜线：同一条上，行 + 列 是同一个数',
-    '     diagUp[r - c + N]    「左下—右上」这族斜线：同一条上，行 - 列 是同一个数',
-    '                          （行 - 列 会是负数，而下标不能是负的，所以整体加 N）',
-    '   不用表也行：每摆一个后，就跟已经摆好的后逐个比一遍。但那样每次要比',
-    '   最多 N 次，查表只要三次下标运算 —— 「剪枝要便宜」说的就是这个。',
-    '   列只有 N 条、斜线有 2N-1 条，三张表干脆都开到 2N 格，省得记三个长度。 */',
+    {
+      zh: [
+        '/* 三张备忘表，记「这条线上已经有后了」。1 = 占了，0 = 还空着。',
+        '     cols[c]              第 c 列',
+        '     diagDown[r + c]      「左上—右下」这族斜线：同一条上，行 + 列 是同一个数',
+        '     diagUp[r - c + N]    「左下—右上」这族斜线：同一条上，行 - 列 是同一个数',
+        '                          （行 - 列 会是负数，而下标不能是负的，所以整体加 N）',
+        '   不用表也行：每摆一个后，就跟已经摆好的后逐个比一遍。但那样每次要比',
+        '   最多 N 次，查表只要三次下标运算 —— 「剪枝要便宜」说的就是这个。',
+        '   列只有 N 条、斜线有 2N-1 条，三张表干脆都开到 2N 格，省得记三个长度。 */',
+      ],
+      en: [
+        '/* Three lookup tables recording "this line already has a queen". 1 = taken, 0 = free.',
+        '     cols[c]              column c',
+        '     diagDown[r + c]      diagonals running down-right: row + column is constant',
+        '     diagUp[r - c + N]    diagonals running up-right: row - column is constant',
+        '                          (row - column can go negative and indices cannot, so add N)',
+        '   You could do without them: compare each new queen with every queen already',
+        '   placed. But that is up to N checks against three lookups: pruning must be cheap.',
+        '   N columns and 2N-1 diagonals, so all three tables get 2N slots — one length. */',
+      ],
+    },
     'const cols = [];',
     'const diagDown = [];',
     'const diagUp = [];',
     'for (let i = 0; i < N + N; i = i + 1) { cols.push(0); diagDown.push(0); diagUp.push(0); }',
     '',
-    '// 到现在为止数出来的完整解个数 —— 这就是最后要回答的那个数。',
+    {
+      zh: ['// 到现在为止数出来的完整解个数 —— 这就是最后要回答的那个数。'],
+      en: ['// How many complete solutions we have counted so far — the final answer.'],
+    },
     'let solutions = 0;',
     '',
-    '/* 第 r 行第 c 列这一格，安全吗？三条线上都没有后才算安全。',
-    '   这一行就是整道题的全部规则，别的都是围着它转的脚手架。',
-    '   想确认它真的在起作用：把 diagUp 那一段删掉再跑，解数立刻就不对了。 */',
+    {
+      zh: [
+        '/* 第 r 行第 c 列这一格，安全吗？三条线上都没有后才算安全。',
+        '   这一行就是整道题的全部规则，别的都是围着它转的脚手架。',
+        '   想确认它真的在起作用：把 diagUp 那一段删掉再跑，解数立刻就不对了。 */',
+      ],
+      en: [
+        '/* Is the square in row r, column c safe? Only if all three lines are clear.',
+        '   This one line is the entire rule of the puzzle; everything else is scaffolding.',
+        '   To see it working, delete the diagUp test and rerun: the count goes wrong. */',
+      ],
+    },
     'function safe(r, c) {',
     '  // >>> BLANK id=safe-return level=1 fill="return false;" hint="三条线都空着才算安全：cols[c] 是这一列，diagDown[r + c] 和 diagUp[r - c + N] 是那两条斜线。表里是 1 就说明那条线上已经有后了 —— 三张表一张都不能少查。" hintEn="A square is safe only when all three lines are clear: cols[c] for the column, diagDown[r + c] and diagUp[r - c + N] for the two diagonals. A 1 in any of the three tables means that line already has a queen on it."',
     '  return !cols[c] && !diagDown[r + c] && !diagUp[r - c + N];',
     '  // <<< BLANK',
     '}',
     '',
-    '/* 把第 r 行到最上面一行全部摆好。',
-    '   r 一路往上走，走到 N 就说明每一行都摆上了一个后 —— 那就是一个完整解，',
-    '   数它一个，这一支到此为止。 */',
+    {
+      zh: [
+        '/* 把第 r 行到最上面一行全部摆好。',
+        '   r 一路往上走，走到 N 就说明每一行都摆上了一个后 —— 那就是一个完整解，',
+        '   数它一个，这一支到此为止。 */',
+      ],
+      en: [
+        '/* Fill in every row from row r up to the top of the board.',
+        '   r climbs upward, and reaching N means every row has a queen on it — that is',
+        '   a complete solution: count it, and this branch ends here. */',
+      ],
+    },
     'function solve(r) {',
     '  if (r === N) {',
-    '    /* 走到这里：N 行都摆满了，而且一路上每一步都通过了 safe ——',
-    '       此刻棋盘上就是一个完整解，N 个后谁也吃不到谁。',
-    '       这是这道题唯一值得停下来看一眼的时刻，所以喊一声。 */',
+    {
+      zh: [
+        '    /* 走到这里：N 行都摆满了，而且一路上每一步都通过了 safe ——',
+        '       此刻棋盘上就是一个完整解，N 个后谁也吃不到谁。',
+        '       这是这道题唯一值得停下来看一眼的时刻，所以喊一声。 */',
+      ],
+      en: [
+        '    /* We got here: all N rows are filled and every step along the way passed',
+        '       safe. What is on the board right now is a complete solution — N queens,',
+        '       none able to capture another. The one moment in this puzzle worth a shout. */',
+      ],
+    },
     '    solutions = solutions + 1;',
-    '    log("第 " + solutions + " 个解：" + N + " 个后都站稳了");',
+    {
+      zh: ['    log("第 " + solutions + " 个解：" + N + " 个后都站稳了");'],
+      en: ['    log("Solution " + solutions + ": all " + N + " queens are safe");'],
+    },
     '    return;',
     '  }',
     '  for (let c = 0; c < N; c = c + 1) {',
     '    const sq = r * N + c;',
-    '    mark(sq, "try");      // 正在尝试：先点亮这一格，再问它安不安全',
+    {
+      zh: ['    mark(sq, "try");      // 正在尝试：先点亮这一格，再问它安不安全'],
+      en: ['    mark(sq, "try");      // trying: light the square up first, then ask if it is safe'],
+    },
     '    if (safe(r, c)) {',
-    '      // 已确认：三条线一起登记成「占了」，再把真正的后摆上去。',
+    {
+      zh: ['      // 已确认：三条线一起登记成「占了」，再把真正的后摆上去。'],
+      en: ['      // Confirmed: register all three lines as taken, then place the real queen.'],
+    },
     '      cols[c] = 1; diagDown[r + c] = 1; diagUp[r - c + N] = 1;',
     '      mark(sq, "ok");',
     '      place(sq, "wQ");',
-    '      solve(r + 1);       // 接着摆上面那一行 —— 递归就发生在这一行',
-    '      /* 回溯撤销：不管上面那一行找没找到解，都要把这一格原样还回去。',
-    '         不还的话，接下来试第 c+1 列时会看到一个早就不该存在的后，',
-    '         再往后数出来的每一个「解」都是假的。 */',
+    {
+      zh: ['      solve(r + 1);       // 接着摆上面那一行 —— 递归就发生在这一行'],
+      en: ['      solve(r + 1);       // now fill the row above — this line is the recursion'],
+    },
+    {
+      zh: [
+        '      /* 回溯撤销：不管上面那一行找没找到解，都要把这一格原样还回去。',
+        '         不还的话，接下来试第 c+1 列时会看到一个早就不该存在的后，',
+        '         再往后数出来的每一个「解」都是假的。 */',
+      ],
+      en: [
+        '      /* Backtracking undo: no matter what the row above found, this square',
+        '         has to go back exactly as it was. Otherwise the next column, c+1,',
+        '         sees a queen that should be long gone, and every "solution" after is fake. */',
+      ],
+    },
     '      // >>> BLANK id=undo level=2 fill="cols[c] = 0;" hint="摆上去的时候三张表一起登记成了 1，撤销就要把这三张表一起还回 0。少还一张，那条线在这一支之后就一直被占着 —— 后面每一步读到的都是一张早就不该是这样的表。" hintEn="Placing the queen set all three tables to 1, so undoing has to clear all three back to 0. Miss one and that line stays blocked for the rest of the search, and every later step reads a table that should have been cleared long ago."',
     '      cols[c] = 0; diagDown[r + c] = 0; diagUp[r - c + N] = 0;',
     '      // <<< BLANK',
     '      mark(sq, "back");',
     '      clear(sq);',
     '    } else {',
-    '      mark(sq, "cut");    // 被剪枝：这一格已经被某个已放好的后攻击了',
+    {
+      zh: ['      mark(sq, "cut");    // 被剪枝：这一格已经被某个已放好的后攻击了'],
+      en: ['      mark(sq, "cut");    // pruned: a queen already on the board attacks this square'],
+    },
     '    }',
     '  }',
     '}',
     '',
-    '// 从最下面一行开始摆。跑完之后 solutions 里就是答案。',
+    {
+      zh: ['// 从最下面一行开始摆。跑完之后 solutions 里就是答案。'],
+      en: ['// Start from the bottom row. When it finishes, solutions holds the answer.'],
+    },
     'solve(0);',
     'return solutions;',
   ];
 
-  /* source({ N }) → string
+  /* source({ N, lang }) → string
 
      N 不给默认值，缺了直接抛（阶段 5 约束 6：公开导出的省略参数已经是
      本仓库抓到过三次的缺陷类）。一个默默变成 8 的 N 会让界面写着 6、
@@ -229,7 +389,10 @@
     if (typeof N !== 'number' || !isFinite(N) || Math.floor(N) !== N || N < 1) {
       throw new Error('N 必须是 >= 1 的整数，收到：' + N);
     }
-    return HEAD.concat(['const N = ' + N + ';']).concat(BODY).join('\n');
+    return render(HEAD, o.lang)
+      .concat(['const N = ' + N + ';'])
+      .concat(render(BODY, o.lang))
+      .join('\n');
   }
 
   return { source: source, N_MIN: N_MIN, N_MAX: N_MAX };
