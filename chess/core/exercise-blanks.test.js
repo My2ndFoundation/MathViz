@@ -219,7 +219,7 @@ const KP = require('./algos/knight-path.js');
 /* 用的是工具页 knightPath 那一档的默认值（`KP_W = 8` / `KP_START = 0` /
    目标格滑杆的初值 `W*W-1`）。它同时是 knight-path.js 文件头实测表里最贵的
    一档：5,086 步、距离 6、整块盘都铺遍。插指令行前后逐格相同。 */
-const kpSrc = KP.source({ W: 8, start: 0, target: 63 });
+const kpSrc = KP.source({ W: 8, start: 0, target: 63, lang: 'zh' });
 
 const kpBlanks = parseZh(kpSrc).blanks;
 T.eq(kpBlanks.length, 2, 'knightPath 声明了两个挖空');
@@ -254,7 +254,7 @@ const kpPlaceBad = [];
 let kpPlaceOffBoard = 0;
 let kpPlaceRight = 0;
 for (let target = 1; target <= 63; target++) {
-  const src = KP.source({ W: 8, start: 0, target: target });
+  const src = KP.source({ W: 8, start: 0, target: target, lang: 'zh' });
   const p = I.run(parseZh(src).placeholder, { host: {} });
   if (p.trace.truncated || p.result === undefined) kpPlaceBad.push(target);
   if (p.result === I.run(src, { host: {} }).result) kpPlaceRight++;
@@ -304,7 +304,7 @@ const kpOnlyBad = { 'on-board': [], 'seen-test': [] };
 const kpOnlyRight = { 'on-board': 0, 'seen-test': 0 };
 let kpOnlyOffBoard = 0;
 for (let target = 1; target <= 63; target++) {
-  const src = KP.source({ W: 8, start: 0, target: target });
+  const src = KP.source({ W: 8, start: 0, target: target, lang: 'zh' });
   const refResult = I.run(src, { host: {} }).result;
   for (let k = 0; k < KP_IDS.length; k++) {
     const b = kpBlankOf[KP_IDS[k]];
@@ -675,8 +675,8 @@ const REAL_SOURCES = [
   ['queens N=6', Q.source({ N: 6, lang: 'zh' })],
   ['queens N=7', Q.source({ N: 7, lang: 'zh' })],
   ['queens N=8', Q.source({ N: 8, lang: 'zh' })],
-  ['knightPath target=63(h8)', KP.source({ W: 8, start: 0, target: 63 })],
-  ['knightPath target=27(d4)', KP.source({ W: 8, start: 0, target: 27 })],
+  ['knightPath target=63(h8)', KP.source({ W: 8, start: 0, target: 63, lang: 'zh' })],
+  ['knightPath target=27(d4)', KP.source({ W: 8, start: 0, target: 27, lang: 'zh' })],
   ['tourWarnsdorff 3×4', TW.source({ W: 3, H: 4, start: 0 })],
   ['tourWarnsdorff 3×5', TW.source({ W: 3, H: 5, start: 0 })],
   ['tourWarnsdorff 4×5', TW.source({ W: 4, H: 5, start: 0 })],

@@ -388,7 +388,7 @@ def fallback_check() -> int:
 # 机制已经够用，不必在 check.py 里再加一道自动化的"白名单只许收缩"检查。
 MONOLINGUAL_ALGOS = {
     'minimax.js',
-    'knight-path.js', 'tour-dfs.js', 'tour-warnsdorff.js',
+    'tour-dfs.js', 'tour-warnsdorff.js',
     'rook-cover.js', 'king-greedy.js', 'king-exact.js',
 }
 
