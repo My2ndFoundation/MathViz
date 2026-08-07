@@ -59,4 +59,11 @@ T.ok(tmpl !== null, '代码里的模板字面量让 normalizeSource 抛');
 T.ok(tmpl !== null && /模板字面量/.test(tmpl.message),
      '错误消息说清楚了为什么这份源码判不了');
 
+/* ---- 审计模式（阶段 9a）----
+   THROWS_AUDIT 没设时必须**一个字节的行为都不变** —— 这是给全仓 149 条
+   T.throws 加的旁路，它自己不能改变任何既有断言的判定。 */
+T.ok(typeof T.auditEntry === 'function', '审计模式暴露了 auditEntry 供自测');
+// 没开审计时不记账
+T.eq(T.auditEntry(), null, '未设 THROWS_AUDIT 时 auditEntry() 返回 null');
+
 T.report();

@@ -664,11 +664,115 @@ def core_tests() -> int:
     return rc
 
 
+def throws_discrimination_check() -> int:
+    """T.throws 的判别力普查（规格 §7.6，阶段 9a）。
+
+    `_test.js` 的 throws(fn, label, pattern) 第三参可选，**不传就退化成
+    「抛了就算过」**。
+
+    ⚠ **ALLOW_MISSING 是 86，不是简报写的 84**——这是 Task 1 实测出来的
+    真发现，不是誊错。简报的 149/84 是用 `grep -c 'T\\.throws('` 数的静态
+    census；跑起来的运行期审计给出的真数是**总 170 条、缺第三参 86 条**。
+    差额全部来自 grep 数不出的执行期真相，跟简报自己举的 rook-cover 例子
+    （grep 15、运行期 14）是同一类问题，只是这次量更大：
+      · king.test.js 的缺参数/越界那组 `T.throws` 写在
+        `for (const [name, M] of [['king-greedy', G], ['king-exact', X]])`
+        循环体内，每条源码行两个算法变体各跑一次——grep=14、运行期=28。
+      · tour.test.js（grep=10/运行期=18）、interp.test.js（grep=15/运行期=22）
+        是同一种循环放大。
+      · exercise.test.js 反过来 grep=46/运行期=43——3 行处在从未执行到的
+        分支里，静态数的时候数进去了，运行期审计天然数不到（这也正是简报
+        自己夸的「运行期审计顺带抓出一条从没被执行到的 T.throws」这个
+        优点的反面：它在总数上会让 grep 偏高）。
+    本仓无构建/lint/测试工具链，Task 1 没有再造一个独立于此門的校验去二次
+    确认这两个数字——`throws_discrimination_check()` 自己就是那个校验，
+    它的输出**就是**权威计数，86 这个数直接来自这里的运行期审计，不是
+    另算的。按顶层任务说明「计划是记录，不是权威」，这里没有把简报的 84
+    悄悄改成一个能让门变绿的数——86 就是今天真实存在、且未来 Task 2–4
+    要真正补齐到 0 的那个数，用它做起步值，才是「先立门」这件事本身要
+    立的那扇门。
+
+    但**补上 pattern 也可以是恒真的**：阶段 7 栽过一次 —— 三条错误消息
+    共享前缀 `source({ W, H, blocked }) 少了 …`，于是 /W/、/H/、/blocked/
+    三个 pattern 匹到了每一条，把那三道守卫全删掉仍然四条全绿。
+
+    所以这道门守的是**判别力**：拿每条 pattern 去横扫同文件里**全部**
+    T.throws 实际抛出的消息，**匹中全部 = 等于没有**。
+
+    ⚠ 这道门**不要求每条都有 pattern** —— 那是 9a 的补齐任务的事，
+    补齐过程中这道门要能跑。它只报两类：
+      · 无判别力的 pattern（匹中同文件全部消息，且该文件不止一条）
+      · 缺第三参的条数（**只统计、不失败**，收敛到 0 之后再收紧）
+
+    收紧的时机写在这里：9a 的补齐任务做完后，把 ALLOW_MISSING 改成 0，
+    这道门从此拒绝任何新增的无 pattern T.throws。
+
+    ⚠ 这里对每个测试文件单独 `subprocess.run(['node', str(test)], env=...)`
+    ——传的是**文件路径**而不是脚本字符串，不经过 run_node()，也就不受它
+    那个「脚本一律走 stdin」的规矩约束：MAX_ARG_STRLEN 限的是单个 argv
+    元素的字节数，这里的 argv 元素是一个短文件路径，从不会顶到那个上限。
+    真正需要新增的能力是**给 node 传环境变量**（THROWS_AUDIT），而
+    run_node() 目前没有 env 参数——与其给它加一个只有这一处用得到的
+    形参，不如在这单独一处直接调 subprocess.run，语义更直接。
+    """
+    import os
+    ALLOW_MISSING = 86          # ⚠ 补齐任务做完后改成 0（简报写的 84 是误差，见上）
+    tests = sorted(list((ROOT / 'core').rglob('*.test.js')))
+    if not tests:
+        print('ERROR: core/ 下一个 *.test.js 都没找到 —— 这道门本该普查，'
+              '不是跑了个寂寞', file=sys.stderr)
+        return 1
+    rc = 0
+    total = missing = blunt = 0
+    for test in tests:
+        out = ROOT / '.throws-audit.json'
+        env = dict(os.environ, THROWS_AUDIT=str(out))
+        proc = subprocess.run(['node', str(test)], capture_output=True,
+                              text=True, env=env)
+        if not out.exists():
+            print(f'ERROR: {test.name} 没写出审计文件 —— _test.js 的审计模式'
+                  f'没生效，或者这个文件根本没调 T.report()', file=sys.stderr)
+            rc = 1
+            continue
+        entries = json.loads(out.read_text(encoding='utf-8'))
+        out.unlink()
+        total += len(entries)
+        missing += sum(1 for e in entries if e['pattern'] is None)
+        if len(entries) < 2:
+            continue
+        msgs = [e['msg'] for e in entries]
+        for e in entries:
+            if e['pattern'] is None:
+                continue
+            body = re.sub(r'^/|/[a-z]*$', '', e['pattern'])
+            try:
+                pat = re.compile(body)
+            except re.error as err:
+                print(f'ERROR: {test.name} 的 pattern {e["pattern"]} '
+                      f'Python 侧编译失败：{err}', file=sys.stderr)
+                rc = 1
+                continue
+            if all(pat.search(m) for m in msgs):
+                blunt += 1
+                print(f'ERROR: {test.name} 的这条 pattern 匹中了同文件全部 '
+                      f'{len(msgs)} 条消息，等于没有判别力：\n'
+                      f'    {e["pattern"]}  ←  {e["label"][:60]}',
+                      file=sys.stderr)
+                rc = 1
+    if missing > ALLOW_MISSING:
+        print(f'ERROR: 缺第三参的 T.throws 有 {missing} 条，超过当前允许的 '
+              f'{ALLOW_MISSING} 条 —— 只许减不许加', file=sys.stderr)
+        rc = 1
+    print(f'T.throws 判别力普查：{total} 条，缺第三参 {missing} 条'
+          f'（允许 {ALLOW_MISSING}），无判别力 {blunt} 条')
+    return rc
+
+
 if __name__ == '__main__':
-    # 八道门都要跑到底、都要报——不能用 `or` 短路。之前 `a() or b() or c()`
+    # 九道门都要跑到底、都要报——不能用 `or` 短路。之前 `a() or b() or c()`
     # 一旦 a() 非零就直接跳过 b()/c()，意味着一份过期的内联副本（或任何语法
     # 错误）会让 406 条断言的 core_tests() 门根本不执行，问题只报出第一个，
-    # 最有分量的那道门被悄悄跳过了。这里八个都无条件跑，各自打印自己的
+    # 最有分量的那道门被悄悄跳过了。这里九个都无条件跑，各自打印自己的
     # ERROR，最后按「任一失败则整体失败」汇总退出码。
     # js_string_literal_html_safety_check 与 algos_roundtrip_check 是阶段 4
     # 新加的两道门：前者查转义结果对 HTML 分词器是否安全（`<!--` + 裸
@@ -682,6 +786,11 @@ if __name__ == '__main__':
     # 事：core/algos/ 下有没有文件忘了装双语机制（普查，按 MONOLINGUAL_ALGOS
     # 白名单工作），以及 render(parts, lang) 助手在七份里是否逐字节相同
     # （它在每份里各存一份，没有门就必然漂移）。
+    # throws_discrimination_check 是阶段 9a 新加的第九道，守 T.throws 断言
+    # 本身的**判别力**：pattern 缺第三参会退化成「抛了就算过」（只统计、
+    # 不失败，收敛到 0 之前给补齐任务留活口），补上的 pattern 若匹中同文件
+    # 全部消息则等于没有判别力（当场失败）——阶段 7 三条同前缀错误消息
+    # 撞上恒真 pattern、四条守卫全删仍全绿，就是这道门要防的事故。
     rc_inline = inline_core.main(check_only=True)
     rc_node = node_check()
     rc_html_safety = js_string_literal_html_safety_check()
@@ -690,5 +799,7 @@ if __name__ == '__main__':
     rc_fallback = fallback_check()
     rc_core = core_tests()
     rc_bilingual = bilingual_algos_check()
+    rc_throws = throws_discrimination_check()
     sys.exit(1 if (rc_inline or rc_node or rc_html_safety or rc_marker or
-                    rc_algos or rc_fallback or rc_core or rc_bilingual) else 0)
+                    rc_algos or rc_fallback or rc_core or rc_bilingual or
+                    rc_throws) else 0)

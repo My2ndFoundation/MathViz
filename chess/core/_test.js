@@ -13,10 +13,31 @@ function ok(cond, label) {
   failures.push(label + '\n    expected truthy, got: ' + cond);
 }
 
+/* 运行期审计（阶段 9a，规格 §7.6）。THROWS_AUDIT 指向一个路径时，把每一条
+   真的抛出来的 T.throws 记下来：它的 label、它的 pattern（没传就是 null）、
+   以及**实际抛出的消息**。report() 收尾时写进那个文件。
+
+   为什么是运行期而不是静态解析：实测 rook-cover.test.js 的
+   `grep -c 'T\.throws('` 是 15、运行期捕获是 14 —— 注释里也会出现
+   `T.throws(`。grep 才是不可靠的那个。运行期审计顺带还能抓出「一条从没被
+   执行到的 T.throws」，那种断言今天完全隐形。
+
+   ⚠ **没设 THROWS_AUDIT 时行为必须一个字节不变** —— 这是给全仓 149 条
+   断言加的旁路，它自己不能改变任何既有判定。 */
+const AUDIT = (typeof process !== 'undefined' && process.env && process.env.THROWS_AUDIT)
+  ? [] : null;
+
+function auditEntry() { return AUDIT; }
+
 function throws(fn, label, pattern) {
   try {
     fn();
   } catch (e) {
+    if (AUDIT) {
+      AUDIT.push({ label: String(label),
+                   pattern: pattern === undefined ? null : String(pattern),
+                   msg: String(e && e.message) });
+    }
     if (pattern === undefined) { passed++; return; }
     const msg = String(e && e.message);
     const matched = (pattern instanceof RegExp) ? pattern.test(msg) : msg.indexOf(pattern) >= 0;
@@ -105,9 +126,12 @@ function failedCount() {
 }
 
 function report() {
+  if (AUDIT) {
+    require('fs').writeFileSync(process.env.THROWS_AUDIT, JSON.stringify(AUDIT));
+  }
   for (const f of failures) console.error('FAIL  ' + f);
   console.log('\n' + passed + ' passed, ' + failures.length + ' failed');
   process.exit(failures.length ? 1 : 0);
 }
 
-module.exports = { eq, ok, throws, failedCount, normalizeSource, report };
+module.exports = { eq, ok, throws, failedCount, normalizeSource, auditEntry, report };
