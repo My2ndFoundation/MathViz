@@ -1,6 +1,7 @@
 'use strict';
 const T = require('../_test.js');
 const I = require('../interp.js');
+const E = require('../exercise.js');
 const Q = require('./queens.js');
 
 // ---- 源码必须在子集里合法 ----
@@ -166,19 +167,41 @@ T.ok(/[一-鿿]/.test(zh6), '中文那一份里有汉字');
    必然把汉字留在英文变体里 —— 实测正是第 39、68 两行、且只有这两行。
    而那两行根本不是读者读的东西：`exercise.js` 的 parse() 把 >>> / <<< 两行
    从 `clean` 里剥掉（见该文件约 85 行），提示由 hintAt 按语言各取一支。
-   所以这里断言的是**送到编辑器里的那一份**，另加一条把「两语这两行逐字节
-   相同」单独钉住 —— 后者才是简报真正想要的不变量，比原样断言更强。 */
-function readerFacing(src) {
-  return src.split('\n')
-    .filter(function (l) { return l.trim().indexOf('// >>> BLANK') !== 0; })
-    .join('\n');
-}
-T.ok(!/[一-鿿]/.test(readerFacing(en6)),
-     '英文那一份里，除 BLANK 指令行外一个汉字都没有');
+   所以这里断言的是**送到编辑器里的那一份**。
+
+   ⚠ 剥指令行这件事**只许问 parse()，不许自己写一个**。这里原先有一个本地
+   `readerFacing()`，实测就已经跟 parse() 分岔了：它出 79 行、`parse().clean`
+   出 77 行 —— 差的正是两行 `// <<< BLANK`。今天没后果（`<<<` 行里恰好没汉字），
+   但那是运气。而且本地版只抄了 parse() 谓词的一半：开指令行在 exercise.js:343
+   是**前缀匹配**、闭指令行在 :355 是**全等匹配**。BLANK 语法哪天长出第二种
+   形态，parse() 会跟着改、本地那份不会，于是汉字漏进英文变体而这道门保持绿色。 */
+T.ok(!/[一-鿿]/.test(E.parse(en6, 'en').clean),
+     '送进编辑器的那一份英文源码（parse().clean）里一个汉字都没有');
+
+/* 下面这两行是**挑出**指令行，不是剥掉 —— parse() 没有对应 API（它只吐
+   blanks / clean / placeholder，不吐原始指令行），所以本地选择器保留。
+   别照着这两行再写一个「剥」的：剥要用 parse().clean，理由见上一段。 */
 const blanksZh = zh6.split('\n').filter(function (l) { return l.trim().indexOf('// >>> BLANK') === 0; });
 const blanksEn = en6.split('\n').filter(function (l) { return l.trim().indexOf('// >>> BLANK') === 0; });
 T.eq(blanksEn.length, 2, '英文变体里有两条 BLANK 指令（safe-return 与 undo）');
 T.eq(blanksEn, blanksZh, 'BLANK 指令行在两种语言下逐字节相同 —— parse() 一点不用改');
+
+/* ---- hintEn 真的是英文（这道门此前不存在）----
+
+   两条 BLANK 的 hintEn 是她在提示面板第 1 级读到的原文，而这个工具**默认
+   英文界面**。上面所有门对 hintEn 的内容一句话都没说：把 hintEn 整段换成
+   中文，改动前的测试全绿放行 —— 指令行在两语间逐字节相同（那条还是绿的），
+   normalizeSource 把整行当注释抽掉，parse().clean 又把整行剥掉。
+   拿 parse().blanks 的结构去断言，不自己解析指令行（同上一段的理由）。 */
+const blanksParsed = E.parse(en6, 'en').blanks;
+T.eq(blanksParsed.length, 2, 'parse() 认出两个挖空');
+let hintEnChecked = 0;
+for (const b of blanksParsed) {
+  T.ok(!/[一-鿿]/.test(b.hint.en), b.id + ' 的 hintEn 里一个汉字都没有');
+  T.ok(/[一-鿿]/.test(b.hint.zh), b.id + ' 的 hint（中文那一支）里有汉字');
+  hintEnChecked++;
+}
+T.eq(hintEnChecked, 2, '两个挖空的 hintEn 都真的查过（这条防上面那个循环空转）');
 
 /* ---- lang 必填，且只认两个值 ----
 

@@ -206,16 +206,16 @@
       ],
       en: [
         '/* ============ N Queens ============',
-        '   Place N queens on an N×N board so that none of them can capture another.',
+        '   Place N queens on an N×N board so that none can capture another.',
         '   A queen slides any distance along a row, a column or either diagonal, so',
-        '   "nobody can capture anybody" means no two share a row, column or diagonal.',
+        '   "none can capture another" means no two share a row, column or diagonal.',
         '',
         '   Squares are numbered sq = row * N + column, written below as r * N + c.',
         '   Row 0 is the bottom row and column 0 is the leftmost column, so square 0',
         '   is a1 in chess — every square on the board to the right maps the same way.',
         '   To go the other way: column = sq % N, row = (sq - column) / N.',
         '',
-        '   The whole solution rests on one rule: only one queen per row.',
+        '   The whole solution rests on one convention: only one queen per row.',
         '   That makes "same row" impossible, leaving columns and diagonals to check. */',
       ],
     },
@@ -228,8 +228,8 @@
       ],
       en: [
         '/* The side of the board. Eight queens means N = 8 — the only dial here.',
-        '   Add one and the work multiplies by about 4.5: N=8 finishes in 150,000 steps,',
-        '   N=9 needs 700,000 and hits the limit. Backtracking is not slow, it is a wall. */',
+        '   Add one and the work multiplies by about 4.5: 150,000 steps at N=8, 700,000 at N=9,',
+        '   which blows the execution limit. That is backtracking: not slower, but impossible. */',
       ],
     },
   ];
@@ -255,7 +255,7 @@
         '                          (row - column can go negative and indices cannot, so add N)',
         '   You could do without them: compare each new queen with every queen already',
         '   placed. But that is up to N checks against three lookups: pruning must be cheap.',
-        '   N columns and 2N-1 diagonals, so all three tables get 2N slots — one length. */',
+        '   N columns and 2N-1 diagonals — give all three 2N slots and track just one length. */',
       ],
     },
     'const cols = [];',
@@ -324,7 +324,7 @@
     '    const sq = r * N + c;',
     {
       zh: ['    mark(sq, "try");      // 正在尝试：先点亮这一格，再问它安不安全'],
-      en: ['    mark(sq, "try");      // trying: light the square up first, then ask if it is safe'],
+      en: ['    mark(sq, "try");      // Trying: light the square up first, then ask if it is safe'],
     },
     '    if (safe(r, c)) {',
     {
@@ -358,7 +358,7 @@
     '    } else {',
     {
       zh: ['      mark(sq, "cut");    // 被剪枝：这一格已经被某个已放好的后攻击了'],
-      en: ['      mark(sq, "cut");    // pruned: a queen already on the board attacks this square'],
+      en: ['      mark(sq, "cut");    // Pruned: a queen already on the board attacks this square'],
     },
     '    }',
     '  }',
