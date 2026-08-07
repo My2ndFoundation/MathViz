@@ -379,6 +379,137 @@ def fallback_check() -> int:
     return rc
 
 
+# 本阶段暂未双语、或明确不在范围内的 algos 文件。
+# minimax.js 是工具④ 的：改它要重做那个工具的验收，规格 §1.6 划在阶段 9。
+# 其余七份随阶段 8 的任务逐个划掉 —— **这个集合必须缩到只剩 minimax.js**，
+# 一直留着就等于这道门没开。
+MONOLINGUAL_ALGOS = {
+    'minimax.js',
+    'knight-path.js', 'tour-dfs.js', 'tour-warnsdorff.js',
+    'rook-cover.js', 'king-greedy.js', 'king-exact.js',
+}
+
+# render(parts, lang) 那一段在每份双语 algos 里逐字节相同（规格 §1.6）。
+# 用两条锚线夹取，而不是数行数：行数会随注释改动漂移，锚线不会。
+RENDER_BEGIN = '  /* ================= 双语渲染（规格 §1.6 / §7.5）'
+RENDER_END = '    return out;\n  }\n'
+
+
+def bilingual_algos_check() -> int:
+    """双语算法源码的普查门（规格 §7.5，阶段 8）。
+
+    各文件自己的 *.test.js 已经跑了「代码同一 / 步数同一 / 行数同一」三道门
+    ——那三道要真实参数，参数只有测试文件知道，放在那里是对的。这里守的是
+    那三道**够不着**的两件事：
+
+    ① **普查**：core/algos/ 下每一份非测试、非白名单的 .js，都得**装上**
+       双语机制。将来有人加第八道题却忘了双语，这道门当场响；靠各文件
+       测试是守不住的 —— 新文件的新测试当然不会去测一件作者没想到的事。
+
+    ② **render 助手七份逐字节相同**：它在每份里各存一份（不抽共用模块的
+       理由见 queens.js 里那段注释），没有门就必然漂移。阶段 7 的
+       king-greedy / king-exact 共用段用的是同一个套路。
+
+    ⚠ **①「装上了」是结构判据，不是行为判据**，这一点必须说清楚：这道门
+    **不**去调 source({}) 看它抛不抛。因为各份 source() 都先校验自己的参数
+    （queens 是「少了 N」），一个空对象撞上的永远是那道校验，根本走不到
+    lang —— 而这道门够不着每份的合法参数（那只有各自的测试知道）。
+    所以①验的是两件加起来等价的结构事实：**render 段在、且逐字节相同**
+    （那一段里就写着两条 lang 的抛），**并且 source() 真的调了 render**。
+    「带全参数、只缺 lang 也抛」由各文件自己的 T.throws(…, /少了 lang/) 守，
+    每个文案任务都写了一条。
+
+    这道门**不判英文写得对不对** —— 机器判不了，那是人工审查项（规格 §8）。
+    """
+    algos = sorted(p for p in (ROOT / 'core' / 'algos').glob('*.js')
+                   if not p.name.endswith('.test.js'))
+    if not algos:
+        print('ERROR: core/algos/ 下一个 .js 都没找到 —— 这道门本该普查，'
+              '不是跑了个寂寞', file=sys.stderr)
+        return 1
+
+    stale = MONOLINGUAL_ALGOS - {p.name for p in algos}
+    if stale:
+        print(f'ERROR: MONOLINGUAL_ALGOS 里有已经不存在的文件：{sorted(stale)}'
+              f' —— 白名单指着空气，等于把某个真文件悄悄放行了', file=sys.stderr)
+        return 1
+
+    rc = 0
+    renders = {}
+    checked = 0
+    for p in algos:
+        if p.name in MONOLINGUAL_ALGOS:
+            continue
+        checked += 1
+        text = p.read_text(encoding='utf-8')
+
+        # ① render 段在不在（那一段里就写着两条 lang 的抛）
+        b = text.find(RENDER_BEGIN)
+        e = text.find(RENDER_END, b if b >= 0 else 0)
+        if b < 0 or e < 0:
+            print(f'ERROR: {p.name} 里找不到 render(parts, lang) 那一段'
+                  f'（锚线 {RENDER_BEGIN.strip()[:24]}…）—— 双语化没做完，'
+                  f'或者锚线被改了', file=sys.stderr)
+            rc = 1
+            continue
+        segment = text[b:e + len(RENDER_END)]
+        renders[p.name] = segment
+
+        # ② source() 真的调了 render —— 光定义不调用，等于没装。
+        #
+        #    ⚠ **不许在原文上搜子串 `render(`。** 第一版就是这么写的，而它是
+        #    **恒真**的：queens.js 有一行写给维护者的注释「…见上面 render()。」，
+        #    裸子串就在那儿，于是这条判据在这份文件下永远成立，对「忘了调
+        #    render」完全失明。突变实验 B 当场抓到了它。
+        #
+        #    正确做法是先**抽掉注释**再搜 —— 而「什么算注释」这段知识本仓已经
+        #    有唯一实现了：_test.js 的 normalizeSource（Task 1）。这里 shell 出
+        #    node 去调它，不在 Python 里重写一份（Task 2 的审查刚为同一条理由
+        #    否掉过一个本地过滤：同一段知识分成两份，迟早分岔）。
+        #
+        #    归一化之后：定义那一行是 `function render(parts, lang) {`，真正的
+        #    调用是 `render(HEAD, o.lang)` 这样的。数**非定义**的那些，至少要
+        #    有一处。实测 queens.js = 2 处调用 + 1 处定义。
+        probe = (
+            'const T = require(%r);'
+            'const fs = require("fs");'
+            'process.stdout.write(T.normalizeSource(fs.readFileSync(%r, "utf8")));'
+        ) % (str(ROOT / 'core' / '_test.js'), str(p))
+        proc = subprocess.run(['node', '-e', probe], capture_output=True, text=True)
+        if proc.returncode != 0:
+            print(f'ERROR: {p.name} 归一化失败 —— {proc.stderr.strip()[:200]}',
+                  file=sys.stderr)
+            rc = 1
+            continue
+        norm = proc.stdout
+        calls = (len(re.findall(r'(?:^|[^\w$.])render\(', norm))
+                 - len(re.findall(r'function\s+render\(', norm)))
+        if calls < 1:
+            print(f'ERROR: {p.name} 定义了 render(parts, lang) 却从来不调它 —— '
+                  f'source() 还在吐单语源码', file=sys.stderr)
+            rc = 1
+
+    if checked == 0:
+        print('ERROR: 一份双语 algos 都没有 —— MONOLINGUAL_ALGOS 是不是把'
+              '所有文件都放行了？', file=sys.stderr)
+        return 1
+
+    names = sorted(renders)
+    if len(names) > 1:
+        first = renders[names[0]]
+        for name in names[1:]:
+            if renders[name] != first:
+                print(f'ERROR: {name} 的 render(parts, lang) 与 {names[0]} 的'
+                      f'不是逐字节相同 —— 七份里各存一份，就必须一个字节都不差',
+                      file=sys.stderr)
+                rc = 1
+
+    print(f'双语 algos 普查：{checked} 份双语 / {len(algos) - checked} 份白名单，'
+          f'render 助手 {len(names)} 份'
+          + ('一致' if rc == 0 else '有不一致'))
+    return rc
+
+
 def core_tests() -> int:
     """跑 core/ 与 games/ 下的全部 *.test.js（**含子目录**）。
 
@@ -413,10 +544,10 @@ def core_tests() -> int:
 
 
 if __name__ == '__main__':
-    # 七道门都要跑到底、都要报——不能用 `or` 短路。之前 `a() or b() or c()`
+    # 八道门都要跑到底、都要报——不能用 `or` 短路。之前 `a() or b() or c()`
     # 一旦 a() 非零就直接跳过 b()/c()，意味着一份过期的内联副本（或任何语法
     # 错误）会让 406 条断言的 core_tests() 门根本不执行，问题只报出第一个，
-    # 最有分量的那道门被悄悄跳过了。这里七个都无条件跑，各自打印自己的
+    # 最有分量的那道门被悄悄跳过了。这里八个都无条件跑，各自打印自己的
     # ERROR，最后按「任一失败则整体失败」汇总退出码。
     # js_string_literal_html_safety_check 与 algos_roundtrip_check 是阶段 4
     # 新加的两道门：前者查转义结果对 HTML 分词器是否安全（`<!--` + 裸
@@ -426,6 +557,10 @@ if __name__ == '__main__':
     # algos_marker_shape_check 是阶段 5 新加的第七道，守的是**扫不扫得到**
     # 那个区间——上面两道都以"已经扫到了"为前提，空区间那次事故正是从这个
     # 前提底下漏过去的。
+    # bilingual_algos_check 是阶段 8 新加的第八道，守两件各文件测试守不住的
+    # 事：core/algos/ 下有没有文件忘了装双语机制（普查，按 MONOLINGUAL_ALGOS
+    # 白名单工作），以及 render(parts, lang) 助手在七份里是否逐字节相同
+    # （它在每份里各存一份，没有门就必然漂移）。
     rc_inline = inline_core.main(check_only=True)
     rc_node = node_check()
     rc_html_safety = js_string_literal_html_safety_check()
@@ -433,5 +568,6 @@ if __name__ == '__main__':
     rc_algos = algos_roundtrip_check()
     rc_fallback = fallback_check()
     rc_core = core_tests()
+    rc_bilingual = bilingual_algos_check()
     sys.exit(1 if (rc_inline or rc_node or rc_html_safety or rc_marker or
-                    rc_algos or rc_fallback or rc_core) else 0)
+                    rc_algos or rc_fallback or rc_core or rc_bilingual) else 0)
