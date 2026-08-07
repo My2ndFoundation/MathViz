@@ -1,6 +1,7 @@
 'use strict';
 const T = require('../_test.js');
 const I = require('../interp.js');
+const E = require('../exercise.js');
 const R = require('./rook-cover.js');
 
 /* 宿主侧独立参照：行段/列段建图 + 匈牙利最大匹配。
@@ -56,7 +57,7 @@ const BOARDS = [
    放在最前面，报出来的第一句话就是「不在子集里」，还带着解析器的原话。 */
 {
   let err = null;
-  try { I.parse(R.source({ W: 6, H: 7, blocked: [4, 6, 7, 8, 26, 31, 33, 35, 37] })); } catch (e) { err = e; }
+  try { I.parse(R.source({ W: 6, H: 7, blocked: [4, 6, 7, 8, 26, 31, 33, 35, 37], lang: 'zh' })); } catch (e) { err = e; }
   T.ok(err === null, 'rook-cover 的源码在子集里合法' + (err ? '：' + err.message : ''));
 }
 
@@ -78,7 +79,7 @@ function emptySquares(W, H, blocked) {
 function placedRooks(W, H, blocked) {
   const seq = [];
   const kinds = [];
-  I.run(R.source({ W: W, H: H, blocked: blocked }), { host: {
+  I.run(R.source({ W: W, H: H, blocked: blocked, lang: 'zh' }), { host: {
     place: function (sq, piece) { seq.push(sq); kinds.push(piece); },
     clear: function (sq) { const at = seq.lastIndexOf(sq); if (at >= 0) { seq.splice(at, 1); kinds.splice(at, 1); } },
   } });
@@ -128,7 +129,7 @@ function attackingPair(W, H, blocked, rooks) {
    被请去挪窝的那个行段是 2 —— 「横一段竖一段」走了几个来回，这里就是几。 */
 function probe(W, H, blocked) {
   const kinds = { try: 0, ok: 0, cut: 0, back: 0 };
-  const r = I.run(R.source({ W: W, H: H, blocked: blocked }), { host: {
+  const r = I.run(R.source({ W: W, H: H, blocked: blocked, lang: 'zh' }), { host: {
     mark: function (sq, kind) { kinds[kind] = (kinds[kind] || 0) + 1; },
   } });
   let depth = 0;
@@ -140,7 +141,7 @@ function probe(W, H, blocked) {
 
 let boardsChecked = 0;
 for (const [label, W, H, blocked, expectK] of BOARDS) {
-  const r = I.run(R.source({ W: W, H: H, blocked: blocked }), { host: {} });
+  const r = I.run(R.source({ W: W, H: H, blocked: blocked, lang: 'zh' }), { host: {} });
   T.ok(!r.trace.truncated, label + ' 未截断');
   T.eq(r.result, hostMaxMatch(W, H, blocked), label + ' 的最大匹配与宿主侧匈牙利一致');
   T.eq(r.result, expectK, label + ' 的最大匹配是设计时量的那个数');
@@ -245,7 +246,7 @@ function lcg(seed) {
     for (let s = 0; s < W * H; s++) if (rnd() < 0.28) blocked.push(s);
     if (blocked.length === 0 || blocked.length === W * H) continue;
     const tag = W + '×' + H + ' [' + blocked.join(',') + ']';
-    const r = I.run(R.source({ W: W, H: H, blocked: blocked }), { host: {} });
+    const r = I.run(R.source({ W: W, H: H, blocked: blocked, lang: 'zh' }), { host: {} });
     T.ok(!r.trace.truncated, tag + ' 未截断');
     T.eq(r.result, hostMaxMatch(W, H, blocked), tag + ' 的最大匹配与宿主侧匈牙利一致');
     const placed = placedRooks(W, H, blocked).squares;
@@ -263,11 +264,11 @@ function lcg(seed) {
 {
   const all = [];
   for (let s = 0; s < 9; s++) all.push(s);
-  const r0 = I.run(R.source({ W: 3, H: 3, blocked: all }), { host: {} });
+  const r0 = I.run(R.source({ W: 3, H: 3, blocked: all, lang: 'zh' }), { host: {} });
   T.eq(r0.result, 0, '整块盘都是障碍：一辆车都不用摆');
   T.eq(placedRooks(3, 3, all).squares, [], '这时候盘上一辆车都没有');
   const one = all.filter(function (s) { return s !== 4; });
-  const r1 = I.run(R.source({ W: 3, H: 3, blocked: one }), { host: {} });
+  const r1 = I.run(R.source({ W: 3, H: 3, blocked: one, lang: 'zh' }), { host: {} });
   T.eq(r1.result, 1, '只剩中间一格：一辆车');
   T.eq(placedRooks(3, 3, one).squares, [4], '那辆车就站在剩下的那一格上');
 }
@@ -304,7 +305,7 @@ T.throws(function () { R.source({ W: 5, H: 5, blocked: [1.5] }); }, 'blocked 里
   let err = null;
   const all = [];
   for (let s = 0; s < 9; s++) all.push(s);
-  try { R.source({ W: 3, H: 3, blocked: all }); } catch (e) { err = e; }
+  try { R.source({ W: 3, H: 3, blocked: all, lang: 'zh' }); } catch (e) { err = e; }
   T.ok(err === null, '一格空的都没有的盘照常吐源码');
 }
 
@@ -315,5 +316,72 @@ T.ok(typeof R.source === 'function', '导出的形状与 queens / knight-path �
 T.ok(typeof R.W_MAX === 'undefined', '没有偷偷带一个滑杆上限出来');
 T.ok(typeof R.BOARDS === 'undefined', '也没有把四档盘写死在模块里——那是页面的事');
 T.eq(Object.keys(R).sort(), ['source'], '导出的键就只有 source 一个');
+
+/* ---- 双语三道门（规格 §7.5）----
+
+   守的是「可执行代码没有偷偷分岔」，**不是**「英文翻得对不对」——后者机器
+   判不了，是人工审查项。
+
+   盘就用上面 BOARDS 的前两档（空盘 + 五障碍）：这一题离 `STEP_LIMIT`
+   差两个数量级（最贵的一档 2,149 步），两语都跑得完。
+   **`!truncated` 那条前置断言仍然不许删**：一旦哪天两语一起撞上限，下面
+   那条步数断言就退化成 `200000 === 200000` —— 截断把两边的步数夹到同一个
+   常数上，是这类断言最安静的死法（阶段 8 Task 5 在 `tour-dfs` 5×5 上实测过）。 */
+const RC_BOARDS = [
+  { W: 5, H: 5, blocked: [] },
+  { W: 5, H: 5, blocked: [3, 14, 17, 18, 21] },
+];
+for (let i = 0; i < RC_BOARDS.length; i = i + 1) {
+  const b = RC_BOARDS[i];
+  const zh = R.source({ W: b.W, H: b.H, blocked: b.blocked, lang: 'zh' });
+  const en = R.source({ W: b.W, H: b.H, blocked: b.blocked, lang: 'en' });
+  T.eq(en.split('\n').length, zh.split('\n').length, '盘 ' + i + '：两种语言行数相同');
+  T.eq(T.normalizeSource(en), T.normalizeSource(zh),
+       '盘 ' + i + '：抽掉注释与字符串之后，两种语言逐字节相同');
+  const rzh = I.run(zh, { host: {} }), ren = I.run(en, { host: {} });
+  T.ok(!rzh.trace.truncated && !ren.trace.truncated,
+       '盘 ' + i + '：两语都没撞上限 —— 撞了的话下面那条步数断言就是 200000 === 200000');
+  T.eq(ren.trace.length, rzh.trace.length, '盘 ' + i + '：两种语言的解释器步数相同');
+}
+
+/* 反向：英文必须真的是英文。上面三道门在「en 原样返回中文」时全绿 ——
+   把 lang 接进来却没接上，长得跟接上了一模一样。
+
+   ⚠ 判「有没有中文」的字符类要连中文标点与全角一起管：只写 /[一-鿿]/ 的话
+   `「」。，？、《》；：` 全是 false，一句 "Cover it。" 会大摇大摆过门。
+
+   ⚠ 「英文里没有汉字」断言的是**送进编辑器的那一份**（parse().clean）。
+   rook-cover 一个挖空都没有，原文断言本来也成立 —— 仍旧走 clean，
+   同一件事整个阶段只留一种写法。 */
+const rcZh = R.source({ W: 5, H: 5, blocked: [3, 14, 17, 18, 21], lang: 'zh' });
+const rcEn = R.source({ W: 5, H: 5, blocked: [3, 14, 17, 18, 21], lang: 'en' });
+T.ok(rcZh !== rcEn, '两种语言的源码不是同一份');
+T.ok(/[一-鿿㐀-䶿　-〿＀-￯]/.test(rcZh), '中文那一份里有汉字');
+T.ok(!/[一-鿿㐀-䶿　-〿＀-￯]/.test(E.parse(rcEn, 'en').clean),
+     '英文那一份送到编辑器的文本里一个汉字都没有');
+
+/* ⚠ 第三个参数才是 pattern：`T.throws(fn, label, pattern)`（见 _test.js）。
+   写在第二个位置上 pattern 就是 undefined，退化成「抛了就算过」——
+   这两条要钉的恰恰是**抛的是哪一条**（少了 lang vs 只认两个值）。 */
+T.throws(function () { R.source({ W: 5, H: 5, blocked: [] }); },
+         'rook-cover：缺 lang 必须抛', /少了 lang/);
+T.throws(function () { R.source({ W: 5, H: 5, blocked: [], lang: 'fr' }); },
+         'rook-cover：lang=fr 必须抛', /只认/);
+T.throws(function () { R.source({ W: 5, H: 5, blocked: [], lang: '' }); },
+         'rook-cover：lang 是空串必须抛（空串不当默认值用）', /只认/);
+
+/* ---- 题面不许在重写英文时滑回那个数学错误 ----
+   一辆车是二分图的一条**边**（一次占住一个行段 + 一个列段）；König 给的是
+   最少的**线**，不是最少的**车**。阶段 7 最终审核实测：这四档的最大匹配是
+   5/7/7/9，而最少车数是 5/4/5/5 —— 三档反例；最小的反例只有 2×2 挖一格
+   （匹配 2、一辆车就盖满）；60 块随机小盘里 49 块的最少车数严格更小。
+
+   所以英文里不许出现「fewest rooks（needed / required）」这一族说法。
+   题面只许讲那两句都恰好等于最大匹配的话：
+     ① 最多能摆几辆互相吃不到的车；② 盖住每个空格最少要点亮几条线。 */
+T.ok(!/fewest\s+rooks/i.test(rcEn), '英文题面没有说 "fewest rooks"');
+T.ok(!/minimum\s+number\s+of\s+rooks/i.test(rcEn),
+     '英文题面没有说 "minimum number of rooks"');
+T.ok(/lines?/i.test(rcEn), '英文题面讲的是「线」');
 
 T.report();
