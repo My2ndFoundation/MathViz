@@ -278,6 +278,20 @@ git status --short
 
 - [ ] **Step 1: 先写三道门（会失败）**
 
+⚠ **步数门会在撞上限的盘上悄悄变成恒真断言。** `interp.js` 的 `STEP_LIMIT = 200000`：两种语言都撞上限时，两边 `trace.length` 都是 200,000，那条断言退化成 `200000 === 200000`——**任何差异都拦不住**。Task 5 实测：`tour-dfs` 在 5×5 上两语都截断，把英文的 `log` 行改成参与控制流，步数门**照样全绿**；同一突变换到 3×4 当场红。
+
+**这不是「挑个小盘就行」**——有的题**故意**要撞上限（`kingDominate` 的 7×7 那一档，精确解跑不完正是它的教学落点）。做法是**把「没截断」和步数一起断言**，让这道门永远不可能悄悄退化：
+
+```js
+const rz = I.run(zh, { host: {} }), re_ = I.run(en, { host: {} });
+T.ok(!rz.trace.truncated && !re_.trace.truncated,
+     label + '：两语都没撞上限 —— 撞了的话下面那条步数断言就是 200000 === 200000');
+T.eq(re_.trace.length, rz.trace.length, label + '：两种语言的解释器步数相同');
+```
+
+步数门的盘**必须挑一个两语都跑得完的**。要验「撞上限」那件事，那是各文件既有测试的活，别混进双语门里。
+
+
 在 `chess/core/algos/queens.test.js` 末尾、`T.report()` 之前插入：
 
 ```js
@@ -776,6 +790,9 @@ git status --short
 
 - [ ] **Step 1: 先写三道门（会失败）**
 
+⚠ **步数门的盘必须挑两语都跑得完的，并且要连「没截断」一起断言**——否则两边都是 `STEP_LIMIT` 时它退化成 `200000 === 200000`（Task 5 实测：`tour-dfs` 在 5×5 上正是如此）。完整写法与理由见 Task 2 的 Step 1。
+
+
 在 `knight-path.test.js` 末尾、`T.report()` 之前插入（参数用这个文件既有的那组，别新编）：
 
 ```js
@@ -928,6 +945,9 @@ git status --short
 
 - [ ] **Step 1: 先写门（会失败）**
 
+⚠ **步数门的盘必须挑两语都跑得完的，并且要连「没截断」一起断言**——否则两边都是 `STEP_LIMIT` 时它退化成 `200000 === 200000`（Task 5 实测：`tour-dfs` 在 5×5 上正是如此）。完整写法与理由见 Task 2 的 Step 1。
+
+
 在 `tour.test.js` 末尾、`T.report()` 之前插入：
 
 ```js
@@ -1051,6 +1071,9 @@ git status --short
 - Produces: `AlgoRookCover.source({ W, H, blocked, lang }) -> string`
 
 - [ ] **Step 1: 先写门（会失败）**
+
+⚠ **步数门的盘必须挑两语都跑得完的，并且要连「没截断」一起断言**——否则两边都是 `STEP_LIMIT` 时它退化成 `200000 === 200000`（Task 5 实测：`tour-dfs` 在 5×5 上正是如此）。完整写法与理由见 Task 2 的 Step 1。
+
 
 在 `rook-cover.test.js` 末尾、`T.report()` 之前插入（盘用这个文件既有的那几块）：
 
@@ -1184,6 +1207,9 @@ git status --short
 - Produces: `source({ W, H, blocked, lang })` × 2
 
 - [ ] **Step 1: 先写门（会失败）**
+
+⚠ **步数门的盘必须挑两语都跑得完的，并且要连「没截断」一起断言**——否则两边都是 `STEP_LIMIT` 时它退化成 `200000 === 200000`（Task 5 实测：`tour-dfs` 在 5×5 上正是如此）。完整写法与理由见 Task 2 的 Step 1。
+
 
 在 `king.test.js` 末尾、`T.report()` 之前插入：
 
