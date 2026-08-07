@@ -850,7 +850,9 @@ def throws_discrimination_check() -> int:
     边要改都得小心别碰坏另一边。35–40 秒在本仓当前规模下可接受，这里
     宁可花两倍的跑测时间也要保持两道门各管一段。
     """
-    ALLOW_MISSING = 86          # ⚠ 补齐任务做完后改成 0（简报写的 84 是误差，见上）
+    ALLOW_MISSING = 0           # 2026-08-08，阶段 9a task 4：最后 18 条（interp.test.js
+                                # 17 条 + exercise-blanks.test.js 1 条）已补齐第三参，
+                                # 门收紧到 0——此后任何新增的无 pattern T.throws 都会被拒绝。
     # 与 core_tests() 扫的是同一个集合——见上面文档字符串。
     tests = sorted((ROOT / 'core').rglob('*.test.js')) + sorted((ROOT / 'games').rglob('*.test.js'))
     if not tests:

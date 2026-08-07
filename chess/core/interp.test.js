@@ -21,8 +21,10 @@ T.eq(values("'a\\nb'"), ['a\nb'], '转义序列在词法阶段就解掉');
    吃掉一个点，再一个成员访问点），会被那条特例误杀。改成「扫描器至多
    吃一个小数点然后停」，1.2.3 仍然会被拒绝，但拒绝的位置改到了解析层
    （点后面必须是属性名，数字不是），报错原因更贴切。 */
-T.throws(() => I.parse('1.2.3;'), '数字里出现第二个小数点在解析层被拒绝');
-T.throws(() => I.parse('let x = 1.2.3;'), '在语句里同样被拒绝');
+T.throws(() => I.parse('1.2.3;'), '数字里出现第二个小数点在解析层被拒绝',
+         'expected ";" but got');
+T.throws(() => I.parse('let x = 1.2.3;'), '在语句里同样被拒绝',
+         'expected ";" but got');
 
 T.eq(I.tokenize('1.5').filter(t => t.type !== 'eof')[0].value, 1.5, '正常小数');
 T.eq(I.tokenize('42').filter(t => t.type !== 'eof')[0].value, 42, '整数');
@@ -69,9 +71,11 @@ T.eq(tplExprs('`${ f("}") }`').map(s => s.trim()), ['f("}")'],
    嵌套模板串本身允许跨行（原生允许），这里特意验证了这一点不受影响，
    只有嵌套在其中的单/双引号字符串不行。 */
 T.throws(() => I.tokenize("`x${ 'a\nb' }y`"),
-         '模板表达式里嵌套的单引号字符串裸换行也要报错（N1）');
+         '模板表达式里嵌套的单引号字符串裸换行也要报错（N1）',
+         'Unterminated string: raw newline not allowed');
 T.throws(() => I.tokenize('`x${ "a\nb" }y`'),
-         '模板表达式里嵌套的双引号字符串裸换行也要报错（N1）');
+         '模板表达式里嵌套的双引号字符串裸换行也要报错（N1）',
+         'Unterminated string: raw newline not allowed');
 let nestedTplErr = null;
 try { I.tokenize('`x${ `a\nb` }y`'); } catch (e) { nestedTplErr = e; }
 T.eq(nestedTplErr, null, '嵌套模板串本身允许跨行，不应被 N1 的检查误伤');
@@ -102,9 +106,9 @@ T.eq(pos[0].line, 1, '第一个 token 在第 1 行');
 T.eq(pos[0].col, 1, '第一个 token 在第 1 列');
 
 // ---- 坏输入：未闭合 ----
-T.throws(() => I.tokenize("'abc"), '未闭合的字符串报错');
-T.throws(() => I.tokenize('`abc'), '未闭合的模板串报错');
-T.throws(() => I.tokenize('/* abc'), '未闭合的块注释报错');
+T.throws(() => I.tokenize("'abc"), '未闭合的字符串报错', /^Unterminated string$/);
+T.throws(() => I.tokenize('`abc'), '未闭合的模板串报错', /^Unterminated template string$/);
+T.throws(() => I.tokenize('/* abc'), '未闭合的块注释报错', 'Unterminated block comment');
 
 /* ---- 与原生 JavaScript 对照（规格 §7.3：正确性判据是「跟原生一致」）----
    上一轮 21 条写死期望值的测试，一条都没抓到 1e10 被切成两个 token——
@@ -143,25 +147,33 @@ sameAsNative('0b101', '二进制');
 sameAsNative('0B101', '二进制（大写 B）');
 
 // ---- 与原生对照：原生拒绝的，我们也要拒绝 ----
-T.throws(() => I.tokenize("'a\nb'"), '字符串内未转义换行要报错');
-T.throws(() => I.tokenize("'\\uZZZZ'"), '非法的 \\u 转义要报错');
+T.throws(() => I.tokenize("'a\nb'"), '字符串内未转义换行要报错',
+         'Unterminated string: raw newline not allowed');
+T.throws(() => I.tokenize("'\\uZZZZ'"), '非法的 \\u 转义要报错',
+         'Invalid Unicode escape sequence');
 
 /* 下面这组同样是「先问原生」，但原生对这些输入是抛错而不是给值，
    不能套用 sameAsNative（nativeValue 会直接把异常炸出测试文件）——
    所以先确认原生自己也抛，再确认我们抛，两者都断言，而不是只断言
    我们抛（那样万一我对原生行为的记忆有误，测试也发现不了）。 */
-function nativeRejects(src, label) {
+function nativeRejects(src, label, pattern) {
   let threwNatively = false;
   try { nativeValue(src); } catch (e) { threwNatively = true; }
   T.ok(threwNatively, label + '（先确认原生自己也拒绝）：' + src);
-  T.throws(() => I.tokenize(src), label + '：' + src);
+  T.throws(() => I.tokenize(src), label + '：' + src, pattern);
 }
-nativeRejects('0xZZ', '0x 后面一个合法十六进制数字都没有');
-nativeRejects('0o19', '八进制里出现非法数字 9');
-nativeRejects('0b12', '二进制里出现非法数字 2');
-nativeRejects('1e', '指数标记后面没有数字');
-nativeRejects('1ex', '指数标记后面跟的不是数字');
-nativeRejects('5g', '数字字面量后面紧跟标识符字符');
+nativeRejects('0xZZ', '0x 后面一个合法十六进制数字都没有',
+              'Invalid number: expected hex digits after 0x');
+nativeRejects('0o19', '八进制里出现非法数字 9',
+              'a numeric literal cannot be immediately followed by');
+nativeRejects('0b12', '二进制里出现非法数字 2',
+              'a numeric literal cannot be immediately followed by');
+nativeRejects('1e', '指数标记后面没有数字',
+              'Invalid number: missing exponent digits');
+nativeRejects('1ex', '指数标记后面跟的不是数字',
+              'Invalid number: missing exponent digits');
+nativeRejects('5g', '数字字面量后面紧跟标识符字符',
+              'a numeric literal cannot be immediately followed by');
 
 /* ---- 额外验证：反斜杠 + 真实换行是「续行」，整体消失而不是被添成
    一个换行字符（原生在两种模式下都这样，不是严格模式限定的怪癖，
@@ -178,8 +190,10 @@ sameAsNative("'a\\\nb'", '反斜杠 + 真实换行是续行，整体消失');
    或者更糟——两种都不模拟、静默给出第三种不上不下的值（之前就是这样：
    017 会被当成十进制 17，跟原生的两种解释都对不上）。这是一个不跟随
    sameAsNative 判据的主动选择，不是遗漏，已经在报告里向协调者点明。 */
-T.throws(() => I.tokenize('017'), '前导零字面量：明确拒绝，不悄悄照抄非严格模式的历史兼容行为');
-T.throws(() => I.tokenize('08'), '前导零字面量（08 在非严格模式下是十进制 8 这种更怪的历史包袱）：同样拒绝');
+T.throws(() => I.tokenize('017'), '前导零字面量：明确拒绝，不悄悄照抄非严格模式的历史兼容行为',
+         'Invalid number: numbers cannot have a leading zero (legacy octal is not supported)');
+T.throws(() => I.tokenize('08'), '前导零字面量（08 在非严格模式下是十进制 8 这种更怪的历史包袱）：同样拒绝',
+         'Invalid number: numbers cannot have a leading zero (legacy octal is not supported)');
 T.eq(I.tokenize('0').filter(t => t.type !== 'eof')[0].value, 0, '单独的 0 不受影响');
 T.eq(I.tokenize('0.5').filter(t => t.type !== 'eof')[0].value, 0.5, '0 打头的正常小数不受影响');
 

@@ -457,7 +457,8 @@ T.throws(function () {
       '      if (!visited[ny * W + nx]) { d = d + 1; }',
       '      // <<< BLANK',
     ].join('\n')));
-}, 'tourKnight：把 degree-count 再挖一道就嵌套了 —— parse 当场抛');
+}, 'tourKnight：把 degree-count 再挖一道就嵌套了 —— parse 当场抛',
+   'BLANK 指令嵌套');
 
 /* tour-dfs 是只读对照，一个挖空都不许有（§2.9 阶段 6 第 1 条）。
    四块盘各查一次：`source()` 是按盘拼字符串的，只查一块盘查不出「某块盘上
