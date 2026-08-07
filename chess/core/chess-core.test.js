@@ -63,9 +63,9 @@ const cl = p0.clone();
 cl.board[C.fromAlg('e2')] = C.EMPTY;
 T.eq(p0.board[C.fromAlg('e2')], C.P, 'clone 是深拷贝，改副本不影响原局面');
 
-T.throws(() => C.Position.fromFEN('rnbqkbnr/pppppppp/8/8 w - -'), 'FEN 横行数不足应抛错', /ranks/);
+T.throws(() => C.Position.fromFEN('rnbqkbnr/pppppppp/8/8 w - -'), 'FEN 横行数不足应抛错', /expected 8 ranks, got \d+/);
 T.throws(() => C.Position.fromFEN('rnbqkbnr/ppppXppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1'), 'FEN 未知棋子字符应抛错', /unknown piece/);
-T.throws(() => C.Position.fromFEN('rnbqkbnr/ppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1'), 'FEN 某横行格数不足 8 应抛错', /squares/);
+T.throws(() => C.Position.fromFEN('rnbqkbnr/ppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1'), 'FEN 某横行格数不足 8 应抛错', /has \d+ squares, expected 8/);
 
 // ---- FEN 校验（修复轮次 1 · I1）----
 T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/4K3 z - - 0 1'), '轮次字段非 w/b 应抛错', /side to move/);

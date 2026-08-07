@@ -708,9 +708,10 @@ def _throws_pattern_matcher(entry: dict, test_name: str):
     `pattern instanceof RegExp` 的结果），**不能靠猜字符串的形状**：一个
     字符串 pattern 恰好长得像 `/xxx/` 的可能性无法排除，猜错了就会把一条
     该走 indexOf 语义的字符串硬塞进 re.compile()，两种语义在边界情况上
-    并不等价。全仓今天的 84 条 pattern 实测全部是 RegExp，没有字符串
-    pattern 的实例，但这条判断逻辑要按 `_test.js` 的真实行为写，不能因为
-    "今天用不上"就省略。
+    并不等价。全仓今天带 pattern 的 152 条里实测 string 43 条、regex 109
+    条——字符串 pattern 不是理论可能性，是真实存在且占三分之一弱的一类，
+    这条判断逻辑必须按 `_test.js` 的真实行为写两条分支，不能只写 RegExp
+    那一半。
 
     返回 `(matcher, warn)`：
       · pattern 是字符串 → `matcher = lambda msg: pattern in msg`（indexOf

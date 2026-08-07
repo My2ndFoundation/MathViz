@@ -144,7 +144,7 @@ T.throws(function () {
 
 T.throws(function () { parseZh(); }, 'parse() 少了 source —— 抛',
   '，或者 source 不是字符串，收到：undefined');
-T.throws(function () { parseZh(123); }, 'parse(非字符串) —— 抛', '收到：number');
+T.throws(function () { parseZh(123); }, 'parse(非字符串) —— 抛', '，或者 source 不是字符串，收到：number');
 T.throws(function () {
   parseZh('// >>> BLANK level=1 fill="1;" hint="甲" hintEn="A"\nx;\n// <<< BLANK');
 }, '缺 id —— 抛', 'BLANK 指令缺 id=');
@@ -222,8 +222,8 @@ T.eq(h4.zh.indexOf('…'), -1, '第 4 级没有省略号');
 
 T.throws(function () { E.hintAt(hb); }, 'hintAt 少了 level —— 抛', 'hintAt(blank, level) 少了 level');
 T.throws(function () { E.hintAt(undefined, 1); }, 'hintAt 少了 blank —— 抛', 'hintAt(blank, level) 少了 blank');
-T.throws(function () { E.hintAt(hb, 0); }, 'level=0 越界 —— 抛', '收到：0');
-T.throws(function () { E.hintAt(hb, 5); }, 'level=5 越界 —— 抛', '收到：5');
+T.throws(function () { E.hintAt(hb, 0); }, 'level=0 越界 —— 抛', 'hintAt 的 level 必须是 1、2、3 或 4，收到：0');
+T.throws(function () { E.hintAt(hb, 5); }, 'level=5 越界 —— 抛', 'hintAt 的 level 必须是 1、2、3 或 4，收到：5');
 
 /* 第 3 级骨架对嵌套括号、多语句、赋值也要机械生成得对——不只是单个
    if+return 那一种最简形状。这里用一段人工构造的挖空体（不是任何一道
@@ -404,12 +404,12 @@ T.eq(vResOnly.divergence.herStep, RW.trace.length - 1, 'result 分歧给她那�
 
 T.throws(function () {
   E.judge(REF, RW, { result: false, boardOps: false, counters: ['solutionz'] });
-}, '计数器名字在参考轨迹里从未出现 —— 抛（出题配置错误，不许静默判对）', 'solutionz');
+}, '计数器名字在参考轨迹里从未出现 —— 抛（出题配置错误，不许静默判对）', '"solutionz" 在参考轨迹里从未出现过');
 
 /* 配置错误不该因为 boardOps 恰好先分歧就被吞掉：三项全开时也照样抛 */
 T.throws(function () {
   E.judge(REF, RW, { result: true, boardOps: true, counters: ['solutionz'] });
-}, '名字打错时，即使 boardOps 会先分歧也照样抛 —— 配置错误不被结果吞掉', 'solutionz');
+}, '名字打错时，即使 boardOps 会先分歧也照样抛 —— 配置错误不被结果吞掉', '"solutionz" 在参考轨迹里从未出现过');
 
 /* 参考里有、她那边一次都没出现（她把变量改名了）：这是一处真分歧，不是相等 */
 const RENAMED = I.run(Q.source({ N: 5, lang: 'zh' }).split('solutions').join('total'), { host: {} });
@@ -517,9 +517,9 @@ T.throws(function () { E.judge(undefined, same, CHECK); }, 'judge 少了 refRun 
 T.throws(function () { E.judge(REF, same, { result: 1, boardOps: true, counters: [] }); },
          'check.result 是 1 不是 true —— 抛（真值不等于显式声明）', 'result 必须显式写成');
 T.throws(function () { E.judge(REF, same, { result: true, boardOps: 'yes', counters: [] }); },
-         'check.boardOps 是字符串 —— 抛', '收到："yes"');
+         'check.boardOps 是字符串 —— 抛', 'check.boardOps 必须显式写成 true 或 false（不接受「真值」），收到："yes"');
 T.throws(function () { E.judge(REF, same, { result: true, boardOps: true, counters: 'solutions' }); },
-         'check.counters 是字符串不是数组 —— 抛', '收到："solutions"');
+         'check.counters 是字符串不是数组 —— 抛', 'check.counters 必须是一个数组（不比任何计数器就写 []），收到："solutions"');
 T.throws(function () { E.judge(REF, same, { result: true, boardOps: true, counters: [''] }); },
          'check.counters 里有空名字 —— 抛', 'counters[0] 不是一个非空的变量名');
 T.throws(function () { E.judge({ result: 1 }, same, CHECK); }, 'refRun 没有 trace —— 抛',
@@ -592,8 +592,8 @@ T.eq(pEn.clean, pZh.clean, 'clean 不随语言变（它里面根本没有占位�
 
 /* 缺 lang / 写错 lang 一律当场抛：默认成哪一种都是让同一个缺陷换个地方复活 */
 T.throws(function () { E.parse(SRC); }, 'parse() 少了 lang —— 抛', 'parse(source, lang) 少了 lang');
-T.throws(function () { E.parse(SRC, 'fr'); }, 'parse() 的 lang 写了别的语言 —— 抛', '收到："fr"');
-T.throws(function () { E.parse(SRC, 'EN'); }, 'parse() 的 lang 大小写不对 —— 抛（不猜）', '收到："EN"');
+T.throws(function () { E.parse(SRC, 'fr'); }, 'parse() 的 lang 写了别的语言 —— 抛', 'parse(source, lang) 的 lang 只认 "zh" 或 "en"，收到："fr"');
+T.throws(function () { E.parse(SRC, 'EN'); }, 'parse() 的 lang 大小写不对 —— 抛（不猜）', 'parse(source, lang) 的 lang 只认 "zh" 或 "en"，收到："EN"');
 T.throws(function () { E.parse(SRC, null); }, 'parse() 的 lang 是 null —— 抛', 'parse(source, lang) 少了 lang');
 
 /* noteLine：UI 切语言时靠它把编辑器里那一行原地换掉（不重跑解释器）。
@@ -610,10 +610,12 @@ T.throws(function () { E.noteLine(undefined, 'zh'); }, 'noteLine 少了 blank �
 /* ⚠ 这条与下一条的原始消息**逐字节相同**：noteLine 把 hint/indent/level/id
    四项形状检查合并成一个 if，两种"缺了不同字段"的调用落到同一句
    `typeof blank === 'object'` 的错误消息里，消息本身分不出哪个字段缺了
-   （见 task-2-report.md）。这不是 pattern 选得不够巧——是被测代码没有
-   给这两种情形留下可供区分的信息，不该为了让 pattern 更好写而去改
-   exercise.js 的错误消息。两条用同一个 pattern 仍然通过判别力普查：
-   它们在本文件内命中的是同一种消息结构（1 种形状），不构成钝。 */
+   （结论见 .superpowers/sdd/2026-08-07-chess-phase9a-close-and-harden/
+   progress.md:108-110 —— 这是 Task 2 记录下来、押后处理的发现，不是
+   task-2-report.md：那份报告没有写出来）。这不是 pattern 选得不够巧——
+   是被测代码没有给这两种情形留下可供区分的信息，不该为了让 pattern
+   更好写而去改 exercise.js 的错误消息。两条用同一个 pattern 仍然通过
+   判别力普查：它们在本文件内命中的是同一种消息结构（1 种形状），不构成钝。 */
 T.throws(function () { E.noteLine({ hint: { zh: 'a', en: 'b' } }, 'zh'); },
          'noteLine 的 blank 缺 indent / level —— 抛（那会静默少一截缩进）',
          '少了 blank，或者它不是 parse() 产出的挖空对象（要有 id / indent / level / hint.{zh,en}），收到：object');
