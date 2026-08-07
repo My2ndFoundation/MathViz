@@ -102,7 +102,7 @@ T.throws(function () {
     'x;',
     '// <<< BLANK',
   ].join('\n'));
-}, 'C 形：引号值里残留字面双引号 —— 抛，不静默取一个含引号的怪值');
+}, 'C 形：引号值里残留字面双引号 —— 抛，不静默取一个含引号的怪值', '不支持转义');
 
 /* A 形：字面引号后面**紧跟空白**、且该属性是行内**最后一个** ——
    token 在那个引号处收尾，后面的「你好的场景"」变成一个没人认领的 token
@@ -114,7 +114,7 @@ T.throws(function () {
     'x;',
     '// <<< BLANK',
   ].join('\n'));
-}, 'A 形：引号后跟空白且属性在行尾 —— 抛，不再把 hint 无声截断成半句');
+}, 'A 形：引号后跟空白且属性在行尾 —— 抛，不再把 hint 无声截断成半句', '你好的场景');
 
 /* 白名单不是「凡是没见过的都抛」的粗暴规则会误伤的那种：带引号的值里全是
    空白和符号也照样是一个完整 token。这两条是它的防误伤底线。 */
@@ -138,36 +138,37 @@ T.throws(function () {
     'x;',
     '// <<< BLANK',
   ].join('\n'));
-}, '指令行上出现认不出来的属性名 —— 抛');
+}, '指令行上出现认不出来的属性名 —— 抛', 'tip="乙"');
 
 /* ---------- parse：每一条都必须大声失败（约束 6） ---------- */
 
-T.throws(function () { parseZh(); }, 'parse() 少了 source —— 抛');
-T.throws(function () { parseZh(123); }, 'parse(非字符串) —— 抛');
+T.throws(function () { parseZh(); }, 'parse() 少了 source —— 抛',
+  '，或者 source 不是字符串，收到：undefined');
+T.throws(function () { parseZh(123); }, 'parse(非字符串) —— 抛', '收到：number');
 T.throws(function () {
   parseZh('// >>> BLANK level=1 fill="1;" hint="甲" hintEn="A"\nx;\n// <<< BLANK');
-}, '缺 id —— 抛');
+}, '缺 id —— 抛', 'BLANK 指令缺 id=');
 T.throws(function () {
   parseZh('// >>> BLANK id=a fill="1;" hint="甲" hintEn="A"\nx;\n// <<< BLANK');
-}, '缺 level —— 抛');
+}, '缺 level —— 抛', 'BLANK 指令缺 level=');
 T.throws(function () {
   parseZh('// >>> BLANK id=a level=1 hint="甲" hintEn="A"\nx;\n// <<< BLANK');
-}, '缺 fill —— 抛');
+}, '缺 fill —— 抛', 'BLANK 指令缺 fill="');
 T.throws(function () {
   parseZh('// >>> BLANK id=a level=1 fill="1;" hintEn="A"\nx;\n// <<< BLANK');
-}, '缺 hint —— 抛');
+}, '缺 hint —— 抛', 'BLANK 指令缺 hint="');
 T.throws(function () {
   parseZh('// >>> BLANK id=a level=1 fill="1;" hint="甲"\nx;\n// <<< BLANK');
-}, '缺 hintEn —— 抛（英文是默认语言，缺了比缺中文更严重）');
+}, '缺 hintEn —— 抛（英文是默认语言，缺了比缺中文更严重）', 'BLANK 指令缺 hintEn="');
 T.throws(function () {
   parseZh('// >>> BLANK id=a level=4 fill="1;" hint="甲" hintEn="A"\nx;\n// <<< BLANK');
-}, 'level=4 越界 —— 抛');
+}, 'level=4 越界 —— 抛', 'level 必须是 1、2 或 3');
 T.throws(function () {
   parseZh('// >>> BLANK id=a level=1 fill="1;" hint="甲" hintEn="A"\nx;');
-}, '有 >>> 没有 <<< —— 抛');
+}, '有 >>> 没有 <<< —— 抛', '行：>>> BLANK 没有对应的 <<< BLANK');
 T.throws(function () {
   parseZh('x;\n// <<< BLANK');
-}, '有 <<< 没有 >>> —— 抛');
+}, '有 <<< 没有 >>> —— 抛', '没有对应的 >>> BLANK');
 T.throws(function () {
   parseZh([
     '// >>> BLANK id=a level=1 fill="1;" hint="甲" hintEn="A"',
@@ -176,7 +177,7 @@ T.throws(function () {
     '// <<< BLANK',
     '// <<< BLANK',
   ].join('\n'));
-}, '嵌套 —— 抛');
+}, '嵌套 —— 抛', 'BLANK 指令嵌套');
 T.throws(function () {
   parseZh([
     '// >>> BLANK id=a level=1 fill="1;" hint="甲" hintEn="A"',
@@ -186,10 +187,10 @@ T.throws(function () {
     'y;',
     '// <<< BLANK',
   ].join('\n'));
-}, '重复 id —— 抛（localStorage 的键靠它，撞了会互相覆盖）');
+}, '重复 id —— 抛（localStorage 的键靠它，撞了会互相覆盖）', '重复的 id="a"');
 T.throws(function () {
   parseZh('// >>> BLANK id=a level=1 fill="1;" hint="甲" hintEn="A"\n// <<< BLANK');
-}, '空挖空体 —— 抛');
+}, '空挖空体 —— 抛', '挖空体是空的');
 
 /* ---------- hintAt ---------- */
 
@@ -219,10 +220,10 @@ const h4 = E.hintAt(hb, 4);
 T.ok(h4.zh.indexOf('!diagDown[r + c]') >= 0, '第 4 级是完整答案');
 T.eq(h4.zh.indexOf('…'), -1, '第 4 级没有省略号');
 
-T.throws(function () { E.hintAt(hb); }, 'hintAt 少了 level —— 抛');
-T.throws(function () { E.hintAt(undefined, 1); }, 'hintAt 少了 blank —— 抛');
-T.throws(function () { E.hintAt(hb, 0); }, 'level=0 越界 —— 抛');
-T.throws(function () { E.hintAt(hb, 5); }, 'level=5 越界 —— 抛');
+T.throws(function () { E.hintAt(hb); }, 'hintAt 少了 level —— 抛', 'hintAt(blank, level) 少了 level');
+T.throws(function () { E.hintAt(undefined, 1); }, 'hintAt 少了 blank —— 抛', 'hintAt(blank, level) 少了 blank');
+T.throws(function () { E.hintAt(hb, 0); }, 'level=0 越界 —— 抛', '收到：0');
+T.throws(function () { E.hintAt(hb, 5); }, 'level=5 越界 —— 抛', '收到：5');
 
 /* 第 3 级骨架对嵌套括号、多语句、赋值也要机械生成得对——不只是单个
    if+return 那一种最简形状。这里用一段人工构造的挖空体（不是任何一道
@@ -403,12 +404,12 @@ T.eq(vResOnly.divergence.herStep, RW.trace.length - 1, 'result 分歧给她那�
 
 T.throws(function () {
   E.judge(REF, RW, { result: false, boardOps: false, counters: ['solutionz'] });
-}, '计数器名字在参考轨迹里从未出现 —— 抛（出题配置错误，不许静默判对）');
+}, '计数器名字在参考轨迹里从未出现 —— 抛（出题配置错误，不许静默判对）', 'solutionz');
 
 /* 配置错误不该因为 boardOps 恰好先分歧就被吞掉：三项全开时也照样抛 */
 T.throws(function () {
   E.judge(REF, RW, { result: true, boardOps: true, counters: ['solutionz'] });
-}, '名字打错时，即使 boardOps 会先分歧也照样抛 —— 配置错误不被结果吞掉');
+}, '名字打错时，即使 boardOps 会先分歧也照样抛 —— 配置错误不被结果吞掉', 'solutionz');
 
 /* 参考里有、她那边一次都没出现（她把变量改名了）：这是一处真分歧，不是相等 */
 const RENAMED = I.run(Q.source({ N: 5, lang: 'zh' }).split('solutions').join('total'), { host: {} });
@@ -499,25 +500,32 @@ T.eq(E.judge(longer, fakeRun(1, [OP_A, OP_B], true), ONLY_OPS).status, 'unknown'
   '比过的那一段全都一致，但她没跑完 —— 不知道就是不知道，不许算 pass');
 
 /* check 的每一个键都必须显式给出（§2.9：不许有默认值） */
-T.throws(function () { E.judge(REF, same); }, 'judge 少了 check —— 抛');
-T.throws(function () { E.judge(REF, same, { result: true }); }, 'check 缺 boardOps —— 抛');
-T.throws(function () { E.judge(REF, same, { result: true, boardOps: true }); }, 'check 缺 counters —— 抛');
+T.throws(function () { E.judge(REF, same); }, 'judge 少了 check —— 抛',
+         'judge(refRun, herRun, check) 少了 check');
+T.throws(function () { E.judge(REF, same, { result: true }); }, 'check 缺 boardOps —— 抛',
+         'check.boardOps 必须显式写成 true 或 false（不接受「真值」），收到：undefined');
+T.throws(function () { E.judge(REF, same, { result: true, boardOps: true }); }, 'check 缺 counters —— 抛',
+         'check.counters 必须是一个数组（不比任何计数器就写 []），收到：undefined');
 T.throws(function () { E.judge(REF, same, { result: false, boardOps: false, counters: [] }); },
-         'check 三项全关 —— 抛（这样的判定永远判对，等于没判）');
-T.throws(function () { E.judge(same, undefined, CHECK); }, 'judge 少了 herRun —— 抛');
-T.throws(function () { E.judge(undefined, same, CHECK); }, 'judge 少了 refRun —— 抛');
+         'check 三项全关 —— 抛（这样的判定永远判对，等于没判）', '三项全关');
+T.throws(function () { E.judge(same, undefined, CHECK); }, 'judge 少了 herRun —— 抛',
+         'herRun 不是一次 Interp.run() 的返回值（要有 trace 数组），收到：undefined');
+T.throws(function () { E.judge(undefined, same, CHECK); }, 'judge 少了 refRun —— 抛',
+         'refRun 不是一次 Interp.run() 的返回值（要有 trace 数组），收到：undefined');
 
 /* 「显式」是指真的布尔 / 真的数组，不是「真值」—— 1 和 'yes' 不算 */
 T.throws(function () { E.judge(REF, same, { result: 1, boardOps: true, counters: [] }); },
-         'check.result 是 1 不是 true —— 抛（真值不等于显式声明）');
+         'check.result 是 1 不是 true —— 抛（真值不等于显式声明）', 'result 必须显式写成');
 T.throws(function () { E.judge(REF, same, { result: true, boardOps: 'yes', counters: [] }); },
-         'check.boardOps 是字符串 —— 抛');
+         'check.boardOps 是字符串 —— 抛', '收到："yes"');
 T.throws(function () { E.judge(REF, same, { result: true, boardOps: true, counters: 'solutions' }); },
-         'check.counters 是字符串不是数组 —— 抛');
+         'check.counters 是字符串不是数组 —— 抛', '收到："solutions"');
 T.throws(function () { E.judge(REF, same, { result: true, boardOps: true, counters: [''] }); },
-         'check.counters 里有空名字 —— 抛');
-T.throws(function () { E.judge({ result: 1 }, same, CHECK); }, 'refRun 没有 trace —— 抛');
-T.throws(function () { E.judge(REF, { result: 1 }, CHECK); }, 'herRun 没有 trace —— 抛');
+         'check.counters 里有空名字 —— 抛', 'counters[0] 不是一个非空的变量名');
+T.throws(function () { E.judge({ result: 1 }, same, CHECK); }, 'refRun 没有 trace —— 抛',
+         'refRun 不是一次 Interp.run() 的返回值（要有 trace 数组），收到：object');
+T.throws(function () { E.judge(REF, { result: 1 }, CHECK); }, 'herRun 没有 trace —— 抛',
+         'herRun 不是一次 Interp.run() 的返回值（要有 trace 数组），收到：object');
 
 /* ================= clean：正常模式该显示的那一份源码 =================
 
@@ -583,10 +591,10 @@ T.eq(enRest.join('\n'), zhRest.join('\n'), '两种语言的占位源码除注释
 T.eq(pEn.clean, pZh.clean, 'clean 不随语言变（它里面根本没有占位注释）');
 
 /* 缺 lang / 写错 lang 一律当场抛：默认成哪一种都是让同一个缺陷换个地方复活 */
-T.throws(function () { E.parse(SRC); }, 'parse() 少了 lang —— 抛');
-T.throws(function () { E.parse(SRC, 'fr'); }, 'parse() 的 lang 写了别的语言 —— 抛');
-T.throws(function () { E.parse(SRC, 'EN'); }, 'parse() 的 lang 大小写不对 —— 抛（不猜）');
-T.throws(function () { E.parse(SRC, null); }, 'parse() 的 lang 是 null —— 抛');
+T.throws(function () { E.parse(SRC); }, 'parse() 少了 lang —— 抛', 'parse(source, lang) 少了 lang');
+T.throws(function () { E.parse(SRC, 'fr'); }, 'parse() 的 lang 写了别的语言 —— 抛', '收到："fr"');
+T.throws(function () { E.parse(SRC, 'EN'); }, 'parse() 的 lang 大小写不对 —— 抛（不猜）', '收到："EN"');
+T.throws(function () { E.parse(SRC, null); }, 'parse() 的 lang 是 null —— 抛', 'parse(source, lang) 少了 lang');
 
 /* noteLine：UI 切语言时靠它把编辑器里那一行原地换掉（不重跑解释器）。
    它必须**逐字节**等于 placeholder 里的那一行，否则对换就会对不上，
@@ -594,13 +602,24 @@ T.throws(function () { E.parse(SRC, null); }, 'parse() 的 lang 是 null —— 
 T.eq(E.noteLine(pZh.blanks[0], 'zh'), noteZh, 'noteLine(zh) 与 placeholder 里那一行逐字节相同');
 T.eq(E.noteLine(pZh.blanks[0], 'en'), noteEn, 'noteLine(en) 与 lang="en" 的那一行逐字节相同');
 T.ok(E.noteLine(pZh.blanks[0], 'zh').indexOf('  ') === 0, 'noteLine 带着挖空体的缩进');
-T.throws(function () { E.noteLine(pZh.blanks[0]); }, 'noteLine 少了 lang —— 抛');
-T.throws(function () { E.noteLine(pZh.blanks[0], 'de'); }, 'noteLine 的 lang 认不出 —— 抛');
-T.throws(function () { E.noteLine(undefined, 'zh'); }, 'noteLine 少了 blank —— 抛');
+T.throws(function () { E.noteLine(pZh.blanks[0]); }, 'noteLine 少了 lang —— 抛', 'noteLine(blank, lang) 少了 lang');
+T.throws(function () { E.noteLine(pZh.blanks[0], 'de'); }, 'noteLine 的 lang 认不出 —— 抛',
+         'noteLine(blank, lang) 的 lang 只认');
+T.throws(function () { E.noteLine(undefined, 'zh'); }, 'noteLine 少了 blank —— 抛',
+         '少了 blank，或者它不是 parse() 产出的挖空对象（要有 id / indent / level / hint.{zh,en}），收到：undefined');
+/* ⚠ 这条与下一条的原始消息**逐字节相同**：noteLine 把 hint/indent/level/id
+   四项形状检查合并成一个 if，两种"缺了不同字段"的调用落到同一句
+   `typeof blank === 'object'` 的错误消息里，消息本身分不出哪个字段缺了
+   （见 task-2-report.md）。这不是 pattern 选得不够巧——是被测代码没有
+   给这两种情形留下可供区分的信息，不该为了让 pattern 更好写而去改
+   exercise.js 的错误消息。两条用同一个 pattern 仍然通过判别力普查：
+   它们在本文件内命中的是同一种消息结构（1 种形状），不构成钝。 */
 T.throws(function () { E.noteLine({ hint: { zh: 'a', en: 'b' } }, 'zh'); },
-         'noteLine 的 blank 缺 indent / level —— 抛（那会静默少一截缩进）');
+         'noteLine 的 blank 缺 indent / level —— 抛（那会静默少一截缩进）',
+         '少了 blank，或者它不是 parse() 产出的挖空对象（要有 id / indent / level / hint.{zh,en}），收到：object');
 T.throws(function () { E.noteLine({ hint: { zh: 'a', en: 'b' }, indent: '', level: 1 }, 'zh'); },
-         'noteLine 的 blank 缺 id —— 抛（没有 id 的注释行两个空会长得一模一样）');
+         'noteLine 的 blank 缺 id —— 抛（没有 id 的注释行两个空会长得一模一样）',
+         '少了 blank，或者它不是 parse() 产出的挖空对象（要有 id / indent / level / hint.{zh,en}），收到：object');
 
 /* ---- 这一行必须短，而且必须点名是哪一个空 ----
 
