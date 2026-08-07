@@ -98,7 +98,7 @@ function threeGates(name, refSrc, check, wrongFn, wrongDiv, equivFn) {
 /* ---------- queens ---------- */
 
 const Q = require('./algos/queens.js');
-const qSrc = Q.source({ N: 5 });
+const qSrc = Q.source({ N: 5, lang: 'zh' });
 
 /* 声明的挖空确实能被解析出来，且 id 与 level 是说好的那些 */
 const qBlanks = parseZh(qSrc).blanks;
@@ -144,7 +144,7 @@ T.ok(qPlace.result !== undefined, 'queens 占位版有返回值（虽然答案�
    `return false;`，并把这一条断言从一个 N 加宽到整条滑杆 —— 简报那两条
    在 N=5 下是绿的，加宽才是这个修正的牙齿。 */
 for (const N of [4, 5, 6, 7, 8]) {
-  const p = I.run(parseZh(Q.source({ N: N })).placeholder, { host: {} });
+  const p = I.run(parseZh(Q.source({ N: N, lang: 'zh' })).placeholder, { host: {} });
   T.ok(!p.trace.truncated, 'queens 占位版 N=' + N + ' 跑得完，不截断');
   T.ok(p.result !== undefined, 'queens 占位版 N=' + N + ' 有返回值（虽然答案不对）');
 }
@@ -219,7 +219,7 @@ const KP = require('./algos/knight-path.js');
 /* 用的是工具页 knightPath 那一档的默认值（`KP_W = 8` / `KP_START = 0` /
    目标格滑杆的初值 `W*W-1`）。它同时是 knight-path.js 文件头实测表里最贵的
    一档：5,086 步、距离 6、整块盘都铺遍。插指令行前后逐格相同。 */
-const kpSrc = KP.source({ W: 8, start: 0, target: 63 });
+const kpSrc = KP.source({ W: 8, start: 0, target: 63, lang: 'zh' });
 
 const kpBlanks = parseZh(kpSrc).blanks;
 T.eq(kpBlanks.length, 2, 'knightPath 声明了两个挖空');
@@ -254,7 +254,7 @@ const kpPlaceBad = [];
 let kpPlaceOffBoard = 0;
 let kpPlaceRight = 0;
 for (let target = 1; target <= 63; target++) {
-  const src = KP.source({ W: 8, start: 0, target: target });
+  const src = KP.source({ W: 8, start: 0, target: target, lang: 'zh' });
   const p = I.run(parseZh(src).placeholder, { host: {} });
   if (p.trace.truncated || p.result === undefined) kpPlaceBad.push(target);
   if (p.result === I.run(src, { host: {} }).result) kpPlaceRight++;
@@ -304,7 +304,7 @@ const kpOnlyBad = { 'on-board': [], 'seen-test': [] };
 const kpOnlyRight = { 'on-board': 0, 'seen-test': 0 };
 let kpOnlyOffBoard = 0;
 for (let target = 1; target <= 63; target++) {
-  const src = KP.source({ W: 8, start: 0, target: target });
+  const src = KP.source({ W: 8, start: 0, target: target, lang: 'zh' });
   const refResult = I.run(src, { host: {} }).result;
   for (let k = 0; k < KP_IDS.length; k++) {
     const b = kpBlankOf[KP_IDS[k]];
@@ -402,7 +402,7 @@ const TW = require('./algos/tour-warnsdorff.js');
 const TD = require('./algos/tour-dfs.js');
 /* 四块盘就是工具页 `TOUR_BOARDS` 的四档；3×4 是滑杆初值。 */
 const TOUR_BOARDS = [[3, 4], [3, 5], [4, 5], [3, 7]];
-const twSrc = TW.source({ W: 3, H: 4, start: 0 });
+const twSrc = TW.source({ W: 3, H: 4, start: 0, lang: 'zh' });
 
 /* ---- 这里只有**一个**挖空，不是简报和规格 §2.9 说的两个 ----
 
@@ -464,7 +464,7 @@ T.throws(function () {
    多了一段」这种事。 */
 for (let b = 0; b < TOUR_BOARDS.length; b++) {
   const W = TOUR_BOARDS[b][0], H = TOUR_BOARDS[b][1];
-  T.eq(parseZh(TD.source({ W: W, H: H, start: 0 })).blanks.length, 0,
+  T.eq(parseZh(TD.source({ W: W, H: H, start: 0, lang: 'zh' })).blanks.length, 0,
        'tour-dfs 在 ' + W + '×' + H + ' 上没有挖空 —— 它是只读对照');
 }
 
@@ -506,7 +506,7 @@ for (let b = 0; b < TOUR_BOARDS.length; b++) {
 const twRefTrunc = [];
 for (let b = 0; b < TOUR_BOARDS.length; b++) {
   const W = TOUR_BOARDS[b][0], H = TOUR_BOARDS[b][1];
-  const src = TW.source({ W: W, H: H, start: 0 });
+  const src = TW.source({ W: W, H: H, start: 0, lang: 'zh' });
   const ref = I.run(src, { host: {} });
   const p = I.run(parseZh(src).placeholder, { host: {} });
   const tag = W + '×' + H;
@@ -535,7 +535,7 @@ T.eq(twRefTrunc.join(','), '3×7',
    这条断言而不是先撞 `Interp.STEP_LIMIT`。撞这条断言看到的是「expected true」
    加一个具体步数，撞上限看到的只是 `result === undefined`。 */
 {
-  const p45 = I.run(parseZh(TW.source({ W: 4, H: 5, start: 0 })).placeholder, { host: {} });
+  const p45 = I.run(parseZh(TW.source({ W: 4, H: 5, start: 0, lang: 'zh' })).placeholder, { host: {} });
   T.ok(p45.trace.length < 150000,
        'tourKnight 占位版 4×5 的步数留着余量（< 150,000；实测 ' + p45.trace.length +
        '，离 200,000 上限还剩 ' + (200000 - p45.trace.length) + ' 步）');
@@ -548,7 +548,7 @@ T.eq(twRefTrunc.join(','), '3×7',
    分歧若没出现在截断之前就是 unknown —— 那也不是「对」）。 */
 for (let b = 0; b < TOUR_BOARDS.length; b++) {
   const W = TOUR_BOARDS[b][0], H = TOUR_BOARDS[b][1];
-  const src = TW.source({ W: W, H: H, start: 0 });
+  const src = TW.source({ W: W, H: H, start: 0, lang: 'zh' });
   const v = E.judge(I.run(src, { host: {} }),
                     I.run(parseZh(src).placeholder, { host: {} }), CHECK_TOUR);
   T.ok(v.status !== 'pass',
@@ -670,17 +670,17 @@ T.eq(noteSeen, 5, '真语料里一共扫过 5 个挖空的占位注释行（quee
        （3×4、3×5、4×5、3×7——3×7 那块参考自己会撞 200,000 步的上限，
        但撞墙前 clean 与 src 走的步数依旧该逐一相同）。 */
 const REAL_SOURCES = [
-  ['queens N=4', Q.source({ N: 4 })],
-  ['queens N=5', Q.source({ N: 5 })],
-  ['queens N=6', Q.source({ N: 6 })],
-  ['queens N=7', Q.source({ N: 7 })],
-  ['queens N=8', Q.source({ N: 8 })],
-  ['knightPath target=63(h8)', KP.source({ W: 8, start: 0, target: 63 })],
-  ['knightPath target=27(d4)', KP.source({ W: 8, start: 0, target: 27 })],
-  ['tourWarnsdorff 3×4', TW.source({ W: 3, H: 4, start: 0 })],
-  ['tourWarnsdorff 3×5', TW.source({ W: 3, H: 5, start: 0 })],
-  ['tourWarnsdorff 4×5', TW.source({ W: 4, H: 5, start: 0 })],
-  ['tourWarnsdorff 3×7', TW.source({ W: 3, H: 7, start: 0 })],
+  ['queens N=4', Q.source({ N: 4, lang: 'zh' })],
+  ['queens N=5', Q.source({ N: 5, lang: 'zh' })],
+  ['queens N=6', Q.source({ N: 6, lang: 'zh' })],
+  ['queens N=7', Q.source({ N: 7, lang: 'zh' })],
+  ['queens N=8', Q.source({ N: 8, lang: 'zh' })],
+  ['knightPath target=63(h8)', KP.source({ W: 8, start: 0, target: 63, lang: 'zh' })],
+  ['knightPath target=27(d4)', KP.source({ W: 8, start: 0, target: 27, lang: 'zh' })],
+  ['tourWarnsdorff 3×4', TW.source({ W: 3, H: 4, start: 0, lang: 'zh' })],
+  ['tourWarnsdorff 3×5', TW.source({ W: 3, H: 5, start: 0, lang: 'zh' })],
+  ['tourWarnsdorff 4×5', TW.source({ W: 4, H: 5, start: 0, lang: 'zh' })],
+  ['tourWarnsdorff 3×7', TW.source({ W: 3, H: 7, start: 0, lang: 'zh' })],
 ];
 function stepsOf(src) { return I.run(src, { host: {} }).trace.length; }
 for (const [label, src] of REAL_SOURCES) {

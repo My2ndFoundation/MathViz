@@ -3,6 +3,7 @@ const T = require('../_test.js');
 const I = require('../interp.js');
 const G = require('./king-greedy.js');
 const X = require('./king-exact.js');
+const E = require('../exercise.js');
 
 /* ================= 宿主侧独立参照 =================
 
@@ -97,7 +98,7 @@ function undominated(W, H, blocked, kings) {
    精确那一份会把王收回去（`take`），所以必须真的删，不能只数 place。 */
 function placedKings(M, W, H, blocked) {
   const seq = [], kinds = [];
-  const r = I.run(M.source({ W: W, H: H, blocked: blocked }), { host: {
+  const r = I.run(M.source({ W: W, H: H, blocked: blocked, lang: 'zh' }), { host: {
     place: function (sq, piece) { seq.push(sq); kinds.push(piece); },
     clear: function (sq) { const at = seq.lastIndexOf(sq); if (at >= 0) { seq.splice(at, 1); kinds.splice(at, 1); } },
   } });
@@ -107,7 +108,7 @@ function placedKings(M, W, H, blocked) {
 /* 一次 run 的画像：返回值、解释器步数、有没有撞墙、四种 mark 各几次、最深调用栈。 */
 function probe(M, W, H, blocked) {
   const kinds = { try: 0, ok: 0, cut: 0, back: 0 };
-  const r = I.run(M.source({ W: W, H: H, blocked: blocked }), { host: {
+  const r = I.run(M.source({ W: W, H: H, blocked: blocked, lang: 'zh' }), { host: {
     mark: function (sq, kind) { kinds[kind] = (kinds[kind] || 0) + 1; },
   } });
   let depth = 0;
@@ -150,7 +151,7 @@ const BOARDS = [
    说不清是哪儿坏了。放最前面，第一句话就是「不在子集里」，还带着解析器原话。 */
 for (const [name, M] of [['king-greedy', G], ['king-exact', X]]) {
   let err = null;
-  try { I.parse(M.source({ W: 6, H: 6, blocked: [6, 24, 35] })); } catch (e) { err = e; }
+  try { I.parse(M.source({ W: 6, H: 6, blocked: [6, 24, 35], lang: 'zh' })); } catch (e) { err = e; }
   T.ok(err === null, name + ' 的源码在子集里合法' + (err ? '：' + err.message : ''));
 }
 
@@ -158,12 +159,12 @@ for (const [name, M] of [['king-greedy', G], ['king-exact', X]]) {
 
 let boardsChecked = 0, gapSeen = 0;
 for (const [label, W, H, blocked, gK, eK] of BOARDS) {
-  const g = I.run(G.source({ W: W, H: H, blocked: blocked }), { host: {} });
+  const g = I.run(G.source({ W: W, H: H, blocked: blocked, lang: 'zh' }), { host: {} });
   T.ok(!g.trace.truncated, label + ' 贪心未截断——它永远跑得完，这是这道题的一半');
   T.eq(g.result, gK, label + ' 贪心的王数');
   T.eq(g.result, hostGreedy(W, H, blocked).k, label + ' 贪心与宿主侧独立参照一致');
 
-  const e = I.run(X.source({ W: W, H: H, blocked: blocked }), { host: {} });
+  const e = I.run(X.source({ W: W, H: H, blocked: blocked, lang: 'zh' }), { host: {} });
   if (eK === null) {
     T.eq(e.trace.truncated, true, label + ' 精确解撞上限——这是这一课，不是故障');
     T.ok(typeof e.result === 'undefined', label + ' 撞墙时没有返回值');
@@ -349,14 +350,14 @@ function lcg(seed) {
     if (blocked.length === W * H) continue;
     const tag = W + '×' + H + ' [' + blocked.join(',') + ']';
 
-    const g = I.run(G.source({ W: W, H: H, blocked: blocked }), { host: {} });
+    const g = I.run(G.source({ W: W, H: H, blocked: blocked, lang: 'zh' }), { host: {} });
     T.ok(!g.trace.truncated, tag + ' 贪心未截断');
     T.eq(g.result, hostGreedy(W, H, blocked).k, tag + ' 贪心与宿主侧参照一致');
     const gp = placedKings(G, W, H, blocked).squares;
     T.eq(undominated(W, H, blocked, gp), [], tag + ' 贪心摆出来的王盖满了');
     if (g.trace.length > worstG) worstG = g.trace.length;
 
-    const x = I.run(X.source({ W: W, H: H, blocked: blocked }), { host: {} });
+    const x = I.run(X.source({ W: W, H: H, blocked: blocked, lang: 'zh' }), { host: {} });
     if (x.trace.truncated) {
       xTrunc++;
       T.ok(typeof x.result === 'undefined', tag + ' 精确撞墙时没有返回值');
@@ -381,11 +382,11 @@ function lcg(seed) {
   const all = [];
   for (let s = 0; s < 9; s++) all.push(s);
   for (const [name, M] of [['贪心', G], ['精确', X]]) {
-    const r0 = I.run(M.source({ W: 3, H: 3, blocked: all }), { host: {} });
+    const r0 = I.run(M.source({ W: 3, H: 3, blocked: all, lang: 'zh' }), { host: {} });
     T.eq(r0.result, 0, name + '：整块盘都是墙，一个王都不用摆');
     T.eq(placedKings(M, 3, 3, all).squares, [], name + '：这时候盘上一个王都没有');
     const one = all.filter(function (s) { return s !== 4; });
-    const r1 = I.run(M.source({ W: 3, H: 3, blocked: one }), { host: {} });
+    const r1 = I.run(M.source({ W: 3, H: 3, blocked: one, lang: 'zh' }), { host: {} });
     T.eq(r1.result, 1, name + '：只剩中间一格，一个王');
     T.eq(placedKings(M, 3, 3, one).squares, [4], name + '：那个王就站在剩下的那一格上');
   }
@@ -412,15 +413,29 @@ function lcg(seed) {
    剩下的差异就正好是「挑哪个王」这个主意本身。
    这道门与 tour 那道门守的是同一件事（她把两边一 diff，diff 出来的就该
    正好是那个主意），只是换成了这一对的正确形状。 */
-const MARK_A = '/* ===== 从这里到下面那条分水岭为止，两份源码逐字相同 ===== */';
-const MARK_B = '/* ===== 分水岭：从这里往下两份不一样了 —— 差的就是「挑哪个王」 ===== */';
-{
-  const opts = { W: 6, H: 6, blocked: [6, 24, 35] };
+/* ⚠ 两条横线本身也是**注释**，所以它们随语言换文本 —— 这道门因此必须
+   两种语言各跑一次（阶段 8）：只跑中文的话，英文那一份共用段漂移了没有
+   任何东西会红，而并排读英文的人看到的正是那一份。
+   下面 MARKS 里每种语言的两条横线，必须与两份 algos 里 COMMON 段的横线
+   逐字相同 —— 对不上，`a >= 0` 那条当场红，而不是静默跳过。 */
+const MARKS = {
+  zh: {
+    a: '/* ===== 从这里到下面那条分水岭为止，两份源码逐字相同 ===== */',
+    b: '/* ===== 分水岭：从这里往下两份不一样了 —— 差的就是「挑哪个王」 ===== */',
+  },
+  en: {
+    a: '/* ===== From here down to the divide below, the two sources read word for word alike ===== */',
+    b: '/* ===== The divide: below here the two differ — what differs is which king to pick ===== */',
+  },
+};
+for (const lang of ['zh', 'en']) {
+  const MARK_A = MARKS[lang].a, MARK_B = MARKS[lang].b;
+  const opts = { W: 6, H: 6, blocked: [6, 24, 35], lang: lang };
   const sg = G.source(opts), sx = X.source(opts);
   const shared = function (src, name) {
     const a = src.indexOf(MARK_A), b = src.indexOf(MARK_B);
-    T.ok(a >= 0, name + ' 里有「以下逐字相同」那条横线');
-    T.ok(b > a, name + ' 里有「分水岭」那条横线，而且在前一条之后');
+    T.ok(a >= 0, '[' + lang + '] ' + name + ' 里有「以下逐字相同」那条横线');
+    T.ok(b > a, '[' + lang + '] ' + name + ' 里有「分水岭」那条横线，而且在前一条之后');
     return src.slice(a, b + MARK_B.length);
   };
   /* ---- 分水岭**之上**那一段也要有门 ----
@@ -434,33 +449,33 @@ const MARK_B = '/* ===== 分水岭：从这里往下两份不一样了 —— �
      （标题、以及讲「这一份 / 另一份」的那两行 —— 那三行本来就该不同）。 */
   const preG = sg.slice(0, sg.indexOf(MARK_A)).split('\n');
   const preX = sx.slice(0, sx.indexOf(MARK_A)).split('\n');
-  T.ok(preG.length > 15, '分水岭之上有 ' + preG.length + ' 行，这道门没有空转');
-  T.eq(preG.length, preX.length, '分水岭之上两份行数相同（并排读时上半截逐行对得上）');
+  T.ok(preG.length > 15, '[' + lang + '] 分水岭之上有 ' + preG.length + ' 行，这道门没有空转');
+  T.eq(preG.length, preX.length, '[' + lang + '] 分水岭之上两份行数相同（并排读时上半截逐行对得上）');
   const headDiff = [];
   for (let i = 0; i < Math.max(preG.length, preX.length); i++) {
     if (preG[i] !== preX[i]) headDiff.push(i + 1);
   }
   T.eq(headDiff, [1, 9, 10],
-       '分水岭之上只有三行不同，就在第 1 / 9 / 10 行（标题 + 讲「这一份 / 另一份」' +
-       '的两行）；实测不同的是第 ' + headDiff.join(' / ') + ' 行');
+       '[' + lang + '] 分水岭之上只有三行不同，就在第 1 / 9 / 10 行（标题 + 讲「这一份 /' +
+       ' 另一份」的两行）；实测不同的是第 ' + headDiff.join(' / ') + ' 行');
 
   const cg = shared(sg, 'king-greedy'), cx = shared(sx, 'king-exact');
-  T.eq(cg === cx, true, '两条横线之间的那一整段，两份逐字节相同');
+  T.eq(cg === cx, true, '[' + lang + '] 两条横线之间的那一整段，两份逐字节相同');
   T.ok(cg.split('\n').length > 40,
-       '共用的那一段有 ' + cg.split('\n').length + ' 行，这道门没有空转');
+       '[' + lang + '] 共用的那一段有 ' + cg.split('\n').length + ' 行，这道门没有空转');
   /* 分水岭之后必须真的不一样 —— 否则上面那条「逐字节相同」可以靠把两份
      写成同一份来满足，而那样就没有两个算法了。 */
   const tailG = sg.slice(sg.indexOf(MARK_B) + MARK_B.length);
   const tailX = sx.slice(sx.indexOf(MARK_B) + MARK_B.length);
-  T.ok(tailG !== tailX, '分水岭之后两份确实分道扬镳了');
-  T.ok(tailG.indexOf('bestGain') >= 0, '贪心那一半里有「擂台」（bestGain）');
-  T.ok(tailX.indexOf('function take') >= 0, '精确那一半里有「把王收回去」（take）');
-  T.ok(tailG.indexOf('function take') < 0, '贪心那一半里没有 take——它从不收回');
-  T.ok(tailX.indexOf('bestGain') < 0, '精确那一半里没有擂台——它不挑，它全试');
+  T.ok(tailG !== tailX, '[' + lang + '] 分水岭之后两份确实分道扬镳了');
+  T.ok(tailG.indexOf('bestGain') >= 0, '[' + lang + '] 贪心那一半里有「擂台」（bestGain）');
+  T.ok(tailX.indexOf('function take') >= 0, '[' + lang + '] 精确那一半里有「把王收回去」（take）');
+  T.ok(tailG.indexOf('function take') < 0, '[' + lang + '] 贪心那一半里没有 take——它从不收回');
+  T.ok(tailX.indexOf('bestGain') < 0, '[' + lang + '] 精确那一半里没有擂台——它不挑，它全试');
   /* 共用段里必须真的装着那些共用的东西，不能只是两条挨着的横线。 */
   for (const needle of ['const wall = []', 'const empty = []', 'const covers = []',
                         'const seen = []', 'let left = empty.length', 'function put(s)']) {
-    T.ok(cg.indexOf(needle) >= 0, '共用段里有 `' + needle + '`');
+    T.ok(cg.indexOf(needle) >= 0, '[' + lang + '] 共用段里有 `' + needle + '`');
   }
 }
 
@@ -468,7 +483,7 @@ const MARK_B = '/* ===== 分水岭：从这里往下两份不一样了 —— �
    页面（Task 5）的 `PROBLEMS.kingDominate.entry` 只有一个名字，两条轨道共用。
    两份都必须叫 `cover`，而且 `cover(n)` 的 n 都是「已经摆了几个王」。 */
 {
-  const opts = { W: 5, H: 5, blocked: [6, 12, 18] };
+  const opts = { W: 5, H: 5, blocked: [6, 12, 18], lang: 'zh' };
   for (const [name, src] of [['king-greedy', G.source(opts)], ['king-exact', X.source(opts)]]) {
     T.ok(src.indexOf('function cover(n) {') >= 0, name + ' 的入口函数叫 cover(n)');
     T.ok(src.indexOf('cover(n + 1)') >= 0, name + ' 的 cover 是递归那一个，不是外壳');
@@ -509,10 +524,10 @@ for (const [name, M] of [['king-greedy', G], ['king-exact', X]]) {
   let err = null;
   const all = [];
   for (let s = 0; s < 9; s++) all.push(s);
-  try { M.source({ W: 3, H: 3, blocked: all }); } catch (e) { err = e; }
+  try { M.source({ W: 3, H: 3, blocked: all, lang: 'zh' }); } catch (e) { err = e; }
   T.ok(err === null, name + '：一格空的都没有的盘照常吐源码');
   err = null;
-  try { M.source({ W: 7, H: 7, blocked: [16, 24, 32] }); } catch (e) { err = e; }
+  try { M.source({ W: 7, H: 7, blocked: [16, 24, 32], lang: 'zh' }); } catch (e) { err = e; }
   T.ok(err === null, name + '：明知精确会撞墙的 7×7 照常吐源码');
 }
 
@@ -524,6 +539,107 @@ for (const [name, M] of [['king-greedy', G], ['king-exact', X]]) {
   T.ok(typeof M.BOARDS === 'undefined', name + ' 没有把四档盘写死在模块里——那是页面的事');
   T.ok(typeof M.W_MAX === 'undefined', name + ' 没有偷偷带一个滑杆上限出来');
   T.eq(Object.keys(M).sort(), ['source'], name + ' 导出的键就只有 source 一个');
+}
+
+/* ================= 双语三道门 × 两份（规格 §7.5）=================
+
+   ⚠ **这两块盘是挑过的：两种语言下精确解都跑得完。** 步数门比的是
+   `trace.length`，而一旦两边都撞上 `Interp.STEP_LIMIT`（200,000），两个
+   `trace.length` 就都等于上限，这条断言退化成 `200000 === 200000` ——
+   翻译把源码改成什么样它都绿（Task 5 在 tour-dfs 5×5 上实测过这件事）。
+   所以下面每一次比步数之前，先钉一条 `!truncated`：**这两块盘上的比较
+   是真的在比**，第四档那块 7×7（精确故意撞上限）**不许**混进来。
+   「撞上限」那件事由本文件上面第四档那一节自己验，与双语无关。 */
+const KING_SRC = { greedy: G, exact: X };
+const KING_BOARDS = [
+  { W: 5, H: 5, blocked: [6, 8, 12] },
+  { W: 6, H: 6, blocked: [6, 24, 35] },
+];
+for (const key of Object.keys(KING_SRC)) {
+  const mod = KING_SRC[key];
+  for (let i = 0; i < KING_BOARDS.length; i = i + 1) {
+    const b = KING_BOARDS[i];
+    const zh = mod.source({ W: b.W, H: b.H, blocked: b.blocked, lang: 'zh' });
+    const en = mod.source({ W: b.W, H: b.H, blocked: b.blocked, lang: 'en' });
+    T.eq(en.split('\n').length, zh.split('\n').length,
+         key + ' 盘 ' + i + '：两种语言行数相同');
+    T.eq(T.normalizeSource(en), T.normalizeSource(zh),
+         key + ' 盘 ' + i + '：抽掉注释与字符串之后，两种语言逐字节相同');
+    const rz = I.run(zh, { host: {} }), re = I.run(en, { host: {} });
+    T.ok(!rz.trace.truncated && !re.trace.truncated,
+         key + ' 盘 ' + i + '：两种语言都跑得完——步数门这才在真的比，' +
+         '不是两边都停在 ' + I.STEP_LIMIT + ' 上');
+    T.eq(re.trace.length, rz.trace.length,
+         key + ' 盘 ' + i + '：两种语言的解释器步数相同（' + rz.trace.length + ' 步）');
+  }
+  const b0 = KING_BOARDS[0];
+  const zh0 = mod.source({ W: b0.W, H: b0.H, blocked: b0.blocked, lang: 'zh' });
+  const en0 = mod.source({ W: b0.W, H: b0.H, blocked: b0.blocked, lang: 'en' });
+  T.ok(zh0 !== en0, key + '：两种语言的源码不是同一份');
+  T.ok(/[一-鿿㐀-䶿　-〿＀-￯]/.test(zh0), key + '：中文那一份里有汉字');
+  /* ⚠ 「英文里没有汉字」断言的是**送进编辑器的那一份**（parse().clean）。
+     这两份一个挖空都没有，原文断言本来也成立 —— 仍旧走 clean，
+     同一件事整个阶段只留一种写法。 */
+  T.ok(!/[一-鿿㐀-䶿　-〿＀-￯]/.test(E.parse(en0, 'en').clean),
+       key + '：英文那一份送到编辑器的文本里一个汉字都没有');
+  /* ⚠ 第三个参数才是 pattern（见 _test.js）：写在第二个位置上 pattern 就是
+     undefined，退化成「抛了就算过」，而这两条要钉的恰恰是**抛的是哪一条**。
+     另外注意上面那一组「缺参数当场抛」**一个 lang 都不传** —— 补了 'zh'
+     它们就对 lang 的校验位置完全失明（'zh' 合法，无论校验排在前排在后都
+     照样落到参数那条）。两组合起来才钉得住「lang 的校验在 W/H/blocked 之后」。 */
+  T.throws(function () { mod.source({ W: 5, H: 5, blocked: [] }); },
+           key + '：缺 lang 必须抛', /少了 lang/);
+  T.throws(function () { mod.source({ W: 5, H: 5, blocked: [], lang: 'fr' }); },
+           key + '：lang=fr 必须抛', /只认/);
+  T.throws(function () { mod.source({ W: 5, H: 5, blocked: [], lang: '' }); },
+           key + '：lang 是空串必须抛（空串不当默认值用）', /只认/);
+}
+
+/* ---- 英文不许把「跑不完」偷偷说成「所以贪心那个数是最优的」 ----
+
+   这道题的落点是第四档：7×7 上精确解撞 200,000 步上限，贪心给出 8，
+   而工具**没有证明** 8 是最优。中文那一段说的是「它什么都没说 —— 不是
+   『答案是贪心那个数』，是『不知道』」。英文那一段必须同样是否定式。
+
+   ⚠ **下面这几条是词表门，不是语义门。** 它们只查两件字面上的事：
+     (a) 英文里没有出现下表里**列着的**那几族肯定说法；
+     (b) 英文里出现了「说不出话」那一族的词（unknown / said nothing）。
+   换法是列不完的（"then the greedy count stands"、"that settles it"、
+   "no fewer will do" ……都能绕过 (a)），而 (b) 只问那个词**有没有出现**，
+   不问它出现在哪句话里、修饰的是不是那件事。
+   **「英文那一段说的是不是『跑不完、判不了』」这一半是人肉门**，靠的是
+   审查逐句读（Task 7 Step 7 的额外一条就是它），不是靠下面这几条。
+
+   （反过来这道门也不恒真：把 (b) 那两个词从英文里抹掉，它当场红 ——
+   它拦得住「彻底把『不知道』丢掉」那一档，只是拦不住换词。） */
+const KING_BANNED_OPTIMAL = [
+  ['… is optimal',              /\bis\s+(the\s+)?optimal\b/i],
+  ['proven / provably optimal', /\b(proven|provably|known\s+to\s+be|guaranteed)\s+optimal\b/i],
+  ['the best possible',         /\bbest\s+possible\b/i],
+  ['confirms …',                /\bconfirm(s|ed)?\b/i],
+  ['greedy … is the answer',    /\bgreed\w*\b[^.]{0,48}\bis\s+the\s+answer\b/i],
+  ['so 8 is …',                 /\bso\s+8\s+is\b/i],
+];
+{
+  const opts = { W: 7, H: 7, blocked: [16, 24, 32] };
+  const kgEn = G.source({ W: opts.W, H: opts.H, blocked: opts.blocked, lang: 'en' });
+  const kxEn = X.source({ W: opts.W, H: opts.H, blocked: opts.blocked, lang: 'en' });
+  for (const [who, src] of [['king-greedy', kgEn], ['king-exact', kxEn]]) {
+    for (let i = 0; i < KING_BANNED_OPTIMAL.length; i = i + 1) {
+      const label = KING_BANNED_OPTIMAL[i][0], rx = KING_BANNED_OPTIMAL[i][1];
+      T.ok(!rx.test(src), who + ' 的英文没有说「' + label + '」这一族' +
+           '（贪心那个 8 没被证明是最优）');
+    }
+  }
+  /* 精确那一份的英文里必须真的写着「跑不完的时候它什么都没说」。
+     没有这一条，上面那几条否定式全靠「别说错话」，把整段删光也是绿的。 */
+  T.ok(/\bsaid nothing\b/i.test(kxEn),
+       'king-exact 的英文里写着「跑不完的时候它什么都没说」（said nothing）');
+  T.ok(/\bunknown\b/i.test(kxEn),
+       'king-exact 的英文里写着「不知道」（unknown），而不是一个数');
+  /* 贪心那一份的英文也必须自己说「我不保证最少」。 */
+  T.ok(/\bdoes\s+not\s+promise\b/i.test(kgEn),
+       'king-greedy 的英文里写着「它不保证最少」（does not promise）');
 }
 
 T.report();

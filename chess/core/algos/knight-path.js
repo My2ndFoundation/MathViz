@@ -136,56 +136,175 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  /* ================= 双语渲染（规格 §1.6 / §7.5）=================
+
+     ⚠ **这一整段在七份 algos/*.js 里逐字节相同**，check.py 的
+     bilingual_algos_check() 会核对。改这里就得七份一起改。
+     不抽成共用模块，是因为这些文件是被 inline_core.py 当**字符串**逐份
+     内联、再各自求值成 AlgoXxx 全局的 —— 抽出去就凭空多一条求值顺序
+     依赖，而那类缺陷要到浏览器里 ALGOS['queens.js'] 是 undefined 才发作
+     （阶段 5 建页当天撞过一次）。七份重复 + 一道字节级门，是阶段 7
+     king-greedy / king-exact 共用段用过的同一个套路。
+
+     `parts` 的元素只有两种：
+       字符串                 —— 一行，两种语言下逐字相同
+                                 （代码、空行、// >>> BLANK 指令行）
+       { zh: [], en: [] }     —— 一段散文，两边都是**行数组**
+
+     **两边行数必须相等**，不是洁癖：生成的源码是按行索引的 —— 解释器
+     每一步记 line，第 4 级提示靠 pristine 与编辑器逐行对齐划出 answerRange，
+     判定靠 judge.herSrc 比对。行数一差，切一次语言这四样同时指错地方。
+     行数一对齐，轨迹在两种语言下逐字节相同，切语言就只是换掉编辑器里的
+     文本，不重跑解释器。
+
+     BLANK 指令行**不翻译**：它本来就同时带着 hint 与 hintEn，两种语言
+     变体里那一行逐字相同，parse() 一点不用改。所以它是**字符串**片段。 */
+  function render(parts, lang) {
+    if (lang === undefined || lang === null) {
+      throw new Error(
+        'source({ lang }) 少了 lang —— 源码的注释与日志要用哪种语言没有' +
+        '默认值，必须写明 "zh" 或 "en"（默认成任何一种，都是让同一个缺陷' +
+        '换个地方复活）'
+      );
+    }
+    if (lang !== 'zh' && lang !== 'en') {
+      throw new Error('source({ lang }) 的 lang 只认 "zh" 或 "en"，收到：' +
+                      JSON.stringify(lang));
+    }
+    const out = [];
+    for (let i = 0; i < parts.length; i = i + 1) {
+      const p = parts[i];
+      if (typeof p === 'string') { out.push(p); continue; }
+      if (!p || !Array.isArray(p.zh) || !Array.isArray(p.en)) {
+        throw new Error('第 ' + i + ' 个片段既不是字符串、也不是 ' +
+                        '{ zh: [], en: [] }');
+      }
+      if (p.zh.length !== p.en.length) {
+        throw new Error(
+          '第 ' + i + ' 个片段两种语言行数不等：zh ' + p.zh.length + ' 行 / en ' +
+          p.en.length + ' 行 —— 生成的源码按行索引，行数一差，切一次语言 ' +
+          'Step.line / pristine / answerRange / judge.herSrc 同时指错地方' +
+          '（规格 §1.6）'
+        );
+      }
+      const lines = p[lang];
+      for (let j = 0; j < lines.length; j = j + 1) out.push(lines[j]);
+    }
+    return out;
+  }
+
   /* 普通字符串拼，不用模板字面量：这段文本本身会被原样贴进 html，
-     反引号在那个上下文里比在这里更容易出事（照抄 queens.js 的理由）。 */
+     反引号在那个上下文里比在这里更容易出事（照抄 queens.js 的理由）。
+
+     元素两种：字符串（代码 / 空行 / BLANK 指令行，两语逐字相同）与
+     `{ zh: [], en: [] }`（一段散文，两边行数必须相等）—— 见上面 render()。
+     英文不是逐句直译，是照中文那一版的意思与语气重写的，行数对齐落在
+     「段」上：段内句子怎么重组都行，段的行数必须一样。 */
   const HEAD = [
-    '/* ============ 骑士的最短路 · 广度优先搜索 ============',
-    '   马走「日」字：横一竖二，或者横二竖一 —— 绕着它站的那一格一共八个方向。',
-    '   题目是：从一格走到另一格，最少要几步？',
+    {
+      zh: [
+        '/* ============ 骑士的最短路 · 广度优先搜索 ============',
+        '   马走「日」字：横一竖二，或者横二竖一 —— 绕着它站的那一格一共八个方向。',
+        '   题目是：从一格走到另一格，最少要几步？',
+        '',
+        '   格子编号：sq = 行 * W + 列。第 0 行是棋盘最下面那一行，第 0 列是最左边',
+        '   那一列 —— 于是 0 号格就是国际象棋里的 a1。',
+        '   要反推回去：列 = sq % W，行 = (sq - 列) / W。',
+        '',
+        '   办法叫「广度优先」：先把一步能到的格子全找出来，再把两步能到的全找出来，',
+        '   一层一层往外铺，像往水里丢一颗石子荡开的波纹。',
+        '   第一次碰到目标的那一层，层号就是最短步数 —— 因为更近的每一层都已经',
+        '   找遍了，目标不在那里面。',
+        '',
+        '   跟前两道题最大的不同：**它一次也不反悔**。回溯搜索要退回来重走，是因为',
+        '   它可能先冲进一条错路；而这一份是按远近铺开的，第一次碰到一格时，那就',
+        '   已经是最短的走法了，没有什么可反悔的。 */',
+      ],
+      en: [
+        '/* ============ The Knight’s Shortest Path · Breadth-First Search ============',
+        '   A knight moves in an L: one square across and two along, or two and one — eight',
+        '   directions around the square it stands on. From one square to another, how few moves?',
+        '',
+        '   Squares are numbered sq = row * W + column. Row 0 is the bottom row of the board',
+        '   and column 0 is the leftmost one — so square 0 is a1 in chess.',
+        '   To go the other way: column = sq % W, row = (sq - column) / W.',
+        '',
+        '   The method is called breadth-first: find every square one move away, then every',
+        '   square two moves away, spreading outward a layer at a time, like ripples from a',
+        '   stone dropped in water. The layer where the target first appears is the fewest',
+        '   moves — every nearer layer was already searched, and the target was not there.',
+        '',
+        '   The big difference from the previous two puzzles: **it never takes a move back**.',
+        '   Backtracking retreats and retries because it can charge into a wrong path; this one',
+        '   spreads by distance, so the first arrival at a square is already the shortest way. */',
+      ],
+    },
     '',
-    '   格子编号：sq = 行 * W + 列。第 0 行是棋盘最下面那一行，第 0 列是最左边',
-    '   那一列 —— 于是 0 号格就是国际象棋里的 a1。',
-    '   要反推回去：列 = sq % W，行 = (sq - 列) / W。',
-    '',
-    '   办法叫「广度优先」：先把一步能到的格子全找出来，再把两步能到的全找出来，',
-    '   一层一层往外铺，像往水里丢一颗石子荡开的波纹。',
-    '   第一次碰到目标的那一层，层号就是最短步数 —— 因为更近的每一层都已经',
-    '   找遍了，目标不在那里面。',
-    '',
-    '   跟前两道题最大的不同：**它一次也不反悔**。回溯搜索要退回来重走，是因为',
-    '   它可能先冲进一条错路；而这一份是按远近铺开的，第一次碰到一格时，那就',
-    '   已经是最短的走法了，没有什么可反悔的。 */',
-    '',
-    '/* 棋盘边长、出发格、目标格。真正的棋盘就是 W = 8。 */',
+    {
+      zh: ['/* 棋盘边长、出发格、目标格。真正的棋盘就是 W = 8。 */'],
+      en: ['/* The side of the board, the starting square, the target. A real board is W = 8. */'],
+    },
   ];
 
   const BODY = [
     '',
-    '/* 马的八个方向。DX 与 DY 一一对应：第 k 个方向是「横走 DX[k]、竖走 DY[k]」。',
-    '   横一竖二四个、横二竖一四个，绕着起点转一圈 —— 这就是「日」字。 */',
+    {
+      zh: [
+        '/* 马的八个方向。DX 与 DY 一一对应：第 k 个方向是「横走 DX[k]、竖走 DY[k]」。',
+        '   横一竖二四个、横二竖一四个，绕着起点转一圈 —— 这就是「日」字。 */',
+      ],
+      en: [
+        '/* The eight knight directions. DX and DY pair up: direction k is "go DX[k] across',
+        '   and DY[k] along" — four one-and-two, four two-and-one, a full ring around it. */',
+      ],
+    },
     'const DX = [1, 2, 2, 1, -1, -2, -2, -1];',
     'const DY = [2, 1, -1, -2, -2, -1, 1, 2];',
     '',
-    '/* 两张备忘表：',
-    '     dist[sq]  从出发格走到这一格最少几步；−1 表示还没碰到过它。',
-    '     prev[sq]  第一次到达它时，是从哪一格过来的 —— 最后要靠它把路线串回来。',
-    '   一格只会被确认一次 —— 这是整道题唯一的规则，别的都是围着它转的脚手架。 */',
+    {
+      zh: [
+        '/* 两张备忘表：',
+        '     dist[sq]  从出发格走到这一格最少几步；−1 表示还没碰到过它。',
+        '     prev[sq]  第一次到达它时，是从哪一格过来的 —— 最后要靠它把路线串回来。',
+        '   一格只会被确认一次 —— 这是整道题唯一的规则，别的都是围着它转的脚手架。 */',
+      ],
+      en: [
+        '/* Two lookup tables:',
+        '     dist[sq]  fewest moves from the start to this square; −1 means not yet touched.',
+        '     prev[sq]  which square we came from the first time; the route is rebuilt from it.',
+        '   A square is confirmed exactly once — the one rule here; the rest is scaffolding. */',
+      ],
+    },
     'const dist = [];',
     'const prev = [];',
     'for (let i = 0; i < W * W; i = i + 1) { dist.push(-1); prev.push(-1); }',
     '',
-    '// (x, y) 还在棋盘上吗？出界的方向连看都不用看。',
+    {
+      zh: ['// (x, y) 还在棋盘上吗？出界的方向连看都不用看。'],
+      en: ['// Is (x, y) still on the board? A direction that leaves it is not worth a look.'],
+    },
     'function onBoard(x, y) {',
     '  // >>> BLANK id=on-board level=1 fill="return false;" hint="四条边都要查：x 要落在 0 到 W−1 之间，y 也一样。少查一条边，波纹就会漫到棋盘外面去 —— 那外面的格子号码根本不存在。" hintEn="All four edges have to be checked: x must land between 0 and W−1, and so must y. Miss one edge and the wave spills off the board, into square numbers that do not exist."',
     '  return x >= 0 && x < W && y >= 0 && y < W;',
     '  // <<< BLANK',
     '}',
     '',
-    '/* frontier 是「正好 d 步能到的那一整层格子」。',
-    '   这个函数把这一层每一格的八个方向都看一遍：凡是还没碰过的，都属于第 d+1',
-    '   层 —— 收齐之后，再对下一层调用自己。递归的每一层，就是棋盘上的一圈波纹，',
-    '   所以左边调用栈叠了几帧，右边的波纹就荡开了几圈。',
-    '   返回最短步数；这一层之后再也铺不出新格子，就返回 −1（到不了）。 */',
+    {
+      zh: [
+        '/* frontier 是「正好 d 步能到的那一整层格子」。',
+        '   这个函数把这一层每一格的八个方向都看一遍：凡是还没碰过的，都属于第 d+1',
+        '   层 —— 收齐之后，再对下一层调用自己。递归的每一层，就是棋盘上的一圈波纹，',
+        '   所以左边调用栈叠了几帧，右边的波纹就荡开了几圈。',
+        '   返回最短步数；这一层之后再也铺不出新格子，就返回 −1（到不了）。 */',
+      ],
+      en: [
+        '/* frontier is "the whole layer of squares reachable in exactly d moves".',
+        '   This function checks all eight directions out of every square in that layer; any',
+        '   square not yet touched belongs to layer d+1. Collect them, then call itself on that',
+        '   layer — each level of recursion is one ripple, so the frames stacked on the left are',
+        '   the rings on the right. Returns the fewest moves; −1 if no new square, so no route. */',
+      ],
+    },
     'function expand(frontier, d) {',
     '  const next = [];',
     '  for (let i = 0; i < frontier.length; i = i + 1) {',
@@ -197,21 +316,43 @@
     '      const ny = y + DY[k];',
     '      if (onBoard(nx, ny)) {',
     '        const nb = ny * W + nx;',
-    '        mark(nb, "try");     // 正在看这个邻居：先点亮，再问它是不是第一次碰到',
+    {
+      zh: ['        mark(nb, "try");     // 正在看这个邻居：先点亮，再问它是不是第一次碰到'],
+      en: ['        mark(nb, "try");     // This neighbour: light it up first, then ask if it is new'],
+    },
     '        // >>> BLANK id=seen-test level=1 fill="if (true) {" hint="dist[nb] 记的是「走到这一格最少几步」，−1 的意思是还没碰过它。碰过的就不必再看了。留神出发格记的是 0 —— 它也是碰过的。" hintEn="dist[nb] holds the fewest moves needed to reach that square, and −1 means it has not been touched yet. A square that has been touched needs no second look. Watch out for the starting square: it holds 0, and 0 counts as touched."',
     '        if (dist[nb] >= 0) {',
     '        // <<< BLANK',
-    '          /* 早就到过它了。而且更早到达它的那一层比现在这一层近，',
-    '             所以从这边再走过去只会更长 —— 看都不用再看。 */',
+    {
+      zh: [
+        '          /* 早就到过它了。而且更早到达它的那一层比现在这一层近，',
+        '             所以从这边再走过去只会更长 —— 看都不用再看。 */',
+      ],
+      en: [
+        '          /* Reached long ago, and the layer that reached it was nearer than',
+        '             this one, so going there from here is only longer. Skip it. */',
+      ],
+    },
     '          mark(nb, "cut");',
     '        } else {',
-    '          /* 第一次碰到它。它比这一层正好远一步，而这就是它的最短步数：',
-    '             更近的每一层刚才都铺过了，如果有更短的走法，早就碰上了。 */',
+    {
+      zh: [
+        '          /* 第一次碰到它。它比这一层正好远一步，而这就是它的最短步数：',
+        '             更近的每一层刚才都铺过了，如果有更短的走法，早就碰上了。 */',
+      ],
+      en: [
+        '          /* First time here, exactly one move further than this layer — that is',
+        '             its shortest: nearer layers are done, so a shorter way would have shown. */',
+      ],
+    },
     '          dist[nb] = d + 1;',
     '          prev[nb] = cur;',
     '          mark(nb, "ok");',
     '          if (nb === TARGET) {',
-    '            return d + 1;    // 碰上目标了 —— 当场就是答案，剩下的层不用再铺',
+    {
+      zh: ['            return d + 1;    // 碰上目标了 —— 当场就是答案，剩下的层不用再铺'],
+      en: ['            return d + 1;    // Target found — that is the answer; no more layers needed'],
+    },
     '          }',
     '          next.push(nb);',
     '        }',
@@ -219,13 +360,22 @@
     '    }',
     '  }',
     '  if (next.length === 0) {',
-    '    /* 这一层之后再没有新格子了：能到的都到过了，目标不在其中。 */',
+    {
+      zh: ['    /* 这一层之后再没有新格子了：能到的都到过了，目标不在其中。 */'],
+      en: ['    /* Nothing new after this layer: everything reachable is done, none is the target. */'],
+    },
     '    return -1;',
     '  }',
-    '  return expand(next, d + 1);   // 铺下一层 —— 递归就发生在这一行',
+    {
+      zh: ['  return expand(next, d + 1);   // 铺下一层 —— 递归就发生在这一行'],
+      en: ['  return expand(next, d + 1);   // lay out the next layer — this line is the recursion'],
+    },
     '}',
     '',
-    '/* 出发。第 0 层只有出发格自己，它到自己是 0 步。 */',
+    {
+      zh: ['/* 出发。第 0 层只有出发格自己，它到自己是 0 步。 */'],
+      en: ['/* Off we go. Layer 0 holds only the starting square: 0 moves to reach itself. */'],
+    },
     'dist[START] = 0;',
     'mark(START, "ok");',
     'let steps = 0;',
@@ -233,29 +383,65 @@
     '  steps = expand([START], 0);',
     '}',
     'if (steps < 0) {',
-    '  /* 盘上一匹马都不摆：没有路线可摆。−1 不是 0 —— 0 的意思是「已经站在',
-    '     目标格上了」，那是完全不同的一件事。 */',
-    '  log("到不了：马从这一格出发，永远走不到目标格");',
+    {
+      zh: [
+        '  /* 盘上一匹马都不摆：没有路线可摆。−1 不是 0 —— 0 的意思是「已经站在',
+        '     目标格上了」，那是完全不同的一件事。 */',
+      ],
+      en: [
+        '  /* Not one knight goes on the board: there is no route to lay out. And −1 is',
+        '     not 0 — 0 would mean "already on the target", a completely different thing. */',
+      ],
+    },
+    {
+      zh: ['  log("到不了：马从这一格出发，永远走不到目标格");'],
+      en: ['  log("Cannot be reached: from this square the knight can never get to the target");'],
+    },
     '} else {',
-    '  /* 把路线倒着串回来：从目标格顺着 prev 一路退回出发格，每退一格就摆一匹马。',
-    '     摆完，盘上那一串马就是一条最短路线本身。',
-    '     整趟搜索里盘上一直有东西在长 —— 长的是波纹（mark），不是棋子：',
-    '     BFS 里没有任何一匹马在走路，它是同时向所有方向铺开的。 */',
+    {
+      zh: [
+        '  /* 把路线倒着串回来：从目标格顺着 prev 一路退回出发格，每退一格就摆一匹马。',
+        '     摆完，盘上那一串马就是一条最短路线本身。',
+        '     整趟搜索里盘上一直有东西在长 —— 长的是波纹（mark），不是棋子：',
+        '     BFS 里没有任何一匹马在走路，它是同时向所有方向铺开的。 */',
+      ],
+      en: [
+        '  /* Rebuild the route backwards: follow prev from the target square back to the',
+        '     start, dropping a knight on every square passed. That string of knights is one',
+        '     shortest route. Something grew on the board all through the search — ripples',
+        '     (mark), not pieces: no knight walks in BFS, it spreads every way at once. */',
+      ],
+    },
     '  let at = TARGET;',
     '  for (let i = 0; i <= steps; i = i + 1) {',
     '    place(at, "wN");',
     '    at = prev[at];',
     '  }',
-    '  log("最短 " + steps + " 步（盘上那串马就是其中一条走法）");',
+    {
+      zh: ['  log("最短 " + steps + " 步（盘上那串马就是其中一条走法）");'],
+      en: ['  log("Fewest moves: " + steps + " (the knights on the board are one such route)");'],
+    },
     '}',
     'return steps;',
   ];
 
-  /* source({ W, start, target }) → string
+  /* source({ W, start, target, lang }) → string
 
-     三个参数都不给默认值，缺了直接抛（阶段 5 约束 6：公开导出的省略参数已经
+     四个参数都不给默认值，缺了直接抛（阶段 5 约束 6：公开导出的省略参数已经
      是本仓库抓到过五次的缺陷类）。一个默默变成 8 的 W 会让界面写着 6、跑的却是
      8，正是这个工具最不能出的错。
+
+     **自身那三个参数的校验仍在最前，`lang` 由 render() 在最后校验**，而这个
+     顺序**是有门守着的**：`knight-path.test.js` 的「缺参数当场抛」那一组
+     **一个 lang 都不传**，并且每条都带第三参 pattern（`/少了 W/`、
+     `/start 必须是/` …）。把 lang 的校验挪到 W 前面来，那一组当场红 ——
+     撞上的会变成「少了 lang」，pattern 对不上。
+
+     ⚠ 这一段先前写的是「既有的 `T.throws(…, /少了 W/)` 一类调用点一行都不用
+     动」，那句话**两处都是假的**：本次改动恰恰改了那三行；而且当时那三条
+     `throws` 的第三参是空的，`/少了 W/` 这个调用点在本仓根本不存在，退化成
+     「抛了就算过」。审查的突变 M10（把 lang 校验提到最前）因此 77 + 175 条
+     断言全绿。补上第三参、并把 lang 从那一组里撤掉之后，M10 才真的会红。
 
      校验只管「是不是合法的棋盘和格子」，**不管到不到得了** —— 见文件头：
      2×2 上到不了恰恰是要生成出来跑给她看的。 */
@@ -282,11 +468,14 @@
         target < 0 || target >= W * W) {
       throw new Error('target 必须是 0 到 ' + (W * W - 1) + ' 之间的整数，收到：' + target);
     }
-    return HEAD.concat([
-      'const W = ' + W + ';',
-      'const START = ' + start + ';',
-      'const TARGET = ' + target + ';',
-    ]).concat(BODY).join('\n');
+    return render(HEAD, o.lang)
+      .concat([
+        'const W = ' + W + ';',
+        'const START = ' + start + ';',
+        'const TARGET = ' + target + ';',
+      ])
+      .concat(render(BODY, o.lang))
+      .join('\n');
   }
 
   return { source: source };

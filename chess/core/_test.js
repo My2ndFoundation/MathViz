@@ -29,6 +29,74 @@ function throws(fn, label, pattern) {
   failures.push(label + '\n    expected a throw, none happened');
 }
 
+/* 把一份源码归一化成「只剩代码」：抽掉注释、每个字符串字面量整体换成 §。
+   阶段 8 三道双语门里第一道的地基（规格 §7.5）—— 两种语言变体归一化之后
+   必须逐字节相同，否则就是可执行代码偷偷分岔了。
+
+   **行结构保留**：第 n 行归一化之后还是第 n 行（跨行块注释每行留一个空行）。
+   因为两种语言变体是逐行对齐的（规格 §1.6），行号对不上本身就是缺陷，
+   而把行号搅乱的归一化器会把这种缺陷伪装成「某一行内容不同」。
+
+   只认四种状态：普通代码 / 单引号串 / 双引号串 / 注释。**这对 algos/*.js
+   是完备的**：那些源码是 interp.js 的 ES 子集，没有模板字面量、也没有正则
+   字面量（queens.js 文件头写明了「用普通字符串拼，不用模板字面量」）。
+   哪天真要归一化一份带正则字面量的源码，`/` 的歧义得单独想清楚——别拿
+   这个函数硬套。 */
+function normalizeSource(src) {
+  if (typeof src !== 'string') {
+    throw new Error('normalizeSource(src) 要一个字符串，收到：' + typeof src);
+  }
+  let out = '';
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i];
+    if (c === '\n') { out += '\n'; i++; continue; }
+    /* 字符串字面量：整体换成一个 §。转义符跳两格 —— 否则 "a\"b" 会在
+       中间那个引号提前收尾，后半截代码被当成字符串外的东西，全乱。 */
+    if (c === "'" || c === '"') {
+      const quote = c;
+      i++;
+      while (i < n && src[i] !== quote) {
+        if (src[i] === '\\') i++;
+        i++;
+      }
+      i++;                       // 吃掉收尾引号
+      out += '§';
+      continue;
+    }
+    if (c === '/' && src[i + 1] === '/') {
+      while (i < n && src[i] !== '\n') i++;
+      continue;                  // 换行留给上面那一支
+    }
+    if (c === '/' && src[i + 1] === '*') {
+      i += 2;
+      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) {
+        if (src[i] === '\n') out += '\n';   // 跨行块注释：行数不变
+        i++;
+      }
+      i += 2;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  /* 行尾空白抽掉：注释被抽走之后 `let a = 1; ` 会留一个尾空格，
+     而另一种语言那一行可能不留 —— 那是归一化器自己制造的假差异。 */
+  const flat = out.split('\n').map(function (l) { return l.replace(/\s+$/, ''); }).join('\n');
+  /* 守卫：注释与字符串都抽干净之后还剩反引号，说明代码里有模板字面量 ——
+     而上面那个四状态扫描器会把模板内容当代码扫。那种情况下判出来的
+     「两种语言代码同一」**不作数**，宁可抛，不许静默给一个不作数的答案。
+     （注释里的反引号不会走到这里：它们跟注释一起被抽掉了。king-greedy.js
+     的中文注释里就有 6 个，实测照常通过。） */
+  if (flat.indexOf('`') >= 0) {
+    throw new Error('normalizeSource 在归一化之后还看到反引号 —— 这份源码里' +
+                    '有模板字面量，而这个扫描器只认 \' " // 和 /* 四种状态，' +
+                    '模板字面量的内容会被当成代码扫，判出来的「代码同一」不作数');
+  }
+  return flat;
+}
+
 /* 读失败计数，供测试自省用（目前只有 exercise.test.js 里验证 T.throws 的
    pattern 参数用得着它：要证明「匹配不上」确实记了一次失败，而不是抛出去
    或者悄悄放过）。只读，不改变任何既有调用点的行为。 */
@@ -42,4 +110,4 @@ function report() {
   process.exit(failures.length ? 1 : 0);
 }
 
-module.exports = { eq, ok, throws, failedCount, report };
+module.exports = { eq, ok, throws, failedCount, normalizeSource, report };

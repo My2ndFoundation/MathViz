@@ -272,19 +272,19 @@ const I = require('./interp.js');
 const Q = require('./algos/queens.js');
 
 /* 参考：交付的算法源码本身。N=5 有 10 个解、2,621 步，够小够快。 */
-const REF = I.run(Q.source({ N: 5 }), { host: {} });
+const REF = I.run(Q.source({ N: 5, lang: 'zh' }), { host: {} });
 const CHECK = { result: true, boardOps: true, counters: ['solutions'] };
 
 /* 参考答案通过自己的判定 —— 拿同一份源码再跑一遍 */
-const same = I.run(Q.source({ N: 5 }), { host: {} });
+const same = I.run(Q.source({ N: 5, lang: 'zh' }), { host: {} });
 const vSame = E.judge(REF, same, CHECK);
 T.eq(vSame.status, 'pass', '参考答案与自己比对：pass');
 T.eq(vSame.divergence, null, 'pass 时没有分歧点');
 
 /* 错误变体：把 safe 的一条线删掉（漏查一条斜线），解数一定变多 */
-const WRONG = Q.source({ N: 5 }).replace(
+const WRONG = Q.source({ N: 5, lang: 'zh' }).replace(
   '!diagUp[r - c + N]', 'true');
-T.ok(WRONG !== Q.source({ N: 5 }), '错误变体确实改动了源码');
+T.ok(WRONG !== Q.source({ N: 5, lang: 'zh' }), '错误变体确实改动了源码');
 const RW = I.run(WRONG, { host: {} });
 /* 实测：参考 10 解 / 2,621 步，变体 23 解 / 5,634 步 —— 简报「解数一定变多」成立 */
 T.eq(REF.result, 10, '参考跑出 10 个解');
@@ -320,7 +320,7 @@ T.ok(opsAt(RW, vWrong.divergence.herStep).indexOf('mark|6|ok') >= 0,
   'herStep 那一步上，她确实写下了报出来的那条事件');
 
 /* 等价改写：把 && 拆成三条 if —— 行为必须完全相同 */
-const EQUIV = Q.source({ N: 5 }).replace(
+const EQUIV = Q.source({ N: 5, lang: 'zh' }).replace(
   '  return !cols[c] && !diagDown[r + c] && !diagUp[r - c + N];',
   [
     '  if (cols[c]) { return false; }',
@@ -328,7 +328,7 @@ const EQUIV = Q.source({ N: 5 }).replace(
     '  if (diagUp[r - c + N]) { return false; }',
     '  return true;',
   ].join('\n'));
-T.ok(EQUIV !== Q.source({ N: 5 }), '等价改写确实改动了源码');
+T.ok(EQUIV !== Q.source({ N: 5, lang: 'zh' }), '等价改写确实改动了源码');
 const RE = I.run(EQUIV, { host: {} });
 /* 实测：2,621 步 vs 3,014 步，棋盘事件两边都是 599 条且逐条相同 */
 T.ok(RE.trace.length !== REF.trace.length, '等价改写的步数确实与参考不同');
@@ -336,7 +336,7 @@ const vEquiv = E.judge(REF, RE, CHECK);
 T.eq(vEquiv.status, 'pass', '等价改写：pass —— 步数不同不算分歧');
 
 /* 截断：任一边跑不完且分歧没在截断前出现 —— 不给判决 */
-const short = I.run(Q.source({ N: 5 }), { host: {}, limit: 200 });
+const short = I.run(Q.source({ N: 5, lang: 'zh' }), { host: {}, limit: 200 });
 T.eq(short.trace.truncated, true, '限 200 步确实截断了');
 const vTrunc = E.judge(REF, short, CHECK);
 T.eq(vTrunc.status, 'unknown', '截断且未发现分歧：unknown，不是 fail');
@@ -411,7 +411,7 @@ T.throws(function () {
 }, '名字打错时，即使 boardOps 会先分歧也照样抛 —— 配置错误不被结果吞掉');
 
 /* 参考里有、她那边一次都没出现（她把变量改名了）：这是一处真分歧，不是相等 */
-const RENAMED = I.run(Q.source({ N: 5 }).split('solutions').join('total'), { host: {} });
+const RENAMED = I.run(Q.source({ N: 5, lang: 'zh' }).split('solutions').join('total'), { host: {} });
 T.eq(RENAMED.result, 10, '改名版本本身跑得对（10 解），只是不再有这个变量名');
 const vRenamed = E.judge(REF, RENAMED, { result: false, boardOps: false, counters: ['solutions'] });
 T.eq(vRenamed.status, 'fail', '参考里有、她那边从没出现过 —— fail，不是「都不知道所以相等」');

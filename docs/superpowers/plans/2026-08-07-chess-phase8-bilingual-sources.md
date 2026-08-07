@@ -17,9 +17,14 @@
 - **规格是 `docs/superpowers/specs/2026-08-02-chess-viz-suite-design.md` 的 §1.6、§7.5、§8。** 本阶段的全部裁定在 §1.6「『双语 UI』与『双语工具』不是一回事」那一小节里。
 - **本阶段的基线 commit 是 `f686833`**（`Merge pull request #97`）。凡是要对照「改动前」的，一律 `git show f686833:<path>`。
 - **中文一个字节都不许改。** 中文变体必须与基线逐字节相同——这是每个文案任务的收口门。真发现某句中文写错了，**停下来报告**，不许顺手改（那会让 diff 从「新增英文」变成「新增英文 + 若干看不出来的中文改动」，审查就废了）。
+
+  ⚠ **有一个必然的例外：BLANK 指令行上的 `hintEn=`。** 指令行**不翻译**，于是中文 `hint=` 与英文 `hintEn=` 同住一行——改 `hintEn`（那是**新写的英文**，正是本阶段要做的事）必然让中文变体那一行的字节变了。Task 5 撞上过。
+
+  所以这道门的判据是：**剥掉 `hintEn="…"` 之后与基线逐字节相同**，且 `hintEn=` **之前**的部分（含整段中文 `hint=`）一个字节不动。实测形状（`tour-warnsdorff` 两档）：每档**恰好 1 行**不同，就是那条 `// >>> BLANK`；剥掉 `hintEn=` 后全等。**差异超出这个形状就是真越线，停下来报告。**
 - **`minimax.js` 不在本阶段范围内**（工具④ 的，改它要重做那个工具的验收）。它进 `check.py` 的单语白名单。
 - **英文以中文那一版的意思与语气为底本重写，不是逐句对译。** 判据是「两边各自读起来都像母语者写给一个十六岁读者的」。
 - **英文不能比中文说得少或多。** 允许句式与举例不同，**教学内容必须是同一件事**。
+- ⚠ **判「有没有中文」的字符类不能只写 `[一-鿿]`。** 那一段是 CJK 汉字（U+4E00–U+9FFF），**看不见中文标点**——`「」。，？、《》；：` 实测全部 `false`，于是一句「Place the knight here。」会大摇大摆过门，而这道门的整个用途就是拦住中文漏进英文变体。用 `[一-鿿㐀-䶿　-〿＀-￯]`（汉字 + 扩展 A + CJK 标点 U+3000–U+303F + 全角 U+FF00–U+FFEF），实测四类中文全 `true`、纯英文 `false`。Task 4 的审查发现的、继承自计划的薄弱点。
 - **约束落在「段」上，不落在「句」上**：一段 6 行的中文注释要写成 6 行英文，段内句子怎么重组都行。写不成等行数就**停下来报告**，不许塞废话或砍内容凑数。
 - **本仓无构建/lint/test 工具链。** 测试 = `node chess/core/xxx.test.js`；总门 = `python3 chess/scripts/check.py`。
 - **`git status --short` 之后只暂存显式路径**；禁止 `git add -A` / `git commit -a`。`.githooks/pre-commit` 会重跑 `inline_core.py` 并**再暂存**，所以钩子跑完之后要**再看一遍** `git status --short`，确认每一条都是自己的。
@@ -41,6 +46,8 @@
 | `chess/core/algos/king-exact.js` | 王支配集精确（160 行） | 双语化 |
 | `chess/core/algos/*.test.js`（5 份） | 各自的测试 | 调用点补 `lang`；加三道双语门 |
 | `chess/core/exercise.test.js` | 挖空测试 | 调用点补 `lang` |
+| `chess/core/exercise-blanks.test.js` | 挖空的三项断言 | 调用点补 `lang`（Task 2 发现的遗漏：6 处 `Q.source`，不补则该测试直接崩） |
+| `chess/tools/chess-board-algorithms.html` | 工具⑤（`inline_core.py` 的生成物） | **每个文案任务都会被钩子重新内联**（`algos/*.js` 是内联进去的字符串）。不重新内联，`check.py` 的 ALGOS 往返门报 ERROR。所以每个文案任务的提交里都会带上它，这是**预期内的**，不是别的会话混进来的东西 |
 | `chess/scripts/check.py` | 总门 | **加** `bilingual_algos_check()`（第八道门） |
 | `chess/tools/chess-board-algorithms.html` | 工具⑤ | `genSource` 传 `lang`；5 个 `PROBLEMS` 声明转发 `lang`；切语言改成整份换文本 |
 | `chess/chess-tools.json` / `chess/index.html` / `chess/app.html` | 三处注册镜像 | 版本 1.2.0 → 1.3.0 |
@@ -275,6 +282,22 @@ git status --short
 
 - [ ] **Step 1: 先写三道门（会失败）**
 
+⚠ **要压到步数门上的突变，必须多一条语句或多一个分支，不能只在表达式里改。** Task 5 实测：把 `log("Found it")` 改成 `log("Found it" + " : …")` **步数一步没变**——那次拼接没跨过 `interp.js` 的语句边界，红的是结构门与子序列门，不是步数门。要真正压住步数门，用「英文变体里偷偷多跑一条语句」这种形状（Task 5 的 M5：3×4 上 `zh=898 / en=910`，步数门当场红）。**照着「改 log 行」去复现、看到步数门是绿的，会误以为它还是死的。**
+
+⚠ **步数门会在撞上限的盘上悄悄变成恒真断言。** `interp.js` 的 `STEP_LIMIT = 200000`：两种语言都撞上限时，两边 `trace.length` 都是 200,000，那条断言退化成 `200000 === 200000`——**任何差异都拦不住**。Task 5 实测：`tour-dfs` 在 5×5 上两语都截断，把英文的 `log` 行改成参与控制流，步数门**照样全绿**；同一突变换到 3×4 当场红。
+
+**这不是「挑个小盘就行」**——有的题**故意**要撞上限（`kingDominate` 的 7×7 那一档，精确解跑不完正是它的教学落点）。做法是**把「没截断」和步数一起断言**，让这道门永远不可能悄悄退化：
+
+```js
+const rz = I.run(zh, { host: {} }), re_ = I.run(en, { host: {} });
+T.ok(!rz.trace.truncated && !re_.trace.truncated,
+     label + '：两语都没撞上限 —— 撞了的话下面那条步数断言就是 200000 === 200000');
+T.eq(re_.trace.length, rz.trace.length, label + '：两种语言的解释器步数相同');
+```
+
+步数门的盘**必须挑一个两语都跑得完的**。要验「撞上限」那件事，那是各文件既有测试的活，别混进双语门里。
+
+
 在 `chess/core/algos/queens.test.js` 末尾、`T.report()` 之前插入：
 
 ```js
@@ -303,16 +326,39 @@ for (const N of [4, 6, 8]) {
 const zh6 = Q.source({ N: 6, lang: 'zh' });
 const en6 = Q.source({ N: 6, lang: 'en' });
 T.ok(zh6 !== en6, '两种语言的源码不是同一份');
-T.ok(/[一-鿿]/.test(zh6), '中文那一份里有汉字');
-T.ok(!/[一-鿿]/.test(en6), '英文那一份里一个汉字都没有');
+T.ok(/[一-鿿㐀-䶿　-〿＀-￯]/.test(zh6), '中文那一份里有汉字');
+T.ok(!/[一-鿿㐀-䶿　-〿＀-￯]/.test(E.parse(en6, 'en').clean), '英文那一份送到编辑器的文本里一个汉字都没有');
+/* BLANK 指令行不翻译 —— 正着钉一次，别只写在散文里 */
+const blankLines = function (src) {
+  return src.split('\n').filter(function (l) { return /BLANK/.test(l); }).join('\n');
+};
+T.eq(blankLines(en6), blankLines(zh6), '两种语言变体里的 BLANK 指令行逐字节相同');
+
+⚠ **「英文那一份里一个汉字都没有」不能对着 `source()` 的原文断言。** BLANK 指令行**不翻译**（它本来就带 `hint` + `hintEn`），所以带挖空的源码在英文变体里**必然**含汉字——`queens.js` 实测 114 个，全在那两行指令行上。要断言的是**送到她眼前的那一份**，也就是 `Exercise.parse(src, lang).clean`（实测 0 个汉字）。
+
+这是我在计划里让两条自己的裁定打了架，Task 2 的实现者抓到的。带挖空的三份（`queens` 2 个、`knight-path` 2 个、`tour-warnsdorff` 1 个）都受影响；`tour-dfs` / `rook-cover` / `king-*` 没有挖空，原文断言本来也成立，但**统一都走 `clean`**，别留两种写法。
+
+顺带把这件事**正着钉一次**（原计划只写在散文里、没有断言）：两种语言变体里那两行 BLANK 指令**逐字节相同**。
+
+⚠ **剥指令行必须走 `Exercise.parse()`，测试里也不许自己写一条过滤。** 五个 `algos/*.test.js` 今天都没 require 过 `exercise.js`，加一行 `const E = require('../exercise.js');` 即可（两个都是仓库本地模块，「零依赖」说的是外部依赖，不受影响）。理由是规格里已经立过的那一条：**「什么算指令行」这段知识分成两份，迟早分岔**——页面不许自己写正则，测试同样不许。一份会漂移的过滤会让这道门悄悄停止检验它该检验的东西。
+
 
 // ---- lang 必填，且只认两个值 ----
-T.throws(function () { Q.source({ N: 6 }); }, /少了 lang/);
-T.throws(function () { Q.source({ N: 6, lang: 'fr' }); }, /只认/);
-T.throws(function () { Q.source({ N: 6, lang: '' }); }, /只认/);
+T.throws(function () { Q.source({ N: 6 }); }, 'queens：缺 lang 必须抛', /少了 lang/);
+T.throws(function () { Q.source({ N: 6, lang: 'fr' }); }, 'queens：lang=fr 必须抛', /只认/);
+T.throws(function () { Q.source({ N: 6, lang: '' }); }, 'queens：lang=空串必须抛', /只认/);
 ```
 
 同时把这个文件里**所有**已有的 `Q.source({ N: … })` 调用补上 `lang: 'zh'`（`lang` 缺了会抛，一跑就知道漏了哪个）。`exercise.test.js` 里 9 处 `source(` 同样处理。
+
+⚠ **但「所有」有一个例外，照做会杀掉一道门。** 这些测试文件里都有一组「缺参数当场抛」的 `T.throws`（`source({})` 少了 `W` / 少了 `start` / …）。**给那一组也补上 `lang: 'zh'`，它们就对 `lang` 的校验位置完全失明**——因为 `'zh'` 合法，无论 `lang` 的校验排在前还是后，都照样落到参数那条、照样抛同一句话、pattern 照样匹上。Task 4 实测：补了 `lang` 之后把 `lang` 校验提到最前，八条断言**全绿**。
+
+所以那一组的处理是**两半，缺一不可**：
+
+1. **不补 `lang`**（保持只缺自己那个参数的形状）；
+2. **补上第三参 pattern**（`T.throws(fn, '标签', /少了 W/)`）——本仓这一族 `throws` 大多第三参是空的，空着就是「抛了就算过」。
+
+补完**自己验一次**：把 `lang` 校验提到参数校验之前，那一组里该有红的；再把某一条的 pattern 换成邻居的错误消息（`/少了 W/` → `/少了 start/`），也该红——证明几条的错误消息**互不共享前缀**（阶段 7 在这里栽过：三条错误消息共享前缀 `source({ W, H, blocked }) 少了 …`，于是 `/W/`、`/H/`、`/blocked/` 三个 pattern 匹到了每一条，删掉全部三道守卫仍然四条全绿）。
 
 - [ ] **Step 2: 跑一遍，确认它失败**
 
@@ -460,7 +506,7 @@ node chess/core/algos/queens.test.js
   ];
 ```
 
-⚠ **上面这个 `en` 块是 4 行、`zh` 是 3 行——它会被 `render` 当场抛错。** 这是**故意留在计划里的**：写英文时最常犯的就是这一下，而门会立刻抓住它。把它压成 3 行（或按写作判断重排），别靠加空行凑数。
+⚠ **上面两个 `en` 块的行数都不对，都会被 `render` 当场抛错**：第一段 `en` 13 行 / `zh` 12 行，第二段 `en` 4 行 / `zh` 3 行。这是**故意留在计划里的**：写英文时最常犯的就是这一下，而门会立刻抓住它。两段都压回等行数（或按写作判断重排），别靠加空行凑数。**后面六个任务的示例块同理，别信示例的行数，信 `render` 抛不抛。**
 
 `BODY` 同法改写。**逐字节抄中文**这件事有一道机械校验，见 Step 6。
 
@@ -546,7 +592,7 @@ Task 2 之后有了第一份双语源码，这道门才咬得住东西。它守�
 
 - [ ] **Step 1: 写门（先写、先跑，看它红）**
 
-在 `chess/scripts/check.py` 的 `core_tests()` 之前插入：
+在 `chess/scripts/check.py` 的 `core_tests()` 之前插入（文件顶部已经 `import re` / `import subprocess` / `import sys`，没有的话补上）：
 
 ```python
 # 本阶段暂未双语、或明确不在范围内的 algos 文件。
@@ -626,10 +672,35 @@ def bilingual_algos_check() -> int:
         renders[p.name] = segment
 
         # ② source() 真的调了 render —— 光定义不调用，等于没装。
-        #    把定义段挖掉之后再数：定义里那一行 `function render(parts, lang) {`
-        #    本来就含 `render(`，不挖掉的话每份都白白算一次，这道门就永远绿。
-        rest = text[:b] + text[e + len(RENDER_END):]
-        if 'render(' not in rest:
+        #
+        #    ⚠ **不许在原文上搜子串 `render(`。** Task 3 第一版就是这么写的，
+        #    而它是**恒真**的：queens.js 有一行写给维护者的注释「…见上面
+        #    render()。」，裸子串就在那儿，于是这条判据在这份文件下永远成立，
+        #    对「忘了调 render」完全失明。突变实验 B 当场抓到了它。
+        #
+        #    正确做法是先**抽掉注释**再搜 —— 而「什么算注释」这段知识本仓已经
+        #    有唯一实现了：_test.js 的 normalizeSource（Task 1）。这里 shell 出
+        #    node 去调它，不在 Python 里重写一份（Task 2 的审查刚为同一条理由
+        #    否掉过一个本地过滤：同一段知识分成两份，迟早分岔）。
+        #
+        #    归一化之后：定义那一行是 `function render(parts, lang) {`，
+        #    真正的调用是 `render(HEAD, o.lang)` 这样的。数**非定义**的那些，
+        #    至少要有一处。实测 queens.js = 2 处调用 + 1 处定义。
+        probe = (
+            'const T = require(%r);'
+            'const fs = require("fs");'
+            'process.stdout.write(T.normalizeSource(fs.readFileSync(%r, "utf8")));'
+        ) % (str(ROOT / 'core' / '_test.js'), str(p))
+        proc = subprocess.run(['node', '-e', probe], capture_output=True, text=True)
+        if proc.returncode != 0:
+            print(f'ERROR: {p.name} 归一化失败 —— {proc.stderr.strip()[:200]}',
+                  file=sys.stderr)
+            rc = 1
+            continue
+        norm = proc.stdout
+        calls = (len(re.findall(r'(?:^|[^\w$.])render\(', norm))
+                 - len(re.findall(r'function\s+render\(', norm)))
+        if calls < 1:
             print(f'ERROR: {p.name} 定义了 render(parts, lang) 却从来不调它 —— '
                   f'source() 还在吐单语源码', file=sys.stderr)
             rc = 1
@@ -681,6 +752,11 @@ python3 chess/scripts/check.py
 #   期望：ERROR: queens.js 里找不到 render(parts, lang) 那一段
 # 突变 B：把 queens.js 的 source() 改回不调 render（直接 HEAD.concat(BODY)）
 #   期望：ERROR: queens.js 定义了 render(parts, lang) 却从来不调它
+#   ⚠ 只看 check.py 的退出码不够 —— 别的既有门（inline 一致性、ALGOS 往返、
+#     三个 .test.js）本来就会因为这个突变而红。**要在输出里找到第八道门
+#     自己那一行 ERROR**，找不到就说明这道门在这个方向上是假的。
+#     Task 3 第一版正是这样漏过去的：整体 exit 1，而第八道门照常打印
+#     「render 助手 1 份一致」。
 # 突变 C：MONOLINGUAL_ALGOS 里临时加上 'queens.js'
 #   期望：ERROR: 一份双语 algos 都没有 ……
 # 突变 D：MONOLINGUAL_ALGOS 里加一个不存在的文件名 'nope.js'
@@ -720,6 +796,9 @@ git status --short
 
 - [ ] **Step 1: 先写三道门（会失败）**
 
+⚠ **步数门的盘必须挑两语都跑得完的，并且要连「没截断」一起断言**——否则两边都是 `STEP_LIMIT` 时它退化成 `200000 === 200000`（Task 5 实测：`tour-dfs` 在 5×5 上正是如此）。完整写法与理由见 Task 2 的 Step 1。
+
+
 在 `knight-path.test.js` 末尾、`T.report()` 之前插入（参数用这个文件既有的那组，别新编）：
 
 ```js
@@ -738,15 +817,30 @@ for (const target of [10, 24]) {
 const kpZh = KP.source({ W: 5, start: 0, target: 24, lang: 'zh' });
 const kpEn = KP.source({ W: 5, start: 0, target: 24, lang: 'en' });
 T.ok(kpZh !== kpEn, '两种语言的源码不是同一份');
-T.ok(/[一-鿿]/.test(kpZh), '中文那一份里有汉字');
-T.ok(!/[一-鿿]/.test(kpEn), '英文那一份里一个汉字都没有');
-T.throws(function () { KP.source({ W: 5, start: 0, target: 24 }); }, /少了 lang/);
-T.throws(function () { KP.source({ W: 5, start: 0, target: 24, lang: 'fr' }); }, /只认/);
+T.ok(/[一-鿿㐀-䶿　-〿＀-￯]/.test(kpZh), '中文那一份里有汉字');
+T.ok(!/[一-鿿㐀-䶿　-〿＀-￯]/.test(E.parse(kpEn, 'en').clean),
+     '英文那一份送到编辑器的文本里一个汉字都没有');
+T.eq(kpEn.split('\n').filter(l => /BLANK/.test(l)).join('\n'),
+     kpZh.split('\n').filter(l => /BLANK/.test(l)).join('\n'),
+     '两种语言变体里的 BLANK 指令行逐字节相同');
+T.throws(function () { KP.source({ W: 5, start: 0, target: 24 }); },
+         'knight-path：缺 lang 必须抛', /少了 lang/);
+T.throws(function () { KP.source({ W: 5, start: 0, target: 24, lang: 'fr' }); },
+         'knight-path：lang=fr 必须抛', /只认/);
 ```
 
 ⚠ 上面的模块别名 `KP`、参数名与合法取值，**以这个测试文件顶部既有的写法为准**——如果它用的是别的名字或别的盘，照它的改，别照抄本计划里的字面量。
 
 同时给这个文件里所有既有的 `source(` 调用补 `lang: 'zh'`。
+
+⚠ **但「所有」有一个例外，照做会杀掉一道门。** 这些测试文件里都有一组「缺参数当场抛」的 `T.throws`（`source({})` 少了 `W` / 少了 `start` / …）。**给那一组也补上 `lang: 'zh'`，它们就对 `lang` 的校验位置完全失明**——因为 `'zh'` 合法，无论 `lang` 的校验排在前还是后，都照样落到参数那条、照样抛同一句话、pattern 照样匹上。Task 4 实测：补了 `lang` 之后把 `lang` 校验提到最前，八条断言**全绿**。
+
+所以那一组的处理是**两半，缺一不可**：
+
+1. **不补 `lang`**（保持只缺自己那个参数的形状）；
+2. **补上第三参 pattern**（`T.throws(fn, '标签', /少了 W/)`）——本仓这一族 `throws` 大多第三参是空的，空着就是「抛了就算过」。
+
+补完**自己验一次**：把 `lang` 校验提到参数校验之前，那一组里该有红的；再把某一条的 pattern 换成邻居的错误消息（`/少了 W/` → `/少了 start/`），也该红——证明几条的错误消息**互不共享前缀**（阶段 7 在这里栽过：三条错误消息共享前缀 `source({ W, H, blocked }) 少了 …`，于是 `/W/`、`/H/`、`/blocked/` 三个 pattern 匹到了每一条，删掉全部三道守卫仍然四条全绿）。
 
 - [ ] **Step 2: 跑，确认失败**
 
@@ -776,9 +870,12 @@ PY
 ```bash
 node chess/core/algos/knight-path.test.js
 node chess/core/exercise.test.js
+node chess/core/exercise-blanks.test.js
 ```
 
-期望：两份 `0 failed`。
+期望：三份 `0 failed`。
+
+⚠ **`exercise-blanks.test.js` 必须跑。** 它里面有这道题的 `source(` 调用点，缺 `lang` 时它不是报一条红断言，是 **require 期进程直接崩**——只跑 algo 自己那份测试**完全看不见**。Task 4 的实现者在这里多改出一个文件（5 处调用点）。
 
 - [ ] **Step 5: 中文逐字节不变**
 
@@ -811,8 +908,15 @@ python3 chess/scripts/check.py
 期望：exit 0，且打印 `双语 algos 普查：2 份双语 / 6 份白名单，render 助手 2 份一致`。
 **「2 份一致」这四个字是这一步的真正产出**——Task 3 那条比对在只有一份时是空转的，到这里才第一次比到东西。
 
-再做一次对照实验证明它真的会响：把 `knight-path.js` 的 `render` 段里任意一个空格删掉，跑 `check.py`，期望
-`ERROR: knight-path.js 的 render(parts, lang) 与 queens.js 的不是逐字节相同`，然后 `git checkout -- chess/core/algos/knight-path.js` 还原并重新做完 Step 3–5。
+再做一次对照实验证明它真的会响：把 `knight-path.js` 的 `render` 段里任意一个空格删掉，跑 `check.py`。
+
+⚠ **别把那行 ERROR 当逐字断言用。** `check.py:570` 拿 `sorted(renders)[0]` 当基准，所以点名的顺序是**字典序**，不是「谁先双语」。此刻两份的字典序是 `knight-path.js` < `queens.js`，于是打印的是「`queens.js` 的…与 `knight-path.js` 的…」——跟直觉相反。而且这个基准**会随后面每个任务移动**：七份到齐后字典序第一是 `king-exact.js`。
+
+**验收判据是语义，不是字面**：输出里出现第八道门自己那一行、点名了这两份文件、并且汇总行变成「有不一致」。
+
+⚠ 这个突变还会**连带**让 `ALGOS 往返校验` 报 ERROR（`algos/*.js` 是当字符串内联进 HTML 的），那是预期内的，不是你又弄坏了别的东西。
+
+⚠ **别用 `git checkout -- chess/core/algos/knight-path.js` 还原**——那会把整个文件退回 HEAD，你这个任务 Step 3–4 的活全没了（Task 4 的实现者踩过，重做了一遍）。**做突变之前先把双语版拷进 scratchpad**（`t5-knight-path.js` 一类），突变完从拷贝还原。
 
 - [ ] **Step 7: 英文自己读一遍**（同 Task 2 Step 7 的四条自查，结论写进提交信息）
 
@@ -847,6 +951,9 @@ git status --short
 
 - [ ] **Step 1: 先写门（会失败）**
 
+⚠ **步数门的盘必须挑两语都跑得完的，并且要连「没截断」一起断言**——否则两边都是 `STEP_LIMIT` 时它退化成 `200000 === 200000`（Task 5 实测：`tour-dfs` 在 5×5 上正是如此）。完整写法与理由见 Task 2 的 Step 1。
+
+
 在 `tour.test.js` 末尾、`T.report()` 之前插入：
 
 ```js
@@ -862,16 +969,28 @@ for (const key of Object.keys(TOUR_SRC)) {
   T.eq(I.run(en, { host: {} }).trace.length, I.run(zh, { host: {} }).trace.length,
        key + '：两种语言的解释器步数相同');
   T.ok(zh !== en, key + '：两种语言的源码不是同一份');
-  T.ok(/[一-鿿]/.test(zh), key + '：中文那一份里有汉字');
-  T.ok(!/[一-鿿]/.test(en), key + '：英文那一份里一个汉字都没有');
-  T.throws(function () { mod.source({ W: 5, H: 5, start: 0 }); }, /少了 lang/);
-  T.throws(function () { mod.source({ W: 5, H: 5, start: 0, lang: 'fr' }); }, /只认/);
+  T.ok(/[一-鿿㐀-䶿　-〿＀-￯]/.test(zh), key + '：中文那一份里有汉字');
+  T.ok(!/[一-鿿㐀-䶿　-〿＀-￯]/.test(E.parse(en, 'en').clean),
+       key + '：英文那一份送到编辑器的文本里一个汉字都没有');
+  T.throws(function () { mod.source({ W: 5, H: 5, start: 0 }); },
+           key + '：缺 lang 必须抛', /少了 lang/);
+  T.throws(function () { mod.source({ W: 5, H: 5, start: 0, lang: 'fr' }); },
+           key + '：lang=fr 必须抛', /只认/);
 }
 ```
 
 **并且**：把这个文件里既有的那道**子序列门**改成两种语言各跑一次。做法是把它现有的断言体抽成一个吃 `lang` 的函数，然后 `['zh', 'en'].forEach(...)` 调两次——**断言消息里带上 lang**，否则红了看不出是哪一侧。
 
 同时给所有既有 `source(` 调用补 `lang: 'zh'`。
+
+⚠ **但「所有」有一个例外，照做会杀掉一道门。** 这些测试文件里都有一组「缺参数当场抛」的 `T.throws`（`source({})` 少了 `W` / 少了 `start` / …）。**给那一组也补上 `lang: 'zh'`，它们就对 `lang` 的校验位置完全失明**——因为 `'zh'` 合法，无论 `lang` 的校验排在前还是后，都照样落到参数那条、照样抛同一句话、pattern 照样匹上。Task 4 实测：补了 `lang` 之后把 `lang` 校验提到最前，八条断言**全绿**。
+
+所以那一组的处理是**两半，缺一不可**：
+
+1. **不补 `lang`**（保持只缺自己那个参数的形状）；
+2. **补上第三参 pattern**（`T.throws(fn, '标签', /少了 W/)`）——本仓这一族 `throws` 大多第三参是空的，空着就是「抛了就算过」。
+
+补完**自己验一次**：把 `lang` 校验提到参数校验之前，那一组里该有红的；再把某一条的 pattern 换成邻居的错误消息（`/少了 W/` → `/少了 start/`），也该红——证明几条的错误消息**互不共享前缀**（阶段 7 在这里栽过：三条错误消息共享前缀 `source({ W, H, blocked }) 少了 …`，于是 `/W/`、`/H/`、`/blocked/` 三个 pattern 匹到了每一条，删掉全部三道守卫仍然四条全绿）。
 
 - [ ] **Step 2: 跑，确认失败**
 
@@ -889,9 +1008,13 @@ node chess/core/algos/tour.test.js
 
 ```bash
 node chess/core/algos/tour.test.js
+node chess/core/exercise.test.js
+node chess/core/exercise-blanks.test.js
 ```
 
-期望：`0 failed`，且子序列门在 `zh` 与 `en` 两侧**各报一次通过**。
+期望：三份 `0 failed`，且子序列门在 `zh` 与 `en` 两侧**各报一次通过**。
+
+⚠ **`exercise-blanks.test.js` 必须跑**：缺 `lang` 时它是 **require 期进程直接崩**，不是红断言，只跑 `tour.test.js` 看不见。
 
 - [ ] **Step 5: 中文逐字节不变（两份）**
 
@@ -955,6 +1078,9 @@ git status --short
 
 - [ ] **Step 1: 先写门（会失败）**
 
+⚠ **步数门的盘必须挑两语都跑得完的，并且要连「没截断」一起断言**——否则两边都是 `STEP_LIMIT` 时它退化成 `200000 === 200000`（Task 5 实测：`tour-dfs` 在 5×5 上正是如此）。完整写法与理由见 Task 2 的 Step 1。
+
+
 在 `rook-cover.test.js` 末尾、`T.report()` 之前插入（盘用这个文件既有的那几块）：
 
 ```js
@@ -976,10 +1102,13 @@ for (let i = 0; i < RC_BOARDS.length; i = i + 1) {
 const rcZh = RC.source({ W: 5, H: 5, blocked: [6, 8, 12, 16, 18], lang: 'zh' });
 const rcEn = RC.source({ W: 5, H: 5, blocked: [6, 8, 12, 16, 18], lang: 'en' });
 T.ok(rcZh !== rcEn, '两种语言的源码不是同一份');
-T.ok(/[一-鿿]/.test(rcZh), '中文那一份里有汉字');
-T.ok(!/[一-鿿]/.test(rcEn), '英文那一份里一个汉字都没有');
-T.throws(function () { RC.source({ W: 5, H: 5, blocked: [] }); }, /少了 lang/);
-T.throws(function () { RC.source({ W: 5, H: 5, blocked: [], lang: 'fr' }); }, /只认/);
+T.ok(/[一-鿿㐀-䶿　-〿＀-￯]/.test(rcZh), '中文那一份里有汉字');
+T.ok(!/[一-鿿㐀-䶿　-〿＀-￯]/.test(E.parse(rcEn, 'en').clean),
+     '英文那一份送到编辑器的文本里一个汉字都没有');
+T.throws(function () { RC.source({ W: 5, H: 5, blocked: [] }); },
+         'rook-cover：缺 lang 必须抛', /少了 lang/);
+T.throws(function () { RC.source({ W: 5, H: 5, blocked: [], lang: 'fr' }); },
+         'rook-cover：lang=fr 必须抛', /只认/);
 
 /* ---- 题面不许在重写英文时滑回那个数学错误 ----
    一辆车是二分图的一条**边**；König 给的是最少的**线**，不是最少的车。
@@ -995,6 +1124,15 @@ T.ok(/lines?/i.test(rcEn), '英文题面讲的是「线」');
 
 同时给所有既有 `source(` 调用补 `lang: 'zh'`。
 
+⚠ **但「所有」有一个例外，照做会杀掉一道门。** 这些测试文件里都有一组「缺参数当场抛」的 `T.throws`（`source({})` 少了 `W` / 少了 `start` / …）。**给那一组也补上 `lang: 'zh'`，它们就对 `lang` 的校验位置完全失明**——因为 `'zh'` 合法，无论 `lang` 的校验排在前还是后，都照样落到参数那条、照样抛同一句话、pattern 照样匹上。Task 4 实测：补了 `lang` 之后把 `lang` 校验提到最前，八条断言**全绿**。
+
+所以那一组的处理是**两半，缺一不可**：
+
+1. **不补 `lang`**（保持只缺自己那个参数的形状）；
+2. **补上第三参 pattern**（`T.throws(fn, '标签', /少了 W/)`）——本仓这一族 `throws` 大多第三参是空的，空着就是「抛了就算过」。
+
+补完**自己验一次**：把 `lang` 校验提到参数校验之前，那一组里该有红的；再把某一条的 pattern 换成邻居的错误消息（`/少了 W/` → `/少了 start/`），也该红——证明几条的错误消息**互不共享前缀**（阶段 7 在这里栽过：三条错误消息共享前缀 `source({ W, H, blocked }) 少了 …`，于是 `/W/`、`/H/`、`/blocked/` 三个 pattern 匹到了每一条，删掉全部三道守卫仍然四条全绿）。
+
 - [ ] **Step 2: 跑，确认失败**
 
 ```bash
@@ -1007,7 +1145,11 @@ node chess/core/algos/rook-cover.test.js
 
 ```bash
 node chess/core/algos/rook-cover.test.js
+node chess/core/exercise.test.js
+node chess/core/exercise-blanks.test.js
 ```
+
+期望：三份 `0 failed`。⚠ **`exercise-blanks.test.js` 必须跑**：缺 `lang` 时是 require 期进程直接崩，不是红断言。
 
 - [ ] **Step 5: 中文逐字节不变**
 
@@ -1072,6 +1214,9 @@ git status --short
 
 - [ ] **Step 1: 先写门（会失败）**
 
+⚠ **步数门的盘必须挑两语都跑得完的，并且要连「没截断」一起断言**——否则两边都是 `STEP_LIMIT` 时它退化成 `200000 === 200000`（Task 5 实测：`tour-dfs` 在 5×5 上正是如此）。完整写法与理由见 Task 2 的 Step 1。
+
+
 在 `king.test.js` 末尾、`T.report()` 之前插入：
 
 ```js
@@ -1098,16 +1243,28 @@ for (const key of Object.keys(KING_SRC)) {
   const zh0 = mod.source({ W: b0.W, H: b0.H, blocked: b0.blocked, lang: 'zh' });
   const en0 = mod.source({ W: b0.W, H: b0.H, blocked: b0.blocked, lang: 'en' });
   T.ok(zh0 !== en0, key + '：两种语言的源码不是同一份');
-  T.ok(/[一-鿿]/.test(zh0), key + '：中文那一份里有汉字');
-  T.ok(!/[一-鿿]/.test(en0), key + '：英文那一份里一个汉字都没有');
-  T.throws(function () { mod.source({ W: 5, H: 5, blocked: [] }); }, /少了 lang/);
-  T.throws(function () { mod.source({ W: 5, H: 5, blocked: [], lang: 'fr' }); }, /只认/);
+  T.ok(/[一-鿿㐀-䶿　-〿＀-￯]/.test(zh0), key + '：中文那一份里有汉字');
+  T.ok(!/[一-鿿㐀-䶿　-〿＀-￯]/.test(E.parse(en0, 'en').clean),
+       key + '：英文那一份送到编辑器的文本里一个汉字都没有');
+  T.throws(function () { mod.source({ W: 5, H: 5, blocked: [] }); },
+           key + '：缺 lang 必须抛', /少了 lang/);
+  T.throws(function () { mod.source({ W: 5, H: 5, blocked: [], lang: 'fr' }); },
+           key + '：lang=fr 必须抛', /只认/);
 }
 ```
 
 **并且**：把既有那道**共用段逐字节相同**的门（约 448 行，`T.eq(cg === cx, true, …)`）改成两种语言各跑一次，断言消息里带上 lang。
 
 同时给所有既有 `source(` 调用补 `lang: 'zh'`。
+
+⚠ **但「所有」有一个例外，照做会杀掉一道门。** 这些测试文件里都有一组「缺参数当场抛」的 `T.throws`（`source({})` 少了 `W` / 少了 `start` / …）。**给那一组也补上 `lang: 'zh'`，它们就对 `lang` 的校验位置完全失明**——因为 `'zh'` 合法，无论 `lang` 的校验排在前还是后，都照样落到参数那条、照样抛同一句话、pattern 照样匹上。Task 4 实测：补了 `lang` 之后把 `lang` 校验提到最前，八条断言**全绿**。
+
+所以那一组的处理是**两半，缺一不可**：
+
+1. **不补 `lang`**（保持只缺自己那个参数的形状）；
+2. **补上第三参 pattern**（`T.throws(fn, '标签', /少了 W/)`）——本仓这一族 `throws` 大多第三参是空的，空着就是「抛了就算过」。
+
+补完**自己验一次**：把 `lang` 校验提到参数校验之前，那一组里该有红的；再把某一条的 pattern 换成邻居的错误消息（`/少了 W/` → `/少了 start/`），也该红——证明几条的错误消息**互不共享前缀**（阶段 7 在这里栽过：三条错误消息共享前缀 `source({ W, H, blocked }) 少了 …`，于是 `/W/`、`/H/`、`/blocked/` 三个 pattern 匹到了每一条，删掉全部三道守卫仍然四条全绿）。
 
 - [ ] **Step 2: 跑，确认失败**
 
@@ -1125,9 +1282,13 @@ node chess/core/algos/king.test.js
 
 ```bash
 node chess/core/algos/king.test.js
+node chess/core/exercise.test.js
+node chess/core/exercise-blanks.test.js
 ```
 
-期望：`0 failed`，共用段门在 `zh` / `en` 两侧**各报一次通过**。
+期望：三份 `0 failed`，共用段门在 `zh` / `en` 两侧**各报一次通过**。
+
+⚠ **`exercise-blanks.test.js` 必须跑**：缺 `lang` 时是 require 期进程直接崩，不是红断言。
 
 - [ ] **Step 5: 中文逐字节不变（两份）**
 
