@@ -382,7 +382,10 @@ def fallback_check() -> int:
 # 本阶段暂未双语、或明确不在范围内的 algos 文件。
 # minimax.js 是工具④ 的：改它要重做那个工具的验收，规格 §1.6 划在阶段 9。
 # 其余七份随阶段 8 的任务逐个划掉 —— **这个集合必须缩到只剩 minimax.js**，
-# 一直留着就等于这道门没开。
+# 一直留着就等于这道门没开。这里只用注释钉住这条纪律、不加代码强制：
+# Task 4–7 的计划里每一步都钉死了期望打印的census数字（如"2 份双语 / 6 份
+# 白名单"），少划掉一个文件、数字对不上，计划本身的验收步骤就会先发现，
+# 机制已经够用，不必在 check.py 里再加一道自动化的"白名单只许收缩"检查。
 MONOLINGUAL_ALGOS = {
     'minimax.js',
     'knight-path.js', 'tour-dfs.js', 'tour-warnsdorff.js',
@@ -414,10 +417,24 @@ def bilingual_algos_check() -> int:
     **不**去调 source({}) 看它抛不抛。因为各份 source() 都先校验自己的参数
     （queens 是「少了 N」），一个空对象撞上的永远是那道校验，根本走不到
     lang —— 而这道门够不着每份的合法参数（那只有各自的测试知道）。
-    所以①验的是两件加起来等价的结构事实：**render 段在、且逐字节相同**
-    （那一段里就写着两条 lang 的抛），**并且 source() 真的调了 render**。
+    所以①验的是三件加起来等价的结构事实：
+      (a) **render 段在、且逐字节相同**（那一段里就写着两条 lang 的抛）；
+      (b) **除 render 定义本身之外，还有别处调用了 render(...)**；
+      (c) **source() 的 return 语句本身引用了那次调用的结果**——不是"调了
+          一次就把结果丢掉，实际 return 的还是单语数组"（这个坑是真的：
+          见下面（c）判据自己的文档字符串）。
     「带全参数、只缺 lang 也抛」由各文件自己的 T.throws(…, /少了 lang/) 守，
-    每个文案任务都写了一条。
+    每个文案任务都写了一条；**「render 的返回值有没有真的被用在别处（不只是
+    在 return 语句里露了个面）」这道门够不着**，那是各文件自己的
+    `zh !== en`（两种语言下生成的源码字符串不同）与三道"代码同一 / 步数
+    同一 / 行数同一"测试的职责——这道门的职责只是让一份**全新的、还没人
+    给它写过测试的**文件，在"忘了接上双语机制"时当场撞上错误，而不是等到
+    英文界面冒出一屏中文才被人发现。
+
+    ⚠ **这道门也不校验 render 段的内容**真的含那两条 lang 的抛——它只验
+    "这一段存在、且七份逐字节相同"。段内容本身是否正确（两条 throw 还在不
+    在）是行为判据，由各文件自己的 `T.throws(…, /少了 lang/)` 覆盖；这里
+    不重复加检查，只是要在文档里说清楚这是"结构判据"的边界，不是漏洞。
 
     这道门**不判英文写得对不对** —— 机器判不了，那是人工审查项（规格 §8）。
     """
@@ -434,13 +451,31 @@ def bilingual_algos_check() -> int:
               f' —— 白名单指着空气，等于把某个真文件悄悄放行了', file=sys.stderr)
         return 1
 
+    # node -e 里公用的归一化探针：从 stdin 读源码字符串，调 _test.js 的
+    # normalizeSource 抽掉注释与字符串字面量，写回 stdout。用 stdin 而不是
+    # 让 node 自己读文件，是因为②要喂给它的是**拼接过的字符串**（挖掉了
+    # render 定义段），磁盘上并不存在这样一份文件。
+    NORMALIZE_PROBE = (
+        'const T = require(%r);'
+        'const src = require("fs").readFileSync(0, "utf8");'
+        'process.stdout.write(T.normalizeSource(src));'
+    ) % (str(ROOT / 'core' / '_test.js'),)
+
+    def normalize(src: str):
+        """跑 normalize probe，失败时返回 (None, stderr)，成功时返回 (norm, None)。"""
+        proc = subprocess.run(['node', '-e', NORMALIZE_PROBE], input=src,
+                              capture_output=True, text=True)
+        if proc.returncode != 0:
+            return None, proc.stderr.strip()[:200]
+        return proc.stdout, None
+
     rc = 0
     renders = {}
-    checked = 0
+    examined = 0    # 尝试过双语检查的文件数——不等于"确认双语"，见下面打印那行的注释
     for p in algos:
         if p.name in MONOLINGUAL_ALGOS:
             continue
-        checked += 1
+        examined += 1
         text = p.read_text(encoding='utf-8')
 
         # ① render 段在不在（那一段里就写着两条 lang 的抛）
@@ -455,46 +490,85 @@ def bilingual_algos_check() -> int:
         segment = text[b:e + len(RENDER_END)]
         renders[p.name] = segment
 
-        # ② source() 真的调了 render —— 光定义不调用，等于没装。
+        # ② (b) source() 真的调了 render —— 光定义不调用，等于没装。
         #
-        #    ⚠ **不许在原文上搜子串 `render(`。** 第一版就是这么写的，而它是
-        #    **恒真**的：queens.js 有一行写给维护者的注释「…见上面 render()。」，
-        #    裸子串就在那儿，于是这条判据在这份文件下永远成立，对「忘了调
-        #    render」完全失明。突变实验 B 当场抓到了它。
+        #    ⚠ **不许在原文（或对原文整体归一化后的文本）上直接搜子串
+        #    `render(` 再减掉定义行的匹配数。** 上一轮就是这么写的（用
+        #    `len(总匹配) - len(function\s+render\( 的匹配)` 估算"非定义调用
+        #    数"），审查的突变 G 抓到它是**假绿**：render 段是**逐字节复制
+        #    到七份**的，段内任何一处 render(（哪怕是段内注释或段内自身逻辑
+        #    里出现的 render(）都会被当成"调用"计入总数——一处污染七份，
+        #    "减掉定义行"这一步根本堵不住"定义段内其它位置的 render("。
         #
-        #    正确做法是先**抽掉注释**再搜 —— 而「什么算注释」这段知识本仓已经
-        #    有唯一实现了：_test.js 的 normalizeSource（Task 1）。这里 shell 出
-        #    node 去调它，不在 Python 里重写一份（Task 2 的审查刚为同一条理由
-        #    否掉过一个本地过滤：同一段知识分成两份，迟早分岔）。
+        #    正确做法是先在**原文**上用 ①已经验证过的锚线 b/e 把整段 render
+        #    定义（含上方注释）**整体挖掉**，剩下两截拼起来，再送去归一化——
+        #    这样"数 render( 出现次数"天然只会数到定义段之外的调用，不需要
+        #    再用任何正则去猜"哪一处是定义行"。锚线在原文里是可靠的（①已经
+        #    验证过 b/e 确实夹住了这一整段），比在归一化文本里重新用
+        #    `function render(parts, lang) {` 配对花括号去切更稳，也不必再
+        #    应付"箭头函数/函数表达式/多行定义"这类会让配对花括号变复杂的
+        #    写法——它们跟普通调用一样，只要出现在挖掉的那一段**之内**就已经
+        #    被连根拔掉，不必单独识别。拼接处会断一次行结构，这里只数子串、
+        #    不关心行号，不受影响。
         #
-        #    归一化之后：定义那一行是 `function render(parts, lang) {`，真正的
-        #    调用是 `render(HEAD, o.lang)` 这样的。数**非定义**的那些，至少要
-        #    有一处。实测 queens.js = 2 处调用 + 1 处定义。
-        probe = (
-            'const T = require(%r);'
-            'const fs = require("fs");'
-            'process.stdout.write(T.normalizeSource(fs.readFileSync(%r, "utf8")));'
-        ) % (str(ROOT / 'core' / '_test.js'), str(p))
-        proc = subprocess.run(['node', '-e', probe], capture_output=True, text=True)
-        if proc.returncode != 0:
-            print(f'ERROR: {p.name} 归一化失败 —— {proc.stderr.strip()[:200]}',
+        #    「什么算注释」这段知识本仓已经有唯一实现：_test.js 的
+        #    normalizeSource（Task 1）。这里 shell 出 node 去调它，不在
+        #    Python 里重写一份（Task 2 的审查刚为同一条理由否掉过一个本地
+        #    过滤：同一段知识分成两份，迟早分岔）。归一化之后 queens.js 的
+        #    非定义 render( 应该有 2 处（HEAD 一次、BODY 一次）。
+        rest_raw = text[:b] + text[e + len(RENDER_END):]
+        rest_norm, err = normalize(rest_raw)
+        if err is not None:
+            print(f'ERROR: {p.name} 挖掉 render 定义段之后归一化失败 —— {err}',
                   file=sys.stderr)
             rc = 1
             continue
-        norm = proc.stdout
-        calls = (len(re.findall(r'(?:^|[^\w$.])render\(', norm))
-                 - len(re.findall(r'function\s+render\(', norm)))
+        calls = len(re.findall(r'(?:^|[^\w$.])render\(', rest_norm))
         if calls < 1:
             print(f'ERROR: {p.name} 定义了 render(parts, lang) 却从来不调它 —— '
                   f'source() 还在吐单语源码', file=sys.stderr)
             rc = 1
+            continue
 
-    if checked == 0:
+        # ② (c) 调了不等于用了 —— render 的返回值必须真的进了 source() 的
+        #    return 语句，不能"先调一次、把结果丢掉，实际 return 的还是单语
+        #    数组"（审查的突变 F：正是这种写法，calls>=1 但结果没被用上）。
+        #
+        #    ⚠ **这条判据是故意收紧的结构判据，脆**：它要求 return 语句本身
+        #    （直到下一个分号为止）里字面出现 render( ——如果将来某份文件
+        #    合法地先把 render(...) 的结果存进一个变量、再 `return
+        #    lines.join(...)`，会被这条误伤为"没用上"。这属于"判据脆是判据
+        #    的问题，不是文件的问题"：真遇到这种写法应该回来放宽这条判据
+        #    （比如改成追踪变量数据流），不能反过来强迫文件写成
+        #    `return render(...)` 的形状。当前七份 algos 的既定写法就是
+        #    `return render(HEAD,...).concat(...).concat(render(BODY,...))…`，
+        #    在这个前提下这条判据是有效的、且已经用 queens.js 的真实文本验证
+        #    过确实能匹配。
+        #
+        #    「render 的返回值有没有真的在**下游别处**被用上（不只是在 return
+        #    语句里露了个面）」这道门够不着，那是各文件自己的 `zh !== en` 与
+        #    三道"代码同一/步数同一/行数同一"测试的职责——这道门只保证
+        #    return 语句字面引用了 render 调用，不保证它是唯一一次调用，也
+        #    不保证调用参数的 lang 传对了。
+        if not re.search(r'return[^;]*render\(', rest_norm):
+            print(f'ERROR: {p.name} 调用了 render(parts, lang)，但 return 语句'
+                  f'里没有用上它的结果 —— source() 实际返回的可能还是单语'
+                  f'（render 被调用后结果被丢弃）', file=sys.stderr)
+            rc = 1
+
+    if examined == 0:
         print('ERROR: 一份双语 algos 都没有 —— MONOLINGUAL_ALGOS 是不是把'
               '所有文件都放行了？', file=sys.stderr)
         return 1
 
+    # 「render 助手 N 份一致/不一致」这半句只报**这一条**（逐字节比对）的
+    # 结果，跟上面①②的结构判据是否失败无关，两者故意分开算——上一版把
+    # 它们混在一起：①②任何一处失败都会让整体 rc 非零，而这半句直接读
+    # `rc == 0` 来判断"一致"，于是①②真的出错时，这里照样打印"…份一致"，
+    # 看起来像是"render 助手没问题"，实际上是别的判据在报错。这里单开一个
+    # consistency_ok，只在这条比对本身失败时才置 False。
     names = sorted(renders)
+    consistency_ok = True
     if len(names) > 1:
         first = renders[names[0]]
         for name in names[1:]:
@@ -503,10 +577,16 @@ def bilingual_algos_check() -> int:
                       f'不是逐字节相同 —— 七份里各存一份，就必须一个字节都不差',
                       file=sys.stderr)
                 rc = 1
+                consistency_ok = False
 
-    print(f'双语 algos 普查：{checked} 份双语 / {len(algos) - checked} 份白名单，'
+    # ⚠ `examined` 数的是"尝试过双语检查的文件数"，不是"确认双语通过的文件
+    # 数"——①锚线缺失的文件也会先被计入 examined（在 continue 之前）。两者
+    # 在door全绿时数值相同（当前 1 份双语场景下就是如此），但读这行输出时
+    # 要知道：`examined` 更准确的含义是分母，不是"验收通过"的断言，真正
+    # 的通过与否看的是整体 rc 和上面有没有打印任何 ERROR。
+    print(f'双语 algos 普查：{examined} 份双语 / {len(algos) - examined} 份白名单，'
           f'render 助手 {len(names)} 份'
-          + ('一致' if rc == 0 else '有不一致'))
+          + ('一致' if consistency_ok else '有不一致'))
     return rc
 
 
