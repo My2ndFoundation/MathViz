@@ -20,6 +20,7 @@
 - **`minimax.js` 不在本阶段范围内**（工具④ 的，改它要重做那个工具的验收）。它进 `check.py` 的单语白名单。
 - **英文以中文那一版的意思与语气为底本重写，不是逐句对译。** 判据是「两边各自读起来都像母语者写给一个十六岁读者的」。
 - **英文不能比中文说得少或多。** 允许句式与举例不同，**教学内容必须是同一件事**。
+- ⚠ **判「有没有中文」的字符类不能只写 `[一-鿿]`。** 那一段是 CJK 汉字（U+4E00–U+9FFF），**看不见中文标点**——`「」。，？、《》；：` 实测全部 `false`，于是一句「Place the knight here。」会大摇大摆过门，而这道门的整个用途就是拦住中文漏进英文变体。用 `[一-鿿㐀-䶿　-〿＀-￯]`（汉字 + 扩展 A + CJK 标点 U+3000–U+303F + 全角 U+FF00–U+FFEF），实测四类中文全 `true`、纯英文 `false`。Task 4 的审查发现的、继承自计划的薄弱点。
 - **约束落在「段」上，不落在「句」上**：一段 6 行的中文注释要写成 6 行英文，段内句子怎么重组都行。写不成等行数就**停下来报告**，不许塞废话或砍内容凑数。
 - **本仓无构建/lint/test 工具链。** 测试 = `node chess/core/xxx.test.js`；总门 = `python3 chess/scripts/check.py`。
 - **`git status --short` 之后只暂存显式路径**；禁止 `git add -A` / `git commit -a`。`.githooks/pre-commit` 会重跑 `inline_core.py` 并**再暂存**，所以钩子跑完之后要**再看一遍** `git status --short`，确认每一条都是自己的。
@@ -305,8 +306,8 @@ for (const N of [4, 6, 8]) {
 const zh6 = Q.source({ N: 6, lang: 'zh' });
 const en6 = Q.source({ N: 6, lang: 'en' });
 T.ok(zh6 !== en6, '两种语言的源码不是同一份');
-T.ok(/[一-鿿]/.test(zh6), '中文那一份里有汉字');
-T.ok(!/[一-鿿]/.test(E.parse(en6, 'en').clean), '英文那一份送到编辑器的文本里一个汉字都没有');
+T.ok(/[一-鿿㐀-䶿　-〿＀-￯]/.test(zh6), '中文那一份里有汉字');
+T.ok(!/[一-鿿㐀-䶿　-〿＀-￯]/.test(E.parse(en6, 'en').clean), '英文那一份送到编辑器的文本里一个汉字都没有');
 /* BLANK 指令行不翻译 —— 正着钉一次，别只写在散文里 */
 const blankLines = function (src) {
   return src.split('\n').filter(function (l) { return /BLANK/.test(l); }).join('\n');
@@ -784,8 +785,8 @@ for (const target of [10, 24]) {
 const kpZh = KP.source({ W: 5, start: 0, target: 24, lang: 'zh' });
 const kpEn = KP.source({ W: 5, start: 0, target: 24, lang: 'en' });
 T.ok(kpZh !== kpEn, '两种语言的源码不是同一份');
-T.ok(/[一-鿿]/.test(kpZh), '中文那一份里有汉字');
-T.ok(!/[一-鿿]/.test(E.parse(kpEn, 'en').clean),
+T.ok(/[一-鿿㐀-䶿　-〿＀-￯]/.test(kpZh), '中文那一份里有汉字');
+T.ok(!/[一-鿿㐀-䶿　-〿＀-￯]/.test(E.parse(kpEn, 'en').clean),
      '英文那一份送到编辑器的文本里一个汉字都没有');
 T.eq(kpEn.split('\n').filter(l => /BLANK/.test(l)).join('\n'),
      kpZh.split('\n').filter(l => /BLANK/.test(l)).join('\n'),
@@ -924,8 +925,8 @@ for (const key of Object.keys(TOUR_SRC)) {
   T.eq(I.run(en, { host: {} }).trace.length, I.run(zh, { host: {} }).trace.length,
        key + '：两种语言的解释器步数相同');
   T.ok(zh !== en, key + '：两种语言的源码不是同一份');
-  T.ok(/[一-鿿]/.test(zh), key + '：中文那一份里有汉字');
-  T.ok(!/[一-鿿]/.test(E.parse(en, 'en').clean),
+  T.ok(/[一-鿿㐀-䶿　-〿＀-￯]/.test(zh), key + '：中文那一份里有汉字');
+  T.ok(!/[一-鿿㐀-䶿　-〿＀-￯]/.test(E.parse(en, 'en').clean),
        key + '：英文那一份送到编辑器的文本里一个汉字都没有');
   T.throws(function () { mod.source({ W: 5, H: 5, start: 0 }); },
            key + '：缺 lang 必须抛', /少了 lang/);
@@ -1045,8 +1046,8 @@ for (let i = 0; i < RC_BOARDS.length; i = i + 1) {
 const rcZh = RC.source({ W: 5, H: 5, blocked: [6, 8, 12, 16, 18], lang: 'zh' });
 const rcEn = RC.source({ W: 5, H: 5, blocked: [6, 8, 12, 16, 18], lang: 'en' });
 T.ok(rcZh !== rcEn, '两种语言的源码不是同一份');
-T.ok(/[一-鿿]/.test(rcZh), '中文那一份里有汉字');
-T.ok(!/[一-鿿]/.test(E.parse(rcEn, 'en').clean),
+T.ok(/[一-鿿㐀-䶿　-〿＀-￯]/.test(rcZh), '中文那一份里有汉字');
+T.ok(!/[一-鿿㐀-䶿　-〿＀-￯]/.test(E.parse(rcEn, 'en').clean),
      '英文那一份送到编辑器的文本里一个汉字都没有');
 T.throws(function () { RC.source({ W: 5, H: 5, blocked: [] }); },
          'rook-cover：缺 lang 必须抛', /少了 lang/);
@@ -1174,8 +1175,8 @@ for (const key of Object.keys(KING_SRC)) {
   const zh0 = mod.source({ W: b0.W, H: b0.H, blocked: b0.blocked, lang: 'zh' });
   const en0 = mod.source({ W: b0.W, H: b0.H, blocked: b0.blocked, lang: 'en' });
   T.ok(zh0 !== en0, key + '：两种语言的源码不是同一份');
-  T.ok(/[一-鿿]/.test(zh0), key + '：中文那一份里有汉字');
-  T.ok(!/[一-鿿]/.test(E.parse(en0, 'en').clean),
+  T.ok(/[一-鿿㐀-䶿　-〿＀-￯]/.test(zh0), key + '：中文那一份里有汉字');
+  T.ok(!/[一-鿿㐀-䶿　-〿＀-￯]/.test(E.parse(en0, 'en').clean),
        key + '：英文那一份送到编辑器的文本里一个汉字都没有');
   T.throws(function () { mod.source({ W: 5, H: 5, blocked: [] }); },
            key + '：缺 lang 必须抛', /少了 lang/);
