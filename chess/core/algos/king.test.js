@@ -420,6 +420,27 @@ const MARK_B = '/* ===== 分水岭：从这里往下两份不一样了 —— �
     T.ok(b > a, name + ' 里有「分水岭」那条横线，而且在前一条之后');
     return src.slice(a, b + MARK_B.length);
   };
+  /* ---- 分水岭**之上**那一段也要有门 ----
+     共用段有字节级门、`source()` 两份都验过，但 HEAD（横线之上、**正是她要
+     并排读的第一屏**）一度只有一句注释声称「行数相同，只有第 1、9、10 行不同」。
+     声称不是门：那一段里任何一句文案只改一份，就会静默漂移，而两栏并排读的
+     时候上半截错行是最刺眼的。（修复轮 1 改那句「墙一多贪心就吃亏」的时候，
+     要改的正是这一段里的一行 —— 没有这道门，漏改一份不会有任何东西红。）
+
+     钉两件事：**行数相同**，且**逐行 diff 恰好三处、就在第 1 / 9 / 10 行**
+     （标题、以及讲「这一份 / 另一份」的那两行 —— 那三行本来就该不同）。 */
+  const preG = sg.slice(0, sg.indexOf(MARK_A)).split('\n');
+  const preX = sx.slice(0, sx.indexOf(MARK_A)).split('\n');
+  T.ok(preG.length > 15, '分水岭之上有 ' + preG.length + ' 行，这道门没有空转');
+  T.eq(preG.length, preX.length, '分水岭之上两份行数相同（并排读时上半截逐行对得上）');
+  const headDiff = [];
+  for (let i = 0; i < Math.max(preG.length, preX.length); i++) {
+    if (preG[i] !== preX[i]) headDiff.push(i + 1);
+  }
+  T.eq(headDiff, [1, 9, 10],
+       '分水岭之上只有三行不同，就在第 1 / 9 / 10 行（标题 + 讲「这一份 / 另一份」' +
+       '的两行）；实测不同的是第 ' + headDiff.join(' / ') + ' 行');
+
   const cg = shared(sg, 'king-greedy'), cx = shared(sx, 'king-exact');
   T.eq(cg === cx, true, '两条横线之间的那一整段，两份逐字节相同');
   T.ok(cg.split('\n').length > 40,
