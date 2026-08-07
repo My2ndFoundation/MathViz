@@ -562,7 +562,7 @@ Task 2 之后有了第一份双语源码，这道门才咬得住东西。它守�
 
 - [ ] **Step 1: 写门（先写、先跑，看它红）**
 
-在 `chess/scripts/check.py` 的 `core_tests()` 之前插入：
+在 `chess/scripts/check.py` 的 `core_tests()` 之前插入（文件顶部已经 `import re` / `import subprocess` / `import sys`，没有的话补上）：
 
 ```python
 # 本阶段暂未双语、或明确不在范围内的 algos 文件。
@@ -642,10 +642,35 @@ def bilingual_algos_check() -> int:
         renders[p.name] = segment
 
         # ② source() 真的调了 render —— 光定义不调用，等于没装。
-        #    把定义段挖掉之后再数：定义里那一行 `function render(parts, lang) {`
-        #    本来就含 `render(`，不挖掉的话每份都白白算一次，这道门就永远绿。
-        rest = text[:b] + text[e + len(RENDER_END):]
-        if 'render(' not in rest:
+        #
+        #    ⚠ **不许在原文上搜子串 `render(`。** Task 3 第一版就是这么写的，
+        #    而它是**恒真**的：queens.js 有一行写给维护者的注释「…见上面
+        #    render()。」，裸子串就在那儿，于是这条判据在这份文件下永远成立，
+        #    对「忘了调 render」完全失明。突变实验 B 当场抓到了它。
+        #
+        #    正确做法是先**抽掉注释**再搜 —— 而「什么算注释」这段知识本仓已经
+        #    有唯一实现了：_test.js 的 normalizeSource（Task 1）。这里 shell 出
+        #    node 去调它，不在 Python 里重写一份（Task 2 的审查刚为同一条理由
+        #    否掉过一个本地过滤：同一段知识分成两份，迟早分岔）。
+        #
+        #    归一化之后：定义那一行是 `function render(parts, lang) {`，
+        #    真正的调用是 `render(HEAD, o.lang)` 这样的。数**非定义**的那些，
+        #    至少要有一处。实测 queens.js = 2 处调用 + 1 处定义。
+        probe = (
+            'const T = require(%r);'
+            'const fs = require("fs");'
+            'process.stdout.write(T.normalizeSource(fs.readFileSync(%r, "utf8")));'
+        ) % (str(ROOT / 'core' / '_test.js'), str(p))
+        proc = subprocess.run(['node', '-e', probe], capture_output=True, text=True)
+        if proc.returncode != 0:
+            print(f'ERROR: {p.name} 归一化失败 —— {proc.stderr.strip()[:200]}',
+                  file=sys.stderr)
+            rc = 1
+            continue
+        norm = proc.stdout
+        calls = (len(re.findall(r'(?:^|[^\w$.])render\(', norm))
+                 - len(re.findall(r'function\s+render\(', norm)))
+        if calls < 1:
             print(f'ERROR: {p.name} 定义了 render(parts, lang) 却从来不调它 —— '
                   f'source() 还在吐单语源码', file=sys.stderr)
             rc = 1
@@ -697,6 +722,11 @@ python3 chess/scripts/check.py
 #   期望：ERROR: queens.js 里找不到 render(parts, lang) 那一段
 # 突变 B：把 queens.js 的 source() 改回不调 render（直接 HEAD.concat(BODY)）
 #   期望：ERROR: queens.js 定义了 render(parts, lang) 却从来不调它
+#   ⚠ 只看 check.py 的退出码不够 —— 别的既有门（inline 一致性、ALGOS 往返、
+#     三个 .test.js）本来就会因为这个突变而红。**要在输出里找到第八道门
+#     自己那一行 ERROR**，找不到就说明这道门在这个方向上是假的。
+#     Task 3 第一版正是这样漏过去的：整体 exit 1，而第八道门照常打印
+#     「render 助手 1 份一致」。
 # 突变 C：MONOLINGUAL_ALGOS 里临时加上 'queens.js'
 #   期望：ERROR: 一份双语 algos 都没有 ……
 # 突变 D：MONOLINGUAL_ALGOS 里加一个不存在的文件名 'nope.js'
