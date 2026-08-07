@@ -22,8 +22,10 @@ function ok(cond, label) {
    `T.throws(`。grep 才是不可靠的那个。运行期审计顺带还能抓出「一条从没被
    执行到的 T.throws」，那种断言今天完全隐形。
 
-   ⚠ **没设 THROWS_AUDIT 时行为必须一个字节不变** —— 这是给全仓 149 条
-   断言加的旁路，它自己不能改变任何既有判定。 */
+   ⚠ **没设 THROWS_AUDIT 时行为必须一个字节不变** —— 这是给全仓 170 条
+   断言加的旁路（阶段 9a Task 1 实测的运行期真数；简报写的 149 是静态
+   grep 数，见 check.py 的 throws_discrimination_check() 文档字符串），
+   它自己不能改变任何既有判定。 */
 const AUDIT = (typeof process !== 'undefined' && process.env && process.env.THROWS_AUDIT)
   ? [] : null;
 
@@ -34,8 +36,13 @@ function throws(fn, label, pattern) {
     fn();
   } catch (e) {
     if (AUDIT) {
+      // patternType 如实记录 pattern 是 RegExp 还是字符串——check.py 那边
+      // 靠这个字段决定用哪种匹配语义（正则 test / 字符串 indexOf），不能靠
+      // 猜 pattern 字符串的形状（一个字符串 pattern 也可能长得像 /xxx/）。
       AUDIT.push({ label: String(label),
                    pattern: pattern === undefined ? null : String(pattern),
+                   patternType: pattern === undefined ? null :
+                     (pattern instanceof RegExp ? 'regex' : 'string'),
                    msg: String(e && e.message) });
     }
     if (pattern === undefined) { passed++; return; }

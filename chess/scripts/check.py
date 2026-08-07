@@ -4,6 +4,7 @@
 对应规格 §7 的第 5、6 道门。第 1–4 道由 node 测试文件负责。
 """
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -667,10 +668,9 @@ def core_tests() -> int:
 def _throws_msg_shape(msg: str) -> str:
     """把一条 T.throws 消息里的**插值**抹掉，只留结构（阶段 9a 判据订正）。
 
-    判别力判据必须建在"结构"上而不是"字面"上——这是修复轮 1 订正掉的
-    一个真实误判：原判据要求 pattern 匹中同文件**全部**消息字面量，
-    但同一类错误在不同输入下的消息只差一个插值，例如
-    `W 必须是 >= 1 的整数，收到：0` 与 `……收到：5.5`、
+    判别力判据必须建在"结构"上而不是"字面"上——原判据要求 pattern 匹中
+    同文件**全部**消息字面量，但同一类错误在不同输入下的消息只差一个
+    插值，例如 `W 必须是 >= 1 的整数，收到：0` 与 `……收到：5.5`、
     `lang 只认 "zh" 或 "en"，收到："fr"` 与 `……收到：""`、
     `(184 calls deep)` 与 `(233 calls deep)`。一条 pattern 同时匹中这些是
     **对的**——它们是同一件事的不同实例，不是判别力不足。
@@ -683,14 +683,84 @@ def _throws_msg_shape(msg: str) -> str:
     只抹两类插值：引号包住的字符串（各种 "fr"/"" 之类的用户输入回显）、
     数字（整数与浮点数，覆盖越界值、深度计数一类场景）。这两类覆盖了
     全仓实测到的全部插值形状；抹完之后还能各自算出正确的期望结果——
-    见 check.py 里 throws_discrimination_check() 的判据用法。
+    见 throws_discrimination_check() 的判据用法。
+
+    ⚠ **只抹 ASCII 双引号 `"` 与阿拉伯数字，不抹中文引号「」""或单引号 '**
+    ——全仓 170 条消息里有 12 条含中文引号，逐条核实过**全部是固定文案**，
+    没有一条把插值包在中文引号里，所以今天不会漏判。但这对 Task 2–4 是
+    一条硬约束：**新写的 86 条断言，插值必须用 ASCII 双引号 `"..."` 回显
+    字符串、或者裸数字回显数值**——如果哪条新消息把插值包进「」或""，
+    这个函数会把它当成固定文案的一部分，两条本该算不同结构的消息会被
+    错误地并成同一种形状，判据会往"漏报"那个方向错（该报的钝 pattern
+    没报），而不是往"误报"方向错——两种方向都要避免，但这条具体来说
+    是这个函数今天唯一的已知盲区，写在这里防止 Task 2–4 踩上去。
     """
-    msg = re.sub(r'"[^"]*"', '"S"', msg)         # 引号里的内容
+    msg = re.sub(r'"[^"]*"', '"S"', msg)         # 引号里的内容（仅 ASCII 双引号）
     return re.sub(r'-?\d+(\.\d+)?', 'N', msg)    # 数字
 
 
+def _throws_pattern_matcher(entry: dict, test_name: str):
+    """从一条审计条目的 pattern 构造一个 `msg -> bool` 的匹配函数。
+
+    `_test.js` 的 throws(fn, label, pattern) 对 RegExp 走 `.test()`、对字符串
+    走 `indexOf()`——**两种语义完全不同**，必须先分清楚是哪一种，而且要靠
+    审计条目自带的 `patternType` 字段（`_test.js` 在 push 的时候如实记了
+    `pattern instanceof RegExp` 的结果），**不能靠猜字符串的形状**：一个
+    字符串 pattern 恰好长得像 `/xxx/` 的可能性无法排除，猜错了就会把一条
+    该走 indexOf 语义的字符串硬塞进 re.compile()，两种语义在边界情况上
+    并不等价。全仓今天的 84 条 pattern 实测全部是 RegExp，没有字符串
+    pattern 的实例，但这条判断逻辑要按 `_test.js` 的真实行为写，不能因为
+    "今天用不上"就省略。
+
+    返回 `(matcher, warn)`：
+      · pattern 是字符串 → `matcher = lambda msg: pattern in msg`（indexOf
+        语义的 Python 等价写法），warn 为 None。
+      · pattern 是正则字面量的字符串形式（形如 `/body/flags`）→ 尝试转换
+        再编译，见下面两条具体处理。
+      · 编译失败 → matcher 为 None，warn 给出原因。**调用方应该只打印一条
+        WARN 并跳过，不能把 rc 置 1**——JS 与 Python 正则方言不完全相同
+        （比如具名组语法），编译失败是**这份工具在这条 pattern 上失效**，
+        不是这条 T.throws 断言本身判别力不足；把工具的局限误判成断言的
+        缺陷，会逼着人把"判别力更强的写法"改成"这份工具能读懂的写法"，
+        本末倒置。
+
+    两个具体的方言差异处理：
+      1. **具名捕获组**：JS 是 `(?<name>...)`，Python 要 `(?P<name>...)`。
+         这里做转换，但**要避开零宽断言** `(?<=...)`（lookbehind）与
+         `(?<!...)`（negative lookbehind）——这两种写法在 JS 与 Python 里
+         语法完全相同，转换正则如果不排除它们，会把 `(?<=` 错改成
+         `(?P<=`，反而制造一个新的编译失败。
+      2. **flags**：JS 正则字面量的 `toString()` 会把 `/body/flags` 里的
+         flags 带出来，这里至少把 `i`（忽略大小写）接到 `re.IGNORECASE`，
+         顺手也接了 `m`→`re.MULTILINE`、`s`→`re.DOTALL`（这两个的语义
+         与 JS 对应 flag 一致，同样的转换成本，不做等于留一个已知但没
+         处理的漏报缺口）。`g`/`u`/`y`/`d` 在这里的用法（`.search()` 判断
+         "匹中了没有"）不影响结果，没有转换的必要。
+    """
+    pattern = entry['pattern']
+    if entry.get('patternType') == 'string':
+        return (lambda msg, p=pattern: p in msg), None
+    m = re.match(r'^/(.*)/([a-z]*)$', pattern, re.DOTALL)
+    body, flags = (m.group(1), m.group(2)) if m else (pattern, '')
+    # (?<name>...) → (?P<name>...)，但 (?<= 与 (?<! 原样放过。
+    body = re.sub(r'\(\?<(?![=!])', '(?P<', body)
+    re_flags = 0
+    if 'i' in flags:
+        re_flags |= re.IGNORECASE
+    if 'm' in flags:
+        re_flags |= re.MULTILINE
+    if 's' in flags:
+        re_flags |= re.DOTALL
+    try:
+        compiled = re.compile(body, re_flags)
+    except re.error as err:
+        return None, (f'{test_name} 的 pattern {pattern} Python 侧编译失败（工具'
+                      f'限制，不是断言缺陷，跳过这条不计入 blunt/rc）：{err}')
+    return (lambda msg, c=compiled: bool(c.search(msg))), None
+
+
 def throws_discrimination_check() -> int:
-    """T.throws 的判别力普查（规格 §7.6，阶段 9a，修复轮 1 订正判据）。
+    """T.throws 的判别力普查（规格 §7.6，阶段 9a，修复轮 2 判据订正）。
 
     `_test.js` 的 throws(fn, label, pattern) 第三参可选，**不传就退化成
     「抛了就算过」**。
@@ -717,28 +787,41 @@ def throws_discrimination_check() -> int:
     共享前缀 `source({ W, H, blocked }) 少了 …`，于是 /W/、/H/、/blocked/
     三个 pattern 匹到了每一条，把那三道守卫全删掉仍然四条全绿。
 
-    所以这道门守的是**判别力**：把同文件全部消息按 `_throws_msg_shape()`
-    抹掉插值、去重成"结构形状"集合，再看每条 pattern 匹中几种形状——
-    **匹中 ≥2 种形状才算钝**，匹中 1 种是正常（精确命中它自己那种错误），
-    **匹中 0 种是判别力最强的那一档、不是异常**（pattern 自己就带着一个
-    具体插值，比如 `/收到：25/`，抹掉插值之后当然匹不上自己的形状——这
-    恰恰是"咬得比结构还紧"，不该被判成钝）。
+    所以这道门守的是**判别力**，判据是**先匹配、再归一化**（修复轮 2
+    从"先归一化、再匹配"订正过来，见下面 ⚠）：对每条 pattern P，先在
+    `_throws_pattern_matcher()` 给的匹配语义下找出它在同文件里**真的
+    匹中的原始消息**集合 M，再用 `_throws_msg_shape()` 把 M 里每条消息
+    归一化、去重，数出 M 覆盖了几种不同的结构形状——**覆盖 ≥2 种才算钝**。
+    覆盖 0 种或 1 种都是通过：0 种是 P 压根没匹中任何消息（大概率是 P
+    自己带着一个具体插值，比如 `/收到：25/` 只会匹中那一条原始消息，
+    覆盖恰好 1 种形状，本来就该通过，不需要为它单开一个"0 种"的特例）；
+    1 种是 P 精确命中了它自己那种错误的全部实例，是判别力正常的样子。
 
-    ⚠ 修复轮 1 之前的判据是"匹中同文件**全部**消息字面量"，实测**完全
-    抓不到任何东西**（全仓 84 条 pattern，用旧判据普查一遍是 0；用"匹中
-    >1 条去重后的字面消息"这种中间判据普查是 33，但逐条核实**全是
-    误报**——都是本文档字符串开头说的"同一类错误的不同插值"）。旧判据
-    在文件还小（3–4 条断言）时凑巧管用，文件长到十几条不相关断言之后就
-    钝了——这不是"以后再说"的边角情况，是全仓核实过的真实现状，所以
-    这一轮直接换成结构判据，不是留着旧判据"以后再收紧"。
+    ⚠ **修复轮 1 的判据是错的，不是"文件变大后的局限"，是选错了维度**：
+    那一轮"先归一化、再匹配"，即预先把同文件消息归一化去重成形状集合，
+    再看 P 匹中形状集合里几个元素——这个顺序有一个**无条件豁免**：只要
+    P 自己带数字或引号（比如 `/1/`），归一化之后 P 在形状集合里天然找
+    不到完全对应的形状字符串，命中数永远算成 0，于是被"0 种不是异常"
+    这条规则无条件放行，**不管 P 有多钝**。全仓验证过 `/1/` 这种 pattern：
+    它在原始消息层面能横跨 king.test.js 3 种结构、rook-cover.test.js 3
+    种结构——跟阶段 7 的 `/W/` 是同一类事故，修复轮 1 的判据会把它放过。
+    这一轮把顺序倒过来（先用 P 的真实匹配语义筛出它匹中的原始消息，再
+    对这个子集归一化），"0 种不许报错"这条特例判据也随之整个删掉——不
+    是不需要它了，是新判据下"0 种"和"1 种"本来就都不该报错，不需要
+    专门开一条豁免规则，特例消失是这次订正的自然结果，不是另外打的补丁。
 
     ⚠ 这道门**不要求每条都有 pattern** —— 那是 9a 的补齐任务的事，
     补齐过程中这道门要能跑。它只报两类：
-      · 无判别力的 pattern（匹中同文件 ≥2 种结构形状）
+      · 无判别力的 pattern（真实匹中同文件 ≥2 种结构形状的消息）
       · 缺第三参的条数（**只统计、不失败**，收敛到 0 之后再收紧）
 
     收紧的时机写在这里：9a 的补齐任务做完后，把 ALLOW_MISSING 改成 0，
     这道门从此拒绝任何新增的无 pattern T.throws。
+
+    ⚠ **扫描范围是 core/ + games/，与 core_tests()（第 7 道门）完全一致**
+    ——早先只扫 core/，games/ 下的 `games.test.js` 今天恰好 0 条 T.throws
+    所以没露出来，但那是运气，不是设计：两道门扫的必须是同一个集合，
+    不然"这道门覆盖了全仓"这句话本身就是假的，只是暂时没人戳破。
 
     ⚠ 这里对每个测试文件单独 `subprocess.run(['node', str(test)], env=...)`
     ——传的是**文件路径**而不是脚本字符串，不经过 run_node()，也就不受它
@@ -748,6 +831,16 @@ def throws_discrimination_check() -> int:
     run_node() 目前没有 env 参数——与其给它加一个只有这一处用得到的
     形参，不如在这单独一处直接调 subprocess.run，语义更直接。
 
+    ⚠ **审计文件路径带测试文件名与本进程 pid**（`.throws-audit.<pid>.
+    <文件名>.json`），且**跑之前先 unlink 掉同名残留**——早先用固定路径
+    `.throws-audit.json` 在整个循环里复用，一旦某个文件的 `T.report()`
+    没跑到（比如那次跑挂了、或者故意被注释掉），`out.exists()` 检查看到
+    的其实是**上一个测试文件残留的旧文件**，会被误当成"这个文件写出了
+    审计数据"而蒙混过关——"没写出审计文件"这个本该响的 ERROR 反而不响。
+    带上文件名与 pid 之后，不同测试文件、不同并发的 check.py 进程之间
+    不会互相踩到对方的审计文件；每次用之前主动 unlink 一次，是防"上上次
+    跑挂在这个位置留下的文件"这种更早的残留。
+
     ⚠ 这道门与 core_tests()（第 7 道）**故意**各自把每个测试文件跑一遍
     ——是的，`tree-model.test.js` 那 8140 条断言因此被启动了两次 node
     进程，整体 check.py 一次跑下来约 35–40 秒。**没有合并成一趟**：把
@@ -756,52 +849,50 @@ def throws_discrimination_check() -> int:
     边要改都得小心别碰坏另一边。35–40 秒在本仓当前规模下可接受，这里
     宁可花两倍的跑测时间也要保持两道门各管一段。
     """
-    import os
     ALLOW_MISSING = 86          # ⚠ 补齐任务做完后改成 0（简报写的 84 是误差，见上）
-    tests = sorted(list((ROOT / 'core').rglob('*.test.js')))
+    # 与 core_tests() 扫的是同一个集合——见上面文档字符串。
+    tests = sorted((ROOT / 'core').rglob('*.test.js')) + sorted((ROOT / 'games').rglob('*.test.js'))
     if not tests:
-        print('ERROR: core/ 下一个 *.test.js 都没找到 —— 这道门本该普查，'
-              '不是跑了个寂寞', file=sys.stderr)
+        print('ERROR: core/ 与 games/ 下一个 *.test.js 都没找到 —— 这道门本该'
+              '普查，不是跑了个寂寞', file=sys.stderr)
         return 1
     rc = 0
     total = missing = blunt = 0
     for test in tests:
-        out = ROOT / '.throws-audit.json'
+        out = ROOT / f'.throws-audit.{os.getpid()}.{test.name}.json'
+        if out.exists():
+            out.unlink()      # 清掉可能残留的上一次跑挂的文件——见上面文档字符串
         env = dict(os.environ, THROWS_AUDIT=str(out))
         proc = subprocess.run(['node', str(test)], capture_output=True,
                               text=True, env=env)
         if not out.exists():
+            detail = proc.stderr.strip()
             print(f'ERROR: {test.name} 没写出审计文件 —— _test.js 的审计模式'
-                  f'没生效，或者这个文件根本没调 T.report()', file=sys.stderr)
+                  f'没生效，或者这个文件根本没调 T.report()'
+                  + (f'\n    node 的 stderr：{detail[:300]}' if detail else ''),
+                  file=sys.stderr)
             rc = 1
             continue
         entries = json.loads(out.read_text(encoding='utf-8'))
         out.unlink()
         total += len(entries)
         missing += sum(1 for e in entries if e['pattern'] is None)
-        if len(entries) < 2:
-            continue
-        # 同文件全部消息，抹掉插值、去重成"结构形状"集合——判据建在这个
-        # 集合上，不是原始消息字面量上（见上面文档字符串）。
-        shapes = sorted(set(_throws_msg_shape(e['msg']) for e in entries))
+        msgs = [e['msg'] for e in entries]
         for e in entries:
             if e['pattern'] is None:
                 continue
-            body = re.sub(r'^/|/[a-z]*$', '', e['pattern'])
-            try:
-                pat = re.compile(body)
-            except re.error as err:
-                print(f'ERROR: {test.name} 的 pattern {e["pattern"]} '
-                      f'Python 侧编译失败：{err}', file=sys.stderr)
-                rc = 1
+            matcher, warn = _throws_pattern_matcher(e, test.name)
+            if matcher is None:
+                print(f'WARN: {warn}', file=sys.stderr)
                 continue
-            hits = sum(1 for s in shapes if pat.search(s))
-            # ⚠ hits == 0 不是异常，是判别力最强的那一档（pattern 自己带
-            # 着插值，抹掉插值的形状集合里自然找不到它）——只有 >= 2 才是钝。
-            if hits >= 2:
+            # 先匹配、再归一化（修复轮 2 订正的顺序，见上面文档字符串）：
+            # 只对 P 真的匹中的原始消息求结构形状，不对全文件消息预先
+            # 归一化。
+            matched_shapes = set(_throws_msg_shape(m) for m in msgs if matcher(m))
+            if len(matched_shapes) >= 2:
                 blunt += 1
-                print(f'ERROR: {test.name} 的这条 pattern 匹中了同文件 {hits} '
-                      f'种不同结构的消息，等于没有判别力：\n'
+                print(f'ERROR: {test.name} 的这条 pattern 匹中了同文件 '
+                      f'{len(matched_shapes)} 种不同结构的消息，等于没有判别力：\n'
                       f'    {e["pattern"]}  ←  {e["label"][:60]}',
                       file=sys.stderr)
                 rc = 1
@@ -834,9 +925,11 @@ if __name__ == '__main__':
     # （它在每份里各存一份，没有门就必然漂移）。
     # throws_discrimination_check 是阶段 9a 新加的第九道，守 T.throws 断言
     # 本身的**判别力**：pattern 缺第三参会退化成「抛了就算过」（只统计、
-    # 不失败，收敛到 0 之前给补齐任务留活口），补上的 pattern 若匹中同文件
-    # 全部消息则等于没有判别力（当场失败）——阶段 7 三条同前缀错误消息
-    # 撞上恒真 pattern、四条守卫全删仍全绿，就是这道门要防的事故。
+    # 不失败，收敛到 0 之前给补齐任务留活口），补上的 pattern 若真的匹中
+    # 同文件里 ≥2 种不同结构的消息（先按 pattern 真实语义匹配、再对匹中的
+    # 消息抹掉插值算结构形状——不是简单数字面消息条数）则等于没有判别力
+    # （当场失败）——阶段 7 三条同前缀错误消息撞上恒真 pattern、四条守卫
+    # 全删仍全绿，就是这道门要防的事故。
     rc_inline = inline_core.main(check_only=True)
     rc_node = node_check()
     rc_html_safety = js_string_literal_html_safety_check()
