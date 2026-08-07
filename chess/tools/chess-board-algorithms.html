@@ -7259,7 +7259,13 @@ const ALGOS = {
        sources   []           要哪几份 algos/*.js（**数组**：tourKnight 一个键持有两份）
        entry     string       入口函数名（§1.4：z 轴 = 这个函数的递归深度）
        source(st, M, file)    → 一份源码字符串。M 是 file → 模块对象
-       board(st)             → { files, ranks }
+       board(st)             → { files, ranks, blocked? }
+                             `blocked`（可选）= 挖掉的格子编号数组（`sq = rank*files + file`）。
+                             **它是盘面形状的一部分，不是装饰**：那几格不画成棋盘格
+                             （走 BoardRender 现成的 `spec.mask`），改画成斜纹的墙。
+                             省略 / 空数组 = 没有墙，与不写这个字段逐字节相同（四题里
+                             三题走的正是这条路）。给了但给坏了 → 跟交不出 files/ranks
+                             一样：不画棋盘 + 红色状态牌（见 layoutTracks）。
        kinds     []           这道题会用到的 mark 种类，决定图例的行与顺序
        onMark(kind)          → { color, label } 或 null（认不出的种类不画）
        zOf(m, api)           → 这个标记该抬到第几层（省略 = 它的调用深度）
@@ -7935,7 +7941,15 @@ const ALGOS = {
          返回值就是 `rooks` 本身（`return rooks;`），再把 `rooks` 写进 counters
          等于把同一个数比两遍，多出来的那一行只会让判定结果读起来像两处分歧。 */
       check: { result: true, boardOps: true, counters: [] },
-      board: function (st) { const B = rcBoard(st); return { files: B.W, ranks: B.H }; },
+      /* ⚠ **`blocked` 是这道题的题面本身，不是装饰。** 没有它，5×5 空盘（档 0）
+         与 5×5 五堵墙（档 1）在画布上是**逐像素相同的两张图**（实测：两档的空盘
+         画布哈希都是 `39c55ec169a68e96`），而右边那张 König 小图上九个障碍打着
+         斜纹 —— 面板知道墙在哪里，画布不知道。跑完的那一帧于是在演"两辆车隔着
+         四个空格互相照面"，读数却写着"互相吃不到"。
+         扩 `board()` 而不是新开一个 furniture(st) 钩子：挖掉的格子在概念上就是
+         盘面形状的一部分，而 `board()` 已经存在、已经拿到 `st`、已经在
+         layoutTracks 里被校验 —— 零新钩子、零新校验分支。 */
+      board: function (st) { const B = rcBoard(st); return { files: B.W, ranks: B.H, blocked: B.blocked }; },
       zLabel: { zh: '递归深度（「请人挪窝」传了几手）', en: 'recursion depth (rounds of “please move”)' },
       kinds: ['try', 'ok', 'cut', 'back'],
       /* 四种全用上，但 **'back' 在这一题里的意思跟前两题不一样**：不是「这条支路
@@ -8705,11 +8719,45 @@ const ALGOS = {
     if (!spec || !isFinite(spec.files) || !isFinite(spec.ranks) ||
         spec.files < 1 || spec.ranks < 1) {
       if (!threw) hookFail(pid, 'board', new Error('没有交出一块能用的棋盘：' + describeBoardSpec(spec)));
-      st.tracks.forEach(function (tk) { tk.layout = null; });
+      st.tracks.forEach(function (tk) { tk.layout = null; tk.blocked = null; });
       return;
     }
     const files = Math.max(1, Math.round(spec.files));
     const ranks = Math.max(1, Math.round(spec.ranks));
+    /* ---- `blocked`：挖掉的格子，**盘面形状的一部分**，所以在这里、跟 files /
+       ranks 同一段里判，不新开一类。
+
+       ⚠ **缺省必须与今天逐字节相同。** 四题里三题（queens / tourKnight /
+       knightPath）的 `board()` 根本不返回这个字段 → 下面 `walls` 是 null →
+       drawProblem 传给 BoardRender 的 `mask` 是 null → drawBoard 里那句
+       `if (mask && mask(f,r) === false) continue;` 一次都不会真，格子循环走的
+       是原来那条路。改动前后这三题的空盘画布哈希逐字节相同（见 task-3a 报告）。
+
+       给了、但给坏了 → **跟"交不出 files/ranks"同样处理**：不画棋盘 + 说出来。
+       一块少了几堵墙、却长得像模像样的棋盘，和一块尺寸错了的棋盘是同一种错——
+       她会拿着它去数格子，而这道题的全部内容就是那些看不见的格子。 */
+    let walls = null;
+    if (spec.blocked !== undefined && spec.blocked !== null) {
+      const cells = files * ranks;
+      let bad = null;
+      if (!Array.isArray(spec.blocked)) {
+        bad = 'blocked 不是数组：' + (typeof spec.blocked) + ' ' + String(spec.blocked);
+      } else {
+        for (let k = 0; k < spec.blocked.length; k++) {
+          const v = spec.blocked[k];
+          if (typeof v !== 'number' || !isFinite(v) || Math.floor(v) !== v || v < 0 || v >= cells) {
+            bad = 'blocked[' + k + '] 不是 0…' + (cells - 1) + ' 之间的格号：' + String(v);
+            break;
+          }
+        }
+      }
+      if (bad) {
+        hookFail(pid, 'board', new Error(bad));
+        st.tracks.forEach(function (tk) { tk.layout = null; tk.blocked = null; });
+        return;
+      }
+      walls = spec.blocked.length ? spec.blocked.slice() : null;
+    }
     /* ⚠ 摆几块棋盘看的是**跑着的**轨道数，不是 `tracks.length` —— 只读对照
        没有棋盘。写成后者的后果是练习模式下那一块唯一的棋盘按"两块"的间距
        算偏移，整块盘偏到画面一侧去，而且什么都不报。 */
@@ -8718,9 +8766,13 @@ const ALGOS = {
     const pitch = files + BOARD_GAP;
     let slot = 0;
     st.tracks.forEach(function (tk) {
-      if (isContrast(tk)) { tk.layout = null; return; }
+      if (isContrast(tk)) { tk.layout = null; tk.blocked = null; return; }
       const base = BR.layout({ files: files, ranks: ranks, cell: 1, z: 0 });
       tk.layout = shiftLayout(base, (slot - (n - 1) / 2) * pitch);
+      /* 墙跟着轨道走而不是塞进 layout：`shiftLayout` 的 `if (!dx) return L;` 会
+         原样交回 BR.layout 造的那个对象，往里塞字段就成了"有时在包装上、有时在
+         引擎的对象上"两种形状。挂在轨道上只有一种形状，并排两块盘也各自有一份。 */
+      tk.blocked = walls;
       slot++;
     });
   }
@@ -8946,6 +8998,72 @@ const ALGOS = {
       ctx.stroke();
     }
     ctx.restore();
+  }
+
+  /* ---------------- 墙：挖掉的格子 ----------------
+     两件事，都在这一页里，`core/board-render.js` 一行没动：
+
+     ① **不画成棋盘格** —— 走 `BoardRender.drawBoard` 现成的 `spec.mask`
+        （`mask(f,r) === false` 的格子跳过）。没有墙时 `wallMask` 交回 null，
+        drawBoard 里的 `spec.mask || null` 于是仍是 null，那一句 `if (mask && …)`
+        一次都不会真：**这就是"缺省与今天逐字节相同"的全部机制**。
+     ② **画成一堵墙** —— 挖成一个洞跟"这里是墙"不是一回事：洞在画面上只是"没有
+        格子"，而她要看见的是"这里过不去"。所以补一层 45° 斜纹，用的是右边那张
+        König 小图里同一套值（底色 #0b1220、纹色 rgba(159,176,200,.30)、1.5px 线
+        / 5px 间距）—— 同一块盘的两处画法必须一致，否则她得先证明那两张图说的是
+        同一件事。斜纹画在 drawBoard **之前**：外框与坐标标签因此仍盖在最上层。
+
+     斜纹按**屏幕像素**排（px()），不按世界坐标：格子是投影出来的四边形，透视下
+     远近格宽差好几倍，按世界坐标排会让远处那几堵墙糊成一片实色。 */
+  const WALL_FILL = '#0b1220';
+  const WALL_HATCH = 'rgba(159,176,200,0.30)';
+  function wallMask(L, blocked) {
+    if (!blocked || !blocked.length) return null;
+    const set = Object.create(null);
+    for (let k = 0; k < blocked.length; k++) set[blocked[k]] = 1;
+    return function (f, r) { return set[r * L.files + f] ? false : true; };
+  }
+  function drawWalls(C, L, blocked, tally) {
+    if (!blocked || !blocked.length) return;
+    const step = px(5), lw = px(1.5);
+    for (let k = 0; k < blocked.length; k++) {
+      const fr = sqToFR(blocked[k], L);
+      if (!fr) { tally.offBoard++; continue; }
+      const cs = L.squareCorners(fr.f, fr.r), pts = [];
+      let clipped = false;
+      for (let m = 0; m < 4; m++) {
+        const p = E.proj(C, cs[m]);
+        if (!p) { clipped = true; break; }
+        pts.push(p);
+      }
+      if (clipped) continue;                       // 近裁剪掉的格不画，与 drawBoard 同规矩
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (let m = 0; m < 4; m++) {
+        x0 = Math.min(x0, pts[m][0]); x1 = Math.max(x1, pts[m][0]);
+        y0 = Math.min(y0, pts[m][1]); y1 = Math.max(y1, pts[m][1]);
+      }
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let m = 1; m < 4; m++) ctx.lineTo(pts[m][0], pts[m][1]);
+      ctx.closePath();
+      ctx.fillStyle = WALL_FILL;
+      ctx.fill();
+      ctx.clip();
+      ctx.strokeStyle = WALL_HATCH;
+      ctx.lineWidth = lw;
+      ctx.beginPath();
+      /* 45°，方向与 CSS 的 repeating-linear-gradient(45deg,…) 一致：条带沿屏幕
+         左下→右上（y 轴向下，所以 x 增、y 减）。扫描线从左上角起、覆盖到
+         bbox 的宽 + 高，斜着推过整个四边形。 */
+      const span = (x1 - x0) + (y1 - y0);
+      for (let d = 0; d <= span; d += step) {
+        ctx.moveTo(x0 + d, y1);
+        ctx.lineTo(x0 + d - (y1 - y0), y0);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   /* 标记：先画压暗的一批、再画有效的一批，重叠时有效的那个盖在上面。 */
@@ -9184,11 +9302,15 @@ const ALGOS = {
       const c = boardAt(tk);
       const pts = towerPoints(P, tk, c);
       for (let j = 0; j < pts.length; j++) if (pts[j].level > top) top = pts[j].level;
-      shots.push({ tk: tk, k: k, L: L, c: c, pts: pts });
+      shots.push({ tk: tk, k: k, L: L, c: c, pts: pts, walls: tk.blocked || null });
     });
     const levels = Math.max(1, top);
     shots.forEach(function (s) {
-      BR.drawBoard(ctx, C, E, { layout: s.L });
+      /* 先墙、后棋盘：两者画的格子互不相交（mask 挖掉的正是墙那几格），先画墙
+         只是让 drawBoard 的外框与坐标标签留在最上层。没有墙时 mask 是 null，
+         drawWalls 立刻返回 —— 与改动前同一条路径。 */
+      drawWalls(C, s.L, s.walls, fresh);
+      BR.drawBoard(ctx, C, E, { layout: s.L, mask: wallMask(s.L, s.walls) });
       if (E.state.marks !== false) drawMarks(C, P, s.L, s.c, fresh);
       if (E.state.pieces !== false) drawPieces(C, s.L, s.c, fresh);
       if (E.state.tower !== false) { drawTower(C, P, s.L, s.pts); drawZAxis(C, P, s.L, levels); }
@@ -10969,7 +11091,27 @@ const ALGOS = {
          练习模式下那份只读对照是一条没有棋盘的轨道，按轨道数报就会说"两块盘"
          而画面上只有一块。 */
       board: L ? { files: L.files, ranks: L.ranks,
-                   boards: tks.filter(function (x) { return !!x.layout; }).length } : null,
+                   boards: tks.filter(function (x) { return !!x.layout; }).length,
+                   /* 墙（`board()` 交回来的 `blocked`，就是 mask 与 drawWalls 用的
+                      那一份）。没有墙的题目是 []，**不是 null** —— null 在这一页
+                      是"不知道"，而"这一题没有墙"是知道的。 */
+                   blocked: (tk && tk.blocked ? tk.blocked.slice() : []).sort(function (a, b) { return a - b; }),
+                   /* 每一格格心此刻在屏幕上的位置（含取景变换 fit）。验收拿它去
+                      **采画布像素**：「墙看得见」这件事不能只靠肉眼看截图，也不能
+                      只靠"我传了 mask"这种自证。相机走 E.makeCam()，跟绘制循环
+                      同一个出口；近裁剪掉的格子是 null。 */
+                   px: (function () {
+                     const C = E.makeCam(), o = Object.create(null);
+                     for (let r = 0; r < L.ranks; r++) {
+                       for (let f = 0; f < L.files; f++) {
+                         const p = E.proj(C, L.squareCenter(f, r));
+                         o[r * L.files + f] = p
+                           ? [Math.round(fit.tx + fit.s * p[0]), Math.round(fit.ty + fit.s * p[1])]
+                           : null;
+                       }
+                     }
+                     return o;
+                   })() } : null,
       towerLevels: towerTop,
       spanZ: spanZOf(pid ? PROBLEMS[pid] : null),
       /* 声明式钩子（board / readout / zOf / trackLabel）抛过没有。null = 没抛过。 */
