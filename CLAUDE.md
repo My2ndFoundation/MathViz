@@ -41,6 +41,16 @@ There is no build/lint/test toolchain. To develop:
   awk '/<script>/{f=1;next}/<\/script>/{f=0}f' outputs/FILE.html | node --check /dev/stdin
   ```
 
+**A green gate on your machine is not a green gate.** After opening a PR, actually read the CI verdict:
+
+```bash
+gh pr checks <PR#>
+```
+
+Everyone here develops on macOS; CI runs on Linux, and the two disagree in ways no local run can show you. This is not hypothetical — `chess/scripts/check.py` passed locally while CI failed on **four consecutive merges** (#97, #98, #99, #100), including one that changed nothing but two markdown files. Cause: Linux caps a *single* `argv` element at `MAX_ARG_STRLEN` = 128 KiB (a different limit from `ARG_MAX`), macOS has no such per-argument cap, and `algos_roundtrip_check` was passing a 225 KB inlined block as one `node -e` argument. For four merges, `registry-sync.yml` — the gate whose whole job is "a clone without the hook still can't merge drift" — was reporting red into a void.
+
+That specific hole is now closed structurally (`check.py`'s `run_node()` puts scripts on stdin, and loudly refuses an oversized `argv` script *on your machine*). The habit is what stops the next one: **the gate you never look at is not protecting you.**
+
 ## Parallel work discipline
 
 Multiple sessions and multiple build agents routinely run against this repo at once. Five rules, each earned the hard way:
