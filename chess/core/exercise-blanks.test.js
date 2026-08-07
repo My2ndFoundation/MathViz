@@ -648,4 +648,46 @@ NOTE_CORPUS.forEach(function (pair) {
    上面那个 forEach 会安安静静地一条断言都不跑，全绿。 */
 T.eq(noteSeen, 5, '真语料里一共扫过 5 个挖空的占位注释行（queens 2 + knightPath 2 + tourKnight 1）');
 
+/* ---------- 常驻门：插入指令行不改变步数（也不改变返回值） ----------
+
+   阶段 6 最有分量的一条完成标准是「往 algos/*.js 里插入 // >>> BLANK 指令行
+   没有改变任何一格步数」——注释不产生步，这是「参考答案就是那份正在跑的源码」
+   这个支点的前提。但它从前只靠一次性测量确认过（各文件头部注释里那些实测表），
+   没有回归门：任何一次「顺手把指令行挪进代码里」（比如给指令行前面不小心加一句
+   真代码）都会悄悄改变步数，而没有任何门会响。
+
+   `clean` 剥掉的只是两行 BLANK 指令注释，挖空体本身一字不动，所以
+   `I.run(clean)` 与 `I.run(src)` 的步数、返回值理应逐一相同——这条门测的正是
+   这件"理应"是不是真的成立。
+
+   五个挖空落在三份源码里，各自的参数档位覆盖：
+     · queens：N=4..8（滑杆全程，跟上面「占位版必须跑得完」那组用的是同一条滑杆）
+     · knightPath：W 恒为 8，两组代表性的目标格——63（h8，最贵的一档，整块盘
+       铺遍）与 27（d4，最便宜的一档之一，两层就碰上目标）。W/start/target
+       三个参数只有 target 在变，"两组"指的是两个 target 档位，不是把 1..63
+       全扫一遍（那是上面"占位版"那组测试在做的事，跟这里的关注点不同）。
+     · tourWarnsdorff：四块盘，跟上面 TOUR_BOARDS 用的是同一份清单
+       （3×4、3×5、4×5、3×7——3×7 那块参考自己会撞 200,000 步的上限，
+       但撞墙前 clean 与 src 走的步数依旧该逐一相同）。 */
+const REAL_SOURCES = [
+  ['queens N=4', Q.source({ N: 4 })],
+  ['queens N=5', Q.source({ N: 5 })],
+  ['queens N=6', Q.source({ N: 6 })],
+  ['queens N=7', Q.source({ N: 7 })],
+  ['queens N=8', Q.source({ N: 8 })],
+  ['knightPath target=63(h8)', KP.source({ W: 8, start: 0, target: 63 })],
+  ['knightPath target=27(d4)', KP.source({ W: 8, start: 0, target: 27 })],
+  ['tourWarnsdorff 3×4', TW.source({ W: 3, H: 4, start: 0 })],
+  ['tourWarnsdorff 3×5', TW.source({ W: 3, H: 5, start: 0 })],
+  ['tourWarnsdorff 4×5', TW.source({ W: 4, H: 5, start: 0 })],
+  ['tourWarnsdorff 3×7', TW.source({ W: 3, H: 7, start: 0 })],
+];
+function stepsOf(src) { return I.run(src, { host: {} }).trace.length; }
+for (const [label, src] of REAL_SOURCES) {
+  const clean = E.parse(src, 'en').clean;
+  T.eq(stepsOf(clean), stepsOf(src), label + '：剥掉指令行后步数不变');
+  T.eq(I.run(clean, { host: {} }).result, I.run(src, { host: {} }).result,
+       label + '：剥掉指令行后返回值不变');
+}
+
 T.report();

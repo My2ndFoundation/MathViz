@@ -632,4 +632,48 @@ const twoP = parseZh([
        '同缩进同难度的两个空，' + lg + ' 注释行也不相同（靠 id 区分）');
 });
 
+/* ---------- T.throws 的可选消息 pattern ----------
+
+   **纠正简报 Step 1 的原文写法，两处。**
+
+   ① 原文用 `try { T.throws(...); patternWorked = true; } catch { patternWorked
+      = false; }` 来判断"匹配得上时照常通过"。但 `throws()` 自己从不向外
+      `rethrow`——不管 pattern 匹不匹配，它只是往内部的 `failures` 里记一条，
+      从来不抛。那层 `try/catch` 因此永远走不到 `catch` 分支，`patternWorked`
+      恒为 `true`，跟 pattern 是否真的生效毫无关系。突变测试证实了这一点
+      （见 task-1-report.md）：把 pattern 检查整个删掉，这条断言照样绿。
+      改成跟②对称地读 `failedCount()`——"匹配得上"不应该记一次失败。
+
+   ② 原文直接在 `T`（本文件顶部 `require('./_test.js')` 出来的共享单例）
+      身上跑"故意匹配不上"的探针。实测过：这样跑一遍，`failures` 数组里
+      真的会多一条"匹配不上应当算失败"，被 `T.report()` 原样打印、计进
+      本文件自己的总数，于是 `node chess/core/exercise.test.js` 变成
+      `192 passed, 1 failed`、exit 1——跟简报自己 Step 4 那句"15 个既有
+      测试文件一条不红"当场矛盾，这不是"预期内的噪声"，是这份文件永远
+      没法全绿。
+
+   两处一起借 Node 的 require 缓存开一个**用后即弃**的 `_test.js` 实例来跑：
+   `T` 是本文件顶部 `require` 时绑定的引用，不受下面对 `require.cache` 的
+   增删影响；`freshT` 是从缓存里临时挖走再重新 require 出来的一份全新计数器
+   （`passed=0`、`failures=[]`），跑完探针就把原来的缓存条目原样放回去——
+   不留任何痕迹，也不影响 `T` 自己的 passed/failed。
+
+   两条断言合起来才卡住两种坏法：「不管三七二十一都放过」（②抓）和
+   「不管三七二十一都判错」（①抓）。 */
+const testModulePath = require.resolve('./_test.js');
+const originalTestModuleEntry = require.cache[testModulePath];
+delete require.cache[testModulePath];
+const freshT = require('./_test.js');
+require.cache[testModulePath] = originalTestModuleEntry;
+
+const freshBefore1 = freshT.failedCount();
+freshT.throws(function () { throw new Error('少了 hintEn='); }, '匹配得上', /hintEn/);
+T.eq(freshT.failedCount(), freshBefore1,
+     'T.throws 的第三个参数匹配得上时不记一次失败（照常通过）');
+
+const freshBefore2 = freshT.failedCount();
+freshT.throws(function () { throw new Error('别的错'); }, '匹配不上应当算失败', /hintEn/);
+T.eq(freshT.failedCount(), freshBefore2 + 1,
+     'pattern 匹配不上时 T.throws 记一次失败（在隔离出来的实例上验证，不污染本文件自己的计数）');
+
 T.report();

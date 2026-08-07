@@ -5,6 +5,44 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <!-- 版本记录（changelog，新→旧）：
+     1.2.0  2026-08-07  两道新题，棋盘上第一次出现**墙**。
+                        · rookCover（车与线）——带障碍的盘把一行断成若干**行段**、
+                          一列断成若干**列段**，一个空格同时属于一个行段和一个列段，
+                          那正好是二分图里的一条**边**。于是「最多能摆几辆互相吃不到
+                          的车」= 最大匹配，而 König 定理说「盖住每个空格最少要点亮
+                          几条线（段）」是同一个数。入口函数 `walk(r)` 的递归深度就是
+                          **增广路的长度**——那串「请人挪窝」在棋盘上看得见地横竖交替
+                          走。四档 5×5 空盘 k=5 / 5×5 五堵墙 k=7 / 6×6 九堵墙 k=7 /
+                          6×7 九堵墙 k=9；第一档空盘上匹配根本没上场（增广路最深只有
+                          1 层），那本身就是「这道题为什么必须有障碍」的答案。
+                          ⚠ 摆出来的车顺手也盖住了每一个空格（验过），但那**不是最少
+                          的车数**——一辆车是一条边，一次占住两个点，页面上明写了这句。
+                        · kingDominate（王的支配）——同屏并排**两份源码**的第二个键：
+                          贪心（每次拿新盖住最多空格的那一格，绝不反悔）与精确（迭代
+                          加深，穷尽）。四档 5×5 `[6,12,18]` 4·4 / 6×6 `[6,24,35]` 6·4 /
+                          6×6 `[1,4,24]` 8·4 / 7×7 `[16,24,32]` 8·**跑不完**。中间两档
+                          同尺寸、同墙数、只挪了墙的位置，差距就从 2 拉到 4：贪心吃多大
+                          亏取决于墙摆在哪儿，不是摆了几堵。最后一档是整个工具的落点——
+                          精确那一份撞上 200,000 步上限，读数写「跑不完，判不了」（琥珀，
+                          不是红），页面**没有任何一处说 8 是最优**：8 是够用，不是最少，
+                          而这个工具分辨不了这两件事，所以它一个字都不声称。
+                        · board(st) 现在可以多交一个 `blocked`（挖掉的格子编号），
+                          那几格不画成棋盘格而画成斜纹的**墙**；三道旧题一个字节没动。
+                        · 声明层新立三道门（都在 validateDecl，坏了整页停住）：
+                          多块棋盘的题目必须自己声明 `sideView`（默认侧视正好沿着并排
+                          那根轴看进去，几块盘会完全重合而什么都不报——阶段 5 与阶段 7
+                          各撞过一次，两次都是靠人眼从截图里救回来的）；图例文案与轨道
+                          标题各有一个**显示宽度上限**（长了会把图例撑到面板底下、把
+                          两块盘的标题撞在一起，两者都发生过）；一道题只能有一份**带
+                          挖空的**可编辑源码（存档键只按题目名分，两份会互相覆盖）。
+                        · 页签条两头各切掉一块的问题一并修了，那是加到五个页签之后
+                          才露出来的：`.tabs` 是 position:fixed 且只给了 `left`，
+                          收缩宽度的上限于是变成「视口右缘减去 left」（1500 px 下
+                          561 px），再被 translateX(-50%) 整个搬回一半 —— 两头各伸进
+                          面板 31 / 32 px，屏幕上是「the other answ|（挡住）」和
+                          「（挡住）rameters & Views」。三个页签时 max-content 才
+                          330 px，够不着上限，所以一直没露。现在给它一条真的上限：
+                          画布那一块的宽度（两边各留 12 px），装不下就在自己里面折行。
      1.1.0  2026-08-05  挖空练习（规格 §2.9）。练习模式把关键的那一行从源码里挖走、
                         换成一行占位注释，她自己写回来；按 Check 才判定，判定**只比
                         行为不比文本**——参考版本与她的版本各跑一遍，比返回值、比棋盘
@@ -50,7 +88,7 @@
                           BFS 的递归深度本身就是最短步数。
                         截断的轨迹一律写「—」与「没跑完」，绝不把「不知道」印成 0。
                         本版同时把工具登记进 chess-tools.json 与两份 FALLBACK 镜像。 -->
-<meta name="tool-version" content="1.1.0">
+<meta name="tool-version" content="1.2.0">
 <meta name="engine-version" content="chess-1.2.0">
 <title>Classic Problems on the Board</title>
 <!--
@@ -213,14 +251,37 @@ body.folded #split,body.folded #divider{display:none}
   white-space:pre;overflow-x:auto;padding:6px 8px;border-radius:6px;background:rgba(2,6,14,.6)}
 #dbgHost{flex:1 1 0;min-height:190px}
 
-/* ---- 页签：居中于**画布那一块**，不是整窗 ---- */
+/* ---- 页签：居中于**画布那一块**，不是整窗 ----
+
+   ⚠ `max-width` 这一条是阶段 7 补的，补的是一个**它自己造出来**的坑。
+   `position:fixed` 只给了 `left`，于是这个盒子的收缩宽度上限是「视口右缘减去
+   left」——1500 px 下正好 561 px——然后 `translateX(-50%)` 又把它整个搬回左边
+   一半。于是它实际占的区间是 left±280，**两头都伸进两块面板里**，而那个 561
+   跟"画布那一块有多宽"（这里只有 498 px）毫无关系。
+
+   三个页签的时候看不出来：那时候 max-content 才 330 px 左右，盒子按内容收缩，
+   离两边都还有富余。阶段 7 加到五个页签、英文标签又长，max-content 越过了
+   561，盒子就被撑到那个上限并且开始折行 —— 实测（1500×950、英文）左缘 659
+   压进代码面板 31 px、右缘 1220 压进参数面板 32 px，屏幕上是
+   「the other answ|（挡住）」和「（挡住）rameters & Views」，两头各切掉一块。
+
+   改法是把那个上限换成真的那个数：画布那一块的宽度（两边各留 12 px）。
+   盒子仍然按内容收缩，只是**再也伸不进任何一块面板**；装不下就在自己里面
+   多折一行，那是这个页签条本来就会做的事。折叠代码面板时画布那一块变宽，
+   所以 body.folded 下要跟着换一份。
+
+   ⚠ **这不是一条新发明的规则**：下面 `.hint` 那条提示条早就带着一模一样的
+   两句 max-width（含 body.folded 那一份）—— 同一排 position:fixed 的东西里，
+   只有页签条漏了它。`#busy` 也居中于同一块，但它只有一句话、够不着上限。 */
 .tabs{position:fixed;top:16px;left:calc(var(--code-w) + (100vw - var(--code-w) - var(--panel-w)) / 2);
+  max-width:calc(100vw - var(--code-w) - var(--panel-w) - 24px);
   transform:translateX(-50%);z-index:5;
-  display:flex;gap:4px;padding:4px;border-radius:999px;
+  display:flex;flex-wrap:wrap;justify-content:center;gap:4px;padding:4px;border-radius:999px;
   background:var(--panel-bg);border:1px solid var(--panel-line);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
-body.folded .tabs{left:calc((100vw - var(--panel-w)) / 2)}
+body.folded .tabs{left:calc((100vw - var(--panel-w)) / 2);
+  max-width:calc(100vw - var(--panel-w) - 24px)}
 .tab{border:1px solid transparent;background:transparent;color:#b8c6da;
   font-size:12.5px;font-family:var(--font-cn);padding:6px 15px;border-radius:999px;cursor:pointer;
   transition:color .15s,border-color .15s,background .15s}
@@ -6879,12 +6940,15 @@ body.busy #busy{display:block}
   return { parse: parse, judge: judge, hintAt: hintAt, noteLine: noteLine };
 });
 /* <<< GENERATED:EXERCISE */
-/* >>> GENERATED:ALGOS queens.js,tour-dfs.js,tour-warnsdorff.js,knight-path.js */
+/* >>> GENERATED:ALGOS queens.js,tour-dfs.js,tour-warnsdorff.js,knight-path.js,rook-cover.js,king-greedy.js,king-exact.js */
 const ALGOS = {
   'queens.js': "/* N 皇后（回溯 + 剪枝）的**算法源码生成器**（规格 §2.1）。\n   零依赖；node 与浏览器双用。编辑源，运行时被内联进 tools/*.html。\n\n   跟 `minimax.js` 是同一个形状：这个模块本身不搜索任何东西 —— 它吐出一段\n   **字符串**。那段字符串同时是：\n     · 喂给 `Interp.run` 去真跑的程序，\n     · 喂给 `Editor.mount` 摆在使用者眼前的那份源码。\n   一份字符串两个用途，所以「看到的」和「跑的」不可能漂移。工具⑤ 比工具④\n   更靠这一条：§2.8 的整个落点就是她动手改这段源码、看着结果跟着变，\n   §2.9 还要从这份源码里挖空 —— 参考答案就是这份正在跑的源码本身。\n\n   **生成出来的那段源码里的注释和命名，是写给一个没学过棋的 16 岁读者的**。\n   本文件自己的注释（就是你正在读的这些）是给维护者的，两套读者，两种口吻。\n\n   ---- 几处必须写下来的约定 ----\n\n   · **入口函数叫 `solve`**，对应 `PROBLEMS.queens.entry`。它是**递归**那一\n     个（`solve(r)` 摆第 r 行），不是一个只调用一次的外壳 —— 计划里\n     「queens 的 z 是递归深度」要成立，`TreeModel.build(trace, 'solve')`\n     认到的帧就必须一层套一层。顶层是 `solve(0); return solutions;`，\n     所以 `run().result` 就是解数。\n\n   · **格子编号 `sq = r * N + c`，r 是行、c 是列，r=0 是棋盘最下面一行、\n     c=0 是最左列**。于是 0 号格就是 a1 —— 跟 `BoardRender.layout()` 的\n     `squareCenter(file, rank)`（rank 0 在下）和 `chess-core.js` 的\n     `SQ(file, rank)` 同向，宿主拿到 sq 之后 `c = sq % N; r = (sq - c) / N`\n     就能直接喂给渲染层，不用在中间翻一次上下。这个约定在生成的源码开头\n     也用她的话写了一遍 —— 她要能自己反推格子。\n\n   · **宿主桥接这一阶段是真用的**（工具④ 一个都不用）：`mark(sq, kind)`\n     画规格 §2.7 的四种状态，四个 kind 逐字是\n       'try'（正在尝试）· 'ok'（已确认）· 'cut'（被剪枝）· 'back'（回溯撤销），\n     `place(sq, 'wQ')` 摆真正的后，`clear(sq)` 收回去。\n\n     **`place` 的第二个参数是字符串 'wQ'（裁定：保持字符串）**，而\n     `BoardRender.drawPiece` 吃的是**数字** code（白后 = 5）：\n     `CODE_KEY[Math.abs(o.code)]` 认不出 'wQ' 就 `return`，**一个后都不画，\n     也不报任何错** —— 最难查的那一类。这次 'wQ' → 5 的换算归页面\n     （Task 4/5）做，不在这里。\n\n     而且仓库里**已经有一个反例**：`tools/_debugger-preview.html` 里内嵌的\n     那份 N 皇后示例（约 155–172 行）写的是 `place(sq(col, row), 5)` ——\n     数字 code，而且它的 `sq(f, r)` 返回的是 `\"a1\"` 这样的**代数记法字符串**，\n     不是整数。也就是说这两份算法源码的 `sq` 与 piece 两个参数**类型正好相反**，\n     而恰好是旧的那一份能直接喂给 `drawPiece`。Task 4/5 别照着那一份抄映射。\n\n     `mark(sq,'back')` 紧跟着 `clear(sq)`，而 `clear` 会把棋子层和标记层\n     一起清掉（见 interp.js 的 wrapHostForTrace）—— 这是故意的：两条语句\n     是两步，她单步时先看到这一格被判「撤销」，下一步它整个消失。\n\n   · **`'cut'` 标记不会被擦掉（裁定：留在显示层解决）**。回溯只还原三张表和\n     那一格的棋子，标记层不随之收缩，于是更上面那些行在别的分支下试过的\n     `'cut'` 会留在棋盘上。实测 N=6：同一时刻峰值有 29/36 格带标记\n     （cut 24 · ok 4 · try 1）。源码侧的两种修法都量过、都不划算：\n     每个节点擦一整行 +18.7%（N=8 会到约 186,000 步，只剩 7% 余量），\n     `mark(sq,'cut')` 之后立刻 `clear(sq)` +8.7%（而且 cut 只闪一步就没了，\n     「这一整行都被攻击」的画面也就没了）。\n     **显示层的做法（零步数成本）**：`interp.js` 的 `stepBoundary` 给每一条\n     Step 都记了 `depth`（= 当时的调用栈深度，见 interp.js 约 1861 行）。\n     所以按 `Debugger.boardState` 那样累积棋盘状态时，顺手把每个 mark 记成\n     「它是在哪个 depth 写下的」，再把 depth 大于当前 Step.depth 的标记压暗\n     或不画即可 —— 通用、不需要知道算法在做什么，别的两道题也照用。\n\n   · **`safe(r, c)` 单独成一个函数，函数体只有一行**。§2.9 挖的就是那一行\n     （`id=safe-return`、level=1「填一个表达式」），参考答案就是它自己。\n     这道缝验过：把那一行换成一个恒假的表达式，程序**照常跑完**，\n     `result` 变成 0 —— 不抛、不截断，正是挖空练习要的那种「跑得完但答错」，\n     判定靠比结果而不是靠比文本（§2.9）。占位的 `fill` 用的正是这个恒假式\n     （`return false;`）：恒**真**的那一版反过来会把剪枝整个拿掉，搜索树\n     退化成满的 N^N 棵树，实测 N>=6 就撞上 200,000 步上限被截断、`result`\n     是 `undefined` —— 占位版连「跑得完」都做不到。\n\n     **两组 `// >>> BLANK` 指令现在就写在下面的 `BODY` 里**（`safe-return`\n     与 `undo`），由 `core/exercise.js` 的 `parse()` 消费。它们是注释，\n     **一步都不产生**：插入前后 N=4..8 的步数与解数逐格相同（770 / 2,621 /\n     9,500 / 37,049 / 156,772，解 2 / 10 / 4 / 40 / 92），把四行指令剥回去\n     再跑也逐字节一致 —— 「参考答案就是这份正在跑的源码本身」这个支点没有\n     被动过。三关六条断言在 `core/exercise-blanks.test.js`。\n\n   · 子集约束（规格 §2.6）：**没有三元运算符**，`a ? b : c` 会抛\n     unsupported，一律展开成 if/else；数组只有 `push` 和 `length`。\n\n   ---- 实测步数（`Interp.STEP_LIMIT` = 200,000）----\n\n   拿本文件生成的源码跑 `Interp.run(src, { host: {}, limit: 5e7 })`，\n   读 `trace.length`：\n\n     N=4    770 步 / 2 解        N=7   37,049 步 / 40 解\n     N=5  2,621 步 / 10 解       N=8  156,772 步 / 92 解   ← 滑杆上限\n     N=6  9,500 步 / 4 解        N=9  705,359 步（跑不完，实测会截断）\n\n   （每个 N 比不喊 `log` 的版本多整整「解数」那么多步 —— 一个解一句话。\n   N=8 是 +92 步、+0.06%。）\n\n   计划与规格 §4⑤ 原先写的那张表（557 / 1,838 / 6,509 / 25,118 / 105,319）\n   是另一份**把 `safe` 内联了**的实现量出来的，比这份便宜约三分之一 ——\n   差价的去处已经逐行量过（按 line 统计 trace）：`safe(r, c)` 每次调用要\n   4 步（if 语句 1 + 进帧 1 + 那行 return 1 + 出帧 1），N=8 光这一项就是\n   62,880 步，占 40%；`const sq = r * N + c;` 再要 15,720 步（10%）。\n   两处都是**故意**留的：前者是 §2.9 的挖空缝（简报明文要求 safe 单独成\n   函数），后者让下面五处 `mark/place/clear` 都能写 `sq` 而不是重复五遍\n   `r * N + c`。**不要为了对齐一个更小的旧数字把这个函数内联回去** ——\n   那等于把 §2.9 的练习拆掉。规格 §4⑤ 的表已按本文件的实测值更新。\n\n   N=8 用掉上限的 78%，余下约 43,000 步。**这不是一个可以随手挥霍的余量**\n   —— 往生成源码的最内层循环里每加一条语句，N=8 就要多约 15,700 步，\n   加三条就撞墙。改完这里请重跑 queens.test.js：「N=8 未截断」那一条就是\n   这道守卫。\n\n   N=9 撞墙是这道题的第二课，也是滑杆上限只到 8 的理由：回溯是指数的，\n   不是「慢一点」，是「做不到」。所以 `N_MAX` 是给滑杆用的，**不是**\n   `source()` 的校验边界 —— 测试要拿 N=9 去撞那堵墙，`source(9)` 必须\n   照常吐出源码。 */\n(function (root, factory) {\n  if (typeof module === 'object' && module.exports) module.exports = factory();\n  else root.AlgoQueens = factory();\n})(typeof self !== 'undefined' ? self : this, function () {\n  'use strict';\n\n  /* 滑杆的上下限（规格 §4⑤ / 计划 Task 4 的 params）。\n     N_MIN = 4 是因为 N=2、N=3 无解 —— 一个永远数出 0 的演示教不了任何东西。\n     N_MAX = 8 是因为 N=9 跑不完（见文件头的实测）。\n     再说一遍：这两个数字**只约束界面**，不约束 source()。 */\n  const N_MIN = 4;\n  const N_MAX = 8;\n\n  /* 这里用普通字符串拼，不用模板字面量：这段文本本身会被原样贴进 html，\n     而反引号在那个上下文里比在这里更容易出事（照抄 minimax.js 的理由）。 */\n  const HEAD = [\n    '/* ============ N 皇后 ============',\n    '   在 N×N 的棋盘上摆 N 个后，让它们谁也吃不到谁。',\n    '   后能沿横线、竖线、两条斜线走任意远，所以「谁也吃不到谁」就是：',\n    '   任意两个后不同行、不同列、也不在同一条斜线上。',\n    '',\n    '   格子编号：sq = 行 * N + 列，下面写成 sq = r * N + c。',\n    '   第 0 行是棋盘最下面那一行，第 0 列是最左边那一列 —— 于是 0 号格',\n    '   就是国际象棋里的 a1，右边棋盘上每一格都能这样对上号。',\n    '   要反推回去：列 = sq % N，行 = (sq - 列) / N。',\n    '',\n    '   整个解法只靠一个约定：每一行只放一个后。',\n    '   这样「同行」根本不可能发生，要查的就只剩列和两条斜线了。 */',\n    '',\n    '/* 棋盘边长。8 皇后就是 N = 8 —— 这是这道题唯一的旋钮。',\n    '   往上加一，工作量大约要乘以 4.5：N=8 十五万步跑得完，N=9 七十万步',\n    '   会直接撞上执行上限。回溯就是这样，不是「慢一点」，是「做不到」。 */',\n  ];\n\n  const BODY = [\n    '',\n    '/* 三张备忘表，记「这条线上已经有后了」。1 = 占了，0 = 还空着。',\n    '     cols[c]              第 c 列',\n    '     diagDown[r + c]      「左上—右下」这族斜线：同一条上，行 + 列 是同一个数',\n    '     diagUp[r - c + N]    「左下—右上」这族斜线：同一条上，行 - 列 是同一个数',\n    '                          （行 - 列 会是负数，而下标不能是负的，所以整体加 N）',\n    '   不用表也行：每摆一个后，就跟已经摆好的后逐个比一遍。但那样每次要比',\n    '   最多 N 次，查表只要三次下标运算 —— 「剪枝要便宜」说的就是这个。',\n    '   列只有 N 条、斜线有 2N-1 条，三张表干脆都开到 2N 格，省得记三个长度。 */',\n    'const cols = [];',\n    'const diagDown = [];',\n    'const diagUp = [];',\n    'for (let i = 0; i < N + N; i = i + 1) { cols.push(0); diagDown.push(0); diagUp.push(0); }',\n    '',\n    '// 到现在为止数出来的完整解个数 —— 这就是最后要回答的那个数。',\n    'let solutions = 0;',\n    '',\n    '/* 第 r 行第 c 列这一格，安全吗？三条线上都没有后才算安全。',\n    '   这一行就是整道题的全部规则，别的都是围着它转的脚手架。',\n    '   想确认它真的在起作用：把 diagUp 那一段删掉再跑，解数立刻就不对了。 */',\n    'function safe(r, c) {',\n    '  // >>> BLANK id=safe-return level=1 fill=\"return false;\" hint=\"三条线都空着才算安全：cols[c] 是这一列，diagDown[r + c] 和 diagUp[r - c + N] 是那两条斜线。表里是 1 就说明那条线上已经有后了 —— 三张表一张都不能少查。\" hintEn=\"A square is safe only when all three lines are clear: cols[c] for the column, diagDown[r + c] and diagUp[r - c + N] for the two diagonals. A 1 in any of the three tables means that line already has a queen on it.\"',\n    '  return !cols[c] && !diagDown[r + c] && !diagUp[r - c + N];',\n    '  // <<< BLANK',\n    '}',\n    '',\n    '/* 把第 r 行到最上面一行全部摆好。',\n    '   r 一路往上走，走到 N 就说明每一行都摆上了一个后 —— 那就是一个完整解，',\n    '   数它一个，这一支到此为止。 */',\n    'function solve(r) {',\n    '  if (r === N) {',\n    '    /* 走到这里：N 行都摆满了，而且一路上每一步都通过了 safe ——',\n    '       此刻棋盘上就是一个完整解，N 个后谁也吃不到谁。',\n    '       这是这道题唯一值得停下来看一眼的时刻，所以喊一声。 */',\n    '    solutions = solutions + 1;',\n    '    log(\"第 \" + solutions + \" 个解：\" + N + \" 个后都站稳了\");',\n    '    return;',\n    '  }',\n    '  for (let c = 0; c < N; c = c + 1) {',\n    '    const sq = r * N + c;',\n    '    mark(sq, \"try\");      // 正在尝试：先点亮这一格，再问它安不安全',\n    '    if (safe(r, c)) {',\n    '      // 已确认：三条线一起登记成「占了」，再把真正的后摆上去。',\n    '      cols[c] = 1; diagDown[r + c] = 1; diagUp[r - c + N] = 1;',\n    '      mark(sq, \"ok\");',\n    '      place(sq, \"wQ\");',\n    '      solve(r + 1);       // 接着摆上面那一行 —— 递归就发生在这一行',\n    '      /* 回溯撤销：不管上面那一行找没找到解，都要把这一格原样还回去。',\n    '         不还的话，接下来试第 c+1 列时会看到一个早就不该存在的后，',\n    '         再往后数出来的每一个「解」都是假的。 */',\n    '      // >>> BLANK id=undo level=2 fill=\"cols[c] = 0;\" hint=\"摆上去的时候三张表一起登记成了 1，撤销就要把这三张表一起还回 0。少还一张，那条线在这一支之后就一直被占着 —— 后面每一步读到的都是一张早就不该是这样的表。\" hintEn=\"Placing the queen set all three tables to 1, so undoing has to clear all three back to 0. Miss one and that line stays blocked for the rest of the search, and every later step reads a table that should have been cleared long ago.\"',\n    '      cols[c] = 0; diagDown[r + c] = 0; diagUp[r - c + N] = 0;',\n    '      // <<< BLANK',\n    '      mark(sq, \"back\");',\n    '      clear(sq);',\n    '    } else {',\n    '      mark(sq, \"cut\");    // 被剪枝：这一格已经被某个已放好的后攻击了',\n    '    }',\n    '  }',\n    '}',\n    '',\n    '// 从最下面一行开始摆。跑完之后 solutions 里就是答案。',\n    'solve(0);',\n    'return solutions;',\n  ];\n\n  /* source({ N }) → string\n\n     N 不给默认值，缺了直接抛（阶段 5 约束 6：公开导出的省略参数已经是\n     本仓库抓到过三次的缺陷类）。一个默默变成 8 的 N 会让界面写着 6、\n     跑的却是 8，正是这个工具最不能出的错。\n\n     校验只管「是不是一个 ≥ 1 的整数」，**不管 N_MIN / N_MAX** —— 见文件\n     头：那两个是滑杆边界，而 N=9 撞墙恰恰是要生成出来跑给她看的。 */\n  function source(opts) {\n    const o = opts || {};\n    if (o.N === undefined || o.N === null) {\n      throw new Error('source({ N }) 少了 N —— 棋盘边长没有默认值，必须写明');\n    }\n    const N = o.N;\n    if (typeof N !== 'number' || !isFinite(N) || Math.floor(N) !== N || N < 1) {\n      throw new Error('N 必须是 >= 1 的整数，收到：' + N);\n    }\n    return HEAD.concat(['const N = ' + N + ';']).concat(BODY).join('\\n');\n  }\n\n  return { source: source, N_MIN: N_MIN, N_MAX: N_MAX };\n});\n",
   'tour-dfs.js': "/* 骑士巡游（朴素回溯）的**算法源码生成器**（规格 §2.1）。\n   零依赖；node 与浏览器双用。编辑源，运行时被内联进 tools/*.html。\n\n   跟 `queens.js` / `minimax.js` 是同一个形状：这个模块本身不搜索任何\n   东西 —— 它吐出一段**字符串**。那段字符串同时是喂给 `Interp.run` 去真跑\n   的程序、和喂给 `Editor.mount` 摆在使用者眼前的那份源码。一份字符串两个\n   用途，所以「看到的」和「跑的」不可能漂移。\n\n   **生成出来的那段源码里的注释和命名，是写给一个没学过棋的 16 岁读者的**。\n   本文件自己的注释（就是你正在读的这些）是给维护者的，两套读者，两种口吻。\n\n   ---- 这一份和 `tour-warnsdorff.js` 是一对，不是两个工具 ----\n\n   规格 §4⑤ 的落点是「同一个问题、同一块盘、两份可以逐行对比的源码」：\n   它们是**一个** `PROBLEMS` 键、**并排**显示，不是两个 tab。于是有一条\n   硬约束：**除了「下一步先试哪一个」那一段，两份生成源码逐字相同** ——\n   棋盘常量、`DX/DY`、`onBoard`、`mark`/`place` 的编舞、连注释都一样。\n   她把两边一 diff，diff 出来的就该正好是那个主意本身。\n\n   连文件头的行数都是对齐的（两边 HEAD 都是同样多行，只有讲「先试哪一个」\n   的那两三行措辞不同），这样并排看的时候上半截是逐行对得上的。\n   **改动这份里的任何共用文本，必须同步改另一份。** 两边的差异行数是\n   tour.test.js 之外的一道人肉门，今天量到（3×4 / start 0）是：\n\n     `diff` 出来 42 行不同（本文件独有 5 行、另一份独有 37 行），\n     其余 85 行逐字相同。42 行里 8 行是措辞（4 对：标题、讲「先试哪一个」\n     的两行、常量注释里举例时提到的是哪一份），另外 34 行就是那个主意本身\n     （本文件的 1 行注释 ↔ 另一份的 `degree()` 17 行 + 排序 16 行）。\n\n   多出来的差异就是漂移。\n\n   ---- 几处必须写下来的约定 ----\n\n   · **入口函数叫 `tour`**，两份签名相同：`tour(sq, n)` = 「马现在站在 sq\n     上，这已经是路线上的第 n 格」。它是**递归**那一个，不是外壳 ——\n     `TreeModel.build(trace, 'tour')` 认到的帧要一层套一层，z 轴才是递归\n     深度。顶层是 `const found = tour(START, 1); ... return found;`，\n     所以 `run().result` 是 true / false。\n\n   · **格子编号 `sq = 行 * W + 列`**，行 0 在棋盘最下面、列 0 在最左边，\n     于是 0 号格是 a1 —— 跟 `queens.js`、`BoardRender.layout()` 的\n     `squareCenter(file, rank)`、`chess-core.js` 的 `SQ(file, rank)` 同向。\n     反推是 `列 = sq % W; 行 = (sq - 列) / W`。\n     **棋盘不是正方形**：这一题的 W（宽）跟 H（高）分开，`files !== ranks`\n     是常态（3×4 / 3×5 / 4×5 / 3×7 四块盘都要用到），所以编号里除的是 W 而不是某个\n     「边长」—— 别照 queens.js 的 `sq = r * N + c` 想当然。\n\n   · **宿主桥接**：`mark(sq, kind)` 画规格 §2.7 的四种状态，四个 kind 逐字是\n       'try'（正在尝试）· 'ok'（已确认）· 'cut'（被剪枝）· 'back'（回溯撤销），\n     `place(sq, 'wN')` 摆马，`clear(sq)` 收回去。\n\n     **`place` 的两个参数是「数字 sq + 字符串 piece」**，跟 `queens.js`\n     的 `place(sq, \"wQ\")` 同一个约定。仓库里另有一个**反例**：\n     `tools/_debugger-preview.html` 内嵌的那份 N 皇后示例（约 165 行）写的是\n     `place(sq(col, row), 5)` —— 代数记法字符串的格子 + 数字 code 的棋子，\n     两个参数**正好相反**。本阶段一律跟 `queens.js` 走，'wN' → code 的换算\n     归页面（Task 4/5）做一次，别照那份旧的抄。\n\n   · **`place` / `clear` 就发生在搜索途中，跟 `queens.js` 完全一样** ——\n     走进一格就 `place(sq, \"wN\")`，回溯时 `mark(sq,'back')` 紧跟 `clear(sq)`。\n     马是一步一步走的，盘上任何一刻显示的都是**当前这条路线**。\n     跑通了，最后那 W*H 匹马留在盘上不收 —— 那一盘马就是答案本身；\n     走不通，全部退回去，盘上跟出发前一模一样。\n\n     这条写下来是因为它一度被写反过。tour.test.js 早先的判分方式是「把所有\n     `place` 事件按顺序收起来当路线」，那就逼着算法**攒到找到答案之后再一次性\n     落子**（否则被放弃的分支会被当成重复格）—— 实测的后果是：4×5 / 3×7 / 3×5\n     三块盘上 `place` 一次都不发生（盘全程空着），3×4 上则是 898 步什么都没有、\n     然后 12 匹马同时出现。一个主题是「马在走」的工具，马一步都不走。\n     **判分方式不该反过来规定算法长什么样。** 现在测试改成回放 `place`/`clear`\n     维护占位表（跟棋盘自己做的一样），被放弃的分支自己消失，那条最强的断言\n     （每格恰好一次 + 每步都是合法马步）原样保住，马也走回来了。\n     测试里另有一条断言专门钉这件事：**落子必须铺满整段搜索，不许挤在结尾**。\n\n   · **`'cut'` 标记不会被擦掉**（跟 queens.js 同一条裁定，不要重新决定）。\n     回溯只还原 `visited` 和这一格的马，标记层不随之收缩，于是别的分支里试过\n     的 'cut' 会留在盘上。**显示层的做法（零步数成本）**：`interp.js` 的\n     `stepBoundary` 给每条 Step 记了 `depth`，按 `Debugger.boardState` 累积\n     棋盘状态时顺手记下每个 mark 是在哪个 depth 写下的，再把 depth 大于\n     当前 Step.depth 的标记压暗或不画。通用，三道题共用。\n\n   · 子集约束（规格 §2.6）：**没有三元运算符**，`a ? b : c` 会抛 unsupported，\n     一律展开成 if/else；数组只有 `push` / `pop` 和 `length` 与下标读写。\n\n   · **不导出滑杆上下限**（queens.js 有 `N_MIN`/`N_MAX`，这里故意没有）。\n     理由见下面的实测表：两份算法能跑的棋盘范围差着数量级 —— 朴素这份\n     4×5 就撞墙，Warnsdorff 那份 4×5 从容、3×7 又撞墙。一个对两边都\n     「安全」的边界会小到把这一课本身删掉（这一课就是「它撞墙」）。\n     滑杆边界因此是页面（Task 4/5）的展示决定，不是本模块的校验边界：\n     `source()` 对任何 W ≥ 1、H ≥ 1 都照常吐源码，撞墙要生成出来跑给她看。\n\n   ---- 实测步数与棋盘事件（`Interp.STEP_LIMIT` = 200,000，角起 start = 0）----\n\n   拿两份源码各自生成的程序跑 `Interp.run(src, { host: {} })`，读 `trace.length`\n   与 mark/place/clear 的次数。**四块盘都是 tour.test.js 里钉着的滑杆位置**，\n   每一块演的是不同的东西：\n\n     棋盘   本文件（朴素）        tour-warnsdorff.js      这一块盘演什么\n     3×4      898 步 ✓ true       3,092 步 ✓ true    小盘上启发式的开销收不回来\n     3×5   34,988 步 ✓ false    120,650 步 ✓ false   查遍了，这块盘上没有巡游\n     4×5  200,000 步 ✗撞墙        7,283 步 ✓ true    大一点，启发式赢得压倒性\n     3×7  200,000 步 ✗撞墙      200,000 步 ✗撞墙     启发式也会失败 —— 它不是保证\n\n   棋盘事件（try / ok / cut / back，以及 place / clear —— place 恒等于 ok、\n   clear 恒等于 back，因为进一格就落子、退一格就收子）：\n\n     棋盘  算法        try    ok   cut   back=clear   注意\n     3×4  朴素         14    12     2       **0**   一次都不回溯，'back' 演不出来\n     3×4  Warnsdorff   19    12     7       **0**   同上\n     3×5  朴素       1,019   395   624       395    ← 'back' 唯一演得完的一块盘\n     3×5  Warnsdorff 1,019   395   624       395    ← 两份在这块盘上事件数完全相同\n     4×5  朴素       6,934 2,171 4,763     2,158    撞墙前已经退了两千多次\n     4×5  Warnsdorff    49    20    29       **0**  一条道走到底，一次没退过\n     3×7  朴素       6,370 2,218 4,152     2,201\n     3×7  Warnsdorff 1,723   591 1,132       577\n\n   **三件 Task 4/5 必须知道的事**：\n     ① 3×4 上两份算法都不回溯，所以 §2.7 的 'back' 状态和「按 `Step.depth`\n        压暗旧 'cut'」那套显示逻辑在默认盘上一次都不触发 —— 要演它得换盘。\n     ② **3×5 是唯一一块「两边都回溯得很凶、而且都诚实地跑到结论」的盘**\n        （各退 395 次，都返回 false，都不撞墙）。它是第四个滑杆位置的全部理由。\n     ③ **4×5 是并排对比最锋利的一块**：朴素退了 2,158 次还是撞墙，Warnsdorff\n        一次没退、20 步走完。这一对数字比步数本身更能说明「启发式在做什么」。\n\n   四行都在 tour.test.js 里钉着。3×4 和 3×7 是这一课诚实的那一半：\n   启发式**有代价**，而且**不保证**。别为了让表好看去调棋盘。\n\n   顺手量的、给 Task 4/5 挑滑杆上限用（本文件在这些盘上一律撞墙，\n   Warnsdorff 一次不退地走完）：\n     Warnsdorff  5×5 10,188 步 · 6×6 17,117 步 · 8×8 36,111 步。\n   也就是说「棋盘越大启发式越省」不是修辞：8×8 上朴素回溯连百分之一都跑不到，\n   Warnsdorff 只用掉上限的 18%。 */\n(function (root, factory) {\n  if (typeof module === 'object' && module.exports) module.exports = factory();\n  else root.AlgoTourDFS = factory();\n})(typeof self !== 'undefined' ? self : this, function () {\n  'use strict';\n\n  /* 普通字符串拼，不用模板字面量：这段文本本身会被原样贴进 html，\n     反引号在那个上下文里比在这里更容易出事（照抄 queens.js 的理由）。 */\n\n  /* ==== 以下 HEAD 与 tour-warnsdorff.js 的 HEAD **行数相同**，\n     只有第 1 行的标题和第 12–13 行讲「先试哪一个」的两行不同。 ==== */\n  const HEAD = [\n    '/* ============ 骑士巡游 · 朴素回溯 ============',\n    '   马走「日」字：横一竖二，或者横二竖一 —— 绕着它站的那一格一共八个方向。',\n    '   题目是：让马从某一格出发，把整块棋盘每一格都恰好踩一次。',\n    '',\n    '   格子编号：sq = 行 * W + 列。W 是棋盘的宽（每行几格），H 是高。',\n    '   第 0 行是棋盘最下面那一行，第 0 列是最左边那一列 —— 于是 0 号格',\n    '   就是国际象棋里的 a1。要反推回去：列 = sq % W，行 = (sq - 列) / W。',\n    '   棋盘不必是正方形，3×4 和 4×5 都是正常的棋盘。',\n    '',\n    '   办法是「试错 + 反悔」：挑一个方向走过去，走不通就退回来换一个。',\n    '   旁边那份源码跟这份只差一件事 —— 下一步先试哪一个。',\n    '   这一份：按固定的方向顺序挨个试，谁也不比谁优先。',\n    '   最朴素，也最诚实 —— 它不知道哪条路更有希望，只能一条条走。 */',\n    '',\n    '/* 棋盘的宽、高，以及马从哪一格出发。',\n    '   能拧的旋钮是两个而不是一个，而工作量随格子数指数增长：',\n    '   3×4 和 4×5 之间只差 8 格，这一份就从「一千步」变成「跑不完」。 */',\n  ];\n\n  const BODY = [\n    '',\n    '/* 马的八个方向。DX 与 DY 一一对应：第 k 个方向是「横走 DX[k]、竖走 DY[k]」。',\n    '   横一竖二四个、横二竖一四个，绕着起点转一圈 —— 这就是「日」字。 */',\n    'const DX = [1, 2, 2, 1, -1, -2, -2, -1];',\n    'const DY = [2, 1, -1, -2, -2, -1, 1, 2];',\n    '',\n    '/* 备忘表：visited[sq] = 1 表示这一格已经踩过了。',\n    '   一格只能踩一次 —— 这是整道题唯一的规则，别的都是围着它转的脚手架。 */',\n    'const visited = [];',\n    'for (let i = 0; i < W * H; i = i + 1) { visited.push(0); }',\n    '',\n    '// (x, y) 还在棋盘上吗？出界的方向连试都不用试。',\n    'function onBoard(x, y) {',\n    '  return x >= 0 && x < W && y >= 0 && y < H;',\n    '}',\n    '',\n    '/* 马站在 sq 上，这已经是路线上的第 n 格 —— 接着往下走。',\n    '   走得通就返回 true，八个方向都走不通就返回 false 让上一层去换。',\n    '   n 等于总格数时，每一格都踩过了，这一支就是答案。 */',\n    'function tour(sq, n) {',\n    '  const x = sq % W;',\n    '  const y = (sq - x) / W;',\n    '  visited[sq] = 1;',\n    '  mark(sq, \"ok\");        // 已确认：这一格进了当前这条路线',\n    '  place(sq, \"wN\");       // 马真的走到这一格 —— 盘上立刻看得见',\n    '  if (n === W * H) {',\n    '    return true;',\n    '  }',\n    '  /* 从这一格出发，八个方向里哪几个还落在棋盘上 —— 先收成一张候选表。 */',\n    '  const cand = [];',\n    '  for (let k = 0; k < 8; k = k + 1) {',\n    '    const nx = x + DX[k];',\n    '    const ny = y + DY[k];',\n    '    if (onBoard(nx, ny)) {',\n    '      cand.push(ny * W + nx);',\n    '    }',\n    '  }',\n    /* ↓↓↓ 这一格就是两份源码唯一不同的地方（tour-warnsdorff.js 在这里\n       多一段按 degree 排序的代码）。上下都必须逐字相同。 ↓↓↓ */\n    '  // 就按 DX/DY 写下来的顺序挨个试 —— 这一份不挑，也不知道该挑谁。',\n    /* ↑↑↑ 差异结束 ↑↑↑ */\n    '  for (let i = 0; i < cand.length; i = i + 1) {',\n    '    const nsq = cand[i];',\n    '    mark(nsq, \"try\");    // 正在尝试：先点亮这一格，再看它能不能走',\n    '    if (visited[nsq]) {',\n    '      mark(nsq, \"cut\");  // 被剪枝：踩过的格子不能再踩',\n    '    } else {',\n    '      if (tour(nsq, n + 1)) {',\n    '        return true;     // 下游走通了 —— 一路把 true 传回去，别的方向不用再试',\n    '      }',\n    '    }',\n    '  }',\n    '  /* 回溯撤销：八个方向都试遍了还是走不通，把这一格原样退还 ——',\n    '     备忘表擦掉，马也从这一格撤走。不退的话，接下来别的分支会看到一格',\n    '     根本没人站过的「踩过」，从此每一条路线都是假的。',\n    '     mark 与 clear 是分开的两步：先看到这一格被判「撤销」，下一步马才消失。 */',\n    '  visited[sq] = 0;',\n    '  mark(sq, \"back\");',\n    '  clear(sq);',\n    '  return false;',\n    '}',\n    '',\n    '// 出发。第一格也要先亮一下，跟后面每一格的待遇一样。',\n    'mark(START, \"try\");',\n    'const found = tour(START, 1);',\n    'if (found) {',\n    '  /* 盘上留着的那一整盘马就是答案本身。它们不收 —— 收了就没有答案可看了。',\n    '     想看清顺序：把单步倒着回放一遍，马是按什么次序落上去的一目了然。 */',\n    '  log(\"找到了：一条踩遍 \" + (W * H) + \" 格的路线\");',\n    '} else {',\n    '  /* 所有分支都退过了，盘上一匹马都不剩，跟出发前一模一样。 */',\n    '  log(\"走不通：从这一格出发，没有能踩遍全盘的路线\");',\n    '}',\n    'return found;',\n  ];\n\n  /* source({ W, H, start }) → string\n\n     三个参数都不给默认值，缺了直接抛（阶段 5 约束 6：公开导出的省略参数\n     已经是本仓库抓到过三次的缺陷类）。一个默默变成 8 的 W 会让界面写着\n     5、跑的却是 8，正是这个工具最不能出的错。\n\n     校验只管「是不是合法的棋盘和格子」，**不管好不好跑** —— 见文件头：\n     4×5 撞墙恰恰是要生成出来跑给她看的。 */\n  function source(opts) {\n    const o = opts || {};\n    if (o.W === undefined || o.W === null) {\n      throw new Error('source({ W, H, start }) 少了 W —— 棋盘宽度没有默认值，必须写明');\n    }\n    if (o.H === undefined || o.H === null) {\n      throw new Error('source({ W, H, start }) 少了 H —— 棋盘高度没有默认值，必须写明');\n    }\n    if (o.start === undefined || o.start === null) {\n      throw new Error('source({ W, H, start }) 少了 start —— 出发格没有默认值，必须写明');\n    }\n    const W = o.W, H = o.H, start = o.start;\n    if (typeof W !== 'number' || !isFinite(W) || Math.floor(W) !== W || W < 1) {\n      throw new Error('W 必须是 >= 1 的整数，收到：' + W);\n    }\n    if (typeof H !== 'number' || !isFinite(H) || Math.floor(H) !== H || H < 1) {\n      throw new Error('H 必须是 >= 1 的整数，收到：' + H);\n    }\n    if (typeof start !== 'number' || !isFinite(start) || Math.floor(start) !== start ||\n        start < 0 || start >= W * H) {\n      throw new Error('start 必须是 0 到 ' + (W * H - 1) + ' 之间的整数，收到：' + start);\n    }\n    return HEAD.concat([\n      'const W = ' + W + ';',\n      'const H = ' + H + ';',\n      'const START = ' + start + ';',\n    ]).concat(BODY).join('\\n');\n  }\n\n  return { source: source };\n});\n",
   'tour-warnsdorff.js': "/* 骑士巡游（Warnsdorff 启发式）的**算法源码生成器**（规格 §2.1）。\n   零依赖；node 与浏览器双用。编辑源，运行时被内联进 tools/*.html。\n\n   跟 `queens.js` / `minimax.js` 是同一个形状：这个模块本身不搜索任何\n   东西 —— 它吐出一段**字符串**。那段字符串同时是喂给 `Interp.run` 去真跑\n   的程序、和喂给 `Editor.mount` 摆在使用者眼前的那份源码。一份字符串两个\n   用途，所以「看到的」和「跑的」不可能漂移。\n\n   **生成出来的那段源码里的注释和命名，是写给一个没学过棋的 16 岁读者的**。\n   本文件自己的注释（就是你正在读的这些）是给维护者的，两套读者，两种口吻。\n\n   ---- 这一份和 `tour-dfs.js` 是一对，不是两个工具 ----\n\n   规格 §4⑤ 的落点是「同一个问题、同一块盘、两份可以逐行对比的源码」：\n   它们是**一个** `PROBLEMS` 键、**并排**显示，不是两个 tab。于是有一条\n   硬约束：**除了「下一步先试哪一个」那一段，两份生成源码逐字相同** ——\n   棋盘常量、`DX/DY`、`onBoard`、`mark`/`place` 的编舞、连注释都一样。\n   她把两边一 diff，diff 出来的就该正好是那个主意本身。\n\n   这一份多出来的**全部**东西就两处，都在下面标了「差异」：\n     ① 一个 `degree(sq)` 函数（从某一格还能去几个没踩过的格子）；\n     ② `tour()` 里那段把候选按 degree 从小到大排序的代码。\n   **改动共用文本必须同步改 `tour-dfs.js`。** 两边差异行数是 tour.test.js\n   之外的一道人肉门，今天量到（3×4 / start 0）是：\n\n     `diff` 出来 44 行不同（tour-dfs.js 独有 5 行、本文件独有 39 行），\n     其余 85 行逐字相同。44 行里 8 行是措辞（4 对：标题、讲「先试哪一个」\n     的两行、常量注释里举例时提到的是哪一份），另外 36 行就是 ①② 本身\n     （对面的 1 行注释 ↔ 本文件的 `degree()` 17 行 + 包着它的两行 BLANK\n     指令 + 排序 16 行）。\n\n   多出来的差异就是漂移。（阶段 6 之前这里是 42 / 37 / 34 —— 多出来的两行\n   正是 §2.9 的挖空指令，见下面「这一份上的挖空」那一条。**挖空只落在\n   Warnsdorff 独有的这一段里**，所以这道人肉门量的还是同一件事：diff 出来\n   的仍然只有「那个主意」，加上把它挖成练习的那两行注释。）\n\n   ---- Warnsdorff 到底是什么，以及它**不是**什么 ----\n\n   规则一句话：下一步走「出路最少」的那一格。直觉是出路快没了的格子再不去\n   就再也去不了了。\n\n   **它仍然是回溯搜索，不是贪心一条道走到黑** —— 这一点关系到整张实测表\n   能不能成立，写在这里免得被「优化」掉：纯贪心版本走进死胡同就直接失败\n   返回，3×7 上会在几百步内干净利落地报「找不到」，于是规格 §4⑤ 的第三段\n   弧线（「连启发式也撞墙」）根本不会发生 —— 它会变成「启发式很快说了不知道」，\n   完全是另一句话。这里的写法是**用 degree 给候选排序的 DFS**：排序只改\n   尝试顺序，走不通照样回溯。于是三段弧线才都是同一种东西的三种命运。\n\n   ---- 几处必须写下来的约定（与 tour-dfs.js 逐条相同）----\n\n   · **入口函数叫 `tour`**，两份签名相同：`tour(sq, n)` = 「马现在站在 sq\n     上，这已经是路线上的第 n 格」。它是**递归**那一个，不是外壳 ——\n     `TreeModel.build(trace, 'tour')` 认到的帧要一层套一层，z 轴才是递归\n     深度。顶层是 `const found = tour(START, 1); ... return found;`，\n     所以 `run().result` 是 true / false。\n\n   · **格子编号 `sq = 行 * W + 列`**，行 0 在棋盘最下面、列 0 在最左边，\n     于是 0 号格是 a1 —— 跟 `queens.js`、`BoardRender.layout()` 的\n     `squareCenter(file, rank)`、`chess-core.js` 的 `SQ(file, rank)` 同向。\n     反推是 `列 = sq % W; 行 = (sq - 列) / W`。\n     **棋盘不是正方形**：W（宽）跟 H（高）分开，`files !== ranks` 是常态\n     （3×4 / 3×5 / 4×5 / 3×7 四块盘都要用到），所以编号里除的是 W 而不是某个「边长」——\n     别照 queens.js 的 `sq = r * N + c` 想当然。\n\n   · **宿主桥接**：`mark(sq, kind)` 画规格 §2.7 的四种状态，四个 kind 逐字是\n       'try'（正在尝试）· 'ok'（已确认）· 'cut'（被剪枝）· 'back'（回溯撤销），\n     `place(sq, 'wN')` 摆马，`clear(sq)` 收回去。\n\n     **`place` 的两个参数是「数字 sq + 字符串 piece」**，跟 `queens.js`\n     的 `place(sq, \"wQ\")` 同一个约定。仓库里另有一个**反例**：\n     `tools/_debugger-preview.html` 内嵌的那份 N 皇后示例（约 165 行）写的是\n     `place(sq(col, row), 5)` —— 代数记法字符串的格子 + 数字 code 的棋子，\n     两个参数**正好相反**。本阶段一律跟 `queens.js` 走，'wN' → code 的换算\n     归页面（Task 4/5）做一次，别照那份旧的抄。\n\n   · **`place` / `clear` 就发生在搜索途中，跟 `queens.js` 完全一样** ——\n     走进一格就 `place(sq, \"wN\")`，回溯时 `mark(sq,'back')` 紧跟 `clear(sq)`。\n     马是一步一步走的，盘上任何一刻显示的都是**当前这条路线**。\n     跑通了，最后那 W*H 匹马留在盘上不收 —— 那一盘马就是答案本身；\n     走不通，全部退回去，盘上跟出发前一模一样。\n\n     这条写下来是因为它一度被写反过。tour.test.js 早先的判分方式是「把所有\n     `place` 事件按顺序收起来当路线」，那就逼着算法**攒到找到答案之后再一次性\n     落子**（否则被放弃的分支会被当成重复格）—— 实测的后果是：4×5 / 3×7 / 3×5\n     三块盘上 `place` 一次都不发生（盘全程空着），3×4 上则是 898 步什么都没有、\n     然后 12 匹马同时出现。一个主题是「马在走」的工具，马一步都不走。\n     **判分方式不该反过来规定算法长什么样。** 现在测试改成回放 `place`/`clear`\n     维护占位表（跟棋盘自己做的一样），被放弃的分支自己消失，那条最强的断言\n     （每格恰好一次 + 每步都是合法马步）原样保住，马也走回来了。\n     测试里另有一条断言专门钉这件事：**落子必须铺满整段搜索，不许挤在结尾**。\n\n   · **`'cut'` 标记不会被擦掉**（跟 queens.js 同一条裁定，不要重新决定）。\n     回溯只还原 `visited` 和这一格的马，标记层不随之收缩，于是别的分支里试过\n     的 'cut' 会留在盘上。**显示层的做法（零步数成本）**：`interp.js` 的\n     `stepBoundary` 给每条 Step 记了 `depth`，按 `Debugger.boardState` 累积\n     棋盘状态时顺手记下每个 mark 是在哪个 depth 写下的，再把 depth 大于\n     当前 Step.depth 的标记压暗或不画。通用，三道题共用。\n\n   · 子集约束（规格 §2.6）：**没有三元运算符**，`a ? b : c` 会抛 unsupported，\n     一律展开成 if/else；数组只有 `push` / `pop` 和 `length` 与下标读写 ——\n     所以下面那段排序是手写的选择排序，不是 `cand.sort(...)`。\n\n   · **候选表里不先滤掉踩过的格子**（degree 照样给它们算一个数、排序照样带着\n     它们）。看着像浪费，是故意的：滤一遍会让这份的候选循环跟 `tour-dfs.js`\n     的那一段不再逐字相同，而踩过的格子无论排在哪儿，进循环后都会被同一句\n     `if (visited[nsq])` 拦下并标成 'cut' —— 排序质量一点不受影响，只多一次\n     'try'/'cut' 的显示。用一点步数换「两边可以逐行对比」，这是本阶段的主线。\n\n   · **不导出滑杆上下限**（queens.js 有 `N_MIN`/`N_MAX`，这里故意没有）。\n     两份算法能跑的棋盘范围差着数量级，一个对两边都「安全」的边界会小到把\n     这一课本身删掉。滑杆边界是页面（Task 4/5）的展示决定，不是本模块的\n     校验边界：`source()` 对任何 W ≥ 1、H ≥ 1 都照常吐源码。\n\n   ---- 这一份上的挖空（§2.9）：**一个，不是两个** ----\n\n   下面的 `BODY` 里有**一组** `// >>> BLANK` 指令，`id=degree-fn`、level=3，\n   挖的是整个 `degree()` 函数，由 `core/exercise.js` 的 `parse()` 消费。\n   `tour-dfs.js` 一个挖空都没有 —— 它在练习模式下是只读对照（§2.9 阶段 6\n   第 1 条），`exercise-blanks.test.js` 四块盘各钉了一条。\n\n   **计划和规格 §2.9 给这一题排的是两个挖空**（另一个是 level=1 的\n   `degree-count`，挖 `degree()` 里那一句 `if (!visited[…]) { d = d + 1; }`）。\n   **这两个不可能同时存在**：后者的挖空体被前者整个包在里面，而 `parse()`\n   见到嵌套的 `>>> BLANK` 会当场抛。这一条是硬的（规格 §2.9 那张表本身要求\n   把一个挖空嵌进另一个里，是规格的缺陷，不是这里的实现选择）。\n\n   而**换个位置是能办到的，只是没有好落点** —— 别把它读成「不可能」：\n\n     · 挖空只能落在 Warnsdorff 独有的两段里，否则 `tour-dfs.js` 与本文件的\n       并排 diff 就多出噪声，而那份 diff 是这一课本身。\n     · 排序那一段规格明令不挖（§7.4「判定过严」的教科书案例）。\n     · 剩下的落点是量出路数那一行 `degs.push(degree(cand[i]));`。它**做得到**：\n       只要占位不是常数，而是把静态出路数**内联**算一遍，四块盘实测\n       2,583 / 101,052 / 5,848 / 撞墙 —— 参考跑得完的三块它都跑得完。\n       不采用是因为那个占位很糟：它比挖空体长十倍，而且要把这道题正在问的\n       那段循环**原样抄进提示里**（等于把答案写在占位上），教的还是跟\n       `degree-fn` 同一课。（常数占位 `degs.push(0);` 则四块盘里 4×5 撞墙 ——\n       候选全并列、排序一次不交换，这一份就退化成朴素回溯。）\n\n   所以这里留了 3 级那一个：3 级在整个阶段 6 只出现这一次，而 1 级另有三个；\n   填整个函数本来也要求她把那一句计数写出来。完整的取舍与实测数据在\n   `exercise-blanks.test.js` 里那段长注释和 task-5 报告里。\n\n   **`fill` 跟计划给的不一样，是实测逼出来的。** 计划给的是「返回常数 0 的\n   同签名函数」。degree 一返回常数，候选就全部并列，那段选择排序一次也不\n   交换，**这一份就逐字退化成 `tour-dfs.js`** —— 实测钉过：`return 0;` 的\n   占位版在 3×4 与 3×5 上的棋盘事件流与 tour-dfs 的逐条相同（40 条 / 3,223\n   条）。后果是 4×5 上撞 200,000 上限、`result` 变成 `undefined`，而参考在\n   那块盘上 7,283 步就走完了 —— 违反「占位版必须仍能跑」（Task 4 在 queens\n   的 `fill=\"return true;\"` 上踩的是同一条线）。\n\n   但「近乎完整的天真实现」与「4×5 撞墙」**不是仅有的两条路**（修复轮 1 之前\n   这里就是这么写的，那个二分是假的）。现在用的 `fill` 是第三条：**按边界猜的\n   角落偏好启发式** —— 从 8 开始，靠一条边就减 2。它\n\n     · **不泄露** `DX/DY` 的八方向循环、不泄露 `onBoard` 调用、不泄露计数，\n       于是这道 3 级题留下的是货真价实的 3 级工作量（先前那版只差一个\n       `!visited` 子句，而中文提示又把那个子句点了名，等于把答案写了两遍\n       —— 那样这一阶段唯一的 3 级挖空实际是 1 级）；\n     · 仍然是**错的**，而且错得正是这道题要教的那件事：出路数必须随着马走过的\n       路变小，靠边界猜出来的数从头到尾不变；\n     · 四块盘实测 3×4 9,115 · 3×5 62,715 · **4×5 131,559** · 3×7 撞墙\n       （参考在 3×7 上也撞墙），参考跑得完的三块它都跑得完。\n\n   **4×5 那 131,559 步是这个选择的代价**：参考的 18 倍、占 200,000 上限的 66%，\n   离上限还剩约 68,000 步。绝对量级上它跟 queens 的 N=8（156,772 步、78%，\n   本来就是出厂默认体验）是同一档，浏览器里跑得动。`exercise-blanks.test.js`\n   有一条**余量断言**把它钉在 150,000 之下：将来任何把它推过线的改动会**大声\n   失败**，而不是变成一次神秘的截断。\n\n   指令是注释，**一步都不产生**：插入前后四块盘的步数、结果与整条棋盘事件流\n   逐条相同（见下表），把两行指令剥回去再跑也一致。\n\n   ---- 实测步数与棋盘事件（`Interp.STEP_LIMIT` = 200,000，角起 start = 0）----\n\n   拿两份源码各自生成的程序跑 `Interp.run(src, { host: {} })`，读 `trace.length`\n   与 mark/place/clear 的次数。**四块盘都是 tour.test.js 里钉着的滑杆位置**，\n   每一块演的是不同的东西：\n\n     棋盘   tour-dfs.js（朴素）   本文件（Warnsdorff）      这一块盘演什么\n     3×4      898 步 ✓ true       3,092 步 ✓ true    小盘上启发式的开销收不回来\n     3×5   34,988 步 ✓ false    120,650 步 ✓ false   查遍了，这块盘上没有巡游\n     4×5  200,000 步 ✗撞墙        7,283 步 ✓ true    大一点，启发式赢得压倒性\n     3×7  200,000 步 ✗撞墙      200,000 步 ✗撞墙     启发式也会失败 —— 它不是保证\n\n   棋盘事件（try / ok / cut / back，以及 place / clear —— place 恒等于 ok、\n   clear 恒等于 back，因为进一格就落子、退一格就收子）：\n\n     棋盘  算法        try    ok   cut   back=clear   注意\n     3×4  朴素         14    12     2       **0**   一次都不回溯，'back' 演不出来\n     3×4  Warnsdorff   19    12     7       **0**   同上\n     3×5  朴素       1,019   395   624       395    ← 'back' 唯一演得完的一块盘\n     3×5  Warnsdorff 1,019   395   624       395    ← 两份在这块盘上事件数完全相同\n     4×5  朴素       6,934 2,171 4,763     2,158    撞墙前已经退了两千多次\n     4×5  Warnsdorff    49    20    29       **0**  一条道走到底，一次没退过\n     3×7  朴素       6,370 2,218 4,152     2,201\n     3×7  Warnsdorff 1,723   591 1,132       577\n\n   **三件 Task 4/5 必须知道的事**：\n     ① 3×4 上两份算法都不回溯，所以 §2.7 的 'back' 状态和「按 `Step.depth`\n        压暗旧 'cut'」那套显示逻辑在默认盘上一次都不触发 —— 要演它得换盘。\n     ② **3×5 是唯一一块「两边都回溯得很凶、而且都诚实地跑到结论」的盘**\n        （各退 395 次，都返回 false，都不撞墙）。它是第四个滑杆位置的全部理由。\n     ③ **4×5 是并排对比最锋利的一块**：朴素退了 2,158 次还是撞墙，Warnsdorff\n        一次没退、20 步走完。这一对数字比步数本身更能说明「启发式在做什么」。\n\n   四行都在 tour.test.js 里钉着。3×4 和 3×7 是这一课诚实的那一半：\n   启发式**有代价**，而且**不保证**。别为了让表好看去调棋盘。\n\n   顺手量的、给 Task 4/5 挑滑杆上限用（tour-dfs.js 在这些盘上一律撞墙，\n   本文件一次不退地走完）：\n     本文件  5×5 10,188 步 · 6×6 17,117 步 · 8×8 36,111 步。\n   也就是说「棋盘越大启发式越省」不是修辞：8×8 上朴素回溯连百分之一都跑不到，\n   本文件只用掉上限的 18%。 */\n(function (root, factory) {\n  if (typeof module === 'object' && module.exports) module.exports = factory();\n  else root.AlgoTourWarnsdorff = factory();\n})(typeof self !== 'undefined' ? self : this, function () {\n  'use strict';\n\n  /* 普通字符串拼，不用模板字面量：这段文本本身会被原样贴进 html，\n     反引号在那个上下文里比在这里更容易出事（照抄 queens.js 的理由）。 */\n\n  /* ==== 以下 HEAD 与 tour-dfs.js 的 HEAD **行数相同**，\n     只有第 1 行的标题和第 12–13 行讲「先试哪一个」的两行不同。 ==== */\n  const HEAD = [\n    '/* ============ 骑士巡游 · Warnsdorff 启发式 ============',\n    '   马走「日」字：横一竖二，或者横二竖一 —— 绕着它站的那一格一共八个方向。',\n    '   题目是：让马从某一格出发，把整块棋盘每一格都恰好踩一次。',\n    '',\n    '   格子编号：sq = 行 * W + 列。W 是棋盘的宽（每行几格），H 是高。',\n    '   第 0 行是棋盘最下面那一行，第 0 列是最左边那一列 —— 于是 0 号格',\n    '   就是国际象棋里的 a1。要反推回去：列 = sq % W，行 = (sq - 列) / W。',\n    '   棋盘不必是正方形，3×4 和 4×5 都是正常的棋盘。',\n    '',\n    '   办法是「试错 + 反悔」：挑一个方向走过去，走不通就退回来换一个。',\n    '   旁边那份源码跟这份只差一件事 —— 下一步先试哪一个。',\n    '   这一份：先试「出路最少」的那一格（这叫 Warnsdorff 规则）。',\n    '   直觉是 —— 出路快没了的格子，再不去就再也去不了了。 */',\n    '',\n    '/* 棋盘的宽、高，以及马从哪一格出发。',\n    '   能拧的旋钮是两个而不是一个，而工作量随格子数指数增长：',\n    '   3×4 和 4×5 之间只差 8 格，朴素那一份就从「一千步」变成「跑不完」。 */',\n  ];\n\n  const BODY = [\n    '',\n    '/* 马的八个方向。DX 与 DY 一一对应：第 k 个方向是「横走 DX[k]、竖走 DY[k]」。',\n    '   横一竖二四个、横二竖一四个，绕着起点转一圈 —— 这就是「日」字。 */',\n    'const DX = [1, 2, 2, 1, -1, -2, -2, -1];',\n    'const DY = [2, 1, -1, -2, -2, -1, 1, 2];',\n    '',\n    '/* 备忘表：visited[sq] = 1 表示这一格已经踩过了。',\n    '   一格只能踩一次 —— 这是整道题唯一的规则，别的都是围着它转的脚手架。 */',\n    'const visited = [];',\n    'for (let i = 0; i < W * H; i = i + 1) { visited.push(0); }',\n    '',\n    '// (x, y) 还在棋盘上吗？出界的方向连试都不用试。',\n    'function onBoard(x, y) {',\n    '  return x >= 0 && x < W && y >= 0 && y < H;',\n    '}',\n    /* ↓↓↓ 差异①：tour-dfs.js 里没有这个函数。 ↓↓↓ */\n    '',\n    '/* 站在 sq 上，还有几个「没踩过」的格子可以去？这个数就叫它的出路数。',\n    '   整个 Warnsdorff 就靠这一个数：出路数越小的格子越急，越要先去。',\n    '   想确认它真的在起作用：把下面排序那一段删掉，这份就退回成朴素回溯了。 */',\n    '// >>> BLANK id=degree-fn level=3 fill=\"function degree(sq) { const x = sq % W; const y = (sq - x) / W; let d = 8; if (x === 0) { d = d - 2; } if (x === W - 1) { d = d - 2; } if (y === 0) { d = d - 2; } if (y === H - 1) { d = d - 2; } return d; }\" hint=\"整个 Warnsdorff 就靠这一个数：马此刻站在 sq 上，接下来到底还能去几个格子 —— 数的是真能落脚的那几个，踩过的一概不算。占位那一版一个方向都没看过，它只按 sq 靠不靠边猜了一个数，于是马已经走到哪儿它根本不管，给出的数从头到尾都一样。\" hintEn=\"All of Warnsdorff rests on this one number: with the knight standing on sq right now, how many squares can it actually move to next. The placeholder never looks at a single direction — it just guesses from how close sq sits to an edge, so the number it hands back never budges as the knight\\'s tour goes on.\"',\n    'function degree(sq) {',\n    '  const x = sq % W;',\n    '  const y = (sq - x) / W;',\n    '  let d = 0;',\n    '  for (let k = 0; k < 8; k = k + 1) {',\n    '    const nx = x + DX[k];',\n    '    const ny = y + DY[k];',\n    '    if (onBoard(nx, ny)) {',\n    '      if (!visited[ny * W + nx]) { d = d + 1; }',\n    '    }',\n    '  }',\n    '  return d;',\n    '}',\n    '// <<< BLANK',\n    /* ↑↑↑ 差异① 结束 ↑↑↑ */\n    '',\n    '/* 马站在 sq 上，这已经是路线上的第 n 格 —— 接着往下走。',\n    '   走得通就返回 true，八个方向都走不通就返回 false 让上一层去换。',\n    '   n 等于总格数时，每一格都踩过了，这一支就是答案。 */',\n    'function tour(sq, n) {',\n    '  const x = sq % W;',\n    '  const y = (sq - x) / W;',\n    '  visited[sq] = 1;',\n    '  mark(sq, \"ok\");        // 已确认：这一格进了当前这条路线',\n    '  place(sq, \"wN\");       // 马真的走到这一格 —— 盘上立刻看得见',\n    '  if (n === W * H) {',\n    '    return true;',\n    '  }',\n    '  /* 从这一格出发，八个方向里哪几个还落在棋盘上 —— 先收成一张候选表。 */',\n    '  const cand = [];',\n    '  for (let k = 0; k < 8; k = k + 1) {',\n    '    const nx = x + DX[k];',\n    '    const ny = y + DY[k];',\n    '    if (onBoard(nx, ny)) {',\n    '      cand.push(ny * W + nx);',\n    '    }',\n    '  }',\n    /* ↓↓↓ 差异②：tour-dfs.js 在这里只有一行注释。上下都逐字相同。 ↓↓↓ */\n    '  /* Warnsdorff 就是这一段：先量出每个候选的出路数，再把候选表按这个数',\n    '     从小到大排一遍 —— 于是下面那个循环第一个试的，就是最急的那一格。',\n    '     子集里数组没有 sort，所以这里是手写的选择排序：每一轮从剩下的里面',\n    '     挑出最小的一个，跟当前位置对调。候选最多八个，多排几趟也不心疼。 */',\n    '  const degs = [];',\n    '  for (let i = 0; i < cand.length; i = i + 1) {',\n    '    degs.push(degree(cand[i]));',\n    '  }',\n    '  for (let i = 0; i < cand.length; i = i + 1) {',\n    '    let best = i;',\n    '    for (let j = i + 1; j < cand.length; j = j + 1) {',\n    '      if (degs[j] < degs[best]) { best = j; }',\n    '    }',\n    '    const tsq = cand[i]; cand[i] = cand[best]; cand[best] = tsq;',\n    '    const td = degs[i]; degs[i] = degs[best]; degs[best] = td;',\n    '  }',\n    /* ↑↑↑ 差异② 结束 ↑↑↑ */\n    '  for (let i = 0; i < cand.length; i = i + 1) {',\n    '    const nsq = cand[i];',\n    '    mark(nsq, \"try\");    // 正在尝试：先点亮这一格，再看它能不能走',\n    '    if (visited[nsq]) {',\n    '      mark(nsq, \"cut\");  // 被剪枝：踩过的格子不能再踩',\n    '    } else {',\n    '      if (tour(nsq, n + 1)) {',\n    '        return true;     // 下游走通了 —— 一路把 true 传回去，别的方向不用再试',\n    '      }',\n    '    }',\n    '  }',\n    '  /* 回溯撤销：八个方向都试遍了还是走不通，把这一格原样退还 ——',\n    '     备忘表擦掉，马也从这一格撤走。不退的话，接下来别的分支会看到一格',\n    '     根本没人站过的「踩过」，从此每一条路线都是假的。',\n    '     mark 与 clear 是分开的两步：先看到这一格被判「撤销」，下一步马才消失。 */',\n    '  visited[sq] = 0;',\n    '  mark(sq, \"back\");',\n    '  clear(sq);',\n    '  return false;',\n    '}',\n    '',\n    '// 出发。第一格也要先亮一下，跟后面每一格的待遇一样。',\n    'mark(START, \"try\");',\n    'const found = tour(START, 1);',\n    'if (found) {',\n    '  /* 盘上留着的那一整盘马就是答案本身。它们不收 —— 收了就没有答案可看了。',\n    '     想看清顺序：把单步倒着回放一遍，马是按什么次序落上去的一目了然。 */',\n    '  log(\"找到了：一条踩遍 \" + (W * H) + \" 格的路线\");',\n    '} else {',\n    '  /* 所有分支都退过了，盘上一匹马都不剩，跟出发前一模一样。 */',\n    '  log(\"走不通：从这一格出发，没有能踩遍全盘的路线\");',\n    '}',\n    'return found;',\n  ];\n\n  /* source({ W, H, start }) → string\n\n     三个参数都不给默认值，缺了直接抛（阶段 5 约束 6：公开导出的省略参数\n     已经是本仓库抓到过三次的缺陷类）。一个默默变成 8 的 W 会让界面写着\n     5、跑的却是 8，正是这个工具最不能出的错。\n\n     校验只管「是不是合法的棋盘和格子」，**不管好不好跑** —— 见文件头：\n     3×7 撞墙恰恰是要生成出来跑给她看的。\n\n     这个函数与 tour-dfs.js 的同名函数逐字相同（除了报错文案里没有算法名），\n     两边一起改。 */\n  function source(opts) {\n    const o = opts || {};\n    if (o.W === undefined || o.W === null) {\n      throw new Error('source({ W, H, start }) 少了 W —— 棋盘宽度没有默认值，必须写明');\n    }\n    if (o.H === undefined || o.H === null) {\n      throw new Error('source({ W, H, start }) 少了 H —— 棋盘高度没有默认值，必须写明');\n    }\n    if (o.start === undefined || o.start === null) {\n      throw new Error('source({ W, H, start }) 少了 start —— 出发格没有默认值，必须写明');\n    }\n    const W = o.W, H = o.H, start = o.start;\n    if (typeof W !== 'number' || !isFinite(W) || Math.floor(W) !== W || W < 1) {\n      throw new Error('W 必须是 >= 1 的整数，收到：' + W);\n    }\n    if (typeof H !== 'number' || !isFinite(H) || Math.floor(H) !== H || H < 1) {\n      throw new Error('H 必须是 >= 1 的整数，收到：' + H);\n    }\n    if (typeof start !== 'number' || !isFinite(start) || Math.floor(start) !== start ||\n        start < 0 || start >= W * H) {\n      throw new Error('start 必须是 0 到 ' + (W * H - 1) + ' 之间的整数，收到：' + start);\n    }\n    return HEAD.concat([\n      'const W = ' + W + ';',\n      'const H = ' + H + ';',\n      'const START = ' + start + ';',\n    ]).concat(BODY).join('\\n');\n  }\n\n  return { source: source };\n});\n",
-  'knight-path.js': "/* 骑士最短路（广度优先搜索）的**算法源码生成器**（规格 §2.1）。\n   零依赖；node 与浏览器双用。编辑源，运行时被内联进 tools/*.html。\n\n   跟 `queens.js` / `tour-dfs.js` / `tour-warnsdorff.js` / `minimax.js` 是同一个\n   形状：这个模块本身不搜索任何东西 —— 它吐出一段**字符串**。那段字符串同时是\n   喂给 `Interp.run` 去真跑的程序、和喂给 `Editor.mount` 摆在使用者眼前的那份\n   源码。一份字符串两个用途，所以「看到的」和「跑的」不可能漂移。\n\n   **生成出来的那段源码里的注释和命名，是写给一个没学过棋的 16 岁读者的**。\n   本文件自己的注释（就是你正在读的这些）是给维护者的，两套读者，两种口吻。\n\n   ---- 为什么是**递归铺层**，不是一条队列 ----\n\n   教科书上的 BFS 是「一条队列 + 一个 while」。这里写成了另一种同样标准的\n   形态：**逐层同步（level-synchronous）BFS** —— `expand(frontier, d)` 拿着\n   「正好 d 步能到的那一整层格子」，把它们的邻居收成下一层，再对下一层调用\n   自己。两种写法访问顺序完全一样、距离完全一样（knight-path.test.js 拿一份\n   队列式的宿主侧 BFS 逐组对拍），但这一种多给了两件工具⑤ 非要不可的东西：\n\n     ① **递归深度就是 BFS 层号**，而层号就是最短距离。于是这一页的第三根轴\n        （深度塔，§1.4「z 轴 = 入口函数的递归深度」）不需要任何额外声明就正好\n        是「第几层」；左边调用栈面板里叠着的帧数，就是右边棋盘上波纹的圈数。\n        队列式写法的调用深度恒等于 1，那根轴会整个塌掉，得靠页面自己再算一遍\n        距离才能立起来 —— 而页面一旦自己算距离，§2.8 请她改这份源码之后，\n        塔就不再跟着她的改动变了。**这正是本仓库最忌讳的那种漂移**：\n        看到的和跑的分了家。\n     ② 「一层铺完再铺下一层」在源码结构上是**看得见**的，而不是藏在一条队列的\n        先进先出里。BFS 唯一的秘密就是这个顺序。\n\n   代价写清楚：`frontier` / `next` 两张表比一条队列多占内存，而且这一段递归\n   最深只到「最短距离」那么深（8×8 上最多 6 层），不是每格一层 —— 不会像\n   骑士巡游那样把栈叠到 20 层。\n\n   ---- 几处必须写下来的约定 ----\n\n   · **入口函数叫 `expand`**，对应 `PROBLEMS.knightPath.entry`。它是**递归**\n     那一个（`expand(frontier, d)` 铺第 d 层），不是只调用一次的外壳 ——\n     `TreeModel.build(trace, 'expand')` 认到的帧必须一层套一层。顶层是\n     `steps = expand([START], 0); … return steps;`，所以 `run().result`\n     就是最短步数。\n\n   · **格子编号 `sq = 行 * W + 列`**，行 0 在棋盘最下面、列 0 在最左边，\n     于是 0 号格是 a1 —— 跟 `queens.js`、`tour-*.js`、`BoardRender.layout()`\n     的 `squareCenter(file, rank)`、`chess-core.js` 的 `SQ(file, rank)` 同向。\n     反推是 `列 = sq % W; 行 = (sq - 列) / W`。**这一题的棋盘是正方形**\n     （W×W），因为它演的是真正那一副 8×8 的棋盘上「马从这里到那里几步」。\n\n   · **返回值：最短步数；到不了是 −1。**「到不了」绝不能变成 0 —— 0 的意思是\n     「已经站在目标格上了」，把这两件事混成同一个数字是这一题最不能出的错\n     （工具⑤ 全页的规矩：`null`/未知不许变成数字，这里是它在算法侧的对应物）。\n     宿主侧那份对拍用的队列式 BFS 也是 −1，两边同源。\n\n   · **宿主桥接**：`mark(sq, kind)` 画规格 §2.7 的状态，**这一题只用三种**：\n       'try'（正在看这个邻居）· 'ok'（第一次到达，这就是它的最短步数）·\n       'cut'（早就到过了，从这边过去只会更长）。\n     **`'back'` 一次都不会出现，而这正是这一题的一半内容**：BFS 从不反悔。\n     N 皇后和骑士巡游都要回溯，它不要 —— 因为它是按距离从近到远铺开的，\n     第一次碰到一格时那就已经是最短的了，没有什么可反悔的。\n     `PROBLEMS.knightPath.kinds` 因此只有三行图例，少的那一行本身就是一句话。\n\n   · **`place` 发生在最后，而且这是对的**（跟 `tour-*.js` 的「边搜边走」相反，\n     不要照抄那条裁定）。骑士巡游里马真的在一步步走，所以落子必须铺满整段\n     搜索；BFS 里**没有任何一匹马在走** —— 它是一圈一圈的水波，同时向所有\n     方向铺开。搜索途中盘上该有的是波纹（`mark`），不是棋子。等到碰着目标，\n     顺着 `prev` 把路线倒着串回来，一次摆出那 d+1 匹马 —— 那串马就是答案。\n     搜索途中盘面并不空：波纹一直在长，只是长的不是棋子。\n\n   · **`place(sq, \"wN\")` 是「数字格子 + 字符串棋子」**，跟 `queens.js` 的\n     `place(sq, \"wQ\")` 同一个约定。仓库里另有一个反例\n     （`tools/_debugger-preview.html` 内嵌的那份 N 皇后示例写的是\n     `place(sq(col, row), 5)`，两个参数正好相反），别照那份抄。\n\n   · 子集约束（规格 §2.6）：**没有三元运算符**，`a ? b : c` 会抛 unsupported，\n     一律展开成 if/else；数组只有 `push` / `pop` 和 `length` 与下标读写。\n\n   · **两组 `// >>> BLANK` 指令现在就写在下面的 `BODY` 里**（§2.9），由\n     `core/exercise.js` 的 `parse()` 消费。两个都是 level=1「填一个表达式」：\n       ① `id=on-board` —— `onBoard(x, y)` 那一行返回式，跟 `queens.js` 的\n          `safe(r, c)` 同一道缝。\n       ② `id=seen-test` —— `expand()` 里那一句 `if (dist[nb] >= 0) {`：\n          「这一格碰过没有」。它就是整个 BFS 的开关，写错了程序照常跑完、\n          照常返回一个数，只是那个数不对 —— 正是挖空练习要的那种「跑得完\n          但答错」，判定靠比行为而不是比文本。\n\n     指令是注释，**一步都不产生**：插入前后 a1→h8 是 5,086 步 / 距离 6、\n     a1→d4 是 347 步 / 距离 2，与上面那张实测表逐格相同；把四行指令剥回去\n     再跑，步数、结果与整条棋盘事件流逐条一致。\n\n     **两个 `fill` 都跟计划给的相反，各挡一种事故**（实测，滑杆全程 1..63）：\n     恒真的 `onBoard`（计划给的 `fill=\"return true;\"`）会让 `nb` 算出 −15、\n     68 这种**棋盘上不存在的格子号**，滑杆全程 10,561 条棋盘事件落在盘外，\n     而且 63 个目标格里有 38 个答案照样对；`fill=\"if (false) {\"` 更甚 ——\n     它 63 个目标格**全部答对**（逐层同步的 BFS 即使把「碰过没有」整个关掉，\n     第一次生成目标格的那一层仍然正好是最短距离）。一个按 Run 就给出正确\n     读数的占位版会让 Check 看起来像在刁难人。现在用的是 `return false;`\n     与 `if (true) {`：一律往**过紧**的方向倒，结果恒为 −1，滑杆全程最多\n     288 步、盘外事件 0 条。三关六条断言在 `core/exercise-blanks.test.js`。\n\n   ---- 实测步数与结果（`Interp.STEP_LIMIT` = 200,000）----\n\n   拿本文件生成的源码跑 `Interp.run(src, { host: {} })`，读 `trace.length`\n   与 `result`（全部 start = 0 = a1，与 knight-path.test.js 同源）：\n\n     目标（start = a1）      步数     距离   确认的格子（ok）\n     h8 (63)               5,086      6      64   ← 整块盘全铺遍了，最贵的一档\n     h1 ( 7)               4,121      5      63\n     a8 (56)               3,575      5      61\n     g8 (62)               3,298      5      56\n     b2 ( 9)               1,791      4      47   ← **这一题的顿悟**：紧挨着的斜角要 4 步\n     a2 ( 8)                 934      3      28\n     b1 ( 1)                 837      3      26\n     d4 (27)                 347      2       5   ← 两层就碰上了，波纹只铺了一小圈\n     6×6 → (35)            1,360      4      30\n     5×5 → (24)            1,247      4      24\n     2×2 → ( 3)              100     −1       1   ← 到不了：马在 2×2 上一步都走不出去\n\n   `back` 一栏不列，因为它恒等于 0 —— 见上面「BFS 从不反悔」那一条。\n\n   简报给的两个数（8×8 a1→h8 **3,588** 步、a1→d4 **469** 步）是对着另一份实现\n   量的：本文件量出来是 **5,086** 与 **347**，而距离 6 与 2 两边一致。注意这不是\n   一个常数倍数 —— 一头比它高、另一头比它低，所以那份实现不是「多写/少写了一行」，\n   而是结构不同（多半是教科书那种一条队列的写法：没有 frontier/next 两张表的\n   开销，但也没有早停在层内的那一下）。**没有为了对齐那两个数字改代码** ——\n   距离才是这道题的答案，步数是实现形态的后果。测出来是多少就报多少。\n\n   离 200,000 的上限还差两个数量级：这一题**永远不会撞墙**，而这本身就是\n   跟前两题的对照 —— 回溯是指数的，BFS 是线性的（每格最多被确认一次）。\n   规格 §4⑤ 的三段弧线里，它是「做得到」的那一段。\n\n   滑杆边界（W 与 target 的范围）是页面的展示决定，不是本模块的校验边界：\n   `source()` 对任何 W ≥ 1、以及任何落在盘上的 start / target 都照常吐源码，\n   包括到不了的那些 —— 「到不了」要生成出来跑给她看。 */\n(function (root, factory) {\n  if (typeof module === 'object' && module.exports) module.exports = factory();\n  else root.AlgoKnightPath = factory();\n})(typeof self !== 'undefined' ? self : this, function () {\n  'use strict';\n\n  /* 普通字符串拼，不用模板字面量：这段文本本身会被原样贴进 html，\n     反引号在那个上下文里比在这里更容易出事（照抄 queens.js 的理由）。 */\n  const HEAD = [\n    '/* ============ 骑士的最短路 · 广度优先搜索 ============',\n    '   马走「日」字：横一竖二，或者横二竖一 —— 绕着它站的那一格一共八个方向。',\n    '   题目是：从一格走到另一格，最少要几步？',\n    '',\n    '   格子编号：sq = 行 * W + 列。第 0 行是棋盘最下面那一行，第 0 列是最左边',\n    '   那一列 —— 于是 0 号格就是国际象棋里的 a1。',\n    '   要反推回去：列 = sq % W，行 = (sq - 列) / W。',\n    '',\n    '   办法叫「广度优先」：先把一步能到的格子全找出来，再把两步能到的全找出来，',\n    '   一层一层往外铺，像往水里丢一颗石子荡开的波纹。',\n    '   第一次碰到目标的那一层，层号就是最短步数 —— 因为更近的每一层都已经',\n    '   找遍了，目标不在那里面。',\n    '',\n    '   跟前两道题最大的不同：**它一次也不反悔**。回溯搜索要退回来重走，是因为',\n    '   它可能先冲进一条错路；而这一份是按远近铺开的，第一次碰到一格时，那就',\n    '   已经是最短的走法了，没有什么可反悔的。 */',\n    '',\n    '/* 棋盘边长、出发格、目标格。真正的棋盘就是 W = 8。 */',\n  ];\n\n  const BODY = [\n    '',\n    '/* 马的八个方向。DX 与 DY 一一对应：第 k 个方向是「横走 DX[k]、竖走 DY[k]」。',\n    '   横一竖二四个、横二竖一四个，绕着起点转一圈 —— 这就是「日」字。 */',\n    'const DX = [1, 2, 2, 1, -1, -2, -2, -1];',\n    'const DY = [2, 1, -1, -2, -2, -1, 1, 2];',\n    '',\n    '/* 两张备忘表：',\n    '     dist[sq]  从出发格走到这一格最少几步；−1 表示还没碰到过它。',\n    '     prev[sq]  第一次到达它时，是从哪一格过来的 —— 最后要靠它把路线串回来。',\n    '   一格只会被确认一次 —— 这是整道题唯一的规则，别的都是围着它转的脚手架。 */',\n    'const dist = [];',\n    'const prev = [];',\n    'for (let i = 0; i < W * W; i = i + 1) { dist.push(-1); prev.push(-1); }',\n    '',\n    '// (x, y) 还在棋盘上吗？出界的方向连看都不用看。',\n    'function onBoard(x, y) {',\n    '  // >>> BLANK id=on-board level=1 fill=\"return false;\" hint=\"四条边都要查：x 要落在 0 到 W−1 之间，y 也一样。少查一条边，波纹就会漫到棋盘外面去 —— 那外面的格子号码根本不存在。\" hintEn=\"All four edges have to be checked: x must land between 0 and W−1, and so must y. Miss one edge and the wave spills off the board, into square numbers that do not exist.\"',\n    '  return x >= 0 && x < W && y >= 0 && y < W;',\n    '  // <<< BLANK',\n    '}',\n    '',\n    '/* frontier 是「正好 d 步能到的那一整层格子」。',\n    '   这个函数把这一层每一格的八个方向都看一遍：凡是还没碰过的，都属于第 d+1',\n    '   层 —— 收齐之后，再对下一层调用自己。递归的每一层，就是棋盘上的一圈波纹，',\n    '   所以左边调用栈叠了几帧，右边的波纹就荡开了几圈。',\n    '   返回最短步数；这一层之后再也铺不出新格子，就返回 −1（到不了）。 */',\n    'function expand(frontier, d) {',\n    '  const next = [];',\n    '  for (let i = 0; i < frontier.length; i = i + 1) {',\n    '    const cur = frontier[i];',\n    '    const x = cur % W;',\n    '    const y = (cur - x) / W;',\n    '    for (let k = 0; k < 8; k = k + 1) {',\n    '      const nx = x + DX[k];',\n    '      const ny = y + DY[k];',\n    '      if (onBoard(nx, ny)) {',\n    '        const nb = ny * W + nx;',\n    '        mark(nb, \"try\");     // 正在看这个邻居：先点亮，再问它是不是第一次碰到',\n    '        // >>> BLANK id=seen-test level=1 fill=\"if (true) {\" hint=\"dist[nb] 记的是「走到这一格最少几步」，−1 的意思是还没碰过它。碰过的就不必再看了。留神出发格记的是 0 —— 它也是碰过的。\" hintEn=\"dist[nb] holds the fewest moves needed to reach that square, and −1 means it has not been touched yet. A square that has been touched needs no second look. Watch out for the starting square: it holds 0, and 0 counts as touched.\"',\n    '        if (dist[nb] >= 0) {',\n    '        // <<< BLANK',\n    '          /* 早就到过它了。而且更早到达它的那一层比现在这一层近，',\n    '             所以从这边再走过去只会更长 —— 看都不用再看。 */',\n    '          mark(nb, \"cut\");',\n    '        } else {',\n    '          /* 第一次碰到它。它比这一层正好远一步，而这就是它的最短步数：',\n    '             更近的每一层刚才都铺过了，如果有更短的走法，早就碰上了。 */',\n    '          dist[nb] = d + 1;',\n    '          prev[nb] = cur;',\n    '          mark(nb, \"ok\");',\n    '          if (nb === TARGET) {',\n    '            return d + 1;    // 碰上目标了 —— 当场就是答案，剩下的层不用再铺',\n    '          }',\n    '          next.push(nb);',\n    '        }',\n    '      }',\n    '    }',\n    '  }',\n    '  if (next.length === 0) {',\n    '    /* 这一层之后再没有新格子了：能到的都到过了，目标不在其中。 */',\n    '    return -1;',\n    '  }',\n    '  return expand(next, d + 1);   // 铺下一层 —— 递归就发生在这一行',\n    '}',\n    '',\n    '/* 出发。第 0 层只有出发格自己，它到自己是 0 步。 */',\n    'dist[START] = 0;',\n    'mark(START, \"ok\");',\n    'let steps = 0;',\n    'if (START !== TARGET) {',\n    '  steps = expand([START], 0);',\n    '}',\n    'if (steps < 0) {',\n    '  /* 盘上一匹马都不摆：没有路线可摆。−1 不是 0 —— 0 的意思是「已经站在',\n    '     目标格上了」，那是完全不同的一件事。 */',\n    '  log(\"到不了：马从这一格出发，永远走不到目标格\");',\n    '} else {',\n    '  /* 把路线倒着串回来：从目标格顺着 prev 一路退回出发格，每退一格就摆一匹马。',\n    '     摆完，盘上那一串马就是一条最短路线本身。',\n    '     整趟搜索里盘上一直有东西在长 —— 长的是波纹（mark），不是棋子：',\n    '     BFS 里没有任何一匹马在走路，它是同时向所有方向铺开的。 */',\n    '  let at = TARGET;',\n    '  for (let i = 0; i <= steps; i = i + 1) {',\n    '    place(at, \"wN\");',\n    '    at = prev[at];',\n    '  }',\n    '  log(\"最短 \" + steps + \" 步（盘上那串马就是其中一条走法）\");',\n    '}',\n    'return steps;',\n  ];\n\n  /* source({ W, start, target }) → string\n\n     三个参数都不给默认值，缺了直接抛（阶段 5 约束 6：公开导出的省略参数已经\n     是本仓库抓到过五次的缺陷类）。一个默默变成 8 的 W 会让界面写着 6、跑的却是\n     8，正是这个工具最不能出的错。\n\n     校验只管「是不是合法的棋盘和格子」，**不管到不到得了** —— 见文件头：\n     2×2 上到不了恰恰是要生成出来跑给她看的。 */\n  function source(opts) {\n    const o = opts || {};\n    if (o.W === undefined || o.W === null) {\n      throw new Error('source({ W, start, target }) 少了 W —— 棋盘边长没有默认值，必须写明');\n    }\n    if (o.start === undefined || o.start === null) {\n      throw new Error('source({ W, start, target }) 少了 start —— 出发格没有默认值，必须写明');\n    }\n    if (o.target === undefined || o.target === null) {\n      throw new Error('source({ W, start, target }) 少了 target —— 目标格没有默认值，必须写明');\n    }\n    const W = o.W, start = o.start, target = o.target;\n    if (typeof W !== 'number' || !isFinite(W) || Math.floor(W) !== W || W < 1) {\n      throw new Error('W 必须是 >= 1 的整数，收到：' + W);\n    }\n    if (typeof start !== 'number' || !isFinite(start) || Math.floor(start) !== start ||\n        start < 0 || start >= W * W) {\n      throw new Error('start 必须是 0 到 ' + (W * W - 1) + ' 之间的整数，收到：' + start);\n    }\n    if (typeof target !== 'number' || !isFinite(target) || Math.floor(target) !== target ||\n        target < 0 || target >= W * W) {\n      throw new Error('target 必须是 0 到 ' + (W * W - 1) + ' 之间的整数，收到：' + target);\n    }\n    return HEAD.concat([\n      'const W = ' + W + ';',\n      'const START = ' + start + ';',\n      'const TARGET = ' + target + ';',\n    ]).concat(BODY).join('\\n');\n  }\n\n  return { source: source };\n});\n"
+  'knight-path.js': "/* 骑士最短路（广度优先搜索）的**算法源码生成器**（规格 §2.1）。\n   零依赖；node 与浏览器双用。编辑源，运行时被内联进 tools/*.html。\n\n   跟 `queens.js` / `tour-dfs.js` / `tour-warnsdorff.js` / `minimax.js` 是同一个\n   形状：这个模块本身不搜索任何东西 —— 它吐出一段**字符串**。那段字符串同时是\n   喂给 `Interp.run` 去真跑的程序、和喂给 `Editor.mount` 摆在使用者眼前的那份\n   源码。一份字符串两个用途，所以「看到的」和「跑的」不可能漂移。\n\n   **生成出来的那段源码里的注释和命名，是写给一个没学过棋的 16 岁读者的**。\n   本文件自己的注释（就是你正在读的这些）是给维护者的，两套读者，两种口吻。\n\n   ---- 为什么是**递归铺层**，不是一条队列 ----\n\n   教科书上的 BFS 是「一条队列 + 一个 while」。这里写成了另一种同样标准的\n   形态：**逐层同步（level-synchronous）BFS** —— `expand(frontier, d)` 拿着\n   「正好 d 步能到的那一整层格子」，把它们的邻居收成下一层，再对下一层调用\n   自己。两种写法访问顺序完全一样、距离完全一样（knight-path.test.js 拿一份\n   队列式的宿主侧 BFS 逐组对拍），但这一种多给了两件工具⑤ 非要不可的东西：\n\n     ① **递归深度就是 BFS 层号**，而层号就是最短距离。于是这一页的第三根轴\n        （深度塔，§1.4「z 轴 = 入口函数的递归深度」）不需要任何额外声明就正好\n        是「第几层」；左边调用栈面板里叠着的帧数，就是右边棋盘上波纹的圈数。\n        队列式写法的调用深度恒等于 1，那根轴会整个塌掉，得靠页面自己再算一遍\n        距离才能立起来 —— 而页面一旦自己算距离，§2.8 请她改这份源码之后，\n        塔就不再跟着她的改动变了。**这正是本仓库最忌讳的那种漂移**：\n        看到的和跑的分了家。\n     ② 「一层铺完再铺下一层」在源码结构上是**看得见**的，而不是藏在一条队列的\n        先进先出里。BFS 唯一的秘密就是这个顺序。\n\n   代价写清楚：`frontier` / `next` 两张表比一条队列多占内存，而且这一段递归\n   最深只到「最短距离」那么深（8×8 上最多 6 层），不是每格一层 —— 不会像\n   骑士巡游那样把栈叠到 20 层。\n\n   ---- 几处必须写下来的约定 ----\n\n   · **入口函数叫 `expand`**，对应 `PROBLEMS.knightPath.entry`。它是**递归**\n     那一个（`expand(frontier, d)` 铺第 d 层），不是只调用一次的外壳 ——\n     `TreeModel.build(trace, 'expand')` 认到的帧必须一层套一层。顶层是\n     `steps = expand([START], 0); … return steps;`，所以 `run().result`\n     就是最短步数。\n\n   · **格子编号 `sq = 行 * W + 列`**，行 0 在棋盘最下面、列 0 在最左边，\n     于是 0 号格是 a1 —— 跟 `queens.js`、`tour-*.js`、`BoardRender.layout()`\n     的 `squareCenter(file, rank)`、`chess-core.js` 的 `SQ(file, rank)` 同向。\n     反推是 `列 = sq % W; 行 = (sq - 列) / W`。**这一题的棋盘是正方形**\n     （W×W），因为它演的是真正那一副 8×8 的棋盘上「马从这里到那里几步」。\n\n   · **返回值：最短步数；到不了是 −1。**「到不了」绝不能变成 0 —— 0 的意思是\n     「已经站在目标格上了」，把这两件事混成同一个数字是这一题最不能出的错\n     （工具⑤ 全页的规矩：`null`/未知不许变成数字，这里是它在算法侧的对应物）。\n     宿主侧那份对拍用的队列式 BFS 也是 −1，两边同源。\n\n   · **宿主桥接**：`mark(sq, kind)` 画规格 §2.7 的状态，**这一题只用三种**：\n       'try'（正在看这个邻居）· 'ok'（第一次到达，这就是它的最短步数）·\n       'cut'（早就到过了，从这边过去只会更长）。\n     **`'back'` 一次都不会出现，而这正是这一题的一半内容**：BFS 从不反悔。\n     N 皇后和骑士巡游都要回溯，它不要 —— 因为它是按距离从近到远铺开的，\n     第一次碰到一格时那就已经是最短的了，没有什么可反悔的。\n     `PROBLEMS.knightPath.kinds` 因此只有三行图例，少的那一行本身就是一句话。\n\n   · **`place` 发生在最后，而且这是对的**（跟 `tour-*.js` 的「边搜边走」相反，\n     不要照抄那条裁定）。骑士巡游里马真的在一步步走，所以落子必须铺满整段\n     搜索；BFS 里**没有任何一匹马在走** —— 它是一圈一圈的水波，同时向所有\n     方向铺开。搜索途中盘上该有的是波纹（`mark`），不是棋子。等到碰着目标，\n     顺着 `prev` 把路线倒着串回来，一次摆出那 d+1 匹马 —— 那串马就是答案。\n     搜索途中盘面并不空：波纹一直在长，只是长的不是棋子。\n\n   · **`place(sq, \"wN\")` 是「数字格子 + 字符串棋子」**，跟 `queens.js` 的\n     `place(sq, \"wQ\")` 同一个约定。仓库里另有一个反例\n     （`tools/_debugger-preview.html` 内嵌的那份 N 皇后示例写的是\n     `place(sq(col, row), 5)`，两个参数正好相反），别照那份抄。\n\n   · 子集约束（规格 §2.6）：**没有三元运算符**，`a ? b : c` 会抛 unsupported，\n     一律展开成 if/else；数组只有 `push` / `pop` 和 `length` 与下标读写。\n\n   · **两组 `// >>> BLANK` 指令现在就写在下面的 `BODY` 里**（§2.9），由\n     `core/exercise.js` 的 `parse()` 消费。两个都是 level=1「填一个表达式」：\n       ① `id=on-board` —— `onBoard(x, y)` 那一行返回式，跟 `queens.js` 的\n          `safe(r, c)` 同一道缝。\n       ② `id=seen-test` —— `expand()` 里那一句 `if (dist[nb] >= 0) {`：\n          「这一格碰过没有」。它就是整个 BFS 的开关，写错了程序照常跑完、\n          照常返回一个数，只是那个数不对 —— 正是挖空练习要的那种「跑得完\n          但答错」，判定靠比行为而不是比文本。\n\n     指令是注释，**一步都不产生**：插入前后 a1→h8 是 5,086 步 / 距离 6、\n     a1→d4 是 347 步 / 距离 2，与上面那张实测表逐格相同；把四行指令剥回去\n     再跑，步数、结果与整条棋盘事件流逐条一致。\n\n     **两个 `fill` 都跟计划给的相反，各挡一种事故**（实测，滑杆全程 1..63）：\n     恒真的 `onBoard`（计划给的 `fill=\"return true;\"`）会让 `nb` 算出 −15、\n     68 这种**棋盘上不存在的格子号**，滑杆全程 10,561 条棋盘事件落在盘外，\n     而且 63 个目标格里有 38 个答案照样对；`fill=\"if (false) {\"` 更甚 ——\n     它 63 个目标格**全部答对**（逐层同步的 BFS 即使把「碰过没有」整个关掉，\n     第一次生成目标格的那一层仍然正好是最短距离）。一个按 Run 就给出正确\n     读数的占位版会让 Check 看起来像在刁难人。现在用的是 `return false;`\n     与 `if (true) {`：一律往**过紧**的方向倒，结果恒为 −1，滑杆全程最多\n     288 步、盘外事件 0 条。三关六条断言在 `core/exercise-blanks.test.js`。\n\n   ---- 实测步数与结果（`Interp.STEP_LIMIT` = 200,000）----\n\n   拿本文件生成的源码跑 `Interp.run(src, { host: {} })`，读 `trace.length`\n   与 `result`（全部 start = 0 = a1，与 knight-path.test.js 同源）：\n\n     目标（start = a1）      步数     距离   确认的格子（ok）\n     h8 (63)               5,086      6      64   ← 整块盘全铺遍了，最贵的一档\n     h1 ( 7)               4,121      5      63\n     a8 (56)               3,575      5      61\n     g8 (62)               3,298      5      56\n     b2 ( 9)               1,791      4      47   ← **这一题的顿悟**：紧挨着的斜角要 4 步\n     a2 ( 8)                 934      3      28\n     b1 ( 1)                 837      3      26\n     d4 (27)                 347      2       5   ← 两层就碰上了，波纹只铺了一小圈\n     6×6 → (35)            1,360      4      30\n     5×5 → (24)            1,247      4      24\n     2×2 → ( 3)              100     −1       1   ← 到不了：马在 2×2 上一步都走不出去\n\n   `back` 一栏不列，因为它恒等于 0 —— 见上面「BFS 从不反悔」那一条。\n\n   简报给的两个数（8×8 a1→h8 **3,588** 步、a1→d4 **469** 步）是对着另一份实现\n   量的：本文件量出来是 **5,086** 与 **347**，而距离 6 与 2 两边一致。注意这不是\n   一个常数倍数 —— 一头比它高、另一头比它低，所以那份实现不是「多写/少写了一行」，\n   而是结构不同（多半是教科书那种一条队列的写法：没有 frontier/next 两张表的\n   开销，但也没有早停在层内的那一下）。**没有为了对齐那两个数字改代码** ——\n   距离才是这道题的答案，步数是实现形态的后果。测出来是多少就报多少。\n\n   离 200,000 的上限还差两个数量级：这一题**永远不会撞墙**，而这本身就是\n   跟前两题的对照 —— 回溯是指数的，BFS 是线性的（每格最多被确认一次）。\n   规格 §4⑤ 的三段弧线里，它是「做得到」的那一段。\n\n   滑杆边界（W 与 target 的范围）是页面的展示决定，不是本模块的校验边界：\n   `source()` 对任何 W ≥ 1、以及任何落在盘上的 start / target 都照常吐源码，\n   包括到不了的那些 —— 「到不了」要生成出来跑给她看。 */\n(function (root, factory) {\n  if (typeof module === 'object' && module.exports) module.exports = factory();\n  else root.AlgoKnightPath = factory();\n})(typeof self !== 'undefined' ? self : this, function () {\n  'use strict';\n\n  /* 普通字符串拼，不用模板字面量：这段文本本身会被原样贴进 html，\n     反引号在那个上下文里比在这里更容易出事（照抄 queens.js 的理由）。 */\n  const HEAD = [\n    '/* ============ 骑士的最短路 · 广度优先搜索 ============',\n    '   马走「日」字：横一竖二，或者横二竖一 —— 绕着它站的那一格一共八个方向。',\n    '   题目是：从一格走到另一格，最少要几步？',\n    '',\n    '   格子编号：sq = 行 * W + 列。第 0 行是棋盘最下面那一行，第 0 列是最左边',\n    '   那一列 —— 于是 0 号格就是国际象棋里的 a1。',\n    '   要反推回去：列 = sq % W，行 = (sq - 列) / W。',\n    '',\n    '   办法叫「广度优先」：先把一步能到的格子全找出来，再把两步能到的全找出来，',\n    '   一层一层往外铺，像往水里丢一颗石子荡开的波纹。',\n    '   第一次碰到目标的那一层，层号就是最短步数 —— 因为更近的每一层都已经',\n    '   找遍了，目标不在那里面。',\n    '',\n    '   跟前两道题最大的不同：**它一次也不反悔**。回溯搜索要退回来重走，是因为',\n    '   它可能先冲进一条错路；而这一份是按远近铺开的，第一次碰到一格时，那就',\n    '   已经是最短的走法了，没有什么可反悔的。 */',\n    '',\n    '/* 棋盘边长、出发格、目标格。真正的棋盘就是 W = 8。 */',\n  ];\n\n  const BODY = [\n    '',\n    '/* 马的八个方向。DX 与 DY 一一对应：第 k 个方向是「横走 DX[k]、竖走 DY[k]」。',\n    '   横一竖二四个、横二竖一四个，绕着起点转一圈 —— 这就是「日」字。 */',\n    'const DX = [1, 2, 2, 1, -1, -2, -2, -1];',\n    'const DY = [2, 1, -1, -2, -2, -1, 1, 2];',\n    '',\n    '/* 两张备忘表：',\n    '     dist[sq]  从出发格走到这一格最少几步；−1 表示还没碰到过它。',\n    '     prev[sq]  第一次到达它时，是从哪一格过来的 —— 最后要靠它把路线串回来。',\n    '   一格只会被确认一次 —— 这是整道题唯一的规则，别的都是围着它转的脚手架。 */',\n    'const dist = [];',\n    'const prev = [];',\n    'for (let i = 0; i < W * W; i = i + 1) { dist.push(-1); prev.push(-1); }',\n    '',\n    '// (x, y) 还在棋盘上吗？出界的方向连看都不用看。',\n    'function onBoard(x, y) {',\n    '  // >>> BLANK id=on-board level=1 fill=\"return false;\" hint=\"四条边都要查：x 要落在 0 到 W−1 之间，y 也一样。少查一条边，波纹就会漫到棋盘外面去 —— 那外面的格子号码根本不存在。\" hintEn=\"All four edges have to be checked: x must land between 0 and W−1, and so must y. Miss one edge and the wave spills off the board, into square numbers that do not exist.\"',\n    '  return x >= 0 && x < W && y >= 0 && y < W;',\n    '  // <<< BLANK',\n    '}',\n    '',\n    '/* frontier 是「正好 d 步能到的那一整层格子」。',\n    '   这个函数把这一层每一格的八个方向都看一遍：凡是还没碰过的，都属于第 d+1',\n    '   层 —— 收齐之后，再对下一层调用自己。递归的每一层，就是棋盘上的一圈波纹，',\n    '   所以左边调用栈叠了几帧，右边的波纹就荡开了几圈。',\n    '   返回最短步数；这一层之后再也铺不出新格子，就返回 −1（到不了）。 */',\n    'function expand(frontier, d) {',\n    '  const next = [];',\n    '  for (let i = 0; i < frontier.length; i = i + 1) {',\n    '    const cur = frontier[i];',\n    '    const x = cur % W;',\n    '    const y = (cur - x) / W;',\n    '    for (let k = 0; k < 8; k = k + 1) {',\n    '      const nx = x + DX[k];',\n    '      const ny = y + DY[k];',\n    '      if (onBoard(nx, ny)) {',\n    '        const nb = ny * W + nx;',\n    '        mark(nb, \"try\");     // 正在看这个邻居：先点亮，再问它是不是第一次碰到',\n    '        // >>> BLANK id=seen-test level=1 fill=\"if (true) {\" hint=\"dist[nb] 记的是「走到这一格最少几步」，−1 的意思是还没碰过它。碰过的就不必再看了。留神出发格记的是 0 —— 它也是碰过的。\" hintEn=\"dist[nb] holds the fewest moves needed to reach that square, and −1 means it has not been touched yet. A square that has been touched needs no second look. Watch out for the starting square: it holds 0, and 0 counts as touched.\"',\n    '        if (dist[nb] >= 0) {',\n    '        // <<< BLANK',\n    '          /* 早就到过它了。而且更早到达它的那一层比现在这一层近，',\n    '             所以从这边再走过去只会更长 —— 看都不用再看。 */',\n    '          mark(nb, \"cut\");',\n    '        } else {',\n    '          /* 第一次碰到它。它比这一层正好远一步，而这就是它的最短步数：',\n    '             更近的每一层刚才都铺过了，如果有更短的走法，早就碰上了。 */',\n    '          dist[nb] = d + 1;',\n    '          prev[nb] = cur;',\n    '          mark(nb, \"ok\");',\n    '          if (nb === TARGET) {',\n    '            return d + 1;    // 碰上目标了 —— 当场就是答案，剩下的层不用再铺',\n    '          }',\n    '          next.push(nb);',\n    '        }',\n    '      }',\n    '    }',\n    '  }',\n    '  if (next.length === 0) {',\n    '    /* 这一层之后再没有新格子了：能到的都到过了，目标不在其中。 */',\n    '    return -1;',\n    '  }',\n    '  return expand(next, d + 1);   // 铺下一层 —— 递归就发生在这一行',\n    '}',\n    '',\n    '/* 出发。第 0 层只有出发格自己，它到自己是 0 步。 */',\n    'dist[START] = 0;',\n    'mark(START, \"ok\");',\n    'let steps = 0;',\n    'if (START !== TARGET) {',\n    '  steps = expand([START], 0);',\n    '}',\n    'if (steps < 0) {',\n    '  /* 盘上一匹马都不摆：没有路线可摆。−1 不是 0 —— 0 的意思是「已经站在',\n    '     目标格上了」，那是完全不同的一件事。 */',\n    '  log(\"到不了：马从这一格出发，永远走不到目标格\");',\n    '} else {',\n    '  /* 把路线倒着串回来：从目标格顺着 prev 一路退回出发格，每退一格就摆一匹马。',\n    '     摆完，盘上那一串马就是一条最短路线本身。',\n    '     整趟搜索里盘上一直有东西在长 —— 长的是波纹（mark），不是棋子：',\n    '     BFS 里没有任何一匹马在走路，它是同时向所有方向铺开的。 */',\n    '  let at = TARGET;',\n    '  for (let i = 0; i <= steps; i = i + 1) {',\n    '    place(at, \"wN\");',\n    '    at = prev[at];',\n    '  }',\n    '  log(\"最短 \" + steps + \" 步（盘上那串马就是其中一条走法）\");',\n    '}',\n    'return steps;',\n  ];\n\n  /* source({ W, start, target }) → string\n\n     三个参数都不给默认值，缺了直接抛（阶段 5 约束 6：公开导出的省略参数已经\n     是本仓库抓到过五次的缺陷类）。一个默默变成 8 的 W 会让界面写着 6、跑的却是\n     8，正是这个工具最不能出的错。\n\n     校验只管「是不是合法的棋盘和格子」，**不管到不到得了** —— 见文件头：\n     2×2 上到不了恰恰是要生成出来跑给她看的。 */\n  function source(opts) {\n    const o = opts || {};\n    if (o.W === undefined || o.W === null) {\n      throw new Error('source({ W, start, target }) 少了 W —— 棋盘边长没有默认值，必须写明');\n    }\n    if (o.start === undefined || o.start === null) {\n      throw new Error('source({ W, start, target }) 少了 start —— 出发格没有默认值，必须写明');\n    }\n    if (o.target === undefined || o.target === null) {\n      throw new Error('source({ W, start, target }) 少了 target —— 目标格没有默认值，必须写明');\n    }\n    const W = o.W, start = o.start, target = o.target;\n    if (typeof W !== 'number' || !isFinite(W) || Math.floor(W) !== W || W < 1) {\n      throw new Error('W 必须是 >= 1 的整数，收到：' + W);\n    }\n    if (typeof start !== 'number' || !isFinite(start) || Math.floor(start) !== start ||\n        start < 0 || start >= W * W) {\n      throw new Error('start 必须是 0 到 ' + (W * W - 1) + ' 之间的整数，收到：' + start);\n    }\n    if (typeof target !== 'number' || !isFinite(target) || Math.floor(target) !== target ||\n        target < 0 || target >= W * W) {\n      throw new Error('target 必须是 0 到 ' + (W * W - 1) + ' 之间的整数，收到：' + target);\n    }\n    return HEAD.concat([\n      'const W = ' + W + ';',\n      'const START = ' + start + ';',\n      'const TARGET = ' + target + ';',\n    ]).concat(BODY).join('\\n');\n  }\n\n  return { source: source };\n});\n",
+  'rook-cover.js': "/* 带障碍盘上的**二分图最大匹配**（行段 × 列段）的算法源码生成器（规格 §2.1）。\n   零依赖；node 与浏览器双用。编辑源，运行时被内联进 tools/*.html。\n\n   跟 `queens.js` / `knight-path.js` / `tour-*.js` / `minimax.js` 是同一个形状：\n   这个模块本身不算任何东西 —— 它吐出一段**字符串**。那段字符串同时是喂给\n   `Interp.run` 去真跑的程序、和喂给 `Editor.mount` 摆在使用者眼前的那份源码。\n   一份字符串两个用途，所以「看到的」和「跑的」不可能漂移。\n\n   **生成出来的那段源码里的注释和命名，是写给一个没学过棋的 16 岁读者的**。\n   本文件自己的注释（就是你正在读的这些）是给维护者的，两套读者，两种口吻。\n\n   ---- ⚠ 题面订正：这一段是本文件最重要的一条 ----\n\n   任务简报（`.superpowers/sdd/2026-08-05-chess-phase7-cover-dominate/task-2-brief.md`）\n   给的题面是「**用最少的车覆盖所有空格**，最大匹配 = 最少的车数」。\n   **后半句不成立**，而且不是边角情形 —— 四档盘里有三档都是反例：\n\n     5×5 `[3,14,17,18,21]`   最大匹配 7，**4 辆车就盖满了**（0, 9, 11, 24）\n     6×6 `[0,6,8,9,14,...]`  最大匹配 7，**5 辆车就盖满了**（1, 4, 12, 15, 35）\n     6×7 `[4,6,7,8,26,...]`  最大匹配 9，**5 辆车就盖满了**（3, 17, 22, 24, 38）\n\n   （四组落子都用「沿行/列走射线、撞障碍就停」独立验过，一个空格都不漏。\n   审查另写了一份与匹配无关的求解器复核过，并在 60 块随机小盘上量到\n   **49 块的最少车数严格更小、反向一次都没有** —— 不是边角失误，是几乎\n   每块有障碍的盘上都对不上。）\n\n   漏在哪里：一辆车站的是一个**格子**，而格子是二分图里的一条**边** —— 它一次\n   占住两个点（一个行段 + 一个列段）。所以 k 辆车能点亮的点数最多是 2k，\n   「最少的车数」是 min over 点覆盖 V 的 (|V| − V 内部的最大匹配)，不是 |V| 本身。\n   最小的反例只有 2×2：障碍放在 (0,1)，最大匹配 2，而 1 号格上摆一辆车就盖满了\n   剩下三格。（König 给的是「最少的**线**」，不是「最少的**车**」；带障碍的车支配\n   问题本身是另一路难题，不是匹配能解的。）\n\n   **本文件按「最大匹配」实现**，因为简报的四档盘、判据 `k < min(行段数, 列段数)`、\n   增广路的画法、四个 `mark` 种类，全都是围着最大匹配设计的，而且四档的\n   **5 / 6 / 7 / 9 与简报表逐格对上**（rook-cover.test.js 拿一份独立的匈牙利实现对拍）。\n   改掉的只有**说法**。生成源码的 HEAD 里只写两句站得住的话，两句都恰好等于最大匹配：\n\n     ① 最多能摆几辆**互相吃不到**的车？（这是它在棋盘上的原生说法）\n     ② 要盖住每一个空格，最少要点亮几条**线**（行段或列段）？（König 的另一半）\n\n   算完之后盘上那些车**顺手也盖住了每一个空格**（最大匹配一定是极大匹配，\n   于是任一空格的行段或列段上必有一辆车），这一条是真的、也验了 ——\n   只是「顺手盖住」不等于「最少」。Task 3 的页面文案与规格 §4 的题面都要照这个改，\n   否则工具会在**它自己的第二档盘上**教一件错事。\n\n   ---- 几处必须写下来的约定 ----\n\n   · **入口函数叫 `walk`**（对应将来 `PROBLEMS.rookCover.entry`）。它是**递归**\n     那一个：`walk(r)` = 给第 r 个行段找一个列段坐下，找不到就去请占着位子的\n     行段挪窝 —— 那一串「请人挪窝」就是增广路，**递归深度 = 增广路的长度**。\n     顶层是 `for (r) { if (walk(r)) rooks++ } return rooks;`，\n     所以 `run().result` 就是最大匹配数。`TreeModel.build(trace, 'walk')`\n     认到的帧因此一层套一层，深度塔（§1.4「z 轴 = 入口函数的递归深度」）\n     正好是「这条增广路走了几个来回」。\n\n   · **`walk` 是两趟扫描，不是一趟**（先贪心找空位，再递归请人挪窝）。这不是\n     优化，是**第一档盘的整个教学点**：空盘上每个行段第一趟就找到空列段，\n     `back` 一次都不出现、增广路最深只有 1 层 —— 「匹配根本没上场，这就是\n     为什么这道题必须有障碍」看一眼就知道。一趟版的 Kuhn 算法在 5×5 空盘上\n     会让车互相挪窝（实测第一档就出现 back），那个对照就没了。\n     两趟版仍是精确的匈牙利算法：第一趟找长度 1 的增广路，第二趟找其余的，\n     `asked` 访问集照旧。（第二趟里 `takenBy[c] < 0` 的分支不必再写：\n     第一趟没返回就说明这一段上每个列段都被占着，而列段一旦被占就再没空过。）\n\n   · **格子编号 `sq = 行 * W + 列`**，行 0 在棋盘最下面、列 0 在最左边，\n     于是 0 号格是 a1 —— 跟 `queens.js` / `knight-path.js` / `tour-*.js`、\n     `BoardRender.layout()` 的 `squareCenter(file, rank)`、`chess-core.js` 的\n     `SQ(file, rank)` 同向。反推是 `列 = sq % W; 行 = (sq - 列) / W`。\n     **这一题的盘可以不是正方形**（`W` 与 `H` 分开给），因为四档里有一档是 6×7。\n\n   · **宿主桥接**：`mark(sq, kind)` 四种全用上，而且四种在这一题里各有各的实义：\n       'try'  正在试这一格\n       'ok'   这一格进了匹配 —— 紧跟着 `place(sq, \"wR\")`，盘上真站一辆车\n       'cut'  这条路走不通（列段这一趟问过了，或者占着它的那位挪不动）\n       'back' 一辆车被请下来挪窝 —— 紧跟着 `clear(sq)`，跟 `queens.js` 同一个\n              两步节奏：先看到「它退下来了」，下一步它整个消失。\n     **`'back'` 在这一题里的意思跟 N 皇后不一样**：N 皇后是「这条支路错了，\n     撤销」；这里是「这辆车没错，只是把位子让给别人，它自己已经在别处站好了」。\n     `back` 的那一格在**上一步**才刚刚被 `ok` 过 —— 增广路推进的样子就是这个。\n     实测 `ok − back = 最后站住的车数`（测试里有这条断言）。\n\n   · **`place(sq, \"wR\")` 是「数字格子 + 字符串棋子」**，跟 `queens.js` 的 `\"wQ\"`、\n     `knight-path.js` 的 `\"wN\"` 同一个约定。`BoardRender.drawPiece` 吃的是**数字**\n     code，'wR' → 4 的换算归页面做（见 `queens.js` 文件头那一整段，含仓库里\n     `tools/_debugger-preview.html` 那个两个参数正好相反的反例）。\n\n   · **最小点覆盖（König 的那些条带）由显示层从轨迹里推**，源码只负责 `mark` ——\n     算法里一句显示层的话都没有，**而且不需要为它加一句**。\n\n     怎么推（这条是实测结论，写在这里免得下一个人再去推一遍）：\n     **一次失败的顶层 `walk(r)` 本身就是 König 要的那趟交替搜索**。它问过的\n     列段（源码里的 `asked`）正是可达集 Z_col；一旦某个行段失败，它的可达集\n     就冻结了（标准引理）。于是：\n       Z_col = 所有**失败的**顶层 `walk` 问过的列段之并\n       Z_row = 那些帧里碰过的行段之并（含失败的根自己）\n       最小点覆盖 = （不在 Z_row 里的行段）∪（在 Z_col 里的列段），大小恰好 = k\n     从解释器轨迹这一侧读也一样：扫 `depth === 1` 的 `walk` 进出帧，**帧内没有\n     `place` 的就是失败帧**，取它 `mark` 过的每一格的 `rowSeg` / `colSeg` 即可\n     （帧内的每一格必然在 `asked` 里：失败的根下面不可能有成功的子调用，\n     所以两趟都走满了）。205 块盘（4 块夹具 + 推荐档 + 200 块随机）上，\n     这两种推法与「拿最终匹配另算一遍 König」三者结果全同，\n     且 `(nr − |Z_row|) + |Z_col| = k` 一块都没差。\n\n     **所以不要为了显示层往这段源码里加可达性标记** —— 那等于让学生读的程序\n     变长，去重新导出程序已经产出的信息。\n\n   · 子集约束（规格 §2.6）：**没有三元运算符**，`a ? b : c` 会抛 unsupported，\n     一律展开成 if/else；数组只有 `push` / `pop` 与下标读写和 `length`\n     （`rowCells` 是数组的数组，`rowCells[r].push(s)` 走的是同一条路，合法）。\n\n   ---- 实测（`Interp.STEP_LIMIT` = 200,000）----\n\n   拿本文件生成的源码跑 `Interp.run(src, { host: {} })`，读 `trace.length`\n   与 `result`；`mark` 次数与最深调用栈由 rook-cover.test.js 的 `probe()` 量：\n\n     档                            最大匹配  解释器步数  增广路最深  mark 次数(try/ok/cut/back)\n     5×5 空盘                          5        722         1        20  (15/5/0/0)\n     5×5 [3,14,17,18,21]               7      1,156         6        81  (53/9/17/2)\n     6×6 [0,6,8,9,14,20,24,26,27]      7      1,411         4        72  (46/8/17/1)\n     6×7 [4,6,7,8,26,31,33,35,37]      9      2,149         7       184 (121/10/52/1)\n     8×8 空盘（对照）                  8      1,628         1        44  (36/8/0/0)\n\n   一、三、四档的最大匹配与简报表逐格相同（5 / 7 / 9），那才是答案。\n   深度与访问数是实现形态的后果，测出来是多少就报多少（照 `knight-path.js`\n   文件头同一条规矩）：简报的「增广路最深 1 / 5 / 4 / 7」本文件量出来是\n   1 / 6 / 4 / 7。\n\n   **第二档换过一次**（修复轮 1，控制器裁定）：简报原本给的 `[3,10,13,17,18]`\n   在这份实现下**退化了** —— k=6，但 `back = 0`、六辆车全是第一趟贪心直接\n   坐下的，一次成功的增广都没发生（它的深度 2 是一次**失败**的尝试），而这\n   一档要教的正是「匹配第一次真的做事」。换成 `[3, 14, 17, 18, 21]`：行段/列段\n   仍是 8/8、k = 7 < 8、`back = 2`、最深 6 层。（审查另指出：简报给这一档标的\n   「增广路最深 5」在**任何贪心优先取空列的实现**里都达不到，那个数本身也是\n   错的。）备选还有 `[2, 5, 6, 13, 22]`（8/8、k=7、back=2、最深 7 层、1,178 步）。\n   `rook-cover.test.js` 里有一条守卫钉住这件事：三档有障碍的盘都必须 `back > 0`，\n   谁再把某一档换回「贪心就能解完」的盘，当场红。\n\n   离上限差两个数量级：这一题**不存在撞墙风险**。四十块 3..6 边长的随机盘\n   （固定种子，见测试）里最贵的一块是 **1,460 步**。 */\n(function (root, factory) {\n  if (typeof module === 'object' && module.exports) module.exports = factory();\n  else root.AlgoRookCover = factory();\n})(typeof self !== 'undefined' ? self : this, function () {\n  'use strict';\n\n  /* 普通字符串拼，不用模板字面量：这段文本本身会被原样贴进 html，\n     反引号在那个上下文里比在这里更容易出事（照抄 queens.js 的理由）。 */\n  const HEAD = [\n    '/* ============ 车、行段与列段 · 最大匹配 ============',\n    '   盘上有些格子被障碍占着，车走不过去。于是一行被障碍切成了几截，',\n    '   一列也被切成了几截。**一辆车只管得住它站的那一截**：它沿这一行往两边',\n    '   看，撞上障碍就停；沿这一列上下看，也是撞上障碍就停。',\n    '',\n    '   给每一截取个号：',\n    '     行段 —— 同一行里被障碍隔开的两截，是两个不同的段，各有各的号。',\n    '     列段 —— 同一列里也一样。',\n    '   于是每个空格都同时属于一个行段和一个列段，它就是一对号码（行段, 列段）。',\n    '   一辆车站上去，等于**同时占住**了这两截。',\n    '',\n    '   同一件事有两个问法，答案是同一个数 —— 这正是这道题好玩的地方：',\n    '',\n    '     问法一：最多能摆几辆**互相吃不到**的车？',\n    '       两辆车互相吃不到，就是它们不在同一个行段、也不在同一个列段 ——',\n    '       写成号码就是：行段号互不相同，列段号也互不相同。',\n    '     问法二：要盖住每一个空格，最少要点亮几**截**（行段或列段）？',\n    '       盖住一个空格，要么点亮它的行段，要么点亮它的列段。',\n    '',\n    '   这两个数永远相等，这件事有个名字，叫 König 定理。下面这段程序算的',\n    '   就是它 —— 算法上它叫「二分图的最大匹配」。',\n    '',\n    '   算完之后，盘上站着的那些车还顺手盖住了每一个空格。为什么？随便挑一个',\n    '   空格：如果它的行段和列段上都没有车，那这一格自己就还能再摆一辆 ——',\n    '   与「最多」矛盾。所以它的行段或列段上一定站着一辆车，也就一定被看到。',\n    '   （**注意**：「顺手盖住」不等于「用最少的车盖住」—— 一辆车一次占两截，',\n    '   有时候用更少的车也能盖满。这段程序回答的是上面那两个问法。）',\n    '',\n    '   格子编号：sq = 行 * W + 列。第 0 行是棋盘最下面那一行，第 0 列是最左边',\n    '   那一列 —— 于是 0 号格就是国际象棋里的 a1。',\n    '   要反推回去：列 = sq % W，行 = (sq - 列) / W。 */',\n    '',\n    '/* 棋盘的宽和高，以及障碍格的编号 —— 这道题的全部旋钮。',\n    '   把 BLOCKED 清空试试：空盘上答案恒等于 min(W, H)，每行摆一个、摆哪都行，',\n    '   匹配根本没上场。**这道题必须有障碍**，障碍把行和列切开，才有得可算。 */',\n  ];\n\n  const BODY = [\n    '',\n    '/* 哪些格子走不过去。wall[sq] = 1 就是障碍。 */',\n    'const wall = [];',\n    'for (let i = 0; i < W * H; i = i + 1) { wall.push(0); }',\n    'for (let i = 0; i < BLOCKED.length; i = i + 1) { wall[BLOCKED[i]] = 1; }',\n    '',\n    '/* 给每一截编号 —— 这是整道题唯一的抽象跳跃，慢一点看。',\n    '   一行从左往右扫，手里攥着「当前这一截的号」：',\n    '     碰到障碍，就把它扔掉（写成 −1），下一个空格要开一段**新的**；',\n    '     碰到空格，手里没号就领一个新号，然后把这一格记在这个号下面。',\n    '   所以**同一行里被障碍隔开的两截，是两个不同的段** —— 它们的号不一样，',\n    '   因为一辆车管不到障碍那一边去。列也照这个法子，从下往上扫一遍。 */',\n    'const rowSeg = [];    // rowSeg[sq]：这一格属于第几个行段',\n    'const colSeg = [];    // colSeg[sq]：这一格属于第几个列段',\n    'for (let i = 0; i < W * H; i = i + 1) { rowSeg.push(-1); colSeg.push(-1); }',\n    '',\n    'const rowCells = [];  // rowCells[r]：第 r 个行段里的所有空格，从左到右',\n    'let nr = 0;           // 一共切出了几个行段',\n    'for (let y = 0; y < H; y = y + 1) {',\n    '  let cur = -1;       // −1 = 手里没号（刚起头，或者刚撞上障碍）',\n    '  for (let x = 0; x < W; x = x + 1) {',\n    '    const s = y * W + x;',\n    '    if (wall[s] === 1) {',\n    '      cur = -1;       // 障碍把这一行截断了：下一个空格要开一段新的',\n    '    } else {',\n    '      if (cur < 0) { cur = nr; nr = nr + 1; rowCells.push([]); }',\n    '      rowSeg[s] = cur;',\n    '      rowCells[cur].push(s);',\n    '    }',\n    '  }',\n    '}',\n    '',\n    'let nc = 0;           // 一共切出了几个列段',\n    'for (let x = 0; x < W; x = x + 1) {',\n    '  let cur = -1;',\n    '  for (let y = 0; y < H; y = y + 1) {',\n    '    const s = y * W + x;',\n    '    if (wall[s] === 1) {',\n    '      cur = -1;',\n    '    } else {',\n    '      if (cur < 0) { cur = nc; nc = nc + 1; }',\n    '      colSeg[s] = cur;',\n    '    }',\n    '  }',\n    '}',\n    'log(\"这块盘被切成了 \" + nr + \" 个行段、\" + nc + \" 个列段\");',\n    '',\n    '/* 两张记录表，记「每个列段现在被哪个行段占着」。',\n    '     takenBy[c]  占着第 c 个列段的行段号；−1 = 还空着',\n    '     rookAt[c]   那一对占住之后，车具体站在哪一格',\n    '   只按列段记就够了：一辆车占的是「一个行段 + 一个列段」这么一对，',\n    '   按列段记完，行段那一头也就跟着记住了。 */',\n    'const takenBy = [];',\n    'const rookAt = [];',\n    'for (let i = 0; i < nc; i = i + 1) { takenBy.push(-1); rookAt.push(-1); }',\n    '',\n    '/* 这一趟里已经问过的列段。给每个新的行段找位子之前都要清零 ——',\n    '   不清零，上一趟问过的列段这一趟就再也不会被问；',\n    '   而在同一趟里问过的绝不能再问第二次，否则会绕圈子绕不出来。 */',\n    'const asked = [];',\n    'for (let i = 0; i < nc; i = i + 1) { asked.push(0); }',\n    '',\n    '/* 给第 r 个行段找一个列段坐下。坐下了返回 true。',\n    '',\n    '   分两趟看这一段上的每个空格：',\n    '     第一趟 —— 有没有哪一格，它的列段**还空着**？有就直接坐下，谁也不惊动。',\n    '     第二趟 —— 都被占了。那就挑一个，去请占着它的那个行段挪窝：那个行段',\n    '                自己再去找别的列段（这就是递归）。它要是挪成了，这个列段',\n    '                就腾出来了 —— 原来站在这儿的车退下来，我这一辆站上去。',\n    '',\n    '   第二趟这一串「我要这个列段 → 占它的那位挪去别处 → 别处又腾出来……」，',\n    '   在棋盘上看就是一条**横一段、竖一段交替走**的路。它有个名字叫增广路：',\n    '   走通一次，站住的车就正好多一辆（中间那些车只是换了格子，没有多也没有少）。',\n    '   左边调用栈叠了几帧，右边这条路就交替走了几个来回。 */',\n    'function walk(r) {',\n    '  const cells = rowCells[r];',\n    '  for (let i = 0; i < cells.length; i = i + 1) {',\n    '    const s = cells[i];',\n    '    const c = colSeg[s];',\n    '    mark(s, \"try\");         // 正在试这一格',\n    '    if (takenBy[c] < 0) {',\n    '      // 这个列段还空着 —— 一步到位，车就摆在这儿。',\n    '      takenBy[c] = r;',\n    '      rookAt[c] = s;',\n    '      mark(s, \"ok\");',\n    '      place(s, \"wR\");',\n    '      return true;',\n    '    }',\n    '  }',\n    '  for (let i = 0; i < cells.length; i = i + 1) {',\n    '    const s = cells[i];',\n    '    const c = colSeg[s];',\n    '    mark(s, \"try\");',\n    '    if (asked[c] === 1) {',\n    '      mark(s, \"cut\");       // 这个列段这一趟已经问过了，再问只会绕圈',\n    '    } else {',\n    '      asked[c] = 1;         // 先记下「问过了」，再去问 —— 顺序反了就会绕圈',\n    '      if (walk(takenBy[c])) {',\n    '        /* 占着这个列段的那位挪走了，而且它已经在别处站好了自己那辆车。',\n    '           把原来站在这儿的车请下来，换我这一辆站上去。',\n    '           注意这里**没有谁被撤销**：退下来的那辆车只是换了个格子。 */',\n    '        const old = rookAt[c];',\n    '        mark(old, \"back\");',\n    '        clear(old);',\n    '        takenBy[c] = r;',\n    '        rookAt[c] = s;',\n    '        mark(s, \"ok\");',\n    '        place(s, \"wR\");',\n    '        return true;',\n    '      } else {',\n    '        mark(s, \"cut\");     // 这条路走不通：那位挪不动。换下一个列段试',\n    '      }',\n    '    }',\n    '  }',\n    '  return false;             // 每个列段都试过了 —— 这个行段这一趟没位子',\n    '}',\n    '',\n    '/* 一个行段一个行段地来，每一趟都从「把问过的记号清零」开始。',\n    '   跑完之后 rooks 里就是答案：既是「最多能摆几辆互相吃不到的车」，',\n    '   也是「盖住所有空格最少要点亮几截」。 */',\n    'let rooks = 0;',\n    'for (let r = 0; r < nr; r = r + 1) {',\n    '  for (let i = 0; i < nc; i = i + 1) { asked[i] = 0; }',\n    '  if (walk(r)) {',\n    '    rooks = rooks + 1;',\n    '    log(\"第 \" + rooks + \" 辆车站住了（第 \" + r + \" 个行段找到了自己的列段）\");',\n    '  }',\n    '}',\n    'return rooks;',\n  ];\n\n  /* source({ W, H, blocked }) → string\n\n     三个参数都不给默认值，缺了直接抛（阶段 5 约束 6：公开导出的省略参数已经\n     是本仓库抓到过八次的缺陷类）。一个默默变成 8 的 W 会让界面写着 6、跑的却是\n     8，正是这个工具最不能出的错；而一个默默变成 `[]` 的 blocked 更糟 ——\n     空盘是这道题的**假题**（答案恒等于 min(W, H)，匹配根本没上场），\n     悄悄退化成假题的演示教不了任何东西。\n\n     校验只管「是不是一块合法的盘、障碍是不是都落在盘上」，**不管盘上还剩不剩\n     空格**：整块盘都是障碍要照常吐出源码（答案 0），那是一条要跑给她看的边界。 */\n  function source(opts) {\n    const o = opts || {};\n    if (o.W === undefined || o.W === null) {\n      throw new Error('source({ W, H, blocked }) 少了 W —— 棋盘宽度没有默认值，必须写明');\n    }\n    if (o.H === undefined || o.H === null) {\n      throw new Error('source({ W, H, blocked }) 少了 H —— 棋盘高度没有默认值，必须写明');\n    }\n    if (o.blocked === undefined || o.blocked === null) {\n      throw new Error('source({ W, H, blocked }) 少了 blocked —— 障碍格没有默认值，必须写明；' +\n                      '空盘请显式传 []（那是这道题的假题，要写出来才算数）');\n    }\n    const W = o.W, H = o.H, blocked = o.blocked;\n    if (typeof W !== 'number' || !isFinite(W) || Math.floor(W) !== W || W < 1) {\n      throw new Error('W 必须是 >= 1 的整数，收到：' + W);\n    }\n    if (typeof H !== 'number' || !isFinite(H) || Math.floor(H) !== H || H < 1) {\n      throw new Error('H 必须是 >= 1 的整数，收到：' + H);\n    }\n    if (!Array.isArray(blocked)) {\n      throw new Error('blocked 必须是一个数组（障碍格编号），收到：' + typeof blocked);\n    }\n    for (let i = 0; i < blocked.length; i++) {\n      const s = blocked[i];\n      if (typeof s !== 'number' || !isFinite(s) || Math.floor(s) !== s || s < 0 || s >= W * H) {\n        throw new Error('blocked 里的格子必须是 0 到 ' + (W * H - 1) + ' 之间的整数，收到：' + s);\n      }\n    }\n    return HEAD.concat([\n      'const W = ' + W + ';',\n      'const H = ' + H + ';',\n      'const BLOCKED = [' + blocked.join(', ') + '];',\n    ]).concat(BODY).join('\\n');\n  }\n\n  return { source: source };\n});\n",
+  'king-greedy.js': "/* 带障碍盘上「最少的王支配所有空格」的**贪心**算法源码生成器（规格 §2.1）。\n   零依赖；node 与浏览器双用。编辑源，运行时被内联进 tools/*.html。\n\n   跟 `queens.js` / `knight-path.js` / `tour-*.js` / `rook-cover.js` 是同一个形状：\n   这个模块本身不算任何东西 —— 它吐出一段**字符串**。那段字符串同时是喂给\n   `Interp.run` 去真跑的程序、和喂给 `Editor.mount` 摆在使用者眼前的那份源码。\n   一份字符串两个用途，所以「看到的」和「跑的」不可能漂移。\n\n   **生成出来的那段源码里的注释和命名，是写给一个没学过棋的 16 岁读者的**。\n   本文件自己的注释（就是你正在读的这些）是给维护者的，两套读者，两种口吻。\n\n   ---- 这一份和 `king-exact.js` 是一对，不是两个工具 ----\n\n   规格 §4⑤ 的落点是「同一个问题、同一块盘、两份可以逐行对比的源码」并排显示：\n   一个 `PROBLEMS` 键、两条轨道，不是两个 tab。两份共用的那一整段\n   （建墙表、列空格、建覆盖表、`seen`/`left`、`put()`）**逐字节相同**，\n   两条横线之间的东西一个字都不许差：\n\n     '/* ===== 从这里到下面那条分水岭为止，两份源码逐字相同 ===== *' + '/'\n     '/* ===== 分水岭：从这里往下两份不一样了 —— 差的就是「挑哪个王」 ===== *' + '/'\n\n   横线本身也是生成源码的一部分，摆在她眼前 —— 并排看的时候，上半截逐行\n   对得上，横线以下才开始分岔。`king.test.js` 有一道门逐字节比这一段。\n\n   **改动共用文本必须同步改 `king-exact.js`。**\n\n   ---- 阶段 5 那道「逐行子序列」的门在这里**不适用**（这一条要写下来）----\n\n   `tour-dfs` / `tour-warnsdorff` 那一对有一道机器门：剥掉注释与空行之后，\n   朴素那份的每一行必须**按原顺序**出现在 Warnsdorff 那份里。那道门成立的\n   前提是两份是**包含关系** —— Warnsdorff 就是朴素回溯多插了一个 `degree()`\n   和一段排序，别的一个字没动。\n\n   这一对不是包含关系，而且**两个方向都不是**：\n     · 贪心有 `bestGain` 那段擂台（谁新照顾到的格子多谁上），精确没有；\n     · 精确有 `take()`（把王收回去）、有 `limit`、有外面那圈迭代加深的\n       while 循环，贪心一个都没有。\n   硬套那道门只会得到一条恒红的断言；要让它绿就得把两份写成一份，\n   那就没有两个算法了。所以这里换成一道**方向正确的**门：共用段逐字节相同，\n   横线以下必须真的分岔（`king.test.js` 里那一节两头都钉着）。\n   两道门守的是同一件事 —— 她把两边一 diff，diff 出来的正好是那个主意本身。\n\n   ---- 这道题的落点：**为什么现实里要用贪心** ----\n\n   前面五个工具都在讲「算法怎么跑」。这一题的第四档讲的是另一件事：\n   7×7 上精确解**跑不完**，而贪心一眨眼给出 8。于是我们并不知道 8 是不是最优 ——\n   **`null` 是「不知道」，绝不许在任何一处变成数字**（工具⑤ 全页的规矩，\n   阶段 6 为这类情形建了整套 `unknown` 通道，照它的既有呈现）。\n\n   顺带一条实测，它订正了规格原写的「差距可见」：**矩形空盘上两份完全相同**\n   （4×4 / 5×5 / 5×6 / 6×6 / 6×7 / 7×7 / 7×8 / 8×8 八种全同，8×8 都是 9）。\n   空盘上王的结构太规整，贪心自然挑中 3×3 块的中心，那恰好最优。\n   **差距只在有墙的时候才出现** —— 所以四档盘里没有一块空盘。\n\n   **但「墙越多贪心越吃亏」是错的**（这一条写下来，因为生成源码里一度就是\n   这么写给读者的，被自己的四档数据证伪：7 堵墙那档差距 2，3 堵墙的\n   `[1,4,24]` 差距 4）。6×6 上按墙数各随机采 40 块，实测平均差距：\n\n     墙数    0     2     3     5     7     9    12\n     平均  0.00  0.78  0.72  0.88  1.05  0.68  0.55\n     最大    0     2     3     2     3     3     2\n\n   差距在「没有墙 → 有墙」之间跳一次，之后**基本持平，墙很多时反而回落**\n   （墙一多，空格连成的块本身就小了，贪心不容易挑错）。\n   决定吃多大亏的是**墙摆在哪儿**，不是摆了几堵。\n\n   顺带一条给下一个挑档的人：`[1,4,24]` 的差距 **4** 比上面 280 块随机盘里\n   的最大值（3）还大 —— 它是**特意挑出来的极端档**，不是典型盘。\n   四档要的是把现象演清楚，不是给出平均值；但别把它当成「6×6 上常见如此」。\n\n   ---- 几处必须写下来的约定 ----\n\n   · **入口函数叫 `cover`，两份同名同义**（对应将来 `PROBLEMS.kingDominate.entry`，\n     一个名字两条轨道共用）：`cover(n)` = 「已经摆了 n 个王，接着往下摆」。\n     它是**递归**那一个，不是外壳 —— `TreeModel.build(trace, 'cover')` 认到的\n     帧要一层套一层，§1.4 的「z 轴 = 入口函数的递归深度」才立得起来。\n     两条轨道上那根轴因此是同一个意思：**已经摆了几个王**。\n     顶层是 `const kings = cover(0); … return kings;`，所以 `run().result`\n     就是贪心用掉的王数。\n\n   · **王的九宫不管墙**：王是跨格照顾的，中间隔着什么都一样 —— 挨着就是挨着。\n     这跟 `rook-cover.js` 里「车撞上障碍就停」正好相反，别把那条搬过来。\n     墙本身**不需要被照顾**（照顾的是空格），王也**站不上**墙。\n\n   · **覆盖表是对称的**：s 照顾得到 t，t 也照顾得到 s（「挨着」是相互的）。\n     精确那一份整个搜索都架在这条上面 —— 能照顾到某一格的王，只可能站在\n     那一格的九宫里，于是候选最多九个。共用段里那句注释就是为它写的。\n\n   · **格子编号 `sq = 行 * W + 列`**，行 0 在棋盘最下面、列 0 在最左边，\n     于是 0 号格是 a1 —— 跟 `queens.js` / `knight-path.js` / `tour-*.js` /\n     `rook-cover.js`、`BoardRender.layout()` 的 `squareCenter(file, rank)`、\n     `chess-core.js` 的 `SQ(file, rank)` 同向。\n     反推是 `列 = sq % W; 行 = (sq - 列) / W`。**盘可以不是正方形**\n     （`W` 与 `H` 分开给），照 `rook-cover.js` 的先例。\n\n   · **宿主桥接**：这一份只用三种 mark，**没有 'back'，而这正是它的性格**：\n       'try'  正在掂量这一格能新照顾到几格\n       'cut'  比不过擂主，出局（老擂主被顶下去时也吃这一记）\n       'ok'   这一格上真的摆一个王 —— 紧跟着 `place(sq, \"wK\")`\n     **贪心从不反悔**，所以一次 `clear` 都不会发生，'back' 一次都不出现。\n     精确那一份反过来：它没有 'cut'（不淘汰任何候选，每一个都真的摆上去试），\n     只有 try / ok / back。少的那一种 mark 本身就是一句话 —— 同一条先例见\n     `knight-path.js` 的文件头（BFS 从不反悔）。`king.test.js` 两头都钉着。\n\n   · **`place(sq, \"wK\")` 是「数字格子 + 字符串棋子」**，跟 `queens.js` 的\n     `\"wQ\"`、`rook-cover.js` 的 `\"wR\"` 同一个约定。`BoardRender.drawPiece`\n     吃的是**数字** code，'wK' → code 的换算归页面做（见 `queens.js` 文件头\n     那一整段，含仓库里 `tools/_debugger-preview.html` 那个两个参数正好相反\n     的反例）。\n\n   · **并列时取编号小的那一格，这是算法的一部分，不是实现细节。**\n     写下来是因为它被验过一次：把扫描序倒过来（同样是「挑最划算的」），\n     6×6 `[6,24,35]` 上贪心从 **6** 变成 **5**，6×6 `[1,4,24]` 上从 **8** 变成\n     **5** —— 换了序就是另一个算法，两档的教学内容（差距 2 与差距 4）也就没了。\n     `king.test.js` 的宿主侧参照因此**不换扫描序**，它的独立性靠\n     「按几何现算 vs 查覆盖表」拿到。\n     （这是对简报「贪心用不同的扫描序」那句话的一处订正。精确那一份反过来：\n     换序不影响答案，所以它的参照**换了**目标格与候选的顺序。）\n\n   · 子集约束（规格 §2.6）：**没有三元运算符**，`a ? b : c` 会抛 unsupported，\n     一律展开成 if/else；数组只有 `push` / `pop` 与下标读写和 `length`\n     （`covers` 是数组的数组，`covers[s].push(t)` 走的是同一条路，合法）。\n\n   ---- 实测（`Interp.STEP_LIMIT` = 200,000）----\n\n   见 `king-exact.js` 文件头那张表 —— 四档的两边数字放在一起才读得懂，\n   所以只在那一份里写一次（**第三档换过一次**，理由也在那里）。\n   这一份要记住的只有一句：**贪心四档全部跑得完**，四档分别 3,983 / 8,154 /\n   9,625 / 13,578 步，最贵的一档只占 200,000 上限的 6.8%。 */\n(function (root, factory) {\n  if (typeof module === 'object' && module.exports) module.exports = factory();\n  else root.AlgoKingGreedy = factory();\n})(typeof self !== 'undefined' ? self : this, function () {\n  'use strict';\n\n  /* 普通字符串拼，不用模板字面量：这段文本本身会被原样贴进 html，\n     反引号在那个上下文里比在这里更容易出事（照抄 queens.js 的理由）。 */\n\n  /* ==== 以下 HEAD 与 king-exact.js 的 HEAD **行数相同**，\n     只有第 1 行的标题和第 9–10 行讲「这一份 / 另一份」的两行不同。 ==== */\n  const HEAD = [\n    '/* ============ 王的支配集 · 贪心 ============',\n    '   王走一步能到旁边八个格子里的任何一个。所以一个王站在某一格上，连同它',\n    '   自己站的这一格，一共「照顾」到九格 —— 围着它的一个九宫。',\n    '   （靠边、靠角的时候九宫会缺一块，出界的那几格不算。）',\n    '',\n    '   盘上有些格子是墙：墙上站不了王，也不用照顾墙 —— 要照顾的是所有空格。',\n    '   题目是：**最少要几个王，才能让每一个空格都被照顾到？**',\n    '',\n    '   这一份：**每一步都挑当下最划算的那一格**，挑完就定，绝不反悔（这叫贪心）。',\n    '   另一份：把所有摆法都试一遍，一个不漏，所以它说得出「最少」（那叫精确解）。',\n    '',\n    '   格子编号：sq = 行 * W + 列。第 0 行是棋盘最下面那一行，第 0 列是最左边',\n    '   那一列 —— 于是 0 号格就是国际象棋里的 a1。',\n    '   要反推回去：列 = sq % W，行 = (sq - 列) / W。 */',\n    '',\n    '/* 棋盘的宽和高，以及墙在哪儿 —— 这道题的全部旋钮。',\n    '   把 BLOCKED 清空试试：**空盘上两份给出的数一模一样**（4×4 到 8×8 八种',\n    '   尺寸实测全同）。空盘上王的位置太规整，贪心随手就挑中最优的那几格。',\n    '   差距只在有墙的时候才出现，而且看的是**墙摆在哪儿**，不是摆了几堵 ——',\n    '   同样是 6×6、同样三堵墙，只把墙挪个位置，贪心就从 6 个变成 8 个。 */',\n  ];\n\n  /* ==== 以下 COMMON 与 king-exact.js 的 COMMON **逐字节相同** ====\n     king.test.js 有一道门比这一段（两条横线之间，含横线本身）。\n     改这里必须同步改那一份。 */\n  const COMMON = [\n    '',\n    '/* ===== 从这里到下面那条分水岭为止，两份源码逐字相同 ===== */',\n    '',\n    '/* 哪些格子是墙。wall[sq] = 1 就是墙 —— 王站不上去，也不用照顾它。 */',\n    'const wall = [];',\n    'for (let i = 0; i < W * H; i = i + 1) { wall.push(0); }',\n    'for (let i = 0; i < BLOCKED.length; i = i + 1) { wall[BLOCKED[i]] = 1; }',\n    '',\n    '/* 盘上所有的空格。要照顾到的就是这些格子，一个都不能漏。 */',\n    'const empty = [];',\n    'for (let s = 0; s < W * H; s = s + 1) {',\n    '  if (wall[s] === 0) { empty.push(s); }',\n    '}',\n    'log(\"这块盘上有 \" + empty.length + \" 个空格要照顾\");',\n    '',\n    '/* 覆盖表：covers[s] 就是「一个王站在 s 上，能照顾到哪些空格」。',\n    '   王往八个方向各走一格，再加上它自己站的这一格 —— 一共九格，围成一个九宫。',\n    '   出界的不算，墙也不算（墙不用照顾）。所以边上、角上的九宫会缺一块。',\n    '',\n    '   **王的九宫不管墙挡不挡**：挨着就是挨着，中间隔着什么都一样。',\n    '   （车不是这样的：车沿直线看出去，撞上墙就停。两道题别搞混。）',\n    '',\n    '   这张表是**对称的**：s 照顾得到 t，t 就一定照顾得到 s —— 因为「挨着」',\n    '   是相互的。这条待会儿有大用：**能照顾到某一格的王，就站在那一格的九宫里**，',\n    '   所以想管住某一格，候选最多只有九个。 */',\n    'const covers = [];',\n    'for (let s = 0; s < W * H; s = s + 1) { covers.push([]); }',\n    'for (let i = 0; i < empty.length; i = i + 1) {',\n    '  const s = empty[i];',\n    '  const x = s % W;',\n    '  const y = (s - x) / W;',\n    '  for (let dy = -1; dy <= 1; dy = dy + 1) {',\n    '    for (let dx = -1; dx <= 1; dx = dx + 1) {',\n    '      const nx = x + dx;',\n    '      const ny = y + dy;',\n    '      if (nx >= 0 && nx < W && ny >= 0 && ny < H) {',\n    '        const t = ny * W + nx;',\n    '        if (wall[t] === 0) { covers[s].push(t); }',\n    '      }',\n    '    }',\n    '  }',\n    '}',\n    '',\n    '/* 两个记录：',\n    '     seen[sq]  现在有几个王照顾着这一格',\n    '     left      还有几个空格一个王都没照顾到',\n    '   记「几个」而不是「有没有」，是因为王有可能被收回去（精确那一份会收）——',\n    '   收回去之后这一格还剩几个王照顾着，只有计数说得清。 */',\n    'const seen = [];',\n    'for (let i = 0; i < W * H; i = i + 1) { seen.push(0); }',\n    'let left = empty.length;',\n    '',\n    '/* 在 s 上摆一个王：它九宫里每一格的计数加一，本来没人管的那几格就有人管了。 */',\n    'function put(s) {',\n    '  const c = covers[s];',\n    '  for (let i = 0; i < c.length; i = i + 1) {',\n    '    if (seen[c[i]] === 0) { left = left - 1; }',\n    '    seen[c[i]] = seen[c[i]] + 1;',\n    '  }',\n    '  mark(s, \"ok\");',\n    '  place(s, \"wK\");',\n    '}',\n    '',\n    '/* ===== 分水岭：从这里往下两份不一样了 —— 差的就是「挑哪个王」 ===== */',\n  ];\n\n  const TAIL = [\n    '',\n    '/* 已经摆了 n 个王了，接着往下摆；摆到每个空格都有人照顾为止，',\n    '   返回一共摆了几个。',\n    '',\n    '   这一份的主意只有一句话：**挑当下最划算的那一格** —— 谁能一口气新照顾到',\n    '   最多还没人管的空格，就把王摆在谁那儿。并列的话取编号小的那一格。',\n    '   挑完就定了：这一份从头到尾没有一次 \"back\"，没有哪个王被收回去过。',\n    '',\n    '   它快得离谱，但它**不保证最少**。旁边那一份会告诉你差多少 ——',\n    '   有墙的盘上，这两个数经常不一样。 */',\n    'function cover(n) {',\n    '  if (left === 0) {',\n    '    return n;              // 每个空格都有人照顾了 —— 一共摆了 n 个王',\n    '  }',\n    '  /* 摆擂台：一格一格地问「你能新照顾到几格」，把最多的那一个留到最后。 */',\n    '  let best = -1;           // 目前的擂主站在哪一格；−1 = 还没有擂主',\n    '  let bestGain = 0;        // 擂主能新照顾到几格',\n    '  for (let i = 0; i < empty.length; i = i + 1) {',\n    '    const s = empty[i];',\n    '    mark(s, \"try\");        // 正在掂量这一格',\n    '    let gain = 0;',\n    '    const c = covers[s];',\n    '    for (let j = 0; j < c.length; j = j + 1) {',\n    '      if (seen[c[j]] === 0) { gain = gain + 1; }',\n    '    }',\n    '    if (gain > bestGain) {',\n    '      /* 新擂主。老擂主这时候才出局 —— 它一直亮着，直到被顶下去。',\n    '         这里写的是 `>` 不是 `>=`：并列的时候擂主不换，也就是取编号小的',\n    '         那一格。**这一句是算法的一部分**，不是随手写的：把它改成 `>=`，',\n    '         或者把上面这个循环倒过来扫，答案会变（有一档从 6 变成 5）。 */',\n    '      if (best >= 0) { mark(best, \"cut\"); }',\n    '      bestGain = gain;',\n    '      best = s;',\n    '    } else {',\n    '      mark(s, \"cut\");      // 比不过擂主，出局',\n    '    }',\n    '  }',\n    '  put(best);',\n    '  log(\"第 \" + (n + 1) + \" 个王站在 \" + best + \" 号格，新照顾到 \" + bestGain +',\n    '      \" 格，还剩 \" + left + \" 格没人管\");',\n    '  return cover(n + 1);',\n    '}',\n    '',\n    'const kings = cover(0);',\n    'log(\"贪心用了 \" + kings + \" 个王\");',\n    'return kings;',\n  ];\n\n  /* source({ W, H, blocked }) → string\n\n     三个参数都不给默认值，缺了直接抛（阶段 5 约束 6：公开导出的省略参数已经\n     是本仓库抓到过八次的缺陷类）。一个默默变成 8 的 W 会让界面写着 6、跑的却是\n     8，正是这个工具最不能出的错；而一个默默变成 `[]` 的 blocked 更糟 ——\n     **空盘是这道题的假题**（两份给出的数一模一样，四档盘因此没有一块空盘），\n     悄悄退化成假题的演示教不了任何东西。\n\n     校验只管「是不是一块合法的盘、墙是不是都落在盘上」，**不管盘上还剩不剩\n     空格、也不管跑不跑得完**：整块盘都是墙要照常吐出源码（答案 0），\n     7×7 那一档明知精确解会撞墙也要照常吐出来 —— 撞墙那一屏正是这道题的落点。\n\n     这个函数与 king-exact.js 的同名函数逐字相同，两边一起改。 */\n  function source(opts) {\n    const o = opts || {};\n    if (o.W === undefined || o.W === null) {\n      throw new Error('source({ W, H, blocked }) 少了 W —— 棋盘宽度没有默认值，必须写明');\n    }\n    if (o.H === undefined || o.H === null) {\n      throw new Error('source({ W, H, blocked }) 少了 H —— 棋盘高度没有默认值，必须写明');\n    }\n    if (o.blocked === undefined || o.blocked === null) {\n      throw new Error('source({ W, H, blocked }) 少了 blocked —— 墙没有默认值，必须写明；' +\n                      '空盘请显式传 []（那是这道题的假题：空盘上贪心与精确给出同一个数）');\n    }\n    const W = o.W, H = o.H, blocked = o.blocked;\n    if (typeof W !== 'number' || !isFinite(W) || Math.floor(W) !== W || W < 1) {\n      throw new Error('W 必须是 >= 1 的整数，收到：' + W);\n    }\n    if (typeof H !== 'number' || !isFinite(H) || Math.floor(H) !== H || H < 1) {\n      throw new Error('H 必须是 >= 1 的整数，收到：' + H);\n    }\n    if (!Array.isArray(blocked)) {\n      throw new Error('blocked 必须是一个数组（墙的格子编号），收到：' + typeof blocked);\n    }\n    for (let i = 0; i < blocked.length; i++) {\n      const s = blocked[i];\n      if (typeof s !== 'number' || !isFinite(s) || Math.floor(s) !== s || s < 0 || s >= W * H) {\n        throw new Error('blocked 里的格子必须是 0 到 ' + (W * H - 1) + ' 之间的整数，收到：' + s);\n      }\n    }\n    return HEAD.concat([\n      'const W = ' + W + ';',\n      'const H = ' + H + ';',\n      'const BLOCKED = [' + blocked.join(', ') + '];',\n    ]).concat(COMMON).concat(TAIL).join('\\n');\n  }\n\n  return { source: source };\n});\n",
+  'king-exact.js': "/* 带障碍盘上「最少的王支配所有空格」的**精确**算法源码生成器（规格 §2.1）。\n   零依赖；node 与浏览器双用。编辑源，运行时被内联进 tools/*.html。\n\n   跟 `queens.js` / `knight-path.js` / `tour-*.js` / `rook-cover.js` 是同一个形状：\n   这个模块本身不算任何东西 —— 它吐出一段**字符串**。那段字符串同时是喂给\n   `Interp.run` 去真跑的程序、和喂给 `Editor.mount` 摆在使用者眼前的那份源码。\n   一份字符串两个用途，所以「看到的」和「跑的」不可能漂移。\n\n   **生成出来的那段源码里的注释和命名，是写给一个没学过棋的 16 岁读者的**。\n   本文件自己的注释（就是你正在读的这些）是给维护者的，两套读者，两种口吻。\n\n   ---- 这一份和 `king-greedy.js` 是一对 ----\n\n   共用的那一整段（建墙表、列空格、建覆盖表、`seen`/`left`、`put()`）\n   **逐字节相同**，两条横线之间一个字都不许差。完整的约定、以及「阶段 5 那道\n   逐行子序列的门为什么在这一对上不适用」，写在 `king-greedy.js` 的文件头里，\n   那一份是这一对的主文档。**改动共用文本必须同步改那一份。**\n\n   这一份自己多出来的东西，就是横线以下那些：`take()`（把王收回去）、\n   `limit`、以及外面那圈迭代加深的 while。\n\n   ---- 算法：迭代加深 + 「谁来管这一格」分支 ----\n\n   一句话：先问「1 个王够不够」，不够再问 2 个、3 个…… 第一个答得上「够」的\n   数就是最少的，因为比它小的都已经被否掉了。**从 0 问起**（整块盘都是墙时\n   答案就是 0 —— 少了这一档会答 1，`king.test.js` 有断言钉着）。\n\n   每一轮里怎么搜：挑一个**还没人管**的空格，它总得有人管；而能管它的王\n   只可能站在它自己的九宫里（覆盖表对称，见共用段那条注释）—— 候选最多九个，\n   一个一个真的摆上去试，不成就收回来换下一个。这不是启发式，是穷尽：\n   「这一格总得有人管」这句话本身就把分支因子从「全盘每一格」压到了九。\n\n   **为什么不是「枚举所有 C(n, k) 种摆法」**：那样 6×6 上 k=4 就是 5 万多种，\n   而且每一种都要从头验一遍覆盖。按「谁来管这一格」分支，同样是精确解，\n   实测便宜两个数量级 —— 但仍然指数，见下面那张表的第四档。\n\n   ---- 这道题的落点：**为什么现实里要用贪心** ----\n\n   前面五个工具都在讲「算法怎么跑」。这一题的第四档讲的是另一件事：\n\n     7×7 `[16,24,32]` 上贪心一眨眼给出 8，**精确这一份跑不完**。\n     于是我们**并不知道** 8 是不是最优。\n\n   读数必须说「跑不完，判不了」，**绝不许说「8 是最优」**（宿主侧另算过，\n   那块盘的真最优确实是 8 —— 但工具里那一屏没有算完，它不该假装知道）。\n   `null` 表示「不知道」，永远不许变成数字。阶段 6 为这类情形建了整套\n   `unknown` 通道（`exercise.js` 的 judge：没找到分歧又有一侧截断 → `unknown`，\n   而且 `unknown` 不是 `fail`），Task 5 照它的既有呈现，别新造一套。\n\n   8×8 更绝望：宿主侧量到 **2,700 万次**操作（简报给的是另一种计数口径下的\n   7,256 万）—— **8×8 的精确支配集根本不可能进这个工具**，滑杆上限别往那儿开。\n\n   ---- 实测（`Interp.STEP_LIMIT` = 200,000）----\n\n   四档的两边数字放在一起才读得懂，所以整张表只在这一份里写一次。\n   拿两份生成的源码各跑 `Interp.run(src, { host: {} })`，读 `result` 与\n   `trace.length`；mark 次数由 `king.test.js` 的 `probe()` 量。\n\n     档                          贪心 k / 步数      精确 k / 步数      差距   这一档演什么\n     ① 5×5 [6,12,18]              4 /  3,983        4 /  18,174        0    两边一样：贪心运气好\n     ② 6×6 [6,24,35]              6 /  8,154        4 /  71,742        2    **差距**出现了\n     ③ 6×6 [1,4,24]               8 /  9,625        4 /  41,627        4    同一块盘、同样三堵墙，\n                                                                            只挪了位置：差距翻倍\n     ④ 7×7 [16,24,32]             8 / 13,578      ✗ 撞墙 200,000       ?    **跑不完，判不了**\n\n   四档的教学轴是**差距**：0 → 2 → 4 → 不知道。三件要知道的事：\n\n     ① **贪心四档全部跑得完**，最贵的一档（7×7）13,578 步，占上限的 6.8%。\n        「一眨眼」不是修辞：第④档它至少比精确便宜 14 倍 —— 而 200,000 只是\n        上限，精确那一边的真值我们并不知道有多大。\n     ② **精确的步数不随盘大小平滑长**：18,174 → 71,742 → 41,627 → 撞墙。\n        ③ 比 ② 大一倍的差距，却便宜四成 —— 贵不贵取决于最少王数是几、\n        以及要否掉多少个更小的王数，跟「盘上有几堵墙」没有直接关系。\n     ③ **第③档是换过的**（见下面那一整段）。前三档余量都在 40% 以上，\n        `king.test.js` 有一条余量断言把它们钉在 120,000 之下：将来任何把\n        某一档推过线的改动会**大声失败**，而不是变成一次神秘的截断。\n\n   墙上那一档（④）**必须**撞墙，`king.test.js` 拿 `trace.truncated === true` 和\n   `typeof result === 'undefined'` 两条钉着 —— 那一档要是哪天跑完了，那才是故障。\n\n   ---- 第三档换过一次（实测逼出来的）----\n\n   简报给的第三档是 `6×6 [6,10,25,28,32,34,35]`（贪心 7 / 精确 5），\n   **它的精确解在解释器里跑不完**。简报自己预警过这一条。\n   这不是外推出来的：把 `Interp.run` 的 `opts.limit` 抬到五千万，**实测那一档\n   要 251,668 步**（k=5，未截断）—— 比 200,000 的上限高出 26%。在默认上限下\n   它就是 `truncated === true`、`result === undefined`。留着它，四档里就有\n   两档撞墙，「差距那一课」只剩一档在演。\n\n   ⚠ **「解释器步数 ÷ 算法操作数」有两套口径，千万别混用**（这里一度混过）：\n\n     档                      简报口径 ops   本仓库口径 ops   解释器步数    倍率(简报/本仓库)\n     5×5 [6,12,18]              1,440           542          18,174     12.6× / 33.5×\n     6×6 [6,24,35]              6,952         2,372          71,742     10.3× / 30.2×\n     6×6 七墙（原第三档）       24,779         9,971         251,668     10.2× / 25.2×\n     6×6 [1,4,24]（新第三档）      ——          1,309          41,627       ——  / 31.8×\n\n   两套差 2.5–2.7 倍，因为「一次操作」的定义不同（简报那套数得细）。\n   **拿简报表里的 ops 预估新档步数，要乘 ~10–13，不是 ~30。**\n   本文件表里的四档步数一律是直接量的，不是任何一种乘出来的。\n\n   换成 `6×6 [1, 4, 24]`：**同样是 6×6、同样是三堵墙，只是位置不同** ——\n   贪心从 6 变成 8（整整一倍的王），精确两块都是 4。差距从 2 拉到 4，\n   步数反而降到 41,627。新档的 k 由一份**穷举**（按 k 从小到大枚举所有子集，\n   零剪枝）独立验过：3 个王盖不满，4 个可以（[7,10,25,28]，与第②档同解）。\n\n   顺带一条给页面的提醒：**② 与 ③ 的贪心结果对扫描序极其敏感** ——\n   把「并列取编号小的」换成倒序扫描，② 从 6 变 5、③ 从 8 变 5。\n   扫描序是算法的一部分，不是实现细节（`king-greedy.js` 文件头有整条记录）。\n\n   顺带一条实测，它订正了规格原写的「差距可见」：**矩形空盘上两份完全相同**\n   （4×4 / 5×5 / 5×6 / 6×6 / 6×7 / 7×7 / 7×8 / 8×8 八种全同，8×8 都是 9）。\n   空盘上王的结构太规整，贪心自然挑中 3×3 块的中心，那恰好最优。\n   **差距只在有墙的时候才出现** —— 所以四档盘里没有一块空盘。 */\n(function (root, factory) {\n  if (typeof module === 'object' && module.exports) module.exports = factory();\n  else root.AlgoKingExact = factory();\n})(typeof self !== 'undefined' ? self : this, function () {\n  'use strict';\n\n  /* 普通字符串拼，不用模板字面量：这段文本本身会被原样贴进 html，\n     反引号在那个上下文里比在这里更容易出事（照抄 queens.js 的理由）。 */\n\n  /* ==== 以下 HEAD 与 king-greedy.js 的 HEAD **行数相同**，\n     只有第 1 行的标题和第 9–10 行讲「这一份 / 另一份」的两行不同。 ==== */\n  const HEAD = [\n    '/* ============ 王的支配集 · 精确解 ============',\n    '   王走一步能到旁边八个格子里的任何一个。所以一个王站在某一格上，连同它',\n    '   自己站的这一格，一共「照顾」到九格 —— 围着它的一个九宫。',\n    '   （靠边、靠角的时候九宫会缺一块，出界的那几格不算。）',\n    '',\n    '   盘上有些格子是墙：墙上站不了王，也不用照顾墙 —— 要照顾的是所有空格。',\n    '   题目是：**最少要几个王，才能让每一个空格都被照顾到？**',\n    '',\n    '   这一份：**把所有摆法都试一遍**，一个不漏，所以它说得出「最少」（精确解）。',\n    '   另一份：每一步只挑当下最划算的那一格，挑完就定，绝不反悔（那叫贪心）。',\n    '',\n    '   格子编号：sq = 行 * W + 列。第 0 行是棋盘最下面那一行，第 0 列是最左边',\n    '   那一列 —— 于是 0 号格就是国际象棋里的 a1。',\n    '   要反推回去：列 = sq % W，行 = (sq - 列) / W。 */',\n    '',\n    '/* 棋盘的宽和高，以及墙在哪儿 —— 这道题的全部旋钮。',\n    '   把 BLOCKED 清空试试：**空盘上两份给出的数一模一样**（4×4 到 8×8 八种',\n    '   尺寸实测全同）。空盘上王的位置太规整，贪心随手就挑中最优的那几格。',\n    '   差距只在有墙的时候才出现，而且看的是**墙摆在哪儿**，不是摆了几堵 ——',\n    '   同样是 6×6、同样三堵墙，只把墙挪个位置，贪心就从 6 个变成 8 个。 */',\n  ];\n\n  /* ==== 以下 COMMON 与 king-greedy.js 的 COMMON **逐字节相同** ====\n     king.test.js 有一道门比这一段（两条横线之间，含横线本身）。\n     改这里必须同步改那一份。 */\n  const COMMON = [\n    '',\n    '/* ===== 从这里到下面那条分水岭为止，两份源码逐字相同 ===== */',\n    '',\n    '/* 哪些格子是墙。wall[sq] = 1 就是墙 —— 王站不上去，也不用照顾它。 */',\n    'const wall = [];',\n    'for (let i = 0; i < W * H; i = i + 1) { wall.push(0); }',\n    'for (let i = 0; i < BLOCKED.length; i = i + 1) { wall[BLOCKED[i]] = 1; }',\n    '',\n    '/* 盘上所有的空格。要照顾到的就是这些格子，一个都不能漏。 */',\n    'const empty = [];',\n    'for (let s = 0; s < W * H; s = s + 1) {',\n    '  if (wall[s] === 0) { empty.push(s); }',\n    '}',\n    'log(\"这块盘上有 \" + empty.length + \" 个空格要照顾\");',\n    '',\n    '/* 覆盖表：covers[s] 就是「一个王站在 s 上，能照顾到哪些空格」。',\n    '   王往八个方向各走一格，再加上它自己站的这一格 —— 一共九格，围成一个九宫。',\n    '   出界的不算，墙也不算（墙不用照顾）。所以边上、角上的九宫会缺一块。',\n    '',\n    '   **王的九宫不管墙挡不挡**：挨着就是挨着，中间隔着什么都一样。',\n    '   （车不是这样的：车沿直线看出去，撞上墙就停。两道题别搞混。）',\n    '',\n    '   这张表是**对称的**：s 照顾得到 t，t 就一定照顾得到 s —— 因为「挨着」',\n    '   是相互的。这条待会儿有大用：**能照顾到某一格的王，就站在那一格的九宫里**，',\n    '   所以想管住某一格，候选最多只有九个。 */',\n    'const covers = [];',\n    'for (let s = 0; s < W * H; s = s + 1) { covers.push([]); }',\n    'for (let i = 0; i < empty.length; i = i + 1) {',\n    '  const s = empty[i];',\n    '  const x = s % W;',\n    '  const y = (s - x) / W;',\n    '  for (let dy = -1; dy <= 1; dy = dy + 1) {',\n    '    for (let dx = -1; dx <= 1; dx = dx + 1) {',\n    '      const nx = x + dx;',\n    '      const ny = y + dy;',\n    '      if (nx >= 0 && nx < W && ny >= 0 && ny < H) {',\n    '        const t = ny * W + nx;',\n    '        if (wall[t] === 0) { covers[s].push(t); }',\n    '      }',\n    '    }',\n    '  }',\n    '}',\n    '',\n    '/* 两个记录：',\n    '     seen[sq]  现在有几个王照顾着这一格',\n    '     left      还有几个空格一个王都没照顾到',\n    '   记「几个」而不是「有没有」，是因为王有可能被收回去（精确那一份会收）——',\n    '   收回去之后这一格还剩几个王照顾着，只有计数说得清。 */',\n    'const seen = [];',\n    'for (let i = 0; i < W * H; i = i + 1) { seen.push(0); }',\n    'let left = empty.length;',\n    '',\n    '/* 在 s 上摆一个王：它九宫里每一格的计数加一，本来没人管的那几格就有人管了。 */',\n    'function put(s) {',\n    '  const c = covers[s];',\n    '  for (let i = 0; i < c.length; i = i + 1) {',\n    '    if (seen[c[i]] === 0) { left = left - 1; }',\n    '    seen[c[i]] = seen[c[i]] + 1;',\n    '  }',\n    '  mark(s, \"ok\");',\n    '  place(s, \"wK\");',\n    '}',\n    '',\n    '/* ===== 分水岭：从这里往下两份不一样了 —— 差的就是「挑哪个王」 ===== */',\n  ];\n\n  const TAIL = [\n    '',\n    '/* 把 s 上的王收回去：九宫里每一格的计数减一，减到 0 就是又没人管了。',\n    '   这是 put 的镜像，一步不多一步不少 —— 收得不干净，后面每一步都是假的。',\n    '   mark 与 clear 是分开的两步：先看到这一格被判「撤销」，下一步王才消失。 */',\n    'function take(s) {',\n    '  const c = covers[s];',\n    '  for (let i = 0; i < c.length; i = i + 1) {',\n    '    seen[c[i]] = seen[c[i]] - 1;',\n    '    if (seen[c[i]] === 0) { left = left + 1; }',\n    '  }',\n    '  mark(s, \"back\");',\n    '  clear(s);',\n    '}',\n    '',\n    '/* 这一轮最多允许摆几个王。下面那圈 while 会一轮一轮把它加上去。 */',\n    'let limit = -1;',\n    '',\n    '/* 已经摆了 n 个王了，接着往下摆。在 limit 个王之内盖得满就返回 true。',\n    '',\n    '   这一份的主意分两步：',\n    '',\n    '     第一步 —— **挑一个还没人管的空格**（叫它 target）。它总得有人管吧？',\n    '     第二步 —— 那么管它的那个王站在哪儿？只可能在 target 自己的九宫里',\n    '                （覆盖表是对称的，上面那条注释就是为这里写的）。',\n    '                于是候选最多九个，一个一个**真的摆上去**试。',\n    '',\n    '   试不成就把王收回来（这就是 \"back\"），换下一个候选。九个都不成，说明',\n    '   这条路走不通，交还给上一层去换它那一步。',\n    '',\n    '   注意这一份**不淘汰任何候选**：它没有 \"cut\"，因为它不挑 —— 每一个候选',\n    '   都真的摆上去走到底过。慢就慢在这儿，「最少」两个字也正是从这儿来的。 */',\n    'function cover(n) {',\n    '  if (left === 0) {',\n    '    return true;           // 每个空格都有人照顾了',\n    '  }',\n    '  if (n === limit) {',\n    '    return false;          // 王用光了，还有格子没人管',\n    '  }',\n    '  let target = -1;',\n    '  for (let i = 0; i < empty.length; i = i + 1) {',\n    '    if (seen[empty[i]] === 0) { target = empty[i]; break; }',\n    '  }',\n    '  const c = covers[target];',\n    '  for (let i = 0; i < c.length; i = i + 1) {',\n    '    const s = c[i];',\n    '    mark(s, \"try\");        // 让这一位来管 target 试试',\n    '    put(s);',\n    '    if (cover(n + 1)) {',\n    '      return true;         // 下游走通了 —— 一路把 true 传回去',\n    '    }',\n    '    take(s);               // 不成：把它收回去，换下一个候选',\n    '  }',\n    '  return false;            // 九个候选都试过了，这条路不通',\n    '}',\n    '',\n    '/* 迭代加深：先问「0 个王够不够」，不够就问 1 个、2 个、3 个……',\n    '   第一个答得上「够」的数，就是**最少**的那个 —— 因为比它小的都已经被',\n    '   一个不漏地否掉了。这才是「最少」两个字唯一站得住的证法。',\n    '',\n    '   （为什么从 0 问起：整块盘都是墙的时候，一个王都不用摆，答案就是 0。',\n    '   从 1 问起会在那一档答 1。）',\n    '',\n    '   看着笨，也确实笨：盘一大，问到第几个王就跑不完了。跑不完的时候',\n    '   **它什么都没说** —— 不是「答案是贪心那个数」，是「不知道」。',\n    '   旁边那一份从不会跑不完，这就是现实里为什么用贪心。 */',\n    'let done = false;',\n    'while (!done) {',\n    '  limit = limit + 1;',\n    '  log(\"试试 \" + limit + \" 个王够不够\");',\n    '  if (cover(0)) { done = true; }',\n    '}',\n    'log(\"最少要 \" + limit + \" 个王，一个都不能少\");',\n    'return limit;',\n  ];\n\n  /* source({ W, H, blocked }) → string\n\n     三个参数都不给默认值，缺了直接抛（阶段 5 约束 6：公开导出的省略参数已经\n     是本仓库抓到过八次的缺陷类）。一个默默变成 8 的 W 会让界面写着 6、跑的却是\n     8，正是这个工具最不能出的错；而一个默默变成 `[]` 的 blocked 更糟 ——\n     **空盘是这道题的假题**（两份给出的数一模一样，四档盘因此没有一块空盘），\n     悄悄退化成假题的演示教不了任何东西。\n\n     校验只管「是不是一块合法的盘、墙是不是都落在盘上」，**不管盘上还剩不剩\n     空格、也不管跑不跑得完**：整块盘都是墙要照常吐出源码（答案 0），\n     7×7 那一档明知会撞墙也要照常吐出来 —— 撞墙那一屏正是这道题的落点。\n\n     这个函数与 king-greedy.js 的同名函数逐字相同，两边一起改。 */\n  function source(opts) {\n    const o = opts || {};\n    if (o.W === undefined || o.W === null) {\n      throw new Error('source({ W, H, blocked }) 少了 W —— 棋盘宽度没有默认值，必须写明');\n    }\n    if (o.H === undefined || o.H === null) {\n      throw new Error('source({ W, H, blocked }) 少了 H —— 棋盘高度没有默认值，必须写明');\n    }\n    if (o.blocked === undefined || o.blocked === null) {\n      throw new Error('source({ W, H, blocked }) 少了 blocked —— 墙没有默认值，必须写明；' +\n                      '空盘请显式传 []（那是这道题的假题：空盘上贪心与精确给出同一个数）');\n    }\n    const W = o.W, H = o.H, blocked = o.blocked;\n    if (typeof W !== 'number' || !isFinite(W) || Math.floor(W) !== W || W < 1) {\n      throw new Error('W 必须是 >= 1 的整数，收到：' + W);\n    }\n    if (typeof H !== 'number' || !isFinite(H) || Math.floor(H) !== H || H < 1) {\n      throw new Error('H 必须是 >= 1 的整数，收到：' + H);\n    }\n    if (!Array.isArray(blocked)) {\n      throw new Error('blocked 必须是一个数组（墙的格子编号），收到：' + typeof blocked);\n    }\n    for (let i = 0; i < blocked.length; i++) {\n      const s = blocked[i];\n      if (typeof s !== 'number' || !isFinite(s) || Math.floor(s) !== s || s < 0 || s >= W * H) {\n        throw new Error('blocked 里的格子必须是 0 到 ' + (W * H - 1) + ' 之间的整数，收到：' + s);\n      }\n    }\n    return HEAD.concat([\n      'const W = ' + W + ';',\n      'const H = ' + H + ';',\n      'const BLOCKED = [' + blocked.join(', ') + '];',\n    ]).concat(COMMON).concat(TAIL).join('\\n');\n  }\n\n  return { source: source };\n});\n"
 };
 /* <<< GENERATED:ALGOS */
 </script>
@@ -6900,7 +6964,7 @@ const ALGOS = {
      **不是** meta（设计系统 §10 写的「从 meta 读取」在 chess 这套引擎里不成立——
      工具① 的 1.1.0 changelog 记着这笔账：1.0.2 那次只改了 meta、忘了这个常量，
      角标停在 1.0.1 整整两版）。改版本必须两处一起动。 */
-  const VERSION = '1.1.0';
+  const VERSION = '1.2.0';
 
   /* ---------------- 算法源码生成器从哪来 ----------------
 
@@ -7258,18 +7322,33 @@ const ALGOS = {
        sources   []           要哪几份 algos/*.js（**数组**：tourKnight 一个键持有两份）
        entry     string       入口函数名（§1.4：z 轴 = 这个函数的递归深度）
        source(st, M, file)    → 一份源码字符串。M 是 file → 模块对象
-       board(st)             → { files, ranks }
+       board(st)             → { files, ranks, blocked? }
+                             `blocked`（可选）= 挖掉的格子编号数组（`sq = rank*files + file`）。
+                             **它是盘面形状的一部分，不是装饰**：那几格不画成棋盘格
+                             （走 BoardRender 现成的 `spec.mask`），改画成斜纹的墙。
+                             省略 / 空数组 = 没有墙，与不写这个字段逐字节相同（五题里
+                             三题走的正是这条路）。给了但给坏了 → 跟交不出 files/ranks
+                             一样：不画棋盘 + 红色状态牌（见 layoutTracks）。
        kinds     []           这道题会用到的 mark 种类，决定图例的行与顺序
        onMark(kind)          → { color, label } 或 null（认不出的种类不画）
+                             `label` 的**显示宽度 ≤ 72**（CJK 算 2），validateDecl 判死：
+                             图例没有 max-width，长了会钻到右上角面板底下（见那道门）
        zOf(m, api)           → 这个标记该抬到第几层（省略 = 它的调用深度）
        zLabel    {zh,en}      z 轴叫什么（queens 是递归深度，knightPath 会是 BFS 层）
        readout(a, st)        → 读数区的 HTML（a 是下面 readoutApi() 给的那个对象）
        check     {result,boardOps,counters}  Check 比哪几样可观测行为（§2.9）
        spanZ     number      （可选）深度塔每层抬多高；层数多的题目必须自己给（见 SPAN_Z）
-       sideView  {az,el,dist}（可选）换掉默认的 `3` 侧视；并排多块棋盘的题目必须给（见 viewsFor）
+       sideView  {az,el,dist}（可选）换掉默认的 `3` 侧视。**`sources` 超过一份就不再是
+                             可选的**：默认侧视正好沿着并排那根轴看进去，几块盘会完全
+                             重合（validateDecl 判死，见那道门里的对照实验）
        exerciseSources []    （可选）练习模式下改用这份清单，每项 { file, role }
                              role: 'edit'（可编辑、跑、上棋盘）/ 'contrast'（只读、不跑）
+                             **带挖空的可编辑源码只许有一份**——不声明这个字段时
+                             `sourcesFor()` 是「每一份都 edit」，多份源码的题目将来
+                             加挖空就必须在这里把其余几份降成 contrast（validateDecl 判死）
        trackLabel(file, k)   （可选）并排多块棋盘时，每块底下与每份源码顶上写什么
+                             **显示宽度 ≤ 26**（CJK 算 2），validateDecl 判死：
+                             并排两块盘时两条的半宽一相加就撞在一起
        exportName(st)        （可选）将来导出 .js 时的文件名 */
 
   const Q = {
@@ -7456,6 +7535,407 @@ const ALGOS = {
     return BR.fileLabel(f) + (r + 1);
   }
 
+  /* ---------------- 车、行段与列段：这一页第一道**盘上有障碍**的题 ----------------
+
+     ⚠ **题面订正 —— 这个键最重要的一条，先读它。**
+     计划与规格原先写的是「用最少的车覆盖所有空格，最大匹配 = 最少的车数」。
+     **后半句不成立**（Task 2 的执行者发现、审查独立验证）：一辆车是二分图里的
+     一条**边**，一次占住一个行段**和**一个列段，所以 k 辆车最多点亮 2k 个点。
+     König 给的是「最少的**线**」，不是「最少的**车**」。最小的反例只有 2×2：
+     挖掉一格，最大匹配 2，而一辆车就盖满了剩下三格；60 块随机小盘里 49 块的
+     最少车数严格更小，反向一次都没有 —— 不是边角失误。
+     所以这个键只说两句站得住的话，两句都恰好等于最大匹配：
+       ① 最多能摆几辆**互相吃不到**的车？
+       ② 要盖住每个空格，最少要点亮几条**线（段）**？
+     「算完之后这些车顺手也盖住了每个空格」是真的、也验过 —— 但 **≠ 最少**，
+     所以每次说它都带着那个括注。同一份订正也落在 `core/algos/rook-cover.js`
+     的 HEAD、规格 §4⑤ 与阶段 7 的计划里，四处一起改。
+
+     ---- 三个可选字段一个都不要，理由跟 knightPath 一样是量出来的 ----
+       · `zOf` 不要：`walk` 就是递归那一个，多一层 = 「请人挪窝」多传了一手，
+         默认 `zOf = m.depth` 正好是这个数。
+         ⚠ **它不等于「增广路有多长」**，别在文案里写成那个。node 扫顶层 walk
+         帧实测（四档依次）：
+
+           最深递归      1 / 6 / 4 / 7
+           其中最深的失败 0 / 6 / 4 / 7      ← 0 = 空盘上一次失败都没有
+           其中最深的成功 1 / 3 / 2 / 2
+
+         所以**后三档**最高的那座塔都属于一次**失败**的搜索，走通的那些浅得多；
+         **第一档是例外**，它那 1 层是一次成功（空盘上没有失败可言）——修复轮 1
+         的审查抓到过这条：原先写成「四档里每一档都……」，在默认档上当场是假的，
+         而同一段 tips 往后两句自己就说第一档「一次让位都没有」。
+         失败的那几趟并不白跑——它们问过的段正是 König 那些线的来源，见 rcKonig。
+       · `spanZ` 不要：塔最深 7 层（6×7 那一档，实测 `Step.depth` 最大 7），
+         7 × 0.55 = 3.85 —— 与 knightPath 的 7 层同一个数，正视下取景放大 1.38 倍。
+       · `sideView` 不要：`sources` 只有一份、只有一块棋盘。
+         **默认的 `3` 侧视是 `az = −π/2`、沿世界 x 轴看进去的**（`VIEWS.side`），
+         不是沿 z ——沿 z 看进去塔会缩成一个点。正因为沿 x 看，世界 z 才摊开在
+         屏幕横向：棋盘立成一条竖线、深度轴的 0…6 横着铺开，轮次一眼分得清。
+         tourKnight 换掉它是因为两块盘正沿世界 x 轴摆开，沿 x 看过去会严丝合缝
+         叠成一块；这一题只有一块盘，没有那回事。
+
+     ---- 一件真实行为，不是 bug ----
+     **每个格子会被 `mark(s,"try")` 两次**：`walk` 两趟扫的是同一个 `cells` 列表，
+     第一趟（找空列段）没成的话第二趟（请人挪窝）会把同样几格再走一遍。回放时
+     看得出顿挫。读数里说了这件事，免得她把算法的真实形状当成工具坏了。 */
+  const RC = {
+    tab:   { zh: '车与线', en: 'Rooks & Lines' },
+    brand: { zh: '障碍把每一行、每一列切成了几截。最多能摆几辆互相吃不到的车？盖住每个空格最少要点亮几截？两个问题同一个答案。',
+             en: 'Obstacles cut every rank and file into pieces. How many rooks can stand without attacking each other? How few of those pieces must be lit to cover every empty square? Two questions, one answer.' },
+    tips:  { zh: '这是这一页第一道盘上有障碍的题。障碍把一行切成几段，一辆车只管得住它站的那一段——于是每个空格都是一对号码（行段, 列段），摆一辆车就是同时占住这两截。按 3 切侧视：z 轴是「请人挪窝」传了几手，「我要这个列段 → 占它的那位挪去别处 → 别处又腾出来」每传一手塔就多一层。**后三档里最高的那座塔都属于一次失败的搜索**，不是一次成功的增广——而正是那几趟失败问过的段，圈出了 König 的线（第一档的空盘一次失败都没有，见下）。橙色的「让位」跟前两题的「回溯撤销」不是一回事：那辆车没错，它只是把位子让给别人，自己已经在别处站好了。先把滑杆停在第一档的空盘——答案恒等于行数、一次让位都没有、塔只有一层，那正是「这道题必须有障碍」的现场证据。读数底下那张小图画的是 König 的那些线：条数永远等于车数。',
+             en: 'This is the first problem on this page with obstacles on the board. They cut each rank into segments, and a rook only ever controls the segment it stands on — so every empty square is a pair of numbers (row segment, column segment), and placing a rook occupies both at once. Press 3 for the side view: the z axis counts how many hands “please move” has been passed through, and every “I want that column segment → whoever holds it moves elsewhere → that frees up in turn” adds a storey. **On the last three boards the tallest tower belongs to a search that fails**, not to a successful augmentation — and it is exactly those failed searches that pin down König’s lines (the empty first board never fails once; see below). Orange “stepped aside” is not the “backtracked” of the first two problems: that rook was not wrong, it merely yielded its square and is already standing somewhere else. Start with the slider on the empty board: the answer is exactly the number of ranks, nothing ever steps aside, the tower is one storey tall — that is the evidence that this problem needs obstacles. The small figure under the readout draws König’s lines; there are always exactly as many of them as there are rooks.' },
+
+    paramBoard: { zh: '棋盘与障碍', en: 'Board and obstacles' },
+
+    kTry:  { zh: '正在试这一格', en: 'trying this square' },
+    kOk:   { zh: '这一对成了（车站上去）', en: 'this pair is taken (a rook stands here)' },
+    kCut:  { zh: '这条路走不通（问过了，或者占着它的那位挪不动）', en: 'dead end (already asked, or the holder cannot move)' },
+    kBack: { zh: '让位（这辆车没错，只是换个格子站）', en: 'stepped aside (not wrong — the same rook just moves)' },
+
+    roRooks:  { zh: '最多能摆几辆互相吃不到的车', en: 'Rooks that cannot take each other' },
+    roLines:  { zh: '盖住每个空格最少要点亮几截', en: 'Fewest segments that cover every empty square' },
+    roSame:   { zh: '同一个数 —— 这就是 König 定理。', en: 'The same number — that is König’s theorem.' },
+    roSegs:   { zh: '行段', en: 'row segments' },
+    roSegsC:  { zh: '列段', en: 'column segments' },
+    roOnBoard:{ zh: '盘上的车', en: 'Rooks on the board' },
+    roYield:  { zh: '让位', en: 'stepped aside' },
+    roCover:  { zh: 'König 的那些线：**%R 截行段 + %C 截列段 = %K 截**，正好等于车数。条带沿着点亮的那一截走，所以**横条是行段、竖条是列段**；打叉的是障碍。每个空格都被至少一条压着——那就是「盖住」。',
+                en: 'König’s lines: **%R row segments + %C column segments = %K**, exactly the number of rooks. Each bar runs along the segment it lights, so **a horizontal bar is a row segment and a vertical bar a column segment**; hatched cells are obstacles. Every empty square has at least one bar over it — that is what “covered” means.' },
+    roCoverNo:{ zh: '**这一刻画不出 König 的线。** 要么这一趟还没跑完，要么这条轨迹跟滑杆上的盘面还没对上（换档的那一瞬间），要么源码被改过之后「线数 = 车数」这个恒等式不再成立。三种情形都是「不知道」——不知道就不画，绝不画一张看着像模像样的假图。',
+                en: '**König’s lines cannot be drawn right now.** Either the run has not finished, or this trace does not yet belong to the board on the slider (the instant of switching), or the source has been edited and “lines = rooks” no longer holds. All three are “unknown” — and unknown means nothing is drawn, never a figure that merely looks right.' },
+    roNotFewest: { zh: '**这些车顺手也盖住了每一个空格**（哪个空格的行段和列段上都没车，它自己就还能再摆一辆，与「最多」矛盾）。但**顺手盖住 ≠ 用最少的车盖住**：一辆车一次占两截，第二档那块 5×5 上 **4 辆车就盖满了，而那一档的答案是 7**。这道题回答的是上面那两个问法，不是「最少几辆车」。',
+                   en: '**These rooks happen to cover every empty square too** — if some square had a rook on neither its row segment nor its column segment, another rook could stand there, contradicting “the most”. But **covering by accident is not covering with the fewest**: one rook occupies two segments at once, and on the second board — the 5×5 with obstacles — **four rooks already cover everything, while the answer there is seven**. This problem answers the two questions above, not “how few rooks”.' },
+    roTwice:  { zh: '回放时同一格会亮两次「正在试」——`walk` 两趟扫的是同一列格子：第一趟找还空着的列段，第二趟才去请人挪窝。那是算法真实的形状。',
+                en: 'On replay the same square lights up “trying” twice: `walk` scans the same list of squares twice — first for a column segment that is still free, only then to ask whoever holds one to move. That is the real shape of the algorithm.' },
+
+    lesEmpty: { zh: '**这一档是对照，不是题。** 空盘上答案恒等于行数，每行随便摆一个就行——一次让位都没有，塔只有一层，匹配根本没上场。把滑杆推到下一档，障碍把行和列切开，才有得可算。',
+                en: '**This board is the control, not the puzzle.** On an empty board the answer is always the number of ranks — one rook per rank, anywhere — nothing ever steps aside, the tower is one storey, and matching never gets to do anything. Push the slider on: only once obstacles cut the ranks and files apart is there something to compute.' },
+    les55:    { zh: '**8 个行段、8 个列段，却只摆得下 7 辆车。** 少的那一辆是被 König 的 7 条线卡住的：7 截就压住了全部空格，第 8 辆再也找不到一对没人占的号码。这一档让位了 2 次；而塔最高的那 6 层不是一次成功的增广，是**唯一一趟失败的搜索**——那个行段问遍了能问的段，一个空位都没有。真正走通的增广路最深只有 3 层。',
+                en: '**Eight row segments, eight column segments — and only seven rooks fit.** The missing one is pinned by König’s seven lines: seven segments already sit on every empty square, so an eighth rook can never find an unclaimed pair. Two rooks step aside here; and the tallest tower, six storeys, is not a successful augmentation but **the one search that fails** — that row segment asks everything it can reach and finds no free seat. The deepest path that actually succeeds is three storeys.' },
+    les66:    { zh: '**10 个行段、10 个列段，7 辆车。** 障碍多了，段反而碎了——碎的段更容易被同一条线压住，所以差距拉到 3。只让位了 1 次：大部分车第一趟贪心就坐下了，真正的增广只发生在最后那几个行段上。',
+                en: '**Ten row segments, ten column segments, seven rooks.** More obstacles means more, smaller segments — and smaller segments are more easily pinned by the same line, so the gap widens to three. Only one rook steps aside: most of them sit down on the first greedy pass, and real augmentation happens only on the last few row segments.' },
+    les67:    { zh: '**塔最高的那一趟，一辆车都没多。** 12 个行段、12 个列段、9 辆车。按 3 切侧视：最高的那座塔有 7 层，「请人挪窝」传下去七手，七手都没腾出空位——这一档最深的搜索是一次**失败**。它并不白跑：正是这几趟失败的搜索问过的那些段，圈定了下面那张图里 König 的 9 条线。真正走通的增广路都很浅，这一档最深只有 2 层。',
+                en: '**The tallest tower on this board gains no rook at all.** Twelve row segments, twelve column segments, nine rooks. Press 3 for the side view: the tallest tower is seven storeys — “please move” passed down seven hands, and not one of them frees a seat. That deepest search **fails**. It is not wasted: the segments those failed searches asked about are exactly what pins down König’s nine lines in the figure below. The paths that do succeed are shallow — two storeys at most here.' },
+  };
+
+  /* 四档盘。**第一档的空盘是有意的对照**（`blocked: []` 显式写出来 —— rook-cover.js
+     的 `source()` 不给默认值，正因为空盘是这道题的假题，要写出来才算数）：
+     k = 行数、一次让位都没有、塔只有一层，「为什么这道题必须有障碍」不用讲。
+     实测（node 跑 Interp.run 读 trace.length，与 rook-cover.js 文件头、
+     rook-cover.test.js 同源）：
+
+       档                              k   步数   最深   try/ok/cut/back
+       5×5 空盘                        5    722    1     15/5/0/0
+       5×5 [3,14,17,18,21]             7  1,156    6     53/9/17/2
+       6×6 [0,6,8,9,14,20,24,26,27]    7  1,411    4     46/8/17/1
+       6×7 [4,6,7,8,26,31,33,35,37]    9  2,149    7    121/10/52/1
+
+     离 200,000 的上限差两个数量级：这一题不存在撞墙风险，四档都跑得完。 */
+  const RC_BOARDS = [
+    { W: 5, H: 5, blocked: [] },
+    { W: 5, H: 5, blocked: [3, 14, 17, 18, 21] },
+    { W: 6, H: 6, blocked: [0, 6, 8, 9, 14, 20, 24, 26, 27] },
+    { W: 6, H: 7, blocked: [4, 6, 7, 8, 26, 31, 33, 35, 37] },
+  ];
+  const RC_LESSON = [RC.lesEmpty, RC.les55, RC.les66, RC.les67];
+  /* 越界当场抛，照 tourBoard 那条（阶段 5 约束 6）：默默夹回第 0 档会让界面写着
+     6×7、跑的却是 5×5 空盘 —— 而空盘是这道题的假题，那是最坏的一种错。 */
+  function rcBoard(st) {
+    const i = Math.round(st.board);
+    if (!isFinite(i) || i < 0 || i >= RC_BOARDS.length) {
+      throw new Error('盘面滑杆的档位越界：' + st.board + '（只有 0…' + (RC_BOARDS.length - 1) + ' 四档）');
+    }
+    return RC_BOARDS[i];
+  }
+
+  /* 把盘切成行段/列段 —— **与生成源码里那两个双重循环逐字同构**（rook-cover.js
+     的 BODY）。显示层要它，是因为轨迹里只有格子号，而 König 说的是「段」。
+     重算一遍而不是从算法里读，是刻意的：源码里一句只为显示服务的话都没有加。 */
+  function rcSegs(B) {
+    const n = B.W * B.H, wall = [], rowSeg = [], colSeg = [];
+    for (let i = 0; i < n; i++) { wall.push(0); rowSeg.push(-1); colSeg.push(-1); }
+    B.blocked.forEach(function (s) { wall[s] = 1; });
+    let nr = 0;
+    for (let y = 0; y < B.H; y++) {
+      let cur = -1;
+      for (let x = 0; x < B.W; x++) {
+        const s = y * B.W + x;
+        if (wall[s]) cur = -1;
+        else { if (cur < 0) { cur = nr; nr++; } rowSeg[s] = cur; }
+      }
+    }
+    let nc = 0;
+    for (let x = 0; x < B.W; x++) {
+      let cur = -1;
+      for (let y = 0; y < B.H; y++) {
+        const s = y * B.W + x;
+        if (wall[s]) cur = -1;
+        else { if (cur < 0) { cur = nc; nc++; } colSeg[s] = cur; }
+      }
+    }
+    return { wall: wall, rowSeg: rowSeg, colSeg: colSeg, nr: nr, nc: nc };
+  }
+
+  /* ---- König 的最小点覆盖，**从轨迹里读出来，不往源码里加一行** ----
+
+     那一步本来就在轨迹里：**一次失败的顶层 `walk(r)` 就是「从未匹配行段出发的
+     交替搜索」**，而一个行段一旦失败，它的可达集就冻结了（标准引理）。于是扫
+     顶层的 `walk` 进出帧，**帧内一次 `place` 都没有的就是失败帧**，把它 `mark`
+     过的每一格的行段/列段收起来，得到 Z_row / Z_col，最小点覆盖就是
+       （不在 Z_row 里的行段）∪（在 Z_col 里的列段）
+     大小恒等于 k。205 块盘（4 块夹具 + 四档 + 200 块随机）上这个式子一块都没差。
+
+     「顶层」判据用的是 **walk 帧自己的嵌套层数**，不是 `Step.depth` —— 两者在
+     这份源码上恰好相等（顶层 walk 的 depth 是 1），但前者不依赖解释器怎么数
+     调用深度，换一份实现也不会悄悄错位。
+     `boardOps` 在 push 之后、pop 之前收：pop 那一步带的正是 `return true` 前
+     刷出来的那批 mark/place，漏掉它就会把成功帧误判成失败帧。 */
+  function rcKonig(trace, seg) {
+    let nest = 0, cur = null;
+    const zrow = Object.create(null), zcol = Object.create(null);
+    for (let k = 0; k < trace.length; k++) {
+      const s = trace[k];
+      if (s.frameOp === 'push' && s.frameName === 'walk') {
+        if (nest === 0) cur = { sqs: [], placed: false };
+        nest++;
+      }
+      if (cur && nest > 0) {
+        const ops = s.boardOps || [];
+        for (let m = 0; m < ops.length; m++) {
+          if (ops[m].kind === 'mark') cur.sqs.push(ops[m].sq);
+          else if (ops[m].kind === 'place') cur.placed = true;
+        }
+      }
+      if (s.frameOp === 'pop' && s.frameName === 'walk') {
+        nest--;
+        if (nest === 0) {
+          if (cur && !cur.placed) {
+            for (let m = 0; m < cur.sqs.length; m++) {
+              const sq = cur.sqs[m];
+              if (seg.rowSeg[sq] >= 0) zrow[seg.rowSeg[sq]] = 1;
+              if (seg.colSeg[sq] >= 0) zcol[seg.colSeg[sq]] = 1;
+            }
+          }
+          cur = null;
+        }
+      }
+    }
+    const rows = [], cols = [];
+    for (let r = 0; r < seg.nr; r++) if (!zrow[r]) rows.push(r);
+    for (let c = 0; c < seg.nc; c++) if (zcol[c]) cols.push(c);
+    return { rows: rows, cols: cols, size: rows.length + cols.length };
+  }
+
+  /* 那张小图：一块 W×H 的格子，点亮的行段画一条横贯的条带、点亮的列段画一条
+     竖贯的，障碍打叉。条带同色（C_STACK，"结构线"那个青色，不是四种状态之一
+     ——它画的不是搜索状态，是算完之后的一个结论），靠方向分行/列，所以这一页
+     的颜色词汇一个都没多。相邻格子的条带首尾相接，于是一整截段看起来就是
+     **一条线**，这正是这道题要她看见的东西。 */
+  function rcMiniBoard(B, seg, kon) {
+    const rowLit = Object.create(null), colLit = Object.create(null);
+    kon.rows.forEach(function (r) { rowLit[r] = 1; });
+    kon.cols.forEach(function (c) { colLit[c] = 1; });
+    const CELL = 15, out = [];
+    /* 第 0 行画在最下面 —— 跟棋盘、跟 `sq = 行 * W + 列` 同向。 */
+    for (let y = B.H - 1; y >= 0; y--) {
+      for (let x = 0; x < B.W; x++) {
+        const s = y * B.W + x, st = [];
+        if (seg.wall[s]) {
+          st.push('background:repeating-linear-gradient(45deg,rgba(159,176,200,.30) 0 1.5px,transparent 1.5px 5px),#0b1220');
+        } else {
+          const bg = [];
+          if (rowLit[seg.rowSeg[s]]) {
+            bg.push('linear-gradient(to bottom,transparent 38%,' + C_STACK + ' 38%,' + C_STACK + ' 62%,transparent 62%)');
+          }
+          if (colLit[seg.colSeg[s]]) {
+            bg.push('linear-gradient(to right,transparent 38%,' + C_STACK + ' 38%,' + C_STACK + ' 62%,transparent 62%)');
+          }
+          bg.push('linear-gradient(' + ((x + y) % 2 === 0 ? 'rgba(30,41,59,.55),rgba(30,41,59,.55)'
+                                                         : 'rgba(148,163,184,.16),rgba(148,163,184,.16)') + ')');
+          st.push('background:' + bg.join(','));
+        }
+        st.push('box-shadow:inset 0 0 0 1px rgba(159,176,200,.14)');
+        out.push('<span style="' + st.join(';') + '"></span>');
+      }
+    }
+    return '<span style="display:inline-grid;grid-template-columns:repeat(' + B.W + ',' + CELL +
+           'px);grid-auto-rows:' + CELL + 'px;margin:6px 0 2px">' + out.join('') + '</span>';
+  }
+
+  /* ---------------- 王的支配集：这一页第二道**持有两份源码**的题 ----------------
+
+     ⚠ **这一题的落点不是「算法怎么跑」，是「为什么现实里要用贪心」。**
+     前面五个工具讲的都是前者。这一题的第四档讲的是另一件事：7×7 上贪心一眨眼
+     给出 8，而精确那一份**跑不完**——于是我们并不知道 8 是不是最优。读数必须写
+     「跑不完，判不了」，**绝不许写「8 是最优」**（宿主侧另算过，那块盘的真最优
+     确实是 8——但工具里那一屏没有算完，它不该假装知道；见 king-exact.js 文件头）。
+     `null` 是「不知道」，永远不许变成数字，照阶段 6 的 unknown 通道与工具④
+     深度 4 的既有呈现：**琥珀色 `.warn`，不是红色的「错」**。
+
+     ---- 四档就是四段课（实测，与 core/algos/king-exact.js 文件头那张表同源）----
+
+       档                       贪心 k / 步数     精确 k / 步数     差距
+       ① 5×5 [6,12,18]           4 /  3,983       4 /  18,174        0
+       ② 6×6 [6,24,35]           6 /  8,154       4 /  71,742        2
+       ③ 6×6 [1,4,24]            8 /  9,625       4 /  41,627        4
+       ④ 7×7 [16,24,32]          8 / 13,578      ✗ 撞墙 200,000       ?
+
+     教学轴是**差距**：0 → 2 → 4 → 不知道。②③ 那一对是这一题最有力的并排——
+     **同尺寸、同墙数、只挪了位置**，差距从 2 拉到 4：贪心吃多大亏取决于墙摆在
+     哪儿，不是摆了几堵。「墙越多贪心越吃亏」是**错的**（生成源码里一度就是这么
+     写的，被自己的数据证伪）：6×6 上按墙数各随机采 40 块，0/2/3/5/7/9/12 堵墙
+     的平均差距是 0.00/0.78/0.72/0.88/1.05/0.68/0.55——跳一次之后基本持平，墙很
+     多时反而回落。③ 的差距 4 比那 280 块随机盘里的最大值（3）还大，它是**特意
+     挑出来的极端档**，不是 6×6 的常态，所以那一档的课文里明写了这一句。
+
+     **四档里没有一块空盘**，这是题面的一部分：矩形空盘上两份给出的数一模一样
+     （4×4 / 5×5 / 5×6 / 6×6 / 6×7 / 7×7 / 7×8 / 8×8 八种实测全同），差距只在有墙
+     的时候才出现——空盘是这道题的假题。
+
+     ---- `kinds` 的裁定：四种是**并集**，而每条轨道只演三种 ----
+
+     贪心永不亮 `'back'`（它从不反悔，一次 `clear` 都没有），精确永不亮 `'cut'`
+     （它不淘汰任何候选，每一个都真的摆上去试）。而 `paintLegend` 画的是**一道题
+     一份扁平图例**（按 `P.kinds` 走，不按轨道），于是并排两栏各有一行永远不亮。
+
+     **裁定：把「这一份没有它」写进图例文案本身，不动架构。** 三条理由：
+       ① 按轨道分图例要改 `paintLegend`——那是渲染段，而这道题只许动三处；
+          而且「每条轨道一份图例」会给另外三道单轨题多出一层没人用的嵌套
+          （queens / knightPath / rookCover —— tourKnight 跟这一题一样是双轨）。
+       ② `knightPath` 已经立过同形的先例（`kinds` 只有三种，"少的那一行本身就是
+          一句话"）。这一题只是把它从「整题少一行」推进到「这一行只属于其中一
+          份」——同一句话的加强版，不是新词汇。
+       ③ 那正好是这道题要她看见的东西：**两份的性格差别，就是各自缺的那一种
+          颜色**。tourKnight 的两份都演四种，所以先例里没出现过这个问题。
+     ⚠ 图例走的是 `textContent`（`paintLegend` 里把标签 replace 掉），
+     **这四条 label 里不许写 `**`**——它会被原样印成两个星号。
+
+     ---- 三个可选字段：只要 `sideView` 一个 ----
+       · `zOf` 不要：`cover(n)` 就是递归那一个，两份**同名同义**（「已经摆了 n 个
+         王，接着往下摆」），默认 `zOf = m.depth` 正好是这个数——两条轨道上那根
+         轴因此是同一个意思，并排读得起来。
+       · `spanZ` 不要：塔最深 9 层（③④ 的贪心，node 扫 `Step.depth` 实测最大 9），
+         9 × 0.55 = 4.95，与 queens 最深时的 10 × 0.55 = 5.5 同量级，正视下透视
+         放大 14/(14−4.95) ≈ 1.55 倍，取景框稳。
+       · `sideView` **要**：`sources` 有两份 = 两块棋盘沿世界 x 轴并排，而默认的
+         `3` 侧视正是 az=−π/2、**沿世界 x 轴看进去**的——两块盘会严丝合缝叠成一
+         块，两行 caption 叠成一行，而且看不出是叠着的。照抄 tourKnight 那一组
+         （az=0 / el=−1.25）：屏幕右仍是世界 x（两块盘照旧分开），屏幕上 ≈
+         0.95·世界 z（塔照旧立起来）。**单块棋盘的题不该声明它**（knightPath 与
+         rookCover 的注释里写着理由），这一题声明是因为它真的有两块。
+
+     ---- 练习模式：不声明 `exerciseSources`，与 rookCover 同形 ----
+     两份 `king-*.js` 里一条 `// >>> BLANK` 都没有，于是 `blankCount` 是 0、状态牌
+     走 `STR.exNone`、`restoreSrc` 因为 `!g.ex.blanks.length` 直接原样返回——练习
+     开关对这一题是**惰性**的，跟 rookCover 走的是同一条路。（tourKnight 要声明
+     `exerciseSources` 是因为它有挖空，两条可编辑轨道会共用一个 localStorage 键；
+     这里没有挖空，也就没有那个键。） */
+  const KD = {
+    tab:   { zh: '王的支配集', en: 'King Domination' },
+    brand: { zh: '盘上有墙。最少要几个王，才能让每一个空格都被照顾到？两份源码并排：一份挑得快，一份答得准。',
+             en: 'Walls on the board. How few kings can watch over every empty square? Two sources side by side: one answers fast, the other answers right.' },
+    tips:  { zh: '两块棋盘、两份源码、一个游标。上半截两份逐字相同——建墙表、列空格、建覆盖表、摆一个王——横线以下才分岔，差的只有一句话：挑哪个王。左边挑当下最划算的那一格，挑完就定；右边把所有摆法都试一遍，所以只有它说得出「最少」。看图例：绿色的「出局」只有左边会亮，橙色的「收回去」只有右边会亮——两份的性格差别，正好就是各自缺的那一种颜色。推着盘面滑杆走四档：5×5 上两边都是 4，贪心这一次运气好；6×6 上贪心 6、精确 4，差距出现了；再往右一档还是 6×6、还是三堵墙、只把墙挪了位置，差距就变成 4——决定吃多大亏的是墙摆在哪儿，不是摆了几堵。最后一档 7×7：贪心一眨眼给出 8，精确撞上 200,000 步的上限，那一栏于是写着「跑不完，判不了」，不是「8 是最优」。斜纹的格子是墙：王站不上去，也不用照顾它；而王的九宫不管墙挡不挡，挨着就是挨着（车不是这样的，别跟上一题搞混）。按 3 切侧视看深度塔，这一题的塔高就是「已经摆了几个王」。',
+             en: 'Two boards, two sources, one cursor. The upper half of the two sources is identical character for character — the wall table, the list of empty squares, the coverage table, placing one king — and they diverge only below the ruled line, over a single question: which king to pick. The left one takes whatever square covers the most right now and never reconsiders; the right one tries every arrangement, which is the only reason it can say “fewest”. Look at the legend: green “eliminated” only ever lights on the left, orange “taken back” only on the right — the difference in temperament between the two is exactly the colour each one lacks. Push the board slider through all four: on 5×5 both say 4 and greedy got lucky; on 6×6 greedy says 6 against the exact 4, and the gap appears; the next board is still 6×6, still three walls, only moved — and the gap becomes 4, so what greedy loses depends on where the walls sit, not how many there are. The last board, 7×7: greedy answers 8 in an eye-blink while the exact search hits the 200,000-step ceiling, so that column reads “does not finish — cannot be judged”, not “8 is optimal”. Hatched squares are walls: no king can stand there, and none needs covering. A king’s ring of nine does not care about walls — adjacent is adjacent (a rook is not like that; do not carry the last problem over). Press 3 for the side view to read the depth tower: here its height is how many kings have been placed.' },
+
+    paramBoard: { zh: '棋盘与墙', en: 'Board and walls' },
+    /* ⚠ **这两条的长度是量出来的，不是随手写的。**（`drawTrackCaption` 把它画在
+       每块盘正下方、以盘心居中，12px 等宽。）第一版写的 'Greedy: take the best
+       right now' / 'Exact: try every arrangement' 量出来是 224 / 202 px —— 两条的
+       半宽一相加，就和两块盘盘心之间那点距离**同一个量级**，于是屏幕上两行字
+       撞在一起，读成一句 “…best right nowExact: try…”（截图上看得见）。
+
+       **这里不写盘心之间那个像素数是有意的。** 它随盘面档位、窗口大小与 `fit.s`
+       浮动，复现时量到的是 235–255 px 这样一个区间，没有任何东西钉住它 —— 把其中
+       任何一个写成"实测值"都是**伪精度**。撞没撞是看得见的，余量不是。
+       tourKnight 的两条是 130 / 144 px。
+       现在这两条 ≈137 / 130 px，与那个先例同档。
+       更长的说明归 tips 与读数（读数里两条轨道的 k 各有各的抬头）。 */
+    lblGreedy:  { zh: '贪心（绝不反悔）', en: 'Greedy (no regrets)' },
+    lblExact:   { zh: '精确解（一个不漏）', en: 'Exact (exhaustive)' },
+
+    /* ⚠ 这四条走 textContent，**不许出现 `**`**（见上面的裁定）。
+       后两条点名说清「这一行只属于哪一份」——那正是这道题的内容。
+
+       ⚠ **长度同样是量出来的。** `.legend` 是 position:fixed、没有 max-width，
+       最长的那一行有多宽整块图例就有多宽；而右上角那块面板是 298 px 宽、
+       左缘落在 1680 视口的 1368 px 处。第一版那两条 106 字的英文让图例量到
+       **594.6 px、右缘 1383 px** —— 整整钻到面板底下去了，末尾几个词看不见。
+       这一页既有最长的一条是 rookCover 的 kCut（50 字）。现在这四条最长 56 字，
+       与那个先例同档，图例右缘离面板还剩两百多像素。 */
+    kTry:  { zh: '正在试这一格（两份都有）', en: 'trying this square (both sources)' },
+    kOk:   { zh: '这一格上真的摆了一个王（两份都有）', en: 'a king really stands here (both sources)' },
+    kCut:  { zh: '出局 —— 只有贪心那一份会亮（精确不淘汰任何候选）',
+             en: 'eliminated — greedy only; the exact one eliminates nobody' },
+    kBack: { zh: '收回去 —— 只有精确那一份会亮（贪心从不反悔）',
+             en: 'taken back — exact only; greedy never reconsiders' },
+
+    /* 两条轨道的 k **不是同一个意思**，所以标签不同：贪心只知道自己用了几个，
+       它没有证明过那是最少的。把两边都写成「最少要几个王」是这一题最不能出的错。 */
+    roKGreedy: { zh: '这一份用了几个王', en: 'Kings this one used' },
+    roKExact:  { zh: '最少要几个王', en: 'Fewest kings needed' },
+    roUnknown: { zh: '跑不完，判不了', en: 'does not finish — cannot be judged' },
+    roTrunc:   { zh: '撞上 200,000 步上限 —— 这不是工具坏了，这就是这一课',
+                 en: 'hit the 200,000-step ceiling — that is the lesson, not a malfunction' },
+    roCut:     { zh: '出局', en: 'eliminated' },
+    roBack:    { zh: '收回去', en: 'taken back' },
+    roOnBoard: { zh: '盘上的王', en: 'Kings on the board' },
+
+    roGap0:    { zh: '**差距 0：两边给出同一个数。** 贪心这一次挑对了 —— 但它并没有因此变得可靠，只是这块盘上没有它会踩的坑。',
+                 en: '**Gap 0: both answer the same number.** Greedy happened to choose well — that does not make it reliable, this board simply holds no trap for it.' },
+    roGapN:    { zh: '**差距 %G 个王。** 贪心 %A，精确 %B —— 同一块盘、同一道题，多出来的那 %G 个王就是「每一步都挑最划算的」这个主意的代价。',
+                 en: '**Gap: %G kings.** Greedy %A against the exact %B — same board, same question, and those %G extra kings are the price of the idea “take whatever is best right now”.' },
+    roGapUnk:  { zh: '**精确那一份没跑完，所以差距是不知道的。** 贪心给出 %A 个王，而这个工具**没有证明 %A 是最少的** —— 它只知道 %A 够用。「不知道」不是「等于 %A」，所以右边那一栏写的是「跑不完，判不了」，不是一个数字。',
+                 en: '**The exact search did not finish, so the gap is unknown.** Greedy answers %A kings, and this tool has **not proved that %A is the fewest** — it only knows %A suffices. “Unknown” is not “equal to %A”, which is why the right-hand column reads “does not finish — cannot be judged” instead of a number.' },
+    /* 贪心比精确还少是不可能的（精确是穷尽的下界）。会看到它只有一种解释：
+       源码被改过。**说出来**，不要把一个负数悄悄印成差距。 */
+    roGapNeg:  { zh: '**贪心（%A）比精确（%B）还少 —— 这不可能。** 精确那一份是穷尽搜索，它给出的就是下界。会看到这一行，只可能是其中一份源码被改过了。',
+                 en: '**Greedy (%A) came out below the exact answer (%B) — that cannot happen.** The exact search is exhaustive; its answer is a lower bound. Seeing this line can only mean one of the two sources has been edited.' },
+
+    les1: { zh: '**这一档两边都是 4。** 贪心这一次挑对了。把 BLOCKED 清空是更极端的情形：矩形**空盘**上两份永远相同（4×4 到 8×8 八种尺寸实测全同，8×8 都是 9）—— 空盘上王的位置太规整，贪心随手就挑中最优的那几格。**差距只在有墙的时候才出现**，所以这四档里没有一块空盘。推到下一档。',
+           en: '**Both boards answer 4 here.** Greedy chose well this time. Emptying BLOCKED is the extreme case: on an empty rectangular board the two are **always** identical (measured across all eight sizes from 4×4 to 8×8; on 8×8 both say 9) — the structure of kings on an empty board is so regular that greedy lands on the optimal squares by reflex. **The gap only ever appears once there are walls**, which is why none of these four boards is empty. Push the slider on.' },
+    les2: { zh: '**差距出现了：贪心 6，精确 4。** 贪心每一步都挑「当下能新照顾到最多空格」的那一格，挑完就定。前几步看着都很划算，可它们把剩下的空格切成了彼此够不着的零碎，于是后面要多花两个王去收尾 —— **每一步都最划算，加起来不等于总共最划算**，这就是贪心的全部毛病。代价那一栏也看得见：精确要 71,742 步，是贪心的 8.8 倍。',
+           en: '**The gap appears: greedy 6, exact 4.** Greedy takes the square that newly covers the most empty squares and never reconsiders. The early picks all look like bargains, but they scatter what is left into pieces no single king can reach together, so two extra kings are needed to mop up — **locally best at every step does not add up to globally best**, and that is the whole flaw of greedy. The price shows too: the exact search takes 71,742 steps, 8.8× the greedy one.' },
+    les3: { zh: '**同样是 6×6、同样三堵墙 —— 只把墙挪了位置，差距就从 2 变成 4。** 贪心要 8 个王，精确仍然只要 4：整整一倍。所以**贪心吃多大亏取决于墙摆在哪儿，不是摆了几堵**。「墙越多越吃亏」是错的：6×6 上按墙数各随机采 40 块，0/2/3/5/7/9/12 堵墙的平均差距是 0.00 / 0.78 / 0.72 / 0.88 / 1.05 / 0.68 / 0.55 —— 从没墙到有墙跳一次，之后基本持平，墙很多时反而回落。也别把这一档当常态：它是特意挑出来的极端例子，那 280 块随机盘里最大的差距只有 3。',
+           en: '**Same 6×6, same three walls — only their positions moved, and the gap goes from 2 to 4.** Greedy needs 8 kings where the exact answer is still 4: exactly double. So **how much greedy loses depends on where the walls are, not how many there are**. “More walls, worse greedy” is false: sampling 40 random 6×6 boards per wall count, the mean gap for 0/2/3/5/7/9/12 walls is 0.00 / 0.78 / 0.72 / 0.88 / 1.05 / 0.68 / 0.55 — one jump from none to some, then flat, and it falls again when walls are dense. Do not read this board as typical either: it was picked deliberately as an extreme, and across those 280 random boards the largest gap seen was 3.' },
+    les4: { zh: '**这一屏是整个工具的落点。** 贪心 13,578 步给出 8 个王 —— 上限的 6.8%，一眨眼。精确那一份撞上 200,000 步的上限，什么都没说完：它**没有**说「8 是对的」，也**没有**说「8 是错的」，它说的是「不知道」。左边那个 8 是一个**够用**的答案，不是一个**被证明过最少**的答案，而这个工具分辨不了这两件事 —— 正因为如此，它一个字都不会声称。**现实里用贪心不是因为它更好，是因为最优解你等不起**，而这件事在这一屏上是看得见的。',
+           en: '**This screen is what the whole tool is for.** Greedy answers 8 kings in 13,578 steps — 6.8% of the ceiling, an eye-blink. The exact search hits the 200,000-step ceiling and finishes nothing: it has **not** said 8 is right, and it has **not** said 8 is wrong. It says it does not know. That 8 on the left is an answer that **suffices**, not an answer **proved to be the fewest**, and this tool cannot tell those two apart — which is exactly why it claims neither. **Greedy is used in the real world not because it is better, but because you cannot wait for the optimum** — and here you can watch that happen.' },
+  };
+
+  /* 四档盘。**一块空盘都没有**是题面的一部分（见上面）：`king-*.js` 的 `source()`
+     因此对 `blocked` 不给默认值 —— 悄悄退化成空盘就是悄悄换成了这道题的假题。
+     顺序是刻意的，差距轴 0 → 2 → 4 → 不知道，推着滑杆走一遍就是四段课。 */
+  const KD_BOARDS = [
+    { W: 5, H: 5, blocked: [6, 12, 18] },
+    { W: 6, H: 6, blocked: [6, 24, 35] },
+    { W: 6, H: 6, blocked: [1, 4, 24] },
+    { W: 7, H: 7, blocked: [16, 24, 32] },
+  ];
+  const KD_LESSON = [KD.les1, KD.les2, KD.les3, KD.les4];
+  /* 越界当场抛，照 tourBoard / rcBoard 那条（阶段 5 约束 6）。 */
+  function kdBoard(st) {
+    const i = Math.round(st.board);
+    if (!isFinite(i) || i < 0 || i >= KD_BOARDS.length) {
+      throw new Error('盘面滑杆的档位越界：' + st.board + '（只有 0…' + (KD_BOARDS.length - 1) + ' 四档）');
+    }
+    return KD_BOARDS[i];
+  }
+  /* 文件名 → 给人看的名字。**认不出就原样显示文件名**（照 tourLabel）：并排两块
+     棋盘时「哪一块是哪一份」是这一题唯一不能含糊的事。 */
+  function kdLabel(file) {
+    if (file === 'king-greedy.js') return KD.lblGreedy;
+    if (file === 'king-exact.js') return KD.lblExact;
+    return { zh: String(file), en: String(file) };
+  }
+  /* 那一栏的抬头。**两条轨道的 k 不是同一个意思**（见 KD.roKGreedy 上面那条）。 */
+  function kdKLabel(file) {
+    if (file === 'king-exact.js') return KD.roKExact;
+    return KD.roKGreedy;
+  }
+  /* 一条轨道**跑到结论了没有**。截断、或者 result 不是数字（源码被改坏了、
+     或者这一帧轨迹还没建好）→ 一律「不知道」，绝不退回一个数字。 */
+  function kdDone(v) { return !!v && !v.truncated && typeof v.result === 'number'; }
+
   const PROBLEMS = {
     queens: {
       label: Q.tab, brand: Q.brand, tips: Q.tips,
@@ -7522,9 +8002,27 @@ const ALGOS = {
       sources: ['tour-dfs.js', 'tour-warnsdorff.js'],
       /* **练习模式下这一题降为「一份可编辑 + 一份只读对照」**（规格 §2.9 阶段 6
          第 1 条）。正常模式的两条轨道装的是「DFS vs Warnsdorff」，而练习要看的是
-         「参考 vs 她」——两组对比争同一块屏幕。降级之后三道题在练习模式下同形：
-         **每道题都只有一条可编辑、会跑、有棋盘的轨道**，而阶段 5 的教训是多一种
-         形状就多一类只在那种形状下发作的 bug。
+         「参考 vs 她」——两组对比争同一块屏幕。降级的理由是**形状要少**：阶段 5 的
+         教训是多一种形状，就多一类只在那种形状下发作的 bug。
+
+         ⚠ **「每道题只有一条可编辑、会跑、有棋盘的轨道」今天已经不是不变式了。**
+         （这里原来是这么写的 —— 阶段 6 那三道题上它为真，阶段 7 之后不再成立。）
+         `kingDominate` **不声明** `exerciseSources`，而 `sourcesFor()` 对没声明的
+         题目是「原样那几份**全都** edit」，于是它在练习模式下有**两条** edit 轨道：
+         两块盘、两个编辑器都活着（截图 `t6-exercise-kingdominate.png` 上看得见）。
+         validateDecl 那道门数的是「**带挖空的**可编辑源码」，而两份 `king-*.js` 一个
+         挖空都没有，所以门今天放行 —— 那是有意的（见那道门自己的注释）。
+
+         **前向风险，写在这里给下一个动 `algos/` 的人看**：`saveSrc(pid, text)`
+         只按 `pid` 存、**没有 blanks 守卫**，两条 edit 轨道今天就都在往同一个
+         `chess.exercise.v1.kingDominate.src` 里写（后写的赢，而且不报）。只因
+         `restoreSrc` 撞上 `!g.ex.blanks.length` 当场返回，那个键今天没人读，
+         存进去的是一坨惰性垃圾。**但只要给两份里的其中一份加上挖空**：那道门
+         只数到 1 份带挖空的、不会响，而 `restoreSrc` 会开始读那个键 —— 把今天从
+         **另一份**存进去的文本恢复到两条轨道上。
+         → 所以给 `king-greedy.js` / `king-exact.js` 加挖空时，**必须同时给
+         `kingDominate` 声明 `exerciseSources`**（一份 edit + 一份 contrast），
+         照下面这一题的写法。
 
          留下的那份 DFS **不跑**（4×5 上它是 200,000 步的截断轨迹，跑它只为摆在
          旁边当对照，等于每次进练习模式白付半秒），以只读文本待着——而它本身
@@ -7677,6 +8175,243 @@ const ALGOS = {
         lines.push('<span class="rule"></span>');
         lines.push(a.strong(KP.roNoBack, { B: fmtInt(m.ops.back) }));
         lines.push(a.note(KP.lesson));
+        return lines.join('<br>');
+      },
+    },
+
+    rookCover: {
+      label: RC.tab, brand: RC.brand, tips: RC.tips,
+      params: [{ key: 'board', label: RC.paramBoard, min: 0, max: RC_BOARDS.length - 1,
+                 step: 1, value: 0,
+                 fmt: function (v) {
+                   const B = RC_BOARDS[Math.max(0, Math.min(RC_BOARDS.length - 1, Math.round(v)))];
+                   /* 语言中立：数字 + 一个障碍的方块，中英两边读起来一样。 */
+                   return B.W + '×' + B.H + ' · ' + B.blocked.length + ' ■';
+                 } }],
+      sources: ['rook-cover.js'],
+      /* 入口是**递归**那一个：`walk(r)` 给第 r 个行段找列段坐下，找不到就请占着
+         位子的那位挪窝。于是调用深度 = 这条增广路交替走了几个来回，第三根轴
+         不需要 `zOf` 就是对的（理由见上面那段和 rook-cover.js 的文件头）。 */
+      entry: 'walk',
+      /* 三个参数一个都不能省：`source({ W, H, blocked })` 没有默认值，缺一个当场抛
+         （rook-cover.test.js 有断言钉着）。**空盘也要显式写 `blocked: []`** ——
+         那是这道题的假题，悄悄退化成它是这个键最不能出的错。 */
+      source: function (st, M, file) {
+        const B = rcBoard(st);
+        return M[file].source({ W: B.W, H: B.H, blocked: B.blocked });
+      },
+      /* 与另外四道题同形（§2.9）。`counters: []` 是**声明不是遗漏**：这段程序的
+         返回值就是 `rooks` 本身（`return rooks;`），再把 `rooks` 写进 counters
+         等于把同一个数比两遍，多出来的那一行只会让判定结果读起来像两处分歧。 */
+      check: { result: true, boardOps: true, counters: [] },
+      /* ⚠ **`blocked` 是这道题的题面本身，不是装饰。** 没有它，5×5 空盘（档 0）
+         与 5×5 五堵墙（档 1）在画布上是**逐像素相同的两张图**（实测：两档的空盘
+         画布哈希都是 `39c55ec169a68e96`），而右边那张 König 小图上九个障碍打着
+         斜纹 —— 面板知道墙在哪里，画布不知道。跑完的那一帧于是在演"两辆车隔着
+         四个空格互相照面"，读数却写着"互相吃不到"。
+         扩 `board()` 而不是新开一个 furniture(st) 钩子：挖掉的格子在概念上就是
+         盘面形状的一部分，而 `board()` 已经存在、已经拿到 `st`、已经在
+         layoutTracks 里被校验 —— 零新钩子、零新校验分支。 */
+      board: function (st) { const B = rcBoard(st); return { files: B.W, ranks: B.H, blocked: B.blocked }; },
+      zLabel: { zh: '递归深度（「请人挪窝」传了几手）', en: 'recursion depth (rounds of “please move”)' },
+      kinds: ['try', 'ok', 'cut', 'back'],
+      /* 四种全用上，但 **'back' 在这一题里的意思跟前两题不一样**：不是「这条支路
+         错了，撤销」，是「这辆车没错，只是把位子让给别人，它自己已经在别处站好
+         了」。图例上那一行照实写，别让她把橙色一律读成「白跑了」。 */
+      onMark: function (kind) {
+        if (kind === 'try') return { color: C_TRY, label: RC.kTry };
+        if (kind === 'ok') return { color: C_OK, label: RC.kOk };
+        if (kind === 'cut') return { color: C_CUT, label: RC.kCut };
+        if (kind === 'back') return { color: C_BACK, label: RC.kBack };
+        return null;
+      },
+      exportName: function (st) {
+        const B = rcBoard(st);
+        return 'rook-cover-' + B.W + 'x' + B.H + '-' + B.blocked.length + '.js';
+      },
+      readout: function (a, st) {
+        const m = a.main, lines = [];
+        if (!m) return '';
+        const B = rcBoard(st), seg = rcSegs(B);
+        /* 截断 / 没跑出结论 → 「—」，绝不写 0。这一题四档都跑得完（最贵 2,149
+           步），但她一旦动手改源码就什么都可能发生，这条路不能没有。 */
+        const done = !m.truncated && typeof m.result === 'number';
+        const kv = done ? bval(fmtInt(m.result), C_OK) : bval('—', C_DIM);
+        /* 两个问法各写一行、印同一个数 —— 那句「同一个数」才有东西可指。 */
+        lines.push(dimt(RC.roRooks) + ' ' + kv);
+        lines.push(dimt(RC.roLines) + ' ' + kv);
+        lines.push(a.note(RC.roSame));
+        lines.push('<span class="rule"></span>');
+        lines.push(dimt(STR.roSteps) + ' ' +
+                   bval(fmtInt(m.steps), m.truncated ? '#fcd34d' : C_STACK) +
+                   (m.truncated ? ' <span class="warn">✂</span>' : ''));
+        lines.push(dimt(RC.roSegs) + ' ' + bval(fmtInt(seg.nr), C_TRY) +
+                   ' <span class="dim">·</span> ' + dimt(RC.roSegsC) + ' ' +
+                   bval(fmtInt(seg.nc), C_TRY));
+        lines.push(dimt(RC.roOnBoard) + ' ' + bval(fmtInt(m.pieceCount), C_OK) +
+                   ' <span class="dim">·</span> ' + dimt(RC.roYield) + ' ' +
+                   bval(fmtInt(m.ops.back), C_BACK));
+        lines.push('<span class="rule"></span>');
+        lines.push(dimt(STR.roMarks) + ' ' + bval(String(m.markBright), C_TRY) + ' ' + t(STR.roBright) +
+                   ' <span class="dim">·</span> ' + bval(String(m.markStale), C_DIM) + ' ' + t(STR.roStale));
+        lines.push(a.note(RC.roTwice));
+        lines.push('<span class="rule"></span>');
+        /* König 的那些线。**没跑完就不画** —— 一条从半截轨迹里读出来的覆盖不是
+           覆盖，它只是「目前为止失败过的那几个行段」，印出来会是一个假答案。
+
+           ⚠ **还有一道自检：`kon.size === m.result`。** 这不是保险丝，是这道题
+           自己的定理 —— 线数恒等于车数，不等就说明这两样东西不该被摆在一起算。
+           实测抓到过一个真实的窗口：`readout(a, st)` 拿到的 `st` 是**滑杆此刻的
+           值**，而 `a.main.trace` 还可能是**上一档**的轨迹（换档 → 重建之间那一
+           两帧，读数正好在 120 ms 的节拍上刷了一次）。段号于是按新盘算、轨迹却
+           是旧盘的，扫出来的覆盖三档全错（8/0、5/6、7/5），而它长得完全正常。
+           拿 `result` 一比，三档全被挡下（8≠5、11≠7、12≠7）。
+           她在练习模式下改坏了 `walk` 也会落到同一条路上，那时候「不知道」正是
+           实话 —— 这个恒等式本来就只对真的最大匹配成立。 */
+        const kon = done ? rcKonig(m.trace, seg) : null;
+        if (kon && kon.size === m.result) {
+          lines.push(a.strong(RC.roCover, { R: fmtInt(kon.rows.length),
+                                            C: fmtInt(kon.cols.length),
+                                            K: fmtInt(kon.size) }));
+          lines.push(rcMiniBoard(B, seg, kon));
+        } else {
+          lines.push(a.note(RC.roCoverNo));
+        }
+        lines.push('<span class="rule"></span>');
+        lines.push(a.note(RC.roNotFewest));
+        lines.push(a.strong(RC_LESSON[Math.round(st.board)] || RC_LESSON[0]));
+        return lines.join('<br>');
+      },
+    },
+
+    kingDominate: {
+      label: KD.tab, brand: KD.brand, tips: KD.tips,
+      params: [{ key: 'board', label: KD.paramBoard, min: 0, max: KD_BOARDS.length - 1,
+                 step: 1, value: 0,
+                 /* ⚠ **档位标签必须把墙的位置也写出来。** ② 与 ③ 同为 6×6、同为三堵
+                    墙，只写「6×6 · 3 ■」的话两档在滑杆上**读起来一模一样** —— 而
+                    「同尺寸、同墙数、只挪了位置」正是这两档全部的内容，滑杆上看不出
+                    区别就等于把这一课藏了起来。格号是语言中立的，中英两边同一份。 */
+                 fmt: function (v) {
+                   const B = KD_BOARDS[Math.max(0, Math.min(KD_BOARDS.length - 1, Math.round(v)))];
+                   return B.W + '×' + B.H + ' · ■ ' + B.blocked.join(' ');
+                 } }],
+      /* **这一页第二个数组长度不是 1 的 `sources`**（tourKnight 是第一个）。
+         两份源码 = 两条轨道 = 两块并排的棋盘 = 两块并排的编辑器，全从这一行长出来。
+         两份的上半截逐字节相同（king.test.js 有一道门比那一段），并排一 diff，
+         diff 出来的正好是「挑哪个王」那个主意本身。 */
+      sources: ['king-greedy.js', 'king-exact.js'],
+      /* 入口两份**同名同义**：`cover(n)` = 「已经摆了 n 个王，接着往下摆」，而且
+         两份都是**递归**那一个（不是外壳）。于是 z 轴在两条轨道上是同一个意思，
+         `zOf` 不需要声明（默认 `zOf = m.depth` 正好是这个数）。 */
+      entry: 'cover',
+      /* 与另外四道题同形（§2.9）。`counters: []` 是**声明不是遗漏**：两份程序的
+         返回值就是各自的王数（`return kings;` / `return limit;`），再写一个计数器
+         等于把同一个数比两遍。三键显式写 —— 与这道题有没有挖空无关。 */
+      check: { result: true, boardOps: true, counters: [] },
+      /* 三个参数一个都不能省：两份 `source({ W, H, blocked })` 都没有默认值，缺一个
+         当场抛（king.test.js 有断言钉着）。**空盘也要显式写出来** —— 那是这道题的
+         假题（空盘上两份给出同一个数），而四档里本来就没有空盘。 */
+      source: function (st, M, file) {
+        const B = kdBoard(st);
+        return M[file].source({ W: B.W, H: B.H, blocked: B.blocked });
+      },
+      /* `blocked` 是题面本身，不是装饰：这道题的全部内容就是「哪些格子要照顾、
+         哪些站不上去」。Task 3A 扩的 `board()` 第三个字段在这里是第二个消费者 ——
+         带障碍盘只要多 return 一样东西，架构一行没动。 */
+      board: function (st) { const B = kdBoard(st); return { files: B.W, ranks: B.H, blocked: B.blocked }; },
+      trackLabel: function (file) { return kdLabel(file); },
+      /* ⚠ **换掉默认的侧视**，理由与 tourKnight 逐字相同：默认那一条是 az=−π/2、
+         沿世界 x 轴看进去的，而并排两块棋盘正是沿 x 轴摆开的。数值也照抄它那一组
+         （量过一次的东西不重新量）。单块棋盘的题不该声明这个字段。 */
+      sideView: { az: 0, el: -1.25, dist: 15 },
+      zLabel: { zh: '递归深度（已经摆了几个王）', en: 'recursion depth (kings placed so far)' },
+      /* 四种是**并集**，每条轨道只演三种：贪心永不亮 back，精确永不亮 cut。
+         裁定与理由写在上面 KD 那一段的注释里 —— 图例的两条 label 自己点名说清
+         「只有哪一份会亮」，不改 paintLegend。 */
+      kinds: ['try', 'ok', 'cut', 'back'],
+      onMark: function (kind) {
+        if (kind === 'try') return { color: C_TRY, label: KD.kTry };
+        if (kind === 'ok') return { color: C_OK, label: KD.kOk };
+        if (kind === 'cut') return { color: C_CUT, label: KD.kCut };
+        if (kind === 'back') return { color: C_BACK, label: KD.kBack };
+        return null;
+      },
+      exportName: function (st) {
+        const B = kdBoard(st);
+        /* ② 与 ③ 的尺寸和墙数都一样，只有位置不同 —— 文件名里也得留住这一点，
+           不然导出两档会得到同一个名字。 */
+        return 'king-dominate-' + B.W + 'x' + B.H + '-' + B.blocked.join('-') + '.js';
+      },
+      readout: function (a, st) {
+        const lines = [];
+        if (!a.tracks.length) return '';
+        /* 练习模式下这一题不降级（没有挖空，也就没有只读对照），但 `contrast`
+           这条路照留 —— 照 tourKnight 的形状，别让这道题成为唯一的例外。 */
+        const live = a.tracks.filter(function (v) { return !v.contrast; });
+        const hasContrast = live.length !== a.tracks.length;
+        live.forEach(function (v, k) {
+          if (k) lines.push('<span class="rule"></span>');
+          lines.push('<b style="--c:' + (v.index === a.active ? C_STACK : C_DIM) + '">' +
+                     esc(t(kdLabel(v.file))) + '</b>' +
+                     (v.index === a.active ? ' <span class="dim">◂</span>' : ''));
+          /* ⚠ **这一行是整道题的读数纪律。** 跑到结论才印数字；截断（或者结果不是
+             数字）一律印「跑不完，判不了」，琥珀色 —— 那是阶段 6 的 unknown 通道
+             与工具④ 深度 4 用的那一种，**不是红色的「错」**（.warn，见 §样式表里
+             `.sp-status.unk` 上面那条注释）。绝不写 0、绝不写贪心那一边的数字、
+             更绝不写一句「8 是最优」：那一栏什么都没算完。 */
+          const kv = kdDone(v) ? bval(fmtInt(v.result), C_OK)
+                               : '<span class="warn">' + esc(t(KD.roUnknown)) + '</span>';
+          lines.push('&nbsp;&nbsp;' + dimt(kdKLabel(v.file)) + ' ' + kv);
+          lines.push('&nbsp;&nbsp;' + bval(fmtInt(v.steps), v.truncated ? '#fcd34d' : C_STACK) +
+                     (v.truncated ? ' <span class="warn">✂</span>' : '') + ' ' + dimt(STR.roSteps));
+          /* 两个计数**两条轨道都印**，就为了让那两个 0 说话：贪心的「收回去」
+             恒等于 0（它从不反悔），精确的「出局」恒等于 0（它不淘汰任何候选）。
+             图例上那两行文案说的是同一件事，这里是它的数字版。 */
+          lines.push('&nbsp;&nbsp;' + dimt(KD.roCut) + ' ' + bval(fmtInt(v.ops.cut), C_CUT) +
+                     ' <span class="dim">·</span> ' + dimt(KD.roBack) + ' ' +
+                     bval(fmtInt(v.ops.back), C_BACK) +
+                     ' <span class="dim">·</span> ' + dimt(KD.roOnBoard) + ' ' +
+                     bval(fmtInt(v.pieceCount), C_OK));
+          lines.push('&nbsp;&nbsp;' + dimt(STR.roHere) + ' ' +
+                     bval(fmtInt(v.i) + ' / ' + fmtInt(Math.max(0, v.len - 1)), C_STACK) +
+                     (v.len > 0 && v.i >= v.len - 1 ? ' <span class="dim">' + esc(t(STR.trkDone)) + '</span>' : ''));
+          if (v.truncated) lines.push('&nbsp;&nbsp;<span class="warn">' + esc(t(KD.roTrunc)) + '</span>');
+        });
+        lines.push('<span class="rule"></span>');
+        /* 「一个游标推两条轨迹」这句话只在真有两条跑着的轨迹时才成立（照 tourKnight）。 */
+        if (live.length > 1) {
+          lines.push(a.note(STR.trkSameI, { I: fmtInt(a.cursor) }));
+          lines.push(a.note(STR.trkPick));
+        }
+        if (hasContrast) lines.push(a.note(STR.exContrast));
+        lines.push('<span class="rule"></span>');
+        /* ---- 差距：这一题的教学轴，也是「不知道」最容易被偷偷变成数字的地方 ----
+           **按文件名取两条轨道，不按下标**：下标只在 `sources` 的顺序没被动过时
+           才对，而「哪一份是精确解」是这段话唯一不能猜错的事。
+           两边都跑到结论才算得出差距；只要精确那一边没跑完，差距就是**不知道**，
+           这里印的是那句「工具没有证明 %A 是最少的」，一个差距数字都不出现。 */
+        function pick(f) {
+          return live.filter(function (v) { return v.file === f; })[0] || null;
+        }
+        const g = pick('king-greedy.js'), x = pick('king-exact.js');
+        if (g && x) {
+          if (kdDone(g) && kdDone(x)) {
+            const gap = g.result - x.result;
+            if (gap === 0) lines.push(a.strong(KD.roGap0));
+            else if (gap > 0) lines.push(a.strong(KD.roGapN, { G: fmtInt(gap),
+                                                              A: fmtInt(g.result),
+                                                              B: fmtInt(x.result) }));
+            else lines.push('<span class="warn">' + a.strong(KD.roGapNeg, { A: fmtInt(g.result),
+                                                                           B: fmtInt(x.result) }) + '</span>');
+          } else if (kdDone(g)) {
+            lines.push(a.strong(KD.roGapUnk, { A: fmtInt(g.result) }));
+          }
+          /* 两边都没跑到结论 → 一个字都不说。这时候连「贪心给出几个」都还不知道，
+             那句 roGapUnk 里的 %A 会变成一个撒谎的数字。 */
+        }
+        lines.push('<span class="rule"></span>');
+        lines.push(a.strong(KD_LESSON[Math.round(st.board)] || KD_LESSON[0]));
         return lines.join('<br>');
       },
     },
@@ -8379,11 +9114,45 @@ const ALGOS = {
     if (!spec || !isFinite(spec.files) || !isFinite(spec.ranks) ||
         spec.files < 1 || spec.ranks < 1) {
       if (!threw) hookFail(pid, 'board', new Error('没有交出一块能用的棋盘：' + describeBoardSpec(spec)));
-      st.tracks.forEach(function (tk) { tk.layout = null; });
+      st.tracks.forEach(function (tk) { tk.layout = null; tk.blocked = null; });
       return;
     }
     const files = Math.max(1, Math.round(spec.files));
     const ranks = Math.max(1, Math.round(spec.ranks));
+    /* ---- `blocked`：挖掉的格子，**盘面形状的一部分**，所以在这里、跟 files /
+       ranks 同一段里判，不新开一类。
+
+       ⚠ **缺省必须与今天逐字节相同。** 五题里三题（queens / tourKnight /
+       knightPath）的 `board()` 根本不返回这个字段 → 下面 `walls` 是 null →
+       drawProblem 传给 BoardRender 的 `mask` 是 null → drawBoard 里那句
+       `if (mask && mask(f,r) === false) continue;` 一次都不会真，格子循环走的
+       是原来那条路。改动前后这三题的空盘画布哈希逐字节相同（见 task-3a 报告）。
+
+       给了、但给坏了 → **跟"交不出 files/ranks"同样处理**：不画棋盘 + 说出来。
+       一块少了几堵墙、却长得像模像样的棋盘，和一块尺寸错了的棋盘是同一种错——
+       她会拿着它去数格子，而这道题的全部内容就是那些看不见的格子。 */
+    let walls = null;
+    if (spec.blocked !== undefined && spec.blocked !== null) {
+      const cells = files * ranks;
+      let bad = null;
+      if (!Array.isArray(spec.blocked)) {
+        bad = 'blocked 不是数组：' + (typeof spec.blocked) + ' ' + String(spec.blocked);
+      } else {
+        for (let k = 0; k < spec.blocked.length; k++) {
+          const v = spec.blocked[k];
+          if (typeof v !== 'number' || !isFinite(v) || Math.floor(v) !== v || v < 0 || v >= cells) {
+            bad = 'blocked[' + k + '] 不是 0…' + (cells - 1) + ' 之间的格号：' + String(v);
+            break;
+          }
+        }
+      }
+      if (bad) {
+        hookFail(pid, 'board', new Error(bad));
+        st.tracks.forEach(function (tk) { tk.layout = null; tk.blocked = null; });
+        return;
+      }
+      walls = spec.blocked.length ? spec.blocked.slice() : null;
+    }
     /* ⚠ 摆几块棋盘看的是**跑着的**轨道数，不是 `tracks.length` —— 只读对照
        没有棋盘。写成后者的后果是练习模式下那一块唯一的棋盘按"两块"的间距
        算偏移，整块盘偏到画面一侧去，而且什么都不报。 */
@@ -8392,9 +9161,13 @@ const ALGOS = {
     const pitch = files + BOARD_GAP;
     let slot = 0;
     st.tracks.forEach(function (tk) {
-      if (isContrast(tk)) { tk.layout = null; return; }
+      if (isContrast(tk)) { tk.layout = null; tk.blocked = null; return; }
       const base = BR.layout({ files: files, ranks: ranks, cell: 1, z: 0 });
       tk.layout = shiftLayout(base, (slot - (n - 1) / 2) * pitch);
+      /* 墙跟着轨道走而不是塞进 layout：`shiftLayout` 的 `if (!dx) return L;` 会
+         原样交回 BR.layout 造的那个对象，往里塞字段就成了"有时在包装上、有时在
+         引擎的对象上"两种形状。挂在轨道上只有一种形状，并排两块盘也各自有一份。 */
+      tk.blocked = walls;
       slot++;
     });
   }
@@ -8620,6 +9393,72 @@ const ALGOS = {
       ctx.stroke();
     }
     ctx.restore();
+  }
+
+  /* ---------------- 墙：挖掉的格子 ----------------
+     两件事，都在这一页里，`core/board-render.js` 一行没动：
+
+     ① **不画成棋盘格** —— 走 `BoardRender.drawBoard` 现成的 `spec.mask`
+        （`mask(f,r) === false` 的格子跳过）。没有墙时 `wallMask` 交回 null，
+        drawBoard 里的 `spec.mask || null` 于是仍是 null，那一句 `if (mask && …)`
+        一次都不会真：**这就是"缺省与今天逐字节相同"的全部机制**。
+     ② **画成一堵墙** —— 挖成一个洞跟"这里是墙"不是一回事：洞在画面上只是"没有
+        格子"，而她要看见的是"这里过不去"。所以补一层 45° 斜纹，用的是右边那张
+        König 小图里同一套值（底色 #0b1220、纹色 rgba(159,176,200,.30)、1.5px 线
+        / 5px 间距）—— 同一块盘的两处画法必须一致，否则她得先证明那两张图说的是
+        同一件事。斜纹画在 drawBoard **之前**：外框与坐标标签因此仍盖在最上层。
+
+     斜纹按**屏幕像素**排（px()），不按世界坐标：格子是投影出来的四边形，透视下
+     远近格宽差好几倍，按世界坐标排会让远处那几堵墙糊成一片实色。 */
+  const WALL_FILL = '#0b1220';
+  const WALL_HATCH = 'rgba(159,176,200,0.30)';
+  function wallMask(L, blocked) {
+    if (!blocked || !blocked.length) return null;
+    const set = Object.create(null);
+    for (let k = 0; k < blocked.length; k++) set[blocked[k]] = 1;
+    return function (f, r) { return set[r * L.files + f] ? false : true; };
+  }
+  function drawWalls(C, L, blocked, tally) {
+    if (!blocked || !blocked.length) return;
+    const step = px(5), lw = px(1.5);
+    for (let k = 0; k < blocked.length; k++) {
+      const fr = sqToFR(blocked[k], L);
+      if (!fr) { tally.offBoard++; continue; }
+      const cs = L.squareCorners(fr.f, fr.r), pts = [];
+      let clipped = false;
+      for (let m = 0; m < 4; m++) {
+        const p = E.proj(C, cs[m]);
+        if (!p) { clipped = true; break; }
+        pts.push(p);
+      }
+      if (clipped) continue;                       // 近裁剪掉的格不画，与 drawBoard 同规矩
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (let m = 0; m < 4; m++) {
+        x0 = Math.min(x0, pts[m][0]); x1 = Math.max(x1, pts[m][0]);
+        y0 = Math.min(y0, pts[m][1]); y1 = Math.max(y1, pts[m][1]);
+      }
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let m = 1; m < 4; m++) ctx.lineTo(pts[m][0], pts[m][1]);
+      ctx.closePath();
+      ctx.fillStyle = WALL_FILL;
+      ctx.fill();
+      ctx.clip();
+      ctx.strokeStyle = WALL_HATCH;
+      ctx.lineWidth = lw;
+      ctx.beginPath();
+      /* 45°，方向与 CSS 的 repeating-linear-gradient(45deg,…) 一致：条带沿屏幕
+         左下→右上（y 轴向下，所以 x 增、y 减）。扫描线从左上角起、覆盖到
+         bbox 的宽 + 高，斜着推过整个四边形。 */
+      const span = (x1 - x0) + (y1 - y0);
+      for (let d = 0; d <= span; d += step) {
+        ctx.moveTo(x0 + d, y1);
+        ctx.lineTo(x0 + d - (y1 - y0), y0);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   /* 标记：先画压暗的一批、再画有效的一批，重叠时有效的那个盖在上面。 */
@@ -8858,11 +9697,15 @@ const ALGOS = {
       const c = boardAt(tk);
       const pts = towerPoints(P, tk, c);
       for (let j = 0; j < pts.length; j++) if (pts[j].level > top) top = pts[j].level;
-      shots.push({ tk: tk, k: k, L: L, c: c, pts: pts });
+      shots.push({ tk: tk, k: k, L: L, c: c, pts: pts, walls: tk.blocked || null });
     });
     const levels = Math.max(1, top);
     shots.forEach(function (s) {
-      BR.drawBoard(ctx, C, E, { layout: s.L });
+      /* 先墙、后棋盘：两者画的格子互不相交（mask 挖掉的正是墙那几格），先画墙
+         只是让 drawBoard 的外框与坐标标签留在最上层。没有墙时 mask 是 null，
+         drawWalls 立刻返回 —— 与改动前同一条路径。 */
+      drawWalls(C, s.L, s.walls, fresh);
+      BR.drawBoard(ctx, C, E, { layout: s.L, mask: wallMask(s.L, s.walls) });
       if (E.state.marks !== false) drawMarks(C, P, s.L, s.c, fresh);
       if (E.state.pieces !== false) drawPieces(C, s.L, s.c, fresh);
       if (E.state.tower !== false) { drawTower(C, P, s.L, s.pts); drawZAxis(C, P, s.L, levels); }
@@ -10192,6 +11035,58 @@ const ALGOS = {
   const SIDE_VIEW_KEYS = { az: 1, el: 1, dist: 1, tx: 1, ty: 1, tz: 1 };
   const CHECK_KEYS = { result: 1, boardOps: 1, counters: 1 };
   const EX_ROLES = { edit: 1, contrast: 1 };
+
+  /* ---- 声明层文案的**显示宽度**上限（阶段 7 Task 6 立的第二道门）----
+
+     `--font-*` 是等宽的这件事不成立，所以这里量的不是像素而是「显示宽度」：
+     CJK / 全角一个字算 2，其余算 1。这只是一个**便宜的近似**，理由与实测都写在
+     下面那道门里 —— 中英两份实测下来每单位 5.6–6.0 px，两种语言落在同一条线上，
+     够用来把「长得离谱」和「正常」分开，而这正是这道门唯一要做的事。
+
+     两个上限都是从今天的实测最长值往上留出余量、并且**必须挡得住已经发生过的
+     那两次坏版面**定出来的（数字见门里的注释）。 */
+  const LEGEND_LABEL_MAX = 72;
+  const TRACK_LABEL_MAX = 26;
+  function dispWidth(s) {
+    let n = 0;
+    /* for…of 走的是码点，不是 UTF-16 码元 —— 别把一个表情符号数成两个字。 */
+    for (const ch of String(s)) {
+      const c = ch.codePointAt(0);
+      n += (c >= 0x1100 && (c <= 0x115f || c === 0x2329 || c === 0x232a ||
+        (c >= 0x2e80 && c <= 0xa4cf && c !== 0x303f) ||
+        (c >= 0xac00 && c <= 0xd7a3) || (c >= 0xf900 && c <= 0xfaff) ||
+        (c >= 0xfe30 && c <= 0xfe6f) || (c >= 0xff00 && c <= 0xff60) ||
+        (c >= 0xffe0 && c <= 0xffe6))) ? 2 : 1;
+    }
+    return n;
+  }
+  /* 一条 {zh,en}（或者一个裸串）在某种语言下真的会被画出来的那段字。
+     **跟 paintLegend 同一条剥标记的正则**：那里画的是 textContent，
+     `<i>x</i>` 里的尖括号不会占宽度，量的时候也不该算进去。 */
+  function labelTextOf(v, lang) {
+    const s = (v && typeof v === 'object') ? v[lang] : v;
+    return typeof s === 'string' ? s.replace(/<[^>]+>/g, '') : null;
+  }
+
+  /* 这份源码里有没有**挖空**（`// >>> BLANK id=…`）。
+
+     读的是内联进来的模块**文本**（ALGOS），不是解析结果 —— 挖空清单要等
+     `P.source(st, M, file)` 生成出源码、再 `Exercise.parse` 一遍才有，而那时候
+     参数、模块、轨道都还没建起来，validateDecl 跑在它们全部之前。
+
+     ⚠ 这是一个**保守的近似**，两个方向都想清楚了：
+       · 认多了（某份源码里有一条永远走不到的挖空）→ 门更早响一步，不是坏事；
+       · 认少了 → 只可能发生在有人把指令写成别的形状，那时 Exercise.parse 会
+         在正常模式下就当场抛（它是**正常模式也要跑**的那一步）。
+     正则要认 `id=`：`tour-warnsdorff.js` 的维护者注释里就有两处裸的
+     `` `// >>> BLANK` 指令 ``，只认前缀会把它们数成挖空。 */
+  const BLANK_DIRECTIVE_RE = /\/\/ >>> BLANK\s+id=/;
+  function fileHasBlanks(file) {
+    if (typeof ALGOS !== 'object' || !ALGOS) return false;
+    const src = ALGOS[file];
+    return typeof src === 'string' && BLANK_DIRECTIVE_RE.test(src);
+  }
+
   function validateDecl() {
     const has = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
     PIDS.forEach(function (pid) {
@@ -10323,6 +11218,145 @@ const ALGOS = {
               (typeof v) + ' ' + String(v) + '。非数字会让相机变成 NaN、整块画布变白。');
           }
         });
+      }
+
+      /* ---- 并排多块棋盘的题目**必须自己给 `sideView`** ----
+
+         这一条是**两次**从截图里用眼睛救回来的（阶段 5 的 `tourKnight` 一次、
+         阶段 7 的 `kingDominate` 一次），而在那两次之间一道门都没有：少写一个
+         **可选**字段，validateDecl 放行、check.py 放行、`node --check` 放行，
+         页面照常起来、状态牌是绿的 —— 只有按下 `3` 才看得见两块棋盘严丝合缝
+         叠成一块，而且叠得太整齐，第一眼像是"这一题只有一块盘"。
+
+         为什么是必然、不是运气不好：默认的 `3` 侧视沿**世界 x 轴**看进去
+         （VIEWS.side 的 az），而 layoutTracks 把并排的几块棋盘正是沿 x 轴摆开的
+         —— 同一根轴，于是**"并排"这段位移在屏幕上投影为零**。三次独立的对照实验
+         （都是把 kingDominate 的 sideView 删掉走默认侧视）量到的都是这一件事：
+         两块盘的中心在屏幕上落到同一点，而声明 sideView 之后它们相隔两百来像素。
+
+         **这里不写具体的像素数是有意的。** 三次量到的余数分别是 0.1 / 0.0 与
+         一个一两像素的值——差别只来自量法（盘心 vs 所有格心的均值）、窗口大小和
+         那一帧相机停在哪里，把其中任何一个写成"实测值"都是**伪精度**：它读起来像
+         一个可复现的测量，而它不是。要判的那件事是定性的：**位移没了。**
+
+         **只查"有没有"，不查"摆得对不对"。** 后者是取景问题（盘距、透视、
+         窗口大小都掺一脚），声明层量不出来；而这道门要挡的那个失败模式
+         ——"根本没想到这回事"——只用"有没有"就挡住了。 */
+      if ((P.sources || []).length > 1 && !has(P, 'sideView')) {
+        throw new Error(at + 'sources 有 ' + P.sources.length + ' 份（并排 ' +
+          P.sources.length + ' 块棋盘），却没有声明 sideView —— 默认的 `3` 侧视' +
+          '正好沿着多块棋盘并排的那根世界 x 轴看进去，**并排那段位移在屏幕上投影为零**，' +
+          '几块盘的中心落到同一点、完全重合（声明 sideView 之后它们相隔两百来像素），' +
+          '而且什么都不报。' +
+          '照 tourKnight / kingDominate 写一个，例：sideView: { az: 0, el: -1.25, dist: 15 }。');
+      }
+
+      /* ---- 图例文案与轨道标题的**显示宽度上限** ----
+
+         这是阶段 7 的第二个坑，同样是作者看截图才发现的（Task 5 第一版）：
+
+           · 过长的**图例**文案把图例撑到面板底下。`.legend` 是 position:fixed
+             且没有 max-width，两条 106 字的英文让它量到 594.6 px、右缘落在
+             1383 px，而面板左缘在 1368 px —— 截图里第三行末尾当场被切掉。
+           · 过长的**轨道标题**让并排两块盘底下的 caption 撞在一起，读成
+             "…best right nowExact: try…"：`Greedy: take the best right now` /
+             `Exact: try every arrangement` 量出来是 224 / 202 px，两条的半宽一相加
+             就和两块盘盘心之间那点距离同一个量级 —— 而那点距离**不是一个定数**
+             （随盘面档位、窗口大小与 `fit.s` 浮动，复现时量到 235–255 px，没有
+             任何东西钉住它），所以这里不写余量：撞没撞是截图上看见的，余量不是。
+
+         **这道门是一个便宜的近似，不是那两件事本身。** 那两件事都是运行期几何
+         （盘距、面板左缘、窗口宽度、`--code-w` 拖到哪儿都掺一脚），而
+         validateDecl 跑在第一帧之前，一个矩形都还没有。真正的运行期判据不能立在
+         这里，也不该立在别处：窄窗口下 `.legend` 本来就 display:none（媒体查询
+         < 900px），一条"图例右缘要在面板左缘左边"的运行期断言会在**合法**的窄
+         窗口上误报。所以这里立的是声明层唯一量得出来的那样东西 —— 字有多长。
+         阶段 6 给占位注释立的 `NOTE_MAX` 是同一个形状的先例。
+
+         上限怎么来的（实测，1500×950 窗口，中英各跑一遍五道题）：
+
+           图例：今天最长 57（en/kingDominate，319 px）· 48（zh/kingDominate，287 px）
+                 → 每单位 5.6–6.0 px，中英落在同一条线上。上限 72 留 26% 余量，
+                   而坏掉的那一版是 106 —— 挡得住。
+           标题：今天最长 20（en/tourKnight）· 18（zh/kingDominate）
+                 → 上限 26；坏掉的那两条是 31 与 28，两条都挡得住。
+
+         `onMark` / `trackLabel` 抛出来的错**不归这道门**：前者 paintLegend 每次
+         重画都会原地炸（响得很），后者 trackTitle 有 hookFail 接着。这里抛了就
+         跳过长度检查，只做自己那一件事 —— 一道门只有一个失败模式，才说得清。 */
+      (P.kinds || []).forEach(function (k) {
+        let info = null;
+        try { info = P.onMark(k); } catch (e) { return; }
+        if (!info || !info.color) return;
+        ['zh', 'en'].forEach(function (lang) {
+          const s = labelTextOf(info.label, lang);
+          if (s === null) return;
+          const w = dispWidth(s);
+          if (w > LEGEND_LABEL_MAX) {
+            throw new Error(at + 'onMark("' + k + '").label 的 ' + lang +
+              ' 那一份太长了：显示宽度 ' + w + '，上限 ' + LEGEND_LABEL_MAX +
+              '（CJK 算 2）。图例是 position:fixed、没有 max-width 的，' +
+              '这么长的一行会把整块图例撑到右上角面板底下，末尾几个词在屏幕上' +
+              '直接看不见（实测 106 宽 → 594.6 px，右缘 1383 px 压过面板左缘 1368 px）。' +
+              '把要解释的话搬到 tips 或读数里，图例只留名字。原文：' + JSON.stringify(s));
+          }
+        });
+      });
+      if (typeof P.trackLabel === 'function') {
+        (P.sources || []).forEach(function (file, k) {
+          let v = null;
+          try { v = P.trackLabel(file, k); } catch (e) { return; }
+          ['zh', 'en'].forEach(function (lang) {
+            const s = labelTextOf(v, lang);
+            if (s === null) return;
+            const w = dispWidth(s);
+            if (w > TRACK_LABEL_MAX) {
+              throw new Error(at + 'trackLabel("' + file + '") 的 ' + lang +
+                ' 那一份太长了：显示宽度 ' + w + '，上限 ' + TRACK_LABEL_MAX +
+                '（CJK 算 2）。这行字画在每块棋盘底下、居中于盘心，' +
+                '并排两块盘时两条的半宽一相加就会撞在一起，读成一句连起来的乱码' +
+                '（实测 31 与 28 宽的两条 → 224 + 202 px，两条的半宽和与两块盘盘心之间' +
+                '那点距离同一个量级，而那点距离随盘面与窗口浮动、没有余量可言）。' +
+                '标题只写"哪一份"，"它是什么主意"归 tips。原文：' + JSON.stringify(s));
+            }
+          });
+        });
+      }
+
+      /* ---- 一道题只能有一份**带挖空的**可编辑源码 ----
+
+         上面 `exerciseSources` 那一段里已经有一条「只支持一份 role:"edit"」，
+         但它**写在 `if (has(P,'exerciseSources'))` 里面** —— 于是完全不声明那个
+         字段、又有两条可编辑轨道的题目从门旁边整个绕了过去。`kingDominate`
+         就是这样一道题：`sourcesFor()` 对没声明的题目是「原样那几份**全都**
+         edit」，所以它在练习模式下是**两条** role:"edit"，而那条门一次都没看它一眼。
+
+         今天无害，明天不是：`king-greedy.js` / `king-exact.js` 里一个挖空都没有，
+         于是 `restoreSrc` 的 `!g.ex.blanks.length` 当场返回、存进
+         `chess.exercise.v1.kingDominate.src` 的东西根本没人读。哪天给这两份
+         加上挖空，两块编辑器就会共用那一个键**互相覆盖**（后写的赢，而且不报），
+         挖空 id 还只在一份源码内保证不重复。
+
+         所以这道门数的是「**带挖空的**可编辑源码」有几份，不是「可编辑源码」
+         有几份：前者才是 localStorage 那两个键真正会打架的条件，也正因如此它
+         今天对 kingDominate 是放行的 —— 一道在正确的时刻才响的门，比一道
+         今天就把页面停住的门有用。上面那条严格的声明侧检查**原样保留**，
+         这一条只补它够不着的那一半。 */
+      const effSources = has(P, 'exerciseSources')
+        ? P.exerciseSources
+        : (P.sources || []).map(function (f) { return { file: f, role: 'edit' }; });
+      const blanky = [];
+      effSources.forEach(function (e) {
+        if (e && e.role === 'edit' && fileHasBlanks(e.file)) blanky.push(e.file);
+      });
+      if (blanky.length > 1) {
+        throw new Error('PROBLEMS.' + pid + '：练习模式下会有 ' + blanky.length +
+          ' 份**带挖空的**可编辑源码（' + blanky.join(' 与 ') + '）—— 今天只支持一份。' +
+          '存档键 chess.exercise.v1.' + pid + '.src 与 .<挖空 id> 都只按题目名分，' +
+          '两份会互相覆盖而且不报，挖空 id 也只在一份源码内保证不重复。' +
+          '给这道题声明 exerciseSources，让其中一份变成 role:"contrast"' +
+          '（照 tourKnight：一份 edit + 一份只读对照）；' +
+          '真要两份都可编辑，先把键改成按文件分并换成 v2 前缀。');
       }
     });
   }
@@ -10643,7 +11677,27 @@ const ALGOS = {
          练习模式下那份只读对照是一条没有棋盘的轨道，按轨道数报就会说"两块盘"
          而画面上只有一块。 */
       board: L ? { files: L.files, ranks: L.ranks,
-                   boards: tks.filter(function (x) { return !!x.layout; }).length } : null,
+                   boards: tks.filter(function (x) { return !!x.layout; }).length,
+                   /* 墙（`board()` 交回来的 `blocked`，就是 mask 与 drawWalls 用的
+                      那一份）。没有墙的题目是 []，**不是 null** —— null 在这一页
+                      是"不知道"，而"这一题没有墙"是知道的。 */
+                   blocked: (tk && tk.blocked ? tk.blocked.slice() : []).sort(function (a, b) { return a - b; }),
+                   /* 每一格格心此刻在屏幕上的位置（含取景变换 fit）。验收拿它去
+                      **采画布像素**：「墙看得见」这件事不能只靠肉眼看截图，也不能
+                      只靠"我传了 mask"这种自证。相机走 E.makeCam()，跟绘制循环
+                      同一个出口；近裁剪掉的格子是 null。 */
+                   px: (function () {
+                     const C = E.makeCam(), o = Object.create(null);
+                     for (let r = 0; r < L.ranks; r++) {
+                       for (let f = 0; f < L.files; f++) {
+                         const p = E.proj(C, L.squareCenter(f, r));
+                         o[r * L.files + f] = p
+                           ? [Math.round(fit.tx + fit.s * p[0]), Math.round(fit.ty + fit.s * p[1])]
+                           : null;
+                       }
+                     }
+                     return o;
+                   })() } : null,
       towerLevels: towerTop,
       spanZ: spanZOf(pid ? PROBLEMS[pid] : null),
       /* 声明式钩子（board / readout / zOf / trackLabel）抛过没有。null = 没抛过。 */
