@@ -193,6 +193,10 @@ body.folded #split,body.folded #divider{display:none}
    共用一个类名迟早有人按名字改样式。 */
 .sp-status.unk{color:#fcd34d;border-color:rgba(251,191,36,.4)}
 .sp-status b{color:#7dd3fc}
+/* 附在状态牌**已有那句话后面**的旁注（今天只有一个用户：切语言时"你改过的那份
+   没换"）。它必须是灰的、而且不许染上 .ok / .judge 的颜色 —— 那一刻状态牌上很
+   可能正是绿色的「对了」，旁注跟着变绿就成了"判定说的一部分"。 */
+.sp-status .note{color:rgba(159,176,200,.7);font-weight:400}
 
 /* 代码区：一道题有几份源码就并排几块（tourKnight 是唯一持有两份的那一个）。
    `#editorHost` 自己不再是编辑器，而是一行 flex 容器；真正被 Editor.mount 接管的
@@ -7242,6 +7246,13 @@ const ALGOS = {
                  en: 'The copy saved in this browser was written for %V, and the parameters are now %W — a different parameter means a different source, so it was not restored.' },
     exNoStore: { zh: '这个浏览器不让存东西（多半是隐私模式），所以刷新一次就得重写 —— 别的一切照常。',
                  en: 'This browser will not let the page store anything (private mode, most likely), so a reload loses your answer. Everything else works as usual.' },
+    /* 切语言时**没有**跟着换语言的那几份源码：她动过它们。
+       ⚠ 这两句里**一个语言名都不许出现**。这句话是在切完之后说的，说话的语言
+       就是她刚切到的那一个 —— 写死"要换成英文那一版"在切回中文的那个方向上
+       正好说反，而且这一页没有第二个地方能纠正它。「这个语言的那一版」两个
+       方向都成立，而且正是 Reset to original 真会给她的东西。 */
+    keptLang:  { zh: '你改过的源码保持原样 —— 切语言不会动它。要换成这个语言的那一版，按「还原为原始版本」。',
+                 en: 'Your edited source was left as it is — switching language never touches it. Press Reset to original for this language\'s version.' },
 
     /* ---- 显示开关（四条都是"画不画"，不是"算什么"） ---- */
     tgMarks:  { zh: '四种状态', en: 'The four states' },
@@ -7321,7 +7332,11 @@ const ALGOS = {
        params    []           滑杆声明；UI 自动生成，值写进 E.state['键.参数名']
        sources   []           要哪几份 algos/*.js（**数组**：tourKnight 一个键持有两份）
        entry     string       入口函数名（§1.4：z 轴 = 这个函数的递归深度）
-       source(st, M, file)    → 一份源码字符串。M 是 file → 模块对象
+       source(st, M, file, lang) → 一份源码字符串。M 是 file → 模块对象。
+                             **`lang` 必须原样转发进 `M[file].source({…, lang })`**
+                             （规格 §1.6：七份生成器的 `lang` 都是必填，缺了当场抛）。
+                             忘了转发的那道题会在自己那块编辑器上方写红字，不会
+                             悄悄退回中文 —— 这是有意的，见 genSource。
        board(st)             → { files, ranks, blocked? }
                              `blocked`（可选）= 挖掉的格子编号数组（`sq = rank*files + file`）。
                              **它是盘面形状的一部分，不是装饰**：那几格不画成棋盘格
@@ -7949,7 +7964,7 @@ const ALGOS = {
          两份必须一起改。** 那边重复了一遍是有意的（测试不该 require 一个 html），
          代价就是这条注释：谁先改了谁负责把另一份也改了。 */
       check: { result: true, boardOps: true, counters: ['solutions'] },
-      source: function (st, M, file) { return M[file].source({ N: st.N }); },
+      source: function (st, M, file, lang) { return M[file].source({ N: st.N, lang: lang }); },
       board: function (st) { return { files: st.N, ranks: st.N }; },
       zLabel: { zh: '递归深度', en: 'recursion depth' },
       kinds: ['try', 'ok', 'cut', 'back'],
@@ -8041,9 +8056,9 @@ const ALGOS = {
       /* 三个参数一个都不能省：两份 `source({ W, H, start })` 都没有默认值，缺一个
          当场抛（tour.test.js 有六条断言钉着）。start 固定 0 = a1 角起——四档的
          实测数字全是角起量的，换起点就是另一张表了。 */
-      source: function (st, M, file) {
+      source: function (st, M, file, lang) {
         const B = tourBoard(st);
-        return M[file].source({ W: B.W, H: B.H, start: 0 });
+        return M[file].source({ W: B.W, H: B.H, start: 0, lang: lang });
       },
       board: function (st) { const B = tourBoard(st); return { files: B.W, ranks: B.H }; },
       trackLabel: function (file) { return tourLabel(file); },
@@ -8131,8 +8146,8 @@ const ALGOS = {
       entry: 'expand',
       /* 三个参数一个都不能省：`source({ W, start, target })` 没有默认值，缺一个
          当场抛（knight-path.test.js 有八条断言钉着）。 */
-      source: function (st, M, file) {
-        return M[file].source({ W: KP_W, start: KP_START, target: st.target });
+      source: function (st, M, file, lang) {
+        return M[file].source({ W: KP_W, start: KP_START, target: st.target, lang: lang });
       },
       /* 与 exercise-blanks.test.js 的 `CHECK_KP` 逐字一致（两份必须一起改）。
          返回值就是最短距离，没有需要单独盯的计数器 —— `counters: []` 是声明。 */
@@ -8196,9 +8211,9 @@ const ALGOS = {
       /* 三个参数一个都不能省：`source({ W, H, blocked })` 没有默认值，缺一个当场抛
          （rook-cover.test.js 有断言钉着）。**空盘也要显式写 `blocked: []`** ——
          那是这道题的假题，悄悄退化成它是这个键最不能出的错。 */
-      source: function (st, M, file) {
+      source: function (st, M, file, lang) {
         const B = rcBoard(st);
-        return M[file].source({ W: B.W, H: B.H, blocked: B.blocked });
+        return M[file].source({ W: B.W, H: B.H, blocked: B.blocked, lang: lang });
       },
       /* 与另外四道题同形（§2.9）。`counters: []` 是**声明不是遗漏**：这段程序的
          返回值就是 `rooks` 本身（`return rooks;`），再把 `rooks` 写进 counters
@@ -8312,9 +8327,9 @@ const ALGOS = {
       /* 三个参数一个都不能省：两份 `source({ W, H, blocked })` 都没有默认值，缺一个
          当场抛（king.test.js 有断言钉着）。**空盘也要显式写出来** —— 那是这道题的
          假题（空盘上两份给出同一个数），而四档里本来就没有空盘。 */
-      source: function (st, M, file) {
+      source: function (st, M, file, lang) {
         const B = kdBoard(st);
-        return M[file].source({ W: B.W, H: B.H, blocked: B.blocked });
+        return M[file].source({ W: B.W, H: B.H, blocked: B.blocked, lang: lang });
       },
       /* `blocked` 是题面本身，不是装饰：这道题的全部内容就是「哪些格子要照顾、
          哪些站不上去」。Task 3A 扩的 `board()` 第三个字段在这里是第二个消费者 ——
@@ -8502,18 +8517,26 @@ const ALGOS = {
   }
 
   /* 一条练习轨道随身带的东西：挖空清单，加上占位注释那几行的**中英两份原文**。
-     后者是切语言时**原地对换**用的 —— 不重新生成源码、更不重跑解释器
-     （queens N=8 一次 Run 是两百毫秒，切一次语言等那么久是不能接受的）。
+
+     `notes` 两份都留着，今天有两个读者，都跟"她手上那份可能是另一种语言写的"
+     有关：① `restoreSrc` —— 存档是上一种语言下存的，把注释那几行换成当前语言的；
+     ② `noteIndexOf`（第 4 级「填进编辑器」）—— 两份都认，所以切过语言之后也
+     定得住她那段答案。**它不再是切语言的机制**：整份源码换新语言那一份是
+     `retextSources` 干的，见那里。
 
      `pristine` 是**这条轨道刚生成出来时的占位版原文**。第 4 级的「填进编辑器」
      靠它划出「她写的是哪几行」：拿她此刻的文本跟这一份对齐，挖空之外的部分
      一模一样时，中间剩下的那几行就是她的答案（见 answerRange）。没有它就只能
      猜「注释行下面那一行是她的答案」—— 而她的答案可以是三行，猜错就是吃掉她
-     写的东西。 */
+     写的东西。
+
+     ⚠ **这里不再记语言。** 从前有一个 `lang: curLang()`，而 `tk.lang`（见
+     markGenerated）记的是同一件事 —— 一条轨道的文本是哪种语言生成的。两份
+     记账迟早分岔，而分岔的后果是切语言时换一半留一半。留 `tk.lang` 那一份：
+     正常模式下根本没有 `ex`，它是唯一两种模式都在的那个。 */
   function exStateOf(parsed) {
     return {
       blanks: parsed.blanks,
-      lang: curLang(),
       pristine: parsed.placeholder,
       notes: {
         zh: parsed.blanks.map(function (b) { return Exercise.noteLine(b, 'zh'); }),
@@ -8668,9 +8691,14 @@ const ALGOS = {
   }
   /* ================= localStorage 到此为止 ================= */
 
-  /* 占位注释那几行的中英原地对换。**两处共用**：切语言（retextNotes）与「从存档
-     恢复」（存的时候可能是另一种语言）。查得到表的那几行才换 —— 她自己改过的行
-     对不上任何一份，原样留着。 */
+  /* 占位注释那几行的中英原地对换。查得到表的那几行才换 —— 她自己改过的行对不上
+     任何一份，原样留着。
+
+     ⚠ **它今天只剩一个调用点：「从存档恢复」**（存的时候可能是另一种语言）。
+     切语言那一头已经改成整份重新生成了（retextSources），逐行对换在那里既不够
+     用（阶段 8 之后整份源码都是双语的，不止注释行）也没必要。但这里换不成 ——
+     存档里那份是**她写的**，生成器吐不出来，只能就着它换掉认得出的那几行。
+     换掉的只是注释，程序一个字节的行为都没变。 */
   function swapNoteLines(text, from, to) {
     const map = Object.create(null);
     for (let i = 0; i < from.length && i < to.length; i++) map[from[i]] = to[i];
@@ -8696,7 +8724,13 @@ const ALGOS = {
       return g.src;
     }
     /* 存的时候是另一种语言 → 占位注释那几行换成当前语言的。换掉的只是注释，
-       程序一个字节的行为都没变（同 retextNotes）。 */
+       程序一个字节的行为都没变。
+
+       ⚠ **这里换不成"整份重新生成"**（切语言那一头的做法，见 retextSources）：
+       存档里那份是**她写的**，生成器吐不出来。她自己写的那几行照旧原样留着，
+       周围的占位注释跟着界面语言走 —— 也正因为如此，恢复回来的这一份跟
+       `pristineSrc` 必然不等，下一次切语言会把它判成"她改过"而原样留着。
+       那是对的：它本来就是她的。 */
     const lang = curLang();
     const text = (rec.lang && rec.lang !== lang)
       ? swapNoteLines(rec.text, g.ex.notes[rec.lang], g.ex.notes[lang])
@@ -8831,6 +8865,9 @@ const ALGOS = {
   let activeMovedByRebuild = 0;
   let statusKind = 'idle';      // idle | ok | bad | judge | busy | boot —— 切语言时按它重画
   let jumpNote = null;          // 点棋盘反向定位之后那一句话
+  /* 最近一次 relabel 里 retextSources 的结果 `{swapped, kept, failed}`。状态牌上
+     那句「你改过的那一份没换」认它，探针也报它。 */
+  let lastRetext = null;
 
   /* ⚠ `bootErr` / `statusLocked` **在这里声明**，不在下面「启动」那一节 ——
      `setStatus` / `attachEditor` / `frameFor` 都要读它们，而那三个函数写在启动
@@ -8930,10 +8967,15 @@ const ALGOS = {
      留成 `''`，而 `I.run('')` **不抛异常**、返回 `{result: undefined, trace: []}`
      —— 于是「源码生成失败」在界面上长得跟「运行成功、零步」一模一样。现在它
      变成这条轨道自己的 `tk.err`（showProblemStatus / relabel / 探针都读它——
-       showProblemStatus 是**所有轨道一起看**的那一份，见它头上的注释）。 */
+       showProblemStatus 是**所有轨道一起看**的那一份，见它头上的注释）。
+
+     ⚠ **第四个参数 `lang` 是必填的**（规格 §1.6）：七份生成器都会在缺它时当场抛
+     「少了 lang」。别在这里补一个默认值把它压下去 —— 那样漏了转发的那道题会
+     悄悄退回中文注释，而屏幕上没有一句话说明为什么。现在它走 catch，红字写在
+     它自己那块编辑器上方。 */
   function genSource(P, pv, file) {
     try {
-      return { src: P.source(pv, MODS, file), err: null };
+      return { src: P.source(pv, MODS, file, curLang()), err: null };
     } catch (e) {
       return { src: '', err: { category: 'source', file: file, line: null,
                                message: (e && e.message) ? e.message : String(e) } };
@@ -8977,6 +9019,26 @@ const ALGOS = {
     };
   }
 
+  /* 一条轨道刚被生成器喂过：记下**原文**与**生成它用的语言**。
+
+     这两个字段是切语言（retextSources）唯一的判据，所以它们必须在**每一个**
+     把生成结果放进轨道的地方各写一次 —— 今天是三处：buildProblem、
+     「还原为原始版本」、attachRefTrack。写成一个函数而不是三处各写两行赋值，
+     是因为漏写的后果是沉默的：漏的那一处会让 `tk.pristineSrc` 停在上一份上，
+     于是切语言时那条轨道被判成"她改过"，永远不换语言，而且一个字都不说。
+
+     ⚠ `tk.src` 不一定等于 `src`：练习模式下 buildProblem 跑的是 restoreSrc 交出来
+     的那一份（她上次写到一半的答案）。**pristineSrc 记的是生成器吐出来的那一份**，
+     不是编辑器里的那一份 —— 两者不等正是"她改过"的定义。
+
+     生成失败（g.err）时 `lang` 记成 null，不是当前语言：那条轨道手上根本没有
+     "某种语言的源码"，下一次切语言应当再试一次，而不是以为它已经是对的。 */
+  function markGenerated(tk, g) {
+    tk.pristineSrc = g.src;
+    tk.lang = g.err ? null : curLang();
+    return g.src;
+  }
+
   /* 活动轨道只能落在可编辑的那一条上：练习模式下的只读对照排在**左边**
      （下标 0），而 `activeTrack` 默认就是 0 —— 不挪的话 F10/F9/Run 全落在
      一块永远不动的死源码上，而且看起来像是工具坏了。 */
@@ -9017,11 +9079,13 @@ const ALGOS = {
     const files = sourcesFor(P);
     st.tracks = files.map(function (entry, k) {
       const old = st.tracks[k];
-      const tk = old || { index: k, file: entry.file, src: '', res: null, cur: D.create([]), err: null, bcache: null };
+      const tk = old || { index: k, file: entry.file, src: '', pristineSrc: '', lang: null,
+                          res: null, cur: D.create([]), err: null, bcache: null };
       tk.file = entry.file;
       tk.role = entry.role;
       const g = prepareSource(P, pv, entry.file, entry.role);
       tk.ex = g.ex;
+      markGenerated(tk, g);
       if (entry.role === 'contrast') {
         /* **只读对照不跑**：没有轨迹、没有棋盘、没有游标（§2.9 阶段 6 第 1 条）。
            4×5 上那份朴素 DFS 是 200,000 步的截断轨迹 —— 跑它只为摆在旁边给人
@@ -10528,7 +10592,7 @@ const ALGOS = {
          ⚠ 走 `prepareSource` 而不是裸的 `genSource`：练习模式下「还原为原始版本」
          要还原到**占位版**，不是把参考答案倒给她。 */
       const g = prepareSource(P, paramsOf(uiTab), tk.file, tk.role);
-      if (!g.err) tk.ex = g.ex;                 // 占位注释重新按当前语言生成
+      if (!g.err) { tk.ex = g.ex; markGenerated(tk, g); }   // 占位注释重新按当前语言生成
       runTrack(tk, g.err ? tk.src : g.src, true);
       if (g.err) tk.err = g.err;
       syncEditorSlots();                 // 只有这一块的内容变了，另一块原样不动
@@ -10599,7 +10663,8 @@ const ALGOS = {
     const st = S[pid];
     let ref = refIndexOf(pid) >= 0 ? st.tracks[st.tracks.length - 1] : null;
     if (!ref) {
-      ref = { index: st.tracks.length, file: tk.file, role: 'reference', src: '', res: null,
+      ref = { index: st.tracks.length, file: tk.file, role: 'reference', src: '',
+              pristineSrc: '', lang: null, res: null,
               cur: D.create([]), err: null, bcache: null, ex: null, layout: null };
       st.tracks.push(ref);
     }
@@ -10607,6 +10672,7 @@ const ALGOS = {
     ref.file = tk.file;
     ref.ex = null;
     const g = prepareSource(P, paramsOf(pid), tk.file, 'edit', true);
+    markGenerated(ref, g);
     /* runTrack 开头把 err 清成 null，所以生成错误只能盖在它之后（同 buildProblem）。 */
     runTrack(ref, g.err ? '' : g.src, false);
     if (g.err) ref.err = g.err;
@@ -11071,7 +11137,7 @@ const ALGOS = {
   /* 这份源码里有没有**挖空**（`// >>> BLANK id=…`）。
 
      读的是内联进来的模块**文本**（ALGOS），不是解析结果 —— 挖空清单要等
-     `P.source(st, M, file)` 生成出源码、再 `Exercise.parse` 一遍才有，而那时候
+     `P.source(st, M, file, lang)` 生成出源码、再 `Exercise.parse` 一遍才有，而那时候
      参数、模块、轨道都还没建起来，validateDecl 跑在它们全部之前。
 
      ⚠ 这是一个**保守的近似**，两个方向都想清楚了：
@@ -11508,43 +11574,64 @@ const ALGOS = {
     document.getElementById('hint').textContent = t(STR.hint);
   }
 
-  /* ---------------- 切语言：占位注释那几行原地对换 ----------------
+  /* ---------------- 切语言：整份源码换成新语言那一份 ----------------
 
-     **不重新生成源码、更不重跑解释器。** 一次 Run 是几十到几百毫秒（queens N=8
-     两百毫秒、4×5 的占位版 13 万步），切一次语言等那么久是不能接受的；而占位
-     注释是注释，换掉它一步都不影响。
+     **不重跑解释器、不重建轨道。** 两种语言变体的可执行代码逐字节相同、行号
+     逐行对齐（规格 §1.6，七份生成器各有一道门守着；rook-cover 上还验过更强的
+     一条：29 档随机盘上两语的逐步 `Step.line` 序列与 `result` 完全相同）。所以
+     手上这份轨迹在新语言下**完全有效**：`Step.line` 指的还是同一行，
+     `pristine` / `answerRange` / `judge.herSrc` 的行号一个都不用动。要换的只有
+     摆在她眼前的那些字。
 
-     做法是**逐行精确对换**：这条轨道建起来时把每个挖空的注释行中英两份原文都
-     记下了（exStateOf），这里按行去查表。她自己改过的那一行对不上任何一份，
-     原样留着 —— 切语言不会吃掉她写了一半的答案，也不会把她删掉的注释找回来。
+     这比它替下来的 `retextNotes()`（逐行查表对换占位注释）**更简单**：那一版只
+     换得动挖空的注释行，源码本体的注释与运行日志换不动 —— 而阶段 8 之后整份
+     源码都是双语的。
+
+     ⚠ **她改过的源码一个字都不动。** 判据跟 saveSrc 那一带用的是同一个：轨道
+     现在的文本若还等于它建起来那一刻生成器吐出来的那一份（`pristineSrc`），
+     说明她只是在读，静默换掉；只要不等，就原样留着，并在状态栏说明为什么没换
+     （`Reset to original` 是既有的退路）。切语言不许吃掉她写了一半的答案。
+
+     ⚠ **判定那一刻记下的源码要跟着换。** `judge.herSrc` 是拿来跟编辑器内容比
+     "她改过了没有"的，不换的话下一次 syncEditorSlots 送来的新文本跟它对不上，
+     判定当场作废。实测过（旧版本的浏览器验收里当场撞上）：填对了、绿色的
+     「对了」，切一次语言就变回一句灰的「运行完成 · 144 步 · 返回值 0」，而她
+     什么都没动。只在**真的换了**那条轨道上换，而且要求它此刻正好等于换之前
+     的文本 —— 否则那句结论本来就已经不属于编辑器里这份源码了。
 
      ⚠ 走遍**所有**题目，不只当前这一道：别的题目的轨道也已经建好了，只是没在
-     屏幕上；不换的话，她切过去看到的是上一种语言的提示，而且再也不会被刷新。 */
-  function retextNotes() {
+     屏幕上；不换的话，她切过去看到的是上一种语言的源码，而且再也不会被刷新。
+     （这一条是 retextNotes 就有的，照旧。）
+
+     ⚠ 参考轨道（`role:'reference'`）也要换，而且要按它自己的生成方式来：
+     attachRefTrack 走的是 `prepareSource(…, 'edit', wantClean=true)`（参考答案
+     就是挖空体原文）。照 `tk.role` 直传会给它一份**占位版**，也就是把答案换成
+     一排空 —— 下一次 Check 拿它当参考。 */
+  function retextSources() {
     const lang = curLang();
-    let n = 0;
+    let swapped = 0, kept = 0, failed = 0;
     PIDS.forEach(function (pid) {
-      const st = S[pid];
+      const P = PROBLEMS[pid], st = S[pid], pv = paramsOf(pid);
       tracksOf(pid).forEach(function (tk, k) {
-        if (!tk.ex || tk.ex.lang === lang) return;
-        const from = tk.ex.notes[tk.ex.lang], to = tk.ex.notes[lang];
-        const swap = function (text) { return swapNoteLines(text, from, to); };
-        tk.src = swap(tk.src);
-        /* ⚠ **那份占位版原文也要跟着换。** 第 4 级的「填进编辑器」拿它跟编辑器
-           里的文本对齐来划出"她写的是哪几行"（answerRange）—— 一边换了语言、
-           一边没换，对齐当场失败，按钮就变成一句"下面的代码被改过"。 */
-        tk.ex.pristine = swap(tk.ex.pristine);
-        /* ⚠ **判定那一刻记下的源码也要跟着换。** 换掉的只是注释那一行，程序一个
-           字节的行为都没变 —— 可 `judge.herSrc` 是拿来跟编辑器内容比"她改过了没有"
-           的，不换的话下一次 syncEditorSlots 送来的新文本跟它对不上，判定当场作废。
-           实测过（浏览器验收里当场撞上）：填对了、绿色的「对了」，切一次语言就变回
-           一句灰的「运行完成 · 144 步 · 返回值 0」，而她什么都没动。 */
-        if (st && st.judge && st.judge.herIndex === k) st.judge.herSrc = swap(st.judge.herSrc);
-        tk.ex.lang = lang;
-        n++;
+        if (tk.lang === lang) return;
+        if (tk.src !== tk.pristineSrc) { kept++; return; }   // 她改过：一个字都不动
+        const isRef = isReference(tk);
+        const g = prepareSource(P, pv, tk.file, isRef ? 'edit' : tk.role, isRef);
+        /* 生成失败：**不换、不假装换过**（lang 留在原处，下一次切语言再试一次），
+           并把错误盖到这条轨道上 —— 编辑器里那份是上一种语言的，屏幕上必须有
+           一句话解释这件事。 */
+        if (g.err) { tk.err = g.err; failed++; return; }
+        const was = tk.src;
+        tk.src = g.src;
+        if (tk.ex && g.ex) tk.ex = g.ex;   // 挖空清单、占位原文、注释两份，一起换新语言那一份
+        if (st && st.judge && st.judge.herIndex === k && st.judge.herSrc === was) {
+          st.judge.herSrc = g.src;
+        }
+        markGenerated(tk, g);
+        swapped++;
       });
     });
-    return n;
+    return { swapped: swapped, kept: kept, failed: failed };
   }
 
   function relabel() {
@@ -11556,8 +11643,9 @@ const ALGOS = {
     paintHint();
     document.getElementById('busy').textContent = t(STR.busy);
     paintLegend();
-    /* 占位注释那几行跟着语言走 —— **不重跑解释器**，见 retextNotes。 */
-    retextNotes();
+    /* 整份源码跟着语言走 —— **不重跑解释器**，见 retextSources。 */
+    const rt = retextSources();
+    lastRetext = rt;                           // 探针读它（`langSwap`）
     /* 并排那几块源码的标题也是 {zh,en}，切语言要跟着重画。 */
     if (uiTab) syncEditorSlots();
     if (bootErr) paintBootFail();              // 唯一能穿过 statusLocked 的那条
@@ -11571,6 +11659,14 @@ const ALGOS = {
     } else if (statusKind === 'ok' || statusKind === 'judge') showProblemStatus();
     else if (statusKind === 'busy') setStatus(t(STR.busy), 'busy');
     else setStatus(t(STR.ready), '');
+    /* 「你改过的那一份没换」**接在上面那句话后面，不盖掉它**。
+       ⚠ 这一条是硬的：此刻状态牌上很可能正是绿色的「对了」（她填对了一个空、
+       按过 Check），而她改过源码正是"填对了"的前提 —— 两件事**必然同时发生**。
+       写成 setStatus 就等于用一句旁注把判定结论抹掉，那正是 retextNotes 那个
+       旧缺陷的另一种长相。statusLocked（引导失败）时一个字都不加。 */
+    if (rt.kept && !statusLocked) {
+      statusEl.innerHTML += '<br><span class="note">' + esc(t(STR.keptLang)) + '</span>';
+    }
     if (dbg) dbg.relabel();
   }
   relabel();
@@ -11641,6 +11737,13 @@ const ALGOS = {
                  /* 'edit' | 'contrast' | 'reference'。判定之后要能一眼看出哪一条
                     是参考轨道 —— 光看 file 看不出来（它跟她那条是同一份文件）。 */
                  role: x.role || 'edit',
+                 /* 这条轨道手上那份源码是**哪种语言生成的**，以及她动过没有。
+                    「切语言整份换掉」与「她改过的那一份原样留着」两条断言都从
+                    这里读 —— 光看 chars 断不出来（两种语言的源码字符数当然不同，
+                    但那不等于换的是对的那一份），而 `edited` 正是 retextSources
+                    的判据本身。 */
+                 lang: x.lang || null,
+                 edited: x.src !== x.pristineSrc,
                  steps: x.res ? x.res.trace.length : null,
                  truncated: !!(x.res && x.res.trace.truncated),
                  result: x.res && x.res.result !== undefined ? x.res.result : null,
@@ -11699,6 +11802,16 @@ const ALGOS = {
                      return o;
                    })() } : null,
       towerLevels: towerTop,
+      /* 界面语言，以及**最近一次 relabel 换了几份源码 / 留了几份 / 失败几份**。
+         两种模式下都在（`exercise.lang` 只在练习模式里有）。启动那一次 relabel
+         也算，所以从没切过语言时它是 `{swapped:0,kept:0,failed:0}` 而不是 null。
+
+         ⚠ **名字不能叫 `lang`** —— 这个对象下面已经有一个 `lang`（报的是
+         `document.documentElement.lang`，也就是 `'zh-CN'|'en'`）。同名的后一个
+         会静默盖掉前一个：写成 `lang` 时探针报的是 `'zh-CN'`，而 `curLang()`
+         给的是 `'zh'`，验收当场读到一个这一页从来没用过的值。 */
+      langCode: curLang(),
+      langSwap: lastRetext,
       spanZ: spanZOf(pid ? PROBLEMS[pid] : null),
       /* 声明式钩子（board / readout / zOf / trackLabel）抛过没有。null = 没抛过。 */
       hookError: st ? st.hookErr : null,
