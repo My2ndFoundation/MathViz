@@ -2390,7 +2390,11 @@ body.busy #busy{display:block}
     return {
       vars: new Map(),
       parent: parent || null,
-      callDepth: parent ? parent.callDepth : { n: 0 },
+      /* n = 被解释的调用帧数；b = 当前路径上已进入未退出的块数（见
+         evalBlockBody 与 MAX_DEPTH 旁边的实测）。两个都在整条环境链上
+         共享同一个对象，所以 b 累加的正是**各帧调用点嵌套深度之和**——
+         这恰好是把帧数换算成宿主栈开销所缺的那一项。 */
+      callDepth: parent ? parent.callDepth : { n: 0, b: 0 },
       rec: parent ? parent.rec : null,
     };
   }
@@ -2728,6 +2732,53 @@ body.busy #busy{display:block}
      乐观的假象），而不是凭感觉调大。 */
   const MAX_DEPTH = 500;
 
+  /* ---- 2026-08-07 订正：这道守卫原先数错了东西 ----
+
+     上面那套推理有一个前提是错的：它默认「一个被解释的帧」在宿主栈上
+     的开销是个**常数**，于是拿「帧数」当「宿主栈开销」的代用品。实际上
+     这个换算系数随**调用点的词法嵌套深度线性增长**，因为每一层包裹都
+     多出几层生成器委托：`for` 的体要走 evalStmt(For) → evalStmt(Block)
+     → evalBlockBody 三层，裸块 `{}` 少一层。
+
+     实测（node，二分探测真实原生天花板，形状同上「递归调用嵌在算术
+     表达式里」）：
+
+       包裹层数   0     1     2     3     4     5
+       原生天花板 747   477   349   274   226   192
+       每帧当量   1.00  1.57  2.15  2.73  3.31  3.90
+
+     每层 +0.575 个「裸帧当量」，六个数据点的斜率吻合到小数点后三位。
+     `for` / `for…of` / `while` / `if` **完全同价**（都是三层委托），裸块
+     `{}` 约 0.375（两层）。也就是**一层循环就足以让 500 这个上限永远
+     轮不上**——而工具 ④⑤ 把编辑器交给使用者，回溯类算法「递归调用嵌在
+     for 循环里」恰恰是最常见的写法。她拿到的会是引擎的裸 RangeError。
+
+     所以**任何固定的帧数上限都不可能对所有形状安全**（嵌套 10 层时天花板
+     约 113，20 层约 63，而使用者想写多少层就能写多少层）。
+
+     修法是让计数器数**宿主栈开销**而不是帧数。callDepth 是整条环境链共享
+     的同一个对象，所以在 evalBlockBody 上挂一个同样共享的块计数器 `b`
+     之后，任一时刻
+
+         n + BLOCK_COST × b
+
+     正好是总开销：`b` 累加的就是各帧调用点嵌套深度之和 Σmᵢ，而总开销是
+     Σ(1 + 0.575·mᵢ) = n + 0.575·Σmᵢ。预算仍是 **500 个裸帧当量**，于是
+     无包裹的行为**一字节都没变**（旧测试原样通过），而每种形状都保住了
+     同样约 33% 的余量：两层包裹时守卫在约 232 帧触发，天花板 349。
+
+     BLOCK_COST 取 0.575（`for`/`if`/`while` 那一档）而不是按构造分两档：
+     裸块因此被**多收**了 0.2/层。这是**故意往保守一侧偏**——收多了只会让
+     守卫早一点响（她拿到的仍是那条友好消息），收少了才会让引擎先崩。
+     一道安全阀不值得为省那点余量去多维护一张构造权重表。
+
+     ⚠ 这些绝对数字**只在 node 默认栈下量过**，而浏览器的栈大小不一样、
+     JIT 状态还会让真实上限漂移（上面那段注释自己也记着这件事）。加权
+     消掉的是**形状**这一维，消不掉**环境**这一维——所以 run() 末尾另有
+     一道兜底：真撞上原生栈溢出时把它翻译成同一条友好消息。两道一起才
+     构成「她永远不会看到裸 RangeError」这个保证。 */
+  const BLOCK_COST = 0.575;
+
   /* 调用一个解释出来的函数：新环境的 parent 是 fn.closure（闭包，见上），
      不是调用点的 env——递归函数的每次调用因此各自拿到一份独立的形参
      绑定，互不干扰，这正是递归能工作的基础。深度检查必须在「创建新环境
@@ -2765,16 +2816,22 @@ body.busy #busy{display:block}
      内层函数场景）。 */
   function* callInterpreted(fn, args, node) {
     const depth = fn.closure.callDepth;
-    if (depth.n >= MAX_DEPTH) {
-      /* 文案要覆盖两种成因，不能只怪使用者：在 500 这个上限上，触发它
-         的既可能是真的忘了写基准情形的失控递归，也可能是一段完全写对、
-         但对一个几百元素以上的数据结构做递归处理、天然就比这个解释器
-         能安全承受的深度更深的合法代码——只说「是不是忘了终止条件」会
-         把后一种使用者引向错误的方向。同时给一条可行的出路（改写成
-         循环），而不是让她卡在一个「我不知道该怎么办」的死胡同。 */
-      throw err('Maximum call depth exceeded (' + MAX_DEPTH + '). Either this recursion is ' +
-                 'missing its base case, or it simply nests deeper than this interpreter ' +
-                 'supports — try rewriting it as a loop.',
+    if (depth.n + BLOCK_COST * depth.b >= MAX_DEPTH) {
+      /* 文案要覆盖两种成因，不能只怪使用者：触发它的既可能是真的忘了写
+         基准情形的失控递归，也可能是一段完全写对、但对一个几百元素以上
+         的数据结构做递归处理、天然就比这个解释器能安全承受的深度更深的
+         合法代码——只说「是不是忘了终止条件」会把后一种使用者引向错误
+         的方向。同时给一条可行的出路（改写成循环），而不是让她卡在一个
+         「我不知道该怎么办」的死胡同。
+
+         ⚠ 报的是**实际到达的调用深度**（depth.n），不是 MAX_DEPTH 那个
+         常量。加权之后「还能再深几层」是随嵌套形状变的（同样的预算，
+         递归调用光秃秃摆在函数体里能到约 500 层，裹在三层循环里只能到
+         约 180 层）——印一个固定的 500 会让她照着这个数去算，而那个数
+         对她眼前这段代码不成立。 */
+      throw err('Maximum call depth exceeded (' + depth.n + ' calls deep). Either this ' +
+                 'recursion is missing its base case, or it simply nests deeper than this ' +
+                 'interpreter supports — try rewriting it as a loop.',
                  node.line, node.col, 'runtime');
     }
     /* 【任务 4.5】进帧之前，先把**调用方**攒下的 pending 单独打包成一步。
@@ -3422,17 +3479,35 @@ body.busy #busy{display:block}
      语句循环。这条注释原来写着"函数调用直接把函数体的语句数组喂给这里"，
      那是错的（3a 的 TDZ 缺口正是这个误解的产物）。两套循环共用的只有
      blockPrologue 这一份前置，见它的注释与约束 6。 */
+  /* 进入一个块体。**这是所有块体的唯一通道**：`if`/`while`/`for`/`for…of`
+     的体都是 Block 节点，走 evalStmt 的 case 'Block' 落到这里；函数自己的
+     体不走这里（callInterpreted 把它摊平内联了，见那边第 2 条注释），这
+     正对应实测里「无包裹」那一档的基准。
+
+     ⚠ **callDepth.b 的增减就挂在这里**，它是 MAX_DEPTH 能对每种帧形状都
+     生效的全部机关（理由见 MAX_DEPTH 常量旁边）。两件事要说清楚：
+
+     1) **不用 try/finally**——跟 depth.n-- 是同一个理由（见 callInterpreted
+        第 1 条注释）：try/finally 在生成器里要多占一截栈，而这里争的就是
+        栈。正常与提前完成（return/break/continue）走下面两个 return，各
+        自减一次；抛出时**不**清理——一旦抛出，整条求值链一路抛穿 run()，
+        这个计数器不会再被第二次使用。
+
+     2) **生成器被丢弃时也不会减**（STEP_LIMIT 截断后 run() 直接不再
+        next()）。同样无害，理由同上：那次执行已经结束了。 */
   function* evalBlockBody(stmts, env) {
     blockPrologue(stmts, env);
+    env.callDepth.b++;
     for (let idx = 0; idx < stmts.length; idx++) {
       const completion = yield* evalStmt(stmts[idx], env);
       /* stepBoundary 无条件调用（在 completion 检查之前）——哪怕这条语句
          是 return/break/continue，它本身也确确实实执行了一次，必须进
          trace；跳过它只会在「函数提前 return」这种最常见的场景里丢一步。 */
       stepBoundary(env, stmts[idx]);
-      if (completion) return completion;
+      if (completion) { env.callDepth.b--; return completion; }
       yield;
     }
+    env.callDepth.b--;
     return null;
   }
 
@@ -3578,8 +3653,36 @@ body.busy #busy{display:block}
        makeEnv(null) 里 rec 的默认值就是 null，这里显式补上。 */
     env.rec = rec;
     const gen = evalBlockBody(program.body, env);
-    let step = gen.next();
-    while (!step.done && !rec.truncated) step = gen.next();
+    let step;
+    /* 兜底：把引擎的裸栈溢出翻译成 MAX_DEPTH 那条友好消息。
+
+       加权之后的 MAX_DEPTH 消掉了「帧形状」这一维，但消不掉「环境」这一
+       维——那些天花板数字只在 node 默认栈下量过，而这两个工具真正跑的
+       地方是浏览器，栈大小不同，JIT 状态还会让真实上限漂移。真漏到这里
+       时，使用者该看到的仍然是「递归太深了」，不是一句对她毫无意义的
+       `RangeError: Maximum call stack size exceeded`。
+
+       只翻译**栈溢出**这一种 RangeError，不是见 RangeError 就吞：别的
+       RangeError（比如宿主实现里的越界）该原样抛出去，盖住它只会把一个
+       真 bug 伪装成使用者的递归问题。判据用两条**并且**：引擎的消息，
+       加上「调用深度确实很深」——单看消息在别的引擎上文案不同（Firefox
+       是 "too much recursion"），单看深度又可能误伤。
+
+       接住之后再构造消息是安全的：此时整条求值链已经退干净了（实测过，
+       接住后还能正常分配对象、造字符串）。 */
+    try {
+      step = gen.next();
+      while (!step.done && !rec.truncated) step = gen.next();
+    } catch (e) {
+      const overflow = e instanceof RangeError &&
+                       /call stack|too much recursion/i.test(String(e && e.message)) &&
+                       env.callDepth.n > 0;
+      if (!overflow) throw e;
+      throw err('Maximum call depth exceeded (' + env.callDepth.n + ' calls deep). Either this ' +
+                 'recursion is missing its base case, or it simply nests deeper than this ' +
+                 'interpreter supports — try rewriting it as a loop.',
+                 null, null, 'runtime');
+    }
     const completion = step.done ? step.value : undefined;
     const result = completion && completion.signal === 'return' ? completion.value : undefined;
     // trace 是 rec.trace 这同一个数组对象——truncated/limit 直接挂在它

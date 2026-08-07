@@ -561,10 +561,18 @@ try {
 T.ok(deepErr, '超过深度上限要抛错');
 T.eq(deepErr && deepErr.category, 'runtime', '抛的是我们的 runtime 错，不是引擎的 RangeError');
 T.ok(deepErr && /depth/i.test(deepErr.message), '消息提到深度：' + (deepErr && deepErr.message));
+/* 2026-08-07：文案里的数字从「MAX_DEPTH 这个常量」改成「实际到达的调用
+   深度」。加权之后「还能再深几层」是随嵌套形状变的（同样的预算，光秃秃
+   的递归能到约 500 层，裹在三层循环里只能到约 180 层），印一个固定的 500
+   会让她照着这个数去算，而那个数对她眼前这段代码不成立。
+
+   这一档（无包裹）实测仍然恰好在**第 500 帧**触发 —— 加权对旧形状是
+   一字节不变的，这条断言同时也是那件事的回归。 */
 T.eq(deepErr && deepErr.message,
-     'Maximum call depth exceeded (500). Either this recursion is missing its base case, ' +
-     'or it simply nests deeper than this interpreter supports — try rewriting it as a loop.',
-     'MAX_DEPTH 报错文案：给出限值、两种成因、一条出路');
+     'Maximum call depth exceeded (500 calls deep). Either this recursion is missing its ' +
+     'base case, or it simply nests deeper than this interpreter supports — try rewriting ' +
+     'it as a loop.',
+     'MAX_DEPTH 报错文案：给出到达深度、两种成因、一条出路');
 
 // 深递归但没超限：fib(12) 已经覆盖了「有意义深度但没触顶」的情形（见上）；
 // 这里额外确认 N 皇后规模（N=12）的递归深度稳稳落在上限之内。
@@ -575,6 +583,82 @@ diff('function depth(n) { if (n <= 0) { return 0; } return 1 + depth(n - 1); } r
 // 降低 MAX_DEPTH 不能误伤这类教学场景常见的深度。
 diff('function fib(n){ if(n<2){return n;} return fib(n-1)+fib(n-2); } return fib(15);',
      '深递归 fib(15)：调用深度仅 15，节点数上千，压一压性能与正确性');
+
+// ---- 守卫必须对**每一种帧形状**都先于原生栈溢出触发 ----
+//
+//      上面那条测试只用了一种形状：递归调用**光秃秃地摆在函数体顶层**。
+//      而这道守卫数的是「被解释的帧数」，真正被耗尽的资源却是**宿主栈帧**
+//      ——两者的换算系数**不是常数**，它随调用点的词法嵌套深度线性增长：
+//      每多一层 `for`/`while`/`if` 的包裹，每个被解释的帧就多吃约 0.575 个
+//      「裸帧当量」（裸块 `{}` 约 0.375）。单位是「一层生成器委托」：
+//      `for` 的体要走 evalStmt(For) → evalStmt(Block) → evalBlockBody 三层，
+//      裸块少一层。
+//
+//      于是固定的帧数上限对带包裹的形状**必然失效**。实测（node，二分探测
+//      真实原生天花板）：
+//        无包裹  747 帧   ← 守卫 500 在它之下，能触发
+//        1 层    477 帧   ← 已经低于 500，守卫永远轮不上
+//        2 层    349 帧
+//        3 层    274 帧
+//        5 层    192 帧
+//      也就是说**一层循环就足以让那条友好消息永远不出现**，而工具 ④⑤ 把
+//      编辑器交给使用者，回溯类算法「递归调用嵌在 for 循环里」恰恰是最
+//      常见的写法。她会拿到一个对她毫无意义的引擎崩溃。
+//
+//      修法是让计数器数**宿主栈开销**而不是帧数：evalBlockBody 上挂一个
+//      同样在环境链上共享的块计数器 b，于是任一时刻 `n + 0.575 × b` 正好
+//      是总开销（b 累加的就是各帧调用点嵌套深度之和）。预算仍是 500 个
+//      裸帧当量——无包裹的行为一字不变，而每种形状都保住了同样约 33% 的
+//      余量。
+//
+//      下面三种形状是**验收判据**，不是举例：形状变了守卫就失效，正是这
+//      道防线唯一的失效方式。 ----
+function deepSrc(nest, depth) {
+  let open = '', close = '';
+  for (let i = 0; i < nest; i++) {
+    open += '  for (let i' + i + ' = 0; i' + i + ' < 1; i' + i + ' = i' + i + ' + 1) {\n';
+    close = '  }\n' + close;
+  }
+  return ['function f(k) {', '  if (k <= 0) { return 0; }', '  let acc = 0;', open,
+          '  acc = 1 + f(k - 1);', close, '  return acc;', '}',
+          'return f(' + depth + ');'].join('\n');
+}
+
+/* 三种形状都必须抛**我们的**错。pattern 用 /call depth exceeded/ 而不是
+   /Maximum call/ —— 后者把引擎的 "Maximum call stack size exceeded" 也
+   一起匹进来了，那样这条断言就无法区分「守卫响了」和「引擎崩了」，
+   而这正是它唯一要证明的事。 */
+for (const shape of [{ nest: 0, label: '无循环包裹' },
+                     { nest: 2, label: '两层循环包裹' },
+                     { nest: 3, label: '三层循环包裹' }]) {
+  T.throws(function () { I.run(deepSrc(shape.nest, 5000), { host: {} }); },
+           shape.label + '：守卫必须先于原生栈溢出触发',
+           /Maximum call depth exceeded/);
+
+  let e = null;
+  try { I.run(deepSrc(shape.nest, 5000), { host: {} }); } catch (err) { e = err; }
+  T.eq(e && e.category, 'runtime', shape.label + '：抛的是我们的 runtime 错');
+  T.ok(e && !(e instanceof RangeError),
+       shape.label + '：不是引擎的裸 RangeError');
+  T.ok(e && /rewriting it as a loop/.test(e.message),
+       shape.label + '：消息给出了一条出路，不只是报个数');
+}
+
+/* 无穷递归（真的忘了写基准情形）—— 这是这道守卫存在的头号理由，
+   而且它天然带一层 for 包裹的变体也要覆盖。 */
+T.throws(function () { I.run('function g(k) { return 1 + g(k + 1); } return g(0);', { host: {} }); },
+         '无穷递归：守卫先于原生栈溢出触发', /Maximum call depth exceeded/);
+T.throws(function () {
+           I.run('function g(k) { for (let i = 0; i < 1; i = i + 1) { return 1 + g(k + 1); } return 0; }\n' +
+                 'return g(0);', { host: {} });
+         },
+         '无穷递归 + 一层循环：守卫先于原生栈溢出触发', /Maximum call depth exceeded/);
+
+/* 反向：加权之后不许误伤教学场景。骑士巡游 8×8 的递归深度是 64，而它的
+   递归调用就嵌在两层循环里（选点的 for + 试走的 for）——这一档必须照常
+   跑完，否则这道守卫就从「拦不住」变成了「拦过头」。 */
+diff(deepSrc(2, 64), '两层循环包裹、深度 64（骑士巡游 8×8 的规模）：正常返回');
+diff(deepSrc(3, 64), '三层循环包裹、深度 64：正常返回');
 
 // ============ Task 7：宿主桥接与可反放的轨迹 ============
 // 逐字采用任务简报 task-7-brief.md 里给出的测试代码。
