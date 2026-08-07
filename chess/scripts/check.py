@@ -388,7 +388,6 @@ def fallback_check() -> int:
 # 机制已经够用，不必在 check.py 里再加一道自动化的"白名单只许收缩"检查。
 MONOLINGUAL_ALGOS = {
     'minimax.js',
-    'king-greedy.js', 'king-exact.js',
 }
 
 # render(parts, lang) 那一段在每份双语 algos 里逐字节相同（规格 §1.6）。
