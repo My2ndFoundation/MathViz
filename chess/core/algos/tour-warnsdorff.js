@@ -284,9 +284,18 @@
      「段」上：段内句子怎么重组都行，段的行数必须一样。
 
      ⚠ **与 tour-dfs.js 共用的每一段英文也必须逐字相同**（跟中文那一侧同一条
-     纪律）：tour.test.js 的子序列门阶段 8 起两种语言各跑一次，而并排 diff
-     这件教学事本身在英文界面下同样要成立 —— 这个工具默认英文。
-     改写共用段的顺手做法是**先改 tour-dfs.js，再把那一段整块复制过来**。 */
+     纪律）：并排 diff 这件教学事在英文界面下同样要成立，而这个工具默认英文。
+     改写共用段的顺手做法是**先改 tour-dfs.js，再把那一段整块复制过来**。
+
+     ⚠ **但这条纪律只有一半有机器门守着，另一半是人肉门** —— 别把它读成
+     全都有人管。tour.test.js 的子序列门阶段 8 起两种语言各跑一次，可它的
+     codeLines() 只留代码行，**整行 `//` 注释与整段块注释都被丢掉**。于是：
+
+       · 行尾 `//` 注释里的共用英文（`mark(sq, "ok");  // …` 那一族）
+         —— **机器门**。实测：只改本文件一侧那一句，`[en]` 当场红。
+       · 独占整行的散文段（HEAD 两段、各处块注释）
+         —— **人肉门**。只改一侧，两种语言照样 82 passed / 0 failed。
+         改这类共用散文，必须自己记得两份一起改。 */
 
   /* ==== 以下 HEAD 与 tour-dfs.js 的 HEAD **行数相同**，
      只有第 1 行的标题和第 12–13 行讲「先试哪一个」的两行不同。 ==== */
@@ -387,7 +396,7 @@
         '   go there first. To check it works: delete the sort below and this turns plain. */',
       ],
     },
-    '// >>> BLANK id=degree-fn level=3 fill="function degree(sq) { const x = sq % W; const y = (sq - x) / W; let d = 8; if (x === 0) { d = d - 2; } if (x === W - 1) { d = d - 2; } if (y === 0) { d = d - 2; } if (y === H - 1) { d = d - 2; } return d; }" hint="整个 Warnsdorff 就靠这一个数：马此刻站在 sq 上，接下来到底还能去几个格子 —— 数的是真能落脚的那几个，踩过的一概不算。占位那一版一个方向都没看过，它只按 sq 靠不靠边猜了一个数，于是马已经走到哪儿它根本不管，给出的数从头到尾都一样。" hintEn="All of Warnsdorff rests on this one number: with the knight standing on sq right now, how many squares can it actually move to next. The placeholder never looks at a single direction — it just guesses from how close sq sits to an edge, so the number it hands back never budges as the knight\'s tour goes on."',
+    '// >>> BLANK id=degree-fn level=3 fill="function degree(sq) { const x = sq % W; const y = (sq - x) / W; let d = 8; if (x === 0) { d = d - 2; } if (x === W - 1) { d = d - 2; } if (y === 0) { d = d - 2; } if (y === H - 1) { d = d - 2; } return d; }" hint="整个 Warnsdorff 就靠这一个数：马此刻站在 sq 上，接下来到底还能去几个格子 —— 数的是真能落脚的那几个，踩过的一概不算。占位那一版一个方向都没看过，它只按 sq 靠不靠边猜了一个数，于是马已经走到哪儿它根本不管，给出的数从头到尾都一样。" hintEn="All of Warnsdorff rests on this one number: with the knight standing on sq right now, how many squares can it actually move to next. Count the ones it can really land on — a square already stepped on does not count at all. The placeholder never looks at a single direction; it just guesses from how close sq sits to an edge, so the number it hands back never budges as the knight\'s tour goes on."',
     'function degree(sq) {',
     '  const x = sq % W;',
     '  const y = (sq - x) / W;',
@@ -444,7 +453,9 @@
     '    }',
     '  }',
     /* ↓↓↓ 差异②：tour-dfs.js 在这里只有一行注释。上下都逐字相同，
-       **两种语言各自逐字相同**（子序列门阶段 8 起两语各跑一次）。 ↓↓↓ */
+       **两种语言各自逐字相同**。⚠ 上下那些**独占整行的**注释段是**人肉门**：
+       子序列门的 codeLines() 把它们整段丢掉，只改一侧两语照样全绿
+       （见文件头）。 ↓↓↓ */
     {
       zh: [
         '  /* Warnsdorff 就是这一段：先量出每个候选的出路数，再把候选表按这个数',

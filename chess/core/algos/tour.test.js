@@ -272,17 +272,28 @@ function subsequenceGate(lang) {
 /* ---- 双语三道门 × 两份（规格 §7.5）----
 
    守的是「可执行代码没有偷偷分岔」，**不是**「英文翻得对不对」——后者机器
-   判不了，是人工审查项。 */
+   判不了，是人工审查项。
+
+   ⚠ **盘必须挑两语都跑得完的那一块（这里是 3×4）**，而且下面那条
+   `!truncated` 前置断言不许删。修复轮 1 之前这里用的是 5×5：`tour-dfs`
+   在 5×5 上撞 `STEP_LIMIT = 200000`，**两种语言一起撞**，于是步数门退化成
+   `200000 === 200000` —— 实测把 dfs 的英文 `log` 行改成参与控制流，这道门
+   照样全绿；同一个突变换到 3×4 当场红。截断把两边的步数**夹到同一个常数**
+   上，是这类断言最安静的死法。
+
+   「撞上限」那件事本身是上面「四段弧线」那几条的活，别混进双语门。 */
 const TOUR_SRC = { dfs: D, warnsdorff: W };
 for (const key of Object.keys(TOUR_SRC)) {
   const mod = TOUR_SRC[key];
-  const zh = mod.source({ W: 5, H: 5, start: 0, lang: 'zh' });
-  const en = mod.source({ W: 5, H: 5, start: 0, lang: 'en' });
+  const zh = mod.source({ W: 3, H: 4, start: 0, lang: 'zh' });
+  const en = mod.source({ W: 3, H: 4, start: 0, lang: 'en' });
   T.eq(en.split('\n').length, zh.split('\n').length, key + '：两种语言行数相同');
   T.eq(T.normalizeSource(en), T.normalizeSource(zh),
        key + '：抽掉注释与字符串之后，两种语言逐字节相同');
-  T.eq(I.run(en, { host: {} }).trace.length, I.run(zh, { host: {} }).trace.length,
-       key + '：两种语言的解释器步数相同');
+  const rzh = I.run(zh, { host: {} }), ren = I.run(en, { host: {} });
+  T.ok(!rzh.trace.truncated && !ren.trace.truncated,
+       key + '：两语都没撞上限 —— 撞了的话下面那条步数断言就是 200000 === 200000');
+  T.eq(ren.trace.length, rzh.trace.length, key + '：两种语言的解释器步数相同');
 
   /* 反向：英文必须真的是英文。上面三道门在「en 原样返回中文」时全绿 ——
      把 lang 接进来却没接上，长得跟接上了一模一样。
@@ -306,11 +317,11 @@ for (const key of Object.keys(TOUR_SRC)) {
   /* ⚠ 第三个参数才是 pattern：`T.throws(fn, label, pattern)`（见 _test.js）。
      写在第二个位置上 pattern 就是 undefined，退化成「抛了就算过」——
      这两条要钉的恰恰是**抛的是哪一条**（少了 lang vs 只认两个值）。 */
-  T.throws(function () { mod.source({ W: 5, H: 5, start: 0 }); },
+  T.throws(function () { mod.source({ W: 3, H: 4, start: 0 }); },
            key + '：缺 lang 必须抛', /少了 lang/);
-  T.throws(function () { mod.source({ W: 5, H: 5, start: 0, lang: 'fr' }); },
+  T.throws(function () { mod.source({ W: 3, H: 4, start: 0, lang: 'fr' }); },
            key + '：lang=fr 必须抛', /只认/);
-  T.throws(function () { mod.source({ W: 5, H: 5, start: 0, lang: '' }); },
+  T.throws(function () { mod.source({ W: 3, H: 4, start: 0, lang: '' }); },
            key + '：lang 是空串必须抛（空串不当默认值用）', /只认/);
 }
 
