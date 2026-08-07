@@ -828,9 +828,12 @@ PY
 ```bash
 node chess/core/algos/knight-path.test.js
 node chess/core/exercise.test.js
+node chess/core/exercise-blanks.test.js
 ```
 
-期望：两份 `0 failed`。
+期望：三份 `0 failed`。
+
+⚠ **`exercise-blanks.test.js` 必须跑。** 它里面有这道题的 `source(` 调用点，缺 `lang` 时它不是报一条红断言，是 **require 期进程直接崩**——只跑 algo 自己那份测试**完全看不见**。Task 4 的实现者在这里多改出一个文件（5 处调用点）。
 
 - [ ] **Step 5: 中文逐字节不变**
 
@@ -863,8 +866,15 @@ python3 chess/scripts/check.py
 期望：exit 0，且打印 `双语 algos 普查：2 份双语 / 6 份白名单，render 助手 2 份一致`。
 **「2 份一致」这四个字是这一步的真正产出**——Task 3 那条比对在只有一份时是空转的，到这里才第一次比到东西。
 
-再做一次对照实验证明它真的会响：把 `knight-path.js` 的 `render` 段里任意一个空格删掉，跑 `check.py`，期望
-`ERROR: knight-path.js 的 render(parts, lang) 与 queens.js 的不是逐字节相同`，然后 `git checkout -- chess/core/algos/knight-path.js` 还原并重新做完 Step 3–5。
+再做一次对照实验证明它真的会响：把 `knight-path.js` 的 `render` 段里任意一个空格删掉，跑 `check.py`。
+
+⚠ **别把那行 ERROR 当逐字断言用。** `check.py:570` 拿 `sorted(renders)[0]` 当基准，所以点名的顺序是**字典序**，不是「谁先双语」。此刻两份的字典序是 `knight-path.js` < `queens.js`，于是打印的是「`queens.js` 的…与 `knight-path.js` 的…」——跟直觉相反。而且这个基准**会随后面每个任务移动**：七份到齐后字典序第一是 `king-exact.js`。
+
+**验收判据是语义，不是字面**：输出里出现第八道门自己那一行、点名了这两份文件、并且汇总行变成「有不一致」。
+
+⚠ 这个突变还会**连带**让 `ALGOS 往返校验` 报 ERROR（`algos/*.js` 是当字符串内联进 HTML 的），那是预期内的，不是你又弄坏了别的东西。
+
+⚠ **别用 `git checkout -- chess/core/algos/knight-path.js` 还原**——那会把整个文件退回 HEAD，你这个任务 Step 3–4 的活全没了（Task 4 的实现者踩过，重做了一遍）。**做突变之前先把双语版拷进 scratchpad**（`t5-knight-path.js` 一类），突变完从拷贝还原。
 
 - [ ] **Step 7: 英文自己读一遍**（同 Task 2 Step 7 的四条自查，结论写进提交信息）
 
@@ -944,9 +954,13 @@ node chess/core/algos/tour.test.js
 
 ```bash
 node chess/core/algos/tour.test.js
+node chess/core/exercise.test.js
+node chess/core/exercise-blanks.test.js
 ```
 
-期望：`0 failed`，且子序列门在 `zh` 与 `en` 两侧**各报一次通过**。
+期望：三份 `0 failed`，且子序列门在 `zh` 与 `en` 两侧**各报一次通过**。
+
+⚠ **`exercise-blanks.test.js` 必须跑**：缺 `lang` 时它是 **require 期进程直接崩**，不是红断言，只跑 `tour.test.js` 看不见。
 
 - [ ] **Step 5: 中文逐字节不变（两份）**
 
@@ -1065,7 +1079,11 @@ node chess/core/algos/rook-cover.test.js
 
 ```bash
 node chess/core/algos/rook-cover.test.js
+node chess/core/exercise.test.js
+node chess/core/exercise-blanks.test.js
 ```
+
+期望：三份 `0 failed`。⚠ **`exercise-blanks.test.js` 必须跑**：缺 `lang` 时是 require 期进程直接崩，不是红断言。
 
 - [ ] **Step 5: 中文逐字节不变**
 
@@ -1186,9 +1204,13 @@ node chess/core/algos/king.test.js
 
 ```bash
 node chess/core/algos/king.test.js
+node chess/core/exercise.test.js
+node chess/core/exercise-blanks.test.js
 ```
 
-期望：`0 failed`，共用段门在 `zh` / `en` 两侧**各报一次通过**。
+期望：三份 `0 failed`，共用段门在 `zh` / `en` 两侧**各报一次通过**。
+
+⚠ **`exercise-blanks.test.js` 必须跑**：缺 `lang` 时是 require 期进程直接崩，不是红断言。
 
 - [ ] **Step 5: 中文逐字节不变（两份）**
 
