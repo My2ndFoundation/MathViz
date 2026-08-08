@@ -449,6 +449,16 @@ diff('return ~5n;', 'BigInt 按位取反');
 diff('return ~~5.9;', '双重取反（原生的截断惯用法）');
 diff('return -~5;', '取反后取负 —— 两个一元运算符连用');
 
+// ---- 内建 BigInt()（阶段 9b，规格 §7.7 ①）----
+/* 位盘里 sq 是数组下标、必然是 Number，要移位就得 BigInt(sq) 转一次 ——
+   「必须显式转」正是这一课要让她撞上的东西。BigInt(1.5) 原生抛，借原生
+   实现意味着这条也白送。 */
+diff('return BigInt(5);', 'BigInt() 把数字转成 BigInt');
+diff('return BigInt("42");', 'BigInt() 把字符串转成 BigInt');
+diff('return BigInt(0);', 'BigInt(0)');
+diff('return 1n << BigInt(3);', 'BigInt() 的结果可以直接当移位数 —— 位盘的核心写法');
+diff('return BigInt(1.5);', 'BigInt(1.5) 原生抛，我们也要抛');
+
 // ---- 短路求值：必须真的短路（宿主序列会暴露有没有多算）----
 diff('return false && log("no");', '&& 短路：右侧不该被求值');
 diff('return true || log("no");', '|| 短路：右侧不该被求值');
