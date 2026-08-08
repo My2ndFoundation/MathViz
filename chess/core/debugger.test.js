@@ -1017,6 +1017,17 @@ T.ok(noCapOk, 'playSteps：省略 cap 连喂 50 帧，steps 与 acc 全程有限
 T.eq(D.fmtVal('ƒ safe'), 'ƒ safe', 'fmtVal：snap() 的函数快照不再被套引号（真 bug 的回归）');
 T.eq(D.fmtVal('safe'), '"safe"', 'fmtVal：普通字符串照常加引号');
 T.eq(D.fmtVal('ƒsafe'), '"ƒsafe"', 'fmtVal：要「ƒ + 空格」才算函数快照，不是光看首字符');
+
+/* BigInt（阶段 9b，规格 §7.7 ⑦）：fmtVal 改之前没有 bigint 分支，一个 BigInt
+   会掉到函数末尾的 String(v)，于是 5n 显示成 `5` —— 跟数字 5 在面板上**一个
+   字都不差**。而 BigInt 在位盘里的全部意义就是「它不是 Number」，这个显示
+   等于把唯一要看的信息抹掉了。第三条是这三条里的判据：它钉的是「两者显示
+   得**不一样**」，前两条各自单独看都可能被一个错的实现同时满足。 */
+T.eq(D.fmtVal(5n), '5n', 'fmtVal：BigInt 带 n 后缀，跟数字区分得开');
+T.eq(D.fmtVal(0n), '0n', 'fmtVal：0n 也带后缀');
+T.ok(D.fmtVal(5n) !== D.fmtVal(5), 'fmtVal：BigInt 5n 与数字 5 在面板上必须显示成不同的东西');
+T.eq(D.fmtVal([1n, 2]), '[1n, 2]', 'fmtVal：数组里的 BigInt 与数字并排时也分得开');
+
 T.eq(D.fmtVal({ __fn: true, name: 'go' }), 'ƒ go', 'fmtVal：未经 snap 的解释器函数值（run().result 走这条）');
 T.eq(D.fmtVal({ __fn: true }), 'ƒ (anonymous)', 'fmtVal：匿名解释器函数');
 T.eq(D.fmtVal(null), 'null', 'fmtVal：null');
