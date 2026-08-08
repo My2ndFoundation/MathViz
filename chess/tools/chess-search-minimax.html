@@ -1511,8 +1511,18 @@ body.busy #busy{display:block}
           const hs = i;
           while (i < src.length && /[0-9a-fA-F]/.test(src[i])) adv();
           if (i === hs) throw err('Invalid number: expected hex digits after 0x', sl, sc);
+          const hd = src.slice(hs, i);
+          /* BigInt 后缀（阶段 9b，规格 §7.7 ①）：n 必须在 checkNumTail 之前
+             吃掉，否则它会把 n 当成「数字后面紧跟标识符起始字符」毙掉。吃掉
+             之后 checkNumTail 的语义一个字没变，仍然是「1nx / 1n5 要报错」。 */
+          if (i < src.length && src[i] === 'n') {
+            adv();
+            checkNumTail(sl, sc);
+            push('num', BigInt('0x' + hd), start, sl, sc);
+            continue;
+          }
           checkNumTail(sl, sc);
-          push('num', parseInt(src.slice(hs, i), 16), start, sl, sc);
+          push('num', parseInt(hd, 16), start, sl, sc);
           continue;
         }
         if (c === '0' && (peek(1) === 'o' || peek(1) === 'O')) {
@@ -1520,8 +1530,16 @@ body.busy #busy{display:block}
           const os = i;
           while (i < src.length && src[i] >= '0' && src[i] <= '7') adv();
           if (i === os) throw err('Invalid number: expected octal digits after 0o', sl, sc);
+          const od = src.slice(os, i);
+          /* 同上：BigInt 后缀在 checkNumTail 之前吃掉。 */
+          if (i < src.length && src[i] === 'n') {
+            adv();
+            checkNumTail(sl, sc);
+            push('num', BigInt('0o' + od), start, sl, sc);
+            continue;
+          }
           checkNumTail(sl, sc);
-          push('num', parseInt(src.slice(os, i), 8), start, sl, sc);
+          push('num', parseInt(od, 8), start, sl, sc);
           continue;
         }
         if (c === '0' && (peek(1) === 'b' || peek(1) === 'B')) {
@@ -1529,8 +1547,16 @@ body.busy #busy{display:block}
           const bs = i;
           while (i < src.length && (src[i] === '0' || src[i] === '1')) adv();
           if (i === bs) throw err('Invalid number: expected binary digits after 0b', sl, sc);
+          const bd = src.slice(bs, i);
+          /* 同上：BigInt 后缀在 checkNumTail 之前吃掉。 */
+          if (i < src.length && src[i] === 'n') {
+            adv();
+            checkNumTail(sl, sc);
+            push('num', BigInt('0b' + bd), start, sl, sc);
+            continue;
+          }
           checkNumTail(sl, sc);
-          push('num', parseInt(src.slice(bs, i), 2), start, sl, sc);
+          push('num', parseInt(bd, 2), start, sl, sc);
           continue;
         }
         /* 0 打头紧跟另一个十进制数字（017 / 08 这类旧式八进制 / 前导零
@@ -1543,6 +1569,8 @@ body.busy #busy{display:block}
         }
 
         while (i < src.length && src[i] >= '0' && src[i] <= '9') adv();
+
+        const intEnd = i;   // 整数位到此为止；下面若吃了小数点或指数，就不再是整数形态
 
         /* 至多吃一个小数点然后停——不管点后面有没有紧跟数字。这一条同时
            是 I1（5..toFixed(2) 不能被词法器提前判死刑：第一个点在这里被
@@ -1566,6 +1594,17 @@ body.busy #busy{display:block}
           const ds = i;
           while (i < src.length && src[i] >= '0' && src[i] <= '9') adv();
           if (i === ds) throw err('Invalid number: missing exponent digits', sl, sc);
+        }
+
+        /* n 后缀只跟整数形态相容 —— 原生实测 1.5n / 1e3n 都是 SyntaxError。
+           `i === intEnd` 就是「小数点与指数两段都一个字符没吃」的意思；不成立
+           时不吃 n，让 checkNumTail 照常把它报成「数字后面紧跟 n」，跟原生
+           一样拒绝（消息措辞不同，但两边都拒绝，nativeRejects 只要求这个）。 */
+        if (i === intEnd && i < src.length && src[i] === 'n') {
+          adv();
+          checkNumTail(sl, sc);
+          push('num', BigInt(src.slice(start, intEnd)), start, sl, sc);
+          continue;
         }
 
         checkNumTail(sl, sc);

@@ -146,6 +146,22 @@ sameAsNative('0O17', '八进制（大写 O）');
 sameAsNative('0b101', '二进制');
 sameAsNative('0B101', '二进制（大写 B）');
 
+/* ---- BigInt 字面量（阶段 9b，规格 §7.7 ①）----
+   四条数字通道各自吃一个可选的 n。原生实测：0x1Fn / 0o17n / 0b101n 合法，
+   1.5n / 1e3n / 01n 是 SyntaxError —— 也就是说 n 后缀只跟**整数**形态相容，
+   带小数点或指数的一律拒绝。这里不写死期望值，照旧问原生要答案。 */
+sameAsNative('1n', 'BigInt 十进制');
+sameAsNative('0n', 'BigInt 零');
+sameAsNative('123456789012345678901234567890n', 'BigInt 超出 Number 安全整数范围');
+sameAsNative('0x1Fn', 'BigInt 十六进制');
+sameAsNative('0o17n', 'BigInt 八进制');
+sameAsNative('0b101n', 'BigInt 二进制');
+
+nativeRejects('1.5n', '小数不能加 n 后缀',
+              'Invalid number: a numeric literal cannot be immediately followed by "n"');
+nativeRejects('1e3n', '科学计数法不能加 n 后缀',
+              'Invalid number: a numeric literal cannot be immediately followed by "n"');
+
 // ---- 与原生对照：原生拒绝的，我们也要拒绝 ----
 T.throws(() => I.tokenize("'a\nb'"), '字符串内未转义换行要报错',
          'Unterminated string: raw newline not allowed');
