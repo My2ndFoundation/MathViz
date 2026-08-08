@@ -1030,6 +1030,17 @@ diff('let x = "5"; x--; return x;', 'A1 对照: 字符串 x--（回归，"--" �
 diff('let x = true; x++; return x;', 'A1 对照: 布尔值 ++（回归）');
 diff('let x = null; x++; return x;', 'A1 对照: null 的 ++（回归）');
 
+// ---- ++/-- 在 BigInt 上不许漂类型（阶段 9b，规格 §7.7 ④）----
+/* Number(1n) 不抛、返回 1 —— 所以改之前 `let x = 1n; x++` 得到的是 Number 2，
+   而原生是 2n。两边都「跑通了」，只是类型不再是同一个类型，差分是唯一
+   看得见它的东西（T.eq 的 BigInt 编码跟数字编码不同，见 Task 1）。 */
+diff('let x = 1n; x++; return x;', 'BigInt 后缀自增');
+diff('let x = 1n; ++x; return x;', 'BigInt 前缀自增');
+diff('let x = 1n; x--; return x;', 'BigInt 后缀自减');
+diff('let x = 1n; return x++;', 'BigInt 后缀自增的表达式值');
+diff('let x = 1n; return ++x;', 'BigInt 前缀自增的表达式值');
+diff('let x = "5"; x++; return x;', '字符串自增仍走 ToNumeric（旧行为不许被这次改动带跑）');
+
 // ---- A-2：snap() 遇到环形引用不能把引擎栈打爆 ----
 // 复审 C2：四种最普通的写法（closeScope / 函数返回 / 形参绑定 /
 // assignVar）都会让一个环形引用值经过 snap()，改之前全部无限递归、

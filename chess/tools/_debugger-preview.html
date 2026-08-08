@@ -3341,13 +3341,20 @@ return k.square;
         /* ECMA-262 13.4.4/13.4.5：两者第一步都是 ToNumeric(oldValue)——
            '--' 侥幸正确是因为一元 '-' 本身就强制转数字，'++' 原来直接
            `old + 1` 对字符串是拼接，不是加法（复审 C1：`let x="5"; x++;`
-           原生得 6，改前我们得 "51"）。这里用 Number(old) 补一个子集版
-           的 ToNumeric（本子集没有 BigInt，不需要分支）。后缀形式返回的
-           也是转换后的数字（原生 `let x="5"; x++;` 的表达式值是数字 5，
-           不是字符串 "5"），所以前缀/后缀都读 num，不再读未转换的 old。 */
+           原生得 6，改前我们得 "51"）。后缀形式返回的也是转换后的数字
+           （原生 `let x="5"; x++;` 的表达式值是数字 5，不是字符串 "5"），
+           所以前缀/后缀都读转换后的值，不再读未转换的 old。
+
+           ⚠ 阶段 9b：**BigInt 必须单独分支**。ToNumeric 对 BigInt 的结果
+           仍是 BigInt，而 `Number(1n)` 不抛、返回 1 —— 走 Number 那条路的
+           后果不是报错，是 `let x = 1n; x++` 静静地得到 Number 2 而原生是
+           2n。这一行以前的注释写着「本子集没有 BigInt，不需要分支」，那句
+           话在 9b 作废了。加一的那个 1 也要跟着分支：`1n + 1` 原生抛。 */
         const ref = yield* evalRef(node.arg, env);
-        const num = Number(ref.get());
-        const next = node.op === '++' ? num + 1 : num - 1;
+        const old = ref.get();
+        const num = typeof old === 'bigint' ? old : Number(old);
+        const one = typeof num === 'bigint' ? 1n : 1;
+        const next = node.op === '++' ? num + one : num - one;
         ref.set(next);
         return node.prefix ? next : num;
       }
