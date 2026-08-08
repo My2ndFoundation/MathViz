@@ -22,10 +22,14 @@ function ok(cond, label) {
    `T.throws(`。grep 才是不可靠的那个。运行期审计顺带还能抓出「一条从没被
    执行到的 T.throws」，那种断言今天完全隐形。
 
-   ⚠ **没设 THROWS_AUDIT 时行为必须一个字节不变** —— 这是给全仓 170 条
-   断言加的旁路（阶段 9a Task 1 实测的运行期真数；简报写的 149 是静态
-   grep 数，见 check.py 的 throws_discrimination_check() 文档字符串），
-   它自己不能改变任何既有判定。 */
+   ⚠ **没设 THROWS_AUDIT 时行为必须一个字节不变** —— 这是给全仓每一条
+   T.throws 加的旁路，它自己不能改变任何既有判定。
+
+   这里**故意不写「全仓共多少条」**。那是个会腐坏的可数事实，而且这一处
+   已经腐坏过一次：阶段 9a Task 1 实测写下 170，**同一阶段之内**就变成了
+   173（后面几轮补断言带跑的）。要当下的数就跑 check.py 的第九道门，它每
+   次都把「共多少条 / 缺第三参多少条 / 无判别力多少条」原地印出来。同一
+   条理由的完整版见 check.py 的 _throws_pattern_matcher() 文档字符串。 */
 const AUDIT = (typeof process !== 'undefined' && process.env && process.env.THROWS_AUDIT)
   ? [] : null;
 

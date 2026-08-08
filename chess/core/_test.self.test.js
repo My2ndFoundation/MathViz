@@ -81,9 +81,9 @@ T.ok(lineGuard !== null && /行数不一致/.test(lineGuard.message),
      '错误消息点名的是「归一化前后行数不一致」这道守卫，不是别的守卫顺手响的');
 
 /* ---- 审计模式（阶段 9a）----
-   THROWS_AUDIT 没设时必须**一个字节的行为都不变** —— 这是给全仓 170 条
-   T.throws 加的旁路（运行期实测数，见 _test.js 顶上注释），它自己不能
-   改变任何既有断言的判定。 */
+   THROWS_AUDIT 没设时必须**一个字节的行为都不变** —— 这是给全仓每一条
+   T.throws 加的旁路（条数**故意不写在这儿**，理由见 _test.js 顶上注释：
+   它腐坏过一次），它自己不能改变任何既有断言的判定。 */
 T.ok(typeof T.auditEntry === 'function', '审计模式暴露了 auditEntry 供自测');
 // 没开审计时不记账
 T.eq(T.auditEntry(), null, '未设 THROWS_AUDIT 时 auditEntry() 返回 null');
