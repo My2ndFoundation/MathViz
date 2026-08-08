@@ -738,7 +738,16 @@ node chess/core/interp.test.js
 python3 chess/scripts/check.py
 ```
 
-期望：exit 0，九道门全过。到这一步 `interp.js` 的改动全部落地，内联镜像会被第一道门检查（`chess-board-algorithms.html` / `chess-search-minimax.html` 里都有 `interp.js` 的副本）——**如果第一道门红了，是因为你没跑 `inline_core.py`，不是回归。**
+期望：exit 0，九道门全过。到这一步 `interp.js` 的改动全部落地，内联镜像会被第一道门检查（`chess-board-algorithms.html` / `chess-search-minimax.html` 里都有 `interp.js` 的副本）——**如果第一道门红了，是因为镜像还没重生成，不是回归。**
+
+⚠ **但不要为此在提交之前手工跑 `inline_core.py`。**（2026-08-08 实测订正，同一个坑 Task 9 与 Task 6 各踩了一次。）`.githooks/pre-commit` 跑的是 `inline_core.py --print-changed`，它**只在自己真的改了文件时才补暂存**。你若先手工跑过，磁盘已是最新，钩子就判「无变化」而不再暂存——三份镜像会**悬空在工作树里、没进 commit**，只能另开一条 `chore` 补。
+
+正确做法二选一：
+
+- **推荐**：这一步先跳过全量门，直接进 Step 6 提交，让钩子自己生成并暂存镜像；提交完再跑 `check.py`（那时树是干净的，读数才作数）。
+- 或者：确实要先跑 `inline_core.py` 看门，那就在 Step 6 里**显式 `git add` 那三份镜像**，别指望钩子。
+
+无论哪条，**commit 之后都要再看一遍 `git status --short`**。
 
 - [ ] **Step 6: Commit**
 
@@ -1007,6 +1016,10 @@ python3 chess/scripts/check.py
 ```
 
 期望：`check.py` exit 0；输出里 `8 个文件已是最新`、`node --check：10 个文件、18 个脚本块通过` 都在。
+
+⚠ **手工跑过 `inline_core.py` 之后，Step 7 提交时钩子就不会再补暂存那三份镜像了**（2026-08-08 实测订正，同一个坑 Task 9 与 Task 6 各踩了一次）。`.githooks/pre-commit` 跑的是 `--print-changed`，**只在自己真的改了文件时才暂存**；磁盘已是最新，它就判「无变化」，镜像**悬空在工作树里、没进 commit**。
+
+所以 Step 7 的 `git add` 里**必须显式列上那三份 HTML**，别指望钩子。另一条路是这一步干脆不先跑 `inline_core.py`，让钩子在提交时自己生成——但本任务需要它的输出来核验第一道门，所以这里走显式 `git add`。
 
 - [ ] **Step 6: 浏览器验收（这条改动唯一的活人判据在这儿之外，但仍要跑）**
 
