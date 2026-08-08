@@ -422,16 +422,13 @@ def fallback_check() -> int:
     return rc
 
 
-# 本阶段暂未双语、或明确不在范围内的 algos 文件。
-# minimax.js 是工具④ 的：改它要重做那个工具的验收，规格 §1.6 划在阶段 9。
-# 其余七份随阶段 8 的任务逐个划掉 —— **这个集合必须缩到只剩 minimax.js**，
-# 一直留着就等于这道门没开。这里只用注释钉住这条纪律、不加代码强制：
-# Task 4–7 的计划里每一步都钉死了期望打印的census数字（如"2 份双语 / 6 份
-# 白名单"），少划掉一个文件、数字对不上，计划本身的验收步骤就会先发现，
-# 机制已经够用，不必在 check.py 里再加一道自动化的"白名单只许收缩"检查。
-MONOLINGUAL_ALGOS = {
-    'minimax.js',
-}
+# 2026-08-08，阶段 9a task 5：曾经有过一个 MONOLINGUAL_ALGOS 白名单（"本阶段
+# 暂未双语的 algos"），minimax.js 是它最后一名住户。八份全部双语之后这个集合
+# 空了，**连同它的 stale 检查和 bilingual_algos_check() 里那句 `if p.name in
+# MONOLINGUAL_ALGOS: continue` 一并删掉了**：一个空白名单不是"没人用的机制"，
+# 是一扇迟早会被重新打开的暗门——下一个赶时间的人只要往里加一个文件名，这道
+# 门对那份文件就当场失明，而且看不出任何异常。删掉之后，`core/algos/` 下每一份
+# 非测试 .js **无条件**要求双语，想绕过就得先把门本身改回去，那是件会被看见的事。
 
 # render(parts, lang) 那一段在每份双语 algos 里逐字节相同（规格 §1.6）。
 # 用两条锚线夹取，而不是数行数：行数会随注释改动漂移，锚线不会。
@@ -440,17 +437,19 @@ RENDER_END = '    return out;\n  }\n'
 
 
 def bilingual_algos_check() -> int:
-    """双语算法源码的普查门（规格 §7.5，阶段 8）。
+    """双语算法源码的普查门（规格 §7.5，阶段 8；阶段 9a task 5 删掉白名单）。
 
     各文件自己的 *.test.js 已经跑了「代码同一 / 步数同一 / 行数同一」三道门
     ——那三道要真实参数，参数只有测试文件知道，放在那里是对的。这里守的是
     那三道**够不着**的两件事：
 
-    ① **普查**：core/algos/ 下每一份非测试、非白名单的 .js，都得**装上**
-       双语机制。将来有人加第八道题却忘了双语，这道门当场响；靠各文件
-       测试是守不住的 —— 新文件的新测试当然不会去测一件作者没想到的事。
+    ① **普查**：core/algos/ 下每一份非测试的 .js，都得**装上**双语机制，
+       **没有白名单、没有例外**（阶段 8 有过一个 MONOLINGUAL_ALGOS，八份
+       到齐之后连机制一起删了，理由见上面那段注释）。将来有人加第九道题
+       却忘了双语，这道门当场响；靠各文件测试是守不住的 —— 新文件的新测试
+       当然不会去测一件作者没想到的事。
 
-    ② **render 助手七份逐字节相同**：它在每份里各存一份（不抽共用模块的
+    ② **render 助手八份逐字节相同**：它在每份里各存一份（不抽共用模块的
        理由见 queens.js 里那段注释），没有门就必然漂移。阶段 7 的
        king-greedy / king-exact 共用段用的是同一个套路。
 
@@ -486,12 +485,6 @@ def bilingual_algos_check() -> int:
               '不是跑了个寂寞', file=sys.stderr)
         return 1
 
-    stale = MONOLINGUAL_ALGOS - {p.name for p in algos}
-    if stale:
-        print(f'ERROR: MONOLINGUAL_ALGOS 里有已经不存在的文件：{sorted(stale)}'
-              f' —— 白名单指着空气，等于把某个真文件悄悄放行了', file=sys.stderr)
-        return 1
-
     # node -e 里公用的归一化探针：从 stdin 读源码字符串，调 _test.js 的
     # normalizeSource 抽掉注释与字符串字面量，写回 stdout。用 stdin 而不是
     # 让 node 自己读文件，是因为②要喂给它的是**拼接过的字符串**（挖掉了
@@ -515,8 +508,6 @@ def bilingual_algos_check() -> int:
     renders = {}
     examined = 0    # 尝试过双语检查的文件数——不等于"确认双语"，见下面打印那行的注释
     for p in algos:
-        if p.name in MONOLINGUAL_ALGOS:
-            continue
         examined += 1
         text = p.read_text(encoding='utf-8')
 
@@ -599,8 +590,8 @@ def bilingual_algos_check() -> int:
             rc = 1
 
     if examined == 0:
-        print('ERROR: 一份双语 algos 都没有 —— MONOLINGUAL_ALGOS 是不是把'
-              '所有文件都放行了？', file=sys.stderr)
+        print('ERROR: 一份 algos 都没检查到 —— 上面那句 glob 是不是选空了？',
+              file=sys.stderr)
         return 1
 
     # 「render 助手 N 份一致/不一致」这半句只报**这一条**（逐字节比对）的
@@ -622,11 +613,11 @@ def bilingual_algos_check() -> int:
                 consistency_ok = False
 
     # ⚠ `examined` 数的是"尝试过双语检查的文件数"，不是"确认双语通过的文件
-    # 数"——①锚线缺失的文件也会先被计入 examined（在 continue 之前）。两者
-    # 在door全绿时数值相同（当前 7 份双语 / 1 份白名单的场景下就是如此），但读这行输出时
-    # 要知道：`examined` 更准确的含义是分母，不是"验收通过"的断言，真正
-    # 的通过与否看的是整体 rc 和上面有没有打印任何 ERROR。
-    print(f'双语 algos 普查：{examined} 份双语 / {len(algos) - examined} 份白名单，'
+    # 数"——①锚线缺失的文件也会先被计入 examined（在 continue 之前）。白名单
+    # 删掉之后 examined 恒等于 len(algos)，但读这行输出时仍要知道：它是分母，
+    # 不是"验收通过"的断言，真正的通过与否看的是整体 rc 和上面有没有打印任何
+    # ERROR。
+    print(f'双语 algos 普查：{examined} 份双语，'
           f'render 助手 {len(names)} 份'
           + ('一致' if consistency_ok else '有不一致'))
     return rc
@@ -766,9 +757,13 @@ def throws_discrimination_check() -> int:
     `_test.js` 的 throws(fn, label, pattern) 第三参可选，**不传就退化成
     「抛了就算过」**。
 
-    ⚠ **ALLOW_MISSING 是 86，不是简报写的 84**——简报的 149/84 是用
-    `grep -c 'T\\.throws('` 数的静态 census，跑起来的运行期审计给出的真数
-    是**总 170 条、缺第三参 86 条**。差额来自 grep 数不出的执行期真相：
+    ⚠ **ALLOW_MISSING 现在是 0**（2026-08-08，阶段 9a task 4 补齐最后 18 条
+    之后收紧的；task 5 顺手把这段文档字符串改成事实描述）。下面这段关于
+    "86 条"的账**是历史**，留着是因为它解释了一件此后仍然成立的事：静态
+    grep 与运行期审计数出来的条数**本来就不相等**，别拿 grep 的数字去核对
+    这道门打印的数字。当时简报按 `grep -c 'T\\.throws('` 数得 149/84，运行期
+    审计的真数是**总 170 条、缺第三参 86 条**。差额来自 grep 数不出的执行期
+    真相：
       · king.test.js 的缺参数/越界那组 `T.throws` 写在
         `for (const [name, M] of [['king-greedy', G], ['king-exact', X]])`
         循环体内，每条源码行两个算法变体各跑一次——grep=14、运行期=28；
@@ -811,13 +806,14 @@ def throws_discrimination_check() -> int:
     是不需要它了，是新判据下"0 种"和"1 种"本来就都不该报错，不需要
     专门开一条豁免规则，特例消失是这次订正的自然结果，不是另外打的补丁。
 
-    ⚠ 这道门**不要求每条都有 pattern** —— 那是 9a 的补齐任务的事，
-    补齐过程中这道门要能跑。它只报两类：
+    ⚠ **这道门已经要求每条都有 pattern**（ALLOW_MISSING = 0，2026-08-08
+    起）。它报两类，两类都会让整道门失败：
       · 无判别力的 pattern（真实匹中同文件 ≥2 种结构形状的消息）
-      · 缺第三参的条数（**只统计、不失败**，收敛到 0 之后再收紧）
+      · 缺第三参的条数（超过 ALLOW_MISSING = 0 就失败，也就是一条都不许）
 
-    收紧的时机写在这里：9a 的补齐任务做完后，把 ALLOW_MISSING 改成 0，
-    这道门从此拒绝任何新增的无 pattern T.throws。
+    收紧过程写在这里备查：阶段 9a 早期这道门对缺第三参**只统计、不失败**，
+    给补齐任务留活口（那时 ALLOW_MISSING 一路从 86 降下来）。task 4 把最后
+    18 条补完之后改成 0，此后任何新增的无 pattern T.throws 都会被当场拒绝。
 
     ⚠ **扫描范围是 core/ + games/，与 core_tests()（第 7 道门）完全一致**
     ——早先只扫 core/，games/ 下的 `games.test.js` 今天恰好 0 条 T.throws
@@ -923,12 +919,13 @@ if __name__ == '__main__':
     # 那个区间——上面两道都以"已经扫到了"为前提，空区间那次事故正是从这个
     # 前提底下漏过去的。
     # bilingual_algos_check 是阶段 8 新加的第八道，守两件各文件测试守不住的
-    # 事：core/algos/ 下有没有文件忘了装双语机制（普查，按 MONOLINGUAL_ALGOS
-    # 白名单工作），以及 render(parts, lang) 助手在七份里是否逐字节相同
-    # （它在每份里各存一份，没有门就必然漂移）。
+    # 事：core/algos/ 下有没有文件忘了装双语机制（**无条件普查**，阶段 9a
+    # task 5 把 MONOLINGUAL_ALGOS 白名单连机制一起删了），以及
+    # render(parts, lang) 助手在八份里是否逐字节相同（它在每份里各存一份，
+    # 没有门就必然漂移）。
     # throws_discrimination_check 是阶段 9a 新加的第九道，守 T.throws 断言
-    # 本身的**判别力**：pattern 缺第三参会退化成「抛了就算过」（只统计、
-    # 不失败，收敛到 0 之前给补齐任务留活口），补上的 pattern 若真的匹中
+    # 本身的**判别力**：pattern 缺第三参会退化成「抛了就算过」（**一条都
+    # 不许**——ALLOW_MISSING 自 2026-08-08 起是 0），补上的 pattern 若真的匹中
     # 同文件里 ≥2 种不同结构的消息（先按 pattern 真实语义匹配、再对匹中的
     # 消息抹掉插值算结构形状——不是简单数字面消息条数）则等于没有判别力
     # （当场失败）——阶段 7 三条同前缀错误消息撞上恒真 pattern、四条守卫

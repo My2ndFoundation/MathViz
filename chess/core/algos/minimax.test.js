@@ -6,7 +6,7 @@ const A = require('./minimax.js');
 // ---- 源码必须能被解释器解析（子集合法性）----
 for (const mode of ['plain', 'ab', 'ordered']) {
   let err = null;
-  try { I.parse(A.source({ mode: mode, depth: 2 })); } catch (e) { err = e; }
+  try { I.parse(A.source({ mode: mode, depth: 2, lang: 'zh' })); } catch (e) { err = e; }
   T.ok(err === null, mode + ' 模式的源码在子集里合法' + (err ? '：' + err.message : ''));
 }
 
@@ -16,8 +16,8 @@ for (const mode of ['plain', 'ab', 'ordered']) {
    抓到的真问题比任何手写期望值都多。 */
 let compared = 0;
 for (const depth of [1, 2, 3]) {
-  const plain = I.run(A.source({ mode: 'plain', depth: depth }), { host: {} });
-  const ab = I.run(A.source({ mode: 'ab', depth: depth }), { host: {} });
+  const plain = I.run(A.source({ mode: 'plain', depth: depth, lang: 'zh' }), { host: {} });
+  const ab = I.run(A.source({ mode: 'ab', depth: depth, lang: 'zh' }), { host: {} });
   T.ok(!plain.trace.truncated, 'depth ' + depth + ' 纯 minimax 未截断');
   T.ok(!ab.trace.truncated, 'depth ' + depth + ' α-β 未截断');
   T.eq(ab.result, plain.result, 'depth ' + depth + '：α-β 与纯 minimax 返回同一个值');
@@ -27,27 +27,27 @@ T.eq(compared, 3, '三个深度都做了对拍');
 
 // ---- 走法排序同样不许改变答案 ----
 for (const depth of [1, 2, 3]) {
-  const plain = I.run(A.source({ mode: 'plain', depth: depth }), { host: {} });
-  const ord = I.run(A.source({ mode: 'ordered', depth: depth }), { host: {} });
+  const plain = I.run(A.source({ mode: 'plain', depth: depth, lang: 'zh' }), { host: {} });
+  const ord = I.run(A.source({ mode: 'ordered', depth: depth, lang: 'zh' }), { host: {} });
   T.eq(ord.result, plain.result, 'depth ' + depth + '：吃子优先序不改变极小极大值');
 }
 
 // ---- α-β 必须真的省下步数 ----
 for (const depth of [2, 3]) {
-  const p = I.run(A.source({ mode: 'plain', depth: depth }), { host: {} }).trace.length;
-  const a = I.run(A.source({ mode: 'ab', depth: depth }), { host: {} }).trace.length;
+  const p = I.run(A.source({ mode: 'plain', depth: depth, lang: 'zh' }), { host: {} }).trace.length;
+  const a = I.run(A.source({ mode: 'ab', depth: depth, lang: 'zh' }), { host: {} }).trace.length;
   T.ok(a < p, 'depth ' + depth + '：α-β 步数更少（' + a + ' < ' + p + '）');
 }
 
 // ---- 吃子优先序必须比随机序剪得更狠（order tab 的全部内容）----
-const abSteps = I.run(A.source({ mode: 'ab', depth: 3 }), { host: {} }).trace.length;
-const ordSteps = I.run(A.source({ mode: 'ordered', depth: 3 }), { host: {} }).trace.length;
+const abSteps = I.run(A.source({ mode: 'ab', depth: 3, lang: 'zh' }), { host: {} }).trace.length;
+const ordSteps = I.run(A.source({ mode: 'ordered', depth: 3, lang: 'zh' }), { host: {} }).trace.length;
 T.ok(ordSteps < abSteps, '吃子优先序比自然序剪得更狠（' + ordSteps + ' < ' + abSteps + '）');
 
 // ---- 深度 4 的撞墙必须真的发生（规格 §4④ 的这一课）----
-const wall = I.run(A.source({ mode: 'plain', depth: 4 }), { host: {} });
+const wall = I.run(A.source({ mode: 'plain', depth: 4, lang: 'zh' }), { host: {} });
 T.eq(wall.trace.truncated, true, 'depth 4 的纯 minimax 撞上 STEP_LIMIT —— 这就是这一课');
-const survive = I.run(A.source({ mode: 'ab', depth: 4 }), { host: {} });
+const survive = I.run(A.source({ mode: 'ab', depth: 4, lang: 'zh' }), { host: {} });
 T.eq(survive.trace.truncated, false, 'depth 4 的 α-β 跑得完 —— 同一格，一个做不到、一个做得到');
 
 /* 注：「源码里没有三元运算符」这条**不要**写成 `src.indexOf('?') === -1`
@@ -58,8 +58,8 @@ T.eq(survive.trace.truncated, false, 'depth 4 的 α-β 跑得完 —— 同一�
 /* 学习者切 tab 时看到的应该是**同一份算法**多了或少了剪枝，而不是两份
    各写各的代码。两份独立维护的源码迟早漂移，而漂移之后「对比」就不再
    是对比了。 */
-const plainLines = A.source({ mode: 'plain', depth: 3 }).split('\n');
-const abLines = A.source({ mode: 'ab', depth: 3 }).split('\n');
+const plainLines = A.source({ mode: 'plain', depth: 3, lang: 'zh' }).split('\n');
+const abLines = A.source({ mode: 'ab', depth: 3, lang: 'zh' }).split('\n');
 const onlyInAb = abLines.filter(function (l) { return plainLines.indexOf(l) === -1; });
 T.ok(onlyInAb.length > 0, 'α-β 确实多出了几行');
 T.ok(onlyInAb.length <= 6, 'α-β 只比纯 minimax 多出不超过 6 行（实际多出：' +
@@ -108,7 +108,7 @@ T.ok(claimRe.test(plainSource), '这句自述在纯 minimax 那份里也在 —�
    去污染源码，正好是不该做的事。
    于是：第一段查「有没有丢东西」（ordered ⊇ ab，逐行），第二段查「多出来
    的是不是只有排序那一块」（数量、位置连成一片、且只谈 caps/quiet/ms）。 */
-const ordLines = A.source({ mode: 'ordered', depth: 3 }).split('\n');
+const ordLines = A.source({ mode: 'ordered', depth: 3, lang: 'zh' }).split('\n');
 
 // 第一段：ordered 必须逐行包含 ab 的全部内容 —— 这条才是防「另写一份」的那道锁。
 const missingFromOrd = abLines.filter(function (l) { return ordLines.indexOf(l) === -1; });
@@ -146,7 +146,7 @@ for (const l of ordOnly) {
    本来就该在使用者改动源码时改变（规格 §2.8 就指望她去改）。 */
 const EXPECTED = { 1: 124, 2: 0, 3: 136 };
 for (const depth of [1, 2, 3]) {
-  const r = I.run(A.source({ mode: 'plain', depth: depth }), { host: {} });
+  const r = I.run(A.source({ mode: 'plain', depth: depth, lang: 'zh' }), { host: {} });
   T.eq(r.result, EXPECTED[depth], 'depth ' + depth + ' 的极小极大值是公布的那个：' + EXPECTED[depth]);
 }
 /* 深度 4 只能拿 α-β 问 —— plain 在这一格撞墙、返回 undefined，
@@ -162,14 +162,47 @@ T.eq(survive.result, -12, 'depth 4 的极小极大值是公布的 −12（问 α
    冻结对象抛、非严格下静默失败，本模块管不着调用方用哪种。 */
 /* 只比生成源码里那一行开局，不比整份字符串：整份比出来的失败信息是几百行
    源码，看的人根本读不出哪里变了。 */
-const boardLine = function () { return /const board = \[.*\];/.exec(A.source({ mode: 'plain', depth: 2 }))[0]; };
+const boardLine = function () { return /const board = \[.*\];/.exec(A.source({ mode: 'plain', depth: 2, lang: 'zh' }))[0]; };
 const beforeTamper = boardLine();
 try { A.POSITIONS.H[0] = 99; } catch (e) { /* 严格模式：抛出来正是想要的 */ }
 try { A.POSITIONS.EVIL = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; } catch (e) {}
 T.eq(A.POSITIONS.H[0], 5, '外面改不动 POSITIONS.H 里的数字');
 T.ok(!A.POSITIONS.EVIL, '外面也塞不进新的局面');
 T.eq(boardLine(), beforeTamper, '所以 source() 生成的开局不会被外面改掉');
-T.eq(I.run(A.source({ mode: 'plain', depth: 2 }), { host: {} }).result, EXPECTED[2],
+T.eq(I.run(A.source({ mode: 'plain', depth: 2, lang: 'zh' }), { host: {} }).result, EXPECTED[2],
      '被改过一手之后跑出来的仍是公布的那个值');
+
+/* ---- 双语三道门 × 三个 mode（规格 §7.5）----
+   三道各有对方才拦得住的漏，见 queens.test.js 里那段注释；这里不重复。
+   ⚠ 步数门必须带 !truncated 前置断言：两语都撞 STEP_LIMIT 时它退化成
+   200000 === 200000（阶段 5 在 tour-dfs 5×5 上栽过）。 */
+const E = require('../exercise.js');
+for (const mode of ['plain', 'ab', 'ordered']) {
+  const zh = A.source({ mode: mode, depth: 2, lang: 'zh' });
+  const en = A.source({ mode: mode, depth: 2, lang: 'en' });
+
+  T.eq(en.split('\n').length, zh.split('\n').length, mode + '：两种语言行数相同');
+  T.eq(T.normalizeSource(en), T.normalizeSource(zh),
+       mode + '：抽掉注释与字符串之后，两种语言逐字节相同');
+
+  const rz = I.run(zh, { host: {} }), re_ = I.run(en, { host: {} });
+  T.ok(!rz.trace.truncated && !re_.trace.truncated,
+       mode + '：两语都没撞上限 —— 撞了的话下面那条步数断言就是 200000 === 200000');
+  T.eq(re_.trace.length, rz.trace.length, mode + '：两种语言的解释器步数相同');
+  T.eq(re_.result, rz.result, mode + '：两种语言的返回值相同');
+
+  T.ok(zh !== en, mode + '：两种语言的源码不是同一份');
+  T.ok(/[一-鿿㐀-䶿　-〿＀-￯]/.test(zh), mode + '：中文那一份里有汉字');
+  T.ok(!/[一-鿿㐀-䶿　-〿＀-￯]/.test(E.parse(en, 'en').clean),
+       mode + '：英文那一份送到编辑器的文本里一个汉字都没有');
+}
+
+// ---- lang 必填，且只认两个值 ----
+/* ⚠ 这一条**不许**补 lang —— 它验的就是「不给 lang 会不会抛」。补上
+   `lang: 'zh'`（合法值）之后这一组对 lang 的校验位置完全失明。 */
+T.throws(function () { A.source({ mode: 'plain', depth: 2 }); },
+         'minimax：缺 lang 必须抛', /少了 lang/);
+T.throws(function () { A.source({ mode: 'plain', depth: 2, lang: 'fr' }); },
+         'minimax：lang=fr 必须抛', /只认/);
 
 T.report();

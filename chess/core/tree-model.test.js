@@ -8,7 +8,7 @@ const ALGO = require('./algos/minimax.js');
 /* 用真实解释器轨迹做 fixture。手搓假 trace 会悄悄偏离真实形状，
    而这个模块的全部正确性都建立在「真实轨迹长什么样」上——3b 的
    词法器审查正是靠「拿原生 JS 当参照」抓出 5 条 Critical 的。 */
-const SRC = ALGO.source({ mode: 'plain', depth: 2 });
+const SRC = ALGO.source({ mode: 'plain', depth: 2, lang: 'zh' });
 const trace = I.run(SRC, { host: {} }).trace;
 T.ok(!trace.truncated, '前提：depth 2 的纯 minimax 不会截断');
 
@@ -181,7 +181,7 @@ T.eq(mvKnown + mvUnknown, tree.order.length, '每个节点非此即彼，没有�
    childIds 是**真的看了**的。两者之差就是被 `if (beta <= alpha) break;`
    砍掉的分支。plain 的 fixture 永远撞不到这条路径，所以必须另开一份。 */
 for (const mode of ['ab', 'ordered']) {
-  const t2 = TM.build(I.run(ALGO.source({ mode: mode, depth: 2 }), { host: {} }).trace, 'search');
+  const t2 = TM.build(I.run(ALGO.source({ mode: mode, depth: 2, lang: 'zh' }), { host: {} }).trace, 'search');
   const r2 = TM.nodeAt(t2, t2.rootId);
   T.eq(r2.value, RESULT, mode + '：剪枝不改变答案（根的 value 与 plain 相同）');
   T.ok(t2.order.length < tree.order.length, mode + '：剪枝之后树上的节点比 plain 少');
@@ -202,7 +202,7 @@ for (const mode of ['ab', 'ordered']) {
 /* ---- 截断轨迹：帧永远不关闭，popStep 只能是 -1 ----
    depth 4 的纯 minimax 撞 STEP_LIMIT 是规格 §4④ 明写的那一课（「不是慢一点，
    是做不到」），所以这条路径一定会被真的走到，不是理论边角。 */
-const cut4 = I.run(ALGO.source({ mode: 'plain', depth: 4 }), { host: {} }).trace;
+const cut4 = I.run(ALGO.source({ mode: 'plain', depth: 4, lang: 'zh' }), { host: {} }).trace;
 T.ok(!!cut4.truncated, '前提：depth 4 的纯 minimax 会撞上步数上限');
 const tCut = TM.build(cut4, 'search');
 T.ok(tCut.order.length > 0, '截断的轨迹照样建得出树');
@@ -310,7 +310,7 @@ T.eq(TM.build(hoRun.trace, 'nosuchfn').rootId, -1, '认不到就没有根');
 
 // ============ 增量游标与剪枝 ============
 
-const abSrc = ALGO.source({ mode: 'ab', depth: 3 });
+const abSrc = ALGO.source({ mode: 'ab', depth: 3, lang: 'zh' });
 const abTrace = I.run(abSrc, { host: {} }).trace;
 T.ok(!abTrace.truncated, '前提：depth 3 的 α-β 不会截断');
 const abTree = TM.build(abTrace, 'search');
@@ -360,7 +360,7 @@ TM.seek(abEnd, abTrace.length - 1);
 const abStats = TM.statsAt(abEnd);
 T.ok(abStats.pruned > 0, 'α-β 到末尾时确实剪掉了分支：' + abStats.pruned);
 
-const plainTrace = I.run(ALGO.source({ mode: 'plain', depth: 3 }), { host: {} }).trace;
+const plainTrace = I.run(ALGO.source({ mode: 'plain', depth: 3, lang: 'zh' }), { host: {} }).trace;
 T.ok(!plainTrace.truncated, '前提：depth 3 的纯 minimax 不截断');
 const plainTree = TM.build(plainTrace, 'search');
 const plainEnd = TM.createView(plainTree, plainTrace);
@@ -372,7 +372,7 @@ T.ok(TM.statsAt(abEnd).visited < TM.statsAt(plainEnd).visited,
      'α-β 访问的节点更少：' + TM.statsAt(abEnd).visited + ' < ' + TM.statsAt(plainEnd).visited);
 
 // ---- 截断轨迹：剪枝不可判定时不许报 0（约束 3）----
-const cutTrace = I.run(ALGO.source({ mode: 'plain', depth: 4 }), { host: {} }).trace;
+const cutTrace = I.run(ALGO.source({ mode: 'plain', depth: 4, lang: 'zh' }), { host: {} }).trace;
 T.eq(cutTrace.truncated, true, '前提：depth 4 的纯 minimax 会截断');
 const cutTree = TM.build(cutTrace, 'search');
 const cutView = TM.createView(cutTree, cutTrace);
@@ -500,7 +500,7 @@ T.ok(typeof abStats.mvEnumerated === 'number', 'α-β 的「枚举了多少走�
    左边会立刻变大，这条当场红。 */
 /* ordered 也在这里一起过一遍 view —— 它是 shipped 工具里与 ab **并排**的
    那半个对比 tab，却是三个 mode 里唯一没有任何 view 级断言的。 */
-const ordTrace = I.run(ALGO.source({ mode: 'ordered', depth: 3 }), { host: {} }).trace;
+const ordTrace = I.run(ALGO.source({ mode: 'ordered', depth: 3, lang: 'zh' }), { host: {} }).trace;
 T.ok(!ordTrace.truncated, '前提：depth 3 的 ordered 不截断');
 const ordTree = TM.build(ordTrace, 'search');
 const ordEnd = TM.createView(ordTree, ordTrace);
