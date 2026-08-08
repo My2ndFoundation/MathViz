@@ -4,7 +4,7 @@
 
 **Goal:** 把「双语工具」这件事收口到最后一份源码（`minimax.js`），并把这一段反复栽跟头的那道门——**恒真的断言**——从靠自觉变成一道机器门。
 
-**Architecture:** 三件事，顺序是硬的。① 先立**判别力门**：给 `_test.js` 加一个运行期审计模式，`check.py` 用它横扫全仓的 `T.throws`，报出「pattern 匹中同文件全部消息」的那些。② 再拿这道门去补 84 条缺第三参的断言。③ 最后做 `minimax.js` 双语与阶段 8 的遗留，共用一次工具 ②④⑤ 的浏览器验收。
+**Architecture:** 三件事，顺序是硬的。① 先立**判别力门**：给 `_test.js` 加一个运行期审计模式，`check.py` 用它横扫全仓的 `T.throws`，报出「pattern 匹中同文件全部消息」的那些。② 再拿这道门去补 84 条缺第三参的断言。③ 最后做 `minimax.js` 双语与阶段 8 的遗留，共用一次工具 ④⑤（**不是** ②——见下） 的浏览器验收。
 
 **Tech Stack:** 零依赖 ES5 子集 JavaScript（`node` 直跑 + 浏览器内联）；Python 3 的 `chess/scripts/check.py`；无构建、无包管理器。
 
@@ -43,7 +43,7 @@
 | `chess/core/interp.test.js` | 解释器 | 12 条补第三参 |
 | `chess/core/algos/minimax.js` | 工具④ 的算法源码生成器 | **双语化** |
 | `chess/core/algos/minimax.test.js` | 它的测试 | 三道双语门 + 调用点补 `lang` |
-| `chess/core/debugger.js` | ②④⑤ 共用调试器 | OUTPUT 空态占位跟语言走 |
+| `chess/core/debugger.js` | ④⑤（**不是** ②——见下） 共用调试器 | OUTPUT 空态占位跟语言走 |
 | `chess/tools/chess-search-minimax.html` | 工具④ | **补 `source()` 单一入口**并传 `lang` |
 | `chess/tools/chess-board-algorithms.html` | 工具⑤ | 修 4 条阶段 8 遗留 |
 
@@ -656,7 +656,10 @@ git status --short
 
 ## Task 6：调试器 OUTPUT 空态占位跟语言走
 
-阶段 9 的旧账，在**共用引擎**里（影响工具 ②④⑤）。**放在这里做，是因为 Task 5 已经要重跑工具④ 的验收了**——分开做等于把同一次验收付两遍。
+> ⚠ **「影响工具 ②④⑤」是错的，2026-08-08 实测订正。** 这句话出自阶段 8 的账本，被一路转述了四次。实测：`GENERATED:DEBUGGER` 标记只出现在 `_debugger-preview.html`（预览页）、`chess-board-algorithms.html`（工具⑤）、`chess-search-minimax.html`（工具④）；**工具② `chess-rules-check-mate.html` 里 `dbg-root` / `dbg-out` / `editorHost` 全是 0**，整页没有调试器、编辑器或 OUTPUT 面板，正文里连「输出」二字都没有。**共用调试器引擎的登记工具只有 ④ 和 ⑤。**
+
+
+阶段 9 的旧账，在**共用引擎**里（影响工具 ④⑤（**不是** ②——见下））。**放在这里做，是因为 Task 5 已经要重跑工具④ 的验收了**——分开做等于把同一次验收付两遍。
 
 阶段 8 Task 9 的查证：切成英文后 OUTPUT 面板的空态占位仍写中文「还没有输出」（同块的「只有全局帧」是跟着换的）。根因是 `relabel` 没重画这一格，而 `chess/core/debugger.js:534` 的 `noOut` **本身是双语的**。最终审核补了一条：**实测是双向的**——那一格取建面板那一刻的语言、此后永不重画（英文界面下看到 `还没有输出`，中文界面下也看到 `no output yet`）。
 
@@ -755,7 +758,7 @@ git status --short
 
 ---
 
-## Task 8：全量门与工具 ②④⑤ 的浏览器验收
+## Task 8：全量门与工具 ④⑤（**不是** ②——见下） 的浏览器验收
 
 **Files:**
 - Modify: `chess/chess-tools.json`（工具④ 版本 + changelog）
@@ -808,7 +811,7 @@ process.exit(bad?1:0);'
 
 ⚠ Task 7 Step 4 改了 `king-greedy.js` / `king-exact.js` 的**英文**——所以这里只比**中文**，中文必须零差异。
 
-- [ ] **Step 4: 浏览器验收（工具 ②④⑤）**
+- [ ] **Step 4: 浏览器验收（工具 ④⑤（**不是** ②——见下））**
 
 `preview_start {name: "mathviz"}`，**每次浏览器工具调用都带显式 `tabId`**，探针**先断言页面身份**再取值。
 
