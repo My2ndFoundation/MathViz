@@ -180,16 +180,29 @@ function nativeRejects(src, label, pattern) {
 }
 nativeRejects('0xZZ', '0x 后面一个合法十六进制数字都没有',
               'Invalid number: expected hex digits after 0x');
+/* 三条共用前缀、各自锚不同的回显字符（阶段 9b 收紧，9a 账本记的那笔债）：
+   守卫只有一条、消息只有一种结构，所以共用前缀过得了第九道门；但**过门不
+   等于 pattern 对** —— 只锚前缀的话，`0o19` 与 `5g` 这两条互相都能匹中，
+   谁挂了都看不出是谁。回显字符是这里唯一的区分度，把它排除在 pattern 之外
+   是主动扔掉判别力。 */
 nativeRejects('0o19', '八进制里出现非法数字 9',
-              'a numeric literal cannot be immediately followed by');
+              'a numeric literal cannot be immediately followed by "9"');
 nativeRejects('0b12', '二进制里出现非法数字 2',
-              'a numeric literal cannot be immediately followed by');
+              'a numeric literal cannot be immediately followed by "2"');
 nativeRejects('1e', '指数标记后面没有数字',
               'Invalid number: missing exponent digits');
 nativeRejects('1ex', '指数标记后面跟的不是数字',
               'Invalid number: missing exponent digits');
 nativeRejects('5g', '数字字面量后面紧跟标识符字符',
-              'a numeric literal cannot be immediately followed by');
+              'a numeric literal cannot be immediately followed by "g"');
+/* 裸 `0o` / `0b`（后面一个数字都没有）—— 9a 的账本预告过这两条：补上它们
+   的那一刻，任何被放宽到「expected … digits after …」这个形状的 pattern 会
+   突然被第九道门判钝。**那是预期，不是回归**：门自纠的时机本来就取决于
+   别人何时补测试。这里三条 pattern 都写完整消息，没有敞口。 */
+nativeRejects('0o', '0o 后面一个合法八进制数字都没有',
+              'Invalid number: expected octal digits after 0o');
+nativeRejects('0b', '0b 后面一个合法二进制数字都没有',
+              'Invalid number: expected binary digits after 0b');
 
 /* ---- 额外验证：反斜杠 + 真实换行是「续行」，整体消失而不是被添成
    一个换行字符（原生在两种模式下都这样，不是严格模式限定的怪癖，
