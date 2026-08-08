@@ -80,6 +80,24 @@ T.ok(lineGuard !== null, '「反斜杠 + 真实换行」续行吞掉一行时 no
 T.ok(lineGuard !== null && /行数不一致/.test(lineGuard.message),
      '错误消息点名的是「归一化前后行数不一致」这道守卫，不是别的守卫顺手响的');
 
+/* ---- eq 认 BigInt（阶段 9b，规格 §7.7 ⑥）----
+   JSON.stringify(1n) 抛 `Do not know how to serialize a BigInt`，而 eq 两边
+   都走 JSON.stringify —— 不修的话，9b 之后任何一条比较 BigInt 的断言都会
+   以「引擎异常炸掉整个测试文件」的形式失败，而不是以「断言失败」的形式。
+
+   编码必须跟字符串区分得开：编成 "5" 就跟字面字符串 "5" 撞、编成 "5n" 就
+   跟字面字符串 "5n" 撞。撞了的后果不是报错，是**真不一致却判相等** —— eq
+   是全仓 18 个测试文件的地基，这种漏是静默的。下面四条里，前两条验「同值
+   相等」，后两条验「不跟字符串撞」，**后两条才是这条设计的守卫**。 */
+let bigOk = null;
+try { T.eq(5n, 5n, 'eq：同值 BigInt 相等'); bigOk = 'no-throw'; }
+catch (e) { bigOk = e.message; }
+T.eq(bigOk, 'no-throw', 'eq 比较 BigInt 时不再抛引擎异常');
+T.ok(!T.wouldPass(5n, '5'), 'eq：BigInt 5n 与字符串 "5" 必须判不等');
+T.ok(!T.wouldPass(5n, '5n'), 'eq：BigInt 5n 与字符串 "5n" 必须判不等');
+T.ok(!T.wouldPass(5n, 5), 'eq：BigInt 5n 与数字 5 必须判不等');
+T.ok(T.wouldPass([1n, { a: 2n }], [1n, { a: 2n }]), 'eq：嵌套在数组/对象里的 BigInt 也认');
+
 /* ---- 审计模式（阶段 9a）----
    THROWS_AUDIT 没设时必须**一个字节的行为都不变** —— 这是给全仓每一条
    T.throws 加的旁路（条数**故意不写在这儿**，理由见 _test.js 顶上注释：

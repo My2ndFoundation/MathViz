@@ -2,10 +2,30 @@
 let passed = 0;
 const failures = [];
 
+/* JSON.stringify 遇到 BigInt 直接抛（`Do not know how to serialize a BigInt`），
+   而阶段 9b 起解释器会产出 BigInt 值（规格 §7.7）。replacer 把它换成一个
+   **不可能与任何真实值重合**的形状：字符串 "5" 会跟字面字符串 "5" 撞、
+   "5n" 会跟字面字符串 "5n" 撞，撞了就是「真不一致却判相等」，而 eq 是全仓
+   18 个测试文件的地基 —— 这种漏是静默的。`__bigint__` 这个键名要撞上，得有
+   人恰好构造出 { __bigint__: "5" } 这个对象来跟一个 BigInt 比较。
+   _test.self.test.js 里有四条断言钉着这件事，别把编码改成字符串。 */
+function serialize(v) {
+  return JSON.stringify(v, function (k, val) {
+    return typeof val === 'bigint' ? { __bigint__: val.toString() } : val;
+  });
+}
+
 function eq(actual, expected, label) {
-  const a = JSON.stringify(actual), e = JSON.stringify(expected);
+  const a = serialize(actual), e = serialize(expected);
   if (a === e) { passed++; return; }
   failures.push(label + '\n    expected: ' + e + '\n    actual:   ' + a);
+}
+
+/* 只回答「这两个值在 eq 眼里相不相等」，不记账、不产生失败 —— 供
+   _test.self.test.js 验证 eq 自己的判定，不然「验证 eq 判不等」这件事
+   本身会被记成一条真失败。跟 eq 共用 serialize，不另写一套比较逻辑。 */
+function wouldPass(actual, expected) {
+  return serialize(actual) === serialize(expected);
 }
 
 function ok(cond, label) {
@@ -166,4 +186,4 @@ function report() {
   process.exit(failures.length ? 1 : 0);
 }
 
-module.exports = { eq, ok, throws, failedCount, normalizeSource, auditEntry, report };
+module.exports = { eq, ok, throws, failedCount, normalizeSource, auditEntry, report, wouldPass };
