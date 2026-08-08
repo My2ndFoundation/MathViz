@@ -35,9 +35,21 @@
      parseUnary / parseAssign 里各自的位置补上（见那几处的注释）。
      `?.` 必须排在 `?`（三元）与 `.`（成员访问）之前，`??` 必须排在 `?`
      之前，`<<`/`>>` 排在个位数运算符 `<`/`>` 之前——都是同一条"更长的
-     优先"规则，不是新规则。 */
-  const PUNCT = ['===', '!==', '**=', '...', '=>', '?.', '??', '==', '!=', '<=', '>=', '&&', '||',
-                 '++', '--', '+=', '-=', '*=', '/=', '%=', '**', '<<', '>>',
+     优先"规则，不是新规则。
+
+     阶段 9b 收尾追加 `>>>` 与五个位运算复合赋值（`<<= >>= &= |= ^=`）：
+     **同样只是为了让它们能被词法器认出来、好在解析阶段报 unsupported，
+     不是把它们收进子集**——跟 `**`/`**=` 在这张表里的处境一字不差。
+     9b 之前这六种写法靠 `UNSUPPORTED_BINOP` 里的 `& | ^ << >>` 顺带被拦成
+     "不支持"（`1 >>> 2` 词法成 `>>` + `>`，`b &= 1n` 词法成 `&` + `=`）；
+     9b 把那五个运算符收进子集之后，那条顺带的拦截没了，六种写法**静默
+     降级成 syntax 错误**——而它们都是合法 JS，syntax 等于对使用者说
+     「你写的不是 JavaScript」。补进这张表是把分类接管回来的第一步。
+     顺序同样是"更长的优先"：`>>>`/`>>=` 排在 `>>` 与 `>` 之前，`<<=`
+     排在 `<<` 与 `<=` 之前，`&=`/`|=`/`^=` 排在 `&`/`|`/`^` 之前。 */
+  const PUNCT = ['===', '!==', '**=', '>>>', '<<=', '>>=',
+                 '...', '=>', '?.', '??', '==', '!=', '<=', '>=', '&&', '||',
+                 '++', '--', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '**', '<<', '>>',
                  '{', '}', '(', ')', '[', ']', ';', ',', '.', ':', '?',
                  '+', '-', '*', '/', '%', '<', '>', '=', '!', '&', '|', '^', '~'];
 
@@ -45,6 +57,35 @@
     const e = new Error(msg);
     e.line = line; e.col = col; e.category = category || 'syntax';
     return e;
+  }
+
+  /* 把「意外的那个东西」回显进错误消息。⚠ 不许在错误消息里直接写
+     `JSON.stringify(someTokenValue)`——**`JSON.stringify(1n)` 抛
+     `TypeError: Do not know how to serialize a BigInt`**，而 token 值从
+     阶段 9b 起可能是 BigInt（`123n` 字面量）。抛在 err() 之前，于是一条
+     本该带 line/col/category 的语法错**变成一个裸 TypeError**：没有
+     line、没有 category。
+
+     这不只是「消息不好看」。工具⑤ 的 check() 按「有没有 line」判这是
+     解析错还是引擎自己的 bug，没有 line 的一律归 category:'internal'，
+     不画波浪线、不点红点，并显示「这是编辑器内部出错，不是你的代码的
+     问题」。触发条件是「漏了逗号/分号，而下一个 token 恰好是 BigInt
+     字面量」——在一份满是 `1n`/`0n` 的位盘源码里，这正是初学者最常见的
+     一类手误，而工具会告诉她「不是你的问题」，还不指行号。
+
+     回显成裸的 `2n` 而不是带引号的 `"2n"`：这一族消息里 Number token
+     本来就是裸的（`JSON.stringify(2) === '2'`，实测消息是
+     `expected "]" but got 2`），引号在这里的意思是「这是字符串/标点
+     记号」。给一个数字字面量套上引号，等于在一条报错里再撒一个小谎。
+     `2n` 与 `2` 并排，一眼就看得出差别在哪儿——那正是 BigInt 存在的
+     全部意义。（词法器里 `checkNumTail` 的 `JSON.stringify(nc)` 不走
+     这里：它回显的 `nc` 永远是单个字符，是字符串，不可能是 BigInt。）
+
+     名字不叫 tokDisp，是因为它有一处调用点不是 token：getProp 的
+     `Cannot read properties of ... (reading X)` 回显的是运行期的属性
+     值，而 `null[1n]` 会让 BigInt 从那一头进来，症状一模一样。 */
+  function dispVal(v) {
+    return typeof v === 'bigint' ? v.toString() + 'n' : JSON.stringify(v);
   }
 
   const ESCAPES = {
@@ -196,8 +237,18 @@
           const hs = i;
           while (i < src.length && /[0-9a-fA-F]/.test(src[i])) adv();
           if (i === hs) throw err('Invalid number: expected hex digits after 0x', sl, sc);
+          const hd = src.slice(hs, i);
+          /* BigInt 后缀（阶段 9b，规格 §7.7 ①）：n 必须在 checkNumTail 之前
+             吃掉，否则它会把 n 当成「数字后面紧跟标识符起始字符」毙掉。吃掉
+             之后 checkNumTail 的语义一个字没变，仍然是「1nx / 1n5 要报错」。 */
+          if (i < src.length && src[i] === 'n') {
+            adv();
+            checkNumTail(sl, sc);
+            push('num', BigInt('0x' + hd), start, sl, sc);
+            continue;
+          }
           checkNumTail(sl, sc);
-          push('num', parseInt(src.slice(hs, i), 16), start, sl, sc);
+          push('num', parseInt(hd, 16), start, sl, sc);
           continue;
         }
         if (c === '0' && (peek(1) === 'o' || peek(1) === 'O')) {
@@ -205,8 +256,16 @@
           const os = i;
           while (i < src.length && src[i] >= '0' && src[i] <= '7') adv();
           if (i === os) throw err('Invalid number: expected octal digits after 0o', sl, sc);
+          const od = src.slice(os, i);
+          /* 同上：BigInt 后缀在 checkNumTail 之前吃掉。 */
+          if (i < src.length && src[i] === 'n') {
+            adv();
+            checkNumTail(sl, sc);
+            push('num', BigInt('0o' + od), start, sl, sc);
+            continue;
+          }
           checkNumTail(sl, sc);
-          push('num', parseInt(src.slice(os, i), 8), start, sl, sc);
+          push('num', parseInt(od, 8), start, sl, sc);
           continue;
         }
         if (c === '0' && (peek(1) === 'b' || peek(1) === 'B')) {
@@ -214,8 +273,16 @@
           const bs = i;
           while (i < src.length && (src[i] === '0' || src[i] === '1')) adv();
           if (i === bs) throw err('Invalid number: expected binary digits after 0b', sl, sc);
+          const bd = src.slice(bs, i);
+          /* 同上：BigInt 后缀在 checkNumTail 之前吃掉。 */
+          if (i < src.length && src[i] === 'n') {
+            adv();
+            checkNumTail(sl, sc);
+            push('num', BigInt('0b' + bd), start, sl, sc);
+            continue;
+          }
           checkNumTail(sl, sc);
-          push('num', parseInt(src.slice(bs, i), 2), start, sl, sc);
+          push('num', parseInt(bd, 2), start, sl, sc);
           continue;
         }
         /* 0 打头紧跟另一个十进制数字（017 / 08 这类旧式八进制 / 前导零
@@ -228,6 +295,8 @@
         }
 
         while (i < src.length && src[i] >= '0' && src[i] <= '9') adv();
+
+        const intEnd = i;   // 整数位到此为止；下面若吃了小数点或指数，就不再是整数形态
 
         /* 至多吃一个小数点然后停——不管点后面有没有紧跟数字。这一条同时
            是 I1（5..toFixed(2) 不能被词法器提前判死刑：第一个点在这里被
@@ -251,6 +320,17 @@
           const ds = i;
           while (i < src.length && src[i] >= '0' && src[i] <= '9') adv();
           if (i === ds) throw err('Invalid number: missing exponent digits', sl, sc);
+        }
+
+        /* n 后缀只跟整数形态相容 —— 原生实测 1.5n / 1e3n 都是 SyntaxError。
+           `i === intEnd` 就是「小数点与指数两段都一个字符没吃」的意思；不成立
+           时不吃 n，让 checkNumTail 照常把它报成「数字后面紧跟 n」，跟原生
+           一样拒绝（消息措辞不同，但两边都拒绝，nativeRejects 只要求这个）。 */
+        if (i === intEnd && i < src.length && src[i] === 'n') {
+          adv();
+          checkNumTail(sl, sc);
+          push('num', BigInt(src.slice(start, intEnd)), start, sl, sc);
+          continue;
         }
 
         checkNumTail(sl, sc);
@@ -349,28 +429,40 @@
      表达式上暴露（a - b - c 对了不代表 a / b / c 对）。 */
 
   /* 二元运算优先级：数字越大结合得越紧。全部列出的都是左结合；右结合的
-     只有赋值，它在 parseAssign 里单独处理，不走这张表。 */
+     只有赋值，它在 parseAssign 里单独处理，不走这张表。
+
+     ⚠ 阶段 9b 加位运算时这张表是**重排**，不是往表尾追加五行：JS 真实
+     优先级里 `|` `^` `&` 夹在 `&&` 与相等之间、`<<` `>>` 夹在关系与加减
+     之间，所以原来的六层整体下移成十层。重排会动到**已有表达式**的解析
+     结果，不只是新运算符自己 —— interp.test.js 里那六条「混合优先级」
+     diff 就是钉这件事的，每一条都挑了在两种排法下算出不同答案的形状。
+     改这张表之前先读那六条。 */
   const BINOP = {
     '||': 1, '&&': 2,
-    '===': 3, '!==': 3, '==': 3, '!=': 3,
-    '<': 4, '>': 4, '<=': 4, '>=': 4,
-    '+': 5, '-': 5,
-    '*': 6, '/': 6, '%': 6,
+    '|': 3, '^': 4, '&': 5,
+    '===': 6, '!==': 6, '==': 6, '!=': 6,
+    '<': 7, '>': 7, '<=': 7, '>=': 7,
+    '<<': 8, '>>': 8,
+    '+': 9, '-': 9,
+    '*': 10, '/': 10, '%': 10,
   };
   const LOGICAL_OPS = { '&&': true, '||': true };
 
   /* 中缀记号里"合法 JS、但不在这个子集"的那一批（复审 I4）——跟
      UNSUPPORTED_WORDS 是同一条原则（消息要点名具体、类别是 unsupported
      不是 syntax），只是这些是标点记号、且只在 parseBinary 的中缀位置
-     才会遇到，所以单独开一张表，不跟 UNSUPPORTED_WORDS 混在一起。 */
+     才会遇到，所以单独开一张表，不跟 UNSUPPORTED_WORDS 混在一起。
+
+     `>>>`（无符号右移）是阶段 9b 收尾补进来的：规格 §7.7「`>>>` 不加」
+     说的是**不进子集**（不能算出结果、不必跟原生对齐一条语义），这里加的
+     是**诊断**，跟 `**` 的处境一模一样——`**` 也在 PUNCT、也在这张表里、
+     也不被支持。9b 之前 `1 >>> 2` 词法成 `>>` + `>`，靠 `>>` 当时还在这张
+     表里被顺带拦成 unsupported；`>>` 进子集之后它退化成一句
+     `Unexpected token: ">"` 的 syntax 错误，而 `1 >>> 2` 是合法 JS。 */
   const UNSUPPORTED_BINOP = {
     '**': 'the ** operator (use repeated multiplication instead)',
     '??': 'the ?? operator (nullish coalescing)',
-    '&': 'the & operator (bitwise and)',
-    '|': 'the | operator (bitwise or)',
-    '^': 'the ^ operator (bitwise xor)',
-    '<<': 'the << operator (bitwise shift)',
-    '>>': 'the >> operator (bitwise shift)',
+    '>>>': 'the >>> operator (unsigned right shift)',
   };
 
   /* 子集边界之外的保留字：走 name 通道进词法器（KEYWORDS 表里没有它们），
@@ -419,7 +511,7 @@
     if (!eat(state, value)) {
       const t = cur(state);
       throw err('Unexpected token: expected ' + JSON.stringify(value) + ' but got ' +
-                 JSON.stringify(t.value), t.line, t.col);
+                 dispVal(t.value), t.line, t.col);
     }
   }
   /* 在任意表达式起始位置检查「这个词/符号是不是子集之外的东西」——
@@ -447,13 +539,6 @@
     if (t.type === 'punct' && t.value === '/') {
       throw unsupported('regular expressions', t);
     }
-    /* '~'（按位取反）只会以「一元前缀运算符」的形状出现在期待操作数的
-       位置——跟 '-'/'+'/'!' 是同一类，但它不在这个教学子集里（复审 I4：
-       改之前词法器压根不认识这个字符，报的是 `Unexpected character "~"`，
-       跟"不支持"毫无关系）。 */
-    if (t.type === 'punct' && t.value === '~') {
-      throw unsupported('the ~ operator (bitwise not)', t);
-    }
   }
 
   /* 赋值：右结合，单独一层，不走 BINOP 表（表里全是左结合）。
@@ -461,6 +546,29 @@
      Assign 节点——这样 a = b = c 这种右结合链靠递归调用 parseAssign
      自然得到，不需要额外的结合性判断。 */
   const ASSIGN_OPS = ['=', '+=', '-=', '*=', '/=', '%='];
+
+  /* 「合法 JS、但不在子集里」的复合赋值。跟 UNSUPPORTED_BINOP 是同一条
+     原则（消息要点名具体符号、类别是 unsupported 不是 syntax），只是这些
+     只在 parseAssign「左手边刚解析完」的位置才会遇到，所以单独一张表。
+
+     `**=` 是复审 I4 留下的原住民；五个位运算复合赋值是阶段 9b 收尾补的。
+     它们本来靠 UNSUPPORTED_BINOP 里的 `& | ^ << >>` **顺带**被拦住
+     （`b &= 1n` 词法成 `&` + `=`，`&` 当场报"不支持位与"）；9b 把那五个
+     运算符收进子集之后，那条顺带的拦截没了，`b &= 1n` 退化成一句
+     `Unexpected token: "="`。⚠ **这里只补诊断，不补实现**：五个复合赋值
+     不进子集（规格 §7.7「探针跑完的裁定（2026-08-08）」），所以每条都要
+     给出替代写法——这个子集支持 `+= -= *= /= %=`，她刚用 `n = n + 1`
+     写完 popcount，试 `b &= b - 1n` 撞上的必须是一句说得清、给得出替代
+     写法的话，而不是一句说她写的不是 JavaScript 的话。 */
+  const UNSUPPORTED_ASSIGN = {
+    '**=': 'the **= operator (use x = x ** y instead)',
+    '&=': 'the &= operator (use x = x & y instead)',
+    '|=': 'the |= operator (use x = x | y instead)',
+    '^=': 'the ^= operator (use x = x ^ y instead)',
+    '<<=': 'the <<= operator (use x = x << y instead)',
+    '>>=': 'the >>= operator (use x = x >> y instead)',
+  };
+
   function parseAssign(state) {
     const t0 = cur(state);
     const left = parseBinary(state, 1);
@@ -472,12 +580,12 @@
     if (at(state, 'punct', '?')) {
       throw unsupported('the ternary operator', cur(state));
     }
-    /* '**='（幂赋值）跟上面的 '?' 是同一种处境：只有解析完左手边才会
-       遇到它，不在 ASSIGN_OPS 表里就会原样漏给调用方，报出不知所云的
-       syntax 错误（复审 I4，与 UNSUPPORTED_BINOP 的 '**' 是同一条分歧
-       原因，只是这是赋值形式）。 */
-    if (at(state, 'punct', '**=')) {
-      throw unsupported('the **= operator (use x = x ** y instead)', cur(state));
+    /* 子集外的复合赋值（'**=' 与五个位运算形式）跟上面的 '?' 是同一种
+       处境：只有解析完左手边才会遇到它们，不在 ASSIGN_OPS 表里就会原样
+       漏给调用方，报出不知所云的 syntax 错误。表见 UNSUPPORTED_ASSIGN。 */
+    const ta = cur(state);
+    if (ta.type === 'punct' && UNSUPPORTED_ASSIGN.hasOwnProperty(ta.value)) {
+      throw unsupported(UNSUPPORTED_ASSIGN[ta.value], ta);
     }
     const t = cur(state);
     if (t.type === 'punct' && ASSIGN_OPS.indexOf(t.value) >= 0) {
@@ -531,7 +639,7 @@
     return left;
   }
 
-  const UNARY_OPS = { '-': true, '+': true, '!': true };
+  const UNARY_OPS = { '-': true, '+': true, '!': true, '~': true };
   function parseUnary(state) {
     const t0 = cur(state);
     if (t0.type === 'punct' && UNARY_OPS[t0.value]) {
@@ -736,7 +844,7 @@
       return { type: 'Object', props: props, line: t0.line, col: t0.col };
     }
 
-    throw err('Unexpected token: ' + JSON.stringify(t0.value), t0.line, t0.col);
+    throw err('Unexpected token: ' + dispVal(t0.value), t0.line, t0.col);
   }
 
   function parseExpr(state) { return parseAssign(state); }
@@ -750,7 +858,7 @@
     const node = parseExpr(state);
     if (!at(state, 'eof')) {
       const t = cur(state);
-      throw err('Unexpected token: ' + JSON.stringify(t.value), t.line, t.col);
+      throw err('Unexpected token: ' + dispVal(t.value), t.line, t.col);
     }
     return node;
   }
@@ -774,7 +882,7 @@
     if (t.type === 'eof' || (t.type === 'punct' && t.value === '}')) return;
     const prevTok = state.toks[state.i - 1];
     if (prevTok && t.line > prevTok.line) return;
-    throw err('Unexpected token: expected ";" but got ' + JSON.stringify(t.value), t.line, t.col);
+    throw err('Unexpected token: expected ";" but got ' + dispVal(t.value), t.line, t.col);
   }
 
   function parseBlock(state) {
@@ -813,7 +921,7 @@
         throw unsupported('destructuring', nameTok);
       }
       if (nameTok.type !== 'name') {
-        throw err('Unexpected token: expected identifier but got ' + JSON.stringify(nameTok.value),
+        throw err('Unexpected token: expected identifier but got ' + dispVal(nameTok.value),
                    nameTok.line, nameTok.col);
       }
       const name = nameTok.value;
@@ -1329,7 +1437,7 @@
       if (Object.prototype.hasOwnProperty.call(obj, prop)) return obj[prop];
       return undefined; // 只读自有属性，不走原型链
     }
-    throw err('Cannot read properties of ' + String(obj) + ' (reading ' + JSON.stringify(prop) + ')',
+    throw err('Cannot read properties of ' + String(obj) + ' (reading ' + dispVal(prop) + ')',
                node.line, node.col, 'runtime');
   }
 
@@ -1651,6 +1759,16 @@
       case '!==': return l !== r;
       case '==': return l == r;
       case '!=': return l != r;
+      /* 位运算五个（阶段 9b）：直接借原生运算符。ToInt32、>> 的符号位、
+         BigInt 任意精度、「混用当场抛」（连报错文字都跟原生逐字相同）
+         全部白送，也不会跟差分测试的参照实现分岔 —— 规格 §7.7 ⑤ 写明了
+         代价：这五格差分**必然通过**，它在这里验的不是运算语义，而是
+         词法与解析有没有把 token 送到正确位置。 */
+      case '&': return l & r;
+      case '|': return l | r;
+      case '^': return l ^ r;
+      case '<<': return l << r;
+      case '>>': return l >> r;
       default: throw new Error('applyBinary: unknown operator ' + op);
     }
   }
@@ -1751,6 +1869,7 @@
         const v = yield* evalExpr(node.arg, env);
         if (node.op === '-') return -v;
         if (node.op === '+') return +v;
+        if (node.op === '~') return ~v;   // 阶段 9b；BigInt 上原生同样有定义（~5n === -6n）
         return !v; // '!'
       }
 
@@ -1758,13 +1877,20 @@
         /* ECMA-262 13.4.4/13.4.5：两者第一步都是 ToNumeric(oldValue)——
            '--' 侥幸正确是因为一元 '-' 本身就强制转数字，'++' 原来直接
            `old + 1` 对字符串是拼接，不是加法（复审 C1：`let x="5"; x++;`
-           原生得 6，改前我们得 "51"）。这里用 Number(old) 补一个子集版
-           的 ToNumeric（本子集没有 BigInt，不需要分支）。后缀形式返回的
-           也是转换后的数字（原生 `let x="5"; x++;` 的表达式值是数字 5，
-           不是字符串 "5"），所以前缀/后缀都读 num，不再读未转换的 old。 */
+           原生得 6，改前我们得 "51"）。后缀形式返回的也是转换后的数字
+           （原生 `let x="5"; x++;` 的表达式值是数字 5，不是字符串 "5"），
+           所以前缀/后缀都读转换后的值，不再读未转换的 old。
+
+           ⚠ 阶段 9b：**BigInt 必须单独分支**。ToNumeric 对 BigInt 的结果
+           仍是 BigInt，而 `Number(1n)` 不抛、返回 1 —— 走 Number 那条路的
+           后果不是报错，是 `let x = 1n; x++` 静静地得到 Number 2 而原生是
+           2n。这一行以前的注释写着「本子集没有 BigInt，不需要分支」，那句
+           话在 9b 作废了。加一的那个 1 也要跟着分支：`1n + 1` 原生抛。 */
         const ref = yield* evalRef(node.arg, env);
-        const num = Number(ref.get());
-        const next = node.op === '++' ? num + 1 : num - 1;
+        const old = ref.get();
+        const num = typeof old === 'bigint' ? old : Number(old);
+        const one = typeof num === 'bigint' ? 1n : 1;
+        const next = node.op === '++' ? num + one : num - one;
         ref.set(next);
         return node.prefix ? next : num;
       }
@@ -2315,9 +2441,9 @@
     };
   }
 
-  /* 根环境的五个宿主桥接名 + Math 恒是全新 Map 上的第一次声明，不可能触发
-     上面新加的重复声明检查——node 参数只在报错时才用得到，这里传一个
-     line:0/col:0 的占位节点即可（没有源码位置可指，也用不上）。 */
+  /* 根环境的五个宿主桥接名 + Math + BigInt 恒是全新 Map 上的第一次声明，
+     不可能触发上面新加的重复声明检查——node 参数只在报错时才用得到，
+     这里传一个 line:0/col:0 的占位节点即可（没有源码位置可指，也用不上）。 */
   const ROOT_NODE = { line: 0, col: 0 };
   function makeRootEnv(resolvedHost) {
     const env = makeEnv(null);
@@ -2327,6 +2453,13 @@
     declareVar(env, 'const', 'clear', resolvedHost.clear, ROOT_NODE);
     declareVar(env, 'const', 'attacked', resolvedHost.attacked, ROOT_NODE);
     declareVar(env, 'const', 'Math', MATH_NS, ROOT_NODE);
+    /* BigInt（阶段 9b，规格 §7.7 ①）：位盘的 sq 是数组下标、必然是 Number，
+       要移位就得显式转一次。它是真·原生函数，所以走的是跟 Math.abs 同一条
+       `fn.apply(thisArg, args)` 路径，isCallableValue / resolveCallable 一个字
+       都不用改（实测 BigInt.apply(null,[5]) === 5n）。BigInt(1.5) 原生抛
+       `cannot be converted to a BigInt because it is not an integer`，借原生
+       实现意味着这条错误行为也是白送的。 */
+    declareVar(env, 'const', 'BigInt', BigInt, ROOT_NODE);
     return env;
   }
 

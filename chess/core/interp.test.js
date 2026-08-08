@@ -21,10 +21,15 @@ T.eq(values("'a\\nb'"), ['a\nb'], '转义序列在词法阶段就解掉');
    吃掉一个点，再一个成员访问点），会被那条特例误杀。改成「扫描器至多
    吃一个小数点然后停」，1.2.3 仍然会被拒绝，但拒绝的位置改到了解析层
    （点后面必须是属性名，数字不是），报错原因更贴切。 */
+/* 两条 pattern 都锚上回显的 `0.3`（`1.2` 吃掉一个小数点后，`.3` 走前导
+   小数点通道成了 0.3）—— 跟 9a 收紧 checkNumTail 三条 pattern 是同一笔债：
+   只锚 `expected ";" but got` 这个前缀的话，semi() 报出的**任何**消息都能
+   匹中它。阶段 9b 的 C1 补了一条 `let x = 1 2n;`（同一个守卫、回显的是
+   BigInt），第九道门当场判这两条无判别力 —— **那是预期，不是回归**。 */
 T.throws(() => I.parse('1.2.3;'), '数字里出现第二个小数点在解析层被拒绝',
-         'expected ";" but got');
+         'expected ";" but got 0.3');
 T.throws(() => I.parse('let x = 1.2.3;'), '在语句里同样被拒绝',
-         'expected ";" but got');
+         'expected ";" but got 0.3');
 
 T.eq(I.tokenize('1.5').filter(t => t.type !== 'eof')[0].value, 1.5, '正常小数');
 T.eq(I.tokenize('42').filter(t => t.type !== 'eof')[0].value, 42, '整数');
@@ -146,6 +151,86 @@ sameAsNative('0O17', '八进制（大写 O）');
 sameAsNative('0b101', '二进制');
 sameAsNative('0B101', '二进制（大写 B）');
 
+/* ---- BigInt 字面量（阶段 9b，规格 §7.7 ①）----
+   四条数字通道各自吃一个可选的 n。原生实测：0x1Fn / 0o17n / 0b101n 合法，
+   1.5n / 1e3n / 01n 是 SyntaxError —— 也就是说 n 后缀只跟**整数**形态相容，
+   带小数点或指数的一律拒绝。这里不写死期望值，照旧问原生要答案。 */
+sameAsNative('1n', 'BigInt 十进制');
+sameAsNative('0n', 'BigInt 零');
+sameAsNative('123456789012345678901234567890n', 'BigInt 超出 Number 安全整数范围');
+sameAsNative('0x1Fn', 'BigInt 十六进制');
+sameAsNative('0o17n', 'BigInt 八进制');
+sameAsNative('0b101n', 'BigInt 二进制');
+
+nativeRejects('1.5n', '小数不能加 n 后缀',
+              'Invalid number: a numeric literal cannot be immediately followed by "n"');
+nativeRejects('1e3n', '科学计数法不能加 n 后缀',
+              'Invalid number: a numeric literal cannot be immediately followed by "n"');
+
+/* ---- BigInt token 落进错误消息（阶段 9b 最终审查 C1）----
+   `JSON.stringify(1n)` 抛 `TypeError: Do not know how to serialize a BigInt`。
+   解析器有六处把「意外的那个东西」回显进错误消息，9b 之前它们的值只可能是
+   字符串或 Number，之后可能是 BigInt —— 于是一条本该带 line/col/category 的
+   语法错**在 err() 之前就炸成一个裸 TypeError**：没有 line、没有 category。
+
+   **这不是「消息不好看」。** 工具⑤ 的 check() 按「有没有 line」判这是解析错
+   还是引擎自己的 bug，没有 line 的一律归 category:'internal'，不画波浪线、
+   不点红点，并显示「这是编辑器内部出错，不是你的代码的问题」。于是：她确实
+   漏了个逗号，工具却告诉她不是她的问题，还不指行号，Run 被禁用。触发条件是
+   「漏了逗号/分号，而下一个 token 恰好是 BigInt 字面量」—— 在一份满是
+   `1n`/`0n` 的位盘源码里，这是初学者最常见的一类手误。
+
+   ⚠ **判据不是消息文本，是 `line` 与 `category` 存不存在** —— 消息是表象，
+   `line` 有没有才是工具⑤ 分类的那个开关。下面每处都先锚一条守卫自己的固定
+   文案，再断言 `typeof line === 'number'`，两条缺一不可。 */
+function bigintTokDisp(src, parseFn) {
+  let caught = null;
+  try { (parseFn || I.parse)(src); } catch (e) { caught = e; }
+  return caught;
+}
+{
+  /* 六处回显里能被 BigInt 走到的五处，逐处一条。（第六处
+     parsePrimary 末尾的 catch-all 走不到：BigInt 字面量是合法的
+     基本单元，永远不会掉进那个兜底，改它是防御性的。） */
+  const sites = [
+    { src: 'let a = [1n 2n];', fn: null,
+      pat: 'Unexpected token: expected "]" but got 2n', label: 'expect()' },
+    { src: 'let x = 1 2n;', fn: null,
+      pat: 'Unexpected token: expected ";" but got 2n', label: 'semi()' },
+    { src: 'let 1n = 3;', fn: null,
+      pat: 'Unexpected token: expected identifier but got 1n', label: 'parseVarDecl()' },
+    { src: '1 2n', fn: I.parseExpression,
+      pat: 'Unexpected token: 2n', label: 'parseExpression()' },
+  ];
+  sites.forEach(function (s) {
+    T.throws(function () { (s.fn || I.parse)(s.src); },
+             'C1: BigInt token 回显进 ' + s.label + ' 的消息，不许抛裸 TypeError', s.pat);
+    const e = bigintTokDisp(s.src, s.fn) || {};
+    T.eq(typeof e.line === 'number' && e.category === 'syntax', true,
+         'C1: ' + s.label + ' —— 必须带 line(number) 与 category:"syntax"，' +
+         '否则工具⑤ 会把她漏的那个逗号说成「编辑器内部出错」。实际: line=' +
+         e.line + ' category=' + e.category + ' name=' + (e.constructor && e.constructor.name));
+  });
+
+  /* 第五处在运行期：`null[1n]` 走 getProp 的 `Cannot read properties of`，
+     同一个 JSON.stringify、同一种症状，只是 category 是 runtime。 */
+  T.throws(function () { I.run('let a = null; return a[1n];'); },
+           'C1: BigInt 下标回显进 getProp 的消息，不许抛裸 TypeError',
+           'Cannot read properties of null (reading 1n)');
+  const ge = bigintTokDisp('let a = null; return a[1n];', I.run) || {};
+  T.eq(typeof ge.line === 'number' && ge.category === 'runtime', true,
+       'C1: getProp() —— 必须带 line(number) 与 category:"runtime"。实际: line=' +
+       ge.line + ' category=' + ge.category + ' name=' + (ge.constructor && ge.constructor.name));
+
+  /* 回显的形状：BigInt 写成裸的 `2n`，跟 Number token 的裸 `2` 并排 ——
+     引号在这一族消息里的意思是「这是字符串/标点记号」，给数字字面量套引号
+     等于在报错里再撒一个小谎。这条断言守的就是那个选择。 */
+  T.ok(String((bigintTokDisp('let a = [1 2];') || {}).message).indexOf('but got 2') >= 0,
+       'C1: Number token 回显成裸的 2（对照组，形状没被改动）');
+  T.ok(String((bigintTokDisp('let a = [1n 2n];') || {}).message).indexOf('but got "2n"') === -1,
+       'C1: BigInt token 回显成裸的 2n 而不是带引号的 "2n"');
+}
+
 // ---- 与原生对照：原生拒绝的，我们也要拒绝 ----
 T.throws(() => I.tokenize("'a\nb'"), '字符串内未转义换行要报错',
          'Unterminated string: raw newline not allowed');
@@ -164,16 +249,29 @@ function nativeRejects(src, label, pattern) {
 }
 nativeRejects('0xZZ', '0x 后面一个合法十六进制数字都没有',
               'Invalid number: expected hex digits after 0x');
+/* 三条共用前缀、各自锚不同的回显字符（阶段 9b 收紧，9a 账本记的那笔债）：
+   守卫只有一条、消息只有一种结构，所以共用前缀过得了第九道门；但**过门不
+   等于 pattern 对** —— 只锚前缀的话，`0o19` 与 `5g` 这两条互相都能匹中，
+   谁挂了都看不出是谁。回显字符是这里唯一的区分度，把它排除在 pattern 之外
+   是主动扔掉判别力。 */
 nativeRejects('0o19', '八进制里出现非法数字 9',
-              'a numeric literal cannot be immediately followed by');
+              'a numeric literal cannot be immediately followed by "9"');
 nativeRejects('0b12', '二进制里出现非法数字 2',
-              'a numeric literal cannot be immediately followed by');
+              'a numeric literal cannot be immediately followed by "2"');
 nativeRejects('1e', '指数标记后面没有数字',
               'Invalid number: missing exponent digits');
 nativeRejects('1ex', '指数标记后面跟的不是数字',
               'Invalid number: missing exponent digits');
 nativeRejects('5g', '数字字面量后面紧跟标识符字符',
-              'a numeric literal cannot be immediately followed by');
+              'a numeric literal cannot be immediately followed by "g"');
+/* 裸 `0o` / `0b`（后面一个数字都没有）—— 9a 的账本预告过这两条：补上它们
+   的那一刻，任何被放宽到「expected … digits after …」这个形状的 pattern 会
+   突然被第九道门判钝。**那是预期，不是回归**：门自纠的时机本来就取决于
+   别人何时补测试。这里三条 pattern 都写完整消息，没有敞口。 */
+nativeRejects('0o', '0o 后面一个合法八进制数字都没有',
+              'Invalid number: expected octal digits after 0o');
+nativeRejects('0b', '0b 后面一个合法二进制数字都没有',
+              'Invalid number: expected binary digits after 0b');
 
 /* ---- 额外验证：反斜杠 + 真实换行是「续行」，整体消失而不是被添成
    一个换行字符（原生在两种模式下都这样，不是严格模式限定的怪癖，
@@ -381,6 +479,122 @@ diff('return 2 === 2;', '严格相等');
 diff('return 2 !== 3;', '严格不等');
 diff('return "a" + "b";', '字符串拼接');
 diff('return "a" + 1;', '字符串与数字相加');
+
+// ---- 位运算：二元五个（阶段 9b，规格 §7.7 ⑤）----
+/* 借原生实现，所以「Number×Number」这一档基本是形式上的 —— 真正承重的是
+   下面的**混合优先级**与「混用」那一档。列在这里是为了矩阵完整、一眼能看出
+   哪一格没覆盖，不是因为它们各自有多大风险（规格 §7.7 ⑤ 写明了这一点）。 */
+diff('return 5 & 3;', '按位与');
+diff('return 5 | 3;', '按位或');
+diff('return 5 ^ 3;', '按位异或');
+diff('return 5 << 2;', '左移');
+diff('return -20 >> 2;', '右移（负数，验符号位）');
+
+/* 混合优先级：这五条是**这个任务真正的判据**。BINOP 是重排不是追加，
+   排错一层就会静默改变已有表达式的解析结果。每一条都挑了在两种排法下
+   **算出不同答案**的形状 —— 换句话说，把 BINOP 里任意两层对调，下面至少
+   有一条会红。挑不出区分力的形状（比如 `1 | 2 & 3`，两种排法都得 3）
+   放进来等于装饰，那正是阶段 9a 那道门要治的病。 */
+diff('return 1 | 2 & 2;', '优先级：& 紧于 |');
+diff('return 3 ^ 1 | 2;', '优先级：^ 紧于 |');
+diff('return 1 & 3 ^ 2;', '优先级：& 紧于 ^');
+diff('return 1 & 2 === 2;', '优先级：=== 紧于 &');
+diff('return 1 << 2 + 3;', '优先级：+ 紧于 <<');
+diff('return 8 >> 1 + 1;', '优先级：+ 紧于 >>');
+
+// ---- 位运算 × BigInt / 混用（规格 §7.7 开头：混用那一档是重点）----
+diff('return 5n & 3n;', 'BigInt 按位与');
+diff('return 5n | 3n;', 'BigInt 按位或');
+diff('return 5n ^ 3n;', 'BigInt 按位异或');
+diff('return 5n << 2n;', 'BigInt 左移');
+diff('return -5n >> 1n;', 'BigInt 右移（负数）');
+diff('return 5n & 3;', '混用：& —— 原生抛 Cannot mix BigInt');
+diff('return 5n | 3;', '混用：|');
+diff('return 5n ^ 3;', '混用：^');
+diff('return 5n << 2;', '混用：<<');
+diff('return 5n >> 1;', '混用：>>');
+
+/* `>>>` **不进子集**（规格 §7.7），但**必须有一句自己的诊断**（规格 §7.7
+   「探针跑完的裁定（2026-08-08）」）。这两件事不矛盾：`>>>` 跟 `**` 的处境
+   一字不差 —— 在 `PUNCT` 里、在 `UNSUPPORTED_BINOP` 里、算不出结果。
+   「不加」指的是不必跟原生对齐一条语义，不是「让它报成语法错」。
+
+   这一条曾经短暂地退化过：9b 之前 `1 >>> 2` 词法成 `>>` + `>`，靠 `>>` 当时
+   还在 UNSUPPORTED_BINOP 里被顺带拦成「不支持右移」；`>>` 进子集之后那条
+   顺带的拦截没了，它掉成一句 `Unexpected token: ">"` 的 **syntax** 错误 ——
+   而 `1 >>> 2` 是合法 JavaScript，syntax 等于对使用者说「你写的不是
+   JavaScript」。**判据是 category 不是消息文本**：下面第二条断言才是这个
+   缺陷的判据，pattern 只是它的外壳（锚的是 unsupported() 自己那句固定
+   文案 + 点名的符号）。 */
+T.throws(function () { I.parse('return 1 >>> 2;'); },
+         '`>>>` 不在子集里，但报的是 unsupported（规格 §7.7）',
+         'Unsupported syntax: the >>> operator (unsigned right shift)');
+T.eq((bad('return 1 >>> 2;') || {}).category, 'unsupported',
+     '`>>>` 的 category 是 unsupported 而不是 syntax —— 它是合法 JS，只是不在子集里');
+
+// ---- 位运算：一元 ~（阶段 9b）----
+diff('return ~5;', '按位取反');
+diff('return ~0;', '按位取反：0');
+diff('return ~5n;', 'BigInt 按位取反');
+diff('return ~~5.9;', '双重取反（原生的截断惯用法）');
+diff('return -~5;', '取反后取负 —— 两个一元运算符连用');
+
+// ---- 内建 BigInt()（阶段 9b，规格 §7.7 ①）----
+/* 位盘里 sq 是数组下标、必然是 Number，要移位就得 BigInt(sq) 转一次 ——
+   「必须显式转」正是这一课要让她撞上的东西。BigInt(1.5) 原生抛，借原生
+   实现意味着这条也白送。 */
+diff('return BigInt(5);', 'BigInt() 把数字转成 BigInt');
+diff('return BigInt("42");', 'BigInt() 把字符串转成 BigInt');
+diff('return BigInt(0);', 'BigInt(0)');
+diff('return 1n << BigInt(3);', 'BigInt() 的结果可以直接当移位数 —— 位盘的核心写法');
+diff('return BigInt(1.5);', 'BigInt(1.5) 原生抛，我们也要抛');
+
+/* ---- 位运算差分矩阵（阶段 9b，规格 §7.7）----
+   上面那些是逐条手写的，覆盖到哪儿全看当时想到什么。这张表让「哪一格没
+   覆盖」一眼可见：六个运算符 ×（Number, BigInt, 混用拆成正反两向）四档。混用那一档
+   原生一律抛 `Cannot mix BigInt and other types`，diff() 比的是抛错文字，
+   所以「该抛的必须同样抛」是免费得到的（规格 §7.7 开头的要求）。
+
+   ⚠ 这张表**不覆盖优先级**：它每条只有一个运算符，排错一层它一条都不会红。
+   优先级由上面那六条混合优先级 diff 守（Task 3），两者不互相替代。 */
+const BIT_BINOPS = ['&', '|', '^', '<<', '>>'];
+const BIT_OPERANDS = [
+  { l: '5', r: '3', tag: 'Number×Number' },
+  { l: '5n', r: '3n', tag: 'BigInt×BigInt' },
+  { l: '5n', r: '3', tag: '混用（原生抛）' },
+  { l: '5', r: '3n', tag: '混用（反向，原生也抛）' },
+];
+for (let bi = 0; bi < BIT_BINOPS.length; bi++) {
+  for (let oi = 0; oi < BIT_OPERANDS.length; oi++) {
+    const op = BIT_BINOPS[bi], o = BIT_OPERANDS[oi];
+    diff('return ' + o.l + ' ' + op + ' ' + o.r + ';',
+         '矩阵 ' + o.l + ' ' + op + ' ' + o.r + '（' + o.tag + '）');
+  }
+}
+/* 一元 ~ 只有一个操作数，单独两格。 */
+diff('return ~5;', '矩阵 ~5（Number）');
+diff('return ~5n;', '矩阵 ~5n（BigInt）');
+
+/* 边界几格：原生对这些有明确规定，我们借原生所以也该一致。 */
+diff('return 1 << 31;', '矩阵边界：Number 左移到符号位（ToInt32 的边）');
+diff('return 1 << 32;', '矩阵边界：Number 移位数取模 32');
+diff('return 1n << 100n;', '矩阵边界：BigInt 任意精度，不取模');
+diff('return -1 >> 31;', '矩阵边界：Number 算术右移补符号位');
+diff('return 0n & 1n;', '矩阵边界：0n 参与运算');
+diff('if (0n) { return "truthy"; } return "falsy";', '矩阵边界：0n 的真假值');
+
+/* ---- 追加 1（来自 Task 3 审查）：BINOP 重排新造出的两处相邻层边界，
+   矩阵与上面六条混合优先级 diff 都没抓到。十层表是
+   ||:1 &&:2 |:3 ^:4 &:5 相等:6 关系:7 移位:8 加减:9 乘除:10 —— 缺的两处
+   相邻关系是 &&(2) vs |(3)、关系(7) vs 移位(8)。两条都挑了「两种排法算出
+   不同答案」的形状（已用 node -e 验过区分力，见任务报告）。 */
+diff('return false && 1 | 2;', '优先级边界：&&(2) 与 |(3) 相邻——| 必须比 && 紧');
+diff('return 1 << 2 < 3;', '优先级边界：关系(7) 与移位(8) 相邻——<< 必须比 < 紧');
+
+/* ---- 追加 2（来自 Task 5 审查）：BigInt 上没测过前缀 --。Task 5 那批
+   （见下方「++/-- 在 BigInt 上不许漂类型」）只覆盖了后缀 ++/--、前缀 ++，
+   独独漏了前缀 --。 */
+diff('let x = 2n; --x; return x;', 'BigInt 前缀自减');
 
 // ---- 短路求值：必须真的短路（宿主序列会暴露有没有多算）----
 diff('return false && log("no");', '&& 短路：右侧不该被求值');
@@ -963,6 +1177,17 @@ diff('let x = "5"; x--; return x;', 'A1 对照: 字符串 x--（回归，"--" �
 diff('let x = true; x++; return x;', 'A1 对照: 布尔值 ++（回归）');
 diff('let x = null; x++; return x;', 'A1 对照: null 的 ++（回归）');
 
+// ---- ++/-- 在 BigInt 上不许漂类型（阶段 9b，规格 §7.7 ④）----
+/* Number(1n) 不抛、返回 1 —— 所以改之前 `let x = 1n; x++` 得到的是 Number 2，
+   而原生是 2n。两边都「跑通了」，只是类型不再是同一个类型，差分是唯一
+   看得见它的东西（T.eq 的 BigInt 编码跟数字编码不同，见 Task 1）。 */
+diff('let x = 1n; x++; return x;', 'BigInt 后缀自增');
+diff('let x = 1n; ++x; return x;', 'BigInt 前缀自增');
+diff('let x = 1n; x--; return x;', 'BigInt 后缀自减');
+diff('let x = 1n; return x++;', 'BigInt 后缀自增的表达式值');
+diff('let x = 1n; return ++x;', 'BigInt 前缀自增的表达式值');
+diff('let x = "5"; x++; return x;', '字符串自增仍走 ToNumeric（旧行为不许被这次改动带跑）');
+
 // ---- A-2：snap() 遇到环形引用不能把引擎栈打爆 ----
 // 复审 C2：四种最普通的写法（closeScope / 函数返回 / 形参绑定 /
 // assignVar）都会让一个环形引用值经过 snap()，改之前全部无限递归、
@@ -1066,12 +1291,10 @@ function unsupportedCheck(src, mustContain, label) {
 }
 unsupportedCheck('return 2 ** 3;', '**', 'B5: ** 运算符（原来是 syntax："expected \\";\\" but got \\"**\\""）');
 unsupportedCheck('let a = 2; a **= 3;', '**=', 'B5: **= 复合赋值');
-unsupportedCheck('return 1 & 2;', '&', 'B5: 位运算 &（原来词法器直接报 Unexpected character）');
-unsupportedCheck('return 1 | 2;', '|', 'B5: 位运算 |');
-unsupportedCheck('return 1 ^ 2;', '^', 'B5: 位运算 ^');
-unsupportedCheck('return ~1;', '~', 'B5: 按位取反 ~');
-unsupportedCheck('return 1 << 2;', '<<', 'B5: 左移 <<');
-unsupportedCheck('return 1 >> 2;', '>>', 'B5: 右移 >>');
+/* 六条位运算符的「不支持」断言在阶段 9b 删完了 —— **子集边界移动了**
+   （规格 §2.6 与 §7.7），不是测试挡路。删掉之后它们的正当性由上面
+   那一批 diff() 接管：`return 5 & 3;` 现在要跟原生算出同一个答案，
+   比「它必须报错」是强得多的断言。 */
 unsupportedCheck('const o = {}; return o?.x;', 'optional chaining', 'B5: 可选链 ?. 的消息必须点名"可选链"');
 unsupportedCheck('return a ?? 1;', '??', 'B5: 空值合并 ?? 的消息必须点名 ??');
 unsupportedCheck('function f(a = 1) {}', 'default parameters', 'B5: 默认参数');
@@ -1361,5 +1584,82 @@ for (let p45 = 0; p45 < T45_PROLOGUE_SHAPES.length; p45++) {
   while (useRe.exec(srcText) !== null) uses++;
   T.eq(uses, 3, '4.5②(b): blockPrologue 在源码里出现 3 次 —— 1 处定义 + 2 处调用');
 }
+
+/* ============ 位盘可行性探针（阶段 9b 收尾，规格 §7.7）============
+   9b 唯一的客户是 9d 的 bitboard。这一段不是「再多测几个运算符」，是拿
+   **真的位盘代码**问一句：这个子集够不够写它。停在「六个运算符能跑」而
+   不跑这一段，就是把「子集还差点什么」这个发现推迟到 9d ——那时它会以
+   「写到一半发现写不下去」的形式出现，代价高得多。
+   探针不落成工具、不进注册表，就是下面这几条 diff。 */
+
+// 位盘的四个核心写法，逐个走差分
+diff('const sq = 3; return 1n << BigInt(sq);', '探针：置位 —— 1n << BigInt(sq)');
+diff('let b = 22n; return b & (b - 1n);', '探针：清掉最低位的 1 —— b & (b - 1n)');
+diff('let b = 22n; let n = 0; while (b !== 0n) { b = b & (b - 1n); n = n + 1; } return n;',
+     '探针：popcount 循环（0n 当循环条件）');
+diff('const sq = 5; const b = 1n << BigInt(sq); return (b >> BigInt(sq)) & 1n;',
+     '探针：取位 —— 移回来再与 1n');
+diff('let b = 0n; for (let sq = 0; sq < 8; sq = sq + 1) { b = b | (1n << BigInt(sq)); } return b;',
+     '探针：循环建一整行的掩码');
+diff('let b = 0n; for (let sq = 0; sq < 64; sq = sq + 1) { b = b | (1n << BigInt(sq)); } return b;',
+     '探针：64 位铺满 —— 这是 9d 真正要跑的规模，验任意精度没在中途退化');
+diff('const b = 22n; log("bitboard = " + b); return 0;',
+     '探针：BigInt 进 log() —— 字符串拼接的行为要跟原生一致');
+
+/* 轨迹：规格 §7.7 说 `deepCopy` 不用动（`snap()` 是手写递归、不走 JSON，
+   BigInt 作为原始值直接过）。那是**读代码读出来的结论**，这里跑一遍证实它
+   —— 一个 BigInt 局部变量必须完整地活到 trace 里，既不被转成 Number、也不
+   把 snap() 打崩。9b 之后 Task 9 的变量面板读的就是这份快照。 */
+const probeRun = I.run('let bb = 22n; bb = bb & (bb - 1n); return bb;');
+T.eq(probeRun.result, 20n, '探针：BigInt 能原样当 run() 的返回值');
+T.ok(probeRun.trace.length > 0, '探针：带 BigInt 的程序照常录出轨迹（snap 没被打崩）');
+
+/* ---- 探针问出来的两条子集边界 ---- */
+
+/* ① 复合赋值 `&= |= ^= <<= >>=`：**已裁定 —— 不进子集，但要有一句自己的
+   诊断**（规格 §7.7「探针跑完的裁定（2026-08-08）」，理由与那条「本裁定
+   什么情况下要重开」的限定都写在那里）。
+
+   探针刚跑完时这五条曾经短暂地是一句 **syntax** 错误：9b 之前 `b &= 1n`
+   词法成 `&` + `=`，靠 `&` 当时还在 UNSUPPORTED_BINOP 里被顺带拦成
+   「不支持位与」；`&` 进子集之后那条顺带的拦截没了，它掉成
+   `Unexpected token: "="`。而 `b &= 1n` 是合法 JavaScript，且这个子集
+   **支持** `+= -= *= /= %=` —— 她刚用 `n = n + 1` 写完 popcount，试
+   `b &= b - 1n`，得到的必须是一句给得出替代写法的话，不是一句说她写的
+   不是 JavaScript 的话。**判据是 category 不是消息文本。** */
+T.throws(function () { I.parse('let b = 3n; b &= 1n; return b;'); },
+         '探针：&= 不在子集里，报的是 unsupported 且给出替代写法',
+         'Unsupported syntax: the &= operator (use x = x & y instead)');
+T.eq((bad('let b = 3n; b &= 1n; return b;') || {}).category, 'unsupported',
+     '&= 的 category 是 unsupported 而不是 syntax —— 它是合法 JS，只是不在子集里');
+
+/* 五个位运算复合赋值**逐个**都要有自己的诊断：只验 `&=` 一条，另外四个
+   退化了也没人拦得住。unsupportedCheck 同时查 category 与「消息里点名了
+   哪个符号」，后者防的是「五条共用一句笼统的话」。 */
+unsupportedCheck('let b = 3n; b |= 1n;', 'the |= operator (use x = x | y instead)', '探针①: |=');
+unsupportedCheck('let b = 3n; b ^= 1n;', 'the ^= operator (use x = x ^ y instead)', '探针①: ^=');
+unsupportedCheck('let b = 3n; b <<= 1n;', 'the <<= operator (use x = x << y instead)', '探针①: <<=');
+unsupportedCheck('let b = 3n; b >>= 1n;', 'the >>= operator (use x = x >> y instead)', '探针①: >>=');
+
+/* 反面：五个复合赋值只补了**诊断**，没有补实现 —— 它们不许算得出结果。
+   这条守的是「别顺手把裁定实现掉」：谁哪天在 ASSIGN_OPS 里加了 '&='，
+   上面五条只会从 unsupported 变成"跑通了"，而**没有一条断言会红**。 */
+T.eq(bad('let b = 3n; b &= 1n;') !== null, true,
+     '子集边界：&= 必须仍然是一个错误（不是"补了诊断顺手也实现了"）');
+
+/* 而这个子集**支持**的那五个复合赋值必须照旧能算 —— 上面那条不对称
+   （`+=` 行、`&=` 不行）正是这条裁定要她撞上并读懂的东西，不能因为
+   加了 UNSUPPORTED_ASSIGN 表就把 `+=` 一起误伤。 */
+diff('let a = 1; a += 2; return a;', '回归：+= 仍在子集里（UNSUPPORTED_ASSIGN 不许误伤它）');
+diff('let a = 7; a %= 4; return a;', '回归：%= 仍在子集里');
+
+/* ② `b.toString(2)`：**已裁定 —— 不加**（规格 §7.7「探针跑完的裁定
+   （2026-08-08）」）。原生支持，我们不支持 —— resolveCallable 只认数组的
+   push/pop 与对象的自有属性，BigInt 两条都不是。这是**真实的子集边界**，
+   不是缺陷：位盘要打印成二进制串的话，今天只能自己写循环。pattern 锚的是
+   resolveCallable 自己那句 `is not a function`，不是回显的方法名。 */
+T.throws(function () { I.run('const b = 5n; return b.toString(2);'); },
+         '探针：BigInt 上的 toString 不在子集里（已裁定，见规格 §7.7）',
+         'toString is not a function');
 
 T.report();
