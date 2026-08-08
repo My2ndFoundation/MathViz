@@ -398,6 +398,50 @@ diff('return 2 !== 3;', '严格不等');
 diff('return "a" + "b";', '字符串拼接');
 diff('return "a" + 1;', '字符串与数字相加');
 
+// ---- 位运算：二元五个（阶段 9b，规格 §7.7 ⑤）----
+/* 借原生实现，所以「Number×Number」这一档基本是形式上的 —— 真正承重的是
+   下面的**混合优先级**与「混用」那一档。列在这里是为了矩阵完整、一眼能看出
+   哪一格没覆盖，不是因为它们各自有多大风险（规格 §7.7 ⑤ 写明了这一点）。 */
+diff('return 5 & 3;', '按位与');
+diff('return 5 | 3;', '按位或');
+diff('return 5 ^ 3;', '按位异或');
+diff('return 5 << 2;', '左移');
+diff('return -20 >> 2;', '右移（负数，验符号位）');
+
+/* 混合优先级：这五条是**这个任务真正的判据**。BINOP 是重排不是追加，
+   排错一层就会静默改变已有表达式的解析结果。每一条都挑了在两种排法下
+   **算出不同答案**的形状 —— 换句话说，把 BINOP 里任意两层对调，下面至少
+   有一条会红。挑不出区分力的形状（比如 `1 | 2 & 3`，两种排法都得 3）
+   放进来等于装饰，那正是阶段 9a 那道门要治的病。 */
+diff('return 1 | 2 & 2;', '优先级：& 紧于 |');
+diff('return 3 ^ 1 | 2;', '优先级：^ 紧于 |');
+diff('return 1 & 3 ^ 2;', '优先级：& 紧于 ^');
+diff('return 1 & 2 === 2;', '优先级：=== 紧于 &');
+diff('return 1 << 2 + 3;', '优先级：+ 紧于 <<');
+diff('return 8 >> 1 + 1;', '优先级：+ 紧于 >>');
+
+// ---- 位运算 × BigInt / 混用（规格 §7.7 开头：混用那一档是重点）----
+diff('return 5n & 3n;', 'BigInt 按位与');
+diff('return 5n | 3n;', 'BigInt 按位或');
+diff('return 5n ^ 3n;', 'BigInt 按位异或');
+diff('return 5n << 2n;', 'BigInt 左移');
+diff('return -5n >> 1n;', 'BigInt 右移（负数）');
+diff('return 5n & 3;', '混用：& —— 原生抛 Cannot mix BigInt');
+diff('return 5n | 3;', '混用：|');
+diff('return 5n ^ 3;', '混用：^');
+diff('return 5n << 2;', '混用：<<');
+diff('return 5n >> 1;', '混用：>>');
+
+/* `>>>` 明确不加（规格 §7.7）：它对 BigInt 在 JS 里本来就抛，位盘也用不着。
+   但它现在的**拒绝路径变了**，要钉一条：`PUNCT` 表里没有 `>>>`，改之前
+   `1 >>> 2` 词法成 `>>` + `>`，而 `>>` 是 UNSUPPORTED_BINOP、当场报「不支持
+   右移」；改之后 `>>` 合法了，于是走到 `>` 上，报的是一句 syntax 错误。
+   两种都拒绝，但**消息完全不同** —— 不钉住的话，将来谁把 `>>>` 加进 PUNCT
+   都不会有测试拦他。pattern 锚的是 parsePrimary 自己那句固定文案。 */
+T.throws(function () { I.parse('return 1 >>> 2;'); },
+         '`>>>` 不在子集里（规格 §7.7 明确不加）',
+         'Unexpected token: ">"');
+
 // ---- 短路求值：必须真的短路（宿主序列会暴露有没有多算）----
 diff('return false && log("no");', '&& 短路：右侧不该被求值');
 diff('return true || log("no");', '|| 短路：右侧不该被求值');
@@ -1082,12 +1126,11 @@ function unsupportedCheck(src, mustContain, label) {
 }
 unsupportedCheck('return 2 ** 3;', '**', 'B5: ** 运算符（原来是 syntax："expected \\";\\" but got \\"**\\""）');
 unsupportedCheck('let a = 2; a **= 3;', '**=', 'B5: **= 复合赋值');
-unsupportedCheck('return 1 & 2;', '&', 'B5: 位运算 &（原来词法器直接报 Unexpected character）');
-unsupportedCheck('return 1 | 2;', '|', 'B5: 位运算 |');
-unsupportedCheck('return 1 ^ 2;', '^', 'B5: 位运算 ^');
+/* 五条位运算符的「不支持」断言在阶段 9b 删掉了 —— **子集边界移动了**
+   （规格 §2.6 与 §7.7），不是测试挡路。`~` 那一条在 Task 4 一起删。
+   删掉之后它们的正当性由上面那一批 diff() 接管：`return 5 & 3;` 现在
+   要跟原生算出同一个答案，比「它必须报错」是强得多的断言。 */
 unsupportedCheck('return ~1;', '~', 'B5: 按位取反 ~');
-unsupportedCheck('return 1 << 2;', '<<', 'B5: 左移 <<');
-unsupportedCheck('return 1 >> 2;', '>>', 'B5: 右移 >>');
 unsupportedCheck('const o = {}; return o?.x;', 'optional chaining', 'B5: 可选链 ?. 的消息必须点名"可选链"');
 unsupportedCheck('return a ?? 1;', '??', 'B5: 空值合并 ?? 的消息必须点名 ??');
 unsupportedCheck('function f(a = 1) {}', 'default parameters', 'B5: 默认参数');

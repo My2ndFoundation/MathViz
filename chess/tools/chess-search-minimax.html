@@ -1703,13 +1703,22 @@ body.busy #busy{display:block}
      表达式上暴露（a - b - c 对了不代表 a / b / c 对）。 */
 
   /* 二元运算优先级：数字越大结合得越紧。全部列出的都是左结合；右结合的
-     只有赋值，它在 parseAssign 里单独处理，不走这张表。 */
+     只有赋值，它在 parseAssign 里单独处理，不走这张表。
+
+     ⚠ 阶段 9b 加位运算时这张表是**重排**，不是往表尾追加五行：JS 真实
+     优先级里 `|` `^` `&` 夹在 `&&` 与相等之间、`<<` `>>` 夹在关系与加减
+     之间，所以原来的六层整体下移成十层。重排会动到**已有表达式**的解析
+     结果，不只是新运算符自己 —— interp.test.js 里那六条「混合优先级」
+     diff 就是钉这件事的，每一条都挑了在两种排法下算出不同答案的形状。
+     改这张表之前先读那六条。 */
   const BINOP = {
     '||': 1, '&&': 2,
-    '===': 3, '!==': 3, '==': 3, '!=': 3,
-    '<': 4, '>': 4, '<=': 4, '>=': 4,
-    '+': 5, '-': 5,
-    '*': 6, '/': 6, '%': 6,
+    '|': 3, '^': 4, '&': 5,
+    '===': 6, '!==': 6, '==': 6, '!=': 6,
+    '<': 7, '>': 7, '<=': 7, '>=': 7,
+    '<<': 8, '>>': 8,
+    '+': 9, '-': 9,
+    '*': 10, '/': 10, '%': 10,
   };
   const LOGICAL_OPS = { '&&': true, '||': true };
 
@@ -1720,11 +1729,6 @@ body.busy #busy{display:block}
   const UNSUPPORTED_BINOP = {
     '**': 'the ** operator (use repeated multiplication instead)',
     '??': 'the ?? operator (nullish coalescing)',
-    '&': 'the & operator (bitwise and)',
-    '|': 'the | operator (bitwise or)',
-    '^': 'the ^ operator (bitwise xor)',
-    '<<': 'the << operator (bitwise shift)',
-    '>>': 'the >> operator (bitwise shift)',
   };
 
   /* 子集边界之外的保留字：走 name 通道进词法器（KEYWORDS 表里没有它们），
@@ -3005,6 +3009,16 @@ body.busy #busy{display:block}
       case '!==': return l !== r;
       case '==': return l == r;
       case '!=': return l != r;
+      /* 位运算五个（阶段 9b）：直接借原生运算符。ToInt32、>> 的符号位、
+         BigInt 任意精度、「混用当场抛」（连报错文字都跟原生逐字相同）
+         全部白送，也不会跟差分测试的参照实现分岔 —— 规格 §7.7 ⑤ 写明了
+         代价：这五格差分**必然通过**，它在这里验的不是运算语义，而是
+         词法与解析有没有把 token 送到正确位置。 */
+      case '&': return l & r;
+      case '|': return l | r;
+      case '^': return l ^ r;
+      case '<<': return l << r;
+      case '>>': return l >> r;
       default: throw new Error('applyBinary: unknown operator ' + op);
     }
   }
