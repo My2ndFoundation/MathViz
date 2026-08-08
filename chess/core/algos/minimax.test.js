@@ -204,5 +204,7 @@ T.throws(function () { A.source({ mode: 'plain', depth: 2 }); },
          'minimax：缺 lang 必须抛', /少了 lang/);
 T.throws(function () { A.source({ mode: 'plain', depth: 2, lang: 'fr' }); },
          'minimax：lang=fr 必须抛', /只认/);
+T.throws(function () { A.source({ mode: 'plain', depth: 2, lang: '' }); },
+         'minimax：lang 是空串必须抛（空串不当默认值用）', /只认/);
 
 T.report();

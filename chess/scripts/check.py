@@ -507,6 +507,8 @@ def bilingual_algos_check() -> int:
     rc = 0
     renders = {}
     examined = 0    # 尝试过双语检查的文件数——不等于"确认双语"，见下面打印那行的注释
+    passed = 0      # 真正**通过**①②(a)(b)(c) 全部结构判据的文件数——这才是打印
+                    # 「N 份双语」该读的分子，见下面打印那行的注释
     for p in algos:
         examined += 1
         text = p.read_text(encoding='utf-8')
@@ -588,6 +590,8 @@ def bilingual_algos_check() -> int:
                   f'里没有用上它的结果 —— source() 实际返回的可能还是单语'
                   f'（render 被调用后结果被丢弃）', file=sys.stderr)
             rc = 1
+        else:
+            passed += 1     # ①②(a)(b)(c) 全部通过，这份才真的算"双语"
 
     if examined == 0:
         print('ERROR: 一份 algos 都没检查到 —— 上面那句 glob 是不是选空了？',
@@ -612,12 +616,16 @@ def bilingual_algos_check() -> int:
                 rc = 1
                 consistency_ok = False
 
-    # ⚠ `examined` 数的是"尝试过双语检查的文件数"，不是"确认双语通过的文件
-    # 数"——①锚线缺失的文件也会先被计入 examined（在 continue 之前）。白名单
-    # 删掉之后 examined 恒等于 len(algos)，但读这行输出时仍要知道：它是分母，
-    # 不是"验收通过"的断言，真正的通过与否看的是整体 rc 和上面有没有打印任何
-    # ERROR。
-    print(f'双语 algos 普查：{examined} 份双语，'
+    # ⚠ `examined` 数的是"尝试过双语检查的文件数"（恒等于 len(algos)，白名单
+    # 删掉之后再没有文件会被跳过检查），**不是**"确认双语通过的文件数"——
+    # ①锚线缺失、②(b)/(c) 任一条结构判据不满足的文件，都会先被计入 examined
+    # 再失败退出这一份的检查（continue 或直接落到循环尾）。这两个数从
+    # 2026-08-08 起不再相等：`passed` 才是三条结构判据都通过的文件数，
+    # 打印的"N 份双语"读的必须是它，不能是 examined —— 否则一份缺了
+    # render(parts, lang) 整段的伪造文件，也会被这一行文案报成"双语"
+    # （阶段 9a 审查 Wave 4 抓到的假绿：examined 恒等于 len(algos)，用它
+    # 打印出的数字对着任何一份没做完双语的文件都照样"看起来对"）。
+    print(f'双语 algos 普查：{passed} 份双语，'
           f'render 助手 {len(names)} 份'
           + ('一致' if consistency_ok else '有不一致'))
     return rc

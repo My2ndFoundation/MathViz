@@ -422,8 +422,8 @@
       ],
       en: [
         '   Between the pruning tab and the plain minimax tab, the source differs by one',
-        '   two-line trick inside the loop below — "raise your own floor", then "stop once that',
-        '   floor has caught up with the other side" — once for White, once for Black: 4 lines. */',
+        '   two-line trick below — "raise your own floor", then "stop once it meets',
+        '   the other side\'s ceiling" — once for White, once for Black: 4 lines. */',
       ],
     },
     'function search(bd, depth, alpha, beta, white) {',
