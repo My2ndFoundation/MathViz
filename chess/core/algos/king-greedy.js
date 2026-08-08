@@ -331,7 +331,7 @@
         '   （车不是这样的：车沿直线看出去，撞上墙就停。两道题别搞混。）',
       ],
       en: [
-        '   **A king block pays no attention to walls**: next to is next to, whatever lies between.',
+        '   **A king\'s 3×3 block ignores walls**: next to is next to, whatever lies between.',
         '   (A rook is not like this: it looks along a line and stops at a wall. Do not mix them up.)',
       ],
     },

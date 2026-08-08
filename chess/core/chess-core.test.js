@@ -14,7 +14,7 @@ T.eq(C.toAlg(C.SQ(4, 3)), 'e4', 'SQ(4,3) 的代数记号是 e4');
 T.eq(C.fromAlg('e4'), C.SQ(4, 3), 'e4 解析回 SQ(4,3)');
 T.eq(C.toAlg(C.fromAlg('h8')), 'h8', 'h8 往返一致');
 T.eq(C.toAlg(C.fromAlg('a1')), 'a1', 'a1 往返一致');
-T.throws(() => C.fromAlg('z9'), 'fromAlg 对非法坐标应抛错');
+T.throws(() => C.fromAlg('z9'), 'fromAlg 对非法坐标应抛错', /^Bad square: /);
 
 // ---- 棋子编码约定（修复轮次 · Phase 0 review 项 4）----
 // board-render.js 故意不 import chess-core.js（解耦是有意的），而是自己
@@ -63,23 +63,23 @@ const cl = p0.clone();
 cl.board[C.fromAlg('e2')] = C.EMPTY;
 T.eq(p0.board[C.fromAlg('e2')], C.P, 'clone 是深拷贝，改副本不影响原局面');
 
-T.throws(() => C.Position.fromFEN('rnbqkbnr/pppppppp/8/8 w - -'), 'FEN 横行数不足应抛错');
-T.throws(() => C.Position.fromFEN('rnbqkbnr/ppppXppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1'), 'FEN 未知棋子字符应抛错');
-T.throws(() => C.Position.fromFEN('rnbqkbnr/ppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1'), 'FEN 某横行格数不足 8 应抛错');
+T.throws(() => C.Position.fromFEN('rnbqkbnr/pppppppp/8/8 w - -'), 'FEN 横行数不足应抛错', /expected 8 ranks, got \d+/);
+T.throws(() => C.Position.fromFEN('rnbqkbnr/ppppXppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1'), 'FEN 未知棋子字符应抛错', /unknown piece/);
+T.throws(() => C.Position.fromFEN('rnbqkbnr/ppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1'), 'FEN 某横行格数不足 8 应抛错', /has \d+ squares, expected 8/);
 
 // ---- FEN 校验（修复轮次 1 · I1）----
-T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/4K3 z - - 0 1'), '轮次字段非 w/b 应抛错');
-T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/4K3 w - - xx 1'), '半步计数非数字应抛错');
-T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/4K3 w - - 0 yy'), '回合数非数字应抛错');
-T.throws(() => C.Position.fromFEN('8/8/8/8/8/8/8/4K3 w - - 0 1'), '没有黑王应抛错');
-T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/8 w - - 0 1'), '没有白王应抛错');
-T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/K3K3 w - - 0 1'), '白方两个王应抛错');
+T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/4K3 z - - 0 1'), '轮次字段非 w/b 应抛错', /side to move/);
+T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/4K3 w - - xx 1'), '半步计数非数字应抛错', /half-move/);
+T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/4K3 w - - 0 yy'), '回合数非数字应抛错', /full-move/);
+T.throws(() => C.Position.fromFEN('8/8/8/8/8/8/8/4K3 w - - 0 1'), '没有黑王应抛错', /black must have exactly one king/);
+T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/8 w - - 0 1'), '没有白王应抛错', /white must have exactly one king/);
+T.throws(() => C.Position.fromFEN('4k3/8/8/8/8/8/8/K3K3 w - - 0 1'), '白方两个王应抛错', /white must have exactly one king/);
 
 // ---- 无王局面（修复轮次 · Phase 0 review 项 1）----
 // 教学用途（例如"孤马 BFS 到每格最短步数场"）需要能表示没有王的局面。
 // 默认仍要求恰好一王一王，游戏代码的护栏不变；显式传 { requireKings: false } 才放行。
 const LONE_KNIGHT_FEN = '8/8/8/3N4/8/8/8/8 w - - 0 1';
-T.throws(() => C.Position.fromFEN(LONE_KNIGHT_FEN), '不传选项时孤马局面仍应抛错（默认要求双王）');
+T.throws(() => C.Position.fromFEN(LONE_KNIGHT_FEN), '不传选项时孤马局面仍应抛错（默认要求双王）', /white must have exactly one king/);
 const loneKnightPos = C.Position.fromFEN(LONE_KNIGHT_FEN, { requireKings: false });
 T.eq(loneKnightPos.board[C.fromAlg('d5')], C.N, 'requireKings:false 时孤马局面正常解析');
 T.eq(loneKnightPos.toFEN(), LONE_KNIGHT_FEN, '孤马局面 FEN 往返一致');
@@ -90,7 +90,7 @@ const handBuilt = new C.Position();
 handBuilt.board[C.SQ(3, 4)] = C.N;   // d5 白马
 handBuilt.turn = C.WHITE;
 const handBuiltFEN = handBuilt.toFEN();
-T.throws(() => C.Position.fromFEN(handBuiltFEN), '手搭无王局面的 FEN 不传选项时应抛错');
+T.throws(() => C.Position.fromFEN(handBuiltFEN), '手搭无王局面的 FEN 不传选项时应抛错', /white must have exactly one king/);
 T.eq(C.Position.fromFEN(handBuiltFEN, { requireKings: false }).toFEN(), handBuiltFEN,
      '手搭无王局面：toFEN() 的输出能被 fromFEN(fen, {requireKings:false}) 读回');
 
@@ -609,8 +609,8 @@ for (const [fen, s] of sanCases) {
 const relaxed = C.Position.fromFEN('4k3/8/8/8/8/8/8/4R2K w - - 0 1');
 T.eq(C.moveToSAN(relaxed, C.parseSAN(relaxed, 'Re7')), 'Re7+', '省略 + 也能解析');
 
-T.throws(() => C.parseSAN(C.Position.fromFEN(START), 'Qh5'), 'SAN 指向非法走法应抛错');
-T.throws(() => C.parseSAN(C.Position.fromFEN(START), 'zz9'), 'SAN 语法错误应抛错');
+T.throws(() => C.parseSAN(C.Position.fromFEN(START), 'Qh5'), 'SAN 指向非法走法应抛错', /^Illegal SAN/);
+T.throws(() => C.parseSAN(C.Position.fromFEN(START), 'zz9'), 'SAN 语法错误应抛错', /Bad SAN syntax/);
 
 // ---- UCI ----
 const u0 = C.Position.fromFEN(START);
@@ -627,8 +627,8 @@ const up = C.Position.fromFEN('7k/8/8/8/8/8/4p3/3P3K b - - 0 1');
 T.eq(C.moveToUCI(C.parseUCI(up, 'e2e1q')), 'e2e1q', '升变的 UCI 带小写棋子字母');
 T.eq(C.moveToSAN(up, C.parseUCI(up, 'e2e1n')), 'e1=N', 'underpromotion 也能解析');
 
-T.throws(() => C.parseUCI(u0, 'e2e5'), 'UCI 指向非法走法应抛错');
-T.throws(() => C.parseUCI(u0, 'xx'), 'UCI 语法错误应抛错');
+T.throws(() => C.parseUCI(u0, 'e2e5'), 'UCI 指向非法走法应抛错', /Illegal UCI move/);
+T.throws(() => C.parseUCI(u0, 'xx'), 'UCI 语法错误应抛错', /Bad UCI syntax/);
 
 // ---- sameMove ----
 // Move 是每次调用现造的新对象，pseudoLegalMoves() 减 legalMoves()（规则工具
@@ -745,7 +745,7 @@ T.eq(reread4.moves.map((m, i) => C.moveToSAN(reread4.positions[i], m)),
 
 // 抄错的棋谱必须报错，且指明第几步
 T.throws(() => C.parsePGN('1. e4 e5 2. Qh5 Qh4 3. Nf7 *'),
-         '非法走法应抛错（Nf7 在该局面下走不通）');
+         '非法走法应抛错（Nf7 在该局面下走不通）', /^PGN move/);
 
 // writePGN：起始局面轮到黑方时，第一个记谱必须带 "N..." 而不是省略回合号
 // （修复轮次 · Phase 0 review 项 2）。既有往返测试都从白方先行的 FEN 起步，

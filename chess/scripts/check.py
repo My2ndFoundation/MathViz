@@ -4,6 +4,7 @@
 对应规格 §7 的第 5、6 道门。第 1–4 道由 node 测试文件负责。
 """
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -421,16 +422,13 @@ def fallback_check() -> int:
     return rc
 
 
-# 本阶段暂未双语、或明确不在范围内的 algos 文件。
-# minimax.js 是工具④ 的：改它要重做那个工具的验收，规格 §1.6 划在阶段 9。
-# 其余七份随阶段 8 的任务逐个划掉 —— **这个集合必须缩到只剩 minimax.js**，
-# 一直留着就等于这道门没开。这里只用注释钉住这条纪律、不加代码强制：
-# Task 4–7 的计划里每一步都钉死了期望打印的census数字（如"2 份双语 / 6 份
-# 白名单"），少划掉一个文件、数字对不上，计划本身的验收步骤就会先发现，
-# 机制已经够用，不必在 check.py 里再加一道自动化的"白名单只许收缩"检查。
-MONOLINGUAL_ALGOS = {
-    'minimax.js',
-}
+# 2026-08-08，阶段 9a task 5：曾经有过一个 MONOLINGUAL_ALGOS 白名单（"本阶段
+# 暂未双语的 algos"），minimax.js 是它最后一名住户。八份全部双语之后这个集合
+# 空了，**连同它的 stale 检查和 bilingual_algos_check() 里那句 `if p.name in
+# MONOLINGUAL_ALGOS: continue` 一并删掉了**：一个空白名单不是"没人用的机制"，
+# 是一扇迟早会被重新打开的暗门——下一个赶时间的人只要往里加一个文件名，这道
+# 门对那份文件就当场失明，而且看不出任何异常。删掉之后，`core/algos/` 下每一份
+# 非测试 .js **无条件**要求双语，想绕过就得先把门本身改回去，那是件会被看见的事。
 
 # render(parts, lang) 那一段在每份双语 algos 里逐字节相同（规格 §1.6）。
 # 用两条锚线夹取，而不是数行数：行数会随注释改动漂移，锚线不会。
@@ -439,17 +437,19 @@ RENDER_END = '    return out;\n  }\n'
 
 
 def bilingual_algos_check() -> int:
-    """双语算法源码的普查门（规格 §7.5，阶段 8）。
+    """双语算法源码的普查门（规格 §7.5，阶段 8；阶段 9a task 5 删掉白名单）。
 
     各文件自己的 *.test.js 已经跑了「代码同一 / 步数同一 / 行数同一」三道门
     ——那三道要真实参数，参数只有测试文件知道，放在那里是对的。这里守的是
     那三道**够不着**的两件事：
 
-    ① **普查**：core/algos/ 下每一份非测试、非白名单的 .js，都得**装上**
-       双语机制。将来有人加第八道题却忘了双语，这道门当场响；靠各文件
-       测试是守不住的 —— 新文件的新测试当然不会去测一件作者没想到的事。
+    ① **普查**：core/algos/ 下每一份非测试的 .js，都得**装上**双语机制，
+       **没有白名单、没有例外**（阶段 8 有过一个 MONOLINGUAL_ALGOS，八份
+       到齐之后连机制一起删了，理由见上面那段注释）。将来有人加第九道题
+       却忘了双语，这道门当场响；靠各文件测试是守不住的 —— 新文件的新测试
+       当然不会去测一件作者没想到的事。
 
-    ② **render 助手七份逐字节相同**：它在每份里各存一份（不抽共用模块的
+    ② **render 助手八份逐字节相同**：它在每份里各存一份（不抽共用模块的
        理由见 queens.js 里那段注释），没有门就必然漂移。阶段 7 的
        king-greedy / king-exact 共用段用的是同一个套路。
 
@@ -485,12 +485,6 @@ def bilingual_algos_check() -> int:
               '不是跑了个寂寞', file=sys.stderr)
         return 1
 
-    stale = MONOLINGUAL_ALGOS - {p.name for p in algos}
-    if stale:
-        print(f'ERROR: MONOLINGUAL_ALGOS 里有已经不存在的文件：{sorted(stale)}'
-              f' —— 白名单指着空气，等于把某个真文件悄悄放行了', file=sys.stderr)
-        return 1
-
     # node -e 里公用的归一化探针：从 stdin 读源码字符串，调 _test.js 的
     # normalizeSource 抽掉注释与字符串字面量，写回 stdout。用 stdin 而不是
     # 让 node 自己读文件，是因为②要喂给它的是**拼接过的字符串**（挖掉了
@@ -513,9 +507,9 @@ def bilingual_algos_check() -> int:
     rc = 0
     renders = {}
     examined = 0    # 尝试过双语检查的文件数——不等于"确认双语"，见下面打印那行的注释
+    passed = 0      # 真正**通过**①②(a)(b)(c) 全部结构判据的文件数——这才是打印
+                    # 「N 份双语」该读的分子，见下面打印那行的注释
     for p in algos:
-        if p.name in MONOLINGUAL_ALGOS:
-            continue
         examined += 1
         text = p.read_text(encoding='utf-8')
 
@@ -596,10 +590,12 @@ def bilingual_algos_check() -> int:
                   f'里没有用上它的结果 —— source() 实际返回的可能还是单语'
                   f'（render 被调用后结果被丢弃）', file=sys.stderr)
             rc = 1
+        else:
+            passed += 1     # ①②(a)(b)(c) 全部通过，这份才真的算"双语"
 
     if examined == 0:
-        print('ERROR: 一份双语 algos 都没有 —— MONOLINGUAL_ALGOS 是不是把'
-              '所有文件都放行了？', file=sys.stderr)
+        print('ERROR: 一份 algos 都没检查到 —— 上面那句 glob 是不是选空了？',
+              file=sys.stderr)
         return 1
 
     # 「render 助手 N 份一致/不一致」这半句只报**这一条**（逐字节比对）的
@@ -620,12 +616,16 @@ def bilingual_algos_check() -> int:
                 rc = 1
                 consistency_ok = False
 
-    # ⚠ `examined` 数的是"尝试过双语检查的文件数"，不是"确认双语通过的文件
-    # 数"——①锚线缺失的文件也会先被计入 examined（在 continue 之前）。两者
-    # 在door全绿时数值相同（当前 7 份双语 / 1 份白名单的场景下就是如此），但读这行输出时
-    # 要知道：`examined` 更准确的含义是分母，不是"验收通过"的断言，真正
-    # 的通过与否看的是整体 rc 和上面有没有打印任何 ERROR。
-    print(f'双语 algos 普查：{examined} 份双语 / {len(algos) - examined} 份白名单，'
+    # ⚠ `examined` 数的是"尝试过双语检查的文件数"（恒等于 len(algos)，白名单
+    # 删掉之后再没有文件会被跳过检查），**不是**"确认双语通过的文件数"——
+    # ①锚线缺失、②(b)/(c) 任一条结构判据不满足的文件，都会先被计入 examined
+    # 再失败退出这一份的检查（continue 或直接落到循环尾）。这两个数从
+    # 2026-08-08 起不再相等：`passed` 才是三条结构判据都通过的文件数，
+    # 打印的"N 份双语"读的必须是它，不能是 examined —— 否则一份缺了
+    # render(parts, lang) 整段的伪造文件，也会被这一行文案报成"双语"
+    # （阶段 9a 审查 Wave 4 抓到的假绿：examined 恒等于 len(algos)，用它
+    # 打印出的数字对着任何一份没做完双语的文件都照样"看起来对"）。
+    print(f'双语 algos 普查：{passed} 份双语，'
           f'render 助手 {len(names)} 份'
           + ('一致' if consistency_ok else '有不一致'))
     return rc
@@ -664,11 +664,275 @@ def core_tests() -> int:
     return rc
 
 
+def _throws_msg_shape(msg: str) -> str:
+    """把一条 T.throws 消息里的**插值**抹掉，只留结构（阶段 9a 判据订正）。
+
+    判别力判据必须建在"结构"上而不是"字面"上——原判据要求 pattern 匹中
+    同文件**全部**消息字面量，但同一类错误在不同输入下的消息只差一个
+    插值，例如 `W 必须是 >= 1 的整数，收到：0` 与 `……收到：5.5`、
+    `lang 只认 "zh" 或 "en"，收到："fr"` 与 `……收到：""`、
+    `(184 calls deep)` 与 `(233 calls deep)`。一条 pattern 同时匹中这些是
+    **对的**——它们是同一件事的不同实例，不是判别力不足。
+
+    真正的钝是阶段 7 那种：`/W/` 匹中了「少了 H」——那是**结构上不同的
+    另一件事**（三条消息共享前缀 `source({ W, H, blocked }) 少了 …`，
+    W/H/blocked 三个字母本来就都在那句签名里，跟到底缺了哪个参数无关）。
+    这种"匹中了不该匹中的另一种结构"才是这道门要抓的。
+
+    只抹两类插值：引号包住的字符串（各种 "fr"/"" 之类的用户输入回显）、
+    数字（整数与浮点数，覆盖越界值、深度计数一类场景）。这两类覆盖了
+    全仓实测到的全部插值形状；抹完之后还能各自算出正确的期望结果——
+    见 throws_discrimination_check() 的判据用法。
+
+    ⚠ **只抹 ASCII 双引号 `"` 与阿拉伯数字，不抹中文引号「」""或单引号 '**
+    ——全仓 170 条消息里有 12 条含中文引号，逐条核实过**全部是固定文案**，
+    没有一条把插值包在中文引号里，所以今天不会漏判。但这对 Task 2–4 是
+    一条硬约束：**新写的 86 条断言，插值必须用 ASCII 双引号 `"..."` 回显
+    字符串、或者裸数字回显数值**——如果哪条新消息把插值包进「」或""，
+    这个函数会把它当成固定文案的一部分，两条本该算不同结构的消息会被
+    错误地并成同一种形状，判据会往"漏报"那个方向错（该报的钝 pattern
+    没报），而不是往"误报"方向错——两种方向都要避免，但这条具体来说
+    是这个函数今天唯一的已知盲区，写在这里防止 Task 2–4 踩上去。
+    """
+    msg = re.sub(r'"[^"]*"', '"S"', msg)         # 引号里的内容（仅 ASCII 双引号）
+    return re.sub(r'-?\d+(\.\d+)?', 'N', msg)    # 数字
+
+
+def _throws_pattern_matcher(entry: dict, test_name: str):
+    """从一条审计条目的 pattern 构造一个 `msg -> bool` 的匹配函数。
+
+    `_test.js` 的 throws(fn, label, pattern) 对 RegExp 走 `.test()`、对字符串
+    走 `indexOf()`——**两种语义完全不同**，必须先分清楚是哪一种，而且要靠
+    审计条目自带的 `patternType` 字段（`_test.js` 在 push 的时候如实记了
+    `pattern instanceof RegExp` 的结果），**不能靠猜字符串的形状**：一个
+    字符串 pattern 恰好长得像 `/xxx/` 的可能性无法排除，猜错了就会把一条
+    该走 indexOf 语义的字符串硬塞进 re.compile()，两种语义在边界情况上
+    并不等价。字符串 pattern 不是理论可能性——两种写法在全仓都真实存在、
+    都不是零星几条，所以这条判断逻辑必须按 `_test.js` 的真实行为写两条
+    分支，不能只写 RegExp 那一半。
+
+    ⚠ **这里故意不写「各有多少条」**。那是个会腐坏的可数事实：这段注释
+    原先写死过一次具体条数，**两个任务之后就不对了**（写的时候是对的，
+    后面几轮补断言把三个数全带跑了，注释还理直气壮地写着「今天」）。
+    一条不写数字的注释不会腐坏，而这里要说明的是**语义有两种、都得处理**
+    ——这句话不依赖任何条数成立。要当下的数就自己跑一遍去数，别信注释。
+
+    返回 `(matcher, warn)`：
+      · pattern 是字符串 → `matcher = lambda msg: pattern in msg`（indexOf
+        语义的 Python 等价写法），warn 为 None。
+      · pattern 是正则字面量的字符串形式（形如 `/body/flags`）→ 尝试转换
+        再编译，见下面两条具体处理。
+      · 编译失败 → matcher 为 None，warn 给出原因。**调用方应该只打印一条
+        WARN 并跳过，不能把 rc 置 1**——JS 与 Python 正则方言不完全相同
+        （比如具名组语法），编译失败是**这份工具在这条 pattern 上失效**，
+        不是这条 T.throws 断言本身判别力不足；把工具的局限误判成断言的
+        缺陷，会逼着人把"判别力更强的写法"改成"这份工具能读懂的写法"，
+        本末倒置。
+
+    两个具体的方言差异处理：
+      1. **具名捕获组**：JS 是 `(?<name>...)`，Python 要 `(?P<name>...)`。
+         这里做转换，但**要避开零宽断言** `(?<=...)`（lookbehind）与
+         `(?<!...)`（negative lookbehind）——这两种写法在 JS 与 Python 里
+         语法完全相同，转换正则如果不排除它们，会把 `(?<=` 错改成
+         `(?P<=`，反而制造一个新的编译失败。
+      2. **flags**：JS 正则字面量的 `toString()` 会把 `/body/flags` 里的
+         flags 带出来，这里至少把 `i`（忽略大小写）接到 `re.IGNORECASE`，
+         顺手也接了 `m`→`re.MULTILINE`、`s`→`re.DOTALL`（这两个的语义
+         与 JS 对应 flag 一致，同样的转换成本，不做等于留一个已知但没
+         处理的漏报缺口）。`g`/`u`/`y`/`d` 在这里的用法（`.search()` 判断
+         "匹中了没有"）不影响结果，没有转换的必要。
+    """
+    pattern = entry['pattern']
+    if entry.get('patternType') == 'string':
+        return (lambda msg, p=pattern: p in msg), None
+    m = re.match(r'^/(.*)/([a-z]*)$', pattern, re.DOTALL)
+    body, flags = (m.group(1), m.group(2)) if m else (pattern, '')
+    # (?<name>...) → (?P<name>...)，但 (?<= 与 (?<! 原样放过。
+    body = re.sub(r'\(\?<(?![=!])', '(?P<', body)
+    re_flags = 0
+    if 'i' in flags:
+        re_flags |= re.IGNORECASE
+    if 'm' in flags:
+        re_flags |= re.MULTILINE
+    if 's' in flags:
+        re_flags |= re.DOTALL
+    try:
+        compiled = re.compile(body, re_flags)
+    except re.error as err:
+        return None, (f'{test_name} 的 pattern {pattern} Python 侧编译失败（工具'
+                      f'限制，不是断言缺陷，跳过这条不计入 blunt/rc）：{err}')
+    return (lambda msg, c=compiled: bool(c.search(msg))), None
+
+
+def throws_discrimination_check() -> int:
+    """T.throws 的判别力普查（规格 §7.6，阶段 9a，修复轮 2 判据订正）。
+
+    `_test.js` 的 throws(fn, label, pattern) 第三参可选，**不传就退化成
+    「抛了就算过」**。
+
+    ⚠ **ALLOW_MISSING 现在是 0**（2026-08-08，阶段 9a task 4 补齐最后 18 条
+    之后收紧的；task 5 顺手把这段文档字符串改成事实描述）。下面这段关于
+    "86 条"的账**是历史**，留着是因为它解释了一件此后仍然成立的事：静态
+    grep 与运行期审计数出来的条数**本来就不相等**，别拿 grep 的数字去核对
+    这道门打印的数字。当时简报按 `grep -c 'T\\.throws('` 数得 149/84，运行期
+    审计的真数是**总 170 条、缺第三参 86 条**。差额来自 grep 数不出的执行期
+    真相：
+      · king.test.js 的缺参数/越界那组 `T.throws` 写在
+        `for (const [name, M] of [['king-greedy', G], ['king-exact', X]])`
+        循环体内，每条源码行两个算法变体各跑一次——grep=14、运行期=28；
+        tour.test.js（grep=10/运行期=18）、interp.test.js
+        （grep=15/运行期=22）是同一种循环放大。
+      · exercise.test.js 反过来 grep=46/运行期=43——3 行处在从未执行到的
+        分支里，静态数的时候数进去了，运行期审计天然数不到。
+    ⚠ **170 条执行 = 170 个唯一 (label, pattern) 对，这个数不会随循环
+    跑几次而漂**——循环体内的每条 T.throws 在不同迭代里 label 都插了循环
+    变量（比如 king.test.js 是 `name + '：连 opts 都没有，先点名 W'`，
+    name 取 'king-greedy' 或 'king-exact'），所以同一行源码执行两次
+    产生的是**两条不同的逻辑断言**，不是同一条断言的重复计数。总数因此
+    既是执行次数也是逻辑断言数，两者永远相等——下一个人改动循环次数、
+    总数会跟着变，但"执行次数"与"断言数"这两种读法不会分岔。
+
+    但**补上 pattern 也可以是恒真的**：阶段 7 栽过一次 —— 三条错误消息
+    共享前缀 `source({ W, H, blocked }) 少了 …`，于是 /W/、/H/、/blocked/
+    三个 pattern 匹到了每一条，把那三道守卫全删掉仍然四条全绿。
+
+    所以这道门守的是**判别力**，判据是**先匹配、再归一化**（修复轮 2
+    从"先归一化、再匹配"订正过来，见下面 ⚠）：对每条 pattern P，先在
+    `_throws_pattern_matcher()` 给的匹配语义下找出它在同文件里**真的
+    匹中的原始消息**集合 M，再用 `_throws_msg_shape()` 把 M 里每条消息
+    归一化、去重，数出 M 覆盖了几种不同的结构形状——**覆盖 ≥2 种才算钝**。
+    覆盖 0 种或 1 种都是通过：0 种是 P 压根没匹中任何消息（大概率是 P
+    自己带着一个具体插值，比如 `/收到：25/` 只会匹中那一条原始消息，
+    覆盖恰好 1 种形状，本来就该通过，不需要为它单开一个"0 种"的特例）；
+    1 种是 P 精确命中了它自己那种错误的全部实例，是判别力正常的样子。
+
+    ⚠ **修复轮 1 的判据是错的，不是"文件变大后的局限"，是选错了维度**：
+    那一轮"先归一化、再匹配"，即预先把同文件消息归一化去重成形状集合，
+    再看 P 匹中形状集合里几个元素——这个顺序有一个**无条件豁免**：只要
+    P 自己带数字或引号（比如 `/1/`），归一化之后 P 在形状集合里天然找
+    不到完全对应的形状字符串，命中数永远算成 0，于是被"0 种不是异常"
+    这条规则无条件放行，**不管 P 有多钝**。全仓验证过 `/1/` 这种 pattern：
+    它在原始消息层面能横跨 king.test.js 3 种结构、rook-cover.test.js 3
+    种结构——跟阶段 7 的 `/W/` 是同一类事故，修复轮 1 的判据会把它放过。
+    这一轮把顺序倒过来（先用 P 的真实匹配语义筛出它匹中的原始消息，再
+    对这个子集归一化），"0 种不许报错"这条特例判据也随之整个删掉——不
+    是不需要它了，是新判据下"0 种"和"1 种"本来就都不该报错，不需要
+    专门开一条豁免规则，特例消失是这次订正的自然结果，不是另外打的补丁。
+
+    ⚠ **这道门已经要求每条都有 pattern**（ALLOW_MISSING = 0，2026-08-08
+    起）。它报两类，两类都会让整道门失败：
+      · 无判别力的 pattern（真实匹中同文件 ≥2 种结构形状的消息）
+      · 缺第三参的条数（超过 ALLOW_MISSING = 0 就失败，也就是一条都不许）
+
+    收紧过程写在这里备查：阶段 9a 早期这道门对缺第三参**只统计、不失败**，
+    给补齐任务留活口（那时 ALLOW_MISSING 一路从 86 降下来）。task 4 把最后
+    18 条补完之后改成 0，此后任何新增的无 pattern T.throws 都会被当场拒绝。
+
+    ⚠ **扫描范围是 core/ + games/，与 core_tests()（第 7 道门）完全一致**
+    ——早先只扫 core/，games/ 下的 `games.test.js` 今天恰好 0 条 T.throws
+    所以没露出来，但那是运气，不是设计：两道门扫的必须是同一个集合，
+    不然"这道门覆盖了全仓"这句话本身就是假的，只是暂时没人戳破。
+
+    ⚠ 这里对每个测试文件单独 `subprocess.run(['node', str(test)], env=...)`
+    ——传的是**文件路径**而不是脚本字符串，不经过 run_node()，也就不受它
+    那个「脚本一律走 stdin」的规矩约束：MAX_ARG_STRLEN 限的是单个 argv
+    元素的字节数，这里的 argv 元素是一个短文件路径，从不会顶到那个上限。
+    真正需要新增的能力是**给 node 传环境变量**（THROWS_AUDIT），而
+    run_node() 目前没有 env 参数——与其给它加一个只有这一处用得到的
+    形参，不如在这单独一处直接调 subprocess.run，语义更直接。
+
+    ⚠ **审计文件路径带测试文件名与本进程 pid**（`.throws-audit.<pid>.
+    <文件名>.json`），且**跑之前先 unlink 掉同名残留**——早先用固定路径
+    `.throws-audit.json` 在整个循环里复用，一旦某个文件的 `T.report()`
+    没跑到（比如那次跑挂了、或者故意被注释掉），`out.exists()` 检查看到
+    的其实是**上一个测试文件残留的旧文件**，会被误当成"这个文件写出了
+    审计数据"而蒙混过关——"没写出审计文件"这个本该响的 ERROR 反而不响。
+    带上文件名与 pid 之后，不同测试文件、不同并发的 check.py 进程之间
+    不会互相踩到对方的审计文件；每次用之前主动 unlink 一次，是防"上上次
+    跑挂在这个位置留下的文件"这种更早的残留。
+
+    ⚠ 这道门与 core_tests()（第 7 道）**故意**各自把每个测试文件跑一遍
+    ——是的，`tree-model.test.js` 那 8140 条断言因此被启动了两次 node
+    进程，整体 check.py 一次跑下来约 35–40 秒。**没有合并成一趟**：把
+    审计职责塞进 core_tests() 会让那道门同时担两件不相关的事（"测试通不
+    通过"与"pattern 有没有判别力"），两个关注点混在一个函数里，任何一
+    边要改都得小心别碰坏另一边。35–40 秒在本仓当前规模下可接受，这里
+    宁可花两倍的跑测时间也要保持两道门各管一段。
+    """
+    ALLOW_MISSING = 0           # 2026-08-08，阶段 9a task 4：最后 18 条（interp.test.js
+                                # 17 条 + exercise-blanks.test.js 1 条）已补齐第三参，
+                                # 门收紧到 0——此后任何新增的无 pattern T.throws 都会被拒绝。
+    # 与 core_tests() 扫的是同一个集合——见上面文档字符串。
+    tests = sorted((ROOT / 'core').rglob('*.test.js')) + sorted((ROOT / 'games').rglob('*.test.js'))
+    if not tests:
+        print('ERROR: core/ 与 games/ 下一个 *.test.js 都没找到 —— 这道门本该'
+              '普查，不是跑了个寂寞', file=sys.stderr)
+        return 1
+    rc = 0
+    total = blunt = 0
+    # 缺第三参的条目**逐条留底**（文件名 + label），不只留一个计数：
+    # ALLOW_MISSING 收紧到 0 之后，这是**日常报错路径**——每一个新写的
+    # 无 pattern T.throws 都会撞上它。只报「有 N 条」等于把人扔回全仓 18
+    # 个测试文件里自己找，而隔壁「无判别力」那条 ERROR 早就会点名到
+    # 文件 + pattern + label 了。两条错误路径要一样好用。
+    missing_entries = []
+    for test in tests:
+        out = ROOT / f'.throws-audit.{os.getpid()}.{test.name}.json'
+        if out.exists():
+            out.unlink()      # 清掉可能残留的上一次跑挂的文件——见上面文档字符串
+        env = dict(os.environ, THROWS_AUDIT=str(out))
+        proc = subprocess.run(['node', str(test)], capture_output=True,
+                              text=True, env=env)
+        if not out.exists():
+            detail = proc.stderr.strip()
+            print(f'ERROR: {test.name} 没写出审计文件 —— _test.js 的审计模式'
+                  f'没生效，或者这个文件根本没调 T.report()'
+                  + (f'\n    node 的 stderr：{detail[:300]}' if detail else ''),
+                  file=sys.stderr)
+            rc = 1
+            continue
+        entries = json.loads(out.read_text(encoding='utf-8'))
+        out.unlink()
+        total += len(entries)
+        missing_entries.extend((test.name, e['label'])
+                               for e in entries if e['pattern'] is None)
+        msgs = [e['msg'] for e in entries]
+        for e in entries:
+            if e['pattern'] is None:
+                continue
+            matcher, warn = _throws_pattern_matcher(e, test.name)
+            if matcher is None:
+                print(f'WARN: {warn}', file=sys.stderr)
+                continue
+            # 先匹配、再归一化（修复轮 2 订正的顺序，见上面文档字符串）：
+            # 只对 P 真的匹中的原始消息求结构形状，不对全文件消息预先
+            # 归一化。
+            matched_shapes = set(_throws_msg_shape(m) for m in msgs if matcher(m))
+            if len(matched_shapes) >= 2:
+                blunt += 1
+                print(f'ERROR: {test.name} 的这条 pattern 匹中了同文件 '
+                      f'{len(matched_shapes)} 种不同结构的消息，等于没有判别力：\n'
+                      f'    {e["pattern"]}  ←  {e["label"][:60]}',
+                      file=sys.stderr)
+                rc = 1
+    missing = len(missing_entries)
+    if missing > ALLOW_MISSING:
+        print(f'ERROR: 缺第三参的 T.throws 有 {missing} 条，超过当前允许的 '
+              f'{ALLOW_MISSING} 条 —— 只许减不许加，下面逐条点名：',
+              file=sys.stderr)
+        for name, label in missing_entries:
+            print(f'    {name}  ←  {label[:60]}', file=sys.stderr)
+        rc = 1
+    print(f'T.throws 判别力普查：{total} 条，缺第三参 {missing} 条'
+          f'（允许 {ALLOW_MISSING}），无判别力 {blunt} 条')
+    return rc
+
+
 if __name__ == '__main__':
-    # 八道门都要跑到底、都要报——不能用 `or` 短路。之前 `a() or b() or c()`
+    # 九道门都要跑到底、都要报——不能用 `or` 短路。之前 `a() or b() or c()`
     # 一旦 a() 非零就直接跳过 b()/c()，意味着一份过期的内联副本（或任何语法
     # 错误）会让 406 条断言的 core_tests() 门根本不执行，问题只报出第一个，
-    # 最有分量的那道门被悄悄跳过了。这里八个都无条件跑，各自打印自己的
+    # 最有分量的那道门被悄悄跳过了。这里九个都无条件跑，各自打印自己的
     # ERROR，最后按「任一失败则整体失败」汇总退出码。
     # js_string_literal_html_safety_check 与 algos_roundtrip_check 是阶段 4
     # 新加的两道门：前者查转义结果对 HTML 分词器是否安全（`<!--` + 裸
@@ -679,9 +943,17 @@ if __name__ == '__main__':
     # 那个区间——上面两道都以"已经扫到了"为前提，空区间那次事故正是从这个
     # 前提底下漏过去的。
     # bilingual_algos_check 是阶段 8 新加的第八道，守两件各文件测试守不住的
-    # 事：core/algos/ 下有没有文件忘了装双语机制（普查，按 MONOLINGUAL_ALGOS
-    # 白名单工作），以及 render(parts, lang) 助手在七份里是否逐字节相同
-    # （它在每份里各存一份，没有门就必然漂移）。
+    # 事：core/algos/ 下有没有文件忘了装双语机制（**无条件普查**，阶段 9a
+    # task 5 把 MONOLINGUAL_ALGOS 白名单连机制一起删了），以及
+    # render(parts, lang) 助手在八份里是否逐字节相同（它在每份里各存一份，
+    # 没有门就必然漂移）。
+    # throws_discrimination_check 是阶段 9a 新加的第九道，守 T.throws 断言
+    # 本身的**判别力**：pattern 缺第三参会退化成「抛了就算过」（**一条都
+    # 不许**——ALLOW_MISSING 自 2026-08-08 起是 0），补上的 pattern 若真的匹中
+    # 同文件里 ≥2 种不同结构的消息（先按 pattern 真实语义匹配、再对匹中的
+    # 消息抹掉插值算结构形状——不是简单数字面消息条数）则等于没有判别力
+    # （当场失败）——阶段 7 三条同前缀错误消息撞上恒真 pattern、四条守卫
+    # 全删仍全绿，就是这道门要防的事故。
     rc_inline = inline_core.main(check_only=True)
     rc_node = node_check()
     rc_html_safety = js_string_literal_html_safety_check()
@@ -690,5 +962,7 @@ if __name__ == '__main__':
     rc_fallback = fallback_check()
     rc_core = core_tests()
     rc_bilingual = bilingual_algos_check()
+    rc_throws = throws_discrimination_check()
     sys.exit(1 if (rc_inline or rc_node or rc_html_safety or rc_marker or
-                    rc_algos or rc_fallback or rc_core or rc_bilingual) else 0)
+                    rc_algos or rc_fallback or rc_core or rc_bilingual or
+                    rc_throws) else 0)

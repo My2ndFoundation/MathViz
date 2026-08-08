@@ -8,7 +8,7 @@ const ALGO = require('./algos/minimax.js');
 /* 用真实解释器轨迹做 fixture。手搓假 trace 会悄悄偏离真实形状，
    而这个模块的全部正确性都建立在「真实轨迹长什么样」上——3b 的
    词法器审查正是靠「拿原生 JS 当参照」抓出 5 条 Critical 的。 */
-const SRC = ALGO.source({ mode: 'plain', depth: 2 });
+const SRC = ALGO.source({ mode: 'plain', depth: 2, lang: 'zh' });
 const trace = I.run(SRC, { host: {} }).trace;
 T.ok(!trace.truncated, '前提：depth 2 的纯 minimax 不会截断');
 
@@ -181,7 +181,7 @@ T.eq(mvKnown + mvUnknown, tree.order.length, '每个节点非此即彼，没有�
    childIds 是**真的看了**的。两者之差就是被 `if (beta <= alpha) break;`
    砍掉的分支。plain 的 fixture 永远撞不到这条路径，所以必须另开一份。 */
 for (const mode of ['ab', 'ordered']) {
-  const t2 = TM.build(I.run(ALGO.source({ mode: mode, depth: 2 }), { host: {} }).trace, 'search');
+  const t2 = TM.build(I.run(ALGO.source({ mode: mode, depth: 2, lang: 'zh' }), { host: {} }).trace, 'search');
   const r2 = TM.nodeAt(t2, t2.rootId);
   T.eq(r2.value, RESULT, mode + '：剪枝不改变答案（根的 value 与 plain 相同）');
   T.ok(t2.order.length < tree.order.length, mode + '：剪枝之后树上的节点比 plain 少');
@@ -202,7 +202,7 @@ for (const mode of ['ab', 'ordered']) {
 /* ---- 截断轨迹：帧永远不关闭，popStep 只能是 -1 ----
    depth 4 的纯 minimax 撞 STEP_LIMIT 是规格 §4④ 明写的那一课（「不是慢一点，
    是做不到」），所以这条路径一定会被真的走到，不是理论边角。 */
-const cut4 = I.run(ALGO.source({ mode: 'plain', depth: 4 }), { host: {} }).trace;
+const cut4 = I.run(ALGO.source({ mode: 'plain', depth: 4, lang: 'zh' }), { host: {} }).trace;
 T.ok(!!cut4.truncated, '前提：depth 4 的纯 minimax 会撞上步数上限');
 const tCut = TM.build(cut4, 'search');
 T.ok(tCut.order.length > 0, '截断的轨迹照样建得出树');
@@ -310,7 +310,7 @@ T.eq(TM.build(hoRun.trace, 'nosuchfn').rootId, -1, '认不到就没有根');
 
 // ============ 增量游标与剪枝 ============
 
-const abSrc = ALGO.source({ mode: 'ab', depth: 3 });
+const abSrc = ALGO.source({ mode: 'ab', depth: 3, lang: 'zh' });
 const abTrace = I.run(abSrc, { host: {} }).trace;
 T.ok(!abTrace.truncated, '前提：depth 3 的 α-β 不会截断');
 const abTree = TM.build(abTrace, 'search');
@@ -360,7 +360,7 @@ TM.seek(abEnd, abTrace.length - 1);
 const abStats = TM.statsAt(abEnd);
 T.ok(abStats.pruned > 0, 'α-β 到末尾时确实剪掉了分支：' + abStats.pruned);
 
-const plainTrace = I.run(ALGO.source({ mode: 'plain', depth: 3 }), { host: {} }).trace;
+const plainTrace = I.run(ALGO.source({ mode: 'plain', depth: 3, lang: 'zh' }), { host: {} }).trace;
 T.ok(!plainTrace.truncated, '前提：depth 3 的纯 minimax 不截断');
 const plainTree = TM.build(plainTrace, 'search');
 const plainEnd = TM.createView(plainTree, plainTrace);
@@ -372,7 +372,7 @@ T.ok(TM.statsAt(abEnd).visited < TM.statsAt(plainEnd).visited,
      'α-β 访问的节点更少：' + TM.statsAt(abEnd).visited + ' < ' + TM.statsAt(plainEnd).visited);
 
 // ---- 截断轨迹：剪枝不可判定时不许报 0（约束 3）----
-const cutTrace = I.run(ALGO.source({ mode: 'plain', depth: 4 }), { host: {} }).trace;
+const cutTrace = I.run(ALGO.source({ mode: 'plain', depth: 4, lang: 'zh' }), { host: {} }).trace;
 T.eq(cutTrace.truncated, true, '前提：depth 4 的纯 minimax 会截断');
 const cutTree = TM.build(cutTrace, 'search');
 const cutView = TM.createView(cutTree, cutTrace);
@@ -500,7 +500,7 @@ T.ok(typeof abStats.mvEnumerated === 'number', 'α-β 的「枚举了多少走�
    左边会立刻变大，这条当场红。 */
 /* ordered 也在这里一起过一遍 view —— 它是 shipped 工具里与 ab **并排**的
    那半个对比 tab，却是三个 mode 里唯一没有任何 view 级断言的。 */
-const ordTrace = I.run(ALGO.source({ mode: 'ordered', depth: 3 }), { host: {} }).trace;
+const ordTrace = I.run(ALGO.source({ mode: 'ordered', depth: 3, lang: 'zh' }), { host: {} }).trace;
 T.ok(!ordTrace.truncated, '前提：depth 3 的 ordered 不截断');
 const ordTree = TM.build(ordTrace, 'search');
 const ordEnd = TM.createView(ordTree, ordTrace);
@@ -687,16 +687,16 @@ T.eq(TM.prunedAt(renView), [], '一个都判不出来时，prunedAt 指认不出
    现在统一抛。同时钉住**边界的另一半**：显式的 null（数据在说「没有」）
    照旧宽容，不能顺手把 null 契约也一起收紧了。 */
 const gTrace = abTrace, gTree = abTree;
-T.throws(function () { TM.build(gTrace); }, 'build(trace) 省掉 entryName 当场抛，不再默默给一棵空树');
-T.throws(function () { TM.build(gTrace, ''); }, 'entryName 是空串同样抛（空串也认不到任何帧）');
-T.throws(function () { TM.build(gTrace, 42); }, 'entryName 不是字符串同样抛');
-T.throws(function () { TM.createView(gTree); }, 'createView(tree) 省掉 trace 当场抛，不再默默冻在第 0 步');
-T.throws(function () { TM.createView(); }, 'createView() 什么都不给也抛');
+T.throws(function () { TM.build(gTrace); }, 'build(trace) 省掉 entryName 当场抛，不再默默给一棵空树', /参数 entryName 缺席/);
+T.throws(function () { TM.build(gTrace, ''); }, 'entryName 是空串同样抛（空串也认不到任何帧）', /参数 entryName 缺席/);
+T.throws(function () { TM.build(gTrace, 42); }, 'entryName 不是字符串同样抛', /参数 entryName 缺席/);
+T.throws(function () { TM.createView(gTree); }, 'createView(tree) 省掉 trace 当场抛，不再默默冻在第 0 步', /参数 trace 缺席/);
+T.throws(function () { TM.createView(); }, 'createView() 什么都不给也抛', /参数 tree 缺席/);
 const gView = TM.createView(gTree, gTrace);
 TM.seek(gView, 20000);
-T.throws(function () { TM.seek(gView); }, 'seek(view) 省掉下标当场抛，不再把游标倒回 0');
-T.throws(function () { TM.seek(gView, NaN); }, 'seek(view, NaN) 同样抛（NaN | 0 也是 0，同一个坑）');
-T.throws(function () { TM.seek(undefined, 3); }, 'seek 不给 view 也抛');
+T.throws(function () { TM.seek(gView); }, 'seek(view) 省掉下标当场抛，不再把游标倒回 0', /参数 i 缺席/);
+T.throws(function () { TM.seek(gView, NaN); }, 'seek(view, NaN) 同样抛（NaN | 0 也是 0，同一个坑）', /参数 i 缺席/);
+T.throws(function () { TM.seek(undefined, 3); }, 'seek 不给 view 也抛', /参数 view 缺席/);
 T.eq(gView.i, 20000, '而且抛出来的那几次一点没动游标 —— 失败是响的，不是半生效的');
 /* null 契约不受影响：null 是**数据**说的「没有/不知道」，不是调用方写错了。 */
 T.eq(TM.build(null, 'search').order, [], 'build(null, entryName) 照旧给空树，不抛');
