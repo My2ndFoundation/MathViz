@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <meta name="tool-version" content="1.0.0">
-<meta name="engine-version" content="1.1.1">
+<meta name="engine-version" content="1.2.0">
 <title>数学可视化起步模板 · Math-Viz Starter</title>
 <!-- ============================================================
-  数学可视化交互教学工具 · 起步模板 · STARTER_VERSION 1.0.0
+  数学可视化交互教学工具 · 起步模板 · STARTER_VERSION 见下方 changelog 与脚本区常量
   设计规范：math-viz-design-system.md（令牌 / 组件 / 绘制语言 / 交互词汇）
 
   制作新工具只需修改三处（均在脚本区顶部，以 ①②③ 标记）：
@@ -18,6 +18,10 @@
   引擎区（相机 / 投影 / 绘制部件 / 交互 / 主循环）一般无需改动。
 
   版本记录（changelog，新→旧）：
+    1.2.0  2026-08-09  引擎新增金光闪（goldHit / drawGoldFlash / goldFlashReset）：
+                       命中「那个数」的一瞬全屏泛起琥珀色的光。加色不遮画面、打
+                       判据上升沿、衰减走 state.t、尊重 reduced-motion；resetSim()
+                       负责清打点。用法与「什么时候不该加」见设计系统 §4.7
     1.1.1  2026-08-02  修：回放期间状态行的进度数字停在「1 / N」不动 —— refreshRecInfo()
                        当年只认 'recording'，而文案只长在 buildRecRow() 里，于是回
                        放期间没有任何代码去改它。文案抽成唯一出处 recInfoText()，
@@ -208,7 +212,7 @@ function resolveLang(){
 let LANG = resolveLang();
 function t(s){ return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.zh) : s; }
 
-const STARTER_VERSION = '1.1.1';
+const STARTER_VERSION = '1.2.0';
 const VERSION = document.querySelector('meta[name="tool-version"]').content;
 const ENGINE_VERSION = document.querySelector('meta[name="engine-version"]').content;
 
@@ -592,6 +596,70 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  const p = (anchor3 && proj(C, anchor3)) || [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -749,6 +817,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
