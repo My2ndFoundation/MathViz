@@ -707,10 +707,15 @@ def _throws_pattern_matcher(entry: dict, test_name: str):
     `pattern instanceof RegExp` 的结果），**不能靠猜字符串的形状**：一个
     字符串 pattern 恰好长得像 `/xxx/` 的可能性无法排除，猜错了就会把一条
     该走 indexOf 语义的字符串硬塞进 re.compile()，两种语义在边界情况上
-    并不等价。全仓今天带 pattern 的 152 条里实测 string 43 条、regex 109
-    条——字符串 pattern 不是理论可能性，是真实存在且占三分之一弱的一类，
-    这条判断逻辑必须按 `_test.js` 的真实行为写两条分支，不能只写 RegExp
-    那一半。
+    并不等价。字符串 pattern 不是理论可能性——两种写法在全仓都真实存在、
+    都不是零星几条，所以这条判断逻辑必须按 `_test.js` 的真实行为写两条
+    分支，不能只写 RegExp 那一半。
+
+    ⚠ **这里故意不写「各有多少条」**。那是个会腐坏的可数事实：这段注释
+    原先写死过一次具体条数，**两个任务之后就不对了**（写的时候是对的，
+    后面几轮补断言把三个数全带跑了，注释还理直气壮地写着「今天」）。
+    一条不写数字的注释不会腐坏，而这里要说明的是**语义有两种、都得处理**
+    ——这句话不依赖任何条数成立。要当下的数就自己跑一遍去数，别信注释。
 
     返回 `(matcher, warn)`：
       · pattern 是字符串 → `matcher = lambda msg: pattern in msg`（indexOf
@@ -864,7 +869,13 @@ def throws_discrimination_check() -> int:
               '普查，不是跑了个寂寞', file=sys.stderr)
         return 1
     rc = 0
-    total = missing = blunt = 0
+    total = blunt = 0
+    # 缺第三参的条目**逐条留底**（文件名 + label），不只留一个计数：
+    # ALLOW_MISSING 收紧到 0 之后，这是**日常报错路径**——每一个新写的
+    # 无 pattern T.throws 都会撞上它。只报「有 N 条」等于把人扔回全仓 18
+    # 个测试文件里自己找，而隔壁「无判别力」那条 ERROR 早就会点名到
+    # 文件 + pattern + label 了。两条错误路径要一样好用。
+    missing_entries = []
     for test in tests:
         out = ROOT / f'.throws-audit.{os.getpid()}.{test.name}.json'
         if out.exists():
@@ -883,7 +894,8 @@ def throws_discrimination_check() -> int:
         entries = json.loads(out.read_text(encoding='utf-8'))
         out.unlink()
         total += len(entries)
-        missing += sum(1 for e in entries if e['pattern'] is None)
+        missing_entries.extend((test.name, e['label'])
+                               for e in entries if e['pattern'] is None)
         msgs = [e['msg'] for e in entries]
         for e in entries:
             if e['pattern'] is None:
@@ -903,9 +915,13 @@ def throws_discrimination_check() -> int:
                       f'    {e["pattern"]}  ←  {e["label"][:60]}',
                       file=sys.stderr)
                 rc = 1
+    missing = len(missing_entries)
     if missing > ALLOW_MISSING:
         print(f'ERROR: 缺第三参的 T.throws 有 {missing} 条，超过当前允许的 '
-              f'{ALLOW_MISSING} 条 —— 只许减不许加', file=sys.stderr)
+              f'{ALLOW_MISSING} 条 —— 只许减不许加，下面逐条点名：',
+              file=sys.stderr)
+        for name, label in missing_entries:
+            print(f'    {name}  ←  {label[:60]}', file=sys.stderr)
         rc = 1
     print(f'T.throws 判别力普查：{total} 条，缺第三参 {missing} 条'
           f'（允许 {ALLOW_MISSING}），无判别力 {blunt} 条')
