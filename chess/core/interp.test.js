@@ -474,7 +474,7 @@ diff('return BigInt(1.5);', 'BigInt(1.5) 原生抛，我们也要抛');
 
 /* ---- 位运算差分矩阵（阶段 9b，规格 §7.7）----
    上面那些是逐条手写的，覆盖到哪儿全看当时想到什么。这张表让「哪一格没
-   覆盖」一眼可见：六个运算符 ×（Number, BigInt, 混用）三档。混用那一档
+   覆盖」一眼可见：六个运算符 ×（Number, BigInt, 混用拆成正反两向）四档。混用那一档
    原生一律抛 `Cannot mix BigInt and other types`，diff() 比的是抛错文字，
    所以「该抛的必须同样抛」是免费得到的（规格 §7.7 开头的要求）。
 
@@ -1507,5 +1507,52 @@ for (let p45 = 0; p45 < T45_PROLOGUE_SHAPES.length; p45++) {
   while (useRe.exec(srcText) !== null) uses++;
   T.eq(uses, 3, '4.5②(b): blockPrologue 在源码里出现 3 次 —— 1 处定义 + 2 处调用');
 }
+
+/* ============ 位盘可行性探针（阶段 9b 收尾，规格 §7.7）============
+   9b 唯一的客户是 9d 的 bitboard。这一段不是「再多测几个运算符」，是拿
+   **真的位盘代码**问一句：这个子集够不够写它。停在「六个运算符能跑」而
+   不跑这一段，就是把「子集还差点什么」这个发现推迟到 9d ——那时它会以
+   「写到一半发现写不下去」的形式出现，代价高得多。
+   探针不落成工具、不进注册表，就是下面这几条 diff。 */
+
+// 位盘的四个核心写法，逐个走差分
+diff('const sq = 3; return 1n << BigInt(sq);', '探针：置位 —— 1n << BigInt(sq)');
+diff('let b = 22n; return b & (b - 1n);', '探针：清掉最低位的 1 —— b & (b - 1n)');
+diff('let b = 22n; let n = 0; while (b !== 0n) { b = b & (b - 1n); n = n + 1; } return n;',
+     '探针：popcount 循环（0n 当循环条件）');
+diff('const sq = 5; const b = 1n << BigInt(sq); return (b >> BigInt(sq)) & 1n;',
+     '探针：取位 —— 移回来再与 1n');
+diff('let b = 0n; for (let sq = 0; sq < 8; sq = sq + 1) { b = b | (1n << BigInt(sq)); } return b;',
+     '探针：循环建一整行的掩码');
+diff('let b = 0n; for (let sq = 0; sq < 64; sq = sq + 1) { b = b | (1n << BigInt(sq)); } return b;',
+     '探针：64 位铺满 —— 这是 9d 真正要跑的规模，验任意精度没在中途退化');
+diff('const b = 22n; log("bitboard = " + b); return 0;',
+     '探针：BigInt 进 log() —— 字符串拼接的行为要跟原生一致');
+
+/* 轨迹：规格 §7.7 说 `deepCopy` 不用动（`snap()` 是手写递归、不走 JSON，
+   BigInt 作为原始值直接过）。那是**读代码读出来的结论**，这里跑一遍证实它
+   —— 一个 BigInt 局部变量必须完整地活到 trace 里，既不被转成 Number、也不
+   把 snap() 打崩。9b 之后 Task 9 的变量面板读的就是这份快照。 */
+const probeRun = I.run('let bb = 22n; bb = bb & (bb - 1n); return bb;');
+T.eq(probeRun.result, 20n, '探针：BigInt 能原样当 run() 的返回值');
+T.ok(probeRun.trace.length > 0, '探针：带 BigInt 的程序照常录出轨迹（snap 没被打崩）');
+
+/* ---- 探针问出来的两条子集边界 ---- */
+
+/* ① 复合赋值：词法器今天的 PUNCT 表里只有 `+= -= *= /= %=`，五个位运算的
+   复合形式一个都没有。下面这条钉住**今天的**行为；要不要加进子集，看上面
+   那几条 diff 写出来的位盘代码读起来累不累 —— 判断写在任务报告里交给裁定，
+   **不要在这个任务里顺手加**（§7.7 只点了六个运算符，加是扩边界）。 */
+T.throws(function () { I.parse('let b = 3n; b &= 1n; return b;'); },
+         '探针：&= 今天不在子集里（钉住现状，等裁定）',
+         'Unexpected token: "="');
+
+/* ② `b.toString(2)`：原生支持，我们不支持 —— resolveCallable 只认数组的
+   push/pop 与对象的自有属性，BigInt 两条都不是。这是**真实的子集边界**，
+   不是缺陷：位盘要打印成二进制串的话，今天只能自己写循环。pattern 锚的是
+   resolveCallable 自己那句 `is not a function`，不是回显的方法名。 */
+T.throws(function () { I.run('const b = 5n; return b.toString(2);'); },
+         '探针：BigInt 上的 toString 今天不在子集里（钉住现状，等裁定）',
+         'toString is not a function');
 
 T.report();
