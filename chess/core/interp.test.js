@@ -21,10 +21,15 @@ T.eq(values("'a\\nb'"), ['a\nb'], '转义序列在词法阶段就解掉');
    吃掉一个点，再一个成员访问点），会被那条特例误杀。改成「扫描器至多
    吃一个小数点然后停」，1.2.3 仍然会被拒绝，但拒绝的位置改到了解析层
    （点后面必须是属性名，数字不是），报错原因更贴切。 */
+/* 两条 pattern 都锚上回显的 `0.3`（`1.2` 吃掉一个小数点后，`.3` 走前导
+   小数点通道成了 0.3）—— 跟 9a 收紧 checkNumTail 三条 pattern 是同一笔债：
+   只锚 `expected ";" but got` 这个前缀的话，semi() 报出的**任何**消息都能
+   匹中它。阶段 9b 的 C1 补了一条 `let x = 1 2n;`（同一个守卫、回显的是
+   BigInt），第九道门当场判这两条无判别力 —— **那是预期，不是回归**。 */
 T.throws(() => I.parse('1.2.3;'), '数字里出现第二个小数点在解析层被拒绝',
-         'expected ";" but got');
+         'expected ";" but got 0.3');
 T.throws(() => I.parse('let x = 1.2.3;'), '在语句里同样被拒绝',
-         'expected ";" but got');
+         'expected ";" but got 0.3');
 
 T.eq(I.tokenize('1.5').filter(t => t.type !== 'eof')[0].value, 1.5, '正常小数');
 T.eq(I.tokenize('42').filter(t => t.type !== 'eof')[0].value, 42, '整数');
@@ -161,6 +166,70 @@ nativeRejects('1.5n', '小数不能加 n 后缀',
               'Invalid number: a numeric literal cannot be immediately followed by "n"');
 nativeRejects('1e3n', '科学计数法不能加 n 后缀',
               'Invalid number: a numeric literal cannot be immediately followed by "n"');
+
+/* ---- BigInt token 落进错误消息（阶段 9b 最终审查 C1）----
+   `JSON.stringify(1n)` 抛 `TypeError: Do not know how to serialize a BigInt`。
+   解析器有六处把「意外的那个东西」回显进错误消息，9b 之前它们的值只可能是
+   字符串或 Number，之后可能是 BigInt —— 于是一条本该带 line/col/category 的
+   语法错**在 err() 之前就炸成一个裸 TypeError**：没有 line、没有 category。
+
+   **这不是「消息不好看」。** 工具⑤ 的 check() 按「有没有 line」判这是解析错
+   还是引擎自己的 bug，没有 line 的一律归 category:'internal'，不画波浪线、
+   不点红点，并显示「这是编辑器内部出错，不是你的代码的问题」。于是：她确实
+   漏了个逗号，工具却告诉她不是她的问题，还不指行号，Run 被禁用。触发条件是
+   「漏了逗号/分号，而下一个 token 恰好是 BigInt 字面量」—— 在一份满是
+   `1n`/`0n` 的位盘源码里，这是初学者最常见的一类手误。
+
+   ⚠ **判据不是消息文本，是 `line` 与 `category` 存不存在** —— 消息是表象，
+   `line` 有没有才是工具⑤ 分类的那个开关。下面每处都先锚一条守卫自己的固定
+   文案，再断言 `typeof line === 'number'`，两条缺一不可。 */
+function bigintTokDisp(src, parseFn) {
+  let caught = null;
+  try { (parseFn || I.parse)(src); } catch (e) { caught = e; }
+  return caught;
+}
+{
+  /* 六处回显里能被 BigInt 走到的五处，逐处一条。（第六处
+     parsePrimary 末尾的 catch-all 走不到：BigInt 字面量是合法的
+     基本单元，永远不会掉进那个兜底，改它是防御性的。） */
+  const sites = [
+    { src: 'let a = [1n 2n];', fn: null,
+      pat: 'Unexpected token: expected "]" but got 2n', label: 'expect()' },
+    { src: 'let x = 1 2n;', fn: null,
+      pat: 'Unexpected token: expected ";" but got 2n', label: 'semi()' },
+    { src: 'let 1n = 3;', fn: null,
+      pat: 'Unexpected token: expected identifier but got 1n', label: 'parseVarDecl()' },
+    { src: '1 2n', fn: I.parseExpression,
+      pat: 'Unexpected token: 2n', label: 'parseExpression()' },
+  ];
+  sites.forEach(function (s) {
+    T.throws(function () { (s.fn || I.parse)(s.src); },
+             'C1: BigInt token 回显进 ' + s.label + ' 的消息，不许抛裸 TypeError', s.pat);
+    const e = bigintTokDisp(s.src, s.fn) || {};
+    T.eq(typeof e.line === 'number' && e.category === 'syntax', true,
+         'C1: ' + s.label + ' —— 必须带 line(number) 与 category:"syntax"，' +
+         '否则工具⑤ 会把她漏的那个逗号说成「编辑器内部出错」。实际: line=' +
+         e.line + ' category=' + e.category + ' name=' + (e.constructor && e.constructor.name));
+  });
+
+  /* 第五处在运行期：`null[1n]` 走 getProp 的 `Cannot read properties of`，
+     同一个 JSON.stringify、同一种症状，只是 category 是 runtime。 */
+  T.throws(function () { I.run('let a = null; return a[1n];'); },
+           'C1: BigInt 下标回显进 getProp 的消息，不许抛裸 TypeError',
+           'Cannot read properties of null (reading 1n)');
+  const ge = bigintTokDisp('let a = null; return a[1n];', I.run) || {};
+  T.eq(typeof ge.line === 'number' && ge.category === 'runtime', true,
+       'C1: getProp() —— 必须带 line(number) 与 category:"runtime"。实际: line=' +
+       ge.line + ' category=' + ge.category + ' name=' + (ge.constructor && ge.constructor.name));
+
+  /* 回显的形状：BigInt 写成裸的 `2n`，跟 Number token 的裸 `2` 并排 ——
+     引号在这一族消息里的意思是「这是字符串/标点记号」，给数字字面量套引号
+     等于在报错里再撒一个小谎。这条断言守的就是那个选择。 */
+  T.ok(String((bigintTokDisp('let a = [1 2];') || {}).message).indexOf('but got 2') >= 0,
+       'C1: Number token 回显成裸的 2（对照组，形状没被改动）');
+  T.ok(String((bigintTokDisp('let a = [1n 2n];') || {}).message).indexOf('but got "2n"') === -1,
+       'C1: BigInt token 回显成裸的 2n 而不是带引号的 "2n"');
+}
 
 // ---- 与原生对照：原生拒绝的，我们也要拒绝 ----
 T.throws(() => I.tokenize("'a\nb'"), '字符串内未转义换行要报错',
@@ -445,15 +514,23 @@ diff('return 5n ^ 3;', '混用：^');
 diff('return 5n << 2;', '混用：<<');
 diff('return 5n >> 1;', '混用：>>');
 
-/* `>>>` 明确不加（规格 §7.7）：它对 BigInt 在 JS 里本来就抛，位盘也用不着。
-   但它现在的**拒绝路径变了**，要钉一条：`PUNCT` 表里没有 `>>>`，改之前
-   `1 >>> 2` 词法成 `>>` + `>`，而 `>>` 是 UNSUPPORTED_BINOP、当场报「不支持
-   右移」；改之后 `>>` 合法了，于是走到 `>` 上，报的是一句 syntax 错误。
-   两种都拒绝，但**消息完全不同** —— 不钉住的话，将来谁把 `>>>` 加进 PUNCT
-   都不会有测试拦他。pattern 锚的是 parsePrimary 自己那句固定文案。 */
+/* `>>>` **不进子集**（规格 §7.7），但**必须有一句自己的诊断**（规格 §7.7
+   「探针跑完的裁定（2026-08-08）」）。这两件事不矛盾：`>>>` 跟 `**` 的处境
+   一字不差 —— 在 `PUNCT` 里、在 `UNSUPPORTED_BINOP` 里、算不出结果。
+   「不加」指的是不必跟原生对齐一条语义，不是「让它报成语法错」。
+
+   这一条曾经短暂地退化过：9b 之前 `1 >>> 2` 词法成 `>>` + `>`，靠 `>>` 当时
+   还在 UNSUPPORTED_BINOP 里被顺带拦成「不支持右移」；`>>` 进子集之后那条
+   顺带的拦截没了，它掉成一句 `Unexpected token: ">"` 的 **syntax** 错误 ——
+   而 `1 >>> 2` 是合法 JavaScript，syntax 等于对使用者说「你写的不是
+   JavaScript」。**判据是 category 不是消息文本**：下面第二条断言才是这个
+   缺陷的判据，pattern 只是它的外壳（锚的是 unsupported() 自己那句固定
+   文案 + 点名的符号）。 */
 T.throws(function () { I.parse('return 1 >>> 2;'); },
-         '`>>>` 不在子集里（规格 §7.7 明确不加）',
-         'Unexpected token: ">"');
+         '`>>>` 不在子集里，但报的是 unsupported（规格 §7.7）',
+         'Unsupported syntax: the >>> operator (unsigned right shift)');
+T.eq((bad('return 1 >>> 2;') || {}).category, 'unsupported',
+     '`>>>` 的 category 是 unsupported 而不是 syntax —— 它是合法 JS，只是不在子集里');
 
 // ---- 位运算：一元 ~（阶段 9b）----
 diff('return ~5;', '按位取反');
@@ -1539,20 +1616,50 @@ T.ok(probeRun.trace.length > 0, '探针：带 BigInt 的程序照常录出轨迹
 
 /* ---- 探针问出来的两条子集边界 ---- */
 
-/* ① 复合赋值：词法器今天的 PUNCT 表里只有 `+= -= *= /= %=`，五个位运算的
-   复合形式一个都没有。下面这条钉住**今天的**行为；要不要加进子集，看上面
-   那几条 diff 写出来的位盘代码读起来累不累 —— 判断写在任务报告里交给裁定，
-   **不要在这个任务里顺手加**（§7.7 只点了六个运算符，加是扩边界）。 */
-T.throws(function () { I.parse('let b = 3n; b &= 1n; return b;'); },
-         '探针：&= 今天不在子集里（钉住现状，等裁定）',
-         'Unexpected token: "="');
+/* ① 复合赋值 `&= |= ^= <<= >>=`：**已裁定 —— 不进子集，但要有一句自己的
+   诊断**（规格 §7.7「探针跑完的裁定（2026-08-08）」，理由与那条「本裁定
+   什么情况下要重开」的限定都写在那里）。
 
-/* ② `b.toString(2)`：原生支持，我们不支持 —— resolveCallable 只认数组的
+   探针刚跑完时这五条曾经短暂地是一句 **syntax** 错误：9b 之前 `b &= 1n`
+   词法成 `&` + `=`，靠 `&` 当时还在 UNSUPPORTED_BINOP 里被顺带拦成
+   「不支持位与」；`&` 进子集之后那条顺带的拦截没了，它掉成
+   `Unexpected token: "="`。而 `b &= 1n` 是合法 JavaScript，且这个子集
+   **支持** `+= -= *= /= %=` —— 她刚用 `n = n + 1` 写完 popcount，试
+   `b &= b - 1n`，得到的必须是一句给得出替代写法的话，不是一句说她写的
+   不是 JavaScript 的话。**判据是 category 不是消息文本。** */
+T.throws(function () { I.parse('let b = 3n; b &= 1n; return b;'); },
+         '探针：&= 不在子集里，报的是 unsupported 且给出替代写法',
+         'Unsupported syntax: the &= operator (use x = x & y instead)');
+T.eq((bad('let b = 3n; b &= 1n; return b;') || {}).category, 'unsupported',
+     '&= 的 category 是 unsupported 而不是 syntax —— 它是合法 JS，只是不在子集里');
+
+/* 五个位运算复合赋值**逐个**都要有自己的诊断：只验 `&=` 一条，另外四个
+   退化了也没人拦得住。unsupportedCheck 同时查 category 与「消息里点名了
+   哪个符号」，后者防的是「五条共用一句笼统的话」。 */
+unsupportedCheck('let b = 3n; b |= 1n;', 'the |= operator (use x = x | y instead)', '探针①: |=');
+unsupportedCheck('let b = 3n; b ^= 1n;', 'the ^= operator (use x = x ^ y instead)', '探针①: ^=');
+unsupportedCheck('let b = 3n; b <<= 1n;', 'the <<= operator (use x = x << y instead)', '探针①: <<=');
+unsupportedCheck('let b = 3n; b >>= 1n;', 'the >>= operator (use x = x >> y instead)', '探针①: >>=');
+
+/* 反面：五个复合赋值只补了**诊断**，没有补实现 —— 它们不许算得出结果。
+   这条守的是「别顺手把裁定实现掉」：谁哪天在 ASSIGN_OPS 里加了 '&='，
+   上面五条只会从 unsupported 变成"跑通了"，而**没有一条断言会红**。 */
+T.eq(bad('let b = 3n; b &= 1n;') !== null, true,
+     '子集边界：&= 必须仍然是一个错误（不是"补了诊断顺手也实现了"）');
+
+/* 而这个子集**支持**的那五个复合赋值必须照旧能算 —— 上面那条不对称
+   （`+=` 行、`&=` 不行）正是这条裁定要她撞上并读懂的东西，不能因为
+   加了 UNSUPPORTED_ASSIGN 表就把 `+=` 一起误伤。 */
+diff('let a = 1; a += 2; return a;', '回归：+= 仍在子集里（UNSUPPORTED_ASSIGN 不许误伤它）');
+diff('let a = 7; a %= 4; return a;', '回归：%= 仍在子集里');
+
+/* ② `b.toString(2)`：**已裁定 —— 不加**（规格 §7.7「探针跑完的裁定
+   （2026-08-08）」）。原生支持，我们不支持 —— resolveCallable 只认数组的
    push/pop 与对象的自有属性，BigInt 两条都不是。这是**真实的子集边界**，
    不是缺陷：位盘要打印成二进制串的话，今天只能自己写循环。pattern 锚的是
    resolveCallable 自己那句 `is not a function`，不是回显的方法名。 */
 T.throws(function () { I.run('const b = 5n; return b.toString(2);'); },
-         '探针：BigInt 上的 toString 今天不在子集里（钉住现状，等裁定）',
+         '探针：BigInt 上的 toString 不在子集里（已裁定，见规格 §7.7）',
          'toString is not a function');
 
 T.report();
