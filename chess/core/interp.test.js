@@ -459,6 +459,53 @@ diff('return BigInt(0);', 'BigInt(0)');
 diff('return 1n << BigInt(3);', 'BigInt() 的结果可以直接当移位数 —— 位盘的核心写法');
 diff('return BigInt(1.5);', 'BigInt(1.5) 原生抛，我们也要抛');
 
+/* ---- 位运算差分矩阵（阶段 9b，规格 §7.7）----
+   上面那些是逐条手写的，覆盖到哪儿全看当时想到什么。这张表让「哪一格没
+   覆盖」一眼可见：六个运算符 ×（Number, BigInt, 混用）三档。混用那一档
+   原生一律抛 `Cannot mix BigInt and other types`，diff() 比的是抛错文字，
+   所以「该抛的必须同样抛」是免费得到的（规格 §7.7 开头的要求）。
+
+   ⚠ 这张表**不覆盖优先级**：它每条只有一个运算符，排错一层它一条都不会红。
+   优先级由上面那六条混合优先级 diff 守（Task 3），两者不互相替代。 */
+const BIT_BINOPS = ['&', '|', '^', '<<', '>>'];
+const BIT_OPERANDS = [
+  { l: '5', r: '3', tag: 'Number×Number' },
+  { l: '5n', r: '3n', tag: 'BigInt×BigInt' },
+  { l: '5n', r: '3', tag: '混用（原生抛）' },
+  { l: '5', r: '3n', tag: '混用（反向，原生也抛）' },
+];
+for (let bi = 0; bi < BIT_BINOPS.length; bi++) {
+  for (let oi = 0; oi < BIT_OPERANDS.length; oi++) {
+    const op = BIT_BINOPS[bi], o = BIT_OPERANDS[oi];
+    diff('return ' + o.l + ' ' + op + ' ' + o.r + ';',
+         '矩阵 ' + o.l + ' ' + op + ' ' + o.r + '（' + o.tag + '）');
+  }
+}
+/* 一元 ~ 只有一个操作数，单独两格。 */
+diff('return ~5;', '矩阵 ~5（Number）');
+diff('return ~5n;', '矩阵 ~5n（BigInt）');
+
+/* 边界几格：原生对这些有明确规定，我们借原生所以也该一致。 */
+diff('return 1 << 31;', '矩阵边界：Number 左移到符号位（ToInt32 的边）');
+diff('return 1 << 32;', '矩阵边界：Number 移位数取模 32');
+diff('return 1n << 100n;', '矩阵边界：BigInt 任意精度，不取模');
+diff('return -1 >> 31;', '矩阵边界：Number 算术右移补符号位');
+diff('return 0n & 1n;', '矩阵边界：0n 参与运算');
+diff('if (0n) { return "truthy"; } return "falsy";', '矩阵边界：0n 的真假值');
+
+/* ---- 追加 1（来自 Task 3 审查）：BINOP 重排新造出的两处相邻层边界，
+   矩阵与上面六条混合优先级 diff 都没抓到。十层表是
+   ||:1 &&:2 |:3 ^:4 &:5 相等:6 关系:7 移位:8 加减:9 乘除:10 —— 缺的两处
+   相邻关系是 &&(2) vs |(3)、关系(7) vs 移位(8)。两条都挑了「两种排法算出
+   不同答案」的形状（已用 node -e 验过区分力，见任务报告）。 */
+diff('return false && 1 | 2;', '优先级边界：&&(2) 与 |(3) 相邻——| 必须比 && 紧');
+diff('return 1 << 2 < 3;', '优先级边界：关系(7) 与移位(8) 相邻——<< 必须比 < 紧');
+
+/* ---- 追加 2（来自 Task 5 审查）：BigInt 上没测过前缀 --。Task 5 那批
+   （见下方「++/-- 在 BigInt 上不许漂类型」）只覆盖了后缀 ++/--、前缀 ++，
+   独独漏了前缀 --。 */
+diff('let x = 2n; --x; return x;', 'BigInt 前缀自减');
+
 // ---- 短路求值：必须真的短路（宿主序列会暴露有没有多算）----
 diff('return false && log("no");', '&& 短路：右侧不该被求值');
 diff('return true || log("no");', '|| 短路：右侧不该被求值');
