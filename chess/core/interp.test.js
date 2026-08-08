@@ -442,6 +442,13 @@ T.throws(function () { I.parse('return 1 >>> 2;'); },
          '`>>>` 不在子集里（规格 §7.7 明确不加）',
          'Unexpected token: ">"');
 
+// ---- 位运算：一元 ~（阶段 9b）----
+diff('return ~5;', '按位取反');
+diff('return ~0;', '按位取反：0');
+diff('return ~5n;', 'BigInt 按位取反');
+diff('return ~~5.9;', '双重取反（原生的截断惯用法）');
+diff('return -~5;', '取反后取负 —— 两个一元运算符连用');
+
 // ---- 短路求值：必须真的短路（宿主序列会暴露有没有多算）----
 diff('return false && log("no");', '&& 短路：右侧不该被求值');
 diff('return true || log("no");', '|| 短路：右侧不该被求值');
@@ -1126,11 +1133,10 @@ function unsupportedCheck(src, mustContain, label) {
 }
 unsupportedCheck('return 2 ** 3;', '**', 'B5: ** 运算符（原来是 syntax："expected \\";\\" but got \\"**\\""）');
 unsupportedCheck('let a = 2; a **= 3;', '**=', 'B5: **= 复合赋值');
-/* 五条位运算符的「不支持」断言在阶段 9b 删掉了 —— **子集边界移动了**
-   （规格 §2.6 与 §7.7），不是测试挡路。`~` 那一条在 Task 4 一起删。
-   删掉之后它们的正当性由上面那一批 diff() 接管：`return 5 & 3;` 现在
-   要跟原生算出同一个答案，比「它必须报错」是强得多的断言。 */
-unsupportedCheck('return ~1;', '~', 'B5: 按位取反 ~');
+/* 六条位运算符的「不支持」断言在阶段 9b 删完了 —— **子集边界移动了**
+   （规格 §2.6 与 §7.7），不是测试挡路。删掉之后它们的正当性由上面
+   那一批 diff() 接管：`return 5 & 3;` 现在要跟原生算出同一个答案，
+   比「它必须报错」是强得多的断言。 */
 unsupportedCheck('const o = {}; return o?.x;', 'optional chaining', 'B5: 可选链 ?. 的消息必须点名"可选链"');
 unsupportedCheck('return a ?? 1;', '??', 'B5: 空值合并 ?? 的消息必须点名 ??');
 unsupportedCheck('function f(a = 1) {}', 'default parameters', 'B5: 默认参数');

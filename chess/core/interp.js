@@ -490,13 +490,6 @@
     if (t.type === 'punct' && t.value === '/') {
       throw unsupported('regular expressions', t);
     }
-    /* '~'（按位取反）只会以「一元前缀运算符」的形状出现在期待操作数的
-       位置——跟 '-'/'+'/'!' 是同一类，但它不在这个教学子集里（复审 I4：
-       改之前词法器压根不认识这个字符，报的是 `Unexpected character "~"`，
-       跟"不支持"毫无关系）。 */
-    if (t.type === 'punct' && t.value === '~') {
-      throw unsupported('the ~ operator (bitwise not)', t);
-    }
   }
 
   /* 赋值：右结合，单独一层，不走 BINOP 表（表里全是左结合）。
@@ -574,7 +567,7 @@
     return left;
   }
 
-  const UNARY_OPS = { '-': true, '+': true, '!': true };
+  const UNARY_OPS = { '-': true, '+': true, '!': true, '~': true };
   function parseUnary(state) {
     const t0 = cur(state);
     if (t0.type === 'punct' && UNARY_OPS[t0.value]) {
@@ -1804,6 +1797,7 @@
         const v = yield* evalExpr(node.arg, env);
         if (node.op === '-') return -v;
         if (node.op === '+') return +v;
+        if (node.op === '~') return ~v;   // 阶段 9b；BigInt 上原生同样有定义（~5n === -6n）
         return !v; // '!'
       }
 
