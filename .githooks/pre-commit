@@ -15,15 +15,30 @@ fi
 # 只在注册表或其镜像被改动时才跑，避免拖慢无关提交
 # 注：不能在此提前 exit —— 下面的 chess 子项目检查要在同一次提交里独立触发
 if git diff --cached --name-only | grep -qE '^(tools\.json|app\.html|index\.html)$'; then
-  # 写模式：app.html 能自动修就自动修；index.html 是手写文案，只报告
+  # 先记下哪些镜像文件在跑脚本之前就已经是脏的（别的会话正在写、或本次提交
+  # 有意留了未暂存的改动）。只有「跑之前干净、跑之后变脏」的文件才是脚本自己
+  # 改出来的，才可以替用户暂存——否则一个 git add 会把别人半写的文案一起卷进
+  # 本次提交（CLAUDE.md「并行开工纪律」第 5 条记过的事故）。
+  DIRTY_BEFORE=
+  for f in app.html index.html; do
+    git diff --quiet -- "$f" || DIRTY_BEFORE="$DIRTY_BEFORE $f"
+  done
+
+  # 写模式：app.html 的内嵌清单与 index.html 的 version/engine 能自动修就自动修；
+  # index.html 的手写文案（desc / tag）只报告
   SYNC_FAILED=
   python3 scripts/sync_registry.py || SYNC_FAILED=1
 
-  # app.html 若被脚本改写，连同本次提交一起入栈，避免提交出一个半同步的状态
-  if ! git diff --quiet -- app.html; then
-    git add app.html
-    echo "pre-commit: app.html 内嵌清单已按 tools.json 重新生成并加入本次提交"
-  fi
+  for f in app.html index.html; do
+    git diff --quiet -- "$f" && continue                      # 脚本没动它
+    case " $DIRTY_BEFORE " in
+      *" $f "*)
+        echo "pre-commit: $f 在同步前就有未暂存改动，不代为 git add —— 请自己确认后再暂存" >&2
+        continue ;;
+    esac
+    git add "$f"
+    echo "pre-commit: $f 已按 tools.json 重新生成并加入本次提交"
+  done
 
   if [ -n "$SYNC_FAILED" ]; then
     echo "" >&2

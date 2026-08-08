@@ -19,7 +19,11 @@ A collection of **single-file, zero-dependency HTML math/physics visualization t
 `tools.json` is the single source of truth; `scripts/sync_registry.py` propagates it:
 
 - **`app.html`** is rewritten automatically between the `/* >>> GENERATED:TOOLS */` … `/* <<< GENERATED:TOOLS */` markers. Never edit that block by hand.
-- **`index.html`** is only *checked* (id / file / cat / accent against `tools.json`), because its `TOOLS` entries carry hand-written `desc`/`tag` copy that a generator shouldn't invent. If the check fails, write the entry yourself.
+- **`index.html`** is *partly* generated: `version` / `engine` on every `TOOLS` entry are **rewritten** from `tools.json` (they are facts, not copy), while id / file / cat / accent are only *checked*, because the entries also carry hand-written `desc`/`tag` copy a generator shouldn't invent. If the check fails, write the entry yourself.
+
+  The version rewrite exists because the old check ignored those two fields, and **48 of 62 entries had silently drifted** — `pi`/`phi` sat at `1.0.0` in the gallery while `tools.json` said `1.2.0`. A mirrored field that nothing verifies will drift; the gallery now prints those numbers on the cards, and printing a wrong version is worse than printing none.
+
+**Version numbers are also cache keys.** `app.html` stamps every iframe URL as `<file>?lang=<l>&v=<version>`, and the gallery cards do the same. GitHub Pages serves HTML with `cache-control: max-age=600` and browsers hold copies well past that — a shipped upgrade could sit invisible behind a stale copy until the user cleared their cache (this happened). The version in the URL makes a new release a new URL. The gallery page itself gets `?v=<fingerprint>` — a djb2 hash over all `id:version` pairs — since it embeds its own copy of the registry. Consequences: `minimal()` in `sync_registry.py` must keep emitting `version`, and app.html's runtime `tools.json` mapping must keep copying `d.version`. Drop either and every URL silently becomes `?v=0`, which is the same as having no cache key at all.
 
 Three layers keep it honest, so "remember to mirror it" is never a step:
 
