@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.1">
+<meta name="tool-version" content="1.2.0">
 <meta name="engine-version" content="1.0.0">
 <title>π 的本质 · The Essence of π</title>
 <!-- ============================================================
@@ -22,6 +22,9 @@
   Basel π²/6 一行读数）。
 
   版本记录（changelog，新→旧）：
+    1.2.0  2026-08-08  命中 π 全屏金光一闪：半圈铺出 πr / 阶梯走到 n = 96 /
+                       扇形合上 π×1 矩形 / 部分和首次逼进 |S−π| < 0.01 四处，
+                       打上升沿、加色不遮画面、尊重 reduced-motion
     1.1.1  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
     1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
@@ -314,6 +317,81 @@ function fillPoly3(C, pts, color) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中 π 的那一瞬，全屏泛起一层琥珀色的光 ——
+   本工具五个页签里有四个存在「终于走到 π」的时刻，而它们此前都只在画面的一个
+   小角落里亮一下（一颗呼吸光点、一行标注），播放时极易错过——尤其展开一圈：
+   半圈的命中窗口只有 ±0.06 rad，默认 ω = 0.5 下约 0.24 s。
+   全屏金光是把这一瞬抬到不可能错过的量级。
+
+   触发的是判据的**上升沿**（由未命中变为命中），不是「正处于命中」——
+   后者在级数页会从 k = 100 一路真到 k = 200，屏幕就一直亮着了。
+   衰减走 state.t，与本文件其余装饰脉动同一个时钟：暂停即冻结，
+   重置（t 归零）由 ③ pushSample 的倒流分支清账，录制器按固定 dt 推进也复现得出。
+
+   四处命中（概率页有意不加，理由见该页注释）：
+     roll   车轮转过半圈，铺平的弧长恰为 πr
+     arch   阶梯走到 n = 96，阿基米德停笔处 3 10/71 < π < 3 1/7
+     area   扇形重排合上 π×1 矩形，S = πr²
+     series 莱布尼茨部分和首次逼进 |S−π| < 0.01（k = 100，此后不再失效） */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+/* 全屏金光：加色（lighter）三层——满屏底光 / 命中点白金泛光 / 边缘暖晕，
+   外加一圈自命中点推向画外的冲击波。加色而非覆盖，是「画布即主角」的要求：
+   峰值时场景始终透得出来，光只是加上去的。
+   prefers-reduced-motion 下衰减到三成并撤掉冲击波，只留一层静的暖光。 */
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  /* 包络：FLASH_RISE 内急起，之后二次曲线缓落 */
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  const p = (anchor3 && proj(C, anchor3)) || [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 /* —— ① 展开一圈：滚动累积量（在 ③ pushSample 中推进） —— */
 let _lastPushT = 0, probT = 0;   /* probT：概率页的确定性揭示时钟 */
 
@@ -414,8 +492,8 @@ const SCENES = {
     params: ['omega', 'wr'],
     brand: { zh: '单位车轮沿地面无滑滚动：已滚过的弧被「剥下来」铺平在地上，滚过的距离恰等于弧长 rθ。半圈铺出 πr，一圈铺出 2πr——π 的定义就是一次测量。',
              en: 'A unit wheel rolls along the ground without slipping: the arc already rolled is peeled off flat, so distance rolled equals arc length rθ. Half a turn lays down πr, a full turn 2πr — the definition of π is simply a measurement.' },
-    tips: { zh: '按 2 正视 x·y，等车轮转过半圈：曲的弧真的变成了长 π 的直线段，琥珀刻度亮起。打开「轮缘轨迹」看轮缘点画出摆线——它的另一段故事在《参数曲线》工具里。',
-            en: 'Press 2 for the front x·y view and wait for half a turn: the curved arc literally becomes a straight segment of length π, and the amber mark lights up. Turn on "Rim trace" to see the rim point draw a cycloid — its other story lives in the Parametric curves tool.' },
+    tips: { zh: '按 2 正视 x·y，等车轮转过半圈：曲的弧真的变成了长 π 的直线段，琥珀刻度亮起、全屏金光一闪。打开「轮缘轨迹」看轮缘点画出摆线——它的另一段故事在《参数曲线》工具里。',
+            en: 'Press 2 for the front x·y view and wait for half a turn: the curved arc literally becomes a straight segment of length π, the amber mark lights up and the screen flashes gold. Turn on "Rim trace" to see the rim point draw a cycloid — its other story lives in the Parametric curves tool.' },
     views: {
       iso:   { label: { zh: '立体',     en: '3D' },        az: -0.75, el: 0.32, dist: 11, tx: 2.7, ty: 0.9, tz: 0 },
       front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 8,  tx: 2.9, ty: 1.0, tz: 0 }
@@ -518,6 +596,11 @@ const SCENES = {
       if (pp) glowDot(pp, 15, '#ffffff', 'rgba(186,240,255,0.9)');
       /* 触地点 */
       solidDot(C, [s, 0, 0], 3, 'rgba(241,245,249,0.95)');
+      /* 金光闪：车轮转过半圈、铺平的弧长恰好走到 πr 刻度的那一瞬。
+         命中窗口 ±0.06 rad，默认 ω = 0.5 下约 0.24 s——不闪一下基本看不见。
+         锚在 x = πr 的刻度上，光从「答案落地的地方」推开。 */
+      goldHit('roll', nearPi);
+      drawGoldFlash(C, [PI * r, 0, 0]);
     },
     readout() {
       const r = state.wr, thm = mod2pi(state.theta), s = r * thm;
@@ -541,8 +624,8 @@ const SCENES = {
     drive: { key: 'archN', from: 0, to: 5, period: 10, kind: 'linear' },
     brand: { zh: '单位圆夹在内接与外切正多边形之间：半周长 n·sin(π/n) < π < n·tan(π/n)。n 沿 3 → 6 → 12 → 24 → 48 → 96 翻倍——正是阿基米德的原始阶梯。拖动 n 看两把钳口合拢。',
              en: 'The unit circle sits between inscribed and circumscribed regular polygons: half-perimeters give n·sin(π/n) < π < n·tan(π/n). n doubles along 3 → 6 → 12 → 24 → 48 → 96 — Archimedes\' own ladder. Drag n and watch the pincers close.' },
-    tips: { zh: '按 2 正视 x·y：n = 96 时两只多边形几乎贴着圆。再按 3 侧视走廊：每层的玫红/紫色量尺一层层收拢到琥珀 π 轨道——阿基米德由此写下 3 10/71 < π < 3 1/7。',
-            en: 'Press 2 for the front x·y view: at n = 96 both polygons hug the circle. Then press 3 for the side corridor: the rose/violet rulers close level by level onto the amber π rail — this is how Archimedes wrote 3 10/71 < π < 3 1/7.' },
+    tips: { zh: '按 2 正视 x·y：n = 96 时两只多边形几乎贴着圆，缺口只剩 0.00168，全屏金光一闪。再按 3 侧视走廊：每层的玫红/紫色量尺一层层收拢到琥珀 π 轨道——阿基米德由此写下 3 10/71 < π < 3 1/7。',
+            en: 'Press 2 for the front x·y view: at n = 96 both polygons hug the circle, the gap is down to 0.00168 and the screen flashes gold. Then press 3 for the side corridor: the rose/violet rulers close level by level onto the amber π rail — this is how Archimedes wrote 3 10/71 < π < 3 1/7.' },
     views: {
       iso:   { label: { zh: '立体',      en: '3D' },            az: -0.8,       el: 0.34, dist: 12,  tx: -0.4, ty: -0.5, tz: 1.6 },
       front: { label: { zh: '正视 x·y',  en: 'Front x·y' },     az: 0.001,      el: 0.02, dist: 8.5, tx: -0.4, ty: -0.4, tz: 0 },
@@ -614,6 +697,10 @@ const SCENES = {
       if (n >= 96) {
         label3(C, [0, 1.75, 0], '3 10/71 < π < 3 1/7', { font: 'italic 14px ' + FONT_MATH, color: C_AMB, align: 'center' });
       }
+      /* 金光闪：阶梯爬到 n = 96——阿基米德停笔的那一级，缺口收到 0.00168。
+         锚在量尺上的琥珀 π 刻度：两把钳口正是在这里合拢。 */
+      goldHit('arch', n >= 96);
+      drawGoldFlash(C, [BX + PI * ARCH_LS, BY, 0]);
     },
     readout() {
       const n = archSides();                       /* 与 draw、滑杆回显同源，三处读数才一致 */
@@ -639,8 +726,8 @@ const SCENES = {
     drive: { key: 'morph', from: 0, to: 1, period: 8, kind: 'linear' },
     brand: { zh: '把单位圆切成 n 个扇形，一上一下交错重排成一条「近似矩形」的条带：底边是半个周长 π，高是半径 1。n 越大条带越直——πr² 不是新公式，是圆周长换了个姿势。',
              en: 'Cut the unit circle into n sectors and rearrange them alternately up and down into a near-rectangular strip: the base is half the circumference, π, and the height is the radius, 1. The larger n, the straighter the strip — πr² is not a new formula, it is the circumference standing up.' },
-    tips: { zh: '把 n 拖到 64、重排进度 m 拖到 1，再按 2 正视 x·y——披萨真的变成了 π×1 的矩形，面积 = π·1 = πr²。打开「自动演示」看扇形一次次飞去又飞回。',
-            en: 'Drag n to 64 and rearrange m to 1, then press 2 for the front x·y view — the pizza really is a π×1 rectangle, so area = π·1 = πr². Turn on "Auto demo" to watch the sectors fly out and back.' },
+    tips: { zh: '把 n 拖到 64、重排进度 m 拖到 1，再按 2 正视 x·y——披萨真的变成了 π×1 的矩形，全屏金光一闪，面积 = π·1 = πr²。打开「自动演示」看扇形一次次飞去又飞回。',
+            en: 'Drag n to 64 and rearrange m to 1, then press 2 for the front x·y view — the pizza really is a π×1 rectangle, the screen flashes gold, and area = π·1 = πr². Turn on "Auto demo" to watch the sectors fly out and back.' },
     views: {
       iso:   { label: { zh: '立体',     en: '3D' },        az: -0.55, el: 0.35, dist: 10.5, tx: -0.8, ty: 0.7, tz: 0 },
       front: { label: { zh: '正视 x·y', en: 'Front x·y' }, az: 0.001, el: 0.02, dist: 8,   tx: -0.8, ty: 0.75, tz: 0 }
@@ -699,6 +786,11 @@ const SCENES = {
         if (hp) glowDot(hp, 13 + 3 * Math.sin(state.t * 9), '#fff7e0', 'rgba(251,191,36,0.9)');
         label3(C, [AREA_X0 + PI / 2, 1.58, 0], 'S = π · 1 = πr²', { font: 'italic 14px ' + FONT_MATH, color: C_AMB, align: 'center' });
       }
+      /* 金光闪：条带合进 π×1 矩形的那一瞬（m > 0.97 且 n ≥ 40，扇形够细才谈得上「是」矩形）。
+         锚在矩形右上角——底边走到 π 的那个点。
+         注意 secN 默认 12，要先把扇形数拖到 40 以上才会命中，与原有琥珀命中标注同一条件。 */
+      goldHit('area', hit);
+      drawGoldFlash(C, [AREA_X0 + PI, 1, 0]);
     },
     readout() {
       const n = state.secN;
@@ -712,6 +804,14 @@ const SCENES = {
   },
 
   /* ────── ④ 概率里的 π：投点与投针，对圆一无所知的点「投票」出 π ────── */
+  /* 不设金光闪：本页没有「命中」这回事，两个估计沿 N 的阶梯并不单调走向 π。
+     照 Halton 序列实算（N = 16…2048，与画面同源）：
+       投点误差  0.358 → 0.108 → 0.046 → 0.108 → 0.046 → 0.030 → 0.0068 → 0.0068
+       投针误差  0.058 → 0.233 → 0.020 → 0.019 → 0.020 → 0.039 → 0.048 → 0.039
+     投点在 N = 128 处不进反退，投针从 N = 128 起一路变差、到 2048 仍停在 3.18。
+     此时若因玫红那一侧锁住了「3.14」就全屏报捷，紫色那一侧正读着 3.18，
+     等于替一个没有发生的到达打光。这一页的教学点恰恰是「它会晃」——
+     误差按 1/√N 收敛，慢且不单调，这份不确定性本身就是内容。 */
   prob: {
     label: { zh: '概率里的 π', en: 'π in probability' },
     params: ['probN'],
@@ -806,8 +906,8 @@ const SCENES = {
     drive: { key: 'terms', from: 1, to: 200, period: 12, kind: 'linear' },
     brand: { zh: '莱布尼茨级数 4(1 − 1/3 + 1/5 − 1/7 + …)：部分和沿 k 轴一上一下振荡，两条包络把它夹向琥珀色的 π 轨道。S∞/4 = arctan 1 恰是四分之一圆的圆心角——级数与几何在 45° 相遇。',
              en: 'The Leibniz series 4(1 − 1/3 + 1/5 − 1/7 + …): partial sums oscillate over and under along the k axis while two envelopes squeeze them onto the amber π rail. S∞/4 = arctan 1 is exactly the quarter-circle angle — series and geometry meet at 45°.' },
-    tips: { zh: '按 2 侧视：振荡阶梯塌成一条正好停在 π 高度的水平线。把 k 拖到 200 看收敛有多慢——每一项只把误差缩小到约 1/k，这份「慢」本身就是信息；翠绿的 Basel 估计 √(6·Σ1/n²) 是通往同一个 π 的另一条路。',
-            en: 'Press 2 for the side view: the oscillating staircase collapses into a horizontal line parked exactly at height π. Drag k to 200 to feel how slow the convergence is — each term only shrinks the error to about 1/k, and that slowness is itself the lesson; the emerald Basel estimate √(6·Σ1/n²) is another road to the same π.' },
+    tips: { zh: '按 2 侧视：振荡阶梯塌成一条正好停在 π 高度的水平线。把 k 拖到 200 看收敛有多慢——整整走到 k = 100 才第一次逼进 |S−π| < 0.01（全屏金光就闪在那一项），每一项只把误差缩小到约 1/k，这份「慢」本身就是信息；翠绿的 Basel 估计 √(6·Σ1/n²) 是通往同一个 π 的另一条路。',
+            en: 'Press 2 for the side view: the oscillating staircase collapses into a horizontal line parked exactly at height π. Drag k to 200 to feel how slow the convergence is — it takes a full 100 terms before |S−π| first drops under 0.01 (that is the term the screen flashes gold on), each term shrinking the error only to about 1/k, and that slowness is itself the lesson; the emerald Basel estimate √(6·Σ1/n²) is another road to the same π.' },
     views: {
       iso:   { label: { zh: '立体',     en: '3D' },        az: -0.85,      el: 0.30,  dist: 11,  tx: -0.4, ty: 2.4, tz: 2.6 },
       side:  { label: { zh: '侧视 S·k', en: 'Side S·k' },  az: -Math.PI/2, el: 0.02,  dist: 9.5, tx: 0, ty: 2.6, tz: 3.2 },
@@ -896,6 +996,12 @@ const SCENES = {
         label3(C, [IC[0], IC[1] - IR - 0.26, 0], 'S/4 → arctan 1 = π/4',
           { font: 'italic 12px ' + FONT_MATH, color: C_CYN, align: 'center' });
       }
+      /* 金光闪：部分和第一次真正逼进 |S−π| < 0.01。
+         实测 k = 100（S = 3.131593，误差 0.0099997）首次成立，此后到 k = 200 再未失效——
+         所以只能打上升沿：按「正处于命中」画，从 k = 100 到 200 屏幕会一直亮着。
+         这一闪同时是这一页的论点：走了整整一百项，才换来第二位小数。 */
+      goldHit('series', hit);
+      drawGoldFlash(C, state.showStair ? [0, yk(kmax), SER_ZL] : [0, PI * SER_YS, SER_ZL]);
     },
     readout() {
       const kmax = Math.round(state.terms);        /* 取整：LEIB/BASEL 按整数下标取值，小数会取到 undefined */
@@ -941,7 +1047,10 @@ function pushSample() {
      原则：记录「当时的真实值」——滚动页的摆线点用采样时的半径算出，
      中途改 r 不重算历史，旧轨迹保持真实。 */
   let dt = state.t - _lastPushT;
-  if (dt < 0) { dt = 0; probT = 0; }
+  /* 倒流 = 用户按了重置：揭示时钟归位，金光闪的打点也一并清账——
+     否则 flashAt 里留着的是「未来」的时刻，命中判据也还停在旧的真值上，
+     重置后走回同一个命中点时就不会再闪。 */
+  if (dt < 0) { dt = 0; probT = 0; goldFlashReset(); }
   _lastPushT = state.t;
   probT += dt;
   const thm = mod2pi(state.theta), r = state.wr;
