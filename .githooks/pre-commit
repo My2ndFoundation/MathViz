@@ -8,7 +8,7 @@
 # 临时跳过：git commit --no-verify
 
 if ! command -v python3 >/dev/null 2>&1; then
-  echo "pre-commit: 未找到 python3，跳过注册表同步检查与 chess 子项目校验" >&2
+  echo "pre-commit: 未找到 python3，跳过注册表同步检查与 chess / cryptography 子项目校验" >&2
   exit 0
 fi
 
@@ -66,6 +66,28 @@ if git diff --cached --name-only | grep -qE '^chess/(core|tools|scripts)/'; then
   fi
   if ! python3 chess/scripts/check.py; then
     echo "chess: check.py 未通过，提交中止" >&2
+    exit 1
+  fi
+fi
+
+# ---- cryptography 子项目 ----
+# 与 chess 段同构。只暂存 inline_core.py 这次实际改写过的文件
+# （--print-changed 一行一个路径），不要 `git add cryptography/tools/*.html`
+# 这种整体 glob——那会把其他并行会话半写的文件一起卷进本次提交
+# （CLAUDE.md「并行开工纪律」第 2 条记过这次事故）。
+if git diff --cached --name-only | grep -qE '^cryptography/(core|examples|tools|scripts)/'; then
+  CRYPTO_CHANGED=$(python3 cryptography/scripts/inline_core.py --print-changed)
+  if [ $? -ne 0 ]; then
+    echo "cryptography: inline_core.py 失败，提交中止" >&2
+    exit 1
+  fi
+  if [ -n "$CRYPTO_CHANGED" ]; then
+    echo "$CRYPTO_CHANGED" | while IFS= read -r f; do
+      [ -n "$f" ] && git add "$f"
+    done
+  fi
+  if ! python3 cryptography/scripts/check.py; then
+    echo "cryptography: check.py 未通过，提交中止" >&2
     exit 1
   fi
 fi
