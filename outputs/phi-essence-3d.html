@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.2.0">
+<meta name="tool-version" content="1.2.1">
 <meta name="engine-version" content="1.0.0">
 <title>φ 的本质 · The Essence of φ</title>
 <!-- ============================================================
@@ -22,6 +22,9 @@
   星（对角线/边 = φ，一条对角线的相邻段之比全是 φ）。
 
   版本记录（changelog，新→旧）：
+    1.2.1  2026-08-09  金光闪归位到引擎区：与 starter 1.2.0 的部件逐字节同源，打点改由
+                       引擎的 resetSim() 清账（原来搭在 ③ pushSample 的倒流分支上）；
+                       同步 starter 1.2.1 的锚点守卫。画面与判据一字未动
     1.2.0  2026-08-08  命中 φ 全屏金光一闪：向日葵扫过黄金角 / 缩放演示每次 ×φ 自重合 /
                        斐波那契比值咬住 φ 三处，打上升沿、加色不遮画面、尊重 reduced-motion
     1.1.1  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
@@ -323,79 +326,6 @@ function fillPoly3(C, pts, color) {
   ctx.save();
   ctx.fillStyle = color;
   ctx.fill();
-  ctx.restore();
-}
-
-/* —— 金光闪（gold flash）：命中 φ 的那一瞬，全屏泛起一层琥珀色的光 ——
-   本工具的三个页签各有一个「终于走到 φ」的时刻，而它们此前都只在画面的一个
-   小角落里亮一下（一颗呼吸光点、一圈细环），播放时极易错过——尤其向日葵页：
-   黄金角的命中窗口只有 ±0.05°，一趟扫描里只占约 0.12 s。全屏金光是把这一瞬
-   抬到不可能错过的量级。
-
-   触发的是判据的**上升沿**（由未命中变为命中），不是「正处于命中」——
-   后者在斐波那契页会从 k = 10 一路真到 k = 20，屏幕就一直亮着了。
-   衰减走 state.t，与本文件其余装饰脉动同一个时钟：暂停即冻结，
-   重置（t 归零）由 ③ pushSample 的倒流分支清账，录制器按固定 dt 推进也复现得出。
-
-   三处命中（另两页无此情形，故不加，理由见各页注释）：
-     cut  每转过 90°（放大 φ 倍）与自身重合一次
-     fib  F(k+1)/F(k) 首次咬住 φ（k = 10，89/55，误差 1.5×10⁻⁴）
-     sun  α 扫过黄金角 137.508° */
-const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
-const flashAt = {}, flashOn = {};
-function goldHit(id, on) {
-  if (on && !flashOn[id]) flashAt[id] = state.t;
-  flashOn[id] = on;
-}
-function goldFlashReset() {
-  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
-  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
-}
-/* 全屏金光：加色（lighter）三层——命中点泛光 / 边缘暖晕 / 一圈推向画外的冲击波。
-   加色而非覆盖，是「画布即主角」的要求：场景始终透得出来，光只是加上去的。
-   prefers-reduced-motion 下衰减到三成并撤掉冲击波，只留一层静的暖光。 */
-function drawGoldFlash(C, anchor3) {
-  const t0 = flashAt[curTab];
-  if (t0 == null) return;
-  const k = state.t - t0;
-  if (k < 0 || k >= FLASH_DUR) return;
-  /* 包络：FLASH_RISE 内急起，之后二次曲线缓落 */
-  const env = k < FLASH_RISE ? k / FLASH_RISE
-                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
-  const a = REDUCED ? env * 0.3 : env;
-  if (a <= 0.002) return;
-  const p = (anchor3 && proj(C, anchor3)) || [CX, CY];
-  const R = Math.hypot(W, H);
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
-  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
-  ctx.fillRect(0, 0, W, H);
-  /* 命中点泛光：白金核心 → 琥珀 */
-  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
-  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
-  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
-  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
-  g.addColorStop(1,    'rgba(251,191,36,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
-  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
-  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
-  v.addColorStop(0, 'rgba(251,191,36,0)');
-  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
-  ctx.fillStyle = v;
-  ctx.fillRect(0, 0, W, H);
-  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
-  if (!REDUCED) {
-    const q = Math.min(1, k / (FLASH_DUR * 0.8));
-    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
-    const fade = Math.pow(1 - q, 1.6);
-    ctx.beginPath();
-    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
-    ctx.lineWidth = 1 + 2.2 * fade;
-    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
-    ctx.stroke();
-  }
   ctx.restore();
 }
 
@@ -1086,10 +1016,7 @@ function pushSample() {
      原则：记录「当时的真实值」——采样存的是该瞬间的缩放角与粒数，
      中途改 speed 不重算历史。 */
   let dt = state.t - _lastPushT;
-  /* 倒流 = 用户按了重置：累积量归位，金光闪的打点也一并清账——
-     否则 flashAt 里留着的是「未来」的时刻，命中判据也还停在旧的真值上，
-     重置后走回同一个命中点时就不会再闪。 */
-  if (dt < 0) { dt = 0; cutA = 0; sunR = 0; goldFlashReset(); }
+    if (dt < 0) { dt = 0; cutA = 0; sunR = 0; }
   _lastPushT = state.t;
   if (state.zoomDemo) cutA += dt * state.speed * 0.55;
   sunR += dt * state.speed * 60;
@@ -1240,6 +1167,74 @@ function label3(C, p, text, o) {
   ctx.shadowColor = 'rgba(3,6,12,.85)';
   ctx.shadowBlur = 4;
   ctx.fillText(text, s[0] + (o.dx || 0), s[1] + (o.dy || 0));
+  ctx.restore();
+}
+
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -1400,6 +1395,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
