@@ -7631,7 +7631,11 @@ const ALGOS = {
                              省略 / 空数组 = 没有墙，与不写这个字段逐字节相同（五题里
                              三题走的正是这条路）。给了但给坏了 → 跟交不出 files/ranks
                              一样：不画棋盘 + 红色状态牌（见 layoutTracks）。
-       kinds     []           这道题会用到的 mark 种类，决定图例的行与顺序
+       kinds     []           **图例的行与顺序**。不要求每一行都对应一个真被发出来的
+                             mark 值 —— 连续的数值域（阶段 9c 的 pathCount）就是用
+                             一行代表整个域（那一行的 kind 是 'num'，算法从不发它）。
+                             反过来也不成立：真被发出来的值必须能被 onMark 认出，
+                             认不出会当场停住（见下面那道门）。
        onMark(kind)          → { color, label } 或 null（认不出的种类不画）
                              `label` 的**显示宽度 ≤ 72**（CJK 算 2），validateDecl 判死：
                              图例没有 max-width，长了会钻到右上角面板底下（见那道门）
@@ -9820,7 +9824,7 @@ const ALGOS = {
   }
 
   /* 标记：先画压暗的一批、再画有效的一批，重叠时有效的那个盖在上面。 */
-  function drawMarks(C, P, L, c, tally) {
+  function drawMarks(C, P, L, c, tally, pid) {
     for (let pass = 0; pass < 2; pass++) {
       for (const key in c.marks) {
         const m = c.marks[key];
@@ -9828,7 +9832,19 @@ const ALGOS = {
         if (stale !== (pass === 0)) continue;
         if (stale && !E.state.stale) continue;
         const info = P.onMark(m.kind);
-        if (!info || !info.color) { tally.badKinds[m.kind] = 1; continue; }
+        if (!info) {
+          /* 阶段 9c 立的门。改之前这里是静默 return —— 一个 onMark 认不出的
+             kind 会让那一格什么都不画，而全页照常绿。9c 把 kind 放宽成
+             string | number（每格带一个标量）之后，这个沉默的代价变成了
+             「整块棋盘的数字一个都不显示，没有任何一处报错」。
+             缺省行为是沉默的东西，迟早会沉默地坏掉。 */
+          throw new Error(
+            'PROBLEMS.' + pid + '.onMark 认不出这个 mark 值：' + JSON.stringify(m.kind) +
+            '（类型 ' + typeof m.kind + '）。算法真的发出了它，但 onMark 返回了 null，' +
+            '于是这一格什么都不会画。要么在 onMark 里接住它，要么让算法别发它。'
+          );
+        }
+        if (!info.color) { tally.badKinds[m.kind] = 1; continue; }
         const fr = sqToFR(+key, L);
         if (!fr) { tally.offBoard++; continue; }
         fillSquare(C, L, fr.f, fr.r, info.color, stale ? 0.12 : 0.38, !stale);
@@ -10064,7 +10080,7 @@ const ALGOS = {
          drawWalls 立刻返回 —— 与改动前同一条路径。 */
       drawWalls(C, s.L, s.walls, fresh);
       BR.drawBoard(ctx, C, E, { layout: s.L, mask: wallMask(s.L, s.walls) });
-      if (E.state.marks !== false) drawMarks(C, P, s.L, s.c, fresh);
+      if (E.state.marks !== false) drawMarks(C, P, s.L, s.c, fresh, pid);
       if (E.state.pieces !== false) drawPieces(C, s.L, s.c, fresh);
       if (E.state.tower !== false) { drawTower(C, P, s.L, s.pts); drawZAxis(C, P, s.L, levels); }
       /* 判据是**画出来几块棋盘**，不是几条轨道：练习模式下 tourKnight 有两条
