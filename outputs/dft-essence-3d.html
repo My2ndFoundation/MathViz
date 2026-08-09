@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.2">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.0.0">
 <title>离散傅里叶变换 · 换一套坐标看信号</title>
 <!-- ============================================================
@@ -13,6 +13,9 @@
   引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
 
   版本记录（changelog，新→旧）：
+    1.1.0  2026-08-09  命中「频域即同一信号」全屏金光一闪：重建 RMS 归零（m = N/2）与
+                       滤波偏差取到最小的那一档（argmin，实测落在 m = f₂ = 7，
+                       噪声 0/0.1/0.5 三档都不移动）。采样与频谱页不加：那里是结构不是到达
     1.0.2  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-12  首个版本（含双语）
@@ -432,6 +435,12 @@ const SCENES = {
     draw(C) {
       const r = drawTF(C, { recon: true, scissor: true, reconName: 'x̂(t)' });
       this._err = rmsErr(r.D, r.cap);
+      /* 金光闪（§4.7）：留够 N/2 个格子、重建与原信号逐点相同的那一刻。
+         判据就是本页读数里那个 RMS 误差本身：< 1e-9 即浮点意义上的零 ——
+         不是「误差够小了」的阈值，是等式成立。频域是同一信号的另一套坐标，
+         不是近似；少留一个格子就永远差着那一项，判据自然为假。 */
+      goldHit('idft', this._err < 1e-9);
+      drawGoldFlash(C, null);
       this._cap = r.cap;
     },
     readout() {
@@ -467,6 +476,21 @@ const SCENES = {
     draw(C) {
       const r = drawTF(C, { recon: true, scissor: true, cleanBold: true, reconName: t({ zh: '滤波', en: 'filtered' }) });
       this._gap = rmsClean(r.D, r.cap);
+      /* 金光闪（§4.7）：「与干净信号偏差」取到最小的那一档 m —— 本页论点
+         「再多留格子是在保噪声，再少留是在砍信号」说的就是这一档。
+         判据不是阈值而是 argmin：每一档 m 的偏差都算一遍再比大小，
+         不必预先指定一个「正确的 m」。实测这个 argmin 恰好落在 m = f₂ 上
+         （N = 32、f₂ = 7 时命中 m = 7），且噪声 0 / 0.1 / 0.5 三档都不移动 ——
+         因为干净信号在 f₂ 以上本来就没有内容，留满到 f₂ 在任何噪声下都最优。
+         这比「随噪声漂移」更强：最优截止跟着信号走，不跟着噪声走。
+         代价是每帧 O(N²)（N ≤ 64），只在本页算。 */
+      let bestCap = r.cap, bestGap = this._gap;
+      for (let m = 0; m <= Math.floor(state.N / 2); m++) {
+        const g = rmsClean(r.D, m);
+        if (g < bestGap - 1e-12) { bestGap = g; bestCap = m; }
+      }
+      goldHit('filter', r.cap === bestCap);
+      drawGoldFlash(C, null);
       this._cap = r.cap;
     },
     readout() {
@@ -665,6 +689,74 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -822,6 +914,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
