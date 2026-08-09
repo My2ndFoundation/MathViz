@@ -1689,7 +1689,12 @@ var TOOL = {
 
 ```javascript
 var PARAMS = [
-  { key: 'k', label: '<i>k</i>', min: 0, max: 25, step: 1, value: 3, fmt: 0 }
+  /* fmt 必须是**函数**，不是小数位数。buildParams() 里是
+     `val.textContent = p.fmt(parseFloat(input.value))`——写 `fmt: 0` 会在
+     init() 建面板时抛 TypeError，页面停在一张空白 canvas 上。
+     （建 Caesar 那天照抄计划的初稿就是这么死的。） */
+  { key: 'k', label: '<i>k</i>', min: 0, max: 25, step: 1, value: 3,
+    fmt: function (v) { return String(Math.round(v)); } }
 ];
 ```
 
@@ -1896,7 +1901,7 @@ git commit -m "feat(crypto): 导航壳与画廊（按 chapter 分组，出站引
 - Consumes: `inline_core`（Task 5）、注册表（Task 6）、两页 FALLBACK（Task 7）
 - Produces: CLI `python3 cryptography/scripts/check.py`，全绿 exit 0
 
-八道门，**全部无条件跑到底**，最后按"任一失败则整体失败"汇总退出码——
+十道门，**全部无条件跑到底**，最后按"任一失败则整体失败"汇总退出码——
 不许用 `or` 短路。chess 的 `__main__` 注释记着理由：短路会让最有分量的那道门
 被前面一个语法错误悄悄跳过。
 
@@ -1963,7 +1968,7 @@ def script_literal_check() -> int:
 #!/usr/bin/env python3
 """cryptography 子项目校验门（设计文档 §5）。
 
-八道门全部无条件跑到底，最后汇总退出码。
+十道门全部无条件跑到底，最后汇总退出码。
 """
 import json
 import pathlib
@@ -2470,7 +2475,7 @@ def inline_order_check() -> int:
 
 ```python
 if __name__ == '__main__':
-    # 八道门都要跑到底、都要报——**不能用 `or` 短路**。`a() or b() or c()`
+    # 十道门都要跑到底、都要报——**不能用 `or` 短路**。`a() or b() or c()`
     # 一旦 a() 非零就跳过后面的，意味着一份过期的内联副本（或任何语法错误）
     # 会让整个 core_tests() 门根本不执行，问题只报出第一个，最有分量的那道门
     # 被悄悄跳过了。chess 的同一处注释记着这个教训。
@@ -2494,7 +2499,7 @@ if __name__ == '__main__':
 ```bash
 python3 cryptography/scripts/check.py
 ```
-预期：exit 0，八行通过信息
+预期：exit 0，十五行通过信息（五个测试文件各一行 + 十道门各一行）
 
 - [ ] **Step 8: 验证门真的会红（**不可跳过**）**
 
@@ -2818,7 +2823,7 @@ gh pr checks <PR#>
 | §3.3 index.html | Task 7 Step 2–3 |
 | §3.4 语言 | Global Constraint 4 + Task 3 Step 1 + Task 7 Step 2 |
 | §4 Caesar 三页签 | Task 6 Step 3 |
-| §5 八道门 | Task 8 全部 |
+| §5 校验门（实现时从八道长到十道） | Task 8 全部 |
 | §5.1 钩子与 CI 接线 | Task 9 Step 5–6 |
 | §6.1 注册表隔离 | Global Constraint 2 + Task 9 Step 4 |
 | §6.2 可搬迁 | Task 8 Step 4–5（执法）+ Task 10 Step 2（实测） |
