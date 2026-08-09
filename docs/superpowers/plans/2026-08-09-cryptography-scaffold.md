@@ -1573,30 +1573,48 @@ awk '/<script>/{f=1;next}/<\/script>/{f=0}f' cryptography/tools/_skeleton.html >
 ```
 预期：无输出
 
-- [ ] **Step 5: 把骨架的 ALGOS 清单改回空**
+- [ ] **Step 5: 骨架的 ALGOS 清单写 `none`，骨架照常参与内联**
 
-骨架是模板不是工具，它不该绑定 `caesar.js`。改回 `/* >>> GENERATED:ALGOS  */`
-并清空区间体。这会让 `inline_core.py` 对它报错——因此
-**`_skeleton.html` 必须被 `inline_core.py` 与 `check.py` 的 glob 排除**。
-在 `inline_core.py` 的 `main()` 里，把
+骨架是模板不是工具，不该绑定 `caesar.js`。但**不要**为此把它排除在
+`inline_core.py` 的 glob 之外——那条路走过，代价是骨架其余六个内联区间
+从此无人看管：建项目当天引擎改了一次，骨架里的副本旧了 354 字节，
+`inline_core` 不碰它、`check.py` 也不查它，没有任何东西报警。骨架恰恰是
+以后每个新工具的复制源，让它长期陈旧等于把陈旧扩散出去。
+
+正确做法是给模板一个**显式弃权哨兵**。`render()` 里，在"清单为空则报错"
+之前加：
+
 ```python
-tools = sorted((ROOT / 'tools').glob('*.html'))
-```
-改成
-```python
-    # 下划线开头的是模板与预览页，不是工具：_skeleton.html 的 ALGOS 清单
-    # 故意留空（它是模板，不绑定任何具体算法），而空清单在 render() 里是
-    # 硬错误。把它们排除在外，"模板留空"与"清单必填"这两条规则才能共存。
-    tools = sorted(p for p in (ROOT / 'tools').glob('*.html')
-                   if not p.name.startswith('_'))
+        if raw_list == 'none':
+            # 模板专用的显式弃权：区间留空、不报错。
+            # 用一个必须写出来的词而不是"留空即弃权"——留空是手滑最常见的
+            # 形状（新建页面时先写标记、内容待填），那正是必须报错的情形。
+            # 真工具不会无意中写出 `none`，所以这个哨兵不掩护真正的疏忽。
+            text = ALGOS_MARK_RE.sub(
+                lambda _m: f'/* >>> GENERATED:ALGOS{_m.group(1)} */\n'
+                           f'/* <<< GENERATED:ALGOS */', text, count=1)
+            return text, missing
 ```
 
-- [ ] **Step 6: 确认排除生效**
+`main()` 的 glob **不加任何排除**：
+
+```python
+    tools = sorted((ROOT / 'tools').glob('*.html'))
+```
+
+骨架的标记行写成 `/* >>> GENERATED:ALGOS none */`。
+
+- [ ] **Step 6: 确认骨架参与内联、且漂移会被抓住**
 
 ```bash
 python3 cryptography/scripts/inline_core.py
+python3 cryptography/scripts/inline_core.py --check
 ```
-预期：`WARN: cryptography/tools/ 下没有 html，本次无事可做`（此刻只有 `_skeleton.html`，已被排除）
+预期：先 `已更新 1 个文件：_skeleton.html`，再 `1 个文件已是最新`
+
+再验证这道门真的会红——改一下任意 core 源，`--check` 必须报 `_skeleton.html`
+不一致；还原后恢复绿。以及：把 `none` 改成空清单，`inline_core.py` 必须
+仍然当场报错（哨兵不许掩护真正的手滑）。
 
 - [ ] **Step 7: 提交**
 
@@ -1893,6 +1911,43 @@ git commit -m "feat(crypto): 导航壳与画廊（按 chapter 分组，出站引
 | 7 | `algos_gate()` | 内联的 ALGOS 块能跑，且 Caesar 全 k 往返成立 |
 | 8 | `outbound_ref_check()` | `../` 只出现在 app/index 各一次，其余目录零次 |
 | 9 | `inline_order_check()` | `CRYPTO-CORE` 的标记必须排在 `CRYPTANALYSIS` / `ALGOS` 之前 |
+| 10 | `script_literal_check()` | `core/` 与 `examples/` 的 js 里不许出现 `<script` / `</script` 字面量 |
+
+**门 10 也是实测出来的。** 从 chess 继承的 `viz-engine.js` 注释里有一处
+字面的 `<script>`（在 JS 块注释内）。后果有两层：本仓到处在用的抽取配方
+`awk '/<script>/{f=1;next}…'` 会**静默丢掉那一行**，于是语法门检查的字节
+与浏览器真正执行的字节不是同一份；而 chess 自己的 `js_string_literal()`
+注释里记着更坏的一层——一个裸的 `<script` 配上任意位置的 `<!--`，会让
+HTML 分词器进入 script-data-escaped 状态，把页面真正的 `</script>` 吃掉，
+整页从那里开始被当成脚本文本吞掉（实测复现过：`document.scripts.length`
+从 2 变成 1）。今天没有 `<!--` 所以只是良性的，但"今天恰好没有"不是不变量。
+改注释措辞即可消除，一道门保证它不会被下一次上游同步带回来。
+
+```python
+# core/ 与 examples/ 的内容会被原样内联进 html 的 <script> 块里。这两个
+# 字面量在那里是有毒的，理由见上表。用拼接构造针，让这个文件自己不踩雷。
+SCRIPT_NEEDLES = ('<' + 'script', '</' + 'script')
+
+
+def script_literal_check() -> int:
+    rc = 0
+    for base in ('core', 'examples'):
+        for path in sorted((ROOT / base).rglob('*.js')):
+            text = path.read_text(encoding='utf-8')
+            for needle in SCRIPT_NEEDLES:
+                if needle in text:
+                    n = text.count(needle)
+                    print(f'ERROR: {path.relative_to(ROOT)} 里有 {n} 处 {needle!r} 字面量。\n'
+                          f'       这些文件会被原样内联进 html 的脚本块：该字面量会让\n'
+                          f'       awk 抽取配方静默丢行（语法门于是检查了另一份字节），\n'
+                          f'       并且一旦同页出现 <'+'!-- 就会翻转 HTML 分词器状态、\n'
+                          f'       把整页吞成脚本文本。改注释措辞即可。',
+                          file=sys.stderr)
+                    rc = 1
+    if rc == 0:
+        print('脚本字面量：core/ 与 examples/ 干净')
+    return rc
+```
 
 **门 9 是实测出来的，不是想出来的。** `caesar.js` 与 `cryptanalysis.js` 的浏览器
 分支都写 `factory(root.CryptoCore)`。若 `crypto-core.js` 被内联到它们**之后**，
@@ -1959,13 +2014,24 @@ def load_registry() -> dict:
 
 
 def tool_pages() -> list:
-    """tools/ 下的真工具页，排除下划线开头的模板与预览页。
+    """**注册表意义上**的工具页：排除下划线开头的模板与预览页。
 
-    与 inline_core.main() 的 glob 保持同一条排除规则——两处若不一致，
-    就会出现"内联脚本跳过了它、校验门却要求它已被内联"这种自相矛盾的红。
+    只给"注册表 / 版本 / 双向存在"那几道门用——`_skeleton.html` 不是发布的
+    工具，没有注册表条目，也不该有版本号被比对。
     """
     return sorted(p for p in (ROOT / 'tools').glob('*.html')
                   if not p.name.startswith('_'))
+
+
+def all_tool_pages() -> list:
+    """tools/ 下的**全部**页面，含 `_` 开头的模板。
+
+    语法门与内联顺序门要用这个，不是 tool_pages()。骨架同样内嵌七个
+    GENERATED 区间、同样会因为一次手滑而语法错或顺序错，而它是以后每个
+    新工具的复制源——它坏了，坏的是所有后代。`inline_core.py` 的 glob 也
+    不排除它（模板用 `GENERATED:ALGOS none` 显式弃权，见那边的注释）。
+    """
+    return sorted((ROOT / 'tools').glob('*.html'))
 
 
 def root_pages() -> list:
@@ -1997,9 +2063,11 @@ def node_check() -> int:
               f'{ROOT_PAGE_MIN} 个（index.html 与 app.html）——glob 漏了或文件被挪走了',
               file=sys.stderr)
         return 1
-    tools = tool_pages()
+    # 语法门用 all_tool_pages()：骨架也内嵌七个 GENERATED 区间、也会语法错，
+    # 而它是以后每个新工具的复制源——它坏了，坏的是所有后代。
+    tools = all_tool_pages()
     if not tools:
-        print('ERROR: cryptography/tools/ 下一个工具页都没有——这道门本该检查语法，'
+        print('ERROR: cryptography/tools/ 下一个页面都没有——这道门本该检查语法，'
               '不是跑了个寂寞', file=sys.stderr)
         return 1
 
@@ -2373,7 +2441,8 @@ def inline_order_check() -> int:
     三道都看不见它——它们各自的前提都是"模块已经正确加载"。
     """
     rc = 0
-    for path in tool_pages():
+    # 同样用 all_tool_pages()：骨架的标记顺序错了，会复制给它的每一个后代。
+    for path in all_tool_pages():
         text = path.read_text(encoding='utf-8')
         core_at = text.find('/* >>> GENERATED:CRYPTO-CORE */')
         if core_at < 0:
@@ -2414,6 +2483,8 @@ if __name__ == '__main__':
         version_meta_check(),
         algos_gate(),
         outbound_ref_check(),
+        inline_order_check(),
+        script_literal_check(),
     ]
     sys.exit(1 if any(rc) else 0)
 ```
