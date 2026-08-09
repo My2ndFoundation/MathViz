@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.1">
+<meta name="tool-version" content="1.2.0">
 <meta name="engine-version" content="1.0.0">
 <title>递推、迭代与稳定性 · Recurrence & Iteration</title>
 <!-- ============================================================
@@ -30,6 +30,13 @@
   关掉自动播放即回到上面的原语义，蛛网 / 三维序列两页始终不受影响。
 
   版本记录（changelog，新→旧）：
+    1.2.0  2026-08-09  接入金光闪（§4.7）：蛛网页「轨道头踩上对角线」、牛顿页「xₙ 落到根上」
+                       各闪一次，均经「落点闩」去抖（一轮重播只报一次，裸判据在滑动的 x₀ 下
+                       会 1 s 一闪）；三维序列页讲的正是恒等式，这一闪留给蛛网页
+                       Gold flash (§4.7): the cobweb page fires when the orbit head lands on
+                       the diagonal and the Newton page when xₙ reaches a root, both de-bounced
+                       to once per replay round; the 3D-sequence page teaches the identity itself
+                       and leaves this flash to the cobweb page
     1.1.1  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
     1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换；
                        牛顿页在驱动下按当前 x₀ 重新上膛，收敛后不再永久定格
@@ -365,6 +372,28 @@ function replayOrbF() {
   for (let i = 0; i < steps; i++) orbF.push(stepVal(fMap, orbF[i]));
 }
 
+/* —— 金光闪的「落点闩」（§4.7；蛛网页与牛顿页各一只） ——
+   两页的判据本身很干净：轨道头落到不动点（|f(xₙ)−xₙ| < 0.005）／落到根
+   （|xₙ−x*| < 1e−12）。麻烦出在重播语义上：被驱动时 x₀ 每帧都在滑，
+   而整条轨道每帧按当前 x₀ 重算 —— 于是「第 k 步够不够近」这件事会随着 x₀
+   在同一个 k 上来回翻面，同一次落点被反复报捷。
+   实测（默认参数、120 s 确定性推帧）：直接用裸判据，蛛网页 15 次/60 s、
+   最小间隔 0.40 s，牛顿页 37.5 次/60 s、中位间隔 1.0 s —— 而 FLASH_DUR 是
+   1.05 s，间隔小于它就是一片连着亮的光，正是 §4.7 点名的「频闪」。
+   闩的语义：一轮重播里只报一次「这一轮落上了」。步号回退（k 变小）就是
+   新一轮开始（重播把 k 从 FAM_RUN 打回 1，重新播种把它打回 0），此时清闩。
+   手动模式下 k 只增不减，闩永不复位 —— 一次播种只闪一次，正是该页原本的语义。
+   加闩后同一趟实测：蛛网 5 次/60 s（间隔 9.6 / 14.4 s 交替，均值 = 一轮 12 s），
+   牛顿 15 次/60 s（间隔 3.8 / 4.2 s，均值 = 一轮 4 s）。 */
+const landed = { cobweb: false, newton: false };
+const landedK = { cobweb: -1, newton: -1 };
+function landHit(id, k, ok) {
+  if (k < landedK[id]) landed[id] = false;
+  landedK[id] = k;
+  if (ok) landed[id] = true;
+  return landed[id];
+}
+
 /* —— 蛛网折线（顶点由新到旧，头亮尾隐；越界裁剪并断开） —— */
 function cobwebPts(orb, M, maxV) {
   const fwd = [];
@@ -618,6 +647,28 @@ const SCENES = {
           if (sp) glowDot(sp, 15, '#ffffff', 'rgba(186,240,255,0.9)');
         }
       }
+      /* 金光闪（§4.7）：蛛网终于踩上对角线 —— 轨道头落进不动点，
+         |f(xₙ) − xₙ| < 0.005，竖线与横线缩成一个点，机器停在自己的输出上。
+         窗口借读数相邻两行 xₙ 与 xₙ₊₁ = f(xₙ) 的两位小数（fmtV 默认 2 位）：
+         命中即这两行印成同一个数 —— 不是新造的阈值。
+         用 |f(x) − x| 而不是 |x − x*| 是有意的：后者在 x₀ = −2 时要 13 步，
+         超过一轮 12 步会整轮漏掉；代价是 |a| → 1 时判据变松。
+         a = 1.00 且 b = 0.00 时 f 是恒等映射、首帧即真 —— 那是用户自己拨出来的
+         退化情形（机器什么也不做），不加护栏。
+         经上方「落点闩」landHit 去抖：一轮重播只报一次落点，理由与实测见那里。
+         实测（默认线性族 a = 0.6 / b = 0.5、ω = 1、drive x₀ −2→2 period 8）：
+         60 s 内 5 次，间隔 9.6 / 14.4 s 交替（均值 12 s = FAM_RUN ÷ ω，一轮）；
+         首次 t = 3.17 s（第 4 步、x₀ = 1.167，不动点 x* = 1.25）。
+         逻辑族 r = 2.8 同为 5 次、间隔 11 / 13 s；a = 1.2 发散时 60 s 内 0 次
+         —— isFinite 挡住 Infinity，绝不给发散打光。
+         手动模式（关掉自动播放）一次播种只闪一次：默认种子 x₀ = 0.3 在第 9 步、
+         t = 8.0 s，此后判据恒真、不再有上升沿。
+         **一轮时长 = 轮内步数 ÷ ω，ω 滑杆能把节奏压进频闪区**：ω = 5 时一轮只有
+         2.4 s，实测 25 次/60 s、中位间隔 2.0 s，已经贴着 FLASH_DUR = 1.05 s 的两倍。
+         锚点取对角线上的主点 [mx(xₙ), mx(xₙ), 0] —— 落点就是那颗青白光点自己。 */
+      goldHit('cobweb', landHit('cobweb', k,
+        isFinite(orbF[k]) && Math.abs(fMap(orbF[k]) - orbF[k]) < 0.005));
+      drawGoldFlash(C, isFinite(orbF[k]) ? [mx(orbF[k]), mx(orbF[k]), 0] : null);
     },
     readout() {
       const k = orbF.length - 1;
@@ -631,6 +682,14 @@ const SCENES = {
   },
 
   /* ────── 页签 2：三维序列 —— 数列抬进 (xₙ, xₙ₊₁, n) 空间 ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 恒等式，而且这一闪已由蛛网页承担。
+     本页 tips 逐字讲的就是那个恒等式：「所有点瞬间塌缩到曲线 y = f(x) 上，
+     因为 xₙ₊₁ 本来就是 f(xₙ)」—— 每个序列点从被算出来的那一刻起就在曲线上，
+     没有哪一帧它「终于」落上去。这一页的顿悟点是视角的事，不是时间的事。
+     本页与蛛网页共用同一条轨道 orbF、同一个 x₀ 驱动，所以「轨道头落进不动点」
+     在这里同步发生（判据逐帧与蛛网页相同，同为 5 次/60 s）；但那是同一次到达的
+     第二次报捷，按「不重复」口径（conic 焦点页的先例）留给蛛网页 —— 那一页的
+     tips 讲的正是收敛与发散，这一页的 tips 讲的正是恒等式。 */
   lift: {
     label: { zh: '三维序列', en: '3D sequence' },
     params: ['family', 'a', 'b', 'r', 'x0', 'omega'],
@@ -807,6 +866,27 @@ const SCENES = {
           if (sp) glowDot(sp, 14, '#ffffff', 'rgba(186,240,255,0.9)');
         }
       }
+      /* 金光闪（§4.7）：切线级联终于把 xₙ 送到根上 —— |xₙ − x*| < 1e−12，
+         切线落脚点与琥珀根标 x* 重合，二次收敛走完最后一步。
+         借 readout 已经在算的那个 |xₙ − x*|，但**不借它的显示精度**：fmtErr 的
+         分界是 0.005，牛顿法第 2 步就跨过去了，借它等于给「还差得远」打光。
+         **不能写 err === 0**：收敛之后 xₙ 在相邻双精度数之间摆动（g = x²−2 实测
+         误差在 2.22e−16 与 2.22e−15 之间交替），按「等于 0」打上升沿会变成每两步
+         一闪的频闪；1e−12 让它一旦落进去就保持为真。
+         经上方「落点闩」landHit 去抖：一轮重播只报一次落点，理由与实测见那里。
+         **驱动模式**（每轮 NEWTON_RUN = 4 步重播，只有「4 步够收敛」的种子命中）实测：
+         默认 g = x²−2、ω = 1、drive x₀ 0.7→2 period 8 ⇒ 60 s 内 15 次，
+         间隔 3.8 / 4.2 s（均值 4 s = NEWTON_RUN ÷ ω，一轮）；首次 t = 2.00 s
+         （第 3 步、x₀ = 1.35）。换 g = x³−x，只有 x₀ ≈ 1.025 那一小段种子能在 4 步内
+         收敛到 1e−12 ⇒ 60 s 内 7 次、间隔 8 s（= 驱动周期，一趟往返扫过那段一次）。
+         **手动模式**（关掉自动播放）一次播种只闪一次：轨道只追加、误差单调下降，
+         默认种子 x₀ = 0.3 在第 7 步、t = 6.0 s 命中，此后判据恒真、不再有上升沿。
+         **一轮时长 = 轮内步数 ÷ ω，ω 滑杆能把节奏压进频闪区**：ω = 5 时一轮只有
+         0.8 s，实测 60 次/60 s、中位间隔 0.8 s —— 短于 FLASH_DUR = 1.05 s，会连成一片。
+         锚点取 x 轴上的当前迭代值 [mxN(xₙ), 0, 0]：那正是切线落脚、根标 x* 所在处。 */
+      goldHit('newton', landHit('newton', k, isFinite(orbN[k]) &&
+        Math.min.apply(null, G.roots.map(rt => Math.abs(orbN[k] - rt))) < 1e-12));
+      drawGoldFlash(C, isFinite(orbN[k]) ? [mxN(orbN[k]), 0, 0] : null);
     },
     readout() {
       const G = gCur(), k = orbN.length - 1, xk = orbN[k];
@@ -1039,6 +1119,74 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -1196,6 +1344,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意

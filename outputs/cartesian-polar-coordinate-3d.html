@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.2">
+<meta name="tool-version" content="1.2.0">
 <meta name="engine-version" content="1.0.0">
 <title>直角坐标 × 极坐标 · 变换可视化</title>
 <!-- ============================================================
@@ -21,6 +21,14 @@
     dA = r·dr·dθ，即 |∂(x,y)/∂(r,θ)| = r 是局部面积放大率。
 
   版本记录（新→旧）：
+    1.2.0  2026-08-09  接入金光闪（§4.7）：「弯折变换」页 k 走到 1 —— 整条 θ 轴缩成极点的
+                       那一瞬全屏一闪（判据借 readout 自己的 k > 0.98 分级阈值，
+                       默认 11.42 s 一次）。「坐标换算」「雅可比」两页有意不加，
+                       理由写在各自场景注释里（恒等式；后者闪了会把「放大率随 r 变」讲反）。
+                       Added the gold flash (§4.7): on the "Bending morph" tab, the instant
+                       k reaches 1 — the whole θ axis collapsing to the pole — lights the
+                       screen. The other two tabs deliberately opt out; reasons are in
+                       their scene comments.
     1.1.2  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
     1.1.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.1.0  2026-07-12  新增「雅可比」页签：dr×dθ 参数细胞 ⇄ 扇形细胞并排对照，
@@ -541,6 +549,74 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -938,6 +1014,31 @@ const SCENES = {
         label3(C, [-2.6, 2.22, 0], P.name(),
           { size: 11, color: 'rgba(159,176,200,.8)', align: 'left' });
       }
+      /* 金光闪（§4.7）：弯折进度 k 走到 1 —— 整张带状图卷成极坐标平面，
+         那条水平的 θ 轴在这一刻收成一个点（tips 的最后半句：「整条 θ 轴缩成极点」）。
+         这不是「动画播完了」：k = 1 是数学上被挑出来的那个值 —— morphPoint 在 k = 1 处
+         退化成 (x, y) = (r·cosθ, −r·sinθ)，即极坐标本身；把它换成 0.9 或 1.1，
+         这一页的结论就跟着变（不再是极坐标）。k 的两端都是有名字的坐标系，
+         只闪极坐标端，是因为直角端是出发点不是到达。
+         判据 state.morphK > 0.98 **一字不改**借 readout 自己的分级阈值
+         （k > 0.98 印「极坐标形态」）—— 屏幕上文字翻成「极坐标形态」的同一瞬间闪，
+         不另立一个只有代码知道的窗口。
+         窗口宽度：k > 0.98 ⟺ |kPhase − π| < acos(0.96) = 0.284 rad，
+         kPhase 每秒走 speed·0.55 = 0.55 rad ⇒ 持续 1.03 s ≈ 62 帧，远宽于一帧；
+         speed 拉满 2.4 时仍有 0.24 s ≈ 14 帧。
+         实测（默认参数、确定性推帧 60 s）：**5 次**，首次 t = 5.20 s
+         （k = 0.9803，kPhase = 2.860 ≈ π − 0.282），此后每 11.42 s 一次
+         —— kPhase 走满 2π 才回到极坐标端，即 2π/0.55 = 11.42 s。frameErrors 空。
+         锚点 [0, 0, 0]：k = 1 时 morphPoint 把极点送到世界原点（x0 = 0、d = 0），
+         那正是 θ 轴缩成的那个点，也是这一闪要人看的地方。命中瞬间 k = 0.98 而非 1，
+         极点被 x0 = −XSPAN/2·(1−k) 推开 0.038 世界单位 —— 在 dist ≈ 7.6…13 的取景下
+         不到一个像素，不值得为它算一遍精确极点。
+         已知代价：manualK() 会在用户拖 k 滑杆时把 state.running 置 false，
+         而这一闪的衰减走 state.t（§4.7 硬规矩 3：暂停即冻结）。所以若正闪着的时候
+         去拖 k，画面会停在闪的中途不再回落，直到按空格续播。这是既有语义的正确表现，
+         不是 bug —— 不为它改引擎。 */
+      goldHit('morph', state.morphK > 0.98);
+      drawGoldFlash(C, [0, 0, 0]);
     },
     readout() {
       const P = PRESETS[curPreset];
@@ -957,6 +1058,16 @@ const SCENES = {
   },
 
   /* ────── 场景二：坐标换算 ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 属「恒等式」。本页画的是同一个点的两套读数：
+     白色半径 + θ 弧给出 (r, θ)，紫、翠两段虚线给出 (x, y)，readout 第三行印正算
+     x = r·cosθ / y = r·sinθ，第四行印反算 √(x²+y²) 与 atan2(y, x)。这两组数字
+     **每一帧都对得上** —— 它们是同一个 pointNow() 里的同一对 (x, y) 换个写法印两遍，
+     没有哪一刻它们「终于」相等。换算公式的正确性不是运动的终点，是运动的前提。
+     唯一像「到达」的候选是点穿过极点（r = 0）与掠过坐标轴（x = 0 或 y = 0），
+     但那是过零，不是到达，而且频率过密：默认预设 rose（A = 1.35, n = 3, θ ∈ [0, 2π]），
+     θ 以 speed·0.75 = 0.75 rad/s 走完一圈需 2π/0.75 = 8.38 s，其间 cos(3θ) = 0
+     出现 6 次 ⇒ **每 1.40 s 一次**；把 n 拨到上限 8 则一圈 16 次 ⇒ 0.52 s 一次。
+     §4.7 的频闪线是「每一两秒真一次」，默认档就已经压在线上，n 一拨就穿过去。 */
   convert: {
     label: { zh: '坐标换算', en: 'Coordinate conversion' },
     /* speed 经引擎时钟（state.theta / state.kPhase）驱动本场景，场景体内不出现 state.speed —— 勿据 grep 判定无用而删 */
@@ -1067,6 +1178,17 @@ const SCENES = {
   },
 
   /* ────── 场景三：雅可比 ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 属「恒等式」，且候选那一闪会把结论讲反。
+     本页画的是 |∂(x,y)/∂(r,θ)| = r 与 dA = r·dr·dθ。这两条对参数平面上的**每一个**
+     (r, θ) 都成立：左侧那些 dr×dθ 矩形每一帧都一样大，右侧扇形细胞的面积每一帧都
+     恰好是它的 r 倍，橙色热度网格每一帧都按 r 涂满整张平面。没有哪一刻它「终于」成立。
+     唯一够密的候选是巡游细胞走到 r₀ = 1（放大率恰好 1，参数矩形与扇形细胞同面积）：
+     jacCellNow() 里 r₀ = 0.2 + 0.7(1 − cos(θ/3.3)) 在 [0.2, 1.6] 上往复，
+     θ 以 0.75 rad/s 走，一个巡游周期 3.3·2π/0.75 = 27.65 s，上行下行各过 r₀ = 1 一次
+     ⇒ **13.8 s 一闪**，频率完全够。不加是因为它讲反了：本页 tips 的整句话是
+     「内圈是窄条、外圈是宽扇」——**放大率随 r 变**；给「放大率 = 1」全屏打光，
+     等于把一个恰好不放大的位置抬成本页的结论。r = 1 在这里是刻度不是地标：
+     把它改成 r = 1.2，这一页什么都不变。 */
   jac: {
     label: { zh: '雅可比', en: 'Jacobian' },
     /* speed 经引擎时钟（state.theta / state.kPhase）驱动本场景，场景体内不出现 state.speed —— 勿据 grep 判定无用而删 */
@@ -1188,6 +1310,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   state.kPhase = 0;

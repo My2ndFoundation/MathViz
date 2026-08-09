@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.1">
+<meta name="tool-version" content="1.2.0">
 <meta name="engine-version" content="1.0.0">
 <title>力矩、平衡与质心</title>
 <!-- ============================================================
@@ -13,6 +13,10 @@
   引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
 
   版本记录（changelog，新→旧）：
+    1.2.0  2026-08-09  接入金光闪（§4.7）：「平衡」页 Στ = 0 两条力矩曲线重合、
+                       「倾倒」页稳定裕度越过零（β 跨过 βc）各闪一次；
+                       「力矩」页（τ 过零频率过密）与「质心」页（铅垂线交于质心
+                       是恒等式）有意不加，理由写在各自场景注释里
     1.1.1  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
     1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
     1.0.1  2026-07-31  各场景声明 params，为后续引擎升级（统一落地 syncParamVisibility）做准备
@@ -312,6 +316,15 @@ function marginNow() {
 const SCENES = {
 
   /* ────── 场景一：力矩与垂直距离 —— τ = rF sin θ = F·d ────── */
+  /* 金光闪（§4.7）：本页有意**不加**——频率过密（频闪）。
+     本页画的 τ = rF·sin θ 由引擎时钟直接驱动（θ 每帧积分 ω·dt），过零点不是被
+     调出来的一个解，而是正弦波每半圈复发一次的周期事件：默认 ω = 0.9 rad/s ⇒
+     π/ω = 3.49 s 一次，滑杆推到 ω = 3 ⇒ 1.05 s 一次，恰好等于 FLASH_DUR，
+     上一闪还没衰完下一闪就起来，连成常亮的琥珀底色。
+     窗口本身是有得借的（第 374 行 |sin θ| > 0.03 才画垂距 d、否则改印
+     「d = 0 → τ = 0」，判据现成），借不得的是频率：金光闪是「终于到达」的
+     标点，一秒一个标点就不是标点了。这一页要人看的是 τ = F·d 这个恒等分解，
+     那行「d = 0 → τ = 0」的说明文字已经把过零点标出来了，不需要再闪一次。 */
   moment: {
     label: { zh: '力矩', en: 'Moment' },
     params: ['omega', 'r', 'F'],
@@ -511,6 +524,28 @@ const SCENES = {
       }
       const sp = proj(C, [0, 0, 0]);
       if (sp) glowDot(sp, 12, '#ffffff', 'rgba(186,240,255,0.9)');
+
+      /* 金光闪（§4.7）——「两条力矩曲线终于重合」的那一帧
+         1. 什么量走到了哪：净力矩 Στ = M↺ − M↻（玫红减紫）在载荷 x₂ 沿杆滑过去的
+            途中穿过零；那一刻杆归于水平，tips 要人看的正是这一刻。
+         2. 窗口从哪借：0.03 不是新取的数，就是本页第 489 行画「平衡 Στ = 0」标签、
+            第 518 行 readout 印「平衡」用的同一个阈值。判据与页面自己宣称平衡的
+            条件逐字相同——闪与那行字必然同时出现，不会各说各话。
+         3. 实测（默认参数，60 s 确定性推帧）：15 次，周期 8 s 的 pingpong 一趟两回，
+            首次命中 t = 1.52（此时 x₂ = 0.88 刚进窗口；精确解 x₂* = m₁|x₁|/m₂ =
+            1.44/1.6 = 0.90），此后 t = 6.42 / 9.52 / 14.42 / 17.52…，
+            最近的两次间隔 3.10 s > FLASH_DUR = 1.05，不重影。
+            窗口 0.06 宽 / 每帧 Στ 走 0.0120 ≈ 5 帧，跨不过去。
+         4. 锚点 [0, KM·M↺, 0]：两条力矩曲线的头亮点在命中时重合于此，
+            光就从「重合点」本身泛开。
+         5. 拨不到就不闪，这是要讲的话：平衡点 x₂* = m₁|x₁|/m₂ 必须落在滑杆量程
+            [0.2, 2] 内。默认 m₁|x₁| = 1.44，于是 m₂ < 0.72 时 x₂* > 2 —— 载荷再往外
+            滑到头也压不平，一趟 0 次（实测 m₂ = 0.50 ⇒ x₂* = 2.88 → 60 s 内 0 次；
+            m₂ = 0.75 ⇒ x₂* = 1.92 刚回到量程内 → 15 次，首次 t = 3.73）。
+            这与最小二乘「直线拟合」页同一个道理：金光闪认的是数学上那个解，
+            不是滑杆到头。 */
+      goldHit('equil', Math.abs(net) < 0.03);
+      drawGoldFlash(C, [0, KM * Mo.M1, 0]);
     },
     readout() {
       const Mo = momentsNow();
@@ -526,6 +561,15 @@ const SCENES = {
   },
 
   /* ────── 场景三：质心 —— 加权平均 x̄ = Σmᵢxᵢ/Σmᵢ ────── */
+  /* 金光闪（§4.7）：本页有意**不加**——恒等式（处处成立）。
+     本页画的两条紫色悬挂铅垂线，每一帧都由质心 (x̄, ȳ) 反算出来（第 590 行：
+     方向取 cm − S），所以「两线交于质心」是构造出来的恒等式，每一帧都为真，
+     没有哪一刻它们「终于」相交——把 m₃ 拨到任意值，交点照样在质心上。
+     次候选是 tips 点名的 m₃ = 0（质心落回杆上），也不合格，两条理由：
+     它是 drive 区间 [0, 2.5] 的端点，首帧即真、没有上升沿（按主控口径，
+     「展示进度参数走到端点」不算到达）；而且 m₃ = 0 是那颗质点连同两条连杆
+     一起消失（第 565/572 行 m₃ > 0.01 才画），闪的会是消失而不是到达。
+     真正该为「支点放在 x̄ 处即 Στ = 0」发的那一闪，由「平衡」页承担。 */
   com: {
     label: { zh: '质心', en: 'Centre of mass' },
     params: ['m1', 'x1', 'm2', 'x2', 'm3'],
@@ -732,6 +776,32 @@ const SCENES = {
 
       const sp = proj(C, [cx, cy, 0]);
       if (sp) glowDot(sp, 15, '#ffffff', 'rgba(186,240,255,0.9)');
+
+      /* 金光闪（§4.7）——「重力线越过棱边」的那一帧
+         1. 什么量走到了哪：稳定裕度 marg（支点棱到重力作用线的水平距离）在倾角 β
+            缓缓增大的过程中由正变负；跨过零的那一刻 β = βc = atan(b/h)，
+            玫红裕度曲线穿零、橙色指示器翻面，正是 tips 点名要看的一刻。
+         2. 窗口从哪借：这里**不借 ±0.03**（第 721/727 行画「倾倒 / 临界」用的那个），
+            改用半平面 marg < 0。理由是几何逼出来的：默认 b = 0.90、h = 1.20 ⇒
+            βc = 36.87°，离滑杆量程上限 40° 只有 3.13°。tilt 以 8°/s 上行，
+            t = 4.61 穿过 βc，5.00 撞上量程顶折返，t = 5.39 又穿回来 ——
+            相隔 0.78 s < FLASH_DUR = 1.05，用 ±0.03 的窗口会在折返处叠成一次重影。
+            半平面只在「进入倾倒区」的上升沿打点，回到稳定区不算到达，
+            语义也更准：闪的是越线，不是压线。
+         3. 实测（默认参数，60 s 确定性推帧）：6 次，drive 周期 10 s 每趟一次，
+            首次命中 t = 4.62（tilt = 36.93°，刚过 βc = 36.87°），
+            此后 t = 14.62 / 24.62 / 34.62 / 44.62，间隔 10 s。
+            裕度在 βc 附近每帧走 0.00175 —— 这正是不能借 1e-3 级细窗口的原因；
+            半平面没有宽度可言，跨不过去。
+         4. 锚点 [0, 0, 0]：支点棱本身。命中的定义就是重力线压到这条棱上，
+            光从棱边泛开。
+         5. 拨不到就不闪，这是要讲的话：βc = atan(b/h) 必须落在量程 40° 以内，
+            即 b < h·tan40° = 1.007。把底宽拨到 b ≥ 1.01，临界角出了量程，
+            方块在整个 β 行程里都稳，一趟 0 次（实测 b = 1.01 与 b = 1.20 ⇒ βc = 45°，
+            60 s 内均 0 次；反向 b = 0.60 ⇒ βc = 26.57° → 6 次，首次提前到 t = 3.33）。
+            加宽底座本来就是这一页要教的抗倾倒办法，闪的消失即是结论。 */
+      goldHit('topple', marg < 0);
+      drawGoldFlash(C, [0, 0, 0]);
     },
     readout() {
       const marg = marginNow();
@@ -931,6 +1001,74 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -1088,6 +1226,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意

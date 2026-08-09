@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.1">
+<meta name="tool-version" content="1.2.0">
 <meta name="engine-version" content="1.0.0">
 <title>曲面、等高线、梯度和切平面 · Surface, Contours & Gradient</title>
 <!-- ============================================================
@@ -13,6 +13,10 @@
   引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
 
   版本记录（changelog，新→旧）：
+    1.2.0  2026-08-09  接入金光闪（§4.7）：「梯度与方向导数」页在 u 转到与 ∇f 同向、
+                       Dᵤf 顶到上界 |∇f| 的那一瞬全屏一闪（默认档 10.47 s 一次）；
+                       「曲面与切片」「切平面」两页有意不加，理由写在各自场景注释里
+                       （都是恒等式，且唯一的地标 ∇f = 0 被量程排除或落进频闪区）
     1.1.1  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
     1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
@@ -429,6 +433,13 @@ function setTg(key, val) {
 const SCENES = {
 
   /* ────── 曲面与切片：水平面切曲面，截口即等高线 ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 画的是一个恒等式。屏幕上那条玫红截线，
+     按定义就是 {(x,y) : f(x,y) = c} 的采样；c 每换一个高度，它立刻换成新的那一条。
+     不存在「c 终于等于某个值、截线才对上」的一刻：扫描区间里每一个 c 都同样成立。
+     真正配得上一闪的是拓扑变点（山顶处等高线缩成一点、鞍点处两支并成 8 字），
+     而 effC()（第 337 行）把 c 钳在 zmin + r·(0.08 … 0.92) 之内，
+     **把这两个端点明确排除在量程外** —— 自动扫描一趟一次也走不到，
+     它们不在这一页的叙述里。 */
   slice: {
     label: { zh: '曲面与切片', en: 'Surface & slices' },
     params: ['surf', 'omega', 'cSlice'],
@@ -551,6 +562,30 @@ const SCENES = {
       if (state.showGrad) drawGradArrow(C, x0, y0, g);
       const sp = proj(C, [x0, f0, y0]);
       if (sp) glowDot(sp, 15, '#ffffff', 'rgba(186,240,255,0.9)');
+      /* 金光闪（§4.7）：橙色的 u 转到与绿色 ∇f 同向的那一瞬 —— 方向导数
+         Dᵤf = ∇f·u 顶到它的上界 |∇f|，readout 末行那句「u ∥ ∇f 时 Dᵤf 最大 = |∇f|」
+         在这一帧字面成立，屏幕上两支箭头叠成一支。
+         窗口两个数都是借来的，不是新造的：0.005 借读数 `Dᵤf = ' + fmtS(du)` 的两位
+         小数（半个显示格 —— 读数上 Dᵤf 与 |∇f| 恰好在这一刻印成同一个数）；
+         `gl > 1e-4` 借 drawGradArrow（第 406 行）判「∇f = 0 就不画箭头、改印 ∇f = 0」
+         的同一个阈值 —— 梯度为零处根本没有「同向」可言，少了这道护栏会在鞍点上报捷。
+         借得起：把 0.005 换算成角度是 gl·(1−cos Δα) < 0.005 ⇒ Δα = ±0.112 rad，
+         而 u 以 ω = 0.6 rad/s 转、一帧只走 0.010 rad ⇒ 驻留 22 帧 ≈ 0.37 s，
+         比一帧宽 22 倍（台账「量判据的四条操作要求」第 3 条）。
+         实测（默认：高斯山丘、(x₀,y₀) = (0.9, 0.6)、ω = 0.6）：|∇f| = 0.8040、
+         ∇f 指向 213.7°；60 s 内 6 次，首次 t = 6.03 s（α = 3.62 rad = 207.4°，
+         正是 u 进窗口的那一帧），此后每转一圈一次，周期 2π/0.6 = 10.47 s。
+         不会开局白闪：t = 0 时 α = 0，与 ∇f 几乎反向，Dᵤf = −0.67。
+         已知风险：ω 是滑杆，拉到上限 2.5 时一圈只剩 2.51 s、驻留降到 5.4 帧 ——
+         那已经掉进 §4.7 说的频闪区。判据本身不变，是用户把钟拨快了；默认档位安全。
+         只接这一处，不接「u ⊥ ∇f ⇒ Dᵤf = 0」：那样一圈会多命中两次，合起来
+         平均 3.5 s 一闪（频闪），而且 Dᵤf = 0 是「沿这个方向什么都没发生」，
+         不是到达 —— 替一个零打光会把「梯度是最陡方向」讲成「零也是个成就」。
+         锚点取曲面上那颗白色主点 [x₀, f₀, y₀]：u 与 ∇f 共同的出发点，也是
+         「这一刻两支箭头重合」发生的地方。 */
+      const gl = Math.hypot(g[0], g[1]);
+      goldHit('grad', gl > 1e-4 && gl - du < 0.005);
+      drawGoldFlash(C, [x0, f0, y0]);
     },
     readout() {
       const S = SURFS[Math.round(state.surf)];
@@ -567,6 +602,16 @@ const SCENES = {
   },
 
   /* ────── 切平面：一点处的最佳线性近似 ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 画的是一个恒等式。这块橙色平面按定义
+     就是 z = f₀ + ∇f·Δr，它在每一帧都正吻在 (x₀,y₀) 上；tips 里那句
+     「局部看，曲面就是一块平面」是可微性的逐点陈述，不是某一刻才发生的事。
+     px 的 drive 让点滑遍整条定义域，吻合度一帧也不曾变好或变坏。
+     本页唯一称得上地标的是 ∇f = 0（切平面放平、drawGradArrow 改印「∇f = 0」），
+     但它够不着：默认 y₀ = 0.6 不被驱动，高斯山丘上 ∇f 只在原点为零，
+     而扫描线 y = 0.6 上 |∇f| 实测落在 0.2486（x₀ = ±1.8 两端）到 0.8699 之间，
+     最小值也离零有 0.25。就算把 y₀ 拖到 0，「∂f/∂x = 0」在 10 s 的往返里
+     每趟命中两次 —— 平均 5 s 一闪，正贴 §4.7 的频闪线。
+     「u 转到与 ∇f 同向」那一闪归「梯度与方向导数」页，本页不重复。 */
   tan: {
     label: { zh: '切平面', en: 'Tangent plane' },
     params: ['surf', 'omega', 'px', 'py'],
@@ -830,6 +875,74 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -987,6 +1100,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意

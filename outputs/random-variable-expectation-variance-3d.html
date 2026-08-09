@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.1">
+<meta name="tool-version" content="1.2.0">
 <meta name="engine-version" content="1.0.0">
 <title>随机变量、期望与方差 · 概率质量的平衡点</title>
 <!-- ============================================================
@@ -13,6 +13,15 @@
   引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
 
   版本记录（changelog，新→旧）：
+    1.2.0  2026-08-09  接入金光闪（§4.7）：期望页「把支点移到重心上、净力矩归零」闪一次；
+                       用「上膛闩」而非时间护栏——判据须先为假过一次才允许打点，
+                       默认支点恰在 μ = 3.5000 上是开局状态、不是到达，故默认档不闪；
+                       映射 / 方差 / 线性变换三页都是恒等式，有意不加，理由写在场景注释里
+                       Gold flash (§4.7): the expectation page fires when you *move* the fulcrum
+                       onto the center of mass (net torque zero); an arming latch — not a time
+                       guard — requires the criterion to have been false once, so the default
+                       pivot already sitting at μ = 3.5000 never fires; the other three pages
+                       are identities and deliberately opt out — reasons in the scene comments
     1.1.1  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
     1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
@@ -253,6 +262,16 @@ const ORG_A = 'rgba(251,146,60,';
 const CYAN_A = 'rgba(45,212,234,';
 const AMB_A = 'rgba(251,191,36,';
 
+/* 金光闪的「上膛」标志（见「期望 · 重心」页 draw 末尾）：公平骰子 μ = 3.5000，
+   而支点滑杆的默认值恰好也是 3.50 —— 判据 |tq| < 0.015 页面一打开就为真，
+   goldHit 的 flashOn 初值又是 undefined，首次为真会被算成上升沿，于是开局白闪一次。
+   而那根本不是到达：支点本来就在重心上，没有谁把它移过去。
+   §4.7 打的是上升沿 = 到达，所以判据必须**先为假过一次**才允许打点 ——
+   闪的语义因此是「你把支点**移到了**重心上」，而不是「支点现在正好在那儿」。
+   与 fourier-essence-3d「频率缠绕」页的 windArmed 同源、同一个病、同一个药。
+   （旧写法用 state.t > 0.5 挡，只是把这个假到达推迟半秒，本质没变，已撤掉。） */
+let expectArmed = false;
+
 /* 取值 1..6 的离散分布：数轴世界坐标与高度缩放 */
 const XS = [1, 2, 3, 4, 5, 6];
 const SX = 0.9, HS = 2.6;
@@ -331,6 +350,11 @@ function enableKey(key) {
 const SCENES = {
 
   /* ────── 一：从结果到随机变量 ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 恒等式。这一页画的是函数 X(ω)：八个结果到
+     四个数的对应从第一帧起就完整地画在那里，pmf 条 COINP = [1/8, 3/8, 3/8, 1/8]
+     是写死的常量，E(X) = 1.5 是画死的琥珀虚线 —— 没有哪一刻它们「终于」相等。
+     本页唯一在动的量是抽样频率，而它是随机量：cnt/n 会在 p 两侧来回穿
+     （同 π 的投针页），按它打光就是替一个没有发生的到达报捷。 */
   map: {
     label: { zh: '从结果到随机变量', en: 'Outcome → number' },
     params: ['omega'],
@@ -498,6 +522,45 @@ const SCENES = {
           if (sp) glowDot(sp, 6, '#ffffff', EME_A + (0.9 - 0.5 * k).toFixed(2) + ')');
         }
       }
+      /* 金光闪（§4.7）：支点终于压在重心上 —— 净力矩 tq = Σpᵢ(xᵢ − c) 归零，
+         杠杆放平。判据借本页自己的那个数：上面那句 `if (Math.abs(tq) < 0.015)`
+         决定画不画翠绿的「平衡」二字，readout 也用同一个 0.015 决定印不印
+         「平衡」—— 不是新造的阈值。
+         用户触发（本页无 drive）。tq ≡ μ − c，而支点滑杆步长是 0.05：**只有 μ 落在
+         某个 0.05 刻度的 ±0.015 之内才够得着**。实测三预设 × 61 档 skew，
+         够得着的共 90/183 档（公平骰子 19、偏斜 30、双峰 41）。
+         expectArmed 是「上膛」护栏（声明处有详注）：公平骰子 μ = 3.5000 与支点
+         默认值 3.50 恰好相等，页面一打开判据即真 —— 但那是**开局就成立的状态**，
+         不是被走到的。判据必须先为假过一次才允许打点，闪的语义因此是
+         「你把支点**移到了**重心上」。与 fourier「频率缠绕」页的 windArmed 同源。
+         实测（60 s 确定性推帧）：
+         · 默认参数干等 60 s，一动不动 —— **0 次**（旧的 state.t > 0.5 写法在这里
+           会闪 1 次，就是那个被裁掉的假到达）；
+         · 把支点拨走再拨回 3.50（c: 3.50 → 4.20 → 3.50）—— **1 次**，在拨回来
+           踩上 3.50 的那一帧；
+         · 在 3.50 与 4.20 之间反复往返（每 5 s 一换，60 s）—— **5 次**，每次
+           回到 3.50 都闪，间隔 10 s：退膛不会吞掉正当的重复到达；
+         · 命中之后支点不动、按一次 R —— 仍是 **1 次**（退膛那一句挡住的就是这个）；
+         · 模拟用户把支点从 1 匀速拖到 6（20 s，量化到滑杆的 0.05）：公平骰子恰
+           **1 次**、在 c = 3.50（第一格就先离开了 3.50，膛自然上好）；偏斜预设配
+           skew = −1.40（μ = 1.2527）**1 次**、在 c = 1.25；
+         · 把支点停在 4.00 不动 —— 0 次；偏斜预设默认（μ = 2.2702、最近刻度 2.25
+           差 0.0202 > 0.015）—— 0 次，够不着就是够不着。
+         **别拿翠绿的 x̄ 当判据**：样本均值是随机量，会在 μ 两侧来回穿，
+         按它打光就是替一个没有发生的到达报捷（同 π 的投针页）。
+         锚点取那颗琥珀重心光点 rot(mw, 0.02)：杠杆倾斜时它跟着杆一起转，
+         光从重心本身推开 —— 而重心正是「平衡」这件事的所在。 */
+      const balanced = Math.abs(tq) < 0.015;
+      if (!balanced) expectArmed = true;
+      const onBalance = expectArmed && balanced;
+      goldHit('expect', onBalance);
+      /* 打完就退膛：下一次命中必须重新「先为假一次」。少了这一句，按 R 重置时
+         goldFlashReset() 清掉 flashOn，而支点还停在重心上、膛还上着 —— 判据在
+         重置后的第一帧又算一次上升沿，白闪照旧（实测确有此事：命中后支点不动
+         按一次 R，引擎的 flashAt 会被再打一次点）。退膛把「先为假过一次」这条
+         规矩贯彻到重置之后，语义仍然是「你把支点**移到了**重心上」。 */
+      if (onBalance) expectArmed = false;
+      drawGoldFlash(C, rot(mw, 0.02));
     },
     readout() {
       const pm = pmf(), st = statsOf(XS, pm);
@@ -515,6 +578,13 @@ const SCENES = {
   },
 
   /* ────── 三：方差与标准差 ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 恒等式。这一页画的紫方块，边恒为 |xᵢ − μ|、
+     面积恒为平方距离；琥珀虚线方块的面积恒为 σ²，它是由 σ 直接算出来的，
+     不是被凑到的。每一帧都成立，没有哪一刻它们「终于」相等。
+     唯一的候选是「skew 扫过 0 时 Var 取极大」，但那个极大值（公平骰子 35/12 =
+     2.9167）**不是任何被标注的地标数**（对比编码树页的 H = 1 bit：那是屏幕上
+     画着参照线在等的数），屏幕上没有任何东西在那里等它；换成偏斜预设，
+     skew = 0 更什么都不是。且 drive period 8 s 往返会让它 4 s 一次，频率也过密。 */
   vari: {
     label: { zh: '方差 · 标准差', en: 'Variance' },
     params: ['preset', 'skew'],
@@ -607,6 +677,12 @@ const SCENES = {
   },
 
   /* ────── 四：线性变换与独立求和 ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 恒等式。这一页画的 E(Y) = aE(X) + b 与
+     Var(Y) = a²Var(X) 逐帧成立：紫色分布每一帧都恰好画在 a·xᵢ + b 上，
+     σ 量尺每一帧都恰好是 |a|·σ。tips 的顿悟点「拖 b，σ 量尺纹丝不动」讲的
+     正是「什么都没有发生」—— 一个恒等式，不是一个被走到的瞬间。
+     b 扫过 0 也不是到达：两行分布画在 yX = 1.6 与 yY = −0.7 两条不同的数轴上，
+     连视觉上的重合都不会发生，而 b = 0 只是「没有平移」这个平凡情形。 */
   lin: {
     label: { zh: '线性变换 · 求和', en: 'aX+b · sums' },
     params: ['preset', 'skew', 'a', 'b'],
@@ -949,6 +1025,74 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -1106,6 +1250,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意

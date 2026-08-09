@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.2">
+<meta name="tool-version" content="1.2.0">
 <meta name="engine-version" content="1.0.0">
 <title>傅立叶变换的本质 · Fourier Essence</title>
 <!-- ============================================================
@@ -24,6 +24,13 @@
   采样原则：记录当时的真实值（谐波开关 / 参数中途改变，历史不重算）
 
   版本记录（新→旧）：
+    1.2.0  2026-08-09  接入金光闪（§4.7）：频率缠绕页「f 扫上信号真有的频率、质心甩离原点」一闪，
+                       窗口借频谱曲线自己的采样步长 KSTEP/2 = 0.025，并检查谐波开关
+                       （关掉的谐波对应刻度点不闪，否则会把「这里没有东西」讲反）；
+                       加 windArmed「上膛 / 打完退膛」闩：既避免 f 默认停在基频 1 上的开局白闪，
+                       也避免命中后按 R 被算成新上升沿而补闪一次；
+                       谐波叠加页（吉布斯过冲是无上升沿的渐近量）与旋转向量页（链尖高度 = 谐波和的恒等式）
+                       有意不加，注释写明理由
     1.1.2  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
     1.1.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.1.0  2026-07-11  全量双语支持（中/EN 切换）
@@ -299,6 +306,15 @@ function comAt(k, lo, hi, stride) {
 
 /* 频谱缓存：|X(k)| 曲线，节流 160ms 重算 */
 let specPts = null, specT = -1e9;
+
+/* 金光闪的「上膛 / 退膛」闩（见「频率缠绕」页 draw 末尾）。两头都要有：
+   · 上膛（离开刻度点）—— f 默认就停在基频 1 上，页面一打开判据即为真，
+     goldHit 的 flashOn 初值又是 undefined，首次为真算上升沿，于是开局白闪一次；
+   · 退膛（命中当帧）—— 否则命中后参数不动按一次 R，goldFlashReset() 清掉 flashAt、
+     判据却还真着，重置后第一帧又算成上升沿，等于凭空补一闪（实测 1 次变 2 次）。
+   合起来就是这一闪的语义：「你把 f **扫上**了这个频率」，
+   而不是「f 现在正好在这个频率上」。 */
+let windArmed = false;
 function updateSpectrum(lo, hi) {
   const stride = Math.max(1, Math.ceil((hi - lo) / 420));
   const pts = [];
@@ -354,6 +370,15 @@ function windAxes(C) {
 const SCENES = {
 
   /* ────── 页签一：谐波叠加（傅立叶级数） ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 主角是一个**无上升沿的渐近量**。
+     tips 自己写着「吉布斯现象：跳变处约 9% 的过冲不会随谐波增加而消失」：
+     四条奇次谐波的和 g 永远不等于方波，跳变附近的过冲是恒定存在的，
+     没有哪一帧它「终于」合成出方波。
+     硬造一个判据也不行。最像样的候选是「g 穿过 ±A」，实测（A = 1、四条谐波全开）
+     一个周期内穿 +1 八次、穿 −1 八次，共 **16 次**；默认 ω = 1 ⇒ T = 6.28 s，
+     也就是**每 0.39 s 一次**，远在 §4.7 的频闪线之内。
+     更要命的是那些穿越点正落在过冲的涟漪上（实测峰值 1.18A），
+     给它们打光等于宣布「收敛了」—— 把 tips 要讲的结论讲反。 */
   synth: {
     label: { zh: '谐波叠加', en: 'Harmonic sum' },
     params: ['omega', 'amp', 'waveSpeed'],
@@ -462,6 +487,12 @@ const SCENES = {
   },
 
   /* ────── 页签二：旋转向量（本轮 · 圆周运动的叠加） ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 主角是一个恒等式。
+     本页画的「链尖高度 = 各谐波之和」就是首尾相接这件事的定义：
+     那条从链尖引到波形上的白虚线**每一帧都是水平的**，读数里 y = Σ 从第一帧起就相等，
+     没有哪一刻它「终于」相等。
+     本页唯一的周期性事件是链条每 T = 2π/ω ≈ 6.28 s（默认 ω = 1）回到起始姿态 ——
+     那是周期复现，不是到达；真要给它打点，也是 6.28 s 一次的节拍器，不是强调。 */
   cycle: {
     label: { zh: '旋转向量', en: 'Rotating vectors' },
     params: ['omega', 'amp', 'waveSpeed'],
@@ -679,6 +710,51 @@ const SCENES = {
 
       label3(C, [-1.7, 1.5, 0], 'g(t)·e^(−ikθ)',
         { font: 'italic 13px ' + FONT_MATH, color: 'rgba(226,232,240,0.85)', align: 'left' });
+      /* 金光闪（§4.7）：缠绕频率 f 扫上了信号里真有的那个频率 —— 质心猛地甩离原点，
+         频谱上冒出一个尖峰。brand 逐字写的「当 f 恰好命中信号所含的频率时，
+         质心猛然偏离原点」，tips 让人「缓慢拖动 f 扫过 1、3、5、7 倍基频」，
+         闪的就是那四次「扫过」。
+         窗口 |f − n| < KSTEP/2 = 0.025 借的是**频谱曲线自己的采样步长**：
+         屏幕上那条琥珀折线就是按 KSTEP = 0.05 采出来的，两个相邻采样点之间没有
+         比这更细的分辨率，所以「站在同一个采样点上」正是这一页能分辨的最小单位。
+         f 滑杆的 step = 0.02 < 0.025，整数刻度点精确可达，不会被刻度跳过去。
+         `state['h' + (i + 1)]` 这个谐波开关检查**不能省**：用户关掉某条谐波后，
+         那条频率上真的什么都没有了（频谱在那里塌回零、刻度数字也转灰），
+         此时还闪就等于把「这个频率里没有东西」讲成「找到了」——正好讲反。
+
+         **这是本批唯一贴着频闪红线的一处，写清楚为什么仍然接：**
+         一趟从 f = 0 拖到 8 会路过 1 / 3 / 5 / 7 四个刻度点，四闪。
+         辩护是 f **不被 drive 驱动**（本工具三页都没有 drive），节奏完全由用户的手决定：
+         想快就快、想停就停，tips 还专门教「先按空格暂停，再细细扫频」。
+         §4.7 禁的是「判据每一两秒自己真一次」的机器节拍，不是用户自己一路拖过去的四个地标。
+         若日后有人给本页加 drive，这一闪必须跟着重新量。
+
+         windArmed 是一把「上膛 → 打完退膛」的闩（声明处有详注），两头都得写：
+         · **上膛**（离开任何刻度点时置真）挡开局白闪：state.wind 默认就是 1，
+           页面一打开判据即真，不上膛会先白闪一次。上膛条件必须带 `range &&` ——
+           头两帧 windRange() 还返回 null、onPeak 恒假，只写 `!onPeak` 会在第一帧
+           就把膛上好，白闪照旧。
+         · **退膛**（命中当帧置假）挡重置补闪：命中之后参数一动不动、按一次 R，
+           goldFlashReset() 把 flashAt 清了，可判据还真着 —— 重置后的第一帧又被算成
+           上升沿，flashAt 会被再打一次点。实测正是这一路：只上膛不退膛 2 次，
+           加上退膛 1 次。退膛后必须重新离开刻度点才可能有下一次命中。
+         裁决要求的 state.t > 0.5 已撤掉：它单独根本不够用（默认页签是「谐波叠加」，
+         用户切到本页时 state.t 早过了 0.5），而这把闩比它严格更强，留着只是噪音。
+         实测（默认 ω = 1、A = 1、四条谐波全开；每组都从「刚打开这一页」的状态起算，
+         打点数直接读引擎的 flashAt，不用探针侧自己的 prev —— 后者不受 resetSim 影响，
+         正好会漏掉重置补闪那一次）：
+         · 干等 60 s 不动 f —— **0 次**（无 drive，本页的节奏由用户给）；
+         · 按滑杆 step = 0.02 从 f = 0 拖到 8（每帧一格，模拟一趟慢扫）——
+           **4 次**，分别在 f = 0.98 / 2.98 / 4.98 / 6.98 打点（进入窗口的第一格）；
+         · 同一趟扫描但关掉「谐波 3ω」—— **3 次**，f = 3 那一格如期不闪；
+         · 命中后不动参数、按一次 R —— **1 次**（加退膛之前是 2 次）。
+         锚点取质心 com：那正是「猛然偏离原点」的那个琥珀点。 */
+      const onPeak = HN.some((n, i) => state['h' + (i + 1)] && Math.abs(k - n) < KSTEP / 2);
+      if (range && !onPeak) windArmed = true;      /* 离开刻度点 → 上膛 */
+      const windHit = windArmed && !!range && onPeak;
+      if (windHit) windArmed = false;              /* 打完退膛：R 之后不再补一闪 */
+      goldHit('wind', windHit);
+      drawGoldFlash(C, [com[0], com[1], 0]);
     },
     readout() {
       const k = state.wind, range = windRange();
@@ -877,6 +953,74 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -1034,6 +1178,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.0">
+<meta name="tool-version" content="1.2.0">
 <meta name="engine-version" content="1.1.0">
 <title>让倒立摆站起来 · 反馈与 PID</title>
 <!-- ============================================================
@@ -19,6 +19,8 @@
   更新 —— 这是刻意的：采样带来的纯延迟正是页签③ 的教学核心。
 
   版本记录（changelog，新→旧）：
+    1.2.0  2026-08-09  接入金光闪（§4.7）：页②「P/I/D」在误差真正归零那一刻闪（|θ|<1e−3 且 |ω|<0.01——只判 |θ| 会被每 0.91 s 一次的过零点误报，实测 40 次→16 次；测量噪声打开时不闪，那一档 θ 是抖在零附近的随机量，实测 134 次），页③「相位与延迟」在相位裕度穿过 0 那一刻闪（借读数「← 已失稳」告警自己的开关）。页①「开环 vs 闭环」与页④「测不到的量」有意不加，理由写在各自场景注释里
+                  Adds the gold flash (§4.7): tab 2 (P/I/D) fires the instant the error truly reaches zero (|θ|<1e−3 and |ω|<0.01 — testing |θ| alone is fooled by the 0.91 s zero-crossings, measured 40 hits vs 16; suppressed when measurement noise is on, where θ is a random quantity jittering about zero, measured 134 hits), and tab 3 (Phase & delay) fires as the phase margin crosses zero, reusing the readout's own "unstable" warning switch. Tabs 1 and 4 deliberately have no flash; the reasons are recorded in their scene comments
     1.1.0  2026-08-02  新增「演示时长」滑杆（4–60 s）：它同时决定一屏的时间跨度与「一轮」的长度，于是慢过程也能完整看完。原先轮长写死 7/8/5 s，再怎么放慢时间轴，场景每几秒就重踢一脚。默认 8 s 与改动前完全一致
                   Adds a demo-span slider (4–60 s) that sets both the visible time window and the length of one round, so slow processes can be watched end to end. Round lengths used to be hard-coded at 7/8/5 s, so no amount of slowing the time axis stopped the scene re-kicking every few seconds. The 8 s default reproduces the previous behaviour exactly
     1.0.0  2026-08-02  首发：开环 vs 闭环、P/I/D 三项分解、相位与临界增益、
@@ -777,7 +779,19 @@ const SCENES = {
   /* ── ① 开环 vs 闭环 ──────────────────────────────────────
      动力来源（规范 §8 出路①）：没有 drive 声明 —— 三只摆由 subStep() 的
      RK4 积分器自走，摆座扰动 d = d₀·sin(2t) 一直在晃，且每 roundLoop() 秒（随「演示时长」）
-     重新踢一脚（seedLoop），永不定格。种子参数 tilt / len 一律不加 drive。 */
+     重新踢一脚（seedLoop），永不定格。种子参数 tilt / len 一律不加 drive。
+
+     金光闪（§4.7）：**不加 —— 恒等式 + 发散，两头都不是「到达」。**
+     本页画的两条曲线，模型对得上时 θ_CL(t) 与 θ_OL(t) 走的是同一个积分器、
+     同一份参数，它们不是「逐渐重合」，而是**逐位相同**：实测 60 s 内
+     max |θ_CL − θ_OL| = 0.000e+0（严格 0，不是 1e−15 量级的浮点残差）。
+     没有哪一刻它们「终于」相等 —— 第一帧就相等，这是恒等式。
+     打开「偷偷改摆长 −30%」，分家的那一侧也不是到达而是**发散**：开环 θ 在
+     t = 0.62 s 越过 |θ| = 0.65 rad 的裁剪线（画面自标「已倒」），20 s 内跑到
+     3.141 rad = π（整个倒下去），闭环同期最大只有 0.2008 rad。给一条冲出量程的
+     曲线打光，闪的是「它出画了」，不是「它走到了」。
+     剩下唯一像事件的是闭环 θ 过零：实测 60 s **50 次**、平均 1.20 s 一次，
+     是标准频闪；而且过零本身也不是这一页的论点（论点是两条曲线分不分家）。 */
   loop: {
     label: { zh: '开环 vs 闭环', en: 'Open vs closed loop' },
     params: ['len', 'damp', 'kp', 'ki', 'kd', 'fs', 'dist', 'tilt', 'waveSpeed'],
@@ -967,6 +981,38 @@ const SCENES = {
         { size: 11, color: rgba(C_CYAN, 0.8), align: 'center' });
       label3(C, [0, -1.98, WAVE_LEN * 0.45], 'u = −K p·θ − K i·∫θ dt − K d·dθ/dt',
         { font: 'italic 13px ' + FONT_MATH, color: rgba(C_CYAN, 0.85), align: 'center' });
+
+      /* 金光闪（§4.7）：误差**真的**回到了零 —— θ 落进 e_ss 那把琥珀标尺量不出来的
+         地方，而且是停在那里，不是路过。这就是打开 I 项之后这一页要人看见的那件事：
+         同样的 P + D，同样的常值扰动，误差不再停在 0.119 rad 上，而是走到 0。
+
+         判据窗口是借来的，两个数一个都不是新造的：
+           · |θ| < 1e-3      —— 借 draw 里 'e ss = ' + fmt(eSS, 3) 那把琥珀标尺的三位小数：
+                                 屏幕上印不出来的误差，就是这一页承认的「零」。
+           · |ω| < 0.01      —— 借页④ readout 里 ω 的两位小数显示精度。
+         **ω 那一项不是装饰。** 打开 I 项后闭环极点是 −5.34 与 −1.131 ± j3.44，
+         θ 是边衰减边过零的，每 π/3.44 = 0.91 s 从零穿过去一次，每次在 |θ| < 1e-3 里
+         只停约 5 ms。只判 |θ| 实测 60 s 打 **40 次**（间隔 0.88 s，标准频闪）；
+         补上 |ω| < 0.01 之后是 **16 次** —— 过零点被滤掉了，剩下的才是「停下来」。
+
+         `!state.useNoise` 护栏也是量出来的，不是防御性编程：打开测量噪声后 θ 就是
+         一个抖在零附近的随机量，60 s 实测 **134 次**（0.45 s 一次）。§4.7 的
+         「量本身会晃」正是这一档，所以噪声一开就不闪 —— 这一页此时讲的也不再是
+         「误差归零」，而是 D 项被撕碎。
+
+         实测（PARAMS 全部复位、演示时长 8 s 的默认档）：
+           · 默认（useI = false）：60 s **0 次**。这正是本页要讲的话 —— 稳态误差
+             解析 d/(K p − mgL) = 0.11909 rad、精确解 0.11899 rad，永远走不到零。
+           · 打开「I 项」：60 s **16 次** = 每 8 s 一轮里两次，首次在 t = 3.28 s
+             （该轮被踢一脚之后 3.28 s），0.62 s 后 θ 最后一个 1.9e-3 的小过冲把它
+             顶出窗口，t = 3.90 s 再落回来并停住。这一对紧挨着的闪是真实的收敛形状，
+             不是判据抖动。
+           · 打开「I 项」+「测量噪声」：不闪（见上面的护栏）。
+
+         锚点 [0, YT, 0]：θ 车道零线与 z = 0 的交点 —— 误差曲线的头光点正好走到那里，
+         也就是「误差 = 0」这件事在屏幕上的位置。 */
+      goldHit('pid', !state.useNoise && Math.abs(W.pid.th) < 1e-3 && Math.abs(W.pid.w) < 0.01);
+      drawGoldFlash(C, [0, YT, 0]);
     },
     readout() {
       const W = ensureWorld(), P = W.pid;
@@ -1059,6 +1105,31 @@ const SCENES = {
         { size: 11, color: rgba(C_ROSE, 0.85), align: 'center' });
       label3(C, [0, -2.06, WAVE_LEN * 0.45], 'u(t) = −K p·θ(t − τ)',
         { font: 'italic 13px ' + FONT_MATH, color: rgba(C_CYAN, 0.85), align: 'center' });
+
+      /* 金光闪（§4.7）：相位裕度走到了零 —— 这一页的整条论证（「力不是太大，是来得
+         太晚」）就在 PM 穿过 0 的那一刻兑现：延迟一到，纠正抵达时误差已经反号。
+
+         判据不新造阈值，直接借 readout 自己那句告警的开关：第 1076 行
+         `pm != null && pm.pm < 0` 决定印不印「← 已失稳」。屏幕上那行字亮起来的
+         同一帧，全屏亮一次。是符号翻转，没有窗口，也就没有「窗口窄于一帧步长」的问题。
+
+         **不要**改用第 1046 行的 `W.ph.u * W.ph.th > 0`（「纠正变成了驱动」那句注记）：
+         那个量每半个振荡周期就翻一次号，是频闪不是到达。
+
+         实测（PARAMS 全部复位）：
+           · 默认档 Kp = 35、附加延迟 0：PM = **+10.20°** @ ω_gc = 4.93 rad/s，
+             60 s **0 次** —— 加载不白闪，要用户自己把它推过去。
+           · 把「附加延迟」从 0 一格一格（step 1 ms）拖到 80 ms：整趟只闪 **1 次**，
+             在 **延迟 = 37 ms**（PM = −0.25°）。滑杆量程内 44 格是负裕度，够得着。
+           · 另一条路是推 Kp（step 0.5，量程 0–200）：默认延迟下第一个负裕度格点是
+             **Kp = 161.0**（PM = −0.03°），量程内 79 格为负。Kp ≲ 9.5 时
+             phaseMargin() 返回 null（无穿越频率），判据自然为假。
+
+         锚点 [0, clamp(W.ph.th*TH, −LT, LT), 0]：θ 曲线的头光点 —— 失稳那一刻正在
+         甩出去的就是它，光从那一点推出去。 */
+      const pmNow = phaseMargin(state.kp);
+      goldHit('phase', pmNow != null && pmNow.pm < 0);
+      drawGoldFlash(C, [0, clamp(W.ph.th * TH, -LT, LT), 0]);
     },
     readout() {
       const W = ensureWorld();
@@ -1086,7 +1157,22 @@ const SCENES = {
 
   /* ── ④ 测不到的量 ──────────────────────────────────────────
      动力来源（规范 §8 出路①）：无 drive —— 与页②共用同一只 PID 摆，由 RK4
-     积分器自走并每 8 s 重新踢一脚；观测器与差分器每个采样时刻更新。 */
+     积分器自走并每 8 s 重新踢一脚；观测器与差分器每个采样时刻更新。
+
+     金光闪（§4.7）：**不加 —— 量本身会晃（随机），叠加一条无上升沿的渐近线。**
+     本页画的三条曲线量的是同一个 ω 的三种取法，要比的是**误差有多大**，
+     而误差从来不「走到」零：
+       · 观测器误差 ω̂ − ω 的 RMS 从 0.165（0–1 s，初值收敛段，按 e^{−8t} 降）
+         落到 0.0163（2–8 s），此后就停在 **0.0536**（20–30 s 与 50–60 s 两段
+         分别是 0.05366 / 0.05355，钉死在同一个数上）—— 那是 σ = 0.005 的测量噪声
+         经 d̂ 注入增益 l₃ = 512 灌进来的地板，不是它「还没到」，是它到不了。
+       · 它在这条地板上**抖**：60 s 内符号翻转 **630 次**（≈10.5 Hz），
+         3600 帧里有 147 帧 |误差| < 1e−3。按「误差归零」打上升沿等于给噪声报捷 ——
+         §4.7 里 π 投针那一条说的就是这件事。
+       · 差分求导那条更没有到达可言：RMS 在 0–1 s、20–30 s、50–60 s 三段分别是
+         0.400 / 0.354 / 0.359，一整趟纹丝不动。
+       · tips 的落点「RMS 只有差分的 1/N」是一个**逐帧成立的比值**（实测稳态
+         0.0536 : 0.359 ≈ 1 : 6.7），是恒等式不是事件。 */
   observer: {
     label: { zh: '测不到的量', en: 'Unmeasured ω' },
     params: ['len', 'damp', 'kp', 'ki', 'kd', 'fs', 'noise', 'dist', 'waveSpeed'],
@@ -1375,6 +1461,74 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -1532,6 +1686,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
