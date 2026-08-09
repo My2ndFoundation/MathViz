@@ -4,25 +4,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<!-- 占位符，从本骨架复制出新工具时**必须**改掉的四处：
-     ① <title>；② 下面 tool-version 的 content（新工具从 1.0.0 起）；
-     ③ 下面这段版本记录；④ 第二个脚本块里 TOOL 的 id / title / h1。
-     （文件里除了两处真正的脚本标签，任何地方——包括注释——都不要再写出
-     `&lt;script&gt;` 这个字符串：语法门与 CI 都靠 `<` + `script` + `>` 这个
-     字面量切分脚本块，注释里多出来的一个会让切分从这里开始，把整段 HTML
-     当成 JS 去检查，报一个跟真实代码毫无关系的错。）
+<!-- 本页从 tools/_skeleton.html 复制而来，改掉的四处：<title>、tool-version、
+     下面的版本记录、第二个脚本块里的 TOOL（id / title / h1），外加把
+     GENERATED:ALGOS 的清单从 `none` 换成 caesar.js。
 
      tool-engine 反映的是 core/ 那几个模块的版本，不是工具自己的版本，
      一般不必跟着改。版本号要在三处同步：注册表 cryptography-tools.json 的
      version、这里的 tool-version meta、面板右上角的徽章——徽章直接读 meta
-     （见第二个脚本块里的 VERSION），所以它永远不需要单独改。 -->
+     （见第二个脚本块里的 VERSION），所以它永远不需要单独改。
+
+     文件里除了两处真正的脚本标签，任何地方——包括注释——都不要再写出
+     `<` + `script` + `>` 这个字面量：语法门与 CI 都靠它切分脚本块，注释里
+     多出来的一个会让切分从那里开始，把整段 HTML 当成 JS 去检查，报一个跟
+     真实代码毫无关系的错。 -->
 <meta name="tool-version" content="1.0.0">
 <meta name="tool-engine" content="crypto-1.0.0">
-<title>CryptoViz Tool Skeleton · 密码学工具骨架</title>
+<title>Caesar Cipher · 凯撒密码</title>
 <!-- 版本记录（changelog，新→旧）：
-     1.0.0  2026-08-09  首发骨架：CryptoViz 视觉令牌、i18n（cryptography-lang）、
-                        全屏 canvas、页签系统、动画时钟与传输条（⏮ ⏵/⏸ ⏭ ⟲）、
-                        响应式布局、独立语言开关、七个 GENERATED 区间。 -->
+     1.0.0  2026-08-09  首发：三页签——字母轮（位移即旋转，k=0 与 k=26 同一个轮子）、
+                        模 26 螺旋（顿悟视角：一整圈就是一次绕回，投影到圆周就是取模）、
+                        χ² 穷举（26 行一次摊开，最优行自己亮起来；全非字母输入时
+                        刻意不给高亮）。 -->
 <style>
 /* 视觉令牌。CryptoViz 与根项目、chess 子项目共用同一套值——它们是同一门
    视觉语言的三个方言，不是三套配色。Canvas 里用到同一个颜色时写**同样的
@@ -394,22 +396,60 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   return { ENGLISH_FREQ, letterCounts, letterFrequency, chiSquare, bruteForceBest };
 });
 /* <<< GENERATED:CRYPTANALYSIS */
-/* >>> GENERATED:ALGOS none */
+/* >>> GENERATED:ALGOS caesar.js */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) {
+    /* node 下取兄弟目录的 crypto-core：路径用 path.join 拼，不写字面的父目录
+       相对路径。理由不是风格——那个字符串会被 inline_core.py 原样内联进每个
+       工具页，而 check.py 的 outbound_ref_check() 正在数整个子树里的父目录
+       引用，用它守住"cryptography/ 可以整体搬走"这条约束。浏览器分支根本走
+       不到这一行，为它留一条会触发普查的字面量不划算。 */
+    module.exports = factory(require(require('path').join(__dirname, '..', 'crypto-core.js')));
+  } else {
+    root.CryptoAlgos = root.CryptoAlgos || {};
+    root.CryptoAlgos.caesar = factory(root.CryptoCore);
+  }
+})(typeof self !== 'undefined' ? self : this, function (C) {
+  'use strict';
+
+  /* 保留大小写与非字母字符，而不是先 normalize 再加密。
+     教学上这更值钱：'Hello, World!' → 'Khoor, Zruog!' 让人一眼看出
+     "只有字母参与运算，标点和空格是旁观者"，而 'KHOORZRUOG' 把这件事藏起来了。
+     代价是密文泄露了词长——这恰好是第三页"穷举"要讲的弱点之一。 */
+  function shift(text, k) {
+    k = C.mod(k, C.N);
+    let out = '';
+    for (let i = 0; i < text.length; i++) {
+      const ch = text.charAt(i);
+      const c = text.charCodeAt(i);
+      if (c >= 65 && c <= 90) out += String.fromCharCode(65 + C.mod(c - 65 + k, C.N));
+      else if (c >= 97 && c <= 122) out += String.fromCharCode(97 + C.mod(c - 97 + k, C.N));
+      else out += ch;
+    }
+    return out;
+  }
+
+  function encrypt(text, k) { return shift(String(text), k); }
+  function decrypt(text, k) { return shift(String(text), -k); }
+
+  /* 26 个候选，一个不少、按 k 升序——工具页把它们排成 26 行，
+     "26 行就是全部可能"正是这一页要传达的东西，少一行都会破坏这个印象。 */
+  function bruteForce(cipher) {
+    const out = [];
+    for (let k = 0; k < C.N; k++) out.push({ k: k, text: decrypt(cipher, k) });
+    return out;
+  }
+
+  return { encrypt, decrypt, bruteForce };
+});
 /* <<< GENERATED:ALGOS */
-/* ↑ 从骨架建新工具时，把 `none` 换成这一页真正会调用的算法文件名，
-   例如 `GENERATED:ALGOS caesar.js`；要多份就用逗号分隔。
+/* ↑ 本页只调用 caesar.js 一份算法，所以清单里只写它。清单来自这一行标记，
+   不扫目录——扫目录会让每个页面都背上它永远不会跑的算法。
 
-   `none` 是模板专用的**显式弃权**：骨架不绑定任何具体算法。
-   把清单**留空**则是硬错误，这是有意的——留空正是手滑最常见的形状
-   （新建页面时先把标记写上、内容待填），而一个空的 ALGOS 块会让页面
-   在浏览器里 CryptoAlgos 是 undefined、一调用就死。真工具不会无意中
-   写出 `none`，所以这个哨兵不会掩护真正的疏忽。
-
-   骨架因此**照常参与内联**：它其余六个区间与 core/ 保持同步，由
-   inline_core.py --check 看着。（早先的做法是把下划线开头的文件整个
-   排除在 glob 之外，代价是那六块从此无人看管，建项目当天就漂了
-   354 字节而没有任何东西报警——骨架是每个新工具的复制源，让它陈旧
-   等于把陈旧扩散出去。） */
+   顺序要紧：caesar.js 与 cryptanalysis.js 都在加载时就把 root.CryptoCore
+   捕获进闭包，所以 CRYPTO-CORE 必须排在它们前面。排错了页面不会报错，
+   会安静地载入、在第一次交互时死在
+   `Cannot read properties of undefined (reading 'mod')`。 */
 /* >>> GENERATED:EXAMPLES */
 (function (root, factory) {
   const data = factory();
@@ -1978,178 +2018,635 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 </script>
 <script>
 /* ================= 手写区 =================
-   工具专属声明写在这里，在 GENERATED 区之外。要改的四件事：
-     TOOL     —— id / title / h1（id 必须与 cryptography-tools.json 里的一致）
-     PARAMS   —— 滑杆声明，面板自动生成
-     SCENES   —— 一个 key 一个页签；每个页签有 label / brand / tips / views /
-                 toggles / draw / readout，views 的第一项必须是 iso（双击回正的 home）
-     init()   —— 末尾那次 VizEngine.init({...})
-   需要记录逐帧真值的工具再自己加一个 pushSample()——古典密码大多不需要：
-   它们的状态是离散的一步一步，时间轴的 index 就是全部历史。
+   工具专属声明写在这里，在 GENERATED 区之外：TOOL / PARAMS / SCENES /
+   末尾那次 VizEngine.init({...})。凯撒不需要 pushSample()——它的状态是离散的
+   一步一步，时间轴的 index 就是全部历史。
 
-   下面这个"骨架自检"演示是**可以整段删掉**的。留着它是为了让骨架自己就是
-   一个能跑的页面：复制之后先打开看一眼，画面动了，就说明内联、令牌、页签、
-   时钟、语言开关这一整条链路都是通的，接下来的红都是自己写的代码的红。 */
+   这一页要讲的三件事，一个页签一件：
+     wheel   位移密码就是一次旋转。k=0 与 k=26 是同一个轮子。
+     modulo  把 0…25 抬成螺旋：一整圈就是一次绕回，沿 z 投影下来就是取模。
+     break   26 行一次摊开。弱点从来不是算法，是密钥空间只有 26 个元素。 */
 
-const E = VizEngine;
+const E  = VizEngine;
 const CC = CryptoCore;
+const CA = Cryptanalysis;
+const CAESAR = CryptoAlgos.caesar;
+const EX = CryptoExamples;
 
-/* 配色：与 :root 里的 CSS 变量**同一批字面量**。一条量在图例点、曲线本体、
-   读数粗体值上必须是同一种颜色（设计规范第 3 条），字面量重复一次好过
-   getComputedStyle 在每帧里查一次。 */
-const CYAN = '#2dd4ea', ROSE = '#fb7185', SLATE = '#9fb0c8', BRIGHT = '#e2e8f0';
+const TAU = Math.PI * 2;
+
+/* 配色：与 :root 里的 CSS 变量**同一批字面量**。
+   这一页把颜色绑在**含义**上，而不是按 rose → violet → emerald → orange 轮换：
+     cyan    明文 / 未取模之前那个"住在圆周上"的世界
+     rose    密文 / +k 这段位移本身
+     violet  取模这个动作（字母轮上的对应箭头、螺旋往圆周落下的虚线）
+     emerald χ² 的获胜行
+     orange  一整圈的圈界（0 / 26 / 52）
+   设计规范第 3 条要的是"同一条量在图例点、本体、投影虚线、辉光点、读数粗体值、
+   公式标签六处是同一个颜色"。三个页签讲的是同一个位移的三种看法，所以让
+   "明文永远是青色、密文永远是玫红"跨页签成立，比在每一页内部重新轮换一遍
+   四个色相更贴近那条原则。 */
+const CYAN = '#2dd4ea', ROSE = '#fb7185', VIOLET = '#a78bfa',
+      EMERALD = '#34d399', ORANGE = '#fb923c',
+      SLATE = '#9fb0c8', BRIGHT = '#e2e8f0';
+const DIM  = 'rgba(159,176,200,.55)';
 const LINE = 'rgba(148,163,184,.22)';
+const CARD = 'rgba(8,13,24,.78)';
 
-/* 版本徽章直接读 <meta name="tool-version">，不在脚本里再抄一遍数字。
-   抄一遍就会有两个真相：chess 的工具① 在 1.0.2 那次就是脚本里的常量忘了跟
-   meta 一起改，面板上整整两个版本都在显示旧号。 */
+/* 版本徽章直接读 <meta name="tool-version">，不在脚本里再抄一遍数字。 */
 const VERSION = (function () {
   const m = document.querySelector('meta[name="tool-version"]');
   return (m && m.getAttribute('content')) || '0.0.0';
 })();
 
-/* ---- 动画时钟 ----
-   单一真相分两半，互不重叠：**播放与否**归引擎的 state.running（⏵/⏸ 按钮
-   由引擎自己绑），**走到第几步**归时间轴。所以时间轴一建好就 play() 并且
-   永不 pause()——它的 playing 标志在这里恒为 true，真正的闸门是下面
-   tickClock() 里那个 state.running 判断。两边各管一件事，就不会出现
-   "按钮显示暂停、画面还在动"这种两个开关互相打架的状态。 */
-const TL = CryptoAnim.createTimeline({ steps: 26, stepDuration: 0.55, loop: true, rate: 1 });
+var TOOL = {
+  id: 'crypto-caesar',
+  title: { en: 'Caesar Cipher', zh: '凯撒密码' },
+  h1: { en: 'Caesar Cipher', zh: '凯撒密码' }
+};
+
+/* ================= 明文（文本输入 + 预置）================= */
+/* 明文来自输入框而不是滑杆——一个 26 档的滑杆表达不了 "ATTACK AT DAWN"。
+   面板里的 #ioHost 是骨架为这件事留的槽，引擎不碰它，由本页自己填。 */
+let PLAIN = '';
+let ACTIVE_NOTE = null;          // 当前预置自带的解说；用户一打字就作废
+let ioText = null, ioLabel = null;
+
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function clip(s, n) { return s.length > n ? s.slice(0, n) + '…' : s; }
+
+function setPlain(s, writeBack) {
+  PLAIN = String(s);
+  if (writeBack && ioText) ioText.value = PLAIN;
+  bf.key = null;                 // 让穷举页下一帧重算
+}
+
+function buildIO() {
+  const host = document.getElementById('ioHost');
+  if (!host) return;
+  host.innerHTML =
+    '<div class="iolabel" id="ioLabel"></div>' +
+    '<textarea class="iofield" id="ioText" spellcheck="false" autocomplete="off"></textarea>';
+  ioText = document.getElementById('ioText');
+  ioLabel = document.getElementById('ioLabel');
+  ioText.addEventListener('input', function () {
+    ACTIVE_NOTE = null;
+    setPlain(ioText.value, false);
+    /* 一动手打字，预置按钮的选中态就不再成立了。三个页签共享同一份 presets
+       数组（同一个对象引用，不是内容碰巧相等），所以对任意一个页签调用一次
+       就会同步到全部——引擎的 syncPresetHighlight 就是为这件事留的。 */
+    E.syncPresetHighlight('wheel', null);
+  });
+}
+
+/* #ioHost 的标签是本页自己写进 DOM 的，不在引擎的 RELABEL 名单里，语言切换
+   不会自动重刷它。引擎在 applyLang() 末尾会调 updateReadout()，所以把这次
+   同步挂在 readout() 里搭车——比自己去监听语言按钮可靠：不管语言是怎么变的
+   （按钮、还是将来别的入口），readout 都会跟着重算一次。 */
+function syncIoLabels() {
+  if (!ioLabel) return;
+  const s = E.t({ en: 'Plaintext — only letters are encrypted',
+                  zh: '明文 —— 只有字母参与加密' });
+  if (ioLabel.textContent !== s) ioLabel.textContent = s;
+}
+
+const PRESET_LABEL = {
+  'pangram':      { en: 'Pangram',   zh: '全字母句' },
+  'attack':       { en: 'Too short', zh: '太短' },
+  'caesar-quote': { en: 'Caesar',    zh: '凯撒' }
+};
+
+/* 三个页签共用**同一个数组对象**——这正是引擎里"跨页签共享的同一份选择"
+   那条分支要的形状：在任意一页换了明文，另外两页的按钮高亮跟着走，
+   而不是各自停在自己的初始项上。 */
+const TEXT_PRESETS = EX.classical.plaintexts.map(function (p) {
+  return {
+    key: p.id,
+    label: PRESET_LABEL[p.id] || { en: p.id, zh: p.id },
+    onSelect: function () { ACTIVE_NOTE = p.note || null; setPlain(E.t(p.text), true); }
+  };
+});
+const PRESETS_LABEL = { en: 'Text', zh: '明文' };
+
+/* ================= k 的唯一真相 =================
+   k 有两个控件：面板上的滑杆，和底部传输条（⏮ ⏵/⏸ ⏭ ⟲）。两个控件写同一个量
+   会互相覆盖，所以这里不让它们各存一份：**时间轴的 index 就是 k**，滑杆只是
+   它的一个视图。滑杆动 → seek 时间轴；时间轴动 → 回写滑杆。两条路都只有一个
+   写入点，不会打架。
+
+   loop:true 不是为了好看——k 从 25 走到下一步时绕回 0，那一下正是
+   "k=26 与 k=0 是同一个轮子"，按 ⏵ 让它自己转一圈就看见了。 */
+const TL = CryptoAnim.createTimeline({ steps: CC.N, stepDuration: 0.42, loop: true, rate: 1 });
 TL.play();
 
+let kInput = null, kValEl = null;
+
+function currentK() { return TL.index; }
+
+function syncK() {
+  const k = TL.index;
+  if (E.state.k === k) return;
+  E.state.k = k;
+  if (kInput) kInput.value = String(k);
+  if (kValEl) kValEl.textContent = String(k);
+}
+
+/* 喂给时间轴的必须是引擎已经夹过的 state.dt（[0, 0.05]），不能是自己用
+   performance.now() 算的差值——tick() 刻意没有内部步长上限，后台标签页回来
+   那一下的时间跳变会让它真的补上几千步。 */
 function tickClock() {
-  TL.setRate(E.state.speed || 1);
   if (E.state.running) TL.tick(E.state.dt);
+  syncK();
 }
 
 document.getElementById('btnBack').addEventListener('click', function () { TL.step(-1); });
 document.getElementById('btnStep').addEventListener('click', function () { TL.step(1); });
-/* ⟲ 上已经挂了引擎的 resetSim()；再挂一条把时间轴也拨回第 0 步。
+/* ⟲ 上已经挂了引擎的 resetSim()；再挂一条把 k 拨回 0。
    用 seek(0) 而不是 TL.reset()：reset() 会把 playing 置 false，而 playing
-   在本页恒为 true（见上），置 false 之后 tick 就永久哑火了。 */
+   在本页恒为 true（真正的闸门是 tickClock() 里的 state.running）。 */
 document.getElementById('btnReset').addEventListener('click', function () { TL.seek(0); });
 
-const TAU = Math.PI * 2;
-
-var TOOL = {
-  id: 'crypto-skeleton',
-  title: { en: 'CryptoViz Tool Skeleton', zh: 'CryptoViz 工具骨架' },
-  h1: { en: 'Tool Skeleton', zh: '工具骨架' }
-};
-
 var PARAMS = [
-  /* label 可以带 HTML——它是用 innerHTML 写进去的。数学符号写成 <i>…</i>，
-     CSS 会把它渲染成 serif italic（见 .ctl label i）。这里的"速度"不是数学量，
-     所以不加 <i>；真正的密码参数（<i>k</i>、<i>a</i>、<i>m</i>）要加。 */
-  { key: 'speed',
-    label: { en: 'speed', zh: '速度' },
-    min: 0.25, max: 4, step: 0.25, value: 1,
-    fmt: function (v) { return v.toFixed(2) + '×'; } }
+  /* fmt 必须是**函数**：引擎 buildParams() 里是 `p.fmt(parseFloat(input.value))`。
+     计划书 Task 6 Step 3 那份 PARAMS 写的是 `fmt: 0`，照抄会在建面板时
+     当场 TypeError，整个页面停在空白 canvas 上。 */
+  { key: 'k',
+    label: { en: 'shift <i>k</i>', zh: '位移 <i>k</i>' },
+    min: 0, max: 25, step: 1, value: 3,
+    fmt: function (v) { return String(Math.round(v)); } }
 ];
 
-/* 演示用：把 k 从时间轴上取下来。k 只有一个来源（时间轴），滑杆管的是
-   另一个量（速度）——两个控件不许写同一个量，否则拖滑杆和播放会互相覆盖。 */
-function currentK() { return TL.index; }
+/* ================= 页签一：字母轮 ================= */
+function focusP() {
+  const ix = CC.letters(PLAIN);
+  return ix.length ? ix[0] : 0;
+}
 
-var SCENES = {
-  wheel: {
-    label: { en: 'Wheel', zh: '字母轮' },
-    brand: { en: 'A shift cipher is a rotation: the inner ring turns, nothing else changes.',
-             zh: '位移密码就是一次旋转：内环转起来，别的什么都没变。' },
-    tips: { en: 'Press ⏭ once. The inner ring turns by exactly one letter — that single click is what "k += 1" means.',
-            zh: '按一次 ⏭。内环正好转过一个字母——这一下点击就是「k += 1」的全部含义。' },
-    views: {
-      /* 第一项必须是 iso：引擎把它当作双击回正的 home，也是页面载入时的机位。
-         本页的图元是屏幕坐标的（与相机无关），视角切换在这里看不出差别；
-         真正用到 3D 的页面（例如把模 26 抬成螺旋的那种顿悟视角）才需要它们。 */
-      iso:   { label: { en: 'Iso', zh: '等距' },   az: -0.62, el: 0.42, dist: 9 },
-      front: { label: { en: 'Front', zh: '正视' }, az: 0, el: 0, dist: 8 }
-    },
-    toggles: [
-      { key: 'showInner', label: { en: 'Cipher ring', zh: '密文环' }, color: ROSE, checked: true }
-    ],
-    draw: function () {
-      tickClock();
-      const vi = E.viewInfo();
-      const cx = vi.W / 2, cy = vi.H / 2;
-      const r = Math.max(90, Math.min(vi.W, vi.H) * 0.28);
-      const k = currentK();
-      const p = 0;                                   // 演示用明文字母：A
-      const c = CC.mod(p + k, CC.N);
+const wheel = {
+  label: { en: 'Wheel', zh: '字母轮' },
+  brand: { en: 'A shift cipher is a rotation. One number turns the inner ring; nothing else changes.',
+           zh: '位移密码就是一次旋转。一个数字转动内环，别的什么都没变。' },
+  tips: { en: 'Press ⏵ and watch k run past 25. The wheel comes back to where it started — k=26 is k=0, which is why the key space is 26 and not 27.',
+          zh: '按 ⏵，看着 k 越过 25。轮子回到了出发的地方——k=26 就是 k=0，所以密钥空间是 26 而不是 27。' },
+  presets: TEXT_PRESETS,
+  presetsLabel: PRESETS_LABEL,
+  /* 本页的图元是屏幕坐标的，与相机无关，所以只保留 iso 这一项：它是引擎
+     双击回正的 home，也是页面载入时的机位（规范要求 views 的第一项是它）。
+     真正吃相机的是 modulo 那一页。 */
+  views: {
+    iso: { label: { en: 'Iso', zh: '等距' }, az: -0.62, el: 0.42, dist: 9 }
+  },
+  toggles: [
+    { key: 'showCipherRing', label: { en: 'Cipher ring', zh: '密文环' }, color: ROSE,   checked: true },
+    { key: 'showLink',       label: { en: 'p → c',        zh: 'p → c' },  color: VIOLET, checked: true },
+    { key: 'showStrip',      label: { en: 'Message',     zh: '报文' },    color: CYAN,   checked: true }
+  ],
+  draw: function () {
+    tickClock();
+    const vi = E.viewInfo();
+    const k = currentK(), p = focusP(), c = CC.mod(p + k, CC.N);
 
-      /* 外环：明文字母表，静止。 */
-      E.alphabetWheel(cx, cy, r, {
-        color: SLATE, highlight: p, hiColor: CYAN, ticks: true, ringColor: LINE, fontSize: 14
+    const wide = vi.W > 900;
+    const availW = wide ? vi.W - 330 : vi.W;
+    const cx = wide ? availW / 2 + 16 : vi.W / 2;
+    const cy = vi.H * 0.44;
+    const r  = E.clamp(Math.min(availW, vi.H) * 0.30, 84, 200);
+    const ri = r * 0.72;
+
+    /* 外环：明文字母表，静止不动。 */
+    E.alphabetWheel(cx, cy, r, {
+      color: SLATE, highlight: p, hiColor: CYAN, ticks: true,
+      ringColor: LINE, fontSize: E.clamp(r * 0.078, 10, 15)
+    });
+
+    /* 内环：密文字母表，整体转 −k。负号不是笔误：内环转 −k 之后，落在外环
+       字母 p 正下方的那一个正好是 p+k，也就是 p 的密文。转 +k 得到的是反方向
+       的对应关系（解密），画出来一样好看、意思却是反的。 */
+    if (E.state.showCipherRing) {
+      E.alphabetWheel(cx, cy, ri, {
+        rotation: -k / CC.N * TAU, color: 'rgba(159,176,200,.72)',
+        highlight: c,
+        /* hiColor 会被拼上 'aa' 去做辉光渐变的颜色停靠点，所以它必须是
+           6 位十六进制；写成 rgba(...) 或 3 位缩写会当场抛错。 */
+        hiColor: ROSE,
+        ringColor: 'rgba(251,113,133,.22)', fontSize: E.clamp(r * 0.072, 9, 14)
       });
-      /* 内环：密文字母表，整体转 −k。负号不是笔误：内环转 −k 之后，落在
-         外环字母 p 正下方的那一个正好是 p+k，也就是 p 的密文。转 +k 得到的
-         是反方向的对应关系（解密），画出来一样好看、意思却是反的。 */
-      if (E.state.showInner) {
-        E.alphabetWheel(cx, cy, r * 0.76, {
-          rotation: -k / CC.N * TAU, color: 'rgba(159,176,200,.75)',
-          highlight: c, hiColor: ROSE, ring: false, fontSize: 13
-        });
-      }
+    }
 
-      E.chip(cx - 92, cy - 17, 184, 34,
-             'c ≡ p + ' + k + '  (mod 26)',
-             { fill: 'rgba(8,13,24,.78)', stroke: LINE, color: BRIGHT, fontSize: 13.5 });
-    },
-    readout: function () {
-      const k = currentK(), p = 0, c = CC.mod(p + k, CC.N);
-      return E.t({ en: 'shift ', zh: '位移 ' }) +
-        '<b style="--c:var(--trace-cyan)"><i>k</i> = ' + k + '</b><br>' +
-        '<span class="dim">' + E.t({ en: 'plain ', zh: '明文 ' }) + '</span>' +
-        '<b style="--c:var(--trace-cyan)"><i>' + CC.ALPHABET.charAt(p) + '</i></b>' +
-        ' &#8594; ' +
-        '<span class="dim">' + E.t({ en: 'cipher ', zh: '密文 ' }) + '</span>' +
-        '<b style="--c:var(--trace-rose)"><i>' + CC.ALPHABET.charAt(c) + '</i></b>';
+    /* 取模这件事在这一页的样子：从外环那个字母指向内环同一角度的位置。 */
+    if (E.state.showLink && E.state.showCipherRing) {
+      const a = -Math.PI / 2 + p * TAU / CC.N;
+      const ux = Math.cos(a), uy = Math.sin(a);
+      E.flowArrow(cx + ux * (r - 17), cy + uy * (r - 17),
+                  cx + ux * (ri + 15), cy + uy * (ri + 15),
+                  { color: VIOLET, width: 1.6, headLen: 7 });
+    }
+
+    const fw = Math.min(216, ri * 1.72);
+    E.chip(cx - fw / 2, cy - 17, fw, 34, 'c ≡ p + ' + k + '  (mod 26)',
+           { fill: CARD, stroke: LINE, color: BRIGHT, fontSize: E.clamp(fw * 0.075, 10, 14) });
+
+    /* 图例：两个环各是什么。这里是散文不是数学符号，所以走 uiFont（mono:true）。 */
+    const legY = cy - r - 34;
+    if (legY > 92) {
+      E.chip(cx - 118, legY, 112, 24, E.t({ en: 'plain ring', zh: '明文环' }),
+             { mono: true, color: CYAN, fill: 'rgba(45,212,234,.08)',
+               stroke: 'rgba(45,212,234,.35)', fontSize: 11.5 });
+      if (E.state.showCipherRing) {
+        E.chip(cx + 6, legY, 112, 24, E.t({ en: 'cipher ring', zh: '密文环' }),
+               { mono: true, color: ROSE, fill: 'rgba(251,113,133,.08)',
+                 stroke: 'rgba(251,113,133,.35)', fontSize: 11.5 });
+      }
+    }
+
+    /* 报文条：明文字母压着密文字母。整条一起滑动——这就是"一个数字是全部密钥"
+       在一段真报文上的样子。 */
+    if (E.state.showStrip) {
+      const idx = CC.letters(PLAIN);
+      const n = Math.min(idx.length, 26);
+      const gap = 3;
+      const cell = E.clamp((availW - 120 - gap * (n - 1)) / Math.max(n, 1), 12, 26);
+      const sy = cy + r + 32;
+      if (n && sy + cell * 2 + 24 < vi.H - 84) {
+        const total = n * cell + (n - 1) * gap;
+        const sx = cx - total / 2;
+        for (let i = 0; i < n; i++) {
+          const x = sx + i * (cell + gap);
+          E.chip(x, sy, cell, cell, CC.ALPHABET.charAt(idx[i]),
+                 { stroke: 'rgba(45,212,234,.30)', color: CYAN, fontSize: cell * 0.56 });
+          E.chip(x, sy + cell + 22, cell, cell, CC.ALPHABET.charAt(CC.mod(idx[i] + k, CC.N)),
+                 { fill: 'rgba(251,113,133,.10)', stroke: 'rgba(251,113,133,.34)',
+                   color: ROSE, fontSize: cell * 0.56 });
+        }
+        E.flowArrow(sx + cell / 2, sy + cell + 4, sx + cell / 2, sy + cell + 18,
+                    { color: VIOLET, width: 1.3, headLen: 6 });
+      }
     }
   },
-
-  strip: {
-    label: { en: 'Strip', zh: '对照表' },
-    brand: { en: 'The same rotation, unrolled: 26 plain letters over 26 cipher letters.',
-             zh: '同一次旋转摊平：26 个明文字母压着 26 个密文字母。' },
-    tips: { en: 'Let it play. The lower row slides left as one rigid piece — the whole alphabet moves together, which is why one number is the entire key.',
-            zh: '让它自己播。下面那一行整条向左滑——整个字母表一起动，所以一个数字就是全部密钥。' },
-    views: {
-      iso:   { label: { en: 'Iso', zh: '等距' },   az: -0.62, el: 0.42, dist: 9 },
-      front: { label: { en: 'Front', zh: '正视' }, az: 0, el: 0, dist: 8 }
-    },
-    draw: function () {
-      tickClock();
-      const vi = E.viewInfo();
-      const k = currentK(), n = CC.N;
-      const gap = 3;
-      const cell = Math.max(14, Math.min(30, (vi.W - 120 - gap * (n - 1)) / n));
-      const total = n * cell + (n - 1) * gap;
-      const x0 = (vi.W - total) / 2, y0 = vi.H / 2 - cell - 22;
-
-      for (let i = 0; i < n; i++) {
-        const x = x0 + i * (cell + gap);
-        E.chip(x, y0, cell, cell, CC.ALPHABET.charAt(i),
-               { stroke: LINE, color: CYAN, fontSize: cell * 0.52 });
-        E.chip(x, y0 + cell + 40, cell, cell, CC.ALPHABET.charAt(CC.mod(i + k, n)),
-               { fill: 'rgba(251,113,133,.10)', stroke: 'rgba(251,113,133,.35)',
-                 color: ROSE, fontSize: cell * 0.52 });
-      }
-      E.flowArrow(x0 + cell / 2, y0 + cell + 6, x0 + cell / 2, y0 + cell + 34,
-                  { color: 'rgba(159,176,200,.55)' });
-    },
-    readout: function () {
-      const k = currentK();
-      return E.t({ en: 'shift ', zh: '位移 ' }) +
-        '<b style="--c:var(--trace-cyan)"><i>k</i> = ' + k + '</b>' +
-        '<br><span class="dim">' +
-        E.t({ en: 'the key space has 26 elements', zh: '密钥空间只有 26 个元素' }) +
-        '</span>';
-    }
+  readout: function () {
+    syncIoLabels();
+    const k = currentK(), p = focusP(), c = CC.mod(p + k, CC.N);
+    const cipher = CAESAR.encrypt(PLAIN, k);
+    return E.t({ en: 'shift ', zh: '位移 ' }) +
+      '<b style="--c:var(--trace-cyan)"><i>k</i> = ' + k + '</b>' +
+      '<span class="dim">  ' + E.t({ en: '· key space 26', zh: '· 密钥空间 26' }) + '</span><br>' +
+      '<b style="--c:var(--trace-cyan)"><i>' + CC.ALPHABET.charAt(p) + '</i></b>' +
+      ' &#8594; ' +
+      '<b style="--c:var(--trace-rose)"><i>' + CC.ALPHABET.charAt(c) + '</i></b>' +
+      '<span class="dim">   ' + p + ' + ' + k + ' ≡ ' + c + '</span><br>' +
+      '<span class="dim">' + E.t({ en: 'plain ', zh: '明文 ' }) + '</span>' +
+      esc(clip(PLAIN, 72)) + '<br>' +
+      '<span class="dim">' + E.t({ en: 'cipher ', zh: '密文 ' }) + '</span>' +
+      '<b style="--c:var(--trace-rose)">' + esc(clip(cipher, 72)) + '</b>';
   }
 };
 
+/* ================= 页签二：模 26 —— 顿悟视角 =================
+   两个世界画在同一张图上：
+     圆周（y = 0）  ℤ/26ℤ —— 26 个字母住的地方，也就是第一页那个字母轮
+     螺旋           ℤ     —— 没取模之前的整数，绕着同一根轴一直往上爬
+   "取模"不是一条规则，是**垂直落回地面那个圆**：螺旋上任意一点的水平位置
+   只取决于 u mod 26，所以它落下来的那一点就是它的余数。u 每加 26，螺旋正好
+   绕完一整圈、回到同一条铅垂线上——这就是"绕回去"的全部内容。
+
+   ⚠ 螺旋的轴是 **y（竖直）**，不是 z。第一版把圆放在 x-y 平面、让它沿 z 前进
+   （引擎注释里"几何住在 z=0 平面"的老习惯），结果是：屏幕上那道投影是**横**的，
+   而这一页从大标题到 tips 到读数用的全是"爬升 / 落下 / 正上方"这套竖直的话。
+   图与话对不上，顿悟就没了——一个说"垂直落下"的页面，画出来必须真的是垂直
+   落下。改成竖轴之后，"整数往上爬、取模是往下落、正上方那一点就是同一个字母"
+   三句话在画面上逐字成立，而且"沿轴看"变成了从正上方俯视，螺旋叠回成字母轮
+   这件事也跟着直白了。 */
+const HELIX_R = 2.0;
+/* 一整圈往上爬的高度。这个数字是**构图参数**，不只是尺寸：一开始给的是 2.9，
+   两圈就有 5.8 高、而圆的直径才 4.0，螺旋被抻得太开——读起来像一条斜着跑掉的
+   曲线而不是一圈一圈的螺旋，远端还会顶进右边的面板。压到 1.75 之后整个物体
+   大致是 4×3.5×4：两圈仍然分得清（层距 1.75 对直径 4.0），也装得进面板左边。 */
+const TURN_Y = 1.75;
+const DY = TURN_Y / CC.N;           // 每加 1 往上爬多少
+const TURNS = 2;                    // p+k 最大 25+25=50，两圈（0…52）装得下
+const U_MAX = CC.N * TURNS;
+
+/* 下标 0 落在"屏幕上方"、顺时针增大——与第一页 alphabetWheel 的排布逐字对应。
+   俯视（az=0、el→+π/2）时相机的屏幕右是 +x、屏幕上是 −z，所以 0 号要放在
+   −z 上、并朝 +x 方向转。少一个负号不会报错，只会让两页看到互为镜像的字母表，
+   而"这是同一个轮子"恰恰是这一页要说的话。 */
+function ringPt(u, h, rf) {
+  const a = u * TAU / CC.N, R = HELIX_R * (rf || 1);
+  return [R * Math.sin(a), h, -R * Math.cos(a)];
+}
+function helixPt(u) { return ringPt(u, u * DY); }
+
+const modulo = {
+  label: { en: 'Modulo 26', zh: '模 26' },
+  brand: { en: 'Unwind the wheel into a helix: the integers climb, the letters do not. Reduction mod 26 is the drop straight down.',
+           zh: '把轮子抻成螺旋：整数一直往上爬，字母没有。模 26 就是那道垂直落下。' },
+  tips: { en: 'Drag k past the top of the first turn. The rose point climbs one full turn and comes to rest directly above where it started — one turn is 26, and that is the whole of "wrapping around". Then take the "From above" view: the helix collapses back into the wheel.',
+          zh: '把 k 拖过第一圈的顶。玫红点爬完整整一圈，停在出发点的正上方——一圈就是 26，"绕回去"的全部内容就在这里。再点「俯视」：螺旋会塌回成那个字母轮。' },
+  presets: TEXT_PRESETS,
+  presetsLabel: PRESETS_LABEL,
+  views: {
+    /* 第一项必须是 iso：引擎把它当双击回正的 home，也是载入时的机位。
+       tx / tz 不是随手给的偏移：面板固定占着右边 304px，而看向点往屏幕右方向
+       挪，就等于画面整体往左挪。这一对值让两圈螺旋连同 0 / 26 / 52 三个标签
+       整个落在面板左边那片地里，而不是顶进面板底下。 */
+    iso:  { label: { en: 'Iso', zh: '等距' }, az: -0.62, el: 0.26, dist: 9.8,
+            tx: 0.62, ty: TURN_Y * 0.95, tz: 0.44 },
+    /* 顿悟视角：从正上方看下去，整条螺旋叠回同一个圆——每一个整数都盖在它的
+       余数上面。透视让上下两圈不会严格重合，所以 dist 给得比等距视角大不少，
+       越远越接近正投影（引擎没有正交模式，这是能做到的最接近的那一步）。
+       el 用 1.50 而不是 π/2：引擎把仰角夹在 1.53 以内，因为 up=(0,1,0) 在
+       正上方会与视线共线、整块画面会悄悄塌成一个点。 */
+    above: { label: { en: 'From above', zh: '俯视' }, az: 0, el: 1.50, dist: 15, ty: TURN_Y },
+    /* 侧视：螺旋摊成一条正弦，一个周期正好数得出 26 个字母。 */
+    side: { label: { en: 'Unrolled', zh: '展开' }, az: 0, el: 0.02, dist: 9.5, ty: TURN_Y * 0.9 }
+  },
+  toggles: [
+    { key: 'showHelix', label: { en: 'Helix ℤ',   zh: '螺旋 ℤ' },  color: ROSE,   checked: true },
+    { key: 'showDrop',  label: { en: 'mod 26',    zh: '取模' },     color: VIOLET, checked: true },
+    { key: 'showTurns', label: { en: 'Turns',     zh: '圈界' },     color: ORANGE, checked: true }
+  ],
+  draw: function (C) {
+    tickClock();
+    const k = currentK(), p = focusP();
+    const raw = p + k;                       // 没取模之前的整数
+    const c = CC.mod(raw, CC.N);
+
+    /* ① 地面那个圆（y=0）：ℤ/26ℤ。 */
+    const ring = [];
+    for (let i = 0; i <= 144; i++) ring.push(ringPt(i * CC.N / 144, 0));
+    E.strokePoly(C, ring, { color: 'rgba(45,212,234,.50)', width: 1.8 });
+
+    /* ② 螺旋：ℤ。 */
+    if (E.state.showHelix) {
+      const helix = [];
+      for (let i = 0; i <= U_MAX * 6; i++) helix.push(helixPt(i / 6));
+      E.strokePoly(C, helix, { color: 'rgba(251,113,133,.38)', width: 1.5 });
+    }
+
+    /* ③ 取模 = 垂直落回地面。每隔两格画一条，密到糊成一片就看不出它们是
+       互相平行、而且都是铅垂的了——"平行且铅垂"正是这道投影要说的话。 */
+    if (E.state.showDrop) {
+      for (let u = 0; u <= U_MAX; u += 2) {
+        E.line3(C, helixPt(u), ringPt(u, 0),
+                { color: 'rgba(167,139,250,.20)', width: 1, dash: [3, 4] });
+      }
+    }
+
+    /* ④ 圈界：y = 0 / 一圈高 / 两圈高，各标 0 / 26 / 52。 */
+    if (E.state.showTurns) {
+      for (let tn = 0; tn <= TURNS; tn++) {
+        const h = tn * TURN_Y;
+        if (tn > 0) {
+          const loop = [];
+          for (let i = 0; i <= 144; i++) loop.push(ringPt(i * CC.N / 144, h));
+          E.strokePoly(C, loop, { color: 'rgba(251,146,60,.22)', width: 1, dash: [4, 5] });
+        }
+        /* tn=0 那个标签与地面圆上的字母 A 挤在同一处（两者都在 y=0、角度都是
+           0 号位），只是半径差一点——投影之后差不多重叠。往上顶 12px 让它离开
+           字母所在的那一圈。 */
+        E.label3(C, ringPt(0, h, 1.30), String(tn * CC.N),
+                 { font: E.mathFont(13, 700), color: ORANGE, align: 'center',
+                   dy: tn === 0 ? -12 : -2 });
+      }
+    }
+
+    /* ⑤ 26 个字母：住在地面那个圆上，不在螺旋上。 */
+    for (let i = 0; i < CC.N; i++) {
+      const on = (i === c);
+      E.solidDot(C, ringPt(i, 0), on ? 4.5 : 2.2, on ? ROSE : 'rgba(45,212,234,.55)');
+      E.label3(C, ringPt(i, 0, 1.17), CC.ALPHABET.charAt(i),
+               { font: E.mathFont(11.5, on ? 700 : 400),
+                 color: on ? ROSE : 'rgba(159,176,200,.62)', align: 'center' });
+    }
+
+    /* ⑥ p 出发、往上爬 k 步、再落回地面。 */
+    if (raw > p) {
+      const seg = [];
+      const n = (raw - p) * 6;
+      for (let i = 0; i <= n; i++) seg.push(helixPt(p + (raw - p) * i / n));
+      E.strokePoly(C, seg, { color: ROSE, width: 3 });
+      E.arrowAt(C, helixPt(raw), helixPt(raw - 0.35), ROSE);
+    }
+    E.solidDot(C, helixPt(p), 5, CYAN);
+    E.label3(C, ringPt(p, p * DY, 1.42), 'p = ' + p,
+             { font: E.mathFont(12.5, 700), color: CYAN, align: 'center' });
+    E.solidDot(C, helixPt(raw), 5, ROSE);
+    E.label3(C, ringPt(raw, raw * DY, 1.42), 'p + k = ' + raw,
+             { font: E.mathFont(12.5, 700), color: ROSE, align: 'center' });
+
+    /* 那道铅垂落下就是取模本身，所以它用 violet，与第一页那支箭同一个颜色。 */
+    E.line3(C, helixPt(raw), ringPt(raw, 0), { color: VIOLET, width: 2, dash: [5, 4] });
+    E.label3(C, ringPt(raw, raw * DY / 2, 1.02), '≡ ' + c,
+             { font: E.mathFont(12.5, 700), color: VIOLET, align: 'center', dx: 8 });
+
+    /* ⑦ 给两个世界各写一个名字。散文用 uiFont，与数学符号区分开。
+       两句都短——它们贴在物体上下两端，长句子会横穿画面撞上右边的面板。 */
+    E.label3(C, [0, U_MAX * DY + 0.42, 0],
+             E.t({ en: 'ℤ — never reduced', zh: 'ℤ —— 没取模' }),
+             { font: E.uiFont(12), color: 'rgba(251,113,133,.85)', align: 'center' });
+    E.label3(C, [0, -0.42, 0],
+             E.t({ en: 'ℤ/26ℤ — the wheel', zh: 'ℤ/26ℤ —— 那个字母轮' }),
+             { font: E.uiFont(12), color: 'rgba(45,212,234,.9)', align: 'center' });
+  },
+  readout: function () {
+    syncIoLabels();
+    const k = currentK(), p = focusP();
+    const raw = p + k, c = CC.mod(raw, CC.N);
+    let s = '<b style="--c:var(--trace-cyan)"><i>p</i> = ' + p + '</b>' +
+      '<span class="dim"> (' + CC.ALPHABET.charAt(p) + ')</span>' +
+      '<span class="dim">   </span>' +
+      '<b style="--c:var(--trace-cyan)"><i>k</i> = ' + k + '</b><br>' +
+      '<i>p</i> + <i>k</i> = <b style="--c:var(--trace-rose)">' + raw + '</b><br>';
+    if (raw >= CC.N) {
+      s += '<b style="--c:var(--trace-violet)">' + raw + ' − 26 = ' + c + '</b>' +
+        '<span class="dim">  ' + E.t({ en: 'one full turn', zh: '整整绕了一圈' }) + '</span><br>';
+    } else {
+      s += '<span class="dim">' +
+        E.t({ en: 'still inside the first turn', zh: '还在第一圈里' }) + '</span><br>';
+    }
+    return s + '<span class="dim">' + E.t({ en: 'cipher letter ', zh: '密文字母 ' }) + '</span>' +
+      '<b style="--c:var(--trace-rose)"><i>' + CC.ALPHABET.charAt(c) + '</i></b>';
+  }
+};
+
+/* ================= 页签三：穷举 ================= */
+/* 26 个候选与它们的 χ² 只在（k, 明文）变了之后才重算。这不是为了省 CPU——
+   每帧重算也不过几千次字符操作——而是为了让"最优行"在一帧之内是一个确定的
+   事实，读数与画面读的是同一份结果，不会因为两次独立计算而出现半帧的错位。 */
+const bf = { key: null };
+
+function bruteState() {
+  const k = currentK();
+  const key = k + '|' + PLAIN;
+  if (bf.key === key) return bf;
+  const cipher = CAESAR.encrypt(PLAIN, k);
+  const cands = CAESAR.bruteForce(cipher);
+  const scores = cands.map(function (cd) { return CA.chiSquare(cd.text); });
+  const sorted = scores.slice().sort(function (a, b) { return a - b; });
+  bf.key = key;
+  bf.cipher = cipher;
+  bf.cands = cands;
+  bf.scores = scores;
+  /* bruteForceBest 对空数组返回 **null**，所以不能闭着眼睛读 .k。
+     bruteForce 恒给 26 个候选，这里其实不会是 null，但这条防守是免费的。 */
+  bf.best = CA.bruteForceBest(cands);
+  bf.minS = sorted[0];
+  bf.secondS = sorted[1];
+  /* 输入里一个字母都没有时，26 个候选的 χ² **全是 Infinity**，
+     bruteForceBest 只好返回排在最前面的那个——k=0，纯属先来后到。
+     那一行会顶着获胜行的高亮，却什么也不意味着。所以这里明确记下
+     "这次没有信号"，画面与读数都据此不给高亮。 */
+  bf.hasSignal = !!(bf.best && isFinite(bf.best.score));
+  return bf;
+}
+
+const brk = {
+  label: { en: 'Brute Force', zh: '穷举' },
+  brand: { en: 'Twenty-six shifts, all of them, at once. Score each against English letter frequency and the right one lights up by itself.',
+           zh: '26 个位移，一个不少，一次全摊开。各自与英文字母频率打分，对的那一行自己亮起来。' },
+  tips: { en: 'Switch the text to "Too short". The winning row is still the right one — but its lead over the runner-up collapses. A ranking is not yet evidence; only length makes it one.',
+          zh: '把明文换成「太短」。获胜行依然是对的——但它对第二名的领先几乎抹平。排名还不构成证据，是长度让它变成证据的。' },
+  presets: TEXT_PRESETS,
+  presetsLabel: PRESETS_LABEL,
+  views: {
+    iso: { label: { en: 'Iso', zh: '等距' }, az: -0.62, el: 0.42, dist: 9 }
+  },
+  toggles: [
+    { key: 'showChi',  label: { en: 'χ² fit',    zh: 'χ² 适配' },  color: ROSE,    checked: true },
+    { key: 'showFreq', label: { en: 'Frequency', zh: '频率对照' }, color: EMERALD, checked: true }
+  ],
+  draw: function () {
+    tickClock();
+    const vi = E.viewInfo();
+    const k = currentK();
+    const S = bruteState();
+
+    const rightPad = vi.W > 900 ? 330 : 16;
+    const availW = Math.max(240, vi.W - 40 - rightPad);
+    const top = 96, bottom = vi.H - 78;
+    const rowH = E.clamp((bottom - top) / CC.N, 12, 22);
+    const blockH = rowH * CC.N;
+    const y0 = top + Math.max(0, (bottom - top - blockH) / 2);
+
+    const gap = 10;
+    const kW = 30;
+    const barW = E.state.showChi ? E.clamp(availW * 0.17, 54, 140) : 0;
+    const textW = Math.max(110, Math.min(520, availW - kW - barW - gap * 2));
+    const rowW = kW + textW + barW + gap * 2;
+    const x0 = 24 + Math.max(0, (availW - rowW) / 2);
+    const tx = x0 + kW + gap;
+    const bx = tx + textW + gap;
+
+    const fs = Math.min(13, rowH * 0.62);
+    /* Georgia 斜体的平均字宽大约是 0.5em；26 行文本长度完全相同，所以哪怕
+       这个估计偏一点，26 行也是整齐地一起偏，读起来仍然是一个方块。 */
+    const maxChars = Math.max(6, Math.floor(textW / (fs * 0.5)));
+
+    E.chip(x0, y0 - 27, rowW, 22,
+           E.t({ en: 'all 26 shifts — this is the entire key space',
+                 zh: '26 个位移 —— 这就是全部密钥空间' }),
+           { mono: true, color: SLATE, fontSize: 11.5 });
+
+    for (let j = 0; j < CC.N; j++) {
+      const y = y0 + j * rowH;
+      const isBest = S.hasSignal && j === S.best.k;
+      const isCur = (j === k);
+      if (isBest) {
+        E.chip(x0 - 6, y + 1, rowW + 12, rowH - 2, '',
+               { fill: 'rgba(52,211,153,.13)', stroke: 'rgba(52,211,153,.55)', radius: 6 });
+      } else if (isCur) {
+        E.chip(x0 - 6, y + 1, rowW + 12, rowH - 2, '',
+               { fill: 'rgba(45,212,234,.06)', stroke: 'rgba(45,212,234,.26)', radius: 6 });
+      }
+      E.chip(x0, y, kW, rowH, String(j),
+             { color: isBest ? EMERALD : (isCur ? CYAN : DIM), fontSize: fs });
+      E.chip(tx, y, textW, rowH, clip(S.cands[j].text, maxChars),
+             { color: isBest ? EMERALD : (isCur ? BRIGHT : 'rgba(159,176,200,.55)'),
+               fontSize: fs });
+      if (E.state.showChi) {
+        /* 适配度用 最小 χ² / 本行 χ²：无量纲，最优行恒为 1，其余按比例缩短。
+           没有信号时（全是 Infinity）这里会算出 NaN，所以直接给 0——
+           26 根等长的柱子会假装成"势均力敌"，那比空着更容易骗人。 */
+        const fit = S.hasSignal && isFinite(S.scores[j]) ? S.minS / S.scores[j] : 0;
+        E.chip(bx, y + 2.5, Math.max(1, barW * fit), Math.max(2, rowH - 5), '',
+               { fill: isBest ? 'rgba(52,211,153,.85)' : 'rgba(251,113,133,.42)', radius: 3 });
+      }
+    }
+
+    if (!S.hasSignal) {
+      E.chip(x0, y0 + blockH + 6, rowW, 26,
+             E.t({ en: 'no letters — all 26 rows tie at χ² = ∞, so nothing is highlighted',
+                   zh: '没有字母 —— 26 行的 χ² 全是 ∞，所以这里不给任何高亮' }),
+             { mono: true, color: ORANGE, fontSize: 11.5,
+               fill: 'rgba(251,146,60,.08)', stroke: 'rgba(251,146,60,.38)' });
+    }
+
+    /* 打分的依据本身：获胜行的字母分布 vs 英文期望分布。 */
+    if (E.state.showFreq && S.hasSignal) {
+      const cw = Math.min(340, vi.W - rightPad - (bx + barW) - 56);
+      if (cw >= 260) {
+        const fx = bx + barW + 36, fy = vi.H * 0.5 - 48;
+        /* 量程写死 0.16，不用每帧的最大值——不锁的话观测频率一变，
+           26 根柱子会整体跳一次高度，看起来像是数据在抖。 */
+        E.barChart(fx, fy, cw, 96, CA.ENGLISH_FREQ, { max: 0.16, color: 'rgba(159,176,200,.30)' });
+        E.barChart(fx, fy, cw, 96, CA.letterFrequency(S.best.text),
+                   { max: 0.16, color: 'rgba(52,211,153,.80)',
+                     labels: CC.ALPHABET.split(''), labelSize: 9,
+                     labelColor: 'rgba(159,176,200,.55)' });
+        E.chip(fx, fy - 30, cw, 22,
+               E.t({ en: 'winning row vs English  ·  grey = expected',
+                     zh: '获胜行 vs 英文频率  ·  灰色 = 期望' }),
+               { mono: true, color: EMERALD, fontSize: 11 });
+      }
+    }
+  },
+  readout: function () {
+    syncIoLabels();
+    const S = bruteState();
+    let s = E.t({ en: 'cipher = encrypt(plain, ', zh: '密文 = 加密(明文, ' }) +
+      '<b style="--c:var(--trace-cyan)"><i>k</i> = ' + currentK() + '</b>)<br>';
+    if (!S.hasSignal) {
+      return s + '<b style="--c:var(--trace-orange)">' +
+        E.t({ en: 'no letters — χ² = ∞ for all 26, no winner',
+              zh: '没有字母 —— 26 行 χ² 全是 ∞，不产生获胜者' }) + '</b>';
+    }
+    const n = CC.letters(PLAIN).length;
+    s += E.t({ en: 'best ', zh: '最优 ' }) +
+      '<b style="--c:var(--trace-emerald)"><i>k</i> = ' + S.best.k + '</b>' +
+      '<span class="dim">   χ² = ' + E.fmt(S.best.score) + '</span><br>' +
+      '<span class="dim">' + E.t({ en: 'lead over runner-up ', zh: '对第二名的领先 ' }) + '</span>' +
+      '<b style="--c:var(--trace-emerald)">×' + E.fmt(S.secondS / S.minS) + '</b>' +
+      '<span class="dim">   ' + n + E.t({ en: ' letters', zh: ' 个字母' }) + '</span><br>' +
+      '<span class="dim">' + esc(clip(S.best.text, 72)) + '</span>';
+    if (ACTIVE_NOTE) s += '<br><span class="dim">' + esc(E.t(ACTIVE_NOTE)) + '</span>';
+    return s;
+  }
+};
+
+var SCENES = { wheel: wheel, modulo: modulo, break: brk };
+
+/* #ioHost 必须在 init() 之前搭好：引擎的 buildPresets() 会在建面板时就选中
+   第一个预置并调它的 onSelect，而那个回调要往 textarea 里写字。 */
+buildIO();
+
 E.init({ canvas: document.getElementById('c'), SCENES: SCENES, PARAMS: PARAMS,
          TOOL: TOOL, VERSION: VERSION });
+
+/* init() 之后滑杆才存在。把它接成时间轴的一个视图：滑杆 → seek，
+   时间轴 → 回写滑杆（syncK）。引擎自己的 input 监听先跑（它在 buildParams
+   里就挂上了），把 state.k 写成滑杆值；随后这一条把时间轴 seek 到同一个数，
+   于是下一次 syncK() 看到两边相等、什么也不做——不会来回打架。 */
+kInput = document.querySelector('#paramsHost input[type=range]');
+if (kInput) {
+  kValEl = kInput.parentNode.querySelector('.val');
+  kInput.addEventListener('input', function () {
+    TL.seek(parseInt(kInput.value, 10) || 0);
+  });
+  /* 让时间轴接受滑杆声明的默认值（k=3），而不是反过来把 k 打回 0。 */
+  TL.seek(parseInt(kInput.value, 10) || 0);
+}
 </script>
 </body>
 </html>
