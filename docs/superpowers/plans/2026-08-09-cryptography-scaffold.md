@@ -526,9 +526,16 @@ T.eq(A.letterFrequency('aab')[0], 2 / 3, 'letterFrequency 归一化');
 T.eq(A.letterFrequency('').reduce(function (s, x) { return s + x; }, 0), 0,
      'letterFrequency 空串全 0，不产生 NaN');
 
-/* ---- χ² ---- */
-T.eq(A.chiSquare(''), Infinity, '无字母时 χ² 是 Infinity（永远排在最后）');
-T.eq(A.chiSquare('!!! 123'), Infinity, '全非字母同上');
+/* ---- χ² ----
+   这两条**必须**用 T.ok + === 而不是 T.eq。T.eq 是 JSON.stringify 比对，
+   而 JSON.stringify(Infinity)、JSON.stringify(NaN)、JSON.stringify(null)
+   三者都是字符串 "null"——用 T.eq 写出来的 `eq(chiSquare(''), Infinity)`
+   在实现返回 NaN 时**照样是绿的**，而返回 NaN 恰好会让 Array.sort 的比较
+   全部为 false、把这个候选留在原地，第三页的高亮行就选错了。
+   一条分不出 Infinity 与 NaN 的断言，守不住它唯一要守的那件事。 */
+T.ok(A.chiSquare('') === Infinity, '无字母时 χ² 是 Infinity（永远排在最后）');
+T.ok(A.chiSquare('!!! 123') === Infinity, '全非字母同上');
+T.ok(!Number.isNaN(A.chiSquare('hello world')), '正常输入不产生 NaN');
 
 /* 核心性质：一段真英文的 χ² 必须低于它自己的任何非零位移密文。
    这就是第三页"穷举"能自动挑出正确答案的全部依据；它若不成立，
@@ -1245,13 +1252,8 @@ git commit -m "feat(crypto): 引擎 fork（保留 3D）+ screen-space 2D 图元�
 
 - [ ] **Step 3: 写测试 `examples.test.js`**
 
-```javascript
-'use strict';
-const T = require('./_test.js') || null;   // 占位，下一行才是真的
-```
-
-上面那行是错的，**不要照抄**——`_test.js` 在 `core/` 下不在 `examples/` 下。
-正确的测试文件是：
+注意 `_test.js` 在 `core/` 下、不在 `examples/` 下，所以 require 路径要跨一层目录。
+（这是 Task 8 的出站引用门唯一放行 `*.test.js` 的原因——测试文件永远不进 html。）
 
 ```javascript
 'use strict';
