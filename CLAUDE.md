@@ -13,6 +13,7 @@ A collection of **single-file, zero-dependency HTML math/physics visualization t
 - `app.html` — the navigation shell: a collapsible sidebar plus a main content area that loads a tool in an **iframe** (iframe, not injection: every tool is a whole page with its own top-level `state`/`cam`, full-screen canvas and keyboard shortcuts, so two of them in one document would collide). It reads `tools.json` at runtime when served, and falls back to its own embedded minimal list (id / file / cat / accent / title / kicker) when opened from `file://`. That fallback list is **generated, not hand-maintained** — see below. Tools themselves are never modified and stay independently openable.
 - `archive/` — retired tools that are no longer registered or linked from the landing page (e.g. `trig-essence-3d.html`, the original hand-written tool the design system was extracted from).
 - `scripts/sync_registry.py` — propagates `tools.json` into its mirrors (see below).
+- `chess/` and `cryptography/` — two **independent subprojects**, each with its own registry, core modules, navigation shell and validation gate. Everything above this line describes the maths collection only; see "Subprojects" below before touching either.
 
 ## Registry sync is automated
 
@@ -34,6 +35,68 @@ python3 scripts/sync_registry.py --check  # verify only; exit 1 if out of sync
 
 - `.githooks/pre-commit` runs it on any commit touching `tools.json` / `app.html` / `index.html`, re-stages a regenerated `app.html`, and blocks the commit if `index.html` still lags. Enable once per clone: `git config core.hooksPath .githooks` (bypass with `--no-verify`).
 - `.github/workflows/registry-sync.yml` re-runs `--check` on every push and PR, plus the `node --check` syntax gate over `app.html`, `index.html` and every tool — so a clone without the hook configured still can't merge drift.
+
+## Subprojects — `chess/` and `cryptography/`
+
+> **MathViz owns the ecosystem; each subproject owns itself.**
+
+`chess/` and `cryptography/` sit beside the maths collection, not inside it. They share the
+repository, the deployment, the design philosophy and the single-file/bilingual rules — and share
+nothing else. Both have the same shape:
+
+```
+<sub>/app.html  <sub>/index.html  <sub>/<sub>-tools.json  core/  tools/  scripts/
+```
+
+**Registry isolation is a hard boundary.** Three registries, mutually disjoint:
+`tools.json` → `outputs/*.html`, `chess/chess-tools.json` → `chess/tools/*.html`,
+`cryptography/cryptography-tools.json` → `cryptography/tools/*.html`.
+**Never register a chess or cryptography tool in the root `tools.json`**, and never point a
+subproject registry at `../outputs/`. `scripts/sync_registry.py` does not govern subprojects; each
+has its own gate, run by `.githooks/pre-commit` and `.github/workflows/registry-sync.yml`:
+
+```bash
+python3 chess/scripts/check.py
+python3 cryptography/scripts/check.py
+```
+
+**Editing model (both).** `core/**/*.js` is the single edit source; `scripts/inline_core.py`
+injects it into the `/* >>> GENERATED:X */ … /* <<< GENERATED:X */` regions of `tools/*.html` so
+each page stays self-contained and `file://`-openable. **Never hand-edit a GENERATED region** —
+change `core/`, then re-run the script. Each subproject also owns its i18n keys
+(`chess-lang` / `chess-nav`, `cryptography-lang` / `cryptography-nav`) and defaults to **English**,
+unlike the maths tools' Chinese default.
+
+### cryptography/ specifics
+
+Chapters are a fixed closed set — 1 古典密码 · 2 机械密码 · 3 密码分析 · 4 现代密码学 ·
+5 量子时代密码学; both `app.html` and `index.html` group by `chapter` and their `CHAPTER_LABELS`
+must stay byte-identical. Accents are the closed set cyan / rose / violet / emerald / orange.
+New tools are copied from `cryptography/tools/_skeleton.html` — the template opts out of algorithms
+with `GENERATED:ALGOS none` and *does* participate in inlining; an **empty** list is a hard error on
+purpose, because empty is the shape a slip takes (write the markers, fill them in later).
+Authoring workflow: `.claude/skills/crypto-viz-tool/SKILL.md`. Architecture: `docs/superpowers/cryptography.md`.
+
+Three invariants `check.py` enforces that you will not guess, each with an incident behind it:
+
+1. **Portability.** No file under `core/`, `examples/` or `tools/` may contain a parent-directory
+   relative path. The whole `cryptography/` directory must still run after being copied elsewhere;
+   the only outward references are the single `PARENT_HOME` constant in `app.html` / `index.html`
+   (the "back to MathViz" link, which hides itself when the parent is absent). This decays
+   silently otherwise — one stray `../outputs/foo.js` breaks nothing until someone moves the folder.
+2. **No literal `<` + `script` + `>` sequence in a `core/` or `examples/` `.js` file, including
+   inside comments.** The repo's `awk '/<script>/{f=1;next}…'` extraction recipe silently drops such
+   lines, so the syntax gate would be checking different bytes than the browser runs; paired with a
+   `<` + `!--` it can flip the HTML tokenizer and swallow the page. One was inherited from chess.
+3. **`CRYPTO-CORE` must be inlined before `CRYPTANALYSIS` and `ALGOS`.** Those modules capture
+   `root.CryptoCore` at load, so the wrong order gives a page that loads clean and then dies on the
+   user's first interaction. Verified: with the order swapped, the inline gate, the syntax gate and
+   the algorithm-evaluation gate are all green — only the order gate is red.
+
+A related trap worth knowing when adding gates: `node -e` **and** `node` reading a script on stdin
+both define `module` and `require`, so a UMD module tested that way takes its **node** branch. To
+exercise the browser branch you need `vm` with a bare context. A gate that tests the wrong branch is
+worse than no gate — it advertises coverage it does not have.
 
 ## Commands
 
