@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Cryptography teaching tools · 密码学教学工具 —— single-file interactive visualizations of ciphers, from the alphabet wheel to the algorithms your browser is running right now.">
+<title>Cryptography Teaching Tools · 密码学教学工具</title>
+<!-- 子项目导航页（画廊），同时是 cryptography/app.html 的 home 页。
+     不内联整个 VizEngine —— 这是一张落地页，不是工具本身。只从
+     cryptography/core/viz-engine.js 抄了 resolveLang() / t() 两个函数（见下方脚本），
+     语义必须与引擎一致：存储键 cryptography-lang，两处兜底都是 en 不是 zh。
+     结构 fork 自 chess/index.html（2026-08-09）；子项目之间不共享代码文件，
+     这是「整个 cryptography 目录可以单独搬走」的前提，往上游同步改动要手工搬。
+     视觉语言沿用 design-system/math-viz-starter.html 的设计令牌，
+     卡片网格布局沿用主站 index.html 的写法（见该文件的 .card / .grid 规则）。 -->
+<style>
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  /* 调色板之外的第六个值，**不是给任何工具用的**：safeAccent() 认不出的 accent
+     退到它。刻意刺眼、刻意不属于任何工具——见下面 safeAccent 处的注释。
+     与 cryptography/app.html 的 :root 逐字同源。 */
+  --trace-unpaired:#ff2fd0;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;min-height:100%}
+body{background:radial-gradient(ellipse 90% 55% at 50% 18%, var(--bg-mid), var(--bg-deep) 70%);
+  color:var(--ui-bright);font-family:var(--font-cn);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+
+.wrap{position:relative;max-width:1000px;margin:0 auto;
+  padding:clamp(40px,8vh,96px) clamp(20px,5vw,48px) 56px}
+
+.back{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:rgba(159,176,200,.75);
+  text-decoration:none;margin-bottom:24px;border-bottom:1px solid transparent;transition:color .15s,border-color .15s}
+.back:hover{color:#bfefff;border-color:rgba(45,212,234,.5)}
+.back:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:2px}
+
+.eyebrow-row{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px}
+.eyebrow{font-size:11px;letter-spacing:.24em;color:rgba(159,176,200,.72);text-transform:uppercase}
+.lang{font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;color:rgba(159,176,200,.8);
+  background:rgba(13,20,36,.6);border:1px solid var(--panel-line);border-radius:7px;
+  padding:5px 11px;cursor:pointer;transition:border-color .15s,color .15s}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:2px}
+
+h1{margin:0;font-family:var(--font-math);font-weight:600;font-size:clamp(30px,5.5vw,48px);
+  letter-spacing:.05em;color:#eef3fa;text-shadow:0 2px 28px rgba(45,212,234,.2)}
+.lead{margin:16px 0 0;max-width:62ch;font-size:clamp(14px,2.1vw,16px);line-height:1.7;color:rgba(159,176,200,.9)}
+
+.sect{display:flex;align-items:baseline;gap:12px;margin:44px 0 16px}
+.sect .lbl{font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:rgba(159,176,200,.7)}
+.sect .rule{flex:1;height:1px;background:linear-gradient(90deg,var(--panel-line),transparent)}
+.sect .count{font-family:var(--font-mono);font-size:11px;color:rgba(159,176,200,.5)}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(272px,1fr));gap:16px}
+.card{position:relative;display:flex;flex-direction:column;gap:11px;
+  padding:20px 20px 18px;border-radius:16px;overflow:hidden;
+  background:var(--panel-bg);border:1px solid var(--panel-line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 18px 50px rgba(0,0,0,.28);text-decoration:none;color:inherit;
+  transition:border-color .18s,transform .18s,box-shadow .18s}
+.card::before{content:"";position:absolute;left:0;top:0;height:2px;width:100%;
+  background:linear-gradient(90deg,var(--c),transparent 72%);opacity:.75}
+.card:hover{border-color:rgba(45,212,234,.5);transform:translateY(-3px);box-shadow:0 26px 62px rgba(0,0,0,.42)}
+.card:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:2px}
+.k{display:flex;align-items:center;gap:8px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--c);box-shadow:0 0 10px var(--c);flex:none}
+.kicker{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:rgba(159,176,200,.7)}
+.card h2{margin:2px 0 0;font-family:var(--font-math);font-weight:600;font-size:19px;letter-spacing:.02em;color:#eaf1fb}
+.card p{margin:0;font-size:13px;line-height:1.65;color:rgba(159,176,200,.82)}
+.foot{display:flex;align-items:center;justify-content:space-between;margin-top:auto;padding-top:6px}
+.tag{font-family:var(--font-mono);font-size:10.5px;color:rgba(159,176,200,.6)}
+.open{font-size:12.5px;color:#9be8f7;display:inline-flex;align-items:center;gap:5px}
+.arw{transition:transform .18s}
+.card:hover .arw{transform:translateX(3px)}
+
+/* 上游 chess/index.html 在这里还有一组 .ghost 规则，给「阶段 N 敬请期待」的
+   占位卡片用。本页没有占位卡片（见下方 render() 上的注释：第 2–5 章全都还没
+   落地，只画其中一张比一张不画更像 bug），所以那组规则一并没有搬过来——
+   没有使用者的 CSS 就是死代码。以后真要五章全部占位时，连卡片带样式一起加。 */
+
+footer{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;
+  margin-top:48px;padding-top:20px;border-top:1px solid var(--panel-line);
+  font-size:12px;color:rgba(159,176,200,.6)}
+
+@media (max-width:520px){ h1{font-size:30px} }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <!-- href 是占位的 '#'：真实地址由 wireParentLink() 在运行时写入（见脚本里的
+       PARENT_HOME 一节）。这一页的卡片本来就全靠 JS 渲染，无 JS 兜底不成立。 -->
+  <a class="back" href="#" id="backLink">← MathViz</a>
+
+  <div class="eyebrow-row">
+    <div class="eyebrow" id="eyebrow">Cryptography</div>
+    <button class="lang" id="btnLang" type="button" title="Switch language / 切换语言">中</button>
+  </div>
+  <h1 id="h1">Cryptography Teaching Tools</h1>
+  <p class="lead" id="lead"></p>
+
+  <div id="chapters"></div>
+
+  <footer>
+    <span id="footLeft"></span>
+  </footer>
+</main>
+
+<script>
+'use strict';
+
+/* ================= i18n（抄自 cryptography/core/viz-engine.js，约 15 行） ===========
+   语义必须与引擎一致：存储键 cryptography-lang；resolveLang() 与 t() 的兜底都是 en，
+   不是 zh —— 否则缺 key 时英文页面会突然冒出中文。本页不需要整个引擎，
+   所以不 fetch/inline viz-engine.js，只抄这两个函数。
+   存储键绝不能沿用别的子项目的：两个子项目的语言状态各自独立，共用一个键会让
+   在那边切成中文的动作把这边也一起切了。 */
+var LANG_KEY = 'cryptography-lang';
+function resolveLang() {
+  try {
+    var q = new URLSearchParams(location.search).get('lang');
+    if (q === 'en' || q === 'zh') return q;
+    var s = localStorage.getItem(LANG_KEY);
+    if (s === 'en' || s === 'zh') return s;
+  } catch (e) { /* file:// 下 localStorage 可能不可用 */ }
+  return 'en';                         // 子项目默认英文
+}
+var LANG = resolveLang();
+function t(s) { return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.en) : s; }
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/* ================= 唯一的出站引用 =================
+   这是整个 cryptography 子树里唯一一处指向父目录的路径（另一处在 app.html，
+   同样只有一处）。它的存在是为了「返回 MathViz」这一个链接；除它之外，
+   core、tools、examples 三个目录里不许出现任何父目录形式的相对路径——
+   check.py 的 outbound_ref_check() 逐文件数着这件事。
+
+   为什么要数：设计约束是「把 cryptography 整个目录复制到任何别处仍可用」。
+   一条随手写下的越界相对路径会在**别人搬走目录的那一刻**才失效，而那时没有
+   任何东西会报警。把它变成一条提交前就会响的断言。
+
+   自愈：http(s) 下对这个 URL 发一次 HEAD 探测，404/网络失败就把链接藏掉。
+   file:// 下 fetch 探测本来就会失败（同源限制），无法区分「文件不在」与
+   「协议不让探」，所以那种情况保持显示——file:// 的使用者基本都在仓库里。 */
+var PARENT_HOME = '../index.html';
+
+function wireParentLink(el) {
+  if (!el) return;
+  el.href = PARENT_HOME + '?lang=' + LANG;
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+  try {
+    fetch(PARENT_HOME, { method: 'HEAD' }).then(function (r) {
+      if (!r.ok) el.style.display = 'none';
+    })['catch'](function () { el.style.display = 'none'; });
+  } catch (e) { el.style.display = 'none'; }
+}
+
+/* ================= 回退列表 =================
+   运行时优先 fetch('cryptography-tools.json')；file:// 下 fetch 会失败（同源
+   限制），这里内嵌一份最小副本静默回落 —— 与主站 app.html 的做法一致（读
+   app.html 的 GENERATED:TOOLS 段：id / file / cat|accent / title / kicker，
+   本页同理，只是把 cat 换成子项目自己的 chapter）。
+   这份副本与 cryptography/app.html 里的那份都要跟注册表同步，由
+   cryptography/scripts/check.py 的 fallback_check() 逐页比对 id 集合来保证。 */
+var FALLBACK = [
+  {
+    id: 'crypto-caesar', file: 'tools/crypto-caesar.html', accent: 'cyan', chapter: 1,
+    kicker: { en: 'Classical Cryptography', zh: '古典密码' },
+    title: { en: 'Caesar Cipher', zh: '凯撒密码' },
+    tag: { en: 'alphabet wheel · modulo 26 · brute force · chi-square',
+           zh: '字母轮 · 模 26 · 穷举 · 卡方' }
+  }
+];
+var TOOLS = FALLBACK;
+
+/* 章节标签。app.html 与 index.html 各存一份、必须逐条相同——分组不是
+   「开发阶段」而是真正的知识章节，两页共用同一套排序（规范 §10）。
+
+   五章是固定的，不像 chess 的阶段那样会往后长，所以 chapterLabel 末尾那个
+   兜底分支**不是**扩展机制：越界的 chapter 该被 check.py 的 chapter ∈ 1–5
+   那道门在提交前拦住，而不是靠页面长出一个叫「第 7 章」的无名栏目。留着它
+   只是为了在真漏过去时给出「第 7 章」而不是 undefined —— 一个看得出是错的
+   标题，好过一个看起来像正常空白的标题。 */
+var CHAPTER_LABELS = {
+  1: { en: 'Chapter 1 · Classical Cryptography', zh: '第 1 章 · 古典密码' },
+  2: { en: 'Chapter 2 · Mechanical Cryptography', zh: '第 2 章 · 机械密码' },
+  3: { en: 'Chapter 3 · Cryptanalysis', zh: '第 3 章 · 密码分析' },
+  4: { en: 'Chapter 4 · Modern Cryptography', zh: '第 4 章 · 现代密码学' },
+  5: { en: 'Chapter 5 · Quantum-Era Cryptography', zh: '第 5 章 · 量子时代密码学' }
+};
+function chapterLabel(n) { return CHAPTER_LABELS[n] || { en: 'Chapter ' + n, zh: '第 ' + n + ' 章' }; }
+
+var L = {
+  title: { en: 'Cryptography Teaching Tools · MathViz', zh: '密码学教学工具 · MathViz' },
+  eyebrow: { en: 'Cryptography', zh: '密码学' },
+  h1: { en: 'Cryptography Teaching Tools', zh: '密码学教学工具' },
+  lead: {
+    en: 'Single-file interactive tools for cryptography — built to be clicked through, not read about. Five chapters: the classical ciphers you can break by hand, the machines that mechanised them, the analysis that reads a message without ever holding the key, the modern algorithms your browser is running right now, and what quantum mechanics does to all of it. Start with Caesar: three views of one shift, and the moment it becomes obvious that 26 keys were never enough.',
+    zh: '密码学的单文件交互工具，是拿来点着学的，不是拿来读的。五章：先是手算就能破的古典密码，再是把它们机械化的机器，然后是不碰钥匙也能读出消息的密码分析，接着是此刻你的浏览器正在跑的现代算法，最后是量子力学对这一切做了什么。从凯撒开始——同一个位移的三种看法，以及「26 把钥匙从来就不够」这件事变得显然的那一刻。'
+  },
+  footLeft: { en: 'Single file · Zero dependencies · Works offline', zh: '单文件 · 零依赖 · 可离线' },
+  open: { en: 'Open', zh: '打开' },
+  back: { en: '← MathViz', zh: '← MathViz' }
+};
+
+/* accent 白名单——不能靠 esc() 兜底：accent 被拼进 style="" 属性值内部
+   （--c:var(--trace-<accent>)），esc() 只转义 & < > "，一个像
+   `x); background:url(//evil/leak?` 这样的 CSS 层面 payload 一个都不含，
+   会原样穿透进 style 并被当成任意 CSS 声明执行。 cryptography-tools.json 今天是
+   仓库自控内容，但它是运行时 fetch 进来的，所以必须在插值点就收紧成闭集。
+   以下两行与 cryptography/app.html 的同名两行逐字同源，改一处就要改另一处——
+   只在一页收紧，另一页照样把 accent 原样插进 style。
+
+   ⚠ 这一页的**失效模式**与 app.html 那页不同，别照抄那边的结论。app.html 的注释
+   讲的是上游 chess 子项目的那次事故：「退路曾经是 cyan，工具⑤ 用掉 cyan 之后哨兵
+   失效、拼错的条目会显示成正常的青色」；这一页在没有白名单时根本走不到「套错颜色」
+   那一步：一个拼错的 accent（比如 cyaan）产生的是 var(--trace-cyaan)，
+   那个变量没有定义，于是 --c 这条声明
+   invalid at computed-value time、取到 guaranteed-invalid 值，吃它的 .dot 背景与
+   .card::before 渐变一起失效——卡片是**没有颜色**，而不是悄悄套错颜色。
+   所以在这一页，白名单挡的是属性值逃逸；`--trace-unpaired` 那块洋红是顺带把
+   「没配对」从「没颜色」提升成一眼可见的信号（本文件 :root 里定义了这个 token，
+   否则退路会退到一个未定义的变量，等于什么都没退）。
+   要维持这条不变量只需一件事：给新工具选 accent 时只能从 ACCENTS 的五个键里选，
+   不许把 unpaired 加进这张表。 */
+var ACCENTS = { cyan: 1, rose: 1, violet: 1, emerald: 1, orange: 1 };
+function safeAccent(a) { return ACCENTS.hasOwnProperty(a) ? a : 'unpaired'; }
+
+function render() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.title = t(L.title);
+  document.getElementById('eyebrow').textContent = t(L.eyebrow);
+  document.getElementById('h1').textContent = t(L.h1);
+  document.getElementById('lead').textContent = t(L.lead);
+  document.getElementById('footLeft').textContent = t(L.footLeft);
+  document.getElementById('backLink').textContent = t(L.back);
+  /* 上游 chess/index.html 在这里只改文案、href 是写死在 HTML 里的静态属性——
+     所以本页没有「一行 href 赋值」可改，是新加的一处调用。放进 render() 而不是
+     只在启动时调一次：链接要带上当前的 ?lang=，而 render() 正是语言变化后
+     重新跑的那个函数。 */
+  wireParentLink(document.getElementById('backLink'));
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+
+  function kickerText(d) {
+    return LANG === 'zh' ? (t(d.kicker) + ' · ' + (d.kicker.en || '')) : t(d.kicker);
+  }
+  /* 注册表字段全部经 esc() 才进 HTML，accent 另走 safeAccent()（见上面的注释）。
+     LANG 不用转义：resolveLang() 只会给出 'en' / 'zh' 两个字面量。 */
+  function card(d) {
+    var descHtml = d.desc ? '<p>' + esc(t(d.desc)) + '</p>' : '';
+    return '<a class="card" style="--c:var(--trace-' + safeAccent(d.accent) + ')"' +
+      ' href="' + esc(d.file) + '?lang=' + LANG + '">' +
+      '<div class="k"><span class="dot"></span><span class="kicker">' + esc(kickerText(d)) + '</span></div>' +
+      '<h2>' + esc(t(d.title)) + '</h2>' + descHtml +
+      '<div class="foot"><span class="tag">' + esc(t(d.tag)) + '</span>' +
+      '<span class="open">' + esc(t(L.open)) + '<span class="arw">→</span></span></div>' +
+    '</a>';
+  }
+
+  /* 只画注册表里真出现过的章节，缺号不留空栏。
+     上游 chess/index.html 在这里还有一段「阶段 2 未落地就画一张 ghost 占位卡片」
+     的代码（连同 L.soonKicker / L.soonDesc 两条文案）。**没有搬过来**：那是它
+     阶段 2 缺位时的临时占位，照搬到这里会凭空长出一张「第 2 章 敬请期待」的卡片，
+     而第 2–5 章此刻全都没有落地——要么五张 ghost 全有、要么一张都没有；只画其中
+     一张更像 bug。这里选一张都没有。 */
+  var chapters = [];
+  TOOLS.forEach(function (d) {
+    var p = d.chapter || 1;
+    if (chapters.indexOf(p) < 0) chapters.push(p);
+  });
+  chapters.sort(function (a, b) { return a - b; });
+
+  var html = '';
+  chapters.forEach(function (p) {
+    var items = TOOLS.filter(function (d) { return (d.chapter || 1) === p; });
+    html += '<div class="sect"><span class="lbl">' + esc(t(chapterLabel(p))) + '</span><span class="rule"></span>' +
+      '<span class="count">' + items.length + '</span></div>' +
+      '<div class="grid">' + items.map(card).join('') + '</div>';
+  });
+  document.getElementById('chapters').innerHTML = html;
+}
+
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  try { var u = new URL(location.href); u.searchParams.set('lang', l); history.replaceState(null, '', u); } catch (e) {}
+  render();
+}
+document.getElementById('btnLang').addEventListener('click', function () {
+  setLang(LANG === 'zh' ? 'en' : 'zh');
+});
+
+render();
+
+/* 优先取 cryptography-tools.json（有服务器时永远最新）；file:// 或离线时 fetch
+   失败，静默沿用上面内嵌的 FALLBACK，不弹错误、不阻塞渲染（上面已经先渲染过一次）。 */
+(function () {
+  try {
+    fetch('cryptography-tools.json', { cache: 'no-cache' }).then(function (r) {
+      return r.ok ? r.json() : null;
+    }).then(function (j) {
+      if (j && j.tools && j.tools.length) { TOOLS = j.tools; render(); }
+    })['catch'](function () {});
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>
