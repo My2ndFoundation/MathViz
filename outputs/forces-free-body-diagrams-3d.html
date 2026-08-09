@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.1">
+<meta name="tool-version" content="1.2.0">
 <meta name="engine-version" content="1.0.0">
 <title>力、约束与自由体图</title>
 <!-- ============================================================
@@ -13,6 +13,11 @@
   引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
 
   版本记录（changelog，新→旧）：
+    1.2.0  2026-08-09  接入金光闪（§4.7）：斜面页「静摩擦被拉爆、方块开始下滑」、
+                       支持力页「R 压到 0、方块脱离表面」、静摩擦页「需求顶穿 μR」三处上升沿全屏一闪；
+                       三处判据一律走页面自己的布尔状态转移（fStat / lift / statc），不借读数精度
+                       （静摩擦页的 0.01 N 读数窗口比一帧的 0.083 N 还窄六倍，借了一次都命不中）；
+                       连接系统页有意不加，注释写明理由（T、a 逐帧成立的恒等式，且临界是本工具第三遍）
     1.1.1  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
     1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
     1.0.1  2026-07-31  各场景声明 params，为后续引擎升级（统一落地 syncParamVisibility）做准备；
@@ -501,6 +506,27 @@ const SCENES = {
       label3(C, R2([-1.9, 1.9, 0]), rot ? t({ zh: '斜面系：x 沿面 · y 垂面', en: 'Incline frame: x along · y normal' })
                                         : t({ zh: '世界系：x 水平 · y 竖直', en: 'World frame: x horizontal · y vertical' }),
         { size: 11, color: 'rgba(45,212,234,.75)', align: 'left' });
+      /* 金光闪（§4.7）：静摩擦被拉爆的那一瞬 —— 方块从「贴着斜面不动」翻成「沿面下滑」。
+         tips 末句逐字要人看的就是这件事（「把 P 拖到 0，看物体何时滑下」）。
+         判据借的是这一页自己的布尔 fStat（v₁ = 0 且 |need| ≤ cap 且没脱离）：
+         同一个 fStat 决定画不画「临界 · 即将滑动」那块琥珀标签、读数印「静止」还是
+         「沿面下滑」—— 闪的和写的是同一件事。**故意不借读数精度**：
+         这是一次状态转移，不是一个数逼近另一个数，「差多少」根本不存在，
+         给它配一个 0.01 的数值窗口只会凭空造出一条假的边界。
+         q.cap > 0.01 是护栏：μ = 0 时 cap ≡ 0、fStat 恒假，那种设置下物体从头滑到尾，
+         没有「终于滑动」可言。
+         state.t > 0.5 是开局护栏：P 与 μ 跨页签共享，「静摩擦极限」页的驱动会把 P 留在
+         最高 25 N 上，切回本页首帧就已经是滑动态 —— 没有这条，重置后先白闪一次
+         （flashOn 初值 undefined，首次为真即上升沿）。t < 0.5 s 时 θ < 3°，恒为静止，
+         护栏在默认参数下不遮任何真命中。
+         实测（默认 m₁ = 1.5 kg、g = 9.8 ⇒ mg = 14.7 N，P = 6 N、β = 0、μ = 0.45，
+         inc 由 drive 以 10 s 往返扫 0 → 60°）：60 s 六次，t = 3.85 / 13.85 / 23.85 / …，
+         每次都落在 **θ = 46.2°** —— 解 14.7 sinθ − 6 = 0.45 · 14.7 cosθ 得 46.08°，
+         一个驱动往返正好过一次。把 P 拖到 0，命中点退化成课本里的 arctan μ = 24.23°
+         （实测在 θ = 24.4° 那一帧打点，60 s 仍是六次）。
+         锚点取方块中心 B：滑动就是从那里开始的。 */
+      goldHit('incline', state.t > 0.5 && !fStat && !q.lift && q.cap > 0.01);
+      drawGoldFlash(C, B);
     },
     readout() {
       if (state._pt == null) initModels();
@@ -604,6 +630,30 @@ const SCENES = {
         label3(C, [0, Math.min(KH * N2, HCLIP) + 0.3, 1.2], 'R = (mg+Q)·cosθ',
           { font: 'italic 13px ' + FONT_MATH, color: '#a78bfa', align: 'left' });
       }
+      /* 金光闪（§4.7）：R 被压到 0，方块脱离表面 —— tips 逐字写的
+         「把 Q 拉到足够负，R 触底为 0，物体脱离表面」。
+         判据借的是这一页自己的布尔 lift（mg + Q ≤ 0）：同一个 lift 让方块浮起 0.42、
+         打出「脱离表面（R = 0）」那块标签、把读数从「贴面静止」翻成「脱离表面」。
+         同样是布尔状态转移，同样不借读数精度（理由见「斜面与分解」页）。
+         实测（默认 m₁ = 1.5 kg、g = 9.8 ⇒ mg = 14.7 N，θ = 28°，Q 由 drive 以 10 s
+         往返扫 −15 → 15 N）：60 s 六次，t = 9.95 / 19.95 / 29.95 / …，
+         命中值 **Q = −14.70 N**，正是 mg + Q = 0 的那一个解。
+
+         **这一页是本工具最脆的一处，两条都得写下来：**
+         ① 命中带只有 0.3 N 宽。Q 的量程下端是 −15，而命中要 Q ≤ −14.7；
+            驱动以 6 N/s 扫过去，这一带只有约 3 帧（0.05 s），且几乎贴着 pingpong 的
+            折返端点。它仍然是「数学值」而不是「扫到头了」：把 mg 改掉，命中点跟着走
+            （判据是 mg + Q = 0），而端点 −15 与本页讲的内容无关。
+         ② 它靠 mg < 15 N 这个巧合。m₁ 调到 1.6 kg（mg = 15.68 N）或 g 调到 10.5
+            （mg = 15.75 N），Q 的下限就再也压不过 mg —— 这一页**一次都不闪**
+            （两组各实测 60 s，均为 0 次）。那不是判据太严（那一刻确实没有脱离），
+            但意味着默认参数一动闪就没了，比大多数工具脆得多。
+         state.t > 0.5 是开局护栏：驱动从 Q = −15 起步，**首帧 lift 就是真**。
+         实测未加护栏时 60 s 七次，多出来的那次在 t = 0.017 s（Q = −14.90）——
+         典型的开局白闪：状态在用户看之前就已经成立了。加上护栏后是干净的 6 次。
+         锚点取方块中心 B：脱离时它浮起 0.42，光正打在浮起来的那个方块上。 */
+      goldHit('normal', state.t > 0.5 && lift);
+      drawGoldFlash(C, B);
     },
     readout() {
       if (state._pt == null) initModels();
@@ -701,6 +751,24 @@ const SCENES = {
         { font: 'italic 13px ' + FONT_MATH, color: '#34d399', align: 'left' });
       if (state.showDH) label3(C, [0, Math.min(KH * q.D, HCLIP) + 0.3, 3.4], 'P·cosβ',
         { font: 'italic 13px ' + FONT_MATH, color: '#fb923c', align: 'left' });
+      /* 金光闪（§4.7）：需求 P·cosβ 顶穿极限 μR 的那一瞬 —— 翠绿的 F 不再贴着橙色需求走，
+         跌到动摩擦 μk·R，方块开始滑动。tips 逐字要人盯的就是这一刻。
+         判据借的是这一页自己的布尔 statc（v₃ = 0 且 D ≤ cap 且没脱离）：
+         同一个 statc 决定读数印「静止 / 临界 / 滑动中」、画不画「滑动中（F = μk·R）」那块标签。
+         **这一页尤其不能借读数精度**：readout 印的是 fmt(q.D) 两位小数 ⇒ 窗口 0.01 N，
+         而 P 被驱动以 5 N/s 扫过，一帧就走 0.083 N —— 窗口比一帧还窄六倍，
+         整帧从窗口上跨过去，一次都命不中。布尔转移没有这个毛病：它不问「差多少」，只问「翻没翻」。
+         实测（默认 m₁ = 1.5 kg、g = 9.8、μ = 0.45 ⇒ μR = 6.615 N，β = 0，
+         P 由 drive 以 10 s 往返扫 0 → 25 N）：60 s 六次，t = 1.333 / 11.333 / 21.333 / …，
+         命中值 **P = 6.67 N**（上一帧 6.58 N 还静止，这一帧越过 6.615 N），
+         一个驱动往返过一次。回程 P 落到 5.29 N 以下时方块被动摩擦刹停、statc 复真，
+         下一趟才有新的上升沿。
+         state.t > 0.5 与另两页同款开局护栏。本页其实用不上：驱动从 P = 0 起步，
+         首帧必然静止；但用户关掉自动播放、把 P 停在 10 N 再按 R 时首帧就是滑动态，
+         护栏把那一下白闪推迟到 t = 0.5 —— 三页写法一致，维护时不必逐页回忆哪页有、哪页没有。
+         锚点取琥珀极限线 μR 在 z = 0 的落点：F 曲线正是在那条线上断开的。 */
+      goldHit('friction', state.t > 0.5 && !statc && !q.lift);
+      drawGoldFlash(C, [0, Math.min(KH * q.cap, HCLIP), 0]);
     },
     readout() {
       if (state._pt == null) initModels();
@@ -720,6 +788,15 @@ const SCENES = {
   },
 
   /* ────── 场景四：连接系统 —— 一张图只画一个物体 ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 主角是一个恒等式。
+     本页画的 T 与 a 是 m₂g − T = m₂a 与 T − μm₁g = m₁a 相加消去 T 的代数结果，
+     这两个方程**每一帧都成立**：读数里的 T、a，以及 v–t 那条直线的斜率，
+     从第一帧到第 n 帧都是同一个解，没有哪一刻它「终于」相等。
+     本页唯一的离散事件是滑块走满 1.5 后归零重来 —— 那是行程循环，不是到达。
+     tips 提到的那个临界确实是真的状态转移（m₂g ≤ μm₁g，默认 μ = 0.45、m₁ = 1.5 ⇒
+     m₂ ≤ 0.675 kg），但它是「静摩擦到顶」这桩同一件事在本工具里的**第三遍**——
+     「斜面与分解」页和「静摩擦极限」页已各为它闪过一次，且本页无 drive，
+     还要用户手动把 m₂ 拖过去。同一个判据在一个工具里闪三次是重复，不是强调。 */
   connected: {
     label: { zh: '连接系统', en: 'Connected' },
     params: ['m1', 'm2', 'mu', 'g'],
@@ -1022,6 +1099,74 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -1179,6 +1324,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意

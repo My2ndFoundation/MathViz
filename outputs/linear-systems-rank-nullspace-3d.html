@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.1">
+<meta name="tool-version" content="1.2.0">
 <meta name="engine-version" content="1.0.0">
 <title>线性方程组、秩与零空间 · Linear Systems, Rank & Null Spaces</title>
 <!-- ============================================================
@@ -16,6 +16,10 @@
   秩是真正独立的约束 / 输出方向的数量，零空间是被矩阵完全压扁的输入方向。
 
   版本记录（changelog，新→旧）：
+    1.2.0  2026-08-09  接入金光闪（§4.7）：rows 页 det A→0（两行共线、约束不再独立）、
+                       cols 页残差归零（b 落回列空间）、nullsp 页 σ₂→0（秩塌成 1、
+                       整条输入直线压成一个像点）各闪一次；planes 页有意不加
+                       （四档离散预设，rank 是写死的元数据，换档不是穿越）
     1.1.1  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
     1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
@@ -519,6 +523,23 @@ const SCENES = {
           }
         }
       }
+      /* 金光闪（§4.7）：det A 走到零的那一瞬 —— 两面墙转成平行、两根行向量共线，
+         琥珀平行四边形被压成一根线，方程组从「唯一解」翻成「整条直线」或「无解」。
+         这正是 tips 逐字要人拖出来的那件事（「det→0：两墙渐渐平行，约束不再独立」）。
+         判据窗口不是新造的：classify2() 自己就用 TOL = 0.02 决定这个系统算不算退化
+         （第 377–378 行），所以闪的那一帧与读数从「唯一解」翻成「无穷多解 / 无解」
+         的那一帧逐帧同一。帧步长核对：drive a22 −2→2 period 10（往返），每帧走
+         0.0133；窗口 |det| ≤ 0.02 折算成 a₂₂ 是 0.0333 ⇒ 2.5 帧，跨不过去。
+         （把 a₁₁ 拖到 2 会收窄到 1.5 帧，仍够；a₁₁ = 0.05 时 det 在 a₂₂ 的量程内
+          根本不过零 —— 那时一次也不闪，是正确行为。）
+         实测（默认系数、默认驱动、Node 确定性推帧 60 s）：12 次 次；
+         det = 1.2·a₂₂ + 0.2 在 a₂₂ ≈ −0.167 变号，首次命中 t = 2.28 s（a₂₂ = −0.1733、det = −0.0080），此后 5.42 / 4.58 s 交替
+         （a₁₁ = 2 时窗口收到 1.5 帧，60 s 仍是 12 次；a₁₁ = 0.05 时 0 次）。
+         锚点取 [0,0,0] —— 琥珀行向量平行四边形的公共顶点，两根行向量在那里生根，
+         命中时整个平行四边形塌成过原点的一根线。**不能用解点**：det→0 时
+         (x*, y*) 正飞向无穷远，锚在那儿等于把光打到画面之外。 */
+      goldHit('rows', Math.abs(detA()) <= 0.02);
+      drawGoldFlash(C, [0, 0, 0]);
     },
     readout() {
       const a = state.a11, b = state.a12, c = state.a21, d = state.a22;
@@ -546,6 +567,14 @@ const SCENES = {
   },
 
   /* ────── 二：三元方程组 · 三张平面的四种命运 ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 属「恒等式 / 无上升沿」一类。
+     本页唯一的参数 preset3 是四档离散选择器（交于一点 / 共享一条线 / 叠成同一面 /
+     三棱柱无解），每一档的 rank 是 PRESETS3 里写死的元数据，不是算出来的量；
+     档与档之间没有中间态（场景注释已据此写 drive: null）。所以这一页画的
+     「解集维度 3 − rank」在每一档内部每一帧都等于那个常数，没有哪一刻它「终于」变了 ——
+     从预设 0 拖到预设 1，三张平面整体瞬移一次，那是换幻灯片，不是穿越。
+     数一下：把 preset3 从 0 扫到 3，rank 的取值序列是 3 → 2 → 1 → 2，
+     三次跳变全部发生在滑杆离散换档的那一帧上，闪的会是「用户松手」而不是任何数学事件。 */
   planes: {
     label: { zh: '三元方程组', en: '3×3 system' },
     params: ['preset3'],
@@ -692,6 +721,21 @@ const SCENES = {
         if (pp) glowDot(pp, 10, '#ffffff', EME_A + '0.9)');
         mathLabel(C, CP0, 'Ax̂', EME_A + '1)', 'left', 14);
       }
+      /* 金光闪（§4.7）：橙色的 b 缩回列空间平面里的那一瞬 —— 残差 r = b − Ax̂
+         归零，Ax = b 从「无精确解」变成「恰好有解」，橙色虚线落差消失、
+         b 与翠绿的 Ax̂ 重合成同一个点。tips 逐字要人做的就是「把 h 拖到 0」。
+         判据窗口借的是 readout 自己的可解性判据：第 700 行用 Math.abs(h) < 0.03
+         决定印「b ∈ Col(A) · Ax = b 有解」还是「b ∉ Col(A) · 无精确解」，
+         这里用同一个数，所以闪与那行字逐帧同步。
+         不存在帧步长问题：本页 h 无 drive，是用户滑杆，step = 0.05、min = −1.2，
+         h = 0 恰好落在刻度上，窗口 ±0.03 只罩住 h = 0 这一档（相邻档 ±0.05 在窗外）。
+         实测（Node 确定性推帧）：默认 h = 0.60，60 s 内 0 次 —— 这是设计如此，
+         「拨对旋钮」才是本页的动作；把 h 置 0 后进本页，把 h 拖到 0 的那一帧闪 1 次（脚本在 t = 10 s 改滑杆，10.02 s 命中）；
+         改成相邻一档 h = 0.05 则 0 次 —— 窗口确实只罩住 h = 0 这一档。
+         锚点取 CP0（第 424 行 = A x̂），也就是命中时 b 落进平面所停的那一点、
+         翠绿光点所在处。 */
+      goldHit('cols', Math.abs(state.bOut) < 0.03);
+      drawGoldFlash(C, CP0);
     },
     readout() {
       const h = state.bOut;
@@ -794,6 +838,23 @@ const SCENES = {
         label3(C, [(p[0]+q[0])/2, (p[1]+q[1])/2, 0], 'q − p ∈ Null(A)',
           { font: 'italic 12px ' + FONT_MATH, color: AMB_A + '0.95)', align: 'left', dx: 10, dy: 10 });
       }
+      /* 金光闪（§4.7）：σ₂ 落到零、A 掉成秩 1 的那一瞬 —— 玫红输入直线上两枚探针
+         p、q 的像 Ap、Aq 合并成同一个紫点，翠绿的 Null(A) 从一个点长成一整条直线，
+         橙色 Col(A) 也在这一刻才被画出来。tips 的「按 3 切『压扁 det→0』」说的就是它。
+         判据零新阈值：直接用 draw 第一行现成的局部量 rdef（= sv.s2 < 0.02），
+         它同时决定画不画 Null(A)/Col(A) 两条直线、也决定 readout 里 rank 印 2 还是 1
+         （第 800 行同一个 0.02）—— 闪与「秩塌下来」是同一个布尔。
+         无帧步长问题：本页四个系数都是用户滑杆（无 drive），命中由「压扁 det→0」
+         视角的 onSelect 一次性写死 a = (1.2, 0.6, 0.6, 0.3)（σ₂ = 0，精确秩 1），
+         只产生一次上升沿。实测（Node 确定性推帧）：默认系数 60 s 0 次（det = 1.40、σ₂ = 1.08，离退化还远） 次；
+         选「压扁 det→0」视角后 闪 1 次 —— onSelect 写下 a = (1.2, 0.6, 0.6, 0.3) 的那一帧，det = 0、σ₂ = 0。
+         **已知的一种「切进来就闪」**：a₂₂ 与 rows 页共享。若在 rows 页把驱动停在
+         a₂₂ ≈ −0.167（det ≈ 0）附近再切进本页，第一帧判据即为真、当场闪一次。
+         这不是错报 —— 那一刻矩阵确实是退化的，本页画的 Null(A) 也确实是一条直线。
+         锚点取 [Ap[0], Ap[1], 0]（第 765 行）：秩亏时 Ap ≡ Aq，正是两枚像点合并成
+         一个紫点的位置。 */
+      goldHit('nullsp', rdef);
+      drawGoldFlash(C, [Ap[0], Ap[1], 0]);
     },
     readout() {
       const sv = svd2(), det = detA();
@@ -1001,6 +1062,74 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -1158,6 +1287,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意

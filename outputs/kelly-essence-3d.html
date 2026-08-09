@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.1">
+<meta name="tool-version" content="1.2.0">
 <meta name="engine-version" content="1.0.0">
 <title>凯利公式的本质 · 最优下注比例</title>
 <!-- ============================================================
@@ -13,6 +13,12 @@
   引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
 
   版本记录（changelog，新→旧）：
+    1.2.0  2026-08-09  接入金光闪（§4.7）：增长率之山页在凯利峰 f* = p − q/b 被赔率推着
+                       滑到「你的下注比例」上的那一瞬全屏泛光（判据借 f 滑杆步长 0.01，
+                       并抄本页画峰顶用的 f* > 0.005 护栏挡掉无优势的退化档；
+                       故意不打在 g 上 —— 山顶二次平坦）。实测默认档 60 s 15 次，
+                       节奏 5.95 s / 2.05 s 交替。财富竞赛页有意不加：
+                       四条 ln W 是真掷硬币的蒙特卡洛，量本身会晃，理由写在场景注释里
     1.1.1  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
     1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
@@ -426,6 +432,63 @@ const SCENES = {
           if (sp) glowDot(sp, 9, '#ffffff', 'rgba(251,113,133,0.6)');
         }
       }
+
+      /* 金光闪（§4.7）：山顶**滑到了你的注上** —— 凯利峰 f* = p − q/b 与你手里那根
+         「你的下注比例 f」重合的那一瞬。整页的立论就是「峰在这里，不在期望线的尽头」，
+         这一闪把那句话变成一个看得见的时刻。
+
+         **语义要说清楚：被驱动的是 b，不是 f。** 本页 drive 打在赔率 b 上
+         （0.5 → 3，period 8，linear pingpong），f 是留给读者自己拿主意的量、永不被驱动。
+         所以这一闪不是「你爬上了山顶」，而是「山顶被赔率推着滑过来，正好压在你的注上」。
+         这正是凯利公式要人明白的事：最优比例不是你的选择，是赔率与胜率给定的那个数。
+
+         判据 = 两个部分：
+         ① `kellyF(p, b) > 0.005` —— **这条护栏不能省**。它抄的是本页正上方
+            `if (fs > 0.005)` 那一行，也就是本页自己决定「画不画 f* 峰顶光点与 f₀ 刻线」
+            的门槛：p ≤ q/b（无优势）时 kellyF 被 Math.max(0, …) 夹到 0，
+            若此时用户的 f 也停在 0，判据会在每个无优势区段假闪一次 ——
+            闪的还是一个屏幕上根本没画出来的「峰顶」。
+         ② `Math.abs(state.f − kellyF(p, b)) < 0.01` —— 借的是 f 滑杆自己的 step = 0.01。
+
+         **判据故意不打在 g 上。** 最自然的写法是「g(f) 追上 g(f*)」，但山顶是二次平坦的：
+         g(f) − g(f*) ≈ ½·g″·(f − f*)²，默认档在命中点 (p = 0.60, b = 1.143) 处
+         g″ = −1.185，就算去借读数里那个罕见的四位小数 g(f*)（本页 readout 印 fmtS(·,4)），
+         0.0001 的窗口也对应 |δ| < 0.013 —— 比 f 滑杆一格还宽。这与 information-entropy
+         binary 页弃 |H − 1| 改取 |p − ½| 是同一个理由：平坦处别用高度判位置。
+
+         **为什么不再收紧**（台账「四条操作要求」第 3 条：窗口不得窄于一帧步长）：
+         b 以 2.5/4 s = 0.625/s 扫过，f* 的速度 = (q/b²)·0.625。默认档 0.191/s，
+         一帧走 0.0032，0.02 宽的窗口 = **6.3 帧**，宽裕。全域最窄处在 p = 0.80、
+         b = 0.5 那一角（f* 的速度 0.5/s，一帧 0.0083）：0.02 的窗口仍有 **2.4 帧**。
+         若改借 f* 读数的三位小数（窗口 0.001）只剩 **0.31 帧**，改借「你的 f」的
+         两位小数（窗口 0.01）在那一角只剩 **1.2 帧** —— 两个都会被整帧跨过去。
+         0.01 是既贴着页面（滑杆步长）、又满足一帧下限的唯一选择。
+
+         实测（确定性推帧、参数按 PARAMS 默认值复位、每页签 60 s）：
+           · 默认档（p = 0.60 / b = 1 / f = 0.25）—— **60 s 15 次**，首次在 t = 0.98 s、
+             b = 1.115（上行）；理论命中点 b = 0.400/(0.60 − 0.25) = **1.143**，
+             下行那一次落在 b = 1.167，正好把窗口 b ∈ [1.111, 1.176] 兜住。
+           · **节奏是 5.95 s → 2.05 s 交替**，平均 4 s。不是均匀的 4 s，因为命中点
+             b = 1.143 不在扫描区间 [0.5, 3] 的中点上，pingpong 一趟里去程与回程
+             穿过它的间隔不等长。密度与 information-entropy binary 页并列全队最前，
+             而那 2.05 s 的短间隔已经踩在 §4.7 频闪线（每一两秒真一次）上 ——
+             **谁要把本页 drive 的 period 8 改小，这一闪必须先重新量。**
+           · p = 0.35 —— **0 次**。f* 的上界只剩 0.35 − 0.65/3 = 0.133，
+             默认的 f = 0.25 从此再也碰不到。那不是判据坏了，那正是这一页要讲的话：
+             胜率不够时，你那个注就是过大的。
+           · 最窄档 p = 0.80 / f = 0.40（命中点恰在 b = 0.5，那个 2.4 帧的角）——
+             60 s **8 次**，一个周期一次，一次没被整帧跨过去。判据窗口够宽，验讫。
+           两个页签的 frameErrors 均为空。
+         （附带一条实测发现：p = 0.80 / f = 0.40 这一档 b 的起点 0.5 本身就在窗口内，
+          首帧即真 ⇒ 会白送一闪。默认档不会 —— b = 1 时 f* = 0.20，
+          |0.25 − 0.20| = 0.05 远在窗口外 —— 故不加 state.t 护栏；
+          若日后有人改动 PARAMS 默认值，这一条要重新核。）
+
+         锚点取 [f*·XS, g(f*)·YS, 0] —— 本页早已画在那里的琥珀峰顶光点（上方
+         `if (fs > 0.005)` 块里的 glowDot）。光从峰顶泛开，闪的就是那颗点。 */
+      const fsHit = kellyF(state.p, state.b);
+      goldHit('mountain', fsHit > 0.005 && Math.abs(state.f - fsHit) < 0.01);
+      drawGoldFlash(C, [fsHit * XS, growth(fsHit, state.p, state.b) * YS, 0]);
     },
     readout() {
       const p = state.p, b = state.b, f = state.f;
@@ -442,6 +505,16 @@ const SCENES = {
   },
 
   /* ────── 场景二：财富竞赛 ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 本页画的四条 ln W 是真掷硬币、逐局结算的
+     蒙特卡洛轨迹，量本身会晃。§4.7 的「量本身会晃」写的正是这种情形：
+     按 R 重开一局，同样的参数会给出完全不同的四条曲线，任何「谁在此刻领先」
+     「谁回到了 ×1」都是这一串随机数的事，不是凯利公式的事。
+     唯一像地标的候选是 tips 提到的 g(2f*) ≈ 0 —— 但那三个字里最要紧的是**约等号**：
+     默认 p = 0.60 / b = 1 时 f* = 0.20，g(0.4) = −0.0024，是个**负数**，不是零。
+     真正的零增长点是山页画出来的 f₀（zeroGrowth() 二分求根，此处 ≈ 0.390），
+     而 f₀ < 2f* 恒成立 —— 双倍凯利永远已经越过零增长线一点点。
+     橙色那条 2f* 曲线在 ×1 附近上下穿越，是随机游走过零，不是「终于回到本金」；
+     给它打光和 π 投针页给一次偶然精确的估计打光是同一个错误。 */
   race: {
     label: { zh: '财富竞赛', en: 'Wealth race' },
     /* ω 经引擎时钟（state.theta += state.omega·dt）驱动下注节奏与 samples 历史，场景体内不出现 state.omega —— 勿据 grep 判定无用而删 */
@@ -716,6 +789,74 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -873,6 +1014,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意

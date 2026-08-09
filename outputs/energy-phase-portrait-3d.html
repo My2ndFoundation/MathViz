@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.2">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.0.0">
 <title>能量、势能与相图 · 交互式可视化</title>
 <!-- ============================================================
@@ -21,6 +21,13 @@
     ③ pushSample  —— 每帧 RK4 积分 x″ = −V′(x)/m − γx′ 并记录 (t, x, v, E, V) 真实值
 
   版本记录（changelog，新→旧）：
+    1.1.0  2026-08-09  接入金光闪（§4.7）：相图页在总能量 E 走到分界能量 E_s 的那一瞬
+                       全屏一闪 —— 小球正踩在橙色分界线上，束缚与越过在这一条上是同一条。
+                       该闪由用户触发（默认势能是谐振子、无 E_s，故默认不闪，这是要讲的话）。
+                       势能景观 / 能量曲面两页有意不加，理由（频闪 / 恒等式且渐近）
+                       写在各自场景注释里。
+                       Gold flash on the phase-portrait tab when E reaches the separatrix
+                       energy; the other two tabs deliberately opt out, reasons in comments.
     1.0.2  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-12  首个版本：势能景观 / 能量曲面 (x,v,E) / 相图等能线 三场景，
@@ -460,6 +467,13 @@ function sceneReadout() {
 const SCENES = {
 
   /* ────── 页签一：势能景观 —— 山谷、能量线与转折点 ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 频率过密，而且那件事本来就是定义。
+     本页唯一像「到达」的是小球爬到 E = V(x)、动能耗尽掉头的那一刻。可 K = 0 不是走到了
+     一个被挑出来的数，它是「转折点」这个词的定义（读数那行直接把 x 的转折点列出来）；
+     更要紧的是它每半个周期来一次。实测 60 s 内掉头次数：默认 m = 1 → **19 次（3.16 s 一次）**，
+     m = 0.5 → 27 次（2.22 s），m = 2 → 13 次（4.62 s）—— 整个滑杆量程都在频闪线以内。
+     γ > 0 时 E 从 0.98 缓缓下沉，是无上升沿的渐近量，同样没有「终于」的那一帧。
+     这一工具的到达那一闪归页三：E 与分界能量 E_s 重合的那一刻。 */
   land: {
     label: { zh: '势能景观', en: 'Landscape' },
     params: ['pot', 'x0', 'v0', 'm', 'gamma', 'waveSpeed'],
@@ -551,6 +565,13 @@ const SCENES = {
   },
 
   /* ────── 页签二：能量曲面 —— 轨迹被钉在等高线上 ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 主角是一个恒等式。本页画的是「轨迹被钉在等高线上」，
+     而 γ = 0 时 E = ½mv² + V(x) 从第一帧起就逐帧严格相等：实测默认参数 60 s 内
+     E 的最小值与最大值都是 **0.980000**，推到 t ≈ 200 s 仍是 0.980000。没有哪一刻它「终于」守恒。
+     γ > 0 是另一头：E 从 0.98 单调下沉，60 s 时六位小数已印成 0.000000 —— 但碗底
+     E = 0 是这段衰减的极限（也就是 V 的最小值、小球停住的地方），是无上升沿的渐近量，
+     不是一个被挑出来的数学值。替「运动停了」全屏打光会把本页的结论讲反：
+     tips 要人看的是轨迹**沿曲面盘旋滑落**的过程，不是它最后不动了。 */
   surface: {
     label: { zh: '能量曲面', en: 'Energy surface' },
     params: ['pot', 'x0', 'v0', 'm', 'gamma', 'waveSpeed'],
@@ -728,6 +749,32 @@ const SCENES = {
       /* 当前点（运动主体） */
       const sp = proj(C, [sim.x, sim.v * SV, 0]);
       if (sp) glowDot(sp, 15, '#ffffff', 'rgba(186,240,255,0.9)');
+      /* 金光闪（§4.7）：总能量 E 走到分界能量 E_s 的那一瞬 —— 小球正落在橙色分界线
+         （separatrix）上，束缚轨道与越过轨道在这一条曲线上是同一条。tips 让人「把 E 调到
+         分界线两侧各看一次」，这一闪标的就是两侧之间那唯一的一条。
+         判据窗口 ±0.005：借读数的两位小数（sceneReadout 里 E 与 E_s 都走 fmt/fmtS）——
+         光亮起时，读数上这两个数印成同一个；同一时刻第 437 行的判语也从「E < E_s：束缚轨道」
+         翻成「E > E_s：越过 · 开放轨道」。窗口不是另取的，是屏幕上那行字自己的分界。
+         `P.Esep != null` 是**必需**守卫，不是防御性写法：四种势能里谐振子的 Esep 就是 null
+         （抛物线没有分界能量，读数在那一支改印转折点），少了它 E − null 会当成 E − 0 乱闪。
+         **本页三个页签都没有 drive，这一闪由用户触发；而默认势能正是谐振子，所以默认参数
+         一趟 60 s 一次也不闪** —— 这不是缺陷，是这一页要讲的话：分界线得先有，才谈得上走到它。
+         （同类先例：最小二乘「直线拟合」页默认也是零次，碗底只有一个点。）
+         实测两组数字：
+           · 默认（谐振子 · x₀ = 1.40 · v₀ = 0 · γ = 0）：三个页签 60 s 全 0 次；
+           · 拨对之后（滑杆步长 x₀ 0.05，下面三个都是能拨到的格点，各 60 s **1 次**，
+             首次都在 t = 0.02 s，即用户拨对后的第一帧）：
+               双阱 x₀ = 1.00, v₀ = 0 → E = 0.000000，E_s = 0（精确命中）；
+               势垒 x₀ = 1.20, v₀ = 0 → E = 0.480000，E_s = 0.48（精确命中）；
+               单摆 x₀ = 2.20, v₀ = 0 → E = 1.9981，E_s = 2（差 0.0019，落在窗口内）。
+             γ = 0 时 E 守恒，判据一旦为真就一直为真 —— 靠上升沿只闪一次，不会长亮。
+           · 最漂亮的一条是让 E 自己走下来：双阱 · x₀ = 1.40 · v₀ = 1.00 · γ = 0.40，
+             E 从 2.38 被阻尼拖着下沉，t = 4.45 s 穿过 E_s = 0 —— 越过型轨道在这一刻掉回
+             束缚型，一次性到达。这一支的帧余量也量过：60 Hz 命中区间 3 帧、
+             抖动 16–27 ms 2 帧、30 Hz 仍有 1 帧，都是 1 次不漏。
+         锚点取小球当前位置 [sim.x, sim.v·SV, 0]：命中的正是「它此刻踩在分界线上」。 */
+      goldHit('phase', P.Esep != null && Math.abs(E0 - P.Esep) < 0.005);
+      drawGoldFlash(C, [sim.x, sim.v * SV, 0]);
     },
     readout: sceneReadout
   }
@@ -960,6 +1007,74 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -1117,6 +1232,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意

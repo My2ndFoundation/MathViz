@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.1">
+<meta name="tool-version" content="1.2.0">
 <meta name="engine-version" content="1.1.1">
 <title>火箭：会自己变的倒立摆 · 推力矢量控制</title>
 <!-- ============================================================
@@ -91,6 +91,25 @@
   回放就会悄悄偏离，而画面看上去完全正常。
 
   版本记录（changelog，新→旧）：
+    1.2.0  2026-08-09  接入金光闪（§4.7）：裕度仪表盘页在四条曲线第一次跨过「0 = 出局」
+                       那条死亡线时闪 —— 判据直接借 diagTick() 原有的两个闩锁
+                       （pmZeroT / authZeroT），阈值与起飞抖动护栏都是原有的，
+                       闩锁天生只翻一次、每次发射自动复位。默认档一次都不闪，
+                       把「压心 − 重心」推到 +3 m 起才看得到（+4 m 时 40.7 s 命中）。
+                       飞行 / 姿态与控制量 / 增益调度 三页有意不加：前两页画的是
+                       每帧成立的结构事实，第三页的 b·Kp − a = ωn² 是代数恒等式
+                       （逐帧残差 4e−16），且其唯一的离散事件与裕度页是同一个
+                       Gold flash (§4.7) on the margin dashboard: it fires the first
+                       time a curve crosses the "0 = out" death line, reusing the two
+                       latches diagTick() already maintains (pmZeroT / authZeroT) —
+                       original thresholds, original liftoff guard, and a latch is a
+                       rising edge by construction, re-armed at every launch. The
+                       default settings never fire it; push "CoP − CoM" to +3 m or
+                       beyond (at +4 m it lands at t = 40.7 s). The flight, signals
+                       and scheduling tabs are deliberately left dark: the first two
+                       draw structural facts true on every frame, and the third's
+                       b·Kp − a = ωn² is an algebraic identity (per-frame residual
+                       4e−16) whose one discrete event is the margin page's own
     1.1.1  2026-08-02  回放期间面板上的进度数字不再停在「1 / N」：状态行的文案抽成唯一出处 recInfoText()，每 120 ms 与录制行数走同一条刷新路径。回放本身一直是对的，坏的只是那个数字
     1.1.0  2026-08-02  「时间轴缩放」改为以秒计的「演示时长」（10–160 s），一屏可容纳整次飞行；默认 40 s 与改动前的 0.20 单位/s 等价。该量仍是纯显示量、不进种子，已有存档不受影响
                   The time-axis control now reads as a demo span in seconds (10–160 s), enough for a whole flight on one screen; the 40 s default is equivalent to the previous 0.20 units/s. It remains display-only and stays out of the seed, so existing archives are unaffected
@@ -1274,6 +1293,16 @@ function roVerdict(V) {
 const SCENES = {
 
   /* ────── ① 飞行 ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 属「恒等式 / 结构事实」。
+     这一页画的两件事每一帧都成立，没有哪一刻它们「终于」成立：本页 tips 让人看的
+     那件事（推力线不穿过重心）是**构造出来的**恒真 —— 力臂 ℓ(t) = comOf(fuel) 是
+     喷管到重心的距离，默认档整趟飞行实测 ℓ ∈ [11.00, 16.09] m，从起飞到 MECO
+     一刻也没有靠近过 0；而 θ̈ = a(t)·θ − b(t)·δ 就是这根倒立摆的运动方程本身。
+     另一个候选是 `endCode === 0`（燃料耗尽且 |θ| < 20° 的成功落幕），节奏也漂亮
+     （默认档 46.7 s 飞行 + 3.6 s 停留 ⇒ 约 50 s 一次），但那是任务级的结局判定：
+     燃料耗尽是一个必然会到点的计时器 —— 实测把推力从 240 kN 调到 160 kN，落幕时刻
+     纹丝不动还是 46.7 s（只有「装填燃料」能推动它：22 t 时 73.3 s）——
+     落在「展示进度走到端点，不算到达」那一条上；而且它与本页要讲的力臂毫无关系。 */
   flight: {
     label: { zh: '飞行', en: 'Flight' },
     params: P_ALL,
@@ -1339,6 +1368,15 @@ const SCENES = {
   },
 
   /* ────── ② 姿态与控制量 ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 属「恒等式 / 结构事实」。
+     这一页画的是「控制器是离散的：每 1/f_s 秒采一次、然后把值保持住」，
+     δ_cmd 因此是一串台阶。这不是一个会在某一刻发生的事件，而是 controlUpdate()
+     的调用节拍本身：每一帧都成立，把 f_s 从 40 Hz 拉到 2 Hz 只是把台阶加粗，
+     没有哪一刻它「终于」变成阶梯。
+     唯一像事件的是 δ_cmd 顶到 ±δmax，但那要么太稀、要么太密，且都不是本页的论点：
+     实测（整趟飞行数「进入限幅」的次数）默认档 **0 次**（δmax = 8°，风 12 / 阵风 12
+     根本顶不到）；风 60 / 阵风 50 时 1 次；把 δmax 压到 1° 则 6 次、平均 0.17 s
+     一进一出 —— 那已经在 §4.7 的频闪线以下了。一个永不亮、一个闪成频闪灯。 */
   signals: {
     label: { zh: '姿态与控制量', en: 'Attitude & command' },
     params: P_ALL,
@@ -1484,6 +1522,44 @@ const SCENES = {
         }
         label3(C, [0, 1.5 - i*0.28, WAVE_LEN*0.66], c[3], { size: 11, color: 'rgba(' + c[2] + ',0.9)', align: 'center' });
       });
+
+      /* 金光闪（§4.7）：这一页把四条曲线都归一成「1 = 健康、0 = 出局」，
+         时间轴本身就是那条死亡线 —— 闪的就是曲线**第一次跨过它**的那一刻。
+
+         判据没有造任何新数：它借的是 diagTick() 自己早就在维护的两个闩锁
+         （上面第 785 / 787 行）`if (V.pmZeroT < 0 && V.pm <= 0 && ts > 1.0)`
+         与 `if (V.authZeroT < 0 && V.auth <= 1 && ts > 1.0)`。阈值（PM = 0、
+         权限比 = 1）和那道起飞抖动护栏 ts > 1.0 都是原有的；闩锁天生只翻一次，
+         也就天生是一个上升沿，每次重新发射 newVeh() 把它复位成 −1，自动重新上膛。
+
+         实测（页内确定性推帧，跑满整趟飞行后在「落幕但尚未再发射」那一刻抓闩锁）：
+         · **默认档一次都不闪**。定增益那枚全程 pm_min = 46.5°（MECO 时）、
+           权限比 min = 1.44，两个闩锁都没翻；调度那枚 26.9° / 4.16。
+           这是设计如此，不是判据写错：页签④ 的 tips 就说要把压心 − 重心推上去才看得到。
+         · 压心 − 重心 = **+2.5 m** 仍不翻（权限比 min 1.15，差一点）；
+           **+3 m** 是第一档翻的：pmZeroT = 45.84 s、authZeroT = 46.28 s，
+           而这趟飞行仍以 MECO 成功收场（endCode 0）；
+           **+4 m**（tips 点名的那一档）pmZeroT = **40.70 s**、authZeroT = 41.48 s，
+           定增益那枚随后以 endCode 3 收场，调度那枚安然 MECO。一次发射至多闪一次，
+           一个发射周期约 50 s（46.7 s 飞行 + 3.6 s 停留）。
+         · 直接数金光闪（130 s 一趟）：默认 **0 次**；cp = +2.5 **0 次**；
+           cp = +3 **2 次**（t = 45.85 / 96.13）；cp = +4 **2 次**（t = 40.72 / 91.00）；
+           cp = +4 且开着「增益调度」**0 次**（调度那枚从不跌破）。四个页签 frameErrors 全空。
+         · 两个闩锁里**先翻的永远是 pmZeroT**：全部档位上权限比都晚 0.4–0.8 s 才跌破 1，
+           或者根本不跌破。authZeroT 那一半是护栏，不是主角。
+         · 调度那枚（VS）在 cp = +1 … +6 的每一档都从不翻 —— 那正是页签④ 的论点。
+
+         **已知副作用（照实写）**：`activeVeh()` 随「增益调度」开关在 VF / VS 之间切换。
+         cp = +4、定增益那枚已在 40.7 s 闩死之后，拨到「增益调度」判据由真转假（熄灭），
+         再拨回「定增益」就由假转真 —— **这一下是假上升沿，会再闪一次**：实测在
+         simT = 43 s 处拨一个来回，闪的次数从 1 变成 2。
+         之所以仍然读 activeVeh() 而不是钉死 SIM.VF：这一页画的、读数印的都是当前那一枚，
+         钉死 VF 会让「开着调度、屏幕上那条曲线好好的」时候闪起来，那比多闪一次更糟。
+         而假上升沿发生时，屏幕上确实正显示着一条已经跌破 0 的曲线，只是「跨过去」
+         发生在过去而不是此刻。
+         锚点取 [0,0,0]：时间轴头端、正是「0 = 出局」那行字所在的死亡线上。 */
+      goldHit('margins', V.pmZeroT >= 0 || V.authZeroT >= 0);
+      drawGoldFlash(C, [0, 0, 0]);
     },
     readout() {
       const V = activeVeh();
@@ -1504,6 +1580,16 @@ const SCENES = {
   },
 
   /* ────── ④ 增益调度 ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 属「恒等式」（次：与页签③ 是同一个事件）。
+     调度律 gainsOf() 直接把 Kp 解成 (ωn² + a)/b，所以 **b·Kp − a = ωn² 是代数恒等式**，
+     不是被逼近出来的结果：实测整趟飞行逐帧核对，|b·Kp − a − ωn²| / ωn² 最大
+     3.67e−16（默认档，2800 帧）／4.09e−16（压心 − 重心 = +4 m）—— 机器精度，
+     从第一帧就成立。tips 里「把 b·Kp − a 钉死在起飞值上」说的就是这条式子。
+     （顺带纠正一个容易顺口说错的版本：翠绿的 Kp/起飞值 与橙色的 b/起飞值 **不**互为倒数
+     —— 实测默认档两者乘积从 1.000 一路涨到 6.547，因为 ωn 本身会随气动极点 √a 抬升，
+     不是常数。真正恒成立的是上面那条带 a 的式子。）
+     本页唯一像「到达」的离散事件，是定增益那一枚跌破死亡线 —— 那与页签③ 的
+     pmZeroT / authZeroT 是同一个事件，已经在那里闪过一次，不重复打光。 */
   schedule: {
     label: { zh: '增益调度', en: 'Gain scheduling' },
     params: P_ALL,
@@ -1892,6 +1978,74 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -2049,6 +2203,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意

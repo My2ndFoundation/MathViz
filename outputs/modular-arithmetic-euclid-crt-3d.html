@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.2">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.0.0">
 <title>模运算、最大公约数与同余 · Modular Arithmetic & Congruence</title>
 <!-- ============================================================
@@ -31,6 +31,10 @@
   只影响未来轨迹，历史绝不重算；重置（R）清空重新爬升。
 
   版本记录（changelog，新→旧）：
+    1.1.0  2026-08-09  接入金光闪（§4.7）：modops 页加法轨道走满 m/gcd(s,m) 步闭合、
+                       euclid 页最后一块 gcd 方块落下铺满矩形、crt 页走点爬到解格
+                       各闪一次；spiral 页有意不加（同余柱子从第一帧起就整根画好，
+                       走点回到同一角度只是节拍器）
     1.0.2  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
     1.0.0  2026-07-30  首个版本：模圆螺旋 / 加法与乘法 / 欧几里得 / 中国剩余 四页签
@@ -339,6 +343,15 @@ function fillQuad(C, pts, color) {
 const SCENES = {
 
   /* ────── 一：模圆螺旋 —— 整数轴卷成圆 ────── */
+  /* 金光闪（§4.7）：本页有意不加 —— 属「恒等式 / 处处成立」一类。
+     本页画的同余类柱子（a、a+m、a+2m、… 竖直排成一列）从第一帧起就整根画好了：
+     helixPos(k) 把角度取成 TAU·k/m，同余的整数**按定义**落在同一个角度上，
+     没有哪一刻它们「终于」对齐。tips 讲的也正是这个恒等式（「a ≡ b (mod m)
+     就是落在圆上同一位置」）。
+     唯一在动的是那个沿螺旋爬的走点，它每 m 步回到同一角度一次 —— 那是节拍器不是到达：
+     m = 6、ω = 1.2 时 5.0 s 一次，m = 2、ω = 4 时 0.5 s 一次，后者直接进频闪区；
+     而且走点的角度是连续量，要给它判「回到同一角度」还得新造一个窗口，
+     本页没有任何现成阈值可借。 */
   spiral: {
     label: { zh: '模圆螺旋', en: 'Mod-circle spiral' },
     params: ['m', 'a', 'omega'],
@@ -472,6 +485,11 @@ const SCENES = {
     draw(C) {
       const m = mCur(), sv = Math.round(state.s), cv = Math.round(state.c);
       const R = 2;
+      /* 加法轨道的三个量提到 draw 顶部：金光闪要在 draw 的最后一行读 prog / Lo，
+         而它们原先声明在 if (state.showAdd) 块里 —— 关掉「加法轨道 +s」时判据
+         就读不到了。提上来只改作用域，块内计算与画法一字未动。 */
+      const g = gcd2(sv, m), Lo = m / g;
+      const prog = Math.min(STEPn() % (Lo + 2), Lo);   /* 走完停两拍再重播 */
       if (state.showGrid) drawGridXY(C, 2.5, 0.5);
 
       /* 模圆与剩余类节点（青色源几何） */
@@ -511,8 +529,6 @@ const SCENES = {
 
       /* 加法轨道 +s（玫红）：从 0 出发按共享时钟逐步前进 */
       if (state.showAdd) {
-        const g = gcd2(sv, m), Lo = m / g;
-        const prog = Math.min(STEPn() % (Lo + 2), Lo);   /* 走完停两拍再重播 */
         const pts = [];
         for (let j = 0; j <= prog; j++) pts.push(circleNode(m, modP(j * sv, m), R));
         if (pts.length > 1) {
@@ -525,6 +541,20 @@ const SCENES = {
         label3(C, [-R - 1.6, R * 1.05, 0], '0 → +s → +2s → …',
           { font: 'italic 13px ' + FONT_MATH, color: '#fb7185', align: 'left' });
       }
+      /* 金光闪（§4.7）：玫红加法轨道走回起点 0 的那一瞬 —— 每步 +s 绕了
+         Lo = m/gcd(s,m) 步，轨道在这一帧闭合成一整圈（或一个正多边形）。
+         判据借页面自己定义的「走完了」：prog 是绘制轨道用的进度（第 515 行原址），
+         Lo 就是读数里印着的那个「轨道长」（第 537 行 m/gs），prog === Lo 与
+         「玫红折线画到最后一个点」逐帧同一，没有新阈值、也不需要窗口（都是整数）。
+         节奏随 ω ∈ [0.2, 4] 伸缩：一拍 = 1/ω 秒，一轮 = (Lo + 2) 拍（走完停两拍再重播）。
+         实测（Node 确定性推帧 60 s）：默认 m = 6、s = 5 ⇒ gcd = 1、Lo = 6、
+         一轮 8 拍 ÷ 1.2 步/s = 6.67 s，首次命中 t = 5.00 s（第 6 步，轨道刚闭合），60 s 内 9 次；
+         最坏档（最密）m = 2、s = 1 ⇒ Lo = 2、一轮 4 拍，ω = 4 时 1.0 s 一闪 —— 这已进
+         频闪区，实测 60 次 / 60 s（首次 t = 0.50 s）；默认档的 6.67 s 远在 §4.7 的下限之上，
+         而拨到最坏档需要用户同时把 m 拖到最小、把 ω 拖到最大，是自找的。
+         锚点 circleNode(m, 0, R) = [R, 0, 0]：轨道的起点，也是它闭合时回到的那一点。 */
+      goldHit('modops', prog === Lo);
+      drawGoldFlash(C, circleNode(m, 0, R));
     },
     readout() {
       const m = mCur(), sv = Math.round(state.s), cv = Math.round(state.c);
@@ -613,6 +643,25 @@ const SCENES = {
         { font: 'italic 13px ' + FONT_MATH, color: '#fb7185', align: 'center' });
       label3(C, [x0 + w + 0.35, y0 + 0.25, 0], 'gcd = ' + res.g,
         { font: 'italic 13px ' + FONT_MATH, color: '#34d399', align: 'left' });
+      /* 金光闪（§4.7）：最后一批翠绿正方形落下、a×b 矩形被铺满的那一瞬 ——
+         铺满 = 除法链的余数走到 0 = 最后的除数就是 gcd。读数末行逐字写着这句话
+         （第 630 行「余数为 0 时，最后的除数就是 gcd」）。
+         判据零新阈值、也无窗口：reveal 是本页控制「已经切到第几块」的整数进度
+         （第 574 行原址），nsq = res.sq.length 是切满需要的块数，reveal === nsq
+         与「最后一块翠绿方块被画出来」逐帧同一。
+         **state.showAnim && 不能省**：关掉「逐步动画」时 reveal 被直接赋成 nsq
+         （同一行的三元表达式），判据会恒为真 —— 那样它就不再是一个到达，
+         而是一句废话，还会在切进本页的第一帧白闪。
+         节奏随 ω ∈ [0.2, 4] 伸缩：一轮 = (nsq + 3) 拍、一拍 = 1/ω 秒。
+         实测（Node 确定性推帧 60 s）：默认 a = 24、b = 9 ⇒ nsq = 5 块、一轮 8 拍
+         ÷ 1.2 步/s = 6.67 s，首次命中 t = 3.33 s（第 4 步），60 s 内 9 次；Fibonacci 最坏输入 55/34 ⇒ nsq = 9、
+         一轮 12 拍 = 10 s，首次 t = 6.67 s，60 s 内 6 次。最密的一档是 a = b（nsq = 1、一轮 4 拍），
+         ω = 4 时 1.0 s —— 但那时 gcd = a 是平凡的，属自找。
+         锚点取最后一块方块的中心（res.sq[nsq−1] 换算到世界坐标）：那正是最后落下、
+         把矩形补满的那一块。 */
+      goldHit('euclid', state.showAnim && reveal === nsq);
+      drawGoldFlash(C, [x0 + (res.sq[nsq - 1].x + res.sq[nsq - 1].s / 2) * u,
+                        y0 + (res.sq[nsq - 1].y + res.sq[nsq - 1].s / 2) * u, 0]);
     },
     readout() {
       const A = Math.round(state.eA), B = Math.round(state.eB);
@@ -736,6 +785,27 @@ const SCENES = {
 
       label3(C, [0, y0 + n * cs + 0.8, 0], 'x mod m · x mod n',
         { font: 'italic 13px ' + FONT_MATH, color: WHT_A + '0.8)', align: 'center' });
+      /* 金光闪（§4.7）：白色走点 k 爬到那个翠绿解格的那一瞬 —— 两条条件带
+         （玫红的列 x ≡ r₁、紫色的行 x ≡ r₂）第一次同时被满足，走点正落进
+         琥珀虚线框起的交叉格里。这就是 CRT 本身：两个周期条件在 k = x 处对齐。
+         判据是**整数相等**，不需要窗口、也不需要阈值：sol.x 是 crtSolve 解出来的
+         那个整数（第 658 行），wk = STEPn() % L 是走点当前落在哪个整数上（第 731 行）。
+         sol.ok 不能省：m、n 不互质且 gcd ∤ (r₁ − r₂) 时无解，页面会印
+         「无解：gcd(m,n) ∤ (r₁ − r₂)」，此时永不闪 —— 正确行为，那种参数下
+         走点确实永远踩不到那个格子。
+         命中窗口是一整个步进拍（走点在一格上停满 1/ω 秒），ω = 1.2 时 0.83 s ≈ 50 帧，
+         比闪本身（1.05 s）略短，闪不会被下一步打断重放。
+         节奏随 ω ∈ [0.2, 4] 与 L = lcm(m,n) 伸缩：一轮 L 拍。
+         实测（Node 确定性推帧 60 s）：默认 m = 6、n = 5、r = (2, 3) ⇒ L = 30、
+         x = 8，一轮 30 拍 ÷ 1.2 = 25 s，首次命中 t = 6.67 s（走点 k = 8 = sol.x），60 s 内 3 次；
+         最密的一档 m = 2、n = 3（L = 6）配 ω = 4 ⇒ 1.5 s 一闪，已进频闪区，
+         实测 41 次 / 60 s —— 但那要用户把两个模数都拖到最小、ω 拖到最大。
+         「切进来第一帧就闪」只在 r₁ ≡ r₂ ≡ 0 时发生（sol.x = 0，走点重置后正站在
+         k = 0 上）。不加护栏：那一帧 k = 0 确实同时满足两个条件，是真命中而不是白闪；
+         默认 r = (2, 3) ⇒ x = 8，遇不上。
+         锚点取走点自己的位置 [wc[0], wc[1], wk*dzc]：命中时它与翠绿解点重合。 */
+      goldHit('crt', sol.ok && wk === sol.x);
+      drawGoldFlash(C, [wc[0], wc[1], wk * dzc]);
     },
     readout() {
       const m = mCur(), n = nCur();
@@ -942,6 +1012,74 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -1099,6 +1237,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意

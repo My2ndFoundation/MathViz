@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.1.0">
 <meta name="engine-version" content="1.1.0">
 <title>陀螺仪的原理 · 角动量与姿态控制</title>
 <!-- ============================================================
@@ -20,6 +20,13 @@
     ⑤ 控制力矩陀螺 CMG    τ = −Ω × Lw，把「搬动 L」翻译成放大了的力矩
 
   版本记录（changelog，新→旧）：
+    1.1.0  2026-08-09  接入金光闪（§4.7）：万向节页在载体俯仰转到 ±90°、外环枢轴与
+                       转子轴重合、自由度当场掉一维的那一瞬全屏泛光（判据 |cos θ| < 1e−3，
+                       不借页面 30° 宽的死区标注阈值 0.26 —— 预警是逼近、闪是到达）。
+                       这一闪由用户拨滑杆触发：默认俯仰 30° 实测 60 s 0 次（有意如此），
+                       90° / −90° 各 1 次，相邻刻度 89° 0 次。
+                       自旋 / 进动 / 反作用轮 / 控制力矩陀螺 四页有意不加，
+                       理由（恒等式 · 频闪 · 无上升沿的渐近量 · 闪了会讲反）写在各自场景注释里
     1.0.0  2026-08-01  首个版本：自旋与角动量 / 万向节与六自由度 / 进动与章动 /
                        反作用轮 / 控制力矩陀螺 五场景，含真实的定点陀螺欧拉—拉格朗日
                        积分、万向节死锁演示与轮速饱和，双语
@@ -663,6 +670,13 @@ const PARAMS = [
 const SCENES = {
 
   /* ══════════ ① 自旋与角动量：一个旋转如何被压成一根矢量 ══════════ */
+  /* 金光闪（§4.7）：本页有意不加 —— 主角是一个恒等式。本页画的 |L| = ROTOR_I·ωs
+     每一帧都是同一个数（默认 ωs = 8 时恒为 0.36），倾角 β 从 −60° 扫到 +60° 它一动不动，
+     画布上那行字自己就写着「（与倾角无关）」（drawing 里的 label3，本页 942 行附近）。
+     没有哪一刻 |L|「终于」等于某个值 —— 它从第一帧起就等于那个值。
+     Lx = −|L|sin β 在 β = 0 处过零，看着像个事件，其实是正弦扫过中点、单调经过：
+     drive period = 11 s 的 pingpong 一趟往返穿两次，≈5.5 s 一次，
+     既是频闪，又只是坐标轴的选法（把画面转 90° 它就不为零了），不是数学地标。 */
   spin: {
     label: { zh: '自旋 · 角动量', en: 'Spin & momentum' },
     params: ['spin', 'tilt', 'span'],
@@ -827,6 +841,43 @@ const SCENES = {
         label3(C, vAdd(p, [0, -1.95, -1.55]), t({ zh: '⚠ 万向节死锁：外环枢轴 ∥ 转子轴', en: '⚠ Gimbal lock: outer pivot ∥ rotor axis' }),
           { size: 12, color: CLR.orange, align: 'center' });
       }
+
+      /* 金光闪（§4.7）：外环枢轴**转到**与转子轴重合的那一刻 —— 载体俯仰 θ = ±90°，
+         三层环塌成两个自由度，一整维姿态就此丢失。这是阿波罗 11 号制导计算机上
+         那条红线真正被跨过的瞬间，本页 tips 让人做的也正是这件事。
+
+         判据取 G.lock < 1e-3（G.lock = |cos θ|，见 gimbalChain()）。
+         **这里没有借本页已经画在屏幕上的 0.26** —— 那个数是「死区」标注的阈值，
+         θ ∈ 75°…105° 整整 30° 宽的一条带，它标的是「快没裕度了」这件程度上的事。
+         而这一闪要判的是「自由度到底掉没掉」这件是非题（台账「量判据的四条操作要求」
+         第 4 条：借读数是默认，不是教条）。收多紧是量出来的：carPitch 滑杆 step = 1°，
+         ±90° 正好是刻度点，|cos 90°| = 6.1e−17；最近的相邻刻度 89° 给 |cos| = 0.01745。
+         1e−3 与这两个数都差 17 倍以上 —— 它的语义因此精确等于「滑杆正停在 ±90° 上」，
+         既不会漏掉真正的死锁，也不会把 89° 算成到达。
+
+         ⚠ 注意这一闪与那条橙色死区标注**不是同一个阈值，也不该是**：
+         标注在 |cos θ| < 0.26 就亮，即 θ = 75°，比闪早整整 15°。
+         预警是「你正在逼近」，闪是「你到了」；两件事分开报，才读得出「逼近 → 到达」
+         这个过程。把闪也放宽到 0.26，等于在 30° 宽的一条带上一路亮着，
+         那就成了背景光而不是那一瞬。
+
+         **这是一处用户触发的闪，不是自动播放能等来的。** 本页 drive 打在 carYaw 上，
+         而 G.lock 只看 carPitch，偏航转多少圈都不改它。实测（确定性推帧、参数按
+         PARAMS 默认值复位、每页签 60 s）：
+           · 默认档（carPitch = 30°，lock = 0.866）—— **0 次**。**永不闪，这是有意的**：
+             死锁是要人伸手把俯仰推过去才该看见的事故，不是开机就该在脸上闪的东西。
+           · carPitch = 90° —— 1 次（首帧即真，lock = 6.123e−17）；−90° 同样 1 次。
+           · carPitch = 89°（相邻刻度，lock = 0.01745）—— **0 次**。判据分得开这两格。
+           · 模拟用户按滑杆步长把俯仰从 80° 一格一格拖到 100° 再拖回：**恰好 2 次，
+             两次都打在 90° 那一格上**（lock = 6.123e−17）。上升沿只在跨进那个刻度点时
+             打一次，停在 90° 上不会持续亮（§4.7 硬规矩 2）。
+         五个页签的 frameErrors 全为空。
+
+         锚点取 vAdd(p, [0, 1.5, 0])：L 箭头的尖端。死锁的意思是外环枢轴倒向了这根轴，
+         光从这根「丢掉的自由度」所在的位置泛开，比从屏幕中心泛开更说明发生了什么；
+         用 p 起算而不是世界原点，是因为三根平移滑杆会把整个载体搬走。 */
+      goldHit('gimbal', G.lock < 1e-3);
+      drawGoldFlash(C, vAdd(p, [0, 1.5, 0]));
     },
     readout() {
       const G = gimbalChain();
@@ -844,6 +895,15 @@ const SCENES = {
   },
 
   /* ══════════ ③ 进动与章动：力矩不让它倒，只让它转圈 ══════════ */
+  /* 金光闪（§4.7）：本页有意不加 —— 恒等式，且唯一像事件的东西频率过密。
+     本页立论是 τ = dL/dt **恒**垂直于 L：那道 90° 的琥珀弧任意时刻都画得出来，
+     τ = r × mg 的定义就保证了它，没有哪一刻它「终于」垂直。轴尖画的那条进动圆
+     也不是走向某个终点，它无限循环。
+     唯一考虑过的候选是「实际进动率 φ̇ 与读数里那个慢进动近似 Mgl/(I₃ωs) 合并」——
+     否决：那两个数的差就是章动，而章动频率 ≈ I₃ωs/I₁，默认 iRatio = 0.5、ωs = 8
+     给 4 rad/s ⇒ 每 **0.79 s** 穿越一次。§4.7「每一两秒真一次就成了频闪」，
+     这比那条线还快一倍多。何况慢进动近似本来就是近似，替一个近似式的偶然相等报捷，
+     等于告诉人「章动此刻消失了」，而画面上那些尖点小圈还在画着。 */
   precess: {
     label: { zh: '进动 · 章动', en: 'Precession & nutation' },
     params: ['spin', 'theta0', 'mgl', 'iRatio'],
@@ -923,6 +983,21 @@ const SCENES = {
   },
 
   /* ══════════ ④ 反作用轮：卫星只能「借」角动量 ══════════ */
+  /* 金光闪（§4.7）：本页有意不加 —— 两个候选一个是无上升沿的渐近量，一个是恒等式，
+     第三个「事件」闪了会把结论讲反。
+     ① 「星体偏航追上目标 ψb = ψc」：satStep() 的控制律是纯 PD
+        cmd = −(2·0.9·λ·ψ̇b + λ²·(ψb − ψc))，**没有积分项**，所以跟不上斜坡。
+        drive 把 ψc 以 pingpong 从 −80° 推到 +80°、半周期 5 s ⇒ ψ̇c = 2.793/5 = 0.559 rad/s，
+        一阶稳态滞后 e = ψ̇c·2ζλ/λ² = 0.559 × 1.8 / 1 = 1.006 rad ≈ **58°**，
+        读数里那行 ψb − ψc 就一直停在 ±58° 上下。误差只在每次折返、目标掉头穿过星体时
+        扫过零，那是 pingpong 折返带来的（≈5 s 一次），按主控裁决「展示进度参数走到端点，
+        不算到达」——把 period 从 10 改成 14 这一页的结论一个字都不变。
+        关掉自动播放让 ψc 静止，误差改为指数衰减，**永远不精确为零**，是标准的渐近量。
+     ② 「Lb + Lw 守恒」：dist = 0 时它每一帧都是常数，本页 readout 直接印「（无外扰，恒定）」，
+        这是角动量守恒本身，处处成立。
+     ③ 「轮速饱和」：默认 dist = 0 下**永远不发生**（要先把外扰滑杆拉开），而且它标记的是
+        「控制力矩已归零、姿态控制当场失效」——给一次失效打全屏报捷的光，
+        正是 §4.7「闪了会把结论讲反」。 */
   wheel: {
     label: { zh: '反作用轮', en: 'Reaction wheel' },
     params: ['psiCmd', 'iwRatio', 'gainK', 'wMax', 'dist', 'span'],
@@ -1009,6 +1084,25 @@ const SCENES = {
   },
 
   /* ══════════ ⑤ 控制力矩陀螺：把转动翻译成 90° 外的力矩 ══════════ */
+  /* 金光闪（§4.7）：本页有意不加 —— 主角是恒等式，唯一的候选事件三条都不过关。
+     本页立论 τ = −Ω × Lw 由 cmgStep() 逐帧按定义算出，那道 90° 的琥珀弧在任意 δ、
+     任意 Ω 下都成立；|Lw| = h 也恒定。没有哪一刻它「终于」垂直、「终于」等于 h。
+
+     认真评估过的候选是「星体角速度 |ωb| 触到读数里印的那个上限 2h/J」，三条否决：
+     ① **那个上限本身靠不住。** ωb = (CMG.L0 − Lw)/J，而 CMG.L0 是**复位那一刻冻结**的
+        轮体角动量（cmgReset() 里赋值）。用户一动 h 滑杆，Lw 的模长立刻变成新的 h，
+        L0 却还是旧的 —— 读数印的 2h/J 用的是新 h，实际能达到的极值是 (h_new + h_old)/J。
+        判据会去追一个页面自己已经印错了的数。
+     ② **极值是切向取到的。** |ωb| 对 δ 在峰值处二次平坦（δ = ±π 时 |L0 − Lw| 取极大），
+        借两位小数读数的窗口换算下来会在真正的峰前 **0.42 s** 就打上升沿 ——
+        闪在「快到了」而不是「到了」，和 binary 页当年弃 |H−1| 取 |p−½| 是同一个毛病。
+     ③ **命中点恰落在驱动的接缝上。** drive 是 circular、from −π to π，
+        峰值 δ = ±π 正是那个 loop 回绕点。按主控裁决「展示进度参数走到端点，不算到达」，
+        这里读不出「扫过」，只读得出「播完了一圈」。
+     另一版用方向而非模长的备选（|ŵ + L̂0| < 0.03，不受 h 中途拖动影响）也一并放弃：
+     circular period = 12 s ⇒ **12 s 才一闪**，会是全队最疏的一处；更要紧的是进本页
+     第一帧 applyDrive() 就把 δ 从 0 跳到时钟值，而 CMG.L0 还停在加载时冻结的值上，
+     |ωb| 会瞬跳 —— 那是既有的建模瑕疵，接上闪等于拿全屏金光把它照亮。 */
   cmg: {
     label: { zh: '控制力矩陀螺', en: 'Control moment gyro' },
     params: ['hw', 'gimbAng', 'jBody'],
@@ -1331,6 +1425,74 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -1488,6 +1650,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意

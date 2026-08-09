@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.1">
+<meta name="tool-version" content="1.2.0">
 <meta name="engine-version" content="1.0.0">
 <title>优化、凸性与梯度下降 · Optimisation & Gradient Descent</title>
 <!-- ============================================================
@@ -13,6 +13,21 @@
   引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
 
   版本记录（changelog，新→旧）：
+    1.2.0  2026-08-09  接入金光闪（§4.7）：「一维下降」页在迭代走到谷底
+                       （紫色 −η·f′ 箭头缩没，|η·f′| ≤ 0.01）时全屏一闪，
+                       「约束优化」页在探针走到约束圆上的最优点（f(P) 与 f*
+                       印成同一个两位小数）时一闪。判据均借页面自己的阈值，
+                       两页的实测节奏（含驱动 / 手动两种语义）写在各自注释里。
+                       「损失曲面」「凸与非凸」两页有意不加，理由写在页签上方：
+                       前者的判据与被驱动的 λ 无关、上升沿由别页的 η 决定，
+                       后者 A/B 两路径逐位互为相反数（恒等式），唯一的离散事件
+                       x₀ = 0 是势垒顶、闪了会把结论讲反。
+                       Gold flash (§4.7): the 1-D descent scene flashes when the
+                       iterate reaches the floor (the violet −η·f′ arrow vanishes),
+                       and the constrained scene when the probe reaches the optimum
+                       on the constraint circle. Both criteria reuse the page's own
+                       thresholds. The loss-surface and convex/non-convex scenes
+                       deliberately opt out, with reasons above each scene key.
     1.1.1  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
     1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
                        驱动接管时下降轨道改为整条重播，轨迹始终对应当前参数
@@ -636,6 +651,33 @@ const SCENES = {
       } else {
         divergedLabel(C, 2.55);
       }
+      /* 金光闪（§4.7）：迭代走到谷底 —— 紫色 −η·f′ 箭头缩没的那一步。
+         判据借的就是上面第 625 行画不画那支箭头的那个数：
+         `Math.abs(xn − xk) > 0.01`，而 xn − xk = −η·f′(xₙ)，
+         所以 |η·f′(xₙ)| ≤ 0.01 与「箭头消失」逐字等价，不是另立的 ε
+         （读数里的 Δx = −η·f′ 也在同一刻落到 ±0.01 以内）。
+         两个守卫都不能省：`isFinite(xk)` —— η 大到发散时 gdStep1 返回 Infinity，
+         那时 η·f′ 是 NaN、比较为假，可一旦有人把判据写成「步长很小」的近似式
+         就会给发散报捷，**绝不给发散打光**；`|xk| ≤ CLIP1` —— 出了裁剪框的点
+         画面上根本不画（§6 奇点约定），不画的东西不该闪。
+         cadence 要分两种语义讲，因为本页两种模式的算术不是一回事（见 orb* 注释）：
+         · 驱动模式（默认，η 由 drive 0.02→2 period 12 pingpong 扫）：每帧按当前 η
+           整条重播 ORBIT_SHOW.one = 14 步，于是 xₖ = 1.5·(1−1.2η)¹⁴，
+           **「到没到谷底」是 η 的函数，不是时间的函数**。解
+           1.8η·|1−1.2η|¹⁴ ≤ 0.01 得判据为真的区间 η ∈ (0.184, 1.395)
+           （η = 0.8333 处收缩因子为 0，一步到底），上升沿落在扫过区间两端的时候。
+           实测（Node 定帧推进，默认参数，60 s）：**10 次**，
+           首次 t = 0.50 s（η = 0.185，xₖ = 0.0446，|η·f′| = 0.00991），
+           次次 t = 7.85 s（η = 1.3895，xₖ = 0.0052），随后 12.50 / 19.85 / 24.50 …
+           一个 12 s 周期 2 次，最密间隔 4.65 s。
+         · 手动模式（关掉自动播放，只追加的真实历史）：默认 η = 0.3 / x₀ = 1.5 /
+           ω = 1.2 步/s ⇒ 0.54·0.64ⁿ ≤ 0.01 要 n = 9 步，t = 9/1.2 = 7.50 s；
+           此后判据恒真，不再有上升沿（实测 60 s **1 次**，首次 t = 7.50 s，
+           n = 9，xₖ = 0.0270，|η·f′| = 0.00973）—— 收敛就是收敛，一次就够。
+         锚点 [0, 0, 0]：f(x) = 0.6x² 的谷底本身，也是最新一步所在的 z = 0 切面。 */
+      goldHit('one', isFinite(xk) && Math.abs(xk) <= CLIP1 &&
+                     Math.abs(state.eta * d1(xk)) <= 0.01);
+      drawGoldFlash(C, [0, 0, 0]);
     },
     readout() {
       const k = orb1.length - 1, xk = orb1[k], ok = isFinite(xk);
@@ -651,6 +693,21 @@ const SCENES = {
   },
 
   /* ────── 二维损失曲面：凸谷地、等高线与 zig-zag ────── */
+  /* 金光闪（§4.7）：本页**有意不加** —— 渐近量，且它的上升沿由**别页的驱动量**决定。
+     本页画的收敛是几何收敛，永远逼近不到达，只能靠 ε 判；页面自带的唯一 ε 是
+     第 713 行 `if (gl > 1e-4)`（−∇f 箭头画不画）。若照它写成
+     `!!p && Math.hypot(...g2(p[0],p[1])) <= 1e-4`，问题出在这一页的驱动结构上：
+     · 驱动模式下每帧按当前参数整条重播 ORBIT_SHOW.valley = 60 步，于是
+       |∇f| 的 x 分量 = 0.35·1.5·|1 − 0.35η|⁶⁰，**与被驱动的 λ 完全无关**
+       （实测 η = 0.3 时 λ = 1 / 2 / 4 / 8 的 gx 全是 6.7537e−4，一位不差），
+       y 分量在任何 λ 下都已衰到 1e−7 以下可忽略 ⇒ 判据在整个 λ ∈ [1, 8] 上
+       是同一个真值。默认 η = 0.3 下它恒为 6.75e−4 > 1e−4 ⇒ **0 次上升沿**。
+     · 真正决定它的是 η —— 而 η 是**一维下降页的驱动量**，跨页签共享。实测
+       η = 0.6 时判据在整个 λ 量程上恒真（3.78e−7），也就是**开局白闪**、
+       同样没有上升沿；只有 η ≈ 0.8 / 1.0 / 1.2 时判据才随 λ 在
+       λ = 6.59 / 5.28 / 4.41 处翻面。
+     给一个「闪不闪由用户在别的页签上停留了多久」决定的量打光，不是记账，是掷骰子。
+     （若日后本页自己驱动 η，这一条就该重新判：那时判据的上升沿才是本页的事。） */
   valley: {
     label: { zh: '损失曲面', en: 'Loss surface' },
     /* η 必须在场：本页的下降路径由 gdStep2 逐步读 state.eta 算出，读数印着 η 与
@@ -737,6 +794,19 @@ const SCENES = {
   },
 
   /* ────── 凸与非凸：局部最小值依赖初始点 ────── */
+  /* 金光闪（§4.7）：本页**有意不加** —— 恒等式类，唯一的离散事件还会把结论讲反。
+     本页要点亮的显然是「A 与 B 落进不同的井」。可三个曲面预设的梯度都是**奇函数**
+     （0.3x / 0.6668x(x²−1.5) / 0.6x, −0.6y+0.32y³），而 B 的种子是
+     `orbB2 = [-x0, -y0]`（reseedOrbits 第 303 行）⇒ orbB2[k] ≡ −orbB1[k]
+     **逐步、逐位**成立：实测三个预设 × x₀ ∈ {±1.8, ±0.9, ±0.05, 0} 各跑 60 步，
+     |Aₖ + Bₖ| 的最大值全是 **0**（不是「很小」，是浮点意义上的严格相反数）。
+     所以「不同的井」对每个 x₀ ≠ 0 从第一步起就为真，没有哪一刻它「终于」分开
+     —— 恒等式，不是到达。（默认双井预设：x₀ = ±0.05 也照样一个到 +1.2247、
+     一个到 −1.2247。）
+     唯一的离散事件是 drive 把 x₀ 扫过 0 的那一刻。而 x₀ = 0 恰是势垒顶 / 鞍点：
+     实测两条路径都卡死在 x = 0（A = B = 0，60 步一动不动），哪个井底都到不了。
+     在那里打光，等于给全量程里唯一一个**永远到不了井底**的起点报捷。
+     本页也没有第二个可借的 ε（读数只印 f 与坐标，没有任何阈值判断）。 */
   convex: {
     label: { zh: '凸与非凸', en: 'Convex vs non-convex' },
     /* 同 valley：两条路径都由 gdStep2 读 state.eta 推进，η 却不在本页 params 里。
@@ -874,6 +944,30 @@ const SCENES = {
         { font: 'italic 12px ' + FONT_MATH, color: AMBER, dx: 10, dy: 14 });
       const sp = proj(C, [px, py, 0]);
       if (sp) glowDot(sp, 13, '#ffffff', 'rgba(186,240,255,0.9)');
+      /* 金光闪（§4.7）：巡游探针走到约束圆上的那个最优点 —— 橙色过点等高线
+         吻住翠绿约束圆、∇f 与 ∇g 变平行的那一刻，也就是 tips 的顿悟点本身。
+         判据借读数的两位小数：f(P) 与 f* 印成同一个数（|f(P) − f*| < 0.005）。
+         **不要**改用同一行读数里的 |sin∠(∇f, ∇g)| —— 它同样是两位小数，但它
+         在最优点附近是**一阶**小量（sn ∝ |Δu|）：实测 r = 0.9 时 sn < 0.005 的
+         角度窗口两个临界点加起来才 0.0189 rad，摊到极小这一个上 ≈ 0.0095 rad，
+         ω = 1.2 rad/s 下驻留 **0.47 帧** —— 整帧跨过去才是常态。
+         f 走的是**二阶**：最优点是 h(u) = f₄(r cos u, r sin u) 的极小，
+         h′(u*) = 0 ⇒ |Δf| < 0.005 对应实测 |Δu| < 0.126 rad（窗口 0.2515 rad，
+         边界 u ∈ [0.438, 0.690]，u* = 0.5672）⇒ 驻留 0.210 s ≈ **12.6 帧**。
+         同一个到达，量对了才量得到 —— 这是「窗口不得窄于一帧步长」的教科书案例。
+         `!O.inside` 不能省：r ≥ 1.332 时无约束最小值 min f 落进圆内、约束失效
+         （读数印「λ = 0（约束未激活）」），constrOpt() 把 O.f 返回成 0 而探针
+         的 f(P) 永远够不着 0，此时**正确行为就是不闪**；漏了这一句，一旦
+         有人把 r 拉到 1.6 又恰好路过，闪的会是一个不存在的约束最优。
+         无 drive：探针角由引擎共享时钟走（ω = 1.2 rad/s）。约束圆上 ∇f ∥ ∇g
+         恰有 2 个临界点（默认 r = 0.9 实测 u = 0.5644 的极小与 3.5853 的极大），
+         判据只认极小 ⇒ 一圈一次。
+         实测（Node 定帧推进，默认参数 r = 0.9 / ω = 1.2，60 s）：**12 次**，
+         首次 t = 0.37 s（θ = 0.44 rad = 窗口下沿；最优点 O = (0.7591, 0.4836)，
+         f* = 0.0519），此后每 5.24 s（= 2π/ω）一次。
+         锚点 [O.x, O.y, 0]：那个琥珀最优点，「∇f = λ∇g」标注挂着的地方。 */
+      goldHit('lagr', !O.inside && Math.abs(f4(px, py) - O.f) < 0.005);
+      drawGoldFlash(C, [O.x, O.y, 0]);
     },
     readout() {
       const r = state.rad, ph = mod2pi(state.theta);
@@ -1101,6 +1195,74 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -1258,6 +1420,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意

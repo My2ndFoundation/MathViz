@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.1">
+<meta name="tool-version" content="1.2.0">
 <meta name="engine-version" content="1.0.0">
 <title>条件概率与贝叶斯更新</title>
 <!-- ============================================================
@@ -13,6 +13,12 @@
   引擎来源：math-viz-starter.html（STARTER_VERSION 1.0.0），引擎区零改动
 
   版本记录（changelog，新→旧）：
+    1.2.0  2026-08-09  接入金光闪（§4.7）：贝叶斯反转（后验 P(A|B) 跌破 ½）与独立与互斥
+                       （P(B|A) 上行穿过 P(B|¬A)）两页会闪；面积模型（条件化进度是展示参数、
+                       终点与往返折返点重合）与树状图（恒等式）两页写明有意不加
+                       Gold flash (§4.7) on two tabs: Bayes inversion (posterior drops below ½)
+                       and independence (P(B|A) crosses above P(B|¬A)); the area model and tree
+                       tabs document why they have no "arrival"
     1.1.1  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
     1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
@@ -322,6 +328,17 @@ function drawJoint(C, x0, y0, S, z, opt) {
 const SCENES = {
 
   /* ────── 场景一：面积模型 —— 条件化 = 删掉再归一化 ────── */
+  /* 金光闪（§4.7）：本页**不加**。类别：展示进度参数走到端点，不算到达。
+     这一页唯一在走的量是「条件化进度 m」，它是一个展示插值参数，不是数学量：
+     m 从 0 走到 1 只表示那段「删掉 ¬B、再把幸存的放大归一」的形变动画放完了。
+     按裁决给的判别口径自查 —— 把它的量程从 0→1 换成 0→100，这一页的结论
+     一个字都不用改；改的只是进度条的刻度。既然如此，m = 1 不是被数学挑出来的值。
+     而且 m 的终点与驱动的 pingpong 折返点是同一个点：实测 m 的峰值 0.999998
+     出现在 t = 3.98 / 11.98 / 19.98 / 27.98 / 35.98 s，正好每 8 s（= drive period）
+     一次、每次都落在往返掉头的那一帧上。真闪起来，讲的是「动画到头了」，
+     不是「某个量走到了它该到的地方」。
+     本工具真正的到达由另外两页承担：后验 P(A|B) 跌破 ½（贝叶斯反转页）、
+     P(B|A) 越过 P(B|¬A)（独立与互斥页）。 */
   area: {
     label: { zh: '面积模型', en: 'Area model' },
     params: ['pA', 'sens', 'fpr', 'condMorph'],
@@ -393,6 +410,14 @@ const SCENES = {
   },
 
   /* ────── 场景二：树状图 —— 路径相乘 = 联合概率 ────── */
+  /* 金光闪（§4.7）：本页**不加**。类别：恒等式。
+     这一页画的两件事都是逐帧为真的：
+     ① 乘法法则 P(A∩B) = P(A)·P(B|A) —— 代码就是这么乘出来的，
+        实测（默认参数、pA 被 drive 扫过全程，30 s / 1800 帧）残差恒为 0；
+     ② tips 落款那句「四条路径概率之和 = 100%」—— 同一段实测最大残差 2.2e−16，
+        纯浮点噪声。
+     pA 从 0.01 扫到 0.60 的整个过程里，这两条式子在每一档上都已经成立，
+     没有哪一刻它们「终于」相等。 */
   tree: {
     label: { zh: '树状图', en: 'Tree diagram' },
     params: ['pA', 'sens', 'fpr'],
@@ -578,6 +603,23 @@ const SCENES = {
       label3(C, [X0 - 0.25, y1 - TH / 2, z1], t({ zh: '全部产品 N', en: 'all items N' }), { size: 11, color: 'rgba(159,176,200,.75)', align: 'right' });
       label3(C, [X0 - 0.25, y2 - TH / 2, z2], t({ zh: '检测结果', en: 'test result' }), { size: 11, color: 'rgba(159,176,200,.75)', align: 'right' });
       label3(C, [X0 - 0.25, y3 - TH / 2, z3], t({ zh: '只看阳性', en: 'positives only' }), { size: 11, color: 'rgba(159,176,200,.75)', align: 'right' });
+      /* 金光闪（§4.7）：后验 P(A|B) 跌破 ½ 的那一瞬 —— 一件检出阳性的产品，
+         「真有缺陷」从比「没缺陷」更可信翻成更不可信。这正是 tips 那句
+         「检测灵敏度高达 95%，真有缺陷的概率却只有约 28%」要人看见的翻转。
+         判据是符号变化，没有窗口、也就没有帧步长问题：分界线本来就画在
+         X0 + XW·P.post，post = ½ 就是第三层里真阳（玫红）与假阳（紫）等宽的
+         那一刻 —— 借的是这一页自己的几何，不是另取的阈值。
+         `P.post != null` 是必需的守卫：P(B) = 0 时后验无定义，这一页会改印
+         「没有阳性」，那时候不该报捷（锚点也一并回落到 null）。
+         实测（PARAMS 默认，drive pA 0.60 → 0.01 period 10 pingpong）：
+         60 s 六次，间隔精确 10 s（t = 4.40 / 14.40 / 24.40 / 34.40 / 44.40 / 54.40），
+         每次都落在 pA = 0.0808 上 —— 与解析临界值 pA* = fpr/(sens + fpr)
+         = 0.08/0.98 = 0.0816 只差一个帧步长（pA 每帧走 0.00197）；命中帧 post = 0.4972。
+         往返的回程把 post 抬回 ½ 以上，判据自动复位，所以一个驱动周期只闪一次。
+         默认状态不会开局白闪：t = 0 时 pA = 0.60 ⇒ post = 0.944，判据为假。
+         锚点取第三层那条 TP/FP 分界线：命中时它正是这一层的中点。 */
+      goldHit('bayes', P.post != null && P.post < 0.5);
+      drawGoldFlash(C, P.post == null ? null : [X0 + XW * P.post, y3 - TH / 2, z3]);
     },
     readout() {
       const P = probs(), N = state.nSamp;
@@ -639,6 +681,30 @@ const SCENES = {
         label3(C, [0.9, 0.5, 0], t({ zh: 'P(B) = 0：P(A|B) 无定义', en: 'P(B) = 0 — P(A|B) undefined' }),
           { size: 11.5, color: 'rgba(251,191,36,.85)', align: 'left' });
       }
+      /* 金光闪（§4.7）：灵敏度 P(B|A) 上行穿过误报率 P(B|¬A) 的那一瞬 ——
+         B 的琥珀边界拉平、两条对比条对齐、P(A|B) = P(A)，这就是独立。
+         tips 第一句要人拖出来的正是这个位置。
+         判据写成**符号形式** `P.sens > P.fpr`，而不用上面文案分支里那个
+         `Math.abs(P.sens - P.fpr) < 0.005`：那个窗口是给文案切换用的、双侧的，
+         拿它打上升沿会一个驱动周期闪两次 —— 实测上升沿落在
+         t = 0.38 / 9.58 / 10.38 / 19.58 / 20.38 / 29.58 / 30.38 / 39.58，
+         间隔 9.2 s 与 0.8 s 交替，那个 0.8 s 的对子就是频闪。
+         符号形式只在上行穿越打一次；它也没有窗口，不受帧步长约束 —— 顺带一提，
+         sens 每帧走 0.0033，本来就已经逼近 0.005 那个半宽了。
+         `P.post != null` 守住 P(B) = 0（此时本页改印「P(A|B) 无定义」）。
+         实测（PARAMS 默认，drive sens 0 → 0.99 period 10 pingpong）：
+         60 s 六次，间隔精确 10 s（t = 0.42 / 10.42 / 20.42 / 30.42 / 40.42 / 50.42），
+         命中时 sens = 0.0825，与 fpr = 0.08 相差不到一个帧步长。
+         默认状态不会开局白闪：t = 0 时 drive 把 sens 按 from 置为 0，判据为假。
+         已知的一处补闪：本页签**第一次**被求值时若 sens 已在 fpr 之上，会补闪一次
+         （实测在 area 页跑到 t = 7 s 再切过来，sens = 0.591，当帧即闪）；
+         这是「上升沿从未求过值」的固有开销，此后每一次都落在真正的穿越上。
+         不接 tips 第二幕「把 P(B|A) 拖到 0 → 互斥」（上面那个 sens < 0.0026 分支）：
+         它与独立那一闪只相距 0.40 s。
+         锚点取方块右边缘上 A 侧的那个高度（J.x1, J.y0 + J.hA）：P(B|A) 与 P(B|¬A)
+         两条琥珀标注就并排写在这条竖边外侧，命中时两者正好合到一处。 */
+      goldHit('indep', P.post != null && P.sens > P.fpr);
+      drawGoldFlash(C, [J.x1, J.y0 + J.hA, 0]);
     },
     readout() {
       const P = probs();
@@ -831,6 +897,74 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -988,6 +1122,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
