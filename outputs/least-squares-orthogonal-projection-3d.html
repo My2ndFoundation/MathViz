@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="tool-version" content="1.1.1">
+<meta name="tool-version" content="1.2.0">
 <meta name="engine-version" content="1.0.0">
 <title>最小二乘与正交投影 · Least Squares & Orthogonal Projection</title>
 <!-- ============================================================
@@ -16,6 +16,9 @@
   写出来就是正规方程 AᵀA x̂ = Aᵀb。
 
   版本记录（changelog，新→旧）：
+    1.2.0  2026-08-09  四个页签全部接入金光闪：残差归零（b 走进子空间 / 列空间）、
+                       当前点落到误差碗底、试探点走到 p 上使不等式取到等号。
+                       后两处默认参数下不闪 —— 那正是「最优解只有一个点」的意思
     1.1.1  2026-08-01  帧级异常兜底：单帧抛出不再杀死渲染循环
     1.1.0  2026-07-31  静止页签接入时间驱动：自动播放可开关，往返/循环可切换
     1.0.1  2026-07-31  参数面板按页签显示：各场景声明 params，只列出对当前页签有效的滑块
@@ -417,6 +420,19 @@ const SCENES = {
         if (sb) glowDot(sb, 11, '#ffffff', ROSE_A + '0.9)');
         label3(C, b, 'b', { font: 'italic 14px ' + FONT_MATH, color: ROSE, dx: 10, dy: -10 });
       }
+      /* 金光闪（§4.7）：残差归零 —— b 自己走进了子空间，投影退化成恒等。
+         本页顶上那段驱动注释把这一刻写成教学要点：「中点 by = 0 是『b 已经在
+         子空间里、r = 0』」。闪的就是它：翠绿的 r 缩成一个点，俯视时 b 与 p 的
+         影子完全重合。
+         判据窗口 |r| < 0.02 不是显示精度（那是 0.005），是**帧步长**逼出来的：
+         by 以 1 单位/s 扫过（量程 4、半周期 4 s），一帧走 0.0167，
+         比 0.005 的窗口还宽 —— 窗口窄于一帧步长，判据就会被整帧跳过，
+         闪时有时无。这是一条通用约束：判据窗口不得窄于被驱动量的一帧步长。
+         实测 60 s 十五次（首次 t = 1.98，by = −0.017；上下行交替），
+         即 4 s 一闪 —— 驱动 8 s 往返、中点过零一次，节奏由驱动定。
+         锚点取 b（此刻 b = p）。 */
+      goldHit('proj', len3(r) < 0.02);
+      drawGoldFlash(C, b);
     },
     readout() {
       const b = bVec();
@@ -494,6 +510,17 @@ const SCENES = {
         if (sb) glowDot(sb, 11, '#ffffff', ROSE_A + '0.9)');
         label3(C, b, 'b', { font: 'italic 14px ' + FONT_MATH, color: ROSE, dx: 10, dy: -10 });
       }
+      /* 金光闪（§4.7）：b 落进列空间的那一瞬 —— Ax = b 从「无解」变成「有解」，
+         最小二乘退化成精确解。本页驱动注释里已经写着这句：「扫到某一刻 b 恰好
+         落进平面」；闪把那一刻从一根缩到零的翠绿短线抬成全屏。
+         判据与「向量投影」页同一条 |r| < 0.02，理由也同（帧步长下限，见那一页）。
+         几何上命中点算得出来：法向 n = a₁×a₂ = (0.7, −2.1, 0.6)，
+         b·n = 0 ⇒ by = (0.7·bx + 0.6·bz)/2.1，默认 bx = 1.2 / bz = 0.6 时 by = 0.571。
+         实测 60 s 十五次，命中值 by = 0.550 / 0.583（上下行各一次，与算出的 0.571 对上），
+         成对出现、对内相隔 2.87 s、对间 5.13 s —— 比「向量投影」页的等间隔更松，
+         因为命中点偏离量程中点。锚点取 b。 */
+      goldHit('cols', len3(r) < 0.02);
+      drawGoldFlash(C, b);
     },
     readout() {
       const b = bVec();
@@ -561,6 +588,23 @@ const SCENES = {
       }
       for (const q of pts) solidDot(C, [q[0], q[1], 0], 3, 'rgba(226,232,240,0.92)');
       if (state.showSurface) this.drawSSE(C, pts, best);
+      /* 金光闪（§4.7）：橙色当前点滑到碗底 —— (m, c) 走到 (m*, c*)，
+         这一刻它才是最小二乘解。判据取 SSE − SSE* < 0.0005，就是本页 SSE 读数的
+         显示精度（fmt(S, 3)）：光亮起时读数上 SSE 与 SSE* 是同一个数。
+         这里不必担心帧步长：SSE 在碗底是二次的，窗口在 m 上折算出来比一帧宽得多。
+         **两个参数都要对**才闪：驱动只扫 m，c 得由用户自己拨到 c*，
+         所以默认参数一路扫过去是不闪的 —— 那正是「碗底只有一个点」的意思。
+         实测（默认 noise = 0.25）60 s 零次：碗底在 (m*, c*) = (0.5205, 0.1085)，
+         而 c 滑杆步长 0.02，最近的刻度 0.10 / 0.12 都还差着 0.0005 以上。
+         但它不是够不着 —— noise 也会把 c* 挪位置。把整张 (noise, c) 刻度格
+         （noise 0.00…0.80 步长 0.05 × c 步长 0.02）扫一遍，有 13 组能命中，
+         最准的一组是 noise = 0.30 / c = 0.10（此时 c* = 0.1002，差 2×10⁻⁶）。
+         按这组实测 60 s 十二次（m 每个驱动周期 10 s 过碗底两次，m = 0.511 / 0.518）。
+         也就是说这一闪要三个旋钮同时对上：noise 定出数据、c 由用户拨、m 由驱动扫过。
+         锚点取碗底 (m*, c*) 的世界位置，与紫色标记同处。 */
+      const S = ssq(state.m, state.c, pts), S0 = ssq(best.m, best.c, pts);
+      goldHit('fit', S - S0 < 0.0005);
+      drawGoldFlash(C, [0, 0, 4.2]);
     },
     /* 误差碗：以 (m*, c*) 为中心的 SSE 线框曲面，架在 z = 4.2 一带 */
     drawSSE(C, pts, best) {
@@ -670,6 +714,23 @@ const SCENES = {
         if (sb) glowDot(sb, 11, '#ffffff', ROSE_A + '0.9)');
         label3(C, PY, 'b', { font: 'italic 14px ' + FONT_MATH, color: ROSE, dx: 10, dy: -10 });
       }
+      /* 金光闪（§4.7）：白色试探点 A(c, m) 走到 p 上 —— 那条
+         「‖b − A(c, m)‖ ≥ |r|」的不等式在这一刻取到等号。
+         本页整页要证的是这条不等式从不被打破；等号成立的那一个点，
+         正是它唯一有话可说的时刻，也正是正规方程解出来的 (ĉ, m̂)。
+         判据 ‖b − A‖ − |r| < 0.005，取本页读数的两位小数精度：
+         亮起时那一行的两个数字印成同一个。
+         驱动只扫 m，c 默认停在 −0.40，而 ĉ ≈ 0.36 —— 所以默认参数一路扫过去
+         不闪（页首那段驱动注释早已算过这笔账：差着约 70 倍）。
+         把 c 拨到 0.36 再让 m 扫过 0.86，光才会亮。
+         实测：默认 c = −0.40 时 60 s 零次；把 c 拨到 0.36（滑杆停得上，ĉ = 0.3563）
+         后 60 s 十五次，最小差值 0.00107。这十五次是**成对**的（如 t = 3.72 与 4.27，
+         相隔 0.55 s），因为 m̂ = 0.8624 离驱动上端 1 很近，m 冲到端点折返又扫回来 ——
+         第二次上升沿落在前一闪还没衰完的时候，看起来是一次加长的强调。
+         真实情况就是这一点被连过了两次，如实记下。锚点取 p。 */
+      const err0 = len3(sub(PY, trial));
+      goldHit('normal', err0 - len3(r) < 0.005);
+      drawGoldFlash(C, p);
     },
     readout() {
       const { c: ch, m: mh, p, r } = projReg();
@@ -868,6 +929,74 @@ function label3(C, p, text, o) {
   ctx.restore();
 }
 
+/* —— 金光闪（gold flash）：命中「那个数」的那一瞬，全屏泛起一层琥珀色的光 ——
+   规范见设计系统 §4.7。要点在那里，这里只留实现约定：
+
+     goldHit(id, on)            每帧喂一次判据，**由假变真**时打点（id 用页签键）
+     drawGoldFlash(C, anchor3)  画这一闪，放在 draw(C) 的最后一行
+     goldFlashReset()           清打点；引擎已在 resetSim() 里调过
+
+   衰减走 state.t，与其余装饰脉动同一个时钟：暂停即冻结，录制器按固定 dt
+   推进也复现得出。加色（lighter）而非覆盖 —— 峰值时场景必须仍然透得出来，
+   这是原则 2「画布即主角」在这一闪上的落法。 */
+const FLASH_DUR = 1.05, FLASH_RISE = 0.09;
+const flashAt = {}, flashOn = {};
+function goldHit(id, on) {
+  if (on && !flashOn[id]) flashAt[id] = state.t;
+  flashOn[id] = on;
+}
+function goldFlashReset() {
+  Object.keys(flashAt).forEach(k => { delete flashAt[k]; });
+  Object.keys(flashOn).forEach(k => { delete flashOn[k]; });
+}
+function drawGoldFlash(C, anchor3) {
+  const t0 = flashAt[curTab];
+  if (t0 == null) return;
+  const k = state.t - t0;
+  if (k < 0 || k >= FLASH_DUR) return;
+  const env = k < FLASH_RISE ? k / FLASH_RISE
+                             : Math.pow(1 - (k - FLASH_RISE) / (FLASH_DUR - FLASH_RISE), 2);
+  const a = REDUCED ? env * 0.3 : env;
+  if (a <= 0.002) return;
+  /* 锚点由工具侧提供，写错是常事（最常见的是把二维点直接传进来，proj 于是
+     算出 NaN，createRadialGradient 抛异常、整帧作废）。这里兜住：投影失败、
+     传了 null、或者算出非有限值，一律回落到画面中心——闪照样闪，只是不居中。 */
+  let p = (anchor3 && proj(C, anchor3)) || null;
+  if (!p || !isFinite(p[0]) || !isFinite(p[1])) p = [CX, CY];
+  const R = Math.hypot(W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  /* 满屏均匀底光：没有这一层就只是「中心亮了一下」，够不上「全屏一闪」 */
+  ctx.fillStyle = 'rgba(251,191,36,' + (0.065 * a).toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+  /* 命中点泛光：白金核心 → 琥珀 */
+  const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], R * 0.78);
+  g.addColorStop(0,    'rgba(255,247,224,' + (0.42 * a).toFixed(4) + ')');
+  g.addColorStop(0.22, 'rgba(253,224,140,' + (0.19 * a).toFixed(4) + ')');
+  g.addColorStop(0.6,  'rgba(251,191,36,'  + (0.07 * a).toFixed(4) + ')');
+  g.addColorStop(1,    'rgba(251,191,36,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  /* 边缘暖晕：四角先亮起来，「整屏」这件事才被看见 */
+  const v = ctx.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 0.6);
+  v.addColorStop(0, 'rgba(251,191,36,0)');
+  v.addColorStop(1, 'rgba(251,191,36,' + (0.13 * a).toFixed(4) + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  /* 冲击波：一圈自命中点推向画外的琥珀细环 */
+  if (!REDUCED) {
+    const q = Math.min(1, k / (FLASH_DUR * 0.8));
+    const rr = R * 0.92 * (1 - Math.pow(1 - q, 3));       /* easeOutCubic */
+    const fade = Math.pow(1 - q, 1.6);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], Math.max(1, rr), 0, TAU);
+    ctx.lineWidth = 1 + 2.2 * fade;
+    ctx.strokeStyle = 'rgba(255,247,224,' + (0.5 * fade).toFixed(4) + ')';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function arrowAt(C, tip3, before3, color) {
   const t = proj(C, tip3), b = proj(C, before3);
   if (!t || !b) return;
@@ -1025,6 +1154,9 @@ function frameError(err) {
 function resetSim() {
   /* 清空帧级异常去重表：用户主动重置后应当允许重新报 */
   Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  /* 金光闪的打点一并清账：t 归零后，flashAt 里留着的是「未来」的时刻，
+     命中判据也还停在旧的真值上——不清，重置后走回同一个命中点时不会再闪 */
+  goldFlashReset();
   state.t = 0;
   state.theta = 0;
   /* 驱动时钟的偏移一并归零：否则 t 回到 0 而偏移还在，驱动会停在一个任意
