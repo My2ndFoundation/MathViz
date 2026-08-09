@@ -80,15 +80,21 @@
      c=0 是最左列，0 号格就是 a1 —— 跟 `queens.js` / `path-count.js` /
      `knight-path.js` 同向。
 
-   · **本任务只调一个桥接**：`mark(sq, "ok")`。⚠ **「要不要 `place(SQ, "wN")`
-     摆一枚真的马」是一个未决问题，由 Task 2 裁定，不是这里结的案**——规格
-     §4⑤① 的原话是「摆**真的马**（`place(sq, 'wN')`）」，而计划把这一条列成
-     Task 2 Step 2 的待判项（摆了就多一次宿主调用、多一行源码，值不值要那时候
-     判）。**若 Task 2 判定要摆，这个生成器得回头加一行**。这道题另外三个
-     桥接（`attacked` 反查、`clear`、`log`）确定不需要。只调 `mark` 不代表桥接
-     总集缩水成一个——`place`/`clear`/`log`/`attacked` 仍然都在根环境里，
-     只是这道题没有调用它们，跟 `path-count.js` 只用 `mark`+`log` 两个、
-     `queens.js` 用另一套组合是同一件事：五个桥接名固定，各题按需取用。
+   · **本任务调两个桥接**：`place(SQ, "wN")` 与 `mark(sq, "ok")`。⚠ **「要不要
+     摆一枚真的马」曾经是未决项，现已裁定为「摆」**（阶段 9d：Task 2 实跑判定
+     「要摆」，控制者裁定采纳，Task 1b 回头加的这一行）。三条理由：规格 §4⑤①
+     原话就是「摆**真的马**（`place(sq, 'wN')`）」；代价只有一行源码、整趟只多
+     一次宿主调用（`addDir` 外面调，不在递归里，不随八个方向放大）；而不摆的话
+     Task 2 实跑确认**「哪一格是马」在画面上没有任何东西说得出来**——`sq` 是这道
+     题唯一的滑杆参数，滑杆一动盘上却看不出动了什么，那个参数就等于不存在。
+     这道题另外三个桥接（`attacked` 反查、`clear`、`log`）确定不需要：只调两个
+     不代表桥接总集缩水——`clear`/`log`/`attacked` 仍然都在根环境里，只是这道题
+     没有调用它们，跟 `path-count.js` 只用 `mark`+`log` 两个、`queens.js` 用另一套
+     组合是同一件事：五个桥接名固定，各题按需取用。
+     ⚠ **`place` 的漏是静默的**：宿主没给 `place` 时解释器落到 NOOP_HOST，删掉
+     这一行源码不会抛、不会改 `result`、也不会动 `mark` 通道。所以
+     `bitboard.test.js` 里专门有一条打桩 host 的断言钉着「恰好调一次、格子号
+     === SQ、棋子代号是字符串 "wN"」——没那条断言，这一行删了没人知道。
 
    · **BigInt 与位运算子集**：`123n` 字面量、`0x..n` 十六进制字面量、
      `BigInt(x)` 内建、`& | ^ ~ << >>` 六个位运算符，全部是阶段 9b 加进
@@ -305,6 +311,21 @@
       ],
     },
     'const one = 1n << BigInt(SQ);',
+    {
+      zh: [
+        '// 可是 one 里的那匹马，眼下只是一个二进制位 —— 棋盘上没有任何东西说',
+        '// 「马站在这一格」。place 把这件抽象的事摆到真棋盘上：SQ 这一格立刻',
+        '// 站上一枚白马，下面标出来的每一个攻击格，才有一个看得见的出发点。',
+        '// 位盘算的是位，读者看的是盘，这一行就是这两件事之间的那座桥。',
+      ],
+      en: [
+        '// But the knight inside one is, so far, only a single binary digit — nothing on the',
+        '// board says "the knight is standing here". place puts that abstract fact onto the',
+        '// real board: a white knight now stands on SQ, so every attacked square marked',
+        '// below has a visible origin. Bitboards reason in bits, readers read a board.',
+      ],
+    },
+    'place(SQ, "wN");',
     'let atk = 0n;',
     '',
     {
