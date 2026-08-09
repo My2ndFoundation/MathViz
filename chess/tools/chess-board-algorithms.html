@@ -7635,8 +7635,10 @@ const ALGOS = {
                              mark 值 —— 连续的数值域（阶段 9c 的 pathCount）就是用
                              一行代表整个域（那一行的 kind 是 'num'，算法从不发它）。
                              反过来也不成立：真被发出来的值必须能被 onMark 认出，
-                             认不出会当场停住（见下面那道门）。
-       onMark(kind)          → { color, label } 或 null（认不出的种类不画）
+                             认不出 → 跟 board() 给坏了同一种处理：那一格不画 +
+                             红色状态牌 + 读数区黄字（hookFail，见 drawMarks）。
+       onMark(kind)          → { color, label } 或 null（认不出的种类不画，见上面
+                             kinds 那一条 —— 不画之外还会经 hookFail 响一次）
                              `label` 的**显示宽度 ≤ 72**（CJK 算 2），validateDecl 判死：
                              图例没有 max-width，长了会钻到右上角面板底下（见那道门）
        zOf(m, api)           → 这个标记该抬到第几层（省略 = 它的调用深度）
@@ -9833,16 +9835,25 @@ const ALGOS = {
         if (stale && !E.state.stale) continue;
         const info = P.onMark(m.kind);
         if (!info) {
-          /* 阶段 9c 立的门。改之前这里是静默 return —— 一个 onMark 认不出的
-             kind 会让那一格什么都不画，而全页照常绿。9c 把 kind 放宽成
+          /* 阶段 9c 立的门。改之前这里是静默 continue —— 一个 onMark 认不出的
+             kind 只被计进 tally.badKinds（读数区那行容易被略过的黄字
+             "mark(): …"），没有别的响，格子照常什么都不画。9c 把 kind 放宽成
              string | number（每格带一个标量）之后，这个沉默的代价变成了
-             「整块棋盘的数字一个都不显示，没有任何一处报错」。
-             缺省行为是沉默的东西，迟早会沉默地坏掉。 */
-          throw new Error(
-            'PROBLEMS.' + pid + '.onMark 认不出这个 mark 值：' + JSON.stringify(m.kind) +
-            '（类型 ' + typeof m.kind + '）。算法真的发出了它，但 onMark 返回了 null，' +
-            '于是这一格什么都不会画。要么在 onMark 里接住它，要么让算法别发它。'
-          );
+             「整块棋盘的数字一个都不显示，唯一的痕迹是一行容易略过的小字」。
+
+             这里在 drawMarks() 里，跟 board() / zOf() / readout() 同一条每帧
+             绘制路径（frame(ts) → draw() → drawProblem()）——直接 throw 会被
+             frame() 的 catch 吞掉、退化成一条去重的 console.warn，画面照常
+             每帧继续渲染，是"响了但没人看见"。跟那三处一样改用 hookFail：
+             记一次红色状态牌 + 读数区黄字，不把整页炸掉（见 hookFail 上方
+             注释）。 */
+          hookFail(pid, 'onMark', new Error(
+            '认不出这个 mark 值：' + JSON.stringify(m.kind) + '（类型 ' + typeof m.kind + '）。' +
+            '算法真的发出了它，但 onMark 返回了 null，于是这一格不会画。' +
+            '要么在 onMark 里接住它，要么让算法别发它。'
+          ));
+          tally.badKinds[m.kind] = 1;
+          continue;
         }
         if (!info.color) { tally.badKinds[m.kind] = 1; continue; }
         const fr = sqToFR(+key, L);
