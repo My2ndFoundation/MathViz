@@ -1892,6 +1892,15 @@ git commit -m "feat(crypto): 导航壳与画廊（按 chapter 分组，出站引
 | 6 | `version_meta_check()` | 注册表 `version` == html 的 `tool-version` meta |
 | 7 | `algos_gate()` | 内联的 ALGOS 块能跑，且 Caesar 全 k 往返成立 |
 | 8 | `outbound_ref_check()` | `../` 只出现在 app/index 各一次，其余目录零次 |
+| 9 | `inline_order_check()` | `CRYPTO-CORE` 的标记必须排在 `CRYPTANALYSIS` / `ALGOS` 之前 |
+
+**门 9 是实测出来的，不是想出来的。** `caesar.js` 与 `cryptanalysis.js` 的浏览器
+分支都写 `factory(root.CryptoCore)`。若 `crypto-core.js` 被内联到它们**之后**，
+页面加载时**什么都不会发生**——`C` 捕获成 `undefined`，模块照常挂上去，直到
+使用者敲第一个键才炸在 `Cannot read properties of undefined (reading 'mod')`。
+标记顺序是页面里的物理顺序（`render()` 是就地替换，不是按 `SOURCES` 的字典序
+拼接），所以一次手滑调换两行标记就能造出这个洞，而语法门、内联门、算法门
+三道都看不见它。
 
 - [ ] **Step 1: 写 `run_node()` 与常量**
 
@@ -1906,6 +1915,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 
 import inline_core
 
@@ -2192,26 +2202,50 @@ def algos_gate() -> int:
         if 'caesar.js' not in names:
             continue
         core = (ROOT / 'core' / 'crypto-core.js').read_text(encoding='utf-8')
-        # 脚本走 stdin（见 run_node 顶上的注释）：这一段会随算法数量增长，
-        # 正是当年顶破 MAX_ARG_STRLEN 的那种块。
-        script = (
-            'const self = globalThis;\n'
-            + core + '\n' + m.group(2) + '\n'
-            + 'const c = self.CryptoAlgos && self.CryptoAlgos.caesar;\n'
-            'if (!c) { console.error("CryptoAlgos.caesar 未挂上 root"); process.exit(1); }\n'
-            'const P = "The Quick Brown Fox! 123";\n'
-            'for (let k = 0; k < 26; k++) {\n'
-            '  if (c.decrypt(c.encrypt(P, k), k) !== P) {\n'
-            '    console.error("往返失败 k=" + k); process.exit(1);\n'
-            '  }\n'
-            '}\n'
-            'if (c.bruteForce("DWWDFN").length !== 26) {\n'
-            '  console.error("bruteForce 不是 26 个候选"); process.exit(1);\n'
-            '}\n'
-            'if (c.encrypt("ATTACK AT DAWN", 3) !== "DWWDFN DW GDZQ") {\n'
-            '  console.error("教科书向量对不上"); process.exit(1);\n'
-            '}\n')
-        proc = run_node(script)
+        # ⚠ **不能用 `const self = globalThis;` 加直接执行来模拟浏览器。**
+        # node -e 与 node-读-stdin **都**定义了 module 与 require（实测：
+        # `typeof module === 'object'`、`typeof require === 'function'`），
+        # 于是 UMD 头部会走**node 分支**——这道门就变成了在测 core 测试已经
+        # 覆盖过的那条路，同时看起来一切正常。一道测错分支的门比没有门更坏：
+        # 它会让人以为浏览器分支被覆盖了。
+        #
+        # 正确做法是 vm + 一个**裸上下文**（没有 module / require），让 UMD
+        # 只能走 root.CryptoAlgos 那条分支。源码经临时文件送进去而不是拼进
+        # 脚本字符串：省掉一整套 JS 字面量转义，也更接近浏览器真实的
+        # "读文件内容、在全局上下文里执行"。
+        with tempfile.TemporaryDirectory() as td:
+            core_f = pathlib.Path(td) / 'core.js'
+            algos_f = pathlib.Path(td) / 'algos.js'
+            core_f.write_text(core, encoding='utf-8')
+            algos_f.write_text(m.group(2), encoding='utf-8')
+            script = (
+                'const vm = require("vm"), fs = require("fs");\n'
+                'const sandbox = {}; sandbox.self = sandbox;\n'
+                'sandbox.console = console;\n'
+                'vm.createContext(sandbox);\n'
+                f'vm.runInContext(fs.readFileSync({json.dumps(str(core_f))}, "utf8"), sandbox);\n'
+                f'vm.runInContext(fs.readFileSync({json.dumps(str(algos_f))}, "utf8"), sandbox);\n'
+                'if (typeof sandbox.module !== "undefined" || typeof sandbox.require !== "undefined") {\n'
+                '  console.error("沙箱不干净：module/require 泄漏进来了，测的还是 node 分支");\n'
+                '  process.exit(1);\n'
+                '}\n'
+                'const c = sandbox.CryptoAlgos && sandbox.CryptoAlgos.caesar;\n'
+                'if (!c) { console.error("CryptoAlgos.caesar 未挂上 root"); process.exit(1); }\n'
+                'const P = "The Quick Brown Fox! 123";\n'
+                'for (let k = 0; k < 26; k++) {\n'
+                '  if (c.decrypt(c.encrypt(P, k), k) !== P) {\n'
+                '    console.error("往返失败 k=" + k); process.exit(1);\n'
+                '  }\n'
+                '}\n'
+                'if (c.bruteForce("DWWDFN").length !== 26) {\n'
+                '  console.error("bruteForce 不是 26 个候选"); process.exit(1);\n'
+                '}\n'
+                'if (c.encrypt("ATTACK AT DAWN", 3) !== "DWWDFN DW GDZQ") {\n'
+                '  console.error("教科书向量对不上"); process.exit(1);\n'
+                '}\n')
+            # 脚本走 stdin（见 run_node 顶上的注释）。临时文件必须在 run_node
+            # **之内**还活着，所以这一句留在 with 块里。
+            proc = run_node(script)
         if proc.returncode != 0:
             print(f'ERROR: {path.name} 的内联 ALGOS 块求值失败\n'
                   f'{proc.stderr.strip()}', file=sys.stderr)
@@ -2316,6 +2350,52 @@ Task 2 写的 `caesar.js` UMD 头部有 `require('../crypto-core.js')`，
 node cryptography/core/algos/caesar.test.js
 ```
 预期：PASS（改的是 require 路径写法，行为不变）
+
+- [ ] **Step 5b: 写门 9（内联顺序）**
+
+```python
+# 依赖在前：这两个模块的浏览器分支都是 factory(root.CryptoCore)，
+# crypto-core 必须已经跑过。顺序错了页面**加载时毫无征兆**。
+INLINE_ORDER_AFTER_CORE = ('CRYPTANALYSIS', 'ALGOS')
+
+
+def inline_order_check() -> int:
+    """CRYPTO-CORE 的标记必须排在依赖它的模块之前。
+
+    这道门守的是一个**静默**失败：caesar.js 与 cryptanalysis.js 的浏览器分支
+    都写 factory(root.CryptoCore)。若 crypto-core.js 内联在它们之后，页面加载
+    时什么都不会发生——C 捕获成 undefined，模块照常挂上 root，直到使用者敲
+    第一个键才炸在 "Cannot read properties of undefined (reading 'mod')"。
+    建这个子项目时在 vm 沙箱里复现过。
+
+    标记顺序就是页面里的物理顺序（render() 是就地替换，不是按 SOURCES 的
+    字典序拼接），所以调换两行标记即可造出这个洞，而语法门、内联门、算法门
+    三道都看不见它——它们各自的前提都是"模块已经正确加载"。
+    """
+    rc = 0
+    for path in tool_pages():
+        text = path.read_text(encoding='utf-8')
+        core_at = text.find('/* >>> GENERATED:CRYPTO-CORE */')
+        if core_at < 0:
+            print(f'ERROR: {path.name} 没有 CRYPTO-CORE 标记区间——每个工具页都必须有',
+                  file=sys.stderr)
+            rc = 1
+            continue
+        for tag in INLINE_ORDER_AFTER_CORE:
+            at = text.find(f'/* >>> GENERATED:{tag}')
+            if at < 0:
+                continue                   # 这一页不用这个模块，正常
+            if at < core_at:
+                print(f'ERROR: {path.name} 的 {tag} 标记排在 CRYPTO-CORE 之前。\n'
+                      f'       该模块的浏览器分支是 factory(root.CryptoCore)，'
+                      f'加载顺序错了不会报错，\n'
+                      f'       只会在第一次调用时炸。把 CRYPTO-CORE 移到它前面。',
+                      file=sys.stderr)
+                rc = 1
+    if rc == 0:
+        print('内联顺序：CRYPTO-CORE 均排在依赖它的模块之前')
+    return rc
+```
 
 - [ ] **Step 6: 写 `__main__`**
 
