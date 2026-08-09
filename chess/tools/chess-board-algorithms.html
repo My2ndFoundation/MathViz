@@ -8284,6 +8284,19 @@ const ALGOS = {
     { name: '8×8 + 3', N: 8, blocked: [26, 35, 44] },
     { name: '8×8 ⧸', N: 8, blocked: [7, 14, 21, 28, 35, 42, 49, 56] },
   ];
+  /* 越界当场抛，照 tourBoard / rcBoard / kdBoard 那条（阶段 5 约束 6）：默默夹回
+     第 0 档会让界面写着一个档位、跑的却是另一档，那是最坏的一种错。今天滑杆
+     `min:0,max:3,step:1` 是唯一的写入路径，进不来这条分支——但护栏要防的正是
+     「今天进不去」不等于「以后也进不去」。`source`/`board`/`exportName` 三个
+     调用点都走这里；`fmt` 拿到的是拖拽中的实时值 `v` 不是 `st`，跟 rcBoard/
+     kdBoard 的 fmt 同形，原地夹回合法区间而不是抛（见下面 fmt 自己的注释）。 */
+  function pcBoard(st) {
+    const i = Math.round(st.board);
+    if (!isFinite(i) || i < 0 || i >= PC_BOARDS.length) {
+      throw new Error('盘面滑杆的档位越界：' + st.board + '（只有 0…' + (PC_BOARDS.length - 1) + ' 四档）');
+    }
+    return PC_BOARDS[i];
+  }
 
   const PROBLEMS = {
     queens: {
@@ -8770,20 +8783,26 @@ const ALGOS = {
       /* 四档盘面，答案分别是 20 / 3432 / 1287 / 0（path-count.test.js 钉着）。
          档1→档2 是这四档里最有分量的一课：三堵墙把 3432 砍成 1287，六成没了。
          档3 是另一课：整条反对角线堵死 = 0，而 0 是一个真实的答案。 */
+      /* `fmt` 收到的是拖拽中的实时值 `v`，不是 `st`——跟 tourKnight/rookCover/
+         kingDominate 的 board 滑杆同形：拖拽途中不拿它当越界当场抛的落点（抛了
+         会在拖拽中途把 UI 炸掉），照那三处一样原地夹回合法区间，只用来出这一
+         帧的显示文字。真正算「这一档到底是哪块盘」永远走 `pcBoard(st)`。 */
       params: [{ key: 'board', label: PC.paramBoard, min: 0, max: 3, step: 1, value: 1,
-                 fmt: function (v) { return PC_BOARDS[Math.round(v)].name; } }],
+                 fmt: function (v) {
+                   return PC_BOARDS[Math.max(0, Math.min(PC_BOARDS.length - 1, Math.round(v)))].name;
+                 } }],
       sources: ['path-count.js'],
       /* 入口是**递归**那一个：fillLayer(d) 填第 d 条反对角线，末尾调
          fillLayer(d + 1)。于是调用深度 = r + c = 层号，第三根轴不需要
          任何额外声明就是对的 —— 跟 knightPath 的 expand(frontier, d) 同构。 */
       entry: 'fillLayer',
       source: function (st, M, file, lang) {
-        const b = PC_BOARDS[Math.round(st.board)];
+        const b = pcBoard(st);
         return M[file].source({ N: b.N, blocked: b.blocked, lang: lang });
       },
       check: { result: true, boardOps: true, counters: [] },
       board: function (st) {
-        const b = PC_BOARDS[Math.round(st.board)];
+        const b = pcBoard(st);
         return { files: b.N, ranks: b.N, blocked: b.blocked };
       },
       zLabel: { zh: '反对角线层号（= r + c）', en: 'Anti-diagonal layer (= r + c)' },
@@ -8799,7 +8818,7 @@ const ALGOS = {
         return null;
       },
       exportName: function (st) {
-        return 'path-count-' + PC_BOARDS[Math.round(st.board)].name + '.js';
+        return 'path-count-' + pcBoard(st).name + '.js';
       },
       readout: function (a, st) { /* Task 5 写 */ return ''; },
     },
