@@ -303,4 +303,325 @@ T.throws(function () { A.columnsForPeriod('ABC', 0); }, 'columnsForPeriod 拒绝
 T.throws(function () { A.columnsForPeriod('ABC', 1.5); }, 'columnsForPeriod 拒绝非整数周期', /周期/);
 T.throws(function () { A.icByPeriod('ABC', 0); }, 'icByPeriod 拒绝 maxPeriod = 0', /maxPeriod/);
 
+/* ================================================================
+   密文分类（"还不知道这是什么密码"那一步）
+   ================================================================ */
+const sub  = require('./algos/substitution.js');
+const vig  = require('./algos/vigenere.js');
+const tra  = require('./algos/transposition.js');
+const pf   = require('./algos/playfair.js');
+const hill = require('./algos/hill.js');
+const affine = require('./algos/affine.js');
+const EX   = require('../examples/examples.js');
+
+const LONG = EX.plaintext('cryptanalysis-note').text.en;
+const LONG_N = C.normalize(LONG).length;
+T.ok(LONG_N >= 400, '教学长文至少 400 个字母（实际 ' + LONG_N + '）');
+T.eq(LONG_N, 656, '教学长文是 656 个字母——下面每一个实测数字都绑在这个长度上');
+
+/* ---- digraphDoubles ----
+   切法是**不重叠**的。这不是实现细节：Playfair 的"永不输出重复对"只在它
+   自己的偶数对齐上成立，换成滑窗就退化成一条统计断言。 */
+T.eq(A.digraphDoubles('AABB').pairs, 2, 'digraphDoubles：4 个字母 = 2 对（不重叠）');
+T.eq(A.digraphDoubles('AABB').doubles, 2, 'AA|BB 是两个重复对');
+T.eq(A.digraphDoubles('ABAB').doubles, 0, 'AB|AB 一个重复对都没有');
+/* 滑窗切法会把 'ABBA' 数成 1（中间那个 BB），不重叠切法数成 0（AB|BA）。
+   这条断言就是两种切法的分界线，改错了它会立刻变红。 */
+T.eq(A.digraphDoubles('ABBA').doubles, 0,
+     'ABBA 的重复对是 0——滑窗切法会数成 1，这条钉住的正是"不重叠"');
+T.eq(A.digraphDoubles('ABCDE').pairs, 2, '奇数长度时末尾那个落单字母不成对');
+T.eq(A.digraphDoubles('Hello, World!').pairs, 5, 'digraphDoubles 先 normalize（10 个字母 = 5 对）');
+{
+  const d = A.digraphDoubles(LONG);
+  T.eq(d.pairs, 328, '656 个字母 = 328 对');
+  T.ok(Math.abs(d.expected - d.pairs * A.indexOfCoincidence(LONG)) < 1e-12,
+       'expected 就是 pairs × IoC');
+  /* 期望**不是** pairs/26。这条断言把两个公式的差值钉住：pairs/26 = 12.62，
+     pairs×IoC = 23.77，差了将近一倍。 */
+  T.ok(Math.abs(d.expected - 23.77) < 0.01,
+       '长文的期望重复对 ≈ 23.77（实测）');
+  T.ok(Math.abs(d.pairs / 26 - 12.62) < 0.01,
+       '同一段文本用 pairs/26 只给 12.62——这就是为什么不能用它');
+}
+T.eq(A.digraphDoubles('').pairs, 0, '空串 0 对');
+T.eq(A.digraphDoubles('').expected, 0, '空串期望 0，不是 NaN');
+
+/* ---- 事实 4：pairs × IoC 是对的基准，pairs / 26 不是 ----
+   对三段真实的多表密文比较两个公式与实测值。判据：IoC 版本必须更接近。 */
+[['HORIZON', 14], ['CRYPTO', 14], ['KEY', 16]].forEach(function (spec) {
+  const d = A.digraphDoubles(vig.encrypt(LONG, spec[0]));
+  T.eq(d.doubles, spec[1], '维吉尼亚 ' + spec[0] + '（p=' + spec[0].length + '）观测到 ' +
+       spec[1] + ' 个重复对');
+  T.ok(Math.abs(d.doubles - d.expected) < Math.abs(d.doubles - d.pairs / 26),
+       '维吉尼亚 ' + spec[0] + '：pairs×IoC（' + d.expected.toFixed(2) +
+       '）比 pairs/26（' + (d.pairs / 26).toFixed(2) + '）更接近实测 ' + d.doubles);
+});
+
+/* ---- absentLetters ---- */
+T.eq(A.absentLetters(C.ALPHABET), [], '全字母表：没有缺席的字母');
+T.eq(A.absentLetters('ABC').length, 23, 'ABC 缺 23 个字母');
+T.eq(A.absentLetters('ABC')[0], 'D', '按字母序返回');
+T.eq(A.absentLetters(LONG), ['Z'], '教学长文只缺 Z');
+T.eq(A.absentLetters(pf.encrypt(LONG, 'MONARCHY')), ['J'],
+     'Playfair 密文缺且只缺 J —— 25 格方阵里没有 J 的位置');
+
+/* ================= 事实 3：Playfair 结构上不可能输出重复对 =================
+   这一版测试是**带负对照**的。原始探针把 mapPair() 的返回**对象**当字符串比，
+   即 String(out)[0] === String(out)[1] 恒为 '[' === '['? 不——是
+   '[object Object]' 的第 0 与第 1 个字符 '[' 与 'o'，永远不等，于是"0 次违规"
+   是在什么都没量的情况下报出来的。下面三条防线让这条测试无法靠"量了个空"通过：
+     (a) 读的是 .out；
+     (b) 断言取到的确实是 2 个字符的字符串；
+     (c) 断言行/列/矩形三条规则都被走到了（分布非退化）。 */
+{
+  const KEYS = ['MONARCHY', 'PLAYFAIR', 'CRYPTANALYSIS', 'ZEBRA', 'QWERTY', ''];
+  const SQ_AL = 'ABCDEFGHIKLMNOPQRSTUVWXYZ';      // 25 个字母，J 已并进 I
+  T.eq(SQ_AL.length, 25, '方阵字母表是 25 个字母');
+  const rules = { row: 0, col: 0, rect: 0 };
+  let tested = 0, doubled = 0, notTwoChars = 0;
+  KEYS.forEach(function (kw) {
+    const sq = pf.makeSquare(kw);
+    for (let i = 0; i < 25; i++) for (let j = 0; j < 25; j++) {
+      if (i === j) continue;                       // 相同字母的对 pairAt 会抛，不属于本实验
+      const r = pf.mapPair(sq, SQ_AL.charAt(i), SQ_AL.charAt(j), 1);
+      const out = r.out;
+      if (typeof out !== 'string' || out.length !== 2) { notTwoChars++; continue; }
+      rules[r.rule] = (rules[r.rule] || 0) + 1;
+      tested++;
+      if (out.charAt(0) === out.charAt(1)) doubled++;
+    }
+  });
+  T.eq(tested, 3600, '穷举 6 把密钥 × 600 对互异字母 = 3600 对');
+  T.eq(notTwoChars, 0, '(a)(b) 每一次 mapPair().out 都是一个 2 字符的字符串');
+  T.eq(rules, { row: 600, col: 600, rect: 2400 },
+       '(c) 三条规则都被走到：行 600 / 列 600 / 矩形 2400，分布非退化');
+  T.eq(doubled, 0, '3600 对里 0 次输出重复对 —— 结构上不可能，不是统计上少见');
+  /* 负对照：把同一段代码故意读成对象再比，证明原来那条探针确实量了个空。 */
+  let vacuous = 0;
+  const sq = pf.makeSquare('MONARCHY');
+  for (let i = 0; i < 25; i++) for (let j = 0; j < 25; j++) {
+    if (i === j) continue;
+    const r = pf.mapPair(sq, SQ_AL.charAt(i), SQ_AL.charAt(j), 1);
+    if (String(r)[0] === String(r)[1]) vacuous++;
+  }
+  T.eq(vacuous, 0, '负对照：把返回对象当字符串比时也是 0 —— 所以"0 次"本身不构成证据，' +
+       '上面 (a)(b)(c) 三条才是');
+  T.ok(String(pf.mapPair(sq, 'A', 'B', 1)) === '[object Object]',
+       '负对照的成因：mapPair 返回的是对象，String() 得到 [object Object]');
+}
+
+/* ================= 事实 1：换位逐位保住单字母统计 ================= */
+{
+  const ct = tra.columnarEncrypt(LONG, 'ANALYST');
+  T.eq(A.letterCounts(ct), A.letterCounts(LONG),
+       '列换位后 letterCounts 逐项相同 —— 换位只动位置');
+  T.ok(A.chiSquare(ct) === A.chiSquare(LONG), 'χ² 逐位相同（不是约等于）');
+  T.ok(Math.abs(A.chiSquare(LONG) - 28.3949) < 0.001,
+       '这段文本的 χ² 实测 28.3949（明文与密文同一个值）');
+  T.ok(A.indexOfCoincidence(ct) === A.indexOfCoincidence(LONG), 'IoC 也逐位相同');
+}
+
+/* ================= 事实 2：单表代换保住 IoC，摧毁 χ² ================= */
+{
+  const key = sub.randomKey(A.rng32(20260810));
+  T.ok(sub.isValidKey(key), '种子化的随机密钥是合法排列');
+  const ct = sub.encrypt(LONG, key);
+  T.ok(A.indexOfCoincidence(ct) === A.indexOfCoincidence(LONG),
+       '单表代换是字母上的双射，IoC 逐位不变');
+  T.ok(Math.abs(A.indexOfCoincidence(LONG) - 0.072473) < 1e-6,
+       '这段文本的 IoC 实测 0.072473');
+  T.ok(A.chiSquare(ct) > 30 * A.chiSquare(LONG),
+       'χ² 却涨了 30 倍以上（实测 28.39 → ' + A.chiSquare(ct).toFixed(1) + '）');
+}
+
+/* ================= MIN_SAMPLE 与 classify ================= */
+T.eq(A.MIN_SAMPLE, 200, 'MIN_SAMPLE = 200');
+T.eq(A.IC_SINGLE, 0.055, '单表 / 多表的 IoC 分界是 0.055');
+T.eq(A.CHI2_PER_LETTER, 1, '每字母 χ² 的分界是 1.0');
+
+/* 低于 MIN_SAMPLE 一律不给家族。用真实的短样本，不是造出来的边角料。 */
+[['pangram', 95], ['caesar-quote', 91], ['attack', 12]].forEach(function (spec) {
+  const r = A.classify(caesar.encrypt(EX.plaintext(spec[0]).text.en, 7));
+  T.eq(r.n, spec[1], spec[0] + ' 的密文有 ' + spec[1] + ' 个字母');
+  T.eq(r.confident, false, spec[0] + '：n < 200，confident 为 false');
+  T.eq(r.family, 'unknown', spec[0] + '：不给家族名');
+  T.eq(r.reasons.map(function (x) { return x.key; }), ['sample-too-small'],
+       spec[0] + '：唯一的理由是样本太小');
+  T.ok(r.measurements.ic > 0, spec[0] + '：测量值照样给出（拒绝的是结论，不是数据）');
+});
+/* 恰好落在门槛两侧。199 拒绝、200 接受——这条把 "<" 与 "<=" 的差别钉死。 */
+{
+  const s = C.normalize(LONG);
+  T.eq(A.classify(s.slice(0, 199)).confident, false, 'n = 199 拒绝');
+  T.eq(A.classify(s.slice(0, 200)).confident, true, 'n = 200 接受');
+  T.eq(A.classify(s.slice(0, 199)).family, 'unknown', 'n = 199 家族是 unknown');
+}
+
+/* 每一类都用真算法造样本，逐条对家族。 */
+const CASES = [
+  ['plain',        LONG,                                          'transposition'],
+  ['caesar',       caesar.encrypt(LONG, 7),                       'monoalphabetic'],
+  ['affine',       affine.encrypt(LONG, 5, 8),                    'monoalphabetic'],
+  ['substitution', sub.encrypt(LONG, sub.randomKey(A.rng32(7))),  'monoalphabetic'],
+  ['columnar',     tra.columnarEncrypt(LONG, 'ANALYST'),          'transposition'],
+  ['railfence',    tra.railFenceEncrypt(LONG, 4),                 'transposition'],
+  ['vigenere',     vig.encrypt(LONG, 'HORIZON'),                  'polyalphabetic'],
+  ['beaufort',     vig.beaufortEncrypt(LONG, 'SIGNAL'),           'polyalphabetic'],
+  ['playfair',     pf.encrypt(LONG, 'MONARCHY'),                  'polygraphic-playfair'],
+  ['hill2',        hill.encrypt(LONG, [[3, 3], [2, 5]]),          'polyalphabetic'],
+  ['hill3',        hill.encrypt(LONG, [[6, 24, 1], [13, 16, 10], [20, 17, 15]]), 'polyalphabetic']
+];
+CASES.forEach(function (c) {
+  const r = A.classify(c[1]);
+  T.eq(r.family, c[2], 'classify(' + c[0] + ') = ' + c[2]);
+  T.eq(r.confident, true, c[0] + ' 的样本够长');
+  T.ok(r.reasons.length > 0, c[0] + ' 至少给出一条理由');
+  r.reasons.forEach(function (x) {
+    T.ok(!!x.key && !!x.zh && !!x.en, c[0] + ' 的理由 ' + x.key + ' 有 key / zh / en 三样');
+  });
+});
+/* 路由路径本身是结果的一部分——页面要把它原样画出来，所以顺序也钉住。 */
+T.eq(A.classify(pf.encrypt(LONG, 'MONARCHY')).reasons.map(function (x) { return x.key; }),
+     ['even-length', 'no-j', 'no-doubles'],
+     'Playfair 走的是三条结构判据，顺序固定');
+T.eq(A.classify(caesar.encrypt(LONG, 7)).reasons.map(function (x) { return x.key; }),
+     ['ic-single', 'chi2-scrambled'],
+     '单表：先 IoC 后 χ²');
+T.eq(A.classify(LONG).reasons.map(function (x) { return x.key; }),
+     ['ic-single', 'chi2-english', 'transposition-caveat'],
+     '换位分支必须带上"分不开明文"那条告诫');
+T.eq(A.classify(vig.encrypt(LONG, 'HORIZON')).reasons.map(function (x) { return x.key; }),
+     ['ic-flat', 'doubles-present', 'next-fork-period'],
+     '多表：IoC 压平 → 有重复对（排除 Playfair）→ 下一步去测周期');
+
+/* 事实 7：单靠 IoC 分不开 Playfair 与短周期维吉尼亚——两者落在同一档，
+   把它们分开的是结构判据。 */
+{
+  const icPf = A.indexOfCoincidence(pf.encrypt(LONG, 'MONARCHY'));
+  const icV3 = A.indexOfCoincidence(vig.encrypt(LONG, 'KEY'));
+  T.ok(icPf < A.IC_SINGLE && icV3 < A.IC_SINGLE,
+       'Playfair 与 p=3 维吉尼亚的 IoC 都在 0.055 以下（' + icPf.toFixed(4) +
+       ' / ' + icV3.toFixed(4) + '）');
+  T.ok(Math.abs(icPf - icV3) < 0.01,
+       '两者相差不到 0.01 —— IoC 这一条判据在它们之间是瞎的');
+  T.eq(A.digraphDoubles(pf.encrypt(LONG, 'MONARCHY')).doubles, 0, '分开它们的是重复对：Playfair 0 个');
+  T.eq(A.digraphDoubles(vig.encrypt(LONG, 'KEY')).doubles, 16, '维吉尼亚 p=3 有 16 个');
+}
+
+/* 结构判据只看结构，不看内容荒不荒谬——这既是它的力量也是它的边界。
+   一段 24 字母循环：偶数长度、没有 J、偶数对齐上一个重复对都没有，
+   于是它照样被判成 Playfair。把这条写成断言，是为了让"结构判据能被
+   构造出的输入骗到"这件事有人看着，而不是等着谁在页面上撞见。 */
+{
+  const cycle = 'ABCDEFGHIKLMNOPQRSTUVWXY';        // 24 个字母，J 已剔除
+  T.eq(cycle.length, 24, '循环节 24 个字母（偶数，所以偶数对齐上永不成对）');
+  const forced = cycle.repeat(10);                 // 240 个字母
+  T.eq(A.digraphDoubles(forced).doubles, 0, '构造样本确实没有重复对');
+  T.ok(A.digraphDoubles(forced).expected > A.DOUBLES_MIN_EXPECTED,
+       '而它的期望值够大（' + A.digraphDoubles(forced).expected.toFixed(1) + '），判据在这里有效');
+  T.eq(A.classify(forced).family, 'polygraphic-playfair',
+       '于是它被判成 Playfair —— 结构判据只问结构');
+}
+
+/* ---- 26 字母表这条前提本身 ----
+   ADFGVX / 波利比乌斯 / 摩尔斯把一个字母拆成两个以上符号，密文的 IoC 天生
+   在 1/6 那一档，比英文还高。不先拦一道，"IoC ≥ 0.055 ⇒ 单表"会把它们
+   一律判成单表代换。 */
+T.eq(A.ALPHABET_MIN_DISTINCT, 10, '互异字母数不超过 10 时不当作 26 字母表上的密码');
+{
+  const six = 'ADFGVX';
+  let s = '';
+  const rng = A.rng32(11);
+  for (let i = 0; i < 400; i++) s += six.charAt(Math.floor(rng() * 6));
+  const r = A.classify(s);
+  T.eq(r.n, 400, 'ADFGVX 样本 400 个字母，长度不是问题');
+  T.ok(r.measurements.ic > A.IC_SINGLE,
+       '它的 IoC 是 ' + r.measurements.ic.toFixed(3) + '，比英文还高 —— 不拦就会被判成单表');
+  T.eq(r.family, 'unknown', 'ADFGVX 不给家族');
+  T.eq(r.confident, false, 'ADFGVX 的 confident 是 false');
+  T.eq(r.reasons[0].key, 'alphabet-too-small', '第一条理由指出字母表根本不是 26 个');
+}
+{
+  /* 门槛的另一侧：正常密文的互异字母数远在 10 以上，不会被这道门误伤。 */
+  const worst = CASES.reduce(function (w, c) {
+    const d = 26 - A.absentLetters(c[1]).length;
+    return Math.min(w, d);
+  }, 26);
+  T.ok(worst > A.ALPHABET_MIN_DISTINCT + 10,
+       '上面十一个真样本里互异字母最少的也有 ' + worst + ' 个，离门槛远得很');
+}
+
+/* ================= 种子化随机数 ================= */
+{
+  const a = A.rng32(42), b = A.rng32(42), c = A.rng32(43);
+  const va = [a(), a(), a()], vb = [b(), b(), b()], vc = [c(), c(), c()];
+  T.eq(va, vb, '同一个种子给出同一串数');
+  T.ok(JSON.stringify(va) !== JSON.stringify(vc), '不同种子给出不同的串');
+  T.ok(va.every(function (x) { return x >= 0 && x < 1; }), '取值落在 [0,1)');
+  T.eq(va[0], 0.6011037519201636, 'rng32(42) 的第一个值钉死（换实现要连同下面整张表一起重量）');
+}
+{
+  const k = A.distinctKey(A.rng32(9), 7);
+  T.eq(k.length, 7, 'distinctKey 给出指定长度');
+  T.eq(new Set(k.split('')).size, 7, 'distinctKey 的字母互不相同');
+  T.eq(A.distinctKey(A.rng32(9), 7), k, 'distinctKey 对同种子确定');
+}
+T.eq(A.cyclicSlice('ABCDE', 3, 4), 'DEAB', 'cyclicSlice 绕回开头');
+
+/* ================= 判错率扫描 —— MIN_SAMPLE = 200 的证据 =================
+   这张表就是工具页 evidence 页签上画的那张。断言与页面读的是同一个函数、
+   同一个种子、同一份语料，所以两边不可能各算各的。
+   数字全部是本仓实测；换语料、换种子、换密钥生成方式都会改变它们，
+   那时候要重新量，而不是把断言改成"差不多就行"。 */
+{
+  const SW = A.icSweep({ source: EX.classical.sweepSource, substitution: sub, vigenere: vig });
+  T.eq(SW.seed, 20260810, '扫描的种子');
+  T.eq(SW.trials, 40, '每个长度每一侧 40 个样本');
+  T.eq(SW.threshold, 0.055, '阈值就是 IC_SINGLE');
+  T.eq(SW.lengths, [40, 60, 80, 100, 150, 200, 300, 500], '八个长度');
+  T.eq(SW.sourceLength, 854, '语料 854 个字母');
+  T.eq(SW.rows.map(function (r) { return r.monoErr; }), [12, 3, 2, 1, 0, 0, 0, 0],
+       '单表被判成多表：12 3 2 1 0 0 0 0');
+  T.eq(SW.rows.map(function (r) { return r.polyErr; }), [5, 0, 3, 1, 1, 1, 0, 0],
+       '多表被判成单表：5 0 3 1 1 1 0 0');
+  T.eq(SW.totalMonoErr, 18, '单表侧合计 18 次判错');
+  T.eq(SW.totalPolyErr, 11, '多表侧合计 11 次判错');
+  /* 两次调用必须逐位相同——页面每次载入都要画出同一张图。 */
+  const SW2 = A.icSweep({ source: EX.classical.sweepSource, substitution: sub, vigenere: vig });
+  T.eq(SW2.rows.map(function (r) { return r.monoIc; }),
+       SW.rows.map(function (r) { return r.monoIc; }), '两次扫描逐个 IoC 相同');
+  /* 真正的论点不是"判错数变小"，是**两条分布带在短样本上重叠**。
+     n=40 时它们重叠，n=300 起完全分开。 */
+  function overlaps(r) { return Math.min(r.monoMax, r.polyMax) > Math.max(r.monoMin, r.polyMin); }
+  T.eq(SW.rows.map(overlaps), [true, true, true, true, false, false, false, false],
+       '两条带在 n ≤ 100 时重叠，n ≥ 150 起分开');
+  T.ok(SW.rows[0].monoMin < SW.rows[0].polyMax,
+       'n=40：最"平"的单表样本比最"尖"的多表样本还平（' +
+       SW.rows[0].monoMin.toFixed(4) + ' < ' + SW.rows[0].polyMax.toFixed(4) + '）');
+  /* 单表侧的 IoC 与密钥无关（单表代换是双射），所以那一侧量的其实是
+     "n 个字母的英文，重合指数有多不稳"。这条把它变成断言而不是注释。 */
+  const p40 = A.cyclicSlice(C.normalize(EX.classical.sweepSource), 17, 40);
+  T.ok(A.indexOfCoincidence(sub.encrypt(p40, sub.randomKey(A.rng32(3)))) ===
+       A.indexOfCoincidence(p40),
+       '单表侧的 IoC 完全由明文切片决定，密钥不起作用');
+}
+/* 源文比最长样本还短时必须当场拒绝：循环切片会把同一段文字接好几遍，
+   画出来的不是英文的抖动而是复读机的抖动。 */
+T.throws(function () {
+  A.icSweep({ source: 'SHORT', substitution: sub, vigenere: vig });
+}, '源文太短要抛', /源文/);
+T.throws(function () {
+  A.icSweep({ source: EX.classical.sweepSource, vigenere: vig });
+}, '缺 substitution 模块要抛', /substitution/);
+T.throws(function () {
+  A.icSweep({ source: EX.classical.sweepSource, substitution: sub });
+}, '缺 vigenere 模块要抛', /vigenere/);
+
+/* ================= 语料本身 ================= */
+T.eq(EX.classical.SWEEP_IDS, ['cryptanalysis-note', 'pangram', 'caesar-quote', 'attack'],
+     '扫描语料的 id 清单是冻结的 —— 改动它就要重量上面那张表');
+T.eq(C.normalize(EX.classical.sweepSource).length, 854, '语料 854 个字母');
+T.ok(Math.abs(A.indexOfCoincidence(EX.classical.sweepSource) - 0.06889) < 1e-5,
+     '语料的 IoC 是 0.06889，比单用长文的 0.07247 更接近普通英文的 0.0667');
+
 T.report('cryptanalysis');

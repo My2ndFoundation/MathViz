@@ -65,8 +65,52 @@
         en: 'Caesar would have used a shift of three.',
         zh: '凯撒本人用的位移是 3。'
       }
+    },
+    {
+      id: 'cryptanalysis-note',
+      /* 656 个字母，本仓自造的散文，无版权顾虑（标准 ①）。
+         为什么要专门加一条这么长的：上面三条分别是 95、12、91 个字母，
+         **全部**落在密码分析工具自己量出来的"结论不可信"区间里
+         （见 cryptanalysis.js 的 MIN_SAMPLE = 200 与 icSweep）。一个讲
+         "样本量决定判据可不可信"的页面，如果它自带的每一份样本都太短，
+         那它只能演示自己的失败。标准 ② 要求 >= 60 个字母，这一条把门槛
+         抬到 400 以上，是同一条标准在这个用途上的延伸。
+
+         实测（656 个字母）：IoC 0.07247、χ²/n 0.0433、缺字母只有 Z。
+         IoC 略高于英文常见的 0.0667——这段文字反复用同一批词
+         （the / and / letters / average / experiment），这是真实散文的常态，
+         不是缺陷；下面 SWEEP_IDS 把它与另外三条拼在一起正是为了把这个
+         偏高拉回 0.0689，更贴近普通英文。 */
+      text: {
+        en: 'Before a single key is tried the ciphertext has already answered several questions and it answers them in numbers rather than in words. Count how often two letters drawn at random turn out to be the same and that number separates one alphabet from many. Compare the letter counts against ordinary English and the answer separates a renaming of the alphabet from a rearrangement of the message. Count the pairs of identical adjacent letters and a whole family of ciphers can be ruled out on the spot. None of this recovers a key. What it does is choose which weapon to reach for and on a short message it will cheerfully choose the wrong one because every one of these numbers is an average and an average over forty letters is mostly noise. Length is not a detail of the experiment. Length is the experiment.',
+        zh: 'Before a single key is tried the ciphertext has already answered several questions and it answers them in numbers rather than in words. Count how often two letters drawn at random turn out to be the same and that number separates one alphabet from many. Compare the letter counts against ordinary English and the answer separates a renaming of the alphabet from a rearrangement of the message. Count the pairs of identical adjacent letters and a whole family of ciphers can be ruled out on the spot. None of this recovers a key. What it does is choose which weapon to reach for and on a short message it will cheerfully choose the wrong one because every one of these numbers is an average and an average over forty letters is mostly noise. Length is not a detail of the experiment. Length is the experiment.'
+      },
+      note: {
+        en: '656 letters — long enough that the four discriminants mean something. Every other plaintext here is under 100 and sits inside the region where the verdict is untrustworthy.',
+        zh: '656 个字母 —— 长到四条判别量说话算数。这里其余每一条明文都不到 100 个字母，全都落在结论不可信的那一段里。'
+      }
     }
   ];
+
+  /* ================= 判错率扫描用的语料 =================
+     cryptanalysis.js 的 icSweep 拿这一段做循环切片，密码分析工具页与
+     cryptanalysis.test.js 读的是**同一个**常量——扫描图上的数字与断言里的
+     数字因此不可能各算各的。
+
+     这份 id 清单是**冻结的**，不是"当前全部明文"。它决定了那张扫描图上
+     每一个计数，所以往 plaintexts 里新加一条不该悄悄改掉已发布的实测结果；
+     真要把新明文纳入语料，得连同测试里那张表一起重新量、重新写。
+     顺序也是结果的一部分（循环切片的起点落在拼接后的坐标上）。
+
+     实测：拼起来 854 个字母，IoC 0.06889 —— 比单用 cryptanalysis-note
+     的 0.07247 更接近普通英文的 0.0667，这正是要拼的理由。 */
+  const SWEEP_IDS = ['cryptanalysis-note', 'pangram', 'caesar-quote', 'attack'];
+  const sweepSource = SWEEP_IDS.map(function (id) {
+    for (let i = 0; i < plaintexts.length; i++) {
+      if (plaintexts[i].id === id) return plaintexts[i].text.en;
+    }
+    throw new Error('examples-classical: SWEEP_IDS 里的 "' + id + '" 不在 plaintexts 里');
+  }).join(' ');
 
   /* 预置密文：id 指向上面的明文，k 是用来加密它的位移。
      cipher 字段**故意留空**由工具页现算——把密文抄死在数据里，
@@ -79,5 +123,5 @@
     { id: 'caesar-quote', k: 7, label: { en: 'Nothing special about 7', zh: '7 没有任何特别之处' } }
   ];
 
-  return { plaintexts, caesar };
+  return { plaintexts, caesar, SWEEP_IDS, sweepSource };
 });
