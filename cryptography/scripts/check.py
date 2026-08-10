@@ -309,35 +309,42 @@ def version_meta_check() -> int:
 
 
 def algos_gate() -> int:
-    """内联进 html 的 ALGOS 块必须真的能跑，且 Caesar 的往返性质成立。
+    """把每个页面**它自己内联的那份** ALGOS 块放进裸 vm 里跑，确认浏览器分支真的可用。
 
-    inline_core --check 只保证「内联副本与源文件字节相同」。它答不了另一个问题：
-    这段代码在浏览器那个没有 module/require 的环境里跑起来会怎样。ALGOS 的
-    UMD 分支在 node 下走 module.exports、在页面里走 root.CryptoAlgos——两条
-    分支只有一条会被 core 测试覆盖到。这道门跑的是**另一条**。
+    inline_core --check 只保证"内联副本与源文件字节相同"。它答不了另一个问题：
+    这段代码在浏览器那个没有 module/require 的环境里跑起来会怎样。UMD 的两条
+    分支只有 node 那条被单元测试覆盖，这道门跑的是另一条。
+
+    ⚠ **这道门原来只看含 caesar.js 的页面**（`if 'caesar.js' not in names: continue`），
+    却打印"N 个页面"，听上去像覆盖了全部。建 polybius 的实现者报上来时，八个工具
+    页里只有两个真被检查过，另外六个一行都没跑——而门的输出看不出这件事。
+    这正是本项目反复遇到的那类失败：**一道宣称了自己并不具备的覆盖的门**，
+    比没有门更坏。现在改成页面无关：清单里列了几份就验几份。
+
+    分两层，报告里分别计数，不把浅的说成深的：
+      · 每一页：清单里的每个模块都必须挂上 root.CryptoAlgos.<basename>，
+        且至少暴露一个函数。这能抓住"清单写了但没内联"、"UMD 浏览器分支写错"、
+        "文件名与挂载名不一致"。
+      · 含 caesar.js 的页面：额外跑教科书向量与全 k 往返的性质断言。
+
+    已知残余缺口（写在这里而不是假装不存在）：模块之间的依赖走
+    root.CryptoAlgos.X（polybius 依赖 transposition），清单顺序写反时被依赖方
+    会捕获 undefined——模块**仍然挂得上**，要到第一次调用才炸。本门抓不到这一类；
+    真要抓得给每份算法配一个冒烟调用。
     """
     rc = 0
-    checked = 0
-    for path in tool_pages():
+    deep = 0
+    shallow = 0
+    core = (ROOT / 'core' / 'crypto-core.js').read_text(encoding='utf-8')
+    for path in all_tool_pages():
         text = path.read_text(encoding='utf-8')
         m = ALGOS_BLOCK_RE.search(text)
         if not m:
             continue
         names = [n.strip() for n in m.group(1).strip().split(',') if n.strip()]
-        if 'caesar.js' not in names:
+        if not names or names == ['none']:
             continue
-        core = (ROOT / 'core' / 'crypto-core.js').read_text(encoding='utf-8')
-        # ⚠ **不能用 `const self = globalThis;` 加直接执行来模拟浏览器。**
-        # node -e 与 node-读-stdin **都**定义了 module 与 require（实测：
-        # `typeof module === 'object'`、`typeof require === 'function'`），
-        # 于是 UMD 头部会走**node 分支**——这道门就变成了在测 core 测试已经
-        # 覆盖过的那条路，同时看起来一切正常。一道测错分支的门比没有门更坏：
-        # 它会让人以为浏览器分支被覆盖了。
-        #
-        # 正确做法是 vm + 一个**裸上下文**（没有 module / require），让 UMD
-        # 只能走 root.CryptoAlgos 那条分支。源码经临时文件送进去而不是拼进
-        # 脚本字符串：省掉一整套 JS 字面量转义，也更接近浏览器真实的
-        # 「读文件内容、在全局上下文里执行」。
+        keys = [n[:-3] if n.endswith('.js') else n for n in names]
         with tempfile.TemporaryDirectory() as td:
             core_f = pathlib.Path(td) / 'core.js'
             algos_f = pathlib.Path(td) / 'algos.js'
@@ -345,8 +352,7 @@ def algos_gate() -> int:
             algos_f.write_text(m.group(2), encoding='utf-8')
             script = (
                 'const vm = require("vm"), fs = require("fs");\n'
-                'const sandbox = {}; sandbox.self = sandbox;\n'
-                'sandbox.console = console;\n'
+                'const sandbox = {}; sandbox.self = sandbox; sandbox.console = console;\n'
                 'vm.createContext(sandbox);\n'
                 f'vm.runInContext(fs.readFileSync({json.dumps(str(core_f))}, "utf8"), sandbox);\n'
                 f'vm.runInContext(fs.readFileSync({json.dumps(str(algos_f))}, "utf8"), sandbox);\n'
@@ -354,36 +360,50 @@ def algos_gate() -> int:
                 '  console.error("沙箱不干净：module/require 泄漏进来了，测的还是 node 分支");\n'
                 '  process.exit(1);\n'
                 '}\n'
-                'const c = sandbox.CryptoAlgos && sandbox.CryptoAlgos.caesar;\n'
-                'if (!c) { console.error("CryptoAlgos.caesar 未挂上 root"); process.exit(1); }\n'
-                'const P = "The Quick Brown Fox! 123";\n'
-                'for (let k = 0; k < 26; k++) {\n'
-                '  if (c.decrypt(c.encrypt(P, k), k) !== P) {\n'
-                '    console.error("往返失败 k=" + k); process.exit(1);\n'
+                f'const want = {json.dumps(keys)};\n'
+                'const A = sandbox.CryptoAlgos || {};\n'
+                'for (const k of want) {\n'
+                '  const mod = A[k];\n'
+                '  if (!mod || typeof mod !== "object") {\n'
+                '    console.error("CryptoAlgos." + k + " 未挂上 root（清单里列了它）");\n'
+                '    process.exit(1);\n'
                 '  }\n'
-                '}\n'
-                'if (c.bruteForce("DWWDFN").length !== 26) {\n'
-                '  console.error("bruteForce 不是 26 个候选"); process.exit(1);\n'
-                '}\n'
-                'if (c.encrypt("ATTACK AT DAWN", 3) !== "DWWDFN DW GDZQ") {\n'
-                '  console.error("教科书向量对不上"); process.exit(1);\n'
+                '  if (!Object.keys(mod).some(n => typeof mod[n] === "function")) {\n'
+                '    console.error("CryptoAlgos." + k + " 挂上了但一个函数都没有");\n'
+                '    process.exit(1);\n'
+                '  }\n'
                 '}\n')
-            # 脚本走 stdin（见 run_node 顶上的注释）。临时文件必须在 run_node
-            # **之内**还活着，所以这一句留在 with 块里。
+            if 'caesar.js' in names:
+                script += (
+                    'const c = A.caesar;\n'
+                    'const P = "The Quick Brown Fox! 123";\n'
+                    'for (let k = 0; k < 26; k++) {\n'
+                    '  if (c.decrypt(c.encrypt(P, k), k) !== P) {\n'
+                    '    console.error("往返失败 k=" + k); process.exit(1);\n'
+                    '  }\n'
+                    '}\n'
+                    'if (c.bruteForce("DWWDFN").length !== 26) {\n'
+                    '  console.error("bruteForce 不是 26 个候选"); process.exit(1);\n'
+                    '}\n'
+                    'if (c.encrypt("ATTACK AT DAWN", 3) !== "DWWDFN DW GDZQ") {\n'
+                    '  console.error("教科书向量对不上"); process.exit(1);\n'
+                    '}\n')
             proc = run_node(script)
         if proc.returncode != 0:
             print(f'ERROR: {path.name} 的内联 ALGOS 块求值失败\n'
                   f'{proc.stderr.strip()}', file=sys.stderr)
             rc = 1
-        checked += 1
-    if checked == 0:
-        print('ERROR: 没有任何工具页含 caesar.js 的 ALGOS 块——这道门扫空了',
-              file=sys.stderr)
+        if 'caesar.js' in names:
+            deep += 1
+        else:
+            shallow += 1
+    if deep + shallow == 0:
+        print('ERROR: 没有任何工具页含 ALGOS 块——这道门扫空了', file=sys.stderr)
         return 1
     if rc == 0:
-        print(f'ALGOS 求值门：{checked} 个页面的内联算法在浏览器分支下可用')
+        print(f'ALGOS 求值门：{deep + shallow} 个页面的内联算法在浏览器分支下可用'
+              f'（其中 {deep} 个另跑了 caesar 性质断言）')
     return rc
-
 
 # 允许出现出站引用的文件与次数。除这两处外，整个子树必须是零。
 # 数值是 1 而不是「随便几次」：两页都已经把这条路径收敛到唯一的 PARENT_HOME
