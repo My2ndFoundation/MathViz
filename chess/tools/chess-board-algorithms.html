@@ -7647,6 +7647,47 @@ const ALGOS = {
     const s = Math.abs(Math.round(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     return (n < 0 ? '−' : '') + s;                 // U+2212，不是 ASCII 连字符
   }
+  /* ---- 位盘（BigInt）的读数。**一律不许走 fmtInt** ----
+     `fmtInt` 的首行守卫是 `typeof n !== 'number' → return '—'`，而 '—' 在这一页
+     的规矩里是「不知道」。位盘是 BigInt，于是一个算得好好的位盘会被印成
+     「不知道」—— 跟 pathCount 那条「0 不能被印成『—』」是同一类谎话
+     （规格 §4⑤⑤）。
+
+     ⚠ 守卫写成「**只有没有值才是不知道**」，不是「不是 BigInt 就是不知道」。
+     后者只是把同一个错搬了个家：§2.8 明确邀请她改这份源码，改完 `attacks`
+     里装的可能是个普通数字 —— 那是一个**算出来了的、只是类型不对**的值。
+     能无损当 64 位位盘看的照样出十六进制，看不成的原样说出来，让她看见
+     回来的到底是什么；只有 `null` / `undefined` 才是「—」。 */
+
+  /* 「能当 64 位位盘看」→ BigInt；看不成 → null（**不是 0**）。 */
+  function bbValue(b) {
+    let v = null;
+    if (typeof b === 'bigint') v = b;
+    else if (typeof b === 'number' && Number.isInteger(b) &&
+             b >= 0 && b <= Number.MAX_SAFE_INTEGER) v = BigInt(b);
+    if (v === null || v < 0n || v > 0xffffffffffffffffn) return null;
+    return v;
+  }
+  /* 十六进制而不是十进制：64 位位盘的十进制是 20 位数字、读不出结构；
+     十六进制正好 16 个字符，**每 2 个字符是一整行棋盘**。 */
+  function fmtBB(b) {
+    if (b === null || b === undefined) return '—';   // 只有「没有值」才是不知道
+    const v = bbValue(b);
+    if (v === null) return esc(String(b));           // 有值、但不是位盘：说出它是什么
+    let s = v.toString(16);
+    while (s.length < 16) s = '0' + s;
+    return '0x' + s;
+  }
+  /* 数 1 的个数。Kernighan：`v & (v − 1)` 一次抹掉最低位的那个 1。
+     不是位盘 → null（不知道），交给 fmtInt 去印「—」，**绝不退回 0** ——
+     0 在这道题上是「一格都攻击不到」，那是个断言，不是缺省值。 */
+  function bbPopcount(b) {
+    let v = bbValue(b);
+    if (v === null) return null;
+    let n = 0;
+    while (v !== 0n) { v = v & (v - 1n); n = n + 1; }
+    return n;
+  }
   function bval(text, color) { return '<b style="--c:' + color + '">' + text + '</b>'; }
   function dimt(s) { return '<span class="dim">' + t(s) + '</span>'; }
 
@@ -8344,10 +8385,10 @@ const ALGOS = {
      的马左移一下会悄没声地落到 h 线去（规格 §4⑤②）。源码里写的是完整正确
      的四张掩码，`tips` 叫她亲手删掉再 Run，看幽灵格自己冒出来。
 
-     ⚠ **下面这个 BB 是占位**：`tab` / `brand` / `paramSq` / `kOk` 已经够
-     Task 2 的声明跑起来，但 `tips` 只有一句骨架，真正那段（要把「删哪几行、
-     Run 之后看哪里」说到能照着做）归 Task 4；读数那两个键 `roBoard` /
-     `roCount` 归 Task 3，那时候一并补进来。 */
+     ⚠ **下面这个 BB 仍是占位**：`tab` / `brand` / `paramSq` / `kOk` 够声明跑
+     起来，读数那两个键 `roBoard` / `roCount` 由 Task 3 补上（就是下面这两条），
+     但 `tips` 只有一句骨架 —— 真正那段（要把「删哪几行、Run 之后看哪里」说到
+     能照着做）连同全部文案的定稿归 Task 4。 */
   const BB = {
     tab:   { zh: '位盘', en: 'Bitboards' },
     brand: { zh: '把整块 8×8 棋盘塞进一个 64 位数：一次移位，64 个格子同时挪。一枚马能攻击哪些格子？',
@@ -8358,6 +8399,11 @@ const ALGOS = {
     paramSq: { zh: '马站在哪一格', en: 'Knight’s square' },
 
     kOk: { zh: '这枚马攻击得到', en: 'attacked by this knight' },
+
+    /* 读数两行。⚠ 措辞的定稿跟 tips 一样归 Task 4，这里只要够读数说清
+       「上面这串十六进制是什么、下面这个数是什么」。 */
+    roBoard: { zh: '攻击位盘', en: 'Attack bitboard' },
+    roCount: { zh: '攻击格数', en: 'Squares attacked' },
   };
 
   /* 8×8 专用的格名。`kpSqName` 绑的是 `KP_W`（最短路那题的盘宽），
@@ -8951,10 +8997,21 @@ const ALGOS = {
         return null;
       },
       exportName: function (st) { return 'bitboard-' + bbSqName(Math.round(st.sq)) + '.js'; },
-      /* 占位，**Task 3 写**：位盘是 BigInt，`fmtInt` 会把它印成「—」＝「不知道」，
-         所以读数要另走一条十六进制的格式化路径（规格 §4⑤⑤）。那条路和它的
-         两个文案键（BB.roBoard / BB.roCount）一起在 Task 3 落地。 */
-      readout: function () { return ''; },
+      readout: function (a, st) {
+        const m = a.main, lines = [];
+        if (!m) return '';
+        /* 截断 → 两行都是「—」，照 knightPath / pathCount 那一支。
+           否则：位盘走 **fmtBB**（BigInt，走 fmtInt 会被印成「不知道」，
+           见 fmtBB 上面那段），攻击格数是**普通数字**，走 fmtInt。 */
+        if (m.truncated || m.result === null) {
+          lines.push(dimt(BB.roBoard) + ' ' + bval('—', C_DIM));
+          lines.push(dimt(BB.roCount) + ' ' + bval('—', C_DIM));
+        } else {
+          lines.push(dimt(BB.roBoard) + ' ' + bval(fmtBB(m.result), C_OK));
+          lines.push(dimt(BB.roCount) + ' ' + bval(fmtInt(bbPopcount(m.result)), C_OK));
+        }
+        return lines.join('<br>');
+      },
     },
   };
 
