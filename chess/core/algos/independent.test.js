@@ -195,19 +195,22 @@ for (const N of TIERS) {
 for (const N of TIERS) {
   T.ok(got[N].logs.length > 0, 'N=' + N + '：至少喊过一次「新纪录」');
 }
-T.ok(got[5].logs[got[5].logs.length - 1].indexOf('13') >= 0,
+T.ok((got[5].logs.length ? got[5].logs[got[5].logs.length - 1] : '').indexOf('13') >= 0,
      'N=5：最后一句 log 里带着最终答案 13');
 
-/* ---- ⑥ 深度塔：调用深度 = 第几格 ----
-   规格 §4⑤ 9e ④ 靠这个数定 spanZ（Task 2 要声明 spanZ ≈ 0.20），
-   而「深度 = SQ + 1」这件事今天没有任何别的地方在守。TreeModel.build
-   认 'pick' 帧，树深从 0 数起，所以层数 = 最大树深 + 1。 */
+/* ---- ⑥ 调用栈深度：调用深度 = 第几格 ----
+   规格 §4⑤ 9e ④ 靠这个数定 spanZ（Task 2 声明的是 spanZ = 0.20），
+   而「调用栈深度 = SQ + 1」这件事今天没有任何别的地方在守。TreeModel.build
+   认 'pick' 帧，树深从 0 数起，所以深度 = 最大树深 + 1。
+   ⚠ **这一条钉的是调用栈深度，不是画出来的塔。** 塔的层号来自 mark 的调用深度，
+   而最深那一帧（at === SQ）一个 mark 都不写，所以**画出来的塔是 SQ 层**
+   （实测 towerTop：N=4 → 16、N=5 → 25）。两个数别混。 */
 for (const N of TIERS) {
   const tree = TM.build(got[N].run.trace, 'pick');
   let maxd = -1;
   for (const id in tree.nodes) if (tree.nodes[id].depth > maxd) maxd = tree.nodes[id].depth;
   T.eq(maxd + 1, N * N + 1,
-       'N=' + N + '：深度塔 ' + (maxd + 1) + ' 层 = SQ + 1（Task 2 的 spanZ 就是按这个定的）');
+       'N=' + N + '：调用栈深度 ' + (maxd + 1) + ' = SQ + 1（画出来的塔是 SQ 层，两个数别混）');
 }
 
 /* ---- ⑦ 三道双语门（规格 §7.5）---- */

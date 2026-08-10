@@ -94,8 +94,11 @@
    · **入口函数叫 `pick`**（对应 `PROBLEMS.independent.entry`）。它是**递归**
      那一个：`pick(at, cnt)` 决定第 `at` 格选不选，两支都以 `pick(at + 1, …)`
      收尾，顶层是 `pick(0, 0); return best;`。于是
-     `TreeModel.build(trace, 'pick')` 认到的帧一层套一层，**深度塔 = SQ + 1 层**
-     —— 实测 N=3 → 10 层、N=4 → 17 层、N=5 → **26 层**，比前面任何一道题都高。
+     `TreeModel.build(trace, 'pick')` 认到的帧一层套一层。⚠ **这里有两个数，别混**
+     （9e Task 4 浏览器验收实测订正）：**调用栈深度 = SQ + 1**（实测 10 / 17 / 26，
+     本文件的测试钉的是它），**画出来的塔 = SQ 层**（实测 towerTop：N=4 → 16、
+     N=5 → 25）。差一层的原因很具体：塔的层号来自 **mark 的调用深度**，而最深
+     那一帧（`at === SQ` 的基准情形）一个 mark 都不写。两个数都比前面任何一道题高。
      ⚠ 默认 `SPAN_Z = 0.55` 是照 `queens` 最深 10 层定的，26 层不声明
      `spanZ` 会长到 26 × 0.55 ≈ 14.3 个世界单位。**Task 2 必须自己声明
      `spanZ ≈ 0.20`**（26 × 0.20 = 5.2，与 queens 的 5.5 同量级）。
@@ -404,14 +407,14 @@
         '   现在轮到第 at 格。一个格子只有两种前途，所以这个函数最后会分两支走：',
         '   一支是「这一格摆上马」再往下走，一支是「这一格空着」再往下走。',
         '   at 走到 SQ 就说明整块盘都问完了 —— 手上的 cnt 就是这一条路的成绩。',
-        '   递归的深度正好就是「问到第几格」，所以塔有 SQ + 1 层那么高。 */',
+        '   递归的深度正好就是「问到第几格」—— 塔一层一格，问到第几格就站到第几层。 */',
       ],
       en: [
         '/* pick(at, cnt): squares 0 through at-1 are already decided and cnt knights are',
         '   on the board; square at is up next. A square has exactly two futures, so this',
         '   function ends by branching twice: once with a knight placed here, once with',
         '   the square left empty. When at reaches SQ the whole board is decided and cnt',
-        '   is what this road achieved. Depth = squares decided, so the tower is SQ + 1. */',
+        '   is what this road achieved. Depth = squares decided: one level per square. */',
       ],
     },
     'function pick(at, cnt) {',
