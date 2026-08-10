@@ -17,10 +17,14 @@
      `<` + `script` + `>` 这个字面量：语法门与 CI 都靠它切分脚本块，注释里
      多出来的一个会让切分从那里开始，把整段 HTML 当成 JS 去检查，报一个跟
      真实代码毫无关系的错。 -->
-<meta name="tool-version" content="1.0.1">
+<meta name="tool-version" content="1.0.2">
 <meta name="tool-engine" content="crypto-1.1.0">
 <title>Caesar Cipher · 凯撒密码</title>
 <!-- 版本记录（changelog，新→旧）：
+     1.0.2  2026-08-10  修窄屏上报文条被画布裁掉两端的问题。原先先定格数（最多 26）
+                        再把格宽 clamp 到 [12,26]，那个 12 是下限——375px 视口上
+                        26 格按 12px 画成 387px，左右各裁掉 6px。改成先用最小格宽
+                        反推放得下几格，放不下的尾巴用省略号明说。
      1.0.1  2026-08-10  内部改动：随引擎升到 crypto-1.1.0。core 长出了模 n 矩阵
                         工具（Hill 要用）与经典密码分析（IoC、n-gram、Kasiski、
                         按周期分组的重合指数）。本页的画面与算法一行未改——
@@ -2613,9 +2617,22 @@ const wheel = {
        在一段真报文上的样子。 */
     if (E.state.showStrip) {
       const idx = CC.letters(PLAIN);
-      const n = Math.min(idx.length, 26);
       const gap = 3;
-      const cell = E.clamp((availW - 120 - gap * (n - 1)) / Math.max(n, 1), 12, 26);
+      /* 先算"这么宽能放下几个格"，再算格子大小——不能反过来。
+         原来的写法是先定 n（最多 26），再把格宽 clamp 到 [12,26]。那个 12 是
+         **下限**，于是窄屏上格子不会继续变小，整条就直接超出画布：375px 视口
+         实测 availW−120 只够 140px，26 格却按 12px 画成 387px，左右各被裁掉
+         6px（两端的字母被切一半）。clamp 的下限保护了可读性，却把"放不下"
+         变成了"画出去"。
+         现在先用最小格宽反推能放下几格，n 取它与文本长度的较小值；格宽再在
+         剩余空间里放大到 26 为止。放不下的尾巴用省略号明说，而不是让它悄悄
+         被画布边缘吃掉——被裁掉的字母看上去仍像内容的一部分。 */
+      const CELL_MIN = 12, CELL_MAX = 26;
+      const stripW = availW - 120;
+      const nFit = Math.max(1, Math.floor((stripW + gap) / (CELL_MIN + gap)));
+      const n = Math.min(idx.length, 26, nFit);
+      const truncated = n < Math.min(idx.length, 26);
+      const cell = E.clamp((stripW - gap * (n - 1)) / n, CELL_MIN, CELL_MAX);
       const sy = cy + r + 32;
       if (n && sy + cell * 2 + 24 < vi.H - 84) {
         const total = n * cell + (n - 1) * gap;
@@ -2630,6 +2647,15 @@ const wheel = {
         }
         E.flowArrow(sx + cell / 2, sy + cell + 4, sx + cell / 2, sy + cell + 18,
                     { color: VIOLET, width: 1.3, headLen: 6 });
+        /* 尾巴被截断时明说。省略号画在条子右端之外一点，两行各一个——
+           不标的话，少掉的字母与"报文就这么长"看起来一模一样。 */
+        if (truncated) {
+          const ex = sx + total + 4;
+          E.chip(ex, sy, 14, cell, '…',
+                 { color: 'rgba(45,212,234,.55)', fontSize: cell * 0.56 });
+          E.chip(ex, sy + cell + 22, 14, cell, '…',
+                 { color: 'rgba(251,113,133,.55)', fontSize: cell * 0.56 });
+        }
       }
     }
   },
