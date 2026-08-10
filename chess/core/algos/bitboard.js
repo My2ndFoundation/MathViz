@@ -136,12 +136,17 @@
 
   /* ================= 双语渲染（规格 §1.6 / §7.5）=================
 
-     ⚠ **这一整段在七份 algos/*.js 里逐字节相同**，check.py 的
-     bilingual_algos_check() 会核对。改这里就得七份一起改。
+     ⚠ **这一整段在每一份 algos/*.js 里逐字节相同**，check.py 的
+     bilingual_algos_check() 会核对。改这里就得每一份一起改。
+     ⚠ 这里**故意不写「共几份」**：这行原本写的是「七份」，而实际份数先涨到
+     十份、又涨到十二份，**两次都没人跟着改**。一个没有门在核的数字必然会漂
+     （CLAUDE.md 的「A mirrored field that nothing verifies will drift」已经
+     记着同一条病的另外几个现场）。**份数由 bilingual_algos_check() 每次现数，
+     不由这行注释记。**
      不抽成共用模块，是因为这些文件是被 inline_core.py 当**字符串**逐份
      内联、再各自求值成 AlgoXxx 全局的 —— 抽出去就凭空多一条求值顺序
      依赖，而那类缺陷要到浏览器里 ALGOS['queens.js'] 是 undefined 才发作
-     （阶段 5 建页当天撞过一次）。七份重复 + 一道字节级门，是阶段 7
+     （阶段 5 建页当天撞过一次）。逐份重复 + 一道字节级门，是阶段 7
      king-greedy / king-exact 共用段用过的同一个套路。
 
      `parts` 的元素只有两种：
