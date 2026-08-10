@@ -1,0 +1,4138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<!-- 占位符，从本骨架复制出新工具时**必须**改掉的四处：
+     ① <title>；② 下面 tool-version 的 content（新工具从 1.0.0 起）；
+     ③ 下面这段版本记录；④ 第二个脚本块里 TOOL 的 id / title / h1。
+     （文件里除了两处真正的脚本标签，任何地方——包括注释——都不要再写出
+     `&lt;script&gt;` 这个字符串：语法门与 CI 都靠 `<` + `script` + `>` 这个
+     字面量切分脚本块，注释里多出来的一个会让切分从这里开始，把整段 HTML
+     当成 JS 去检查，报一个跟真实代码毫无关系的错。）
+
+     tool-engine 反映的是 core/ 那几个模块的版本，不是工具自己的版本，
+     一般不必跟着改。版本号要在三处同步：注册表 cryptography-tools.json 的
+     version、这里的 tool-version meta、面板右上角的徽章——徽章直接读 meta
+     （见第二个脚本块里的 VERSION），所以它永远不需要单独改。 -->
+<meta name="tool-version" content="1.0.0">
+<meta name="tool-engine" content="crypto-1.1.0">
+<title>Codes, Morse &amp; Fractionated Morse · 编码与摩尔斯</title>
+<!-- 版本记录（changelog，新→旧）：
+     1.0.0  2026-08-10  首发：三个页签。① 摩尔斯树——字母坐在**内部节点**上，
+                        所以摩尔斯不是前缀码，字母间那个停顿是第三个符号；
+                        裸串的读法数直接算出来（... 有 4 种，...--- ... 有 216 种）。
+                        ② 编码 vs 密码（顿悟视角）——同一段明文，左边摩尔斯、
+                        右边凯撒，四步交出去：公开算法、公开码表、公开密钥；
+                        密钥空间 1 / 26 / 26! 三根柱子把差别量成一个数。
+                        ③ 分裂式摩尔斯——同一条符号流上，字母括号在上、三个一组
+                        的括号在下，错开的那一刀就是这个密码本身；附频率剖面对照
+                        （单表代换保留全部英文信号，分裂式只剩不到三成）。 -->
+<style>
+/* 视觉令牌。CryptoViz 与根项目、chess 子项目共用同一套值——它们是同一门
+   视觉语言的三个方言，不是三套配色。Canvas 里用到同一个颜色时写**同样的
+   字面量**（见第二个脚本块顶部的 CYAN / ROSE / …），这样"一条线一种颜色、
+   在多处复用"这条原则在 CSS 与 Canvas 两侧是同一个事实，而不是两份要靠人
+   记住去同步的抄写。 */
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  /* 未配对 / 异常态专用色。只在"这一项没有对手、没有解、不该存在"时用，
+     不参与 accent 轮换——它刺眼是故意的。 */
+  --trace-unpaired:#ff2fd0;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none}
+body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)}
+
+/* canvas 是主角：全屏置底，其余一切 UI 以 position:fixed 浮在它之上。
+   任何"左边画布右边面板"的分栏都是违规的——画面一旦被切开，字母轮就不再
+   是这一页的主体，而变成了一张配图。 */
+#c{position:fixed;inset:0;display:block;touch-action:none;cursor:grab}
+#c.dragging{cursor:grabbing}
+
+/* ---- 标题区 ---- */
+.brand{position:fixed;top:20px;left:24px;pointer-events:none;user-select:none;max-width:min(520px,42vw)}
+.brand .eyebrow{font-size:10px;letter-spacing:.22em;color:rgba(159,176,200,.72);margin-bottom:6px}
+.brand h1{margin:0;font-family:var(--font-math);font-weight:600;font-size:26px;letter-spacing:.08em;
+  color:#eef3fa;text-shadow:0 2px 20px rgba(45,212,234,.20)}
+.brand p{margin:7px 0 0;font-size:12.5px;line-height:1.65;color:rgba(159,176,200,.85)}
+
+/* ---- 页签 ---- */
+.tabs{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:5;
+  display:flex;gap:4px;padding:4px;border-radius:999px;
+  background:var(--panel-bg);border:1px solid var(--panel-line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
+.tab{border:1px solid transparent;background:transparent;color:#b8c6da;
+  font-size:12.5px;font-family:var(--font-cn);padding:6px 15px;border-radius:999px;cursor:pointer;
+  transition:color .15s,border-color .15s,background .15s}
+.tab:hover{color:#e8f2fb}
+.tab:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.tab.active{background:rgba(45,212,234,.13);border-color:rgba(45,212,234,.55);color:#9be8f7}
+
+/* ---- 传输条（动画时钟的控件）----
+   ⏮ 上一步 · ⏵/⏸ 播放暂停 · ⏭ 下一步 · ⟲ 回到第 0 步。
+   密码学工具几乎都是"一轮一轮"的（每次按键、每一轮、每个 block），所以时间
+   控件是这一类工具的标配而不是可选件，放在浮层里而不是折进面板：使用者在看
+   canvas，手要落在看得见的地方。#btnPlay 与 #btnReset 的文案由引擎写
+   （UI.pause / UI.resume / UI.reset，随语言切换），这里的字形只是无 JS 时的
+   兜底；⏮ / ⏭ 是本页自己接的，见第二个脚本块。 */
+.transport{position:fixed;left:50%;bottom:38px;transform:translateX(-50%);z-index:5;
+  display:flex;align-items:center;gap:5px;padding:5px;border-radius:999px;
+  background:var(--panel-bg);border:1px solid var(--panel-line);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 12px 34px rgba(0,0,0,.4);user-select:none}
+.tbtn{min-width:34px;padding:6px 12px;border-radius:999px;border:1px solid transparent;
+  background:transparent;color:#c6d2e4;font-size:13px;font-family:var(--font-cn);
+  line-height:1.2;cursor:pointer;transition:color .15s,border-color .15s,background .15s}
+.tbtn:hover{color:#e8f2fb;border-color:rgba(45,212,234,.45)}
+.tbtn:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.tbtn.primary{background:rgba(45,212,234,.13);border-color:rgba(45,212,234,.5);color:#9be8f7}
+
+/* ---- 底部提示 ---- */
+.hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);pointer-events:none;user-select:none;
+  font-size:11px;letter-spacing:.05em;color:rgba(159,176,200,.6);white-space:nowrap}
+
+/* ---- 控制面板 ---- */
+.panel{position:fixed;top:14px;right:14px;width:304px;max-height:calc(100vh - 28px);overflow-y:auto;
+  background:var(--panel-bg);border:1px solid var(--panel-line);border-radius:16px;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 18px 50px rgba(0,0,0,.45);user-select:none}
+.panel::-webkit-scrollbar{width:6px}
+.panel::-webkit-scrollbar-thumb{background:rgba(148,163,184,.25);border-radius:3px}
+.panel-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px 10px;
+  font-size:13px;font-weight:600;letter-spacing:.06em;color:#dbe6f5}
+.panel:not(.collapsed) .panel-head{border-bottom:1px solid var(--panel-line)}
+.ph-right{display:flex;align-items:center;gap:7px}
+.ver{font-family:var(--font-mono);font-size:10px;color:rgba(159,176,200,.55)}
+.lang{padding:3px 8px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:11px;cursor:pointer}
+.lang:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.lang:focus-visible,.fold:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.fold{width:24px;height:24px;border-radius:8px;border:1px solid var(--panel-line);
+  background:rgba(30,41,59,.5);color:var(--ui-slate);font-size:14px;line-height:1;cursor:pointer}
+.fold:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.panel.collapsed .panel-body{display:none}
+.panel-body{padding:6px 14px 14px}
+
+/* 滑杆 */
+.ctl{margin:11px 0 3px}
+.ctl .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.ctl label{font-size:12px;color:#c6d2e4}
+/* 数学符号一律 serif italic（设计规范五条原则第 4 条），Canvas 侧对应
+   VizEngine.mathFont()。字母轮上的字母、模运算里的数字都算数学符号。 */
+.ctl label i{font-family:var(--font-math);font-style:italic;font-size:13px}
+.ctl .val{font-family:var(--font-mono);font-size:11.5px;color:#7dd3fc}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;cursor:pointer;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--trace-cyan);margin-top:-5px;border:2px solid #0b1220;box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:rgba(148,163,184,.28)}
+input[type=range]::-moz-range-thumb{width:11px;height:11px;border:2px solid #0b1220;border-radius:50%;
+  background:var(--trace-cyan);box-shadow:0 0 8px rgba(45,212,234,.8)}
+input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-offset:2px;border-radius:4px}
+
+/* 按钮 */
+.row{display:flex;gap:8px;margin:13px 0 4px}
+.btn{padding:6px 10px;border-radius:9px;border:1px solid rgba(148,163,184,.25);
+  background:rgba(30,41,59,.55);color:#d7e2f2;font-size:12px;font-family:var(--font-cn);cursor:pointer;
+  transition:border-color .15s,color .15s,background .15s}
+.btn:hover{border-color:rgba(45,212,234,.55)}
+.btn:focus-visible{outline:2px solid rgba(45,212,234,.8);outline-offset:1px}
+.btn.wide{flex:1}
+.btn.active{border-color:rgba(45,212,234,.8);background:rgba(45,212,234,.12);color:#9be8f7}
+.views,.presets{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 2px}
+.views .vlabel,.presets .plabel{font-size:11.5px;color:rgba(159,176,200,.8);margin-right:2px}
+.vbtn,.pbtn{padding:5px 9px;font-size:11.5px}
+
+/* 文本输入槽（#ioHost）。古典密码工具的明文/密钥来自输入框而不是滑杆——
+   一个 26 档的滑杆表达不了 "ATTACK AT DAWN"。不需要的工具把 #ioHost 留空。 */
+.iorow{display:flex;flex-wrap:wrap;gap:6px;margin:11px 0 2px}
+.iorow .btn{padding:5px 9px;font-size:11.5px}
+.iolabel{font-size:11.5px;color:rgba(159,176,200,.8);margin:10px 0 4px}
+.iofield{width:100%;min-height:52px;resize:vertical;padding:7px 9px;border-radius:9px;
+  border:1px solid var(--panel-line);background:rgba(8,13,24,.7);color:var(--ui-bright);
+  font-family:var(--font-mono);font-size:12px;line-height:1.6}
+.iofield:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-offset:1px}
+
+/* 开关 */
+.toggles{display:flex;flex-wrap:wrap;gap:7px 12px;margin:12px 0 2px}
+.tg{display:flex;align-items:center;gap:6px;font-size:12px;color:#c6d2e4;cursor:pointer}
+.tg input{accent-color:var(--trace-cyan);width:14px;height:14px;margin:0;cursor:pointer}
+.tg .dot{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
+
+/* 读数与提示 */
+.readout{margin-top:13px;padding-top:10px;border-top:1px solid var(--panel-line);
+  font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:#a9b8cd}
+/* 读数里的粗体值用行内 style="--c:var(--trace-xxx)" 指定颜色，与 .tg .dot
+   用的是同一个自定义属性——同一条量在图例点与读数值上必须是同一种颜色。 */
+.readout b{font-weight:600;color:var(--c, inherit)}
+.readout i{font-family:var(--font-math);font-style:italic}
+.readout .dim{color:rgba(159,176,200,.6)}
+.tips{margin-top:11px;font-size:11px;line-height:1.65;color:rgba(159,176,200,.72)}
+
+@media (max-width:760px){
+  .brand{top:12px;left:14px;max-width:70vw}
+  .brand h1{font-size:20px}
+  .brand p{display:none}
+  .tabs{top:52px;left:14px;transform:none}
+  /* 传输条挪到页签下方：手机上面板是贴底的抽屉，底部中央那个位置会被它盖住。 */
+  .transport{top:96px;left:14px;bottom:auto;transform:none}
+  .panel{left:10px;right:10px;top:auto;bottom:10px;width:auto;max-height:62vh}
+  .hint{display:none}
+}
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div class="brand">
+  <div class="eyebrow">CRYPTOVIZ · 密码学可视化</div>
+  <h1></h1>
+  <p id="brandDesc"></p>
+</div>
+
+<nav class="tabs" id="tabsNav"></nav>
+
+<aside class="panel" id="panel">
+  <div class="panel-head">
+    <span id="panelTitle">Parameters &amp; Views</span>
+    <span class="ph-right">
+      <span class="ver" id="verBadge"></span>
+      <button class="lang" id="btnLang" title="切换语言 / Switch language">中</button>
+      <button class="fold" id="btnFold" title="收起 / 展开 · Collapse / expand">−</button>
+    </span>
+  </div>
+  <div class="panel-body">
+    <div id="paramsHost"></div>
+    <div id="ioHost"></div>
+    <div id="togglesHost"></div>
+    <div id="presetsHost"></div>
+    <div id="viewsHost"></div>
+    <div class="readout" id="readout"></div>
+    <div class="tips" id="tips"></div>
+  </div>
+</aside>
+
+<div class="transport" id="transport">
+  <button class="tbtn" id="btnBack" title="上一步 · Step back" aria-label="Step back">⏮</button>
+  <button class="tbtn primary" id="btnPlay" title="播放 / 暂停 · Play / pause">⏵</button>
+  <button class="tbtn" id="btnStep" title="下一步 · Step forward" aria-label="Step forward">⏭</button>
+  <button class="tbtn" id="btnReset" title="回到起点 · Reset">⟲</button>
+</div>
+
+<div class="hint"></div>
+
+<script>
+/* ================= 生成区间 =================
+   本块的全部内容由 cryptography/scripts/inline_core.py 从 core/ 与 examples/
+   注入，**禁止手改**：手改的那一行会在下一次跑脚本时被无声地覆盖掉，而
+   check.py 的第一道门会先一步把它判红。要改行为就去改编辑源，然后跑
+
+       python3 cryptography/scripts/inline_core.py
+
+   顺序是依赖顺序，不是字母顺序：CRYPTO-CORE 最先（其余都用它的 mod / letters），
+   CRYPTANALYSIS 与 ALGOS 次之，EXAMPLES 再次（examples.js 要读分组文件挂上去
+   的 CryptoExamplesParts），VIZ-ENGINE / INTERACT / ANIMATION 最后。
+   一个工具用不到的块可以整块删掉（除 CRYPTO-CORE 与 VIZ-ENGINE 外都是可选的，
+   见 inline_core.py 的 OPTIONAL_TAGS）——留着空标记也行，脚本会照填。 */
+/* >>> GENERATED:CRYPTO-CORE */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.CryptoCore = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const N = 26;
+
+  function isAlpha(ch) {
+    if (typeof ch !== 'string' || ch.length !== 1) return false;
+    const c = ch.charCodeAt(0);
+    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+  }
+
+  /* 只留 A-Z 并大写。刻意**不**做 Unicode 折叠（é → E）：这是古典密码，
+     字母表就是 26 个，把 é 悄悄折进 E 会让"密文长度 = 明文字母数"这条
+     使用者肉眼在数的关系对不上。丢弃比折叠诚实。 */
+  function normalize(text) {
+    return String(text).toUpperCase().replace(/[^A-Z]/g, '');
+  }
+
+  function letters(text) {
+    const s = normalize(text);
+    const out = [];
+    for (let i = 0; i < s.length; i++) out.push(s.charCodeAt(i) - 65);
+    return out;
+  }
+
+  function fromIndices(idx) {
+    let s = '';
+    for (let i = 0; i < idx.length; i++) s += ALPHABET.charAt(mod(idx[i], N));
+    return s;
+  }
+
+  /* JS 的 % 是取余不是取模：(-1) % 26 === -1。整个古典密码部分都建立在
+     "落回 [0,n)" 上，所以这一个函数是地基，不许有人图省事直接写 %。 */
+  function mod(a, n) {
+    /* 模数必须为正，不只是非零。n < 0 时 ((a%n)+n)%n 会给出**负**结果
+       （实测 mod(5,-3) === -1），而这个函数对外承诺的是"结果恒 >= 0"，
+       整个古典密码部分都建立在那句承诺上。与其让一个负模数悄悄产出负下标、
+       在 fromIndices 里变成 charAt(-1) 那种空字符串，不如在入口就拒绝：
+       今天没有调用方传负模数，正因为如此，现在把门关上是免费的。 */
+    if (!(n > 0)) throw new Error('mod 的模数必须是正数，收到 ' + n);
+    return ((a % n) + n) % n;
+  }
+
+  function gcd(a, b) {
+    a = Math.abs(a); b = Math.abs(b);
+    while (b) { const t = a % b; a = b; b = t; }
+    return a;
+  }
+
+  /* 扩展欧几里得：返回 [g, x, y] 满足 a*x + b*y === g === gcd(a,b)。
+     modInverse 靠它，Affine 的解密也靠它。 */
+  function egcd(a, b) {
+    let old_r = a, r = b;
+    let old_s = 1, s = 0;
+    let old_t = 0, t = 1;
+    while (r !== 0) {
+      const q = Math.floor(old_r / r);
+      let tmp = old_r - q * r; old_r = r; r = tmp;
+      tmp = old_s - q * s; old_s = s; s = tmp;
+      tmp = old_t - q * t; old_t = t; t = tmp;
+    }
+    /* gcd 约定非负；a<0 或 b<0 时上面会得到负的 old_r，连同系数一起翻号，
+       贝祖等式仍成立。 */
+    if (old_r < 0) return [-old_r, -old_s, -old_t];
+    return [old_r, old_s, old_t];
+  }
+
+  function modInverse(a, n) {
+    const r = egcd(mod(a, n), n);
+    if (r[0] !== 1) return null;      // 不互素，逆元不存在
+    return mod(r[1], n);
+  }
+
+  /* ================= ℤ/nℤ 上的矩阵（Hill 密码） =================
+     Hill 把每 k 个字母看成 ℤ/nℤ 上的一个列向量，密钥是 k×k 矩阵：c = M·p (mod n)。
+     解密要的不是"除以 M"，而是 M 在**模 n 意义下**的逆，它存在的充要条件是
+     gcd(det M, n) = 1 —— 不是实数意义上的 det ≠ 0。这一条差别正是 Hill 那一页
+     要讲的东西：行列式为 13 的矩阵在实数上完全可逆，模 26 却是死的（13 与 26
+     不互素）。所以下面的逆元一律走 modInverse，绝不新写第二份模逆实现——
+     两份模逆实现总有一天会给出两个答案，而那天没人知道该信哪个。 */
+
+  /* 行列式按 Laplace 展开，代价是 k!：k=8 是 4 万次乘法、还在一帧之内；
+     k=12 是 4.8 亿次，页面当场假死。Hill 页面只用 2×2 / 3×3，把门开在 8
+     是免费的，而"用户手滑贴进一个 12 阶方阵就整页无响应"不是。 */
+  const MAT_MAX_DIM = 8;
+
+  /* 形状检查集中在一处。矩阵参数只有三种坏法：不是数组、行长不齐、元素不是整数。
+     整数这一条不是洁癖——M[i][j] = 2.5 时 mod(2.5, 26) 老老实实返回 2.5，
+     一路传到 fromIndices 就成了 charAt(2.5) === ''，密文凭空少一个字母，
+     而中间没有任何一步报错。在入口拒绝，比在输出端反查便宜得多。 */
+  function matShape(M, name) {
+    if (!Array.isArray(M) || M.length === 0) throw new Error(name + ' 需要非空的二维数组');
+    const rows = M.length;
+    if (!Array.isArray(M[0]) || M[0].length === 0) throw new Error(name + ' 的行必须是非空数组');
+    const cols = M[0].length;
+    for (let i = 0; i < rows; i++) {
+      const r = M[i];
+      if (!Array.isArray(r) || r.length !== cols) {
+        throw new Error(name + ' 第 ' + i + ' 行的长度与第 0 行不齐（应为 ' + cols + '）');
+      }
+      for (let j = 0; j < cols; j++) {
+        if (!Number.isInteger(r[j])) {
+          throw new Error(name + ' 的元素 [' + i + '][' + j + '] 不是整数：' + r[j]);
+        }
+      }
+    }
+    return [rows, cols];
+  }
+
+  function matSquareDim(M, name) {
+    const s = matShape(M, name);
+    if (s[0] !== s[1]) throw new Error(name + ' 需要方阵，收到 ' + s[0] + '×' + s[1]);
+    if (s[0] > MAT_MAX_DIM) {
+      throw new Error(name + ' 只支持 ' + MAT_MAX_DIM + ' 阶以内的方阵（行列式按 Laplace 展开，代价是 k!），收到 ' + s[0]);
+    }
+    return s[0];
+  }
+
+  /* 划去第 r 行第 c 列，返回 (k−1)×(k−1) 的子阵。k=1 时会得到空数组，
+     所以调用方必须自己拦住 k=1（matInverse 里那一支）。 */
+  function matMinor(M, r, c) {
+    const k = M.length;
+    const out = [];
+    for (let i = 0; i < k; i++) {
+      if (i === r) continue;
+      const row = [];
+      for (let j = 0; j < k; j++) if (j !== c) row.push(M[i][j]);
+      out.push(row);
+    }
+    return out;
+  }
+
+  /* 沿第 0 行的 Laplace 展开。每个因子进乘法前先规约到 [0,n)，于是任何中间量
+     都小于 n²——传进来一个 1e10 的元素也不会让乘积溜出 2^53 变成错的整数。 */
+  function detRec(M, n) {
+    const k = M.length;
+    if (k === 1) return mod(M[0][0], n);
+    if (k === 2) return mod(mod(M[0][0], n) * mod(M[1][1], n) - mod(M[0][1], n) * mod(M[1][0], n), n);
+    let d = 0;
+    for (let j = 0; j < k; j++) {
+      const term = mod(M[0][j], n) * detRec(matMinor(M, 0, j), n);
+      d = mod(j % 2 === 0 ? d + term : d - term, n);
+    }
+    return d;
+  }
+
+  function matDet(M, n) {
+    matSquareDim(M, 'matDet');
+    return detRec(M, n);
+  }
+
+  /* c = M·v (mod n)。M 行主序 k×k，v 长度 k，返回长度 k 的新数组。 */
+  function matMulVec(M, v, n) {
+    const k = matSquareDim(M, 'matMulVec');
+    if (!Array.isArray(v) || v.length !== k) {
+      throw new Error('matMulVec 的向量长度应为 ' + k + '，收到 ' + (Array.isArray(v) ? v.length : typeof v));
+    }
+    for (let j = 0; j < k; j++) {
+      if (!Number.isInteger(v[j])) throw new Error('matMulVec 的向量元素 [' + j + '] 不是整数：' + v[j]);
+    }
+    const out = [];
+    for (let i = 0; i < k; i++) {
+      let s = 0;
+      for (let j = 0; j < k; j++) s = mod(s + mod(M[i][j], n) * mod(v[j], n), n);
+      out.push(s);
+    }
+    return out;
+  }
+
+  /* A·B (mod n)。不限方阵：r×m 乘 m×c 都收，因为 Hill 页面要用它验证
+     M·M⁻¹ = I，也要用它把明文按列拼成矩阵一次乘完。 */
+  function matMul(A, B, n) {
+    const sa = matShape(A, 'matMul 的左矩阵');
+    const sb = matShape(B, 'matMul 的右矩阵');
+    if (sa[1] !== sb[0]) {
+      throw new Error('matMul 维度不匹配：' + sa[0] + '×' + sa[1] + ' 乘 ' + sb[0] + '×' + sb[1]);
+    }
+    const out = [];
+    for (let i = 0; i < sa[0]; i++) {
+      const row = [];
+      for (let j = 0; j < sb[1]; j++) {
+        let s = 0;
+        for (let t = 0; t < sa[1]; t++) s = mod(s + mod(A[i][t], n) * mod(B[t][j], n), n);
+        row.push(s);
+      }
+      out.push(row);
+    }
+    return out;
+  }
+
+  /* M⁻¹ = (det M)⁻¹ · adj M (mod n)；adj 是代数余子式矩阵的**转置**。
+     用伴随矩阵而不是高斯消元：ℤ/26ℤ 不是域（2·13 ≡ 0），消元里"用主元去除"
+     这一步随时会撞上一个不可逆的主元，得再写一套换行换列的启发式，而且那套
+     启发式失败时给不出干净的"不可逆"结论。伴随法只需要一次模逆，
+     而那一次模逆恰好就是可逆性判据本身。
+     不可逆时返回 null（不是抛异常）：模 n 下不可逆是一个**正常的数学事实**，
+     Hill 页面要靠它把"这个密钥不能用"画出来，不是要靠它中断。 */
+  function matInverse(M, n) {
+    const k = matSquareDim(M, 'matInverse');
+    const dInv = modInverse(matDet(M, n), n);
+    if (dInv === null) return null;          // gcd(det, n) ≠ 1
+    const out = [];
+    for (let i = 0; i < k; i++) {
+      const row = [];
+      for (let j = 0; j < k; j++) {
+        /* adj[i][j] = C_ji = (−1)^(i+j) · （划去第 j 行第 i 列的余子式）。
+           下标是 (j, i) 而不是 (i, j)——伴随矩阵是代数余子式矩阵的转置。
+           漏掉这次转置，在对称矩阵上照样测得过，非对称矩阵才露馅，
+           所以测试里必须有非对称的用例。
+           k=1 时 matMinor 会给出空数组，1×1 的伴随矩阵按定义就是 [[1]]。 */
+        const c = (k === 1) ? 1 : detRec(matMinor(M, j, i), n);
+        row.push(mod(dInv * ((i + j) % 2 === 0 ? c : -c), n));
+      }
+      out.push(row);
+    }
+    return out;
+  }
+
+  /* 判据直接写成 gcd(det, n) === 1，而不是 matInverse(...) !== null：
+     两者等价，但这一行把"为什么可逆"印在了代码上，页面上要显示的也正是这句。 */
+  function matIsInvertible(M, n) {
+    return gcd(matDet(M, n), n) === 1;
+  }
+
+  return { ALPHABET, N, isAlpha, normalize, letters, fromIndices,
+           mod, gcd, egcd, modInverse,
+           MAT_MAX_DIM, matMulVec, matMul, matDet, matInverse, matIsInvertible };
+});
+/* <<< GENERATED:CRYPTO-CORE */
+/* >>> GENERATED:CRYPTANALYSIS */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./crypto-core.js'));
+  else root.Cryptanalysis = factory(root.CryptoCore);
+})(typeof self !== 'undefined' ? self : this, function (C) {
+  'use strict';
+
+  const RAW = [.08167,.01492,.02782,.04253,.12702,.02228,.02015,.06094,.06966,
+               .00153,.00772,.04025,.02406,.06749,.07507,.01929,.00095,.05987,
+               .06327,.09056,.02758,.00978,.02360,.00150,.01974,.00074];
+  /* 这张表来自公开的英文字母频率统计，26 个值之和是 0.99999 而不是 1。
+     差的那 1e-5 对 χ² 排序毫无影响，但它比"频率表求和为 1"这条断言的容差
+     （1e-6）大了整整一个数量级——不归一化那条断言直接过不了。归一化不是
+     装饰：它同时把"频率表求和为 1"这条读代码的人会默认成立、也确实值得
+     成立的性质做实。 */
+  const TOTAL = RAW.reduce(function (s, x) { return s + x; }, 0);
+  const ENGLISH_FREQ = RAW.map(function (x) { return x / TOTAL; });
+
+  function letterCounts(text) {
+    const counts = new Array(26).fill(0);
+    const idx = C.letters(text);
+    for (let i = 0; i < idx.length; i++) counts[idx[i]]++;
+    return counts;
+  }
+
+  function letterFrequency(text) {
+    const counts = letterCounts(text);
+    const n = counts.reduce(function (s, x) { return s + x; }, 0);
+    if (n === 0) return counts;            // 全 0，且不产生 NaN
+    return counts.map(function (x) { return x / n; });
+  }
+
+  /* χ² = Σ (观测 − 期望)² / 期望。越小越像英文。
+     没有字母时返回 Infinity 而不是 0——返回 0 会让一段空候选在排序里
+     排到第一名，那正好是"最像英文"的位置，方向完全反了。
+     也不能靠"没有守卫时自然算出 NaN"蒙混：NaN 参与的比较全为 false，
+     bruteForceBest 的 `s < best.score` 会把它当成"不比现任好"而跳过，
+     看起来像对的，实际是排序对这个候选完全失明。 */
+  function chiSquare(text) {
+    const counts = letterCounts(text);
+    const n = counts.reduce(function (s, x) { return s + x; }, 0);
+    if (n === 0) return Infinity;
+    let x2 = 0;
+    for (let i = 0; i < 26; i++) {
+      const expected = ENGLISH_FREQ[i] * n;
+      const d = counts[i] - expected;
+      x2 += d * d / expected;
+    }
+    return x2;
+  }
+
+  /* 给一组 { k, text } 候选打分并挑出最像英文的那个。
+     返回原候选对象上补一个 score 字段的浅拷贝，不改调用方的数组。 */
+  function bruteForceBest(candidates) {
+    let best = null;
+    for (let i = 0; i < candidates.length; i++) {
+      const s = chiSquare(candidates[i].text);
+      if (best === null || s < best.score) {
+        best = { k: candidates[i].k, text: candidates[i].text, score: s };
+      }
+    }
+    return best;
+  }
+
+  /* ================= 重合指数 IoC =================
+     定义：从文本里**不放回**地抽两个字母，它们相同的概率。
+     字母 i 出现 f_i 次，能排出 f_i(f_i − 1) 个有序对；全部有序对是 N(N − 1)。
+
+         IoC = Σ f_i(f_i − 1) / (N(N − 1))
+
+     分母写 N(N−1) 而不是 N²：N² 对应**放回**抽样，会把一个字母跟它自己配成对，
+     在短文本上系统性偏高（极端情形 N=1 时 Σf² / N² = 1，"一个字母的文本
+     重合指数是 1"显然是胡说）。N(N−1) 这一版是无偏的。
+
+     两个参考值是整个维吉尼亚分析的支点：
+       · 英文 ≈ 0.0667
+       · 26 个字母均匀随机 ≈ 1/26 ≈ 0.0385
+     单表代换**保持** IoC（只是给字母换名字，f_i 的多重集合不变），
+     多表代换把它压向 0.0385。所以 IoC 不告诉你密钥是什么，它告诉你
+     "这是不是一张单表"——这正是第一步该问的问题。
+
+     N < 2 时分母为 0，返回 0 而不是 NaN。NaN 一旦进了取最大值或排序，
+     所有比较都是 false，那一项会被静默跳过：页面上少一根柱子，没人知道。 */
+  function indexOfCoincidence(text) {
+    const counts = letterCounts(text);
+    let n = 0;
+    for (let i = 0; i < 26; i++) n += counts[i];
+    if (n < 2) return 0;
+    let s = 0;
+    for (let i = 0; i < 26; i++) s += counts[i] * (counts[i] - 1);
+    return s / (n * (n - 1));
+  }
+
+  /* n 元组计数，键是 n 个字母的字符串。
+     返回 Map 而不是普通对象：插入顺序稳定、size 直接可读，也不会有人对它
+     误用 for...in 而扫到原型链上去。
+     **测试注意**：JSON.stringify(Map) 恒为 "{}"，所以 T.eq 直接比两个 Map
+     永远是绿的。测试文件里有一条专门的断言把这个坑钉在明处。 */
+  function ngramCounts(text, n) {
+    if (!Number.isInteger(n) || n < 1) {
+      throw new Error('ngramCounts 的 n 必须是 >= 1 的整数，收到 ' + n);
+    }
+    const s = C.normalize(text);
+    const out = new Map();
+    for (let i = 0; i + n <= s.length; i++) {
+      const g = s.slice(i, i + n);
+      out.set(g, (out.get(g) || 0) + 1);
+    }
+    return out;
+  }
+
+  /* Kasiski 第一步：找出密文里重复出现的片段，记下它们的间距。
+     为什么重复片段能泄露周期：维吉尼亚下，同一段明文只有在**密钥对齐**时才
+     加成同一段密文，所以一段重复密文的间距十有八九是周期的整数倍。
+
+     可以在"某个长度一条重复都没有"时收工：长度 L+1 的片段若重复，它的长度 L
+     前缀必然也重复；于是"L 处无重复"蕴含"L+1 处无重复"，不需要拍脑袋定上限。
+
+     但仍然留了一个 maxLen（默认 32），因为那条单调性在**周期性文本**上帮不了忙：
+     把 'AAAA…' 用长度 7 的密钥加密，密文本身周期为 7，最长重复串是 N−7，
+     循环会一路跑到 N，每层还要切 N 个长度近 N 的子串——O(N³) 字节，页面卡死。
+     教学页恰恰最容易被喂这种退化输入。而对 Kasiski 来说，拿到一条长度 32 的
+     重复串时证据早已压倒性，再长也不添新东西。
+
+     gaps 取**相邻**位置之差，不是全部两两之差。任意两两之差都是相邻之差的和，
+     把它们也算进来只是把同一份证据按出现次数重新加权一遍，不带来新信息。 */
+  const REPEAT_MAX_LEN = 32;
+
+  function repeatedSequences(text, minLen, maxLen) {
+    const lo = (minLen === undefined) ? 3 : minLen;
+    const hi = (maxLen === undefined) ? REPEAT_MAX_LEN : maxLen;
+    if (!Number.isInteger(lo) || lo < 1) {
+      throw new Error('repeatedSequences 的 minLen 必须是 >= 1 的整数，收到 ' + minLen);
+    }
+    if (!Number.isInteger(hi) || hi < lo) {
+      throw new Error('repeatedSequences 的 maxLen 必须是 >= minLen 的整数，收到 ' + maxLen);
+    }
+    const s = C.normalize(text);
+    const out = [];
+    const top = Math.min(hi, s.length);
+    for (let len = lo; len <= top; len++) {
+      const pos = new Map();
+      for (let i = 0; i + len <= s.length; i++) {
+        const g = s.slice(i, i + len);
+        const a = pos.get(g);
+        if (a) a.push(i); else pos.set(g, [i]);
+      }
+      let found = 0;
+      pos.forEach(function (positions, seq) {
+        if (positions.length < 2) return;
+        found++;
+        const gaps = [];
+        for (let i = 1; i < positions.length; i++) gaps.push(positions[i] - positions[i - 1]);
+        out.push({ seq: seq, positions: positions, gaps: gaps });
+      });
+      if (found === 0) break;
+    }
+    /* 顺序必须是确定的：页面要把前几条列成表给人看，而一个"碰巧的"顺序会让
+       同一份密文两次打开显示出不同的"最长重复串"。先长后短（长的证据最硬），
+       同长按出现次数多在前，再按首次出现位置。 */
+    out.sort(function (a, b) {
+      return (b.seq.length - a.seq.length)
+          || (b.positions.length - a.positions.length)
+          || (a.positions[0] - b.positions[0]);
+    });
+    return out;
+  }
+
+  /* Kasiski 检验：把重复片段的间距拿去试除，最可能的密钥长度是能整除最多间距的那个。
+
+     计分**不能**直接用"被整除的间距条数"：p=2 平白就能整除大约一半的随机间距，
+     排序会稳稳地把 2 顶到第一名。所以计的是**超出偶然的部分**
+
+         score(p) = 命中率 − 1/p
+
+     1/p 正是一个与密钥无关的随机间距被 p 整除的概率。真实周期 7 的命中率接近 1，
+     score ≈ 1 − 1/7 ≈ 0.86；而 p=2 的命中率也就在 1/2 附近，score ≈ 0。
+
+     14、21 这些倍数仍会拿到正分（它们确实整除一部分间距），但低于 7。这不是缺陷
+     而是事实：Kasiski 本来就只能定到"周期或其倍数"，把倍数强行压掉是在替数学
+     撒谎。真正分开 7 与 14 的是 icByPeriod。
+
+     长片段的权重是自动的：一个重复的 8 元组会让它内部的 3/4/5/6/7 元组各自也重复，
+     同一个间距因此被计入很多次。方向正是想要的——长重复几乎不可能是巧合。
+
+     没有任何重复片段时返回**空数组**，而不是一串并列 0 分。并列 0 分排序后第一名
+     是 minPeriod，页面会把它当成"最可能的密钥长度"显示出来——那是凭空捏造。
+     空数组让页面必须显式地说"没找到重复片段"。 */
+  function kasiskiPeriods(text, opts) {
+    const o = opts || {};
+    const minPeriod = (o.minPeriod === undefined) ? 2 : o.minPeriod;
+    const maxPeriod = (o.maxPeriod === undefined) ? 20 : o.maxPeriod;
+    if (!Number.isInteger(minPeriod) || minPeriod < 1) {
+      throw new Error('kasiskiPeriods 的 minPeriod 必须是 >= 1 的整数，收到 ' + o.minPeriod);
+    }
+    if (!Number.isInteger(maxPeriod) || maxPeriod < minPeriod) {
+      throw new Error('kasiskiPeriods 的 maxPeriod 必须是 >= minPeriod 的整数，收到 ' + o.maxPeriod);
+    }
+    const seqs = repeatedSequences(text, o.minLen, o.maxLen);
+    const gaps = [];
+    for (let i = 0; i < seqs.length; i++) {
+      for (let j = 0; j < seqs[i].gaps.length; j++) gaps.push(seqs[i].gaps[j]);
+    }
+    if (gaps.length === 0) return [];
+    const out = [];
+    for (let p = minPeriod; p <= maxPeriod; p++) {
+      let hits = 0;
+      for (let i = 0; i < gaps.length; i++) if (gaps[i] % p === 0) hits++;
+      out.push({ period: p, score: hits / gaps.length - 1 / p, hits: hits, total: gaps.length });
+    }
+    out.sort(function (a, b) { return (b.score - a.score) || (a.period - b.period); });
+    return out;
+  }
+
+  /* 把文本按周期 p 拆成 p 列（第 k 列是下标 ≡ k (mod p) 的那些字母）。
+     恒返回 p 个元素，哪怕文本比 p 还短——调用方是按下标取"第 5 列"的，
+     一个长度随文本变化的返回值会让那句取值时灵时不灵。 */
+  function columnsForPeriod(text, p) {
+    if (!Number.isInteger(p) || p < 1) {
+      throw new Error('columnsForPeriod 的周期必须是 >= 1 的整数，收到 ' + p);
+    }
+    const s = C.normalize(text);
+    const cols = [];
+    for (let i = 0; i < p; i++) cols.push('');
+    for (let i = 0; i < s.length; i++) cols[i % p] += s.charAt(i);
+    return cols;
+  }
+
+  /* 逐周期的平均重合指数。
+     周期猜对时，每一列都是同一个凯撒位移的产物；单表代换保持 IoC，于是每列的
+     IoC 都回到英文的 0.066。猜错时列里混着若干个不同位移，IoC 塌向 0.0385。
+     这比 Kasiski 稳：它不要求文本里恰好出现重复片段，任何一段够长的密文都能算。
+
+     p 的倍数同样会出现高峰（周期 7 的密文按 14 分列，每列仍是同一个位移），
+     所以读峰值时要取**最小**的那个高点。这条不写进代码里当"聪明的后处理"——
+     哪个高点是真周期需要人看着曲线判断，替使用者判断掉就把这一页的顿悟点删了。
+     从 p=1 开始：p=1 就是整段文本的 IoC，那根柱子是"多表代换把 IoC 压低了"
+     这句话的直接证据，没有它，后面的高峰无从对比。 */
+  function icByPeriod(text, maxPeriod) {
+    const mp = (maxPeriod === undefined) ? 20 : maxPeriod;
+    if (!Number.isInteger(mp) || mp < 1) {
+      throw new Error('icByPeriod 的 maxPeriod 必须是 >= 1 的整数，收到 ' + maxPeriod);
+    }
+    const s = C.normalize(text);
+    const out = [];
+    for (let p = 1; p <= mp; p++) {
+      const cols = columnsForPeriod(s, p);
+      let sum = 0;
+      for (let i = 0; i < cols.length; i++) sum += indexOfCoincidence(cols[i]);
+      out.push({ period: p, ic: sum / cols.length });
+    }
+    return out;
+  }
+
+  return { ENGLISH_FREQ, letterCounts, letterFrequency, chiSquare, bruteForceBest,
+           indexOfCoincidence, ngramCounts, repeatedSequences, kasiskiPeriods,
+           icByPeriod, columnsForPeriod };
+});
+/* <<< GENERATED:CRYPTANALYSIS */
+/* >>> GENERATED:ALGOS caesar.js,substitution.js,morse.js */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) {
+    /* node 下取兄弟目录的 crypto-core：路径用 path.join 拼，不写字面的父目录
+       相对路径。理由不是风格——那个字符串会被 inline_core.py 原样内联进每个
+       工具页，而 check.py 的 outbound_ref_check() 正在数整个子树里的父目录
+       引用，用它守住"cryptography/ 可以整体搬走"这条约束。浏览器分支根本走
+       不到这一行，为它留一条会触发普查的字面量不划算。 */
+    module.exports = factory(require(require('path').join(__dirname, '..', 'crypto-core.js')));
+  } else {
+    root.CryptoAlgos = root.CryptoAlgos || {};
+    root.CryptoAlgos.caesar = factory(root.CryptoCore);
+  }
+})(typeof self !== 'undefined' ? self : this, function (C) {
+  'use strict';
+
+  /* 保留大小写与非字母字符，而不是先 normalize 再加密。
+     教学上这更值钱：'Hello, World!' → 'Khoor, Zruog!' 让人一眼看出
+     "只有字母参与运算，标点和空格是旁观者"，而 'KHOORZRUOG' 把这件事藏起来了。
+     代价是密文泄露了词长——这恰好是第三页"穷举"要讲的弱点之一。 */
+  function shift(text, k) {
+    k = C.mod(k, C.N);
+    let out = '';
+    for (let i = 0; i < text.length; i++) {
+      const ch = text.charAt(i);
+      const c = text.charCodeAt(i);
+      if (c >= 65 && c <= 90) out += String.fromCharCode(65 + C.mod(c - 65 + k, C.N));
+      else if (c >= 97 && c <= 122) out += String.fromCharCode(97 + C.mod(c - 97 + k, C.N));
+      else out += ch;
+    }
+    return out;
+  }
+
+  function encrypt(text, k) { return shift(String(text), k); }
+  function decrypt(text, k) { return shift(String(text), -k); }
+
+  /* 26 个候选，一个不少、按 k 升序——工具页把它们排成 26 行，
+     "26 行就是全部可能"正是这一页要传达的东西，少一行都会破坏这个印象。 */
+  function bruteForce(cipher) {
+    const out = [];
+    for (let k = 0; k < C.N; k++) out.push({ k: k, text: decrypt(cipher, k) });
+    return out;
+  }
+
+  return { encrypt, decrypt, bruteForce };
+});
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) {
+    /* node 下取兄弟目录的 crypto-core：路径用 path.join 拼，不写字面的父目录
+       相对路径。理由与 caesar.js 那一行完全相同——那个字符串会被 inline_core.py
+       原样内联进每个工具页，而 check.py 的 outbound_ref_check() 正在数整个子树
+       里的父目录引用，用它守住"cryptography/ 可以整体搬走"这条约束。浏览器
+       分支根本走不到这一行，为它留一条会触发普查的字面量不划算。 */
+    module.exports = factory(require(require('path').join(__dirname, '..', 'crypto-core.js')));
+  } else {
+    root.CryptoAlgos = root.CryptoAlgos || {};
+    root.CryptoAlgos.substitution = factory(root.CryptoCore);
+  }
+})(typeof self !== 'undefined' ? self : this, function (C) {
+  'use strict';
+
+  /* 单表代换：密钥就是"把 A–Z 重新排一遍"的那个排列，key[i] 是明文第 i 个
+     字母的密文。凯撒是它的一个特例——密钥恰好是字母表整体转 k 位——所以
+     26 个凯撒密钥全都躺在这 26! 个密钥里面，占的比例是 26/26! ≈ 6e-26。
+     这条包含关系是本模块与 caesar.js 的关系，也是这个工具要讲的第一件事。
+
+     "单表"是与维吉尼亚那类多表密码的分界：整段报文自始至终只用这一张表，
+     所以每个字母的出现次数原样搬到了它的像上——频率分析因此成立。 */
+
+  /* 合法密钥 = 恰好 26 个字符，且是 A–Z 的一个真排列。
+     刻意只认大写：小写、空格、重复字母都判 false，由调用方先 normalize。
+     "长度对 + 全是字母"不够——'AAAAAAAAAAAAAAAAAAAAAAAAAA' 满足那个较弱的
+     条件却没有逆，用它加密的报文谁也解不开。排列这件事必须逐字母数。 */
+  function isValidKey(key) {
+    if (typeof key !== 'string' || key.length !== C.N) return false;
+    const seen = new Array(C.N).fill(false);
+    for (let i = 0; i < C.N; i++) {
+      const v = key.charCodeAt(i) - 65;
+      if (!(v >= 0 && v < C.N)) return false;   // 非大写 A–Z（含小写、标点、非 ASCII）
+      if (seen[v]) return false;                // 重复：不是排列，也就没有逆
+      seen[v] = true;
+    }
+    return true;
+  }
+
+  /* 密钥非法时**当场抛**，不悄悄退回恒等、也不跳过那个字母。
+     悄悄兜底的代价是页面照常吐出一段"看着像密文"的文本，而它既解不开也不是
+     任何人的密文——这种错误要很久以后才会被人撞见。crypto-core 的 mod() 对
+     负模数用的是同一条策略，理由写在那里。 */
+  function requireKey(key) {
+    if (!isValidKey(key)) {
+      throw new Error('substitution: 密钥必须是 A–Z 的一个 26 字母排列，收到 ' +
+                      JSON.stringify(key));
+    }
+  }
+
+  /* 与 caesar.js 同一条约定：保留大小写与非字母字符，而不是先 normalize 再加密。
+     'Hello, World!' 加密后仍然是 'X..., X.....!' 这个形状，让人一眼看出只有字母
+     参与代换、标点和空格是旁观者。代价同样是密文泄露了词长——那正是频率分析
+     之外另一条能咬进来的缝。 */
+  function encrypt(text, key) {
+    requireKey(key);
+    const s = String(text);
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      if (c >= 65 && c <= 90) out += key.charAt(c - 65);
+      else if (c >= 97 && c <= 122) out += key.charAt(c - 97).toLowerCase();
+      else out += s.charAt(i);
+    }
+    return out;
+  }
+
+  /* 解密不是"反着查一遍表"，而是拿逆排列再加密一次：只有一条代码路径在处理
+     大小写与标点，不会出现两份实现慢慢走偏的情况。 */
+  function decrypt(text, key) { return encrypt(text, invertKey(key)); }
+
+  /* 逆排列：明文 i 加密成 key[i]，所以密文字母 key[i] 解密回明文字母 i。 */
+  function invertKey(key) {
+    requireKey(key);
+    const out = new Array(C.N);
+    for (let i = 0; i < C.N; i++) out[key.charCodeAt(i) - 65] = C.ALPHABET.charAt(i);
+    return out.join('');
+  }
+
+  /* 关键词密钥：关键词去重后按出现顺序排在前面，剩下的字母按字母序补齐。
+     'ZEBRA' 得到 'ZEBRACDFGHIJKLMNOPQSTUVWXY'。
+
+     这是历史上真正被用过的密钥编码方式——人记不住 26 个乱序字母，记得住一个
+     词。代价是密钥空间从 26! 塌成"能想起来的词的个数"，而这恰恰是这个工具
+     第三页要讲的那句话的另一面：把 26! 当成强度，等于假设密钥真的是均匀取的。
+
+     输入先过 normalize：非字母一律丢弃，所以任何字符串（含空串、中文、标点）
+     都能得到一个合法密钥。空串给出恒等密钥——它同样是 26! 个密钥中的一个，
+     一点也不特殊，只是刚好什么都不加密。 */
+  function keyFromKeyword(word) {
+    const s = C.normalize(word);
+    const seen = new Array(C.N).fill(false);
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+      const v = s.charCodeAt(i) - 65;
+      if (seen[v]) continue;
+      seen[v] = true;
+      out += C.ALPHABET.charAt(v);
+    }
+    for (let v = 0; v < C.N; v++) if (!seen[v]) out += C.ALPHABET.charAt(v);
+    return out;
+  }
+
+  /* 随机密钥（Fisher–Yates，自后向前）。rng 由调用方注入，**模块内绝不碰
+     Math.random**：不然测试只能"多跑几次看看像不像随机"，而不能钉住任何一个
+     具体结果——洗牌算法最容易错的地方（下标范围、消费 rng 的顺序）恰好只有
+     确定性向量能钉住。 */
+  function randomKey(rngFn) {
+    if (typeof rngFn !== 'function') {
+      throw new Error('substitution.randomKey 需要一个返回 [0,1) 的函数；' +
+                      '模块内不使用 Math.random');
+    }
+    const a = C.ALPHABET.split('');
+    for (let i = a.length - 1; i > 0; i--) {
+      /* 夹一下下标。一个返回 1（或 NaN）的 rng 会算出 i+1 或 NaN，交换到数组
+         外面去，产出的"密钥"里带着 undefined——它不抛错、长度还可能看着对，
+         但已经不是排列了。这个函数对外承诺的是"返回值恒为合法密钥"，
+         守住它的成本是两行。 */
+      let j = Math.floor(rngFn() * (i + 1));
+      if (!(j >= 0)) j = 0;          // NaN 或负数
+      if (j > i) j = i;              // rng 返回了 1
+      const t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a.join('');
+  }
+
+  return { encrypt, decrypt, invertKey, keyFromKeyword, randomKey, isValidKey };
+});
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) {
+    /* node 下取兄弟目录的 crypto-core：路径用 path.join 拼，不写字面的父目录
+       相对路径。理由与 caesar.js 那一处相同，也不是风格问题——那个字符串会被
+       inline_core.py 原样内联进每个工具页，而 check.py 的 outbound_ref_check()
+       正在数整个子树里的父目录引用，用它守住"cryptography/ 可以整体搬走"这条
+       约束。浏览器分支根本走不到这一行，为它留一条会触发普查的字面量不划算。 */
+    module.exports = factory(require(require('path').join(__dirname, '..', 'crypto-core.js')));
+  } else {
+    root.CryptoAlgos = root.CryptoAlgos || {};
+    root.CryptoAlgos.morse = factory(root.CryptoCore);
+  }
+})(typeof self !== 'undefined' ? self : this, function (C) {
+  'use strict';
+
+  /* ================= 编码不是密码 =================
+
+     摩尔斯码是一个**编码**：码表是公开的，没有密钥，任何人都能反着查回去。
+     它提供的保密性是零。本模块把这件事做成可执行的事实——fromMorse() 不接受
+     任何密钥参数，因为**没有密钥可接**。
+
+     但它是一个极好的**密码基底**，理由有两条，都写在数据结构里：
+
+       ① 它把 26 个字母重写进一个只有点、划两种符号的字母表；
+       ② 码长是**变长**的（E 是 1 个符号，0 是 5 个），所以"第几个符号属于
+          第几个字母"这件事不再能靠数数得到。
+
+     ①+② 加在一起，就是分裂式摩尔斯（fractionated Morse）赖以成立的东西：
+     把符号流按**固定长度 3**重新切段，切口与字母边界系统性地错开，此后密文里
+     任何一个字母都不再对应明文里的任何一个字母。
+
+     ---- 一个必须说清楚的事实：摩尔斯**不是**前缀码 ----
+     E = "." 是 I = ".." 的前缀，I 又是 S = "..." 的前缀，S 又是 H 的前缀。
+     在只有点划两种符号的字母表上，摩尔斯是**歧义**的：裸的 "..." 可以读成
+     S、EI、IE、EEE 四种（countReadings 会把这个数算出来）。
+     所以字母之间那个"停顿"不是排版习惯，它是**第三个符号**，而且是让整套
+     编码可解的那一个。本模块把它写成字面的 'x'，正是为了让它在数据里也占一格，
+     而不是变成一个看不见的约定。 */
+
+  /* ITU 标准码表：26 个字母 + 10 个数字。标点不收——古典密码工具里没有一处
+     用得上，收进来只会让"26 个有效三元组"那笔账多出一堆需要解释的例外。 */
+  const MORSE_TABLE = {
+    A: '.-',    B: '-...',  C: '-.-.',  D: '-..',   E: '.',     F: '..-.',
+    G: '--.',   H: '....',  I: '..',    J: '.---',  K: '-.-',   L: '.-..',
+    M: '--',    N: '-.',    O: '---',   P: '.--.',  Q: '--.-',  R: '.-.',
+    S: '...',   T: '-',     U: '..-',   V: '...-',  W: '.--',   X: '-..-',
+    Y: '-.--',  Z: '--..',
+    0: '-----', 1: '.----', 2: '..---', 3: '...--', 4: '....-',
+    5: '.....', 6: '-....', 7: '--...', 8: '---..', 9: '----.'
+  };
+
+  /* 反查表。建表时**逐条查重**：两个字符共用一个码意味着 fromMorse 会静静地
+     丢掉其中一个，而那种错误在页面上表现为"某个字母解出来变成了另一个"，
+     没有任何东西会报警。 */
+  const CODE_TO_CHAR = (function () {
+    const out = {};
+    Object.keys(MORSE_TABLE).forEach(function (ch) {
+      const code = MORSE_TABLE[ch];
+      if (out[code] !== undefined) {
+        throw new Error('morse: 码表里 ' + JSON.stringify(code) + ' 被 ' +
+                        out[code] + ' 与 ' + ch + ' 共用');
+      }
+      out[code] = ch;
+    });
+    return out;
+  })();
+
+  /* 最长的码是 5 个符号（数字全是 5）。分段搜索靠它收敛，写死一个常量比在
+     循环里现算 Math.max 好：现算一次要遍历整张表，而这个上限是 ITU 定死的。 */
+  const MAX_CODE_LEN = 5;
+
+  const DOT = '.', DASH = '-', SEP = 'x';
+  /* 三符号字母表的**固定顺序**。三元组表按这个顺序做进位枚举，所以它同时
+     定义了 tripleTable() 的次序，也就间接定义了密钥字母表怎么对齐。
+     换掉这个顺序等于换掉整个密码，不是换个写法。 */
+  const SYMBOLS = [DOT, DASH, SEP];
+
+  function isMorseChar(ch) { return MORSE_TABLE[ch] !== undefined; }
+
+  /* 规范化：大写，只留 A-Z 与 0-9，其余一切（标点、中文、换行）折成单个空格，
+     首尾去空。空格必须留下来——分裂式摩尔斯的词间隔是 'xx'，把词边界丢掉
+     等于换了一段明文，往返承诺当场不成立。
+
+     与 caesar.js "保留大小写与标点"的选择相反，理由与 transposition.js 那段
+     一样：这里的运算定义在**符号位置**上，一个不属于码表的字符没有符号可占，
+     留着它就得回答"它占几个符号"，而任何答案都是编出来的。 */
+  function normalizeText(text) {
+    const s = String(text == null ? '' : text).toUpperCase();
+    let out = '';
+    let pendingSpace = false;
+    for (let i = 0; i < s.length; i++) {
+      const ch = s.charAt(i);
+      if (isMorseChar(ch)) {
+        if (pendingSpace && out.length) out += ' ';
+        pendingSpace = false;
+        out += ch;
+      } else {
+        pendingSpace = true;
+      }
+    }
+    return out;
+  }
+
+  function codeOf(ch) {
+    const code = MORSE_TABLE[String(ch).toUpperCase()];
+    if (code === undefined) {
+      throw new Error('morse.codeOf: 码表里没有 ' + JSON.stringify(String(ch)));
+    }
+    return code;
+  }
+
+  function charOf(code) {
+    const ch = CODE_TO_CHAR[String(code)];
+    if (ch === undefined) {
+      throw new Error('morse.charOf: 不是一个合法的摩尔斯码 ' + JSON.stringify(String(code)));
+    }
+    return ch;
+  }
+
+  /* ================= 人读的那一层：toMorse / fromMorse =================
+     字母之间一个空格，词之间一个斜杠——这是电报抄本与今天所有摩尔斯练习软件
+     共用的写法。斜杠不是装饰：没有它，"SOS OS" 与 "SOSOS" 写出来一模一样。
+
+     **这两个函数都不接受密钥，因为没有密钥可接。** 这就是"编码不是密码"
+     这句话在代码里的形状：谁拿到 fromMorse 谁就能读，而 fromMorse 就在这里。 */
+  const WORD_GAP = ' / ';
+
+  function toMorse(text) {
+    const plain = normalizeText(text);
+    if (!plain) return '';
+    return plain.split(' ').map(function (word) {
+      let parts = [];
+      for (let i = 0; i < word.length; i++) parts.push(MORSE_TABLE[word.charAt(i)]);
+      return parts.join(' ');
+    }).join(WORD_GAP);
+  }
+
+  /* 解码。空白怎么写都认（多个空格、换行、制表符），'/' 与 '|' 都当词边界——
+     抄下来的电报很少排版整齐，而这个函数的全部意义就是"任何人都能读回去"。
+     认不出来的码当场抛：静静地跳过一个坏码，得到的是一段看着正常、其实少了
+     一个字母的明文，那种错误要等很久才会被人撞见。 */
+  function fromMorse(code) {
+    const s = String(code == null ? '' : code).trim();
+    if (!s) return '';
+    const tokens = s.split(/\s+/);
+    let out = '';
+    for (let i = 0; i < tokens.length; i++) {
+      const tk = tokens[i];
+      if (tk === '/' || tk === '|') {
+        if (out.length && out.charAt(out.length - 1) !== ' ') out += ' ';
+        continue;
+      }
+      out += charOf(tk);
+    }
+    return out.trim();
+  }
+
+  /* ================= 歧义：没有分隔符时能读出几种 =================
+     裸的点划串（把字母间隔全抹掉）能被切成多少种合法读法。这是"分隔符是承重
+     结构"这句话的**可计算版本**：加上分隔符，读法恰好 1 种；抹掉分隔符，
+     读法是下面这个数。
+
+     DP：ways[i] = 前 i 个符号的切法数 = Σ ways[i−L]（末段长 L 且是合法码）。
+     L 只需扫到 MAX_CODE_LEN。
+
+     返回的是 JS number。约 2^53 之后计数不再精确——那个规模上"到底几种"
+     早已不是问题的重点（几百万种和几万亿种同样意味着不可读），所以不引入
+     BigInt；调用方若在意，看 exact 字段。 */
+  function countReadings(bare) {
+    const s = String(bare == null ? '' : bare);
+    for (let i = 0; i < s.length; i++) {
+      if (s.charAt(i) !== DOT && s.charAt(i) !== DASH) {
+        throw new Error('morse.countReadings: 只接受点与划组成的裸串，收到 ' +
+                        JSON.stringify(s));
+      }
+    }
+    const n = s.length;
+    if (!n) return 1;                    // 空串恰有一种读法：什么都不读
+    const ways = new Array(n + 1).fill(0);
+    ways[0] = 1;
+    for (let i = 1; i <= n; i++) {
+      for (let L = 1; L <= MAX_CODE_LEN && L <= i; L++) {
+        if (ways[i - L] === 0) continue;
+        if (CODE_TO_CHAR[s.slice(i - L, i)] !== undefined) ways[i] += ways[i - L];
+      }
+    }
+    return ways[n];
+  }
+
+  /* 把前若干种读法真的列出来（给页面展示用）。limit 必须有：'…………' 那种输入
+     的读法数是指数级的，不封顶就是一个会把标签页挂死的函数。
+     枚举顺序按"末段从短到长"深度优先，于是 '...' 的第一条是 EEE、最后一条是 S，
+     每一步都是"能不能再拆细一点"，读起来正好是歧义本身的形状。 */
+  function ambiguousReadings(bare, limit) {
+    const s = String(bare == null ? '' : bare);
+    const cap = (limit === undefined) ? 8 : Math.max(1, Math.round(limit));
+    const out = [];
+    (function walk(pos, acc) {
+      if (out.length >= cap) return;
+      if (pos === s.length) { out.push(acc); return; }
+      for (let L = 1; L <= MAX_CODE_LEN && pos + L <= s.length; L++) {
+        const ch = CODE_TO_CHAR[s.slice(pos, pos + L)];
+        if (ch === undefined) continue;
+        walk(pos + L, acc + ch);
+        if (out.length >= cap) return;
+      }
+    })(0, '');
+    return out;
+  }
+
+  /* ================= 三符号流：分裂式摩尔斯的基底 =================
+     字母内符号直接相连，字母之间插一个 'x'，词之间插两个 'x'。于是：
+
+         "AB CD"  ->  ".-x-...xx-.-.x-.."
+
+     两条性质是后面一切的前提，都由这条构造直接保证：
+       · 'x' 的连续段长度只可能是 1 或 2，**永远不会是 3**——所以 27 个三元组
+         里 'xxx' 是不可能出现的那一个，剩下的恰好 26 个，恰好配一个字母表。
+         这不是巧合，是这个密码被设计成这样的原因。
+       · 符号流以字母的点划收尾（normalizeText 已经去掉首尾空白），补位补的
+         'x' 最多 2 个，因此补位也造不出 'xxx'。
+
+     owner[] 是每个符号属于明文第几个字符（分隔符是 −1）。工具页画"字母边界
+     原来在哪"那一条靠它，测试也靠它钉住边界——把它算在这里而不是让页面自己
+     推一遍，是因为页面推的那一份与加密用的这一份一旦错开，画面会漂亮地指错
+     地方，而没有任何东西会报警。 */
+  function symbolStream(text) {
+    const plain = normalizeText(text);
+    const codes = [];        // 与 plain 逐字符对齐；空格位置是空串
+    let stream = '';
+    const owner = [];
+    const first = [];        // first[j] / last[j]：明文第 j 个字符占符号流的哪一段
+    const last = [];
+    for (let j = 0; j < plain.length; j++) {
+      const ch = plain.charAt(j);
+      if (ch === ' ') {
+        codes.push('');
+        first.push(-1); last.push(-1);
+        stream += SEP + SEP;
+        owner.push(-1, -1);
+        continue;
+      }
+      const code = MORSE_TABLE[ch];
+      codes.push(code);
+      /* 词边界那两个 'x' 已经由空格那一支写过，这里只补字母之间的那一个。 */
+      if (j > 0 && plain.charAt(j - 1) !== ' ') { stream += SEP; owner.push(-1); }
+      first.push(stream.length);
+      for (let k = 0; k < code.length; k++) { stream += code.charAt(k); owner.push(j); }
+      last.push(stream.length - 1);
+    }
+    return { plain: plain, codes: codes, stream: stream, owner: owner,
+             first: first, last: last };
+  }
+
+  /* ================= 26 个有效三元组 =================
+     三个符号、每位三选一 = 27 种，去掉不可能出现的 'xxx'，正好 26 种。
+     进位枚举的顺序（点 < 划 < x）就是历史上那张表的排法，'xxx' 恰好排在最后，
+     所以"去掉它"在实现上就是截断，不需要挖洞。 */
+  function tripleTable() {
+    const out = [];
+    for (let a = 0; a < SYMBOLS.length; a++) {
+      for (let b = 0; b < SYMBOLS.length; b++) {
+        for (let c = 0; c < SYMBOLS.length; c++) {
+          const t = SYMBOLS[a] + SYMBOLS[b] + SYMBOLS[c];
+          if (t !== SEP + SEP + SEP) out.push(t);
+        }
+      }
+    }
+    return out;
+  }
+
+  const TRIPLES = tripleTable();
+  const TRIPLE_INDEX = (function () {
+    const m = {};
+    for (let i = 0; i < TRIPLES.length; i++) m[TRIPLES[i]] = i;
+    return m;
+  })();
+
+  /* 密钥字母表：A–Z 的一个 26 字母排列，第 i 个字母对应第 i 个三元组。
+     省略（或空串）时退回 A–Z——它同样是 26! 个密钥中的一个，一点也不特殊，
+     只是刚好让"三元组 → 字母"这张表读起来像教科书上的那一张。
+     非法密钥当场抛，与 substitution.js 的 requireKey 同一条纪律：悄悄退回
+     恒等会吐出一段既解不开、也不是任何人密文的东西。 */
+  function requireKeyAlphabet(keyAlphabet) {
+    if (keyAlphabet === undefined || keyAlphabet === null || keyAlphabet === '') {
+      return C.ALPHABET;
+    }
+    const key = String(keyAlphabet);
+    let ok = key.length === C.N;
+    if (ok) {
+      const seen = new Array(C.N).fill(false);
+      for (let i = 0; i < C.N; i++) {
+        const v = key.charCodeAt(i) - 65;
+        if (!(v >= 0 && v < C.N) || seen[v]) { ok = false; break; }
+        seen[v] = true;
+      }
+    }
+    if (!ok) {
+      throw new Error('morse: 密钥字母表必须是 A–Z 的一个 26 字母排列，收到 ' +
+                      JSON.stringify(String(keyAlphabet)));
+    }
+    return key;
+  }
+
+  /* 全流程留痕。工具页三条带（符号流 / 三个一组 / 密文）以及"字母边界与组边界
+     错开多少"那个读数全部读它，加解密也走它——一份真相，不是两份。 */
+  function fractionatedTrace(text, keyAlphabet) {
+    const key = requireKeyAlphabet(keyAlphabet);
+    const st = symbolStream(text);
+    const pad = st.stream.length ? (3 - st.stream.length % 3) % 3 : 0;
+    let padded = st.stream;
+    for (let i = 0; i < pad; i++) padded += SEP;
+    const owner = st.owner.slice();
+    for (let i = 0; i < pad; i++) owner.push(-1);
+
+    const groups = [];
+    let cipher = '';
+    for (let i = 0; i < padded.length; i += 3) {
+      const g = padded.slice(i, i + 3);
+      const idx = TRIPLE_INDEX[g];
+      if (idx === undefined) {
+        /* 到不了这里：symbolStream 的构造保证 'x' 连续段不超过 2 个。真到了
+           就说明构造被改坏了，当场炸比吐一个静静错掉的密文强。 */
+        throw new Error('morse: 出现了不可能的三元组 ' + JSON.stringify(g));
+      }
+      groups.push(g);
+      cipher += key.charAt(idx);
+    }
+    return {
+      key: key, plain: st.plain, codes: st.codes,
+      stream: st.stream, padded: padded, pad: pad,
+      owner: owner, first: st.first, last: st.last,
+      groups: groups, cipher: cipher
+    };
+  }
+
+  function fractionatedEncrypt(text, keyAlphabet) {
+    return fractionatedTrace(text, keyAlphabet).cipher;
+  }
+
+  /* 解密。密钥的逆排列把密文字母映回三元组下标，拼回符号流，去掉末尾的补位
+     'x'（合法符号流永远以点或划收尾，所以"末尾的 x 全是补位"这条是安全的），
+     再按 'xx' 切词、'x' 切字母，交给 fromMorse。
+
+     刻意复用 fromMorse 而不是另写一份查表循环：两份解码实现迟早会在某个
+     边界上走偏，而"分裂式摩尔斯解出来的东西与人手抄的摩尔斯解出来的东西
+     是同一个"恰恰是这个密码在教学上的全部意义。 */
+  function fractionatedDecrypt(cipher, keyAlphabet) {
+    const key = requireKeyAlphabet(keyAlphabet);
+    const inv = new Array(C.N);
+    for (let i = 0; i < C.N; i++) inv[key.charCodeAt(i) - 65] = i;
+
+    const s = C.normalize(cipher);
+    if (!s) return '';
+    let stream = '';
+    for (let i = 0; i < s.length; i++) {
+      const idx = inv[s.charCodeAt(i) - 65];
+      stream += TRIPLES[idx];
+    }
+    let end = stream.length;
+    while (end > 0 && stream.charAt(end - 1) === SEP) end--;
+    stream = stream.slice(0, end);
+    if (!stream) return '';
+
+    const spaced = stream.split(SEP + SEP).map(function (word) {
+      return word.split(SEP).join(' ');
+    }).join(WORD_GAP);
+    return fromMorse(spaced);
+  }
+
+  return {
+    MORSE_TABLE: MORSE_TABLE, CODE_TO_CHAR: CODE_TO_CHAR,
+    SYMBOLS: SYMBOLS, DOT: DOT, DASH: DASH, SEP: SEP, MAX_CODE_LEN: MAX_CODE_LEN,
+    normalizeText: normalizeText, isMorseChar: isMorseChar,
+    codeOf: codeOf, charOf: charOf,
+    toMorse: toMorse, fromMorse: fromMorse,
+    countReadings: countReadings, ambiguousReadings: ambiguousReadings,
+    symbolStream: symbolStream,
+    tripleTable: tripleTable,
+    fractionatedTrace: fractionatedTrace,
+    fractionatedEncrypt: fractionatedEncrypt,
+    fractionatedDecrypt: fractionatedDecrypt
+  };
+});
+/* <<< GENERATED:ALGOS */
+/* ↑ 清单必须列全这一页真正会调用的每一份算法，多一份是浪费、少一份是
+   运行时 undefined。本页三份都真的会被调：
+     caesar.js       第二页右边那一列（同一段明文的凯撒密文）
+     substitution.js keyFromKeyword() 造密钥字母表，encrypt() 造第三页
+                     用来对照频率剖面的那份单表代换密文
+     morse.js        整页的主角
+   三份的浏览器分支都是 factory(root.CryptoCore)，彼此不互相依赖，
+   所以清单顺序在这一页无所谓——不像 polybius 必须排在 transposition 之后。 */
+/* >>> GENERATED:EXAMPLES */
+(function (root, factory) {
+  const data = factory();
+  if (typeof module === 'object' && module.exports) module.exports = data;
+  else {
+    root.CryptoExamplesParts = root.CryptoExamplesParts || {};
+    root.CryptoExamplesParts.classical = data;
+  }
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  /* 教学明文。挑选标准：
+     ① 无版权顾虑——要么是自造句，要么是早已进入公有领域的历史句子改写。
+        规范 §15：本目录只放 CryptoViz 自己的教学数据，不抄任何比赛正文。
+     ② 用于频率分析的那几条，长度要够让字母统计有统计意义（>= 60 个字母），
+        否则第三页的 χ² 排序会因为样本太小而选错，使用者看到的就是一个
+        "自动破解失败"的演示。
+     ③ 至少有一条包含全部 26 个字母（pangram），好让字母轮上没有空位。
+
+     ②"缺一不可"只约束长文本。'attack' 是**故意**违反 ② 的对照组，
+     它的全部价值就在于短——见它自己的 note。
+
+     text 的 zh 与 en 是同一句英文，这不是漏翻译：古典密码的字母表就是 A-Z，
+     把明文换成中文会让整个工具无字母可加密。这里双语的是 note 与 label
+     （解说），不是 text（被加密的对象）。 */
+  const plaintexts = [
+    {
+      id: 'pangram',
+      text: {
+        en: 'The quick brown fox jumps over the lazy dog and then runs away into the deep forest where nobody ever finds him again',
+        zh: 'The quick brown fox jumps over the lazy dog and then runs away into the deep forest where nobody ever finds him again'
+      },
+      note: {
+        en: 'A pangram, extended so letter statistics mean something.',
+        zh: '全字母句，特意加长到字母统计有意义的长度。'
+      }
+    },
+    {
+      id: 'attack',
+      text: { en: 'ATTACK AT DAWN', zh: 'ATTACK AT DAWN' },
+      /* 这条 note 与计划书原稿不同。原稿写的是"正好看 χ² 在这里选错"，
+         而实测 χ² 在这里**选对了**：以计划书钉死的那张 ENGLISH_FREQ 为准，
+         'ATTACK AT DAWN' 的 26 个候选里 k=3 得分最低（33.1），排第一。
+         真正随长度崩掉的不是名次，是**差距**：
+           attack（12 字母）     第二名 / 第一名 ≈ 1.31
+           pangram（95 字母）    ≈ 4.27
+           caesar-quote（91 字母）≈ 5.16
+         所以这条对照组要讲的是"排名还在，但已经不构成证据"，
+         而不是"排名错了"。复现：对每个 k 取 bruteForce 候选算 χ² 后升序排，
+         比较前两名的比值。 */
+      note: {
+        en: 'Only twelve letters. Chi-square still lands on the right shift here, but its lead over the runner-up all but vanishes — at this length a ranking is not yet evidence.',
+        zh: '只有 12 个字母。χ² 在这里仍然选中了正确的位移，但它对第二名的领先几乎抹平——在这个长度上，排名还不构成证据。'
+      }
+    },
+    {
+      id: 'caesar-quote',
+      /* 两句凯撒的改写：veni vidi vici，与《高卢战记》开篇"高卢全境分为三部分"。
+         都是两千年前的公有领域文本，且这里是本仓自己的英文措辞加一句玩笑收尾，
+         不是任何现代译本的转录。 */
+      text: {
+        en: 'I came I saw I conquered and the whole of Gaul is now divided into three parts each of them quite unhappy about it',
+        zh: 'I came I saw I conquered and the whole of Gaul is now divided into three parts each of them quite unhappy about it'
+      },
+      note: {
+        en: 'Caesar would have used a shift of three.',
+        zh: '凯撒本人用的位移是 3。'
+      }
+    }
+  ];
+
+  /* 预置密文：id 指向上面的明文，k 是用来加密它的位移。
+     cipher 字段**故意留空**由工具页现算——把密文抄死在数据里，
+     一旦 caesar.js 的行为改了（比如某天不再保留标点），
+     这里就会静静地对不上，而没有任何东西会报警。
+     examples.test.js 里那条 `c.cipher === undefined` 就是这条约定的执法者。 */
+  const caesar = [
+    { id: 'attack', k: 3, label: { en: 'The textbook shift', zh: '教科书上的那个位移' } },
+    { id: 'pangram', k: 13, label: { en: 'ROT13 — its own inverse', zh: 'ROT13 —— 自己是自己的逆' } },
+    { id: 'caesar-quote', k: 7, label: { en: 'Nothing special about 7', zh: '7 没有任何特别之处' } }
+  ];
+
+  return { plaintexts, caesar };
+});
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) {
+    module.exports = factory({ classical: require('./examples-classical.js') });
+  } else {
+    root.CryptoExamples = factory(root.CryptoExamplesParts || {});
+  }
+})(typeof self !== 'undefined' ? self : this, function (parts) {
+  'use strict';
+
+  /* 汇总器。浏览器里读的是 root.CryptoExamplesParts——那份对象由每个分组
+     文件自己挂上去，所以**分组文件必须先于本文件加载**。
+     inline_core.py 的 EXAMPLES_PARTS 显式写死了这个顺序，不靠文件名排序
+     碰巧成立（chess 的 games.js 在同一处踩过这个点）。 */
+  function get(name) {
+    const d = parts[name];
+    if (!d) throw new Error('CryptoExamples: 分组 "' + name + '" 未加载——检查内联顺序');
+    return d;
+  }
+
+  /* 按 id 取一条明文，取不到当场抛：一个拼错的 id 应该立刻炸，
+     而不是让工具页拿着 undefined 往下走、最后画出一片空白。 */
+  function plaintext(id) {
+    const list = get('classical').plaintexts;
+    for (let i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    throw new Error('CryptoExamples: 找不到明文 id "' + id + '"');
+  }
+
+  return { classical: get('classical'), plaintext };
+});
+/* <<< GENERATED:EXAMPLES */
+/* >>> GENERATED:VIZ-ENGINE */
+/* fork 自 chess/core/viz-engine.js（2026-08-09）。子项目之间不共享代码文件——
+   这是"整个 cryptography/ 目录可以单独搬走"的前提，见
+   docs/superpowers/specs/2026-08-09-cryptography-subproject-design.md §6.2。
+   往上游同步改动时要手工搬，没有自动机制，这是这个架构自觉付的代价。
+
+   相对上游的改动只有两处：① LANG_KEY 换成本子项目自己的键；
+   ② 文件末尾 return 之前追加了一层 screen-space 2D 图元层（见那一节的注释）。
+   其余逐字节继承，好让"往上游同步"这件事在 diff 里一眼可辨。 */
+
+/* 3D 渲染引擎 —— 由 design-system/math-viz-starter.html 裁剪而来。
+   保留：轨道相机、透视投影与近裁剪、绘图原语、设计令牌、UI 组件、i18n。
+   删除：连续时间积分、历史样本环形缓冲、三角函数专用部件、
+         浮点采样录制/回放骨架（阶段 2 Task 1——每条前提在棋类工具上都不
+         成立：棋没有连续演算可供逐帧采样，见下面 state.dt 的说明）。
+   编辑源，运行时被内联进 tools/*.html。
+
+   模块顶层绝不触碰 document / window.matchMedia / localStorage / location ——
+   这样 `require('./viz-engine.js')` 在没有 DOM 的 node 环境里也能装载
+   （见 task-12 的 Step 5 导出检查）。任何要碰 DOM 的东西都挪进 init() /
+   bindOrbit() / 事件回调里，只有真正在浏览器里调用它们时才会执行。
+
+   SCENES / PARAMS / TOOL 等「工具专属声明」不在这里假定成同名全局——
+   那样在 node 下 require，或在没有声明它们的最小页面里调用 init()，会在
+   第一次访问处直接 ReferenceError。这里把它们做成 init() 的可选参数，
+   默认是空容器，未提供时相关机制安静地不生效。 */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.VizEngine = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  /* ================= i18n 核心（引擎区） ================= */
+  /* 子项目自己的存储键（规范 §12）。绝不能沿用上游那个键：两个子项目的
+     语言状态是各自独立的，共享一个键会让在另一个子项目里切成中文的动作把
+     cryptography 也一起切了，反之亦然。 */
+  const LANG_KEY = 'cryptography-lang';
+  function resolveLang() {
+    try {
+      const q = new URLSearchParams(location.search).get('lang');
+      if (q === 'en' || q === 'zh') return q;
+      const s = localStorage.getItem(LANG_KEY);
+      if (s === 'en' || s === 'zh') return s;
+    } catch (e) { /* file:// 下 localStorage 可能不可用，或运行在无 DOM 环境（node） */ }
+    return 'en';                       // 本子项目默认英文（规格 §1.6）
+  }
+  /* 默认值先摆一个字面量，真正的解析（碰 location / localStorage）延后到
+     init() 才做——调用点是惰性的，模块顶层不触发它。 */
+  let LANG = 'en';
+  function t(s) { return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.en) : s; }
+  // t() 的兜底是 s.en（与默认语言一致），不是 s.zh —— 否则缺 en 键时英文界面会突然冒出中文。
+
+  const TAU = Math.PI * 2;
+
+  /* 引擎级 UI 文案（英文默认；与 math-viz 的中文默认版本区分开）。
+     这些是「按钮上写什么」层面的通用词汇，不属于任何单个工具，所以留在引擎里，
+     不必由 init() 注入。 */
+  const UI = {
+    panelTitle: { zh: '参数与视角', en: 'Parameters & Views' },
+    pause:  { zh: '⏸ 暂停', en: '⏸ Pause' },
+    resume: { zh: '▶ 继续', en: '▶ Resume' },
+    reset:  { zh: '↺ 重置', en: '↺ Reset' },
+    views:  { zh: '视角', en: 'View' },
+    /* 预置局面/预置内容的默认标签——场景可以用 SCENES[id].presetsLabel 覆盖它
+       （如「棋种」而不是通用的「预置」），省略时退回这个通用词。 */
+    presets: { zh: '预置', en: 'Preset' },
+    /* 手势由 bindOrbit(canvas) 绑定，快捷键由 bindKeyboard() 绑定（见「交互」
+       一节）——两组都是 init() 会自动接好的，提示语把它们列在一起。 */
+    hint:   { zh: '拖拽旋转 · 滚轮 / 双指缩放 · 右键或 Shift 拖拽平移 · 双击回正 · 1–9 视角 · T 切换页签',
+              en: 'Drag to rotate · Scroll / pinch to zoom · Right-click or Shift-drag to pan · Double-click to reset · 1–9 views · T to switch tabs' }
+  };
+
+  /* ================= 常量与状态（引擎区，以下一般无需改动） ================= */
+  const NEAR = 0.15;       // 近裁剪面
+
+  const FONT_CN = 'ui-sans-serif,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif';
+  const FONT_MATH = 'Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif';
+
+  /* window.matchMedia 的结果；只在 init() 里读一次（硬约束：模块顶层不碰 window）。 */
+  let REDUCED = false;
+
+  /* state.dt：本帧的时长（秒），由 frame() 每帧写入，已 clamp 到 [0, 0.05]
+     以熬过后台标签页的时间跳变。场景在 draw() 里读它来推进自己的动画——
+     这是引擎唯一的时钟出口。工具不得自己再用 performance.now() 算一遍：
+     同一个量两处计算必然漂移（阶段 1 的两个工具各自造了一份 frameDt()，
+     阶段 2 Task 1 一并收口）。running 默认 false（载入即暂停）——不是继承自
+     math-viz 引擎的 true——那边的工具天生是一段持续运行的连续模拟，
+     「打开就在动」是常态；棋类工具没有连续模拟，running 目前唯一的效果是
+     喂给播放按钮的文案，真正的「自动巡回演示」是每个工具自己的
+     demoRunning/demoPlaying 在管。默认给 true 会让按钮在打开页面的瞬间就
+     显示「暂停」，暗示着有什么正在跑，这正是用户在两个棋类工具上报的体验
+     问题的根——用户到达页面时演示已经在切换，第一件事却要去找暂停键。
+     默认 false 让「打开 = 静止，播放是你主动要的」对每一个未来要接这份
+     引擎的棋类工具都成立，不必每个工具各自记得覆盖它。 */
+  const state = { running: false, dt: 0 };
+  let curTab = null;
+  const RELABEL = [];        // 语言切换时需要重新取文案的回调列表
+  const cams = {};           // tabId -> 该页签「首视角」对应的相机参数（启动 / 双击回正用）
+  /* cam 是「唯一一份」可变对象：往后任何「换页签因而换相机」都用 Object.assign(cam, ...)
+     原地改写，绝不 `cam = 别的对象`——否则导出的 VizEngine.cam 会在换页签后指向一个
+     没人再更新的旧对象。默认值给一个通用的三视角，供没有 SCENES 的最小用法直接可用。 */
+  let cam = { az: -0.6, el: 0.32, dist: 10, tx: 0, ty: 0, tz: 0 };
+  let tween = null;
+  const lastView = {};
+  /* tabId -> 当前选中的预置内容 key（见「预置内容」一节）。与 lastView 同一手法：
+     views 是相机角度的单选记忆，lastPreset 是内容（局面/棋种/……）的单选记忆——
+     两者过去被 Task 6 误合并进同一份 views（onSelect 里塞内容加载），这里把它们
+     拆成两份独立状态，谁也不再替谁背锅。 */
+  const lastPreset = {};
+
+  /* SCENES / PARAMS / TOOL / 版本号：工具专属声明，由 init() 可选注入。
+     默认给空容器而不是假定同名全局已存在——这样 require() 或在没提供它们的
+     最小页面上调用 init() 都不会在访问处抛 ReferenceError，机制只是安静地不生效。 */
+  let SCENES = {};
+  let PARAMS = [];
+  let TOOL = { id: null, title: { zh: '', en: '' }, h1: { zh: '', en: '' } };
+  let VERSION = '0.0.0';
+
+  /* ================= 画布 ================= */
+  let canvas = null, ctx = null;
+  let W = 0, H = 0, DPR = 1, FOCAL = 900, CX = 0, CY = 0, bgGrad = null;
+
+  function resize() {
+    if (!canvas) return;
+    DPR = Math.min(2.5, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    CX = W / 2; CY = H / 2;
+    FOCAL = 1.2 * Math.min(H, W * 1.1);
+    bgGrad = ctx.createRadialGradient(W*0.5, H*0.3, 0, W*0.5, H*0.42, Math.max(W, H)*0.95);
+    bgGrad.addColorStop(0, '#0c1526');
+    bgGrad.addColorStop(1, '#05070d');
+  }
+
+  /* ================= 基础数学 ================= */
+  const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+  const wrapPI = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
+  const ease = k => k < 0.5 ? 4*k*k*k : 1 - Math.pow(-2*k + 2, 3) / 2;
+  const fmt = (x, d = 2) => x.toFixed(d);
+  const fmtS = (x, d = 2) => (x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
+
+  const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+  const dot3 = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+  const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+  const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+
+  /* ================= 轨道相机与投影 ================= */
+  // 仰角安全范围：world up 取的是 (0,1,0)，el 趋近 ±π/2 时 forward 与它共线，
+  // 下面 cross(f, [0,1,0]) 会退化成一个接近零的向量——右/上手基就此失定，
+  // 不会报错，是整块画面悄悄塌缩成屏幕正中的一个点（norm() 对零向量的
+  // 兜底是 0/1=0，不是抛异常）。bindOrbit() 里鼠标拖拽早就把 el 夹在这个
+  // 范围内（见下面 pointermove 的 clamp），但那只管交互拖拽——SCENES 里
+  // 声明的视角预设（tools/*.html 的 CAM_TOP 之类）是直接把 el 写进
+  // tween.to 再原样赋给 cam.el 的，不经过那处 clamp。这里把同一对边界
+  // 值搬到相机基本身的计算里，保证不管 cam.el 是被拖出来的还是被某个
+  // 视角预设直接赋值出来的，算出来的基永远不会撞上这个奇点——单一出口，
+  // 以后任何新工具写一个贴着 ±π/2 的 el 都不会把渲染悄悄弄坏。
+  const EL_MIN = -1.45, EL_MAX = 1.53;
+  function makeCam() {
+    const elC = clamp(cam.el, EL_MIN, EL_MAX);
+    const cp = Math.cos(elC), sp = Math.sin(elC);
+    const eye = [
+      cam.tx + cam.dist * cp * Math.sin(cam.az),
+      cam.ty + cam.dist * sp,
+      cam.tz + cam.dist * cp * Math.cos(cam.az)
+    ];
+    const f = norm(sub([cam.tx, cam.ty, cam.tz], eye));
+    const r = norm(cross(f, [0, 1, 0]));
+    const u = cross(r, f);
+    return { eye, f, r, u };
+  }
+  function camPt(C, p) {
+    const d = sub(p, C.eye);
+    return [dot3(d, C.r), dot3(d, C.u), dot3(d, C.f)];
+  }
+  function scr(c) { const s = FOCAL / c[2]; return [CX + c[0]*s, CY - c[1]*s]; }
+  function proj(C, p) { const c = camPt(C, p); return c[2] < NEAR ? null : scr(c); }
+  function clipNear(a, b) {
+    const tt = (NEAR - a[2]) / (b[2] - a[2]);
+    return [a[0] + (b[0]-a[0])*tt, a[1] + (b[1]-a[1])*tt, NEAR];
+  }
+
+  /* proj() 的反方向：给一个屏幕点，把「相机 eye 出发经过该像素的那条射线」
+     与世界平面 z = planeZ 求交，返回世界坐标 [x, y, planeZ]，射线与平面
+     平行（或恰好落在平面内，同样无唯一解）或交点落在相机之后都返回 null。
+     推导：scr() 是 cz=1 那层的仿射投影，把它反过来，屏幕点 (sx,sy) 对应
+     相机空间方向 (cx, cy, 1)（cx=(sx-CX)/FOCAL, cy=(CY-sy)/FOCAL），
+     camPt() 的基是正交的 {r,u,f}，所以世界方向就是 cx·r + cy·u + 1·f——
+     和 camPt() 互为逆变换，同一份 FOCAL/CX/CY 用两次，谁都不用再猜一遍。
+     这是 BoardRender.pickSquare（点击选子）能成立的唯一依据。 */
+  function unproject(C, screenXY, planeZ) {
+    if (planeZ == null) planeZ = 0;
+    const cx = (screenXY[0] - CX) / FOCAL;
+    const cy = (CY - screenXY[1]) / FOCAL;
+    const dir = [
+      cx * C.r[0] + cy * C.u[0] + C.f[0],
+      cx * C.r[1] + cy * C.u[1] + C.f[1],
+      cx * C.r[2] + cy * C.u[2] + C.f[2]
+    ];
+    if (Math.abs(dir[2]) < 1e-9) return null;             // 射线与平面平行（或共面），无唯一交点
+    const tt = (planeZ - C.eye[2]) / dir[2];
+    if (tt <= 0) return null;                              // 交点在相机之后（或恰在相机上）
+    return [C.eye[0] + dir[0]*tt, C.eye[1] + dir[1]*tt, planeZ];
+  }
+
+  /* 投影常量的只读访问器——FOCAL/CX/CY/W/H 是模块私有的，之前每个消费方
+     只能各自重新推一遍 FOCAL = 1.2·min(H, W·1.1) 的公式；棋子预览页就吃过
+     这个亏（算错一次，全部棋子跟着错位）。往后任何要自己做投影相关计算
+     的调用方，都从这里取权威值，不再重新推导。 */
+  function viewInfo() { return { FOCAL: FOCAL, CX: CX, CY: CY, W: W, H: H }; }
+
+  /* 让「ctx 参数」名副其实：drawBoard/drawPiece 这类跨模块的绘制函数把
+     ctx 当参数注入，是为了能在 node 下装载、能给第二块画布画图（如规则
+     工具要并排画伪合法/合法两块棋盘）。但 strokePoly/label3 等图元一直画
+     在本模块 init() 时钉死的模块私有 ctx 上，从不重新指向别的画布——于是
+     drawBoard(someOtherCanvas, …) 的输出会被悄悄劈成两半。withContext()
+     在 fn() 执行期间把私有 ctx 换成调用方给的目标画布，结束后原样复原；
+     选它而不是给每个图元加 ctx 形参，是因为改动只集中在一处，图元本身、
+     调用点都不用逐个改签名。 */
+  function withContext(targetCtx, fn) {
+    const prev = ctx;
+    ctx = targetCtx;
+    try { return fn(); }
+    finally { ctx = prev; }
+  }
+
+  /* 折线路径（支持 null 断点 + 近平面裁剪）；返回 [首点, 末点] 屏幕坐标 */
+  function polyPath(C, pts) {
+    if (pts.length < 2) return null;
+    let head = null, tail = null, contin = false, prev = null;
+    ctx.beginPath();
+    for (let i = 0; i < pts.length; i++) {
+      const P = pts[i];
+      if (P === null) { prev = null; contin = false; continue; }
+      const cur = camPt(C, P);
+      if (prev !== null) {
+        let a = prev, b = cur;
+        const av = a[2] >= NEAR, bv = b[2] >= NEAR;
+        if (av || bv) {
+          if (!av) a = clipNear(a, b);
+          if (!bv) b = clipNear(b, a);
+          const sA = scr(a), sB = scr(b);
+          if (!contin) ctx.moveTo(sA[0], sA[1]);
+          ctx.lineTo(sB[0], sB[1]);
+          if (!head) head = sA;
+          tail = sB;
+          contin = bv;
+        } else {
+          contin = false;
+        }
+      }
+      prev = cur;
+    }
+    return head ? [head, tail] : null;
+  }
+
+  function strokePoly(C, pts, o) {
+    const ht = polyPath(C, pts);
+    if (!ht) return;
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = o.width || 2;
+    if (o.alpha != null) ctx.globalAlpha = o.alpha;
+    if (o.dash) ctx.setLineDash(o.dash);
+    if (o.fade) {
+      const h = ht[0], tt = ht[1];
+      if (Math.hypot(tt[0]-h[0], tt[1]-h[1]) < 2) {
+        ctx.strokeStyle = o.fade[0];
+      } else {
+        const g = ctx.createLinearGradient(h[0], h[1], tt[0], tt[1]);
+        g.addColorStop(0, o.fade[0]);
+        g.addColorStop(1, o.fade[1]);
+        ctx.strokeStyle = g;
+      }
+    } else {
+      ctx.strokeStyle = o.color;
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+  const line3 = (C, a, b, o) => strokePoly(C, [a, b], o);
+
+  function glowDot(s, r, core, mid) {
+    const g = ctx.createRadialGradient(s[0], s[1], 0, s[0], s[1], r);
+    g.addColorStop(0, core);
+    g.addColorStop(0.35, mid);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(s[0], s[1], r, 0, TAU);
+    ctx.fill();
+  }
+  function solidDot(C, p, r, color) {
+    const s = proj(C, p);
+    if (!s) return;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(s[0], s[1], r, 0, TAU);
+    ctx.fill();
+  }
+
+  function label3(C, p, text, o) {
+    const s = proj(C, p);
+    if (!s) return;
+    ctx.save();
+    ctx.font = o.font || ((o.size || 12) + 'px ' + FONT_CN);
+    ctx.fillStyle = o.color || '#c4d2e6';
+    ctx.textAlign = o.align || 'left';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(3,6,12,.85)';
+    ctx.shadowBlur = 4;
+    ctx.fillText(text, s[0] + (o.dx || 0), s[1] + (o.dy || 0));
+    ctx.restore();
+  }
+
+  function arrowAt(C, tip3, before3, color) {
+    const tp = proj(C, tip3), b = proj(C, before3);
+    if (!tp || !b) return;
+    const a = Math.atan2(tp[1]-b[1], tp[0]-b[0]);
+    const L = 9;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(tp[0], tp[1]); ctx.lineTo(tp[0]-L*Math.cos(a-0.42), tp[1]-L*Math.sin(a-0.42));
+    ctx.moveTo(tp[0], tp[1]); ctx.lineTo(tp[0]-L*Math.cos(a+0.42), tp[1]-L*Math.sin(a+0.42));
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* ================= 常用场景部件 ================= */
+  const AXIS = 'rgba(159,176,200,0.9)';
+  const AXIS_DIM = 'rgba(159,176,200,0.5)';
+
+  /* 坐标轴：o = { ex, ey, yTicks:[], xTicks:[] }。
+     starter 版本还有个 tAxis（z 轴当连续时间轴用，靠一个「波形可视长度」常量定长、
+     按秒打刻度）——棋没有连续时间驱动，这条分支随那个时间长度常量一起删掉了，
+     只留平面上的 x/y 两轴。 */
+  function drawAxes(C, o) {
+    const ex = o.ex, ey = o.ey;
+    line3(C, [-ex, 0, 0], [ex, 0, 0], { width: 1.4, color: AXIS });
+    arrowAt(C, [ex, 0, 0], [ex - 0.2, 0, 0], AXIS);
+    label3(C, [ex + 0.22, 0, 0], 'x', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+    line3(C, [0, -ey, 0], [0, ey, 0], { width: 1.4, color: AXIS });
+    arrowAt(C, [0, ey, 0], [0, ey - 0.2, 0], AXIS);
+    label3(C, [0, ey + 0.18, 0], 'y', { font: 'italic 15px ' + FONT_MATH, color: '#c4d2e6', align: 'center' });
+    for (const k of (o.yTicks || [])) {
+      for (const yv of [k, -k]) {
+        line3(C, [-0.05, yv, 0], [0.05, yv, 0], { width: 1.2, color: AXIS_DIM });
+        label3(C, [-0.13, yv, 0], (yv < 0 ? '−' : '') + Math.abs(yv), { size: 10, color: 'rgba(159,176,200,.7)', align: 'right' });
+      }
+    }
+    for (const k of (o.xTicks || [])) {
+      for (const xv of [k, -k]) {
+        line3(C, [xv, -0.05, 0], [xv, 0.05, 0], { width: 1.2, color: AXIS_DIM });
+        label3(C, [xv, -0.24, 0], (xv < 0 ? '−' : '') + Math.abs(xv), { size: 10, color: 'rgba(159,176,200,.55)', align: 'center' });
+      }
+    }
+  }
+
+  /* z=0 平面方格网格（几何类场景） */
+  function drawGridXY(C, g, step) {
+    const n = Math.round(g / step);
+    for (let i = -n; i <= n; i++) {
+      if (i === 0) continue;
+      const u = i * step;
+      line3(C, [u, -g, 0], [u, g, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+      line3(C, [-g, u, 0], [g, u, 0], { width: 1, color: 'rgba(148,163,184,0.08)' });
+    }
+  }
+
+  /* ================= 主绘制与主循环 ================= */
+  function draw() {
+    if (!ctx) return;
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+    const C = makeCam();
+    if (curTab != null && SCENES[curTab] && typeof SCENES[curTab].draw === 'function') {
+      SCENES[curTab].draw(C);
+    }
+  }
+
+  function updateReadout() {
+    if (!roEl || curTab == null || !SCENES[curTab] || typeof SCENES[curTab].readout !== 'function') return;
+    roEl.innerHTML = SCENES[curTab].readout();
+  }
+
+  /* 帧级异常兜底：同一页签的同一条错误只报一次，否则 60 fps 会把控制台刷爆。
+     resetSim() 会清空它——用户主动重置后应当允许重新报。 */
+  const frameErrSeen = Object.create(null);
+  function frameError(err) {
+    const k = curTab + '|' + ((err && err.message) || err);
+    if (frameErrSeen[k]) return;
+    frameErrSeen[k] = 1;
+    console.warn('[frame] 场景「' + curTab + '」抛出异常，已跳过该帧并继续渲染循环：', err);
+  }
+
+  function resetSim() {
+    Object.keys(frameErrSeen).forEach(k => delete frameErrSeen[k]);
+  }
+
+  let lastTs = 0, lastRO = 0;
+  function frame(ts) {
+    try {
+      if (!lastTs) lastTs = ts;
+      const dt = clamp((ts - lastTs) / 1000, 0, 0.05);
+      lastTs = ts;
+
+      if (tween) {
+        const k = Math.min(1, (ts - tween.t0) / tween.dur);
+        const e = ease(k);
+        const f = tween.from, o = tween.to;
+        cam.az = f.az + wrapPI(o.az - f.az) * e;
+        cam.el = f.el + (o.el - f.el) * e;
+        cam.dist = f.dist + (o.dist - f.dist) * e;
+        cam.tx = f.tx + (o.tx - f.tx) * e;
+        cam.ty = f.ty + (o.ty - f.ty) * e;
+        cam.tz = f.tz + (o.tz - f.tz) * e;
+        if (k >= 1) tween = null;
+      }
+
+      state.dt = dt;
+
+      draw();
+      if (ts - lastRO > 120) { lastRO = ts; updateReadout(); }
+    } catch (err) {
+      frameError(err);
+    } finally {
+      requestAnimationFrame(frame);
+    }
+  }
+
+  /* ================= UI 生成（由消费方通过 init() 提供的 PARAMS / SCENES 声明驱动） ================= */
+  const paramWraps = {};   // key -> { wrap, input, val, p }
+
+  function buildParams() {
+    const host = document.getElementById('paramsHost');
+    if (!host || !PARAMS) return;
+    PARAMS.forEach(p => {
+      const wrap = document.createElement('div');
+      wrap.className = 'ctl';
+      wrap.innerHTML = '<div class="top"><label></label><span class="val"></span></div>';
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = p.min; input.max = p.max; input.step = p.step; input.value = p.value;
+      const val = wrap.querySelector('.val');
+      const render = () => { val.textContent = p.fmt(parseFloat(input.value)); };
+      const upd = () => {
+        const raw = parseFloat(input.value);
+        state[p.key] = p.map ? p.map(raw) : raw;
+        render();
+      };
+      input.addEventListener('input', upd);
+      wrap.appendChild(input);
+      host.appendChild(wrap);
+      paramWraps[p.key] = { wrap, input, val, p };
+      upd();                       // 建面板时用默认刻度初始化 state
+      const relabel = () => { wrap.querySelector('label').innerHTML = t(p.label); render(); };
+      RELABEL.push(relabel);
+      relabel();
+    });
+  }
+
+  /* 按当前页签的 params 显隐滑块。省略 params = 全部显示（向后兼容）。 */
+  function syncParamVisibility() {
+    const list = SCENES[curTab] && SCENES[curTab].params;
+    Object.keys(paramWraps).forEach(k => {
+      paramWraps[k].wrap.style.display = (!list || list.indexOf(k) >= 0) ? '' : 'none';
+    });
+  }
+
+  function buildToggles() {
+    const host = document.getElementById('togglesHost');
+    if (!host) return;
+    Object.keys(SCENES).forEach(id => {
+      const grp = document.createElement('div');
+      grp.className = 'toggles';
+      grp.dataset.tab = id;
+      (SCENES[id].toggles || []).forEach(tg => {
+        if (!(tg.key in state)) state[tg.key] = tg.checked;
+        const lab = document.createElement('label');
+        lab.className = 'tg';
+        lab.innerHTML = '<input type="checkbox" data-key="' + tg.key + '"' + (state[tg.key] ? ' checked' : '') + '>' +
+          '<i class="dot" style="--c:' + tg.color + '"></i><span class="tgl"></span>';
+        const cb = lab.querySelector('input');
+        cb.addEventListener('change', () => {
+          state[tg.key] = cb.checked;
+          document.querySelectorAll('input[data-key="' + tg.key + '"]').forEach(o => { o.checked = cb.checked; });
+        });
+        const relabel = () => { lab.querySelector('.tgl').innerHTML = t(tg.label); };
+        RELABEL.push(relabel);
+        relabel();
+        grp.appendChild(lab);
+      });
+      host.appendChild(grp);
+    });
+  }
+
+  function buildViews() {
+    const host = document.getElementById('viewsHost');
+    if (!host) return;
+    Object.keys(SCENES).forEach(id => {
+      const row = document.createElement('div');
+      row.className = 'views';
+      row.dataset.tab = id;
+      const lab = document.createElement('span');
+      lab.className = 'vlabel';
+      row.appendChild(lab);
+      const labRelabel = () => { lab.textContent = t(UI.views); };
+      RELABEL.push(labRelabel);
+      labRelabel();
+      Object.keys(SCENES[id].views || {}).forEach(name => {
+        const b = document.createElement('button');
+        b.className = 'btn vbtn';
+        b.dataset.view = name;
+        b.addEventListener('click', () => applyView(name));
+        row.appendChild(b);
+        const relabel = () => { b.textContent = t(SCENES[id].views[name].label); };
+        RELABEL.push(relabel);
+        relabel();
+      });
+      host.appendChild(row);
+    });
+  }
+
+  /* ================= 预置内容（局面 / 棋种……）================= */
+  /* Task 6 的原话是「预置局面（views 的 onSelect 里加载）」——把内容选择塞进
+     相机角度控件里。这两件事其实互不相干：相机角度回答「从哪儿看」，预置
+     内容回答「看什么」。合并的后果是两头都坏：选了某个局面，相机会跟着
+     跳；想从顶视角看某个局面，view 一栏根本没有这个组合按钮。这里补一个
+     独立控件——buildParams / buildToggles / buildViews 之外的第四种——
+     专门表示「离散的、有名字的内容」：一组按钮，互斥选中，选中的 key 写进
+     导出的 state，并调用调用方给的 onSelect（真正去加载那份内容，如
+     Interact.create(FEN) 或切换 E.state 里的棋种索引）。
+
+     声明形状：SCENES[id].presets = [{ key, label, onSelect }, ...]，
+     可选 SCENES[id].presetsLabel 覆盖分组标签（省略时用通用的 UI.presets——
+     「预置/Preset」——见上面的声明）。没有声明 presets 的场景，#presetsHost
+     里对应那一行不会出现，与 toggles/views 的既有习惯一致。 */
+  function buildPresets() {
+    const host = document.getElementById('presetsHost');
+    if (!host) return;
+    Object.keys(SCENES).forEach(id => {
+      const list = SCENES[id].presets;
+      if (!list || !list.length) return;
+      const row = document.createElement('div');
+      row.className = 'presets';
+      row.dataset.tab = id;
+      const lab = document.createElement('span');
+      lab.className = 'plabel';
+      row.appendChild(lab);
+      const labRelabel = () => { lab.textContent = t(SCENES[id].presetsLabel || UI.presets); };
+      RELABEL.push(labRelabel);
+      labRelabel();
+      list.forEach(pr => {
+        const b = document.createElement('button');
+        b.className = 'btn pbtn';
+        b.dataset.preset = pr.key;
+        b.addEventListener('click', () => applyPreset(id, pr.key));
+        row.appendChild(b);
+        const relabel = () => { b.textContent = t(pr.label); };
+        RELABEL.push(relabel);
+        relabel();
+      });
+      host.appendChild(row);
+      /* 建面板时就选中第一项——与 buildParams() 对滑杆默认值的处理同一条
+         精神：面板刚搭好、用户还没机会点任何按钮之前，就该有一份确定的
+         初始内容，而不是留白等第一次点击。传显式 id，不依赖 curTab——
+         这时候 switchTab() 还没跑过，curTab 仍是 null，且这里本就是在给
+         *每一个* tab（不只是即将成为首个可见 tab 的那个）建立初始状态。 */
+      applyPreset(id, list[0].key);
+    });
+  }
+
+  function buildTabs() {
+    const nav = document.getElementById('tabsNav');
+    if (!nav) return;
+    Object.keys(SCENES).forEach(id => {
+      const b = document.createElement('button');
+      b.className = 'tab';
+      b.dataset.tab = id;
+      b.addEventListener('click', () => switchTab(id));
+      nav.appendChild(b);
+      const relabel = () => { b.textContent = t(SCENES[id].label); };
+      RELABEL.push(relabel);
+      relabel();
+    });
+  }
+
+  /* ================= 视角与页签 ================= */
+  /* 选择器必须限定在 .views 之内：.vbtn 只是个样式类，工具可能为了复用外观
+     把它挂到别处的按钮上。不限定的话 closest('.views') 会返回 null，这里
+     当场抛错，视角高亮从此再不更新。 */
+  function refreshViewButtons() {
+    document.querySelectorAll('.views .vbtn').forEach(b => {
+      const row = b.closest('.views');
+      b.classList.toggle('active', row.dataset.tab === curTab && b.dataset.view === lastView[curTab]);
+    });
+  }
+  function viewDist(d) { return (W < 820 || W < H) ? d * 1.4 : d; }
+  function applyView(name) {
+    const sc = SCENES[curTab];
+    const vw = sc && sc.views && sc.views[name];
+    if (!vw) return;
+    if (vw.onSelect) vw.onSelect();   /* 可选联动：如自动开启该视角对应的曲线开关 */
+    tween = {
+      from: { az: cam.az, el: cam.el, dist: cam.dist, tx: cam.tx, ty: cam.ty, tz: cam.tz },
+      to:   { az: vw.az, el: vw.el, dist: viewDist(vw.dist), tx: vw.tx || 0, ty: vw.ty || 0, tz: vw.tz || 0 },
+      t0: performance.now(),
+      dur: REDUCED ? 1 : 750
+    };
+    lastView[curTab] = name;
+    refreshViewButtons();
+  }
+
+  /* 选择器同样必须限定在 .presets 之内，理由与 refreshViewButtons() 一致。 */
+  function refreshPresetButtons() {
+    document.querySelectorAll('.presets .pbtn').forEach(b => {
+      const row = b.closest('.presets');
+      b.classList.toggle('active', b.dataset.preset === lastPreset[row.dataset.tab]);
+    });
+  }
+  /* 显式接受 tabId，不像 applyView() 那样隐式用 curTab——预置内容的
+     初始化（buildPresets() 建面板时、以及工具可能想在页面加载时就把
+     几个不可见 tab 都摆到各自的默认局面）必须能在切到那个 tab 之前
+     就把它的内容选好，等真正切过去时画面已经是对的，不需要「先切 tab
+     再选内容」这道额外的手续。 */
+  function applyPreset(tabId, key) {
+    const sc = SCENES[tabId];
+    const list = sc && sc.presets;
+    const pr = list && list.find(p => p.key === key);
+    if (!pr) return;
+    if (pr.onSelect) pr.onSelect();
+    lastPreset[tabId] = key;
+    /* 若还有别的 tab 声明的 presets 是同一个数组引用（同一个对象，不是内容碰巧
+       相等）——这就是「跨 tab 共享的同一份选择」（例如 chess-moves-geometry.html
+       的六种棋子：piece/field/mobility 三个 tab 都读写同一份 E.state.pieceIdx，
+       presets 声明也故意用的是同一个数组常量）。这些 tab 的按钮高亮要跟着同步，
+       否则切到另一个 tab 会看见按钮组还停在初始项，尽管实际选择早已跟着共享
+       状态变了。onSelect 不重复调用——它已经在上面跑过一次，副作用只与
+       「选了哪个 key」有关，与是哪个 tab 触发的无关，重复调用不会更对，
+       只会更容易踩到调用方自己没预料到的重入。 */
+    Object.keys(SCENES).forEach(otherId => {
+      if (otherId !== tabId && SCENES[otherId].presets === list) lastPreset[otherId] = key;
+    });
+    if (tabId === curTab) state.preset = key;
+    refreshPresetButtons();
+  }
+
+  /* 只同步高亮，不调用 onSelect：给调用方已经自己完成了加载（例如工具③
+     的 PGN 拖入 / FEN 粘贴 / 棋局浏览器直接选中某个 id）、只需要让预置
+     按钮组的选中态跟上真实状态的场景。key 传 null/undefined 表示「清空
+     高亮」——没有哪个按钮的 dataset.preset 会等于 undefined，所以这就是
+     『不让按钮组停在一个已经不成立的选中态』的实现方式。跨 tab 共享同一份
+     presets 数组引用时的同步逻辑与 applyPreset() 保持一致（否则切换 tab
+     会看见按钮组用另一条路径的陈旧值重新亮起）。 */
+  function syncPresetHighlight(tabId, key) {
+    const sc = SCENES[tabId];
+    const list = sc && sc.presets;
+    lastPreset[tabId] = key || undefined;
+    if (list) Object.keys(SCENES).forEach(otherId => {
+      if (otherId !== tabId && SCENES[otherId].presets === list) lastPreset[otherId] = key || undefined;
+    });
+    if (tabId === curTab) state.preset = key || undefined;
+    refreshPresetButtons();
+  }
+
+  let brandDescEl = null, tipsEl = null, roEl = null;
+
+  function switchTab(id) {
+    if (id === curTab) return;
+    curTab = id;
+    tween = null;
+    document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+    document.querySelectorAll('.toggles[data-tab], .views[data-tab], .presets[data-tab]').forEach(el => {
+      el.style.display = el.dataset.tab === id ? '' : 'none';
+    });
+    if (cams[id]) Object.assign(cam, cams[id]);   // 原地改写，VizEngine.cam 引用不变
+    const sc = SCENES[id];
+    if (brandDescEl && sc) brandDescEl.textContent = t(sc.brand);
+    if (tipsEl && sc) tipsEl.textContent = t(sc.tips);
+    syncParamVisibility();
+    refreshViewButtons();
+    /* 换 tab 时把导出的 state.preset 同步成这个 tab 自己记住的那一个——
+       lastPreset[id] 在 buildPresets() 建面板时已经对每个声明了 presets
+       的 tab 都填过一次（选中第一项），没声明 presets 的 tab 这里是
+       undefined，state.preset 也就诚实地变成 undefined，不留一份别的
+       tab 的陈旧数据。 */
+    state.preset = lastPreset[id];
+    refreshPresetButtons();
+    updateReadout();
+  }
+
+  /* ================= 播放 / 重置 / 折叠 ================= */
+  let btnPlay = null, btnFold = null, panelEl = null;
+  function togglePlay() {
+    state.running = !state.running;
+    if (btnPlay) btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+  }
+
+  /* ================= 语言切换 ================= */
+  function applyLang() {
+    if (typeof document === 'undefined') return;
+    document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+    document.title = t(TOOL.title);
+    const h1 = document.querySelector('.brand h1');
+    if (h1) h1.textContent = t(TOOL.h1);
+    const panelTitleEl = document.getElementById('panelTitle');
+    if (panelTitleEl) panelTitleEl.textContent = t(UI.panelTitle);
+    const hintEl = document.querySelector('.hint');
+    if (hintEl) hintEl.textContent = t(UI.hint);
+    const btnLangEl = document.getElementById('btnLang');
+    if (btnLangEl) btnLangEl.textContent = LANG === 'zh' ? 'EN' : '中';
+    if (btnPlay) btnPlay.textContent = state.running ? t(UI.pause) : t(UI.resume);
+    const btnResetEl = document.getElementById('btnReset');
+    if (btnResetEl) btnResetEl.textContent = t(UI.reset);
+    RELABEL.forEach(f => f());
+    const sc = SCENES[curTab];
+    if (brandDescEl && sc) brandDescEl.textContent = t(sc.brand);
+    if (tipsEl && sc) tipsEl.textContent = t(sc.tips);
+    updateReadout();
+  }
+  function setLang(l) {
+    LANG = l;
+    try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+    try {
+      const u = new URL(location.href);
+      u.searchParams.set('lang', l);
+      history.replaceState(null, '', u);
+    } catch (e) {}
+    applyLang();
+  }
+
+  /* ================= 交互：旋转 / 平移 / 缩放 ================= */
+  function pan(dx, dy) {
+    const C = makeCam();
+    const s = cam.dist / FOCAL;
+    cam.tx = clamp(cam.tx - C.r[0]*dx*s + C.u[0]*dy*s, -6, 6);
+    cam.ty = clamp(cam.ty - C.r[1]*dx*s + C.u[1]*dy*s, -5, 5);
+    cam.tz = clamp(cam.tz - C.r[2]*dx*s + C.u[2]*dy*s, -3, 11);
+  }
+
+  /* 绑定拖拽旋转 / 右键或 Shift 拖拽平移 / 滚轮或双指缩放 / 双击回正到给定 canvas。
+     只在浏览器里调用才会碰 DOM 事件，模块顶层不会自动执行这段。
+     双击回正：若当前页签在 SCENES 里声明了 views，就补间回它的第一个视角
+     （规范里「首视角即双击回正的家」）；没有 SCENES 的最小用法里则安静地不做事。 */
+  function bindOrbit(canvasEl) {
+    const pointers = new Map();
+    let pinch = null;
+
+    canvasEl.addEventListener('pointerdown', e => {
+      canvasEl.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, btn: e.button });
+      tween = null;
+      lastView[curTab] = null;
+      refreshViewButtons();
+      if (pointers.size === 2) {
+        const vs = Array.from(pointers.values());
+        pinch = {
+          gap: Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y),
+          cx: (vs[0].x + vs[1].x) / 2,
+          cy: (vs[0].y + vs[1].y) / 2
+        };
+      }
+      canvasEl.classList.add('dragging');
+    });
+
+    canvasEl.addEventListener('pointermove', e => {
+      const p = pointers.get(e.pointerId);
+      if (!p) return;
+      const dx = e.clientX - p.x, dy = e.clientY - p.y;
+      p.x = e.clientX;
+      p.y = e.clientY;
+      if (pointers.size === 1) {
+        const panMode = e.shiftKey || (e.buttons & 2) || p.btn === 2 || p.btn === 1;
+        if (panMode) {
+          pan(dx, dy);
+        } else {
+          cam.az -= dx * 0.0055;
+          cam.el = clamp(cam.el + dy * 0.0055, EL_MIN, EL_MAX);   // 与 makeCam() 共用同一对边界，见那里的注释
+        }
+      } else if (pointers.size === 2 && pinch) {
+        const vs = Array.from(pointers.values());
+        const gap = Math.hypot(vs[0].x - vs[1].x, vs[0].y - vs[1].y);
+        const cx = (vs[0].x + vs[1].x) / 2, cy = (vs[0].y + vs[1].y) / 2;
+        if (gap > 1) cam.dist = clamp(cam.dist * pinch.gap / gap, 4.5, 60);
+        pan(cx - pinch.cx, cy - pinch.cy);
+        pinch = { gap: gap, cx: cx, cy: cy };
+      }
+    });
+
+    function endPointer(e) {
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinch = null;
+      if (!pointers.size) canvasEl.classList.remove('dragging');
+    }
+    canvasEl.addEventListener('pointerup', endPointer);
+    canvasEl.addEventListener('pointercancel', endPointer);
+    canvasEl.addEventListener('contextmenu', e => e.preventDefault());
+
+    canvasEl.addEventListener('wheel', e => {
+      e.preventDefault();
+      tween = null;
+      cam.dist = clamp(cam.dist * Math.exp(e.deltaY * 0.0012), 4.5, 60);
+    }, { passive: false });
+
+    canvasEl.addEventListener('dblclick', () => {
+      const sc = SCENES[curTab];
+      const names = sc && sc.views && Object.keys(sc.views);
+      if (names && names.length) applyView(names[0]);
+    });
+  }
+
+  /* 全局键盘快捷键：T 切换页签、1–9 选视角。这两组快捷键都只驱动引擎本体
+     已经实现、且已经接在按钮上的函数（switchTab / applyView），不需要
+     消费方提供任何东西，所以放在这里而不是要求每个工具各自重新接一遍。
+     绑在 window 上，不是 canvas 上——这是键盘事件，和 bindOrbit() 的
+     canvas 指针事件是两回事，混在一起会把两者都说不清楚。
+
+     Space 与 r 不在这里绑定——它们属于工具，不属于引擎。math-viz 的设计
+     规格把 Space 定为所有五个棋类工具的播放/暂停/单步这枚统一的传输键
+     （阶段 3 的复盘工具还要用它当「下一步」），r 同理是工具自己的重置键；
+     若引擎在这里先用 preventDefault() 抢注，工具将来接自己的处理器时
+     只会和引擎打架，而不是真正拿到这个键。resetSim()/togglePlay() 本身
+     没有删——它们仍然接在面板的按钮上，只是不再从键盘直接触发。 */
+  function bindKeyboard() {
+    window.addEventListener('keydown', e => {
+      const el = document.activeElement;
+      const tag = el && el.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el && el.isContentEditable)) return;
+
+      if (e.key === 't' || e.key === 'T') {
+        const keys = Object.keys(SCENES);
+        if (keys.length) switchTab(keys[(keys.indexOf(curTab) + 1) % keys.length]);
+      } else if (e.key >= '1' && e.key <= '9') {
+        const sc = SCENES[curTab];
+        const names = sc && sc.views && Object.keys(sc.views);
+        if (!names) return;
+        const i = +e.key - 1;
+        if (i < names.length) applyView(names[i]);   // 越界就什么也不做，不抛也不落到 undefined
+      }
+    });
+  }
+
+  /* ================= 启动 ================= */
+  /* VizEngine.init({ canvas, SCENES, PARAMS, TOOL, VERSION }) ——
+     只有 canvas 是必需的。其余都是「工具专属声明」，省略时对应机制安静地不生效，
+     这样本模块既可以被最小页面（如棋子预览页）直接用来拿相机与绘图原语，
+     也能在将来的算法工具里接上完整的滑杆 / 页签机制。
+     没有 ENGINE_VERSION 参数——它唯一的读者是阶段 2 Task 1 删掉的那份录制
+     存档函数（下载 JSON 存档时把引擎版本写进文档头），删掉那份骨架后引擎
+     自己不再需要这个值。工具仍然在 <meta name="engine-version"> 里声明它、
+     给人读（§10 版本规范），只是不用再传进 init()。 */
+  function init(opts) {
+    opts = opts || {};
+    canvas = opts.canvas;
+    if (!canvas) throw new Error('VizEngine.init({ canvas }) 需要一个 canvas 元素');
+    ctx = canvas.getContext('2d');
+
+    if (opts.SCENES) SCENES = opts.SCENES;
+    if (opts.PARAMS) PARAMS = opts.PARAMS;
+    if (opts.TOOL) TOOL = opts.TOOL;
+    if (opts.VERSION) VERSION = opts.VERSION;
+
+    try {
+      REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch (e) { REDUCED = false; }
+    LANG = resolveLang();   // 惰性求值：只在这里才碰 location / localStorage
+
+    resize();
+    window.addEventListener('resize', resize);
+
+    brandDescEl = document.getElementById('brandDesc');
+    tipsEl = document.getElementById('tips');
+    roEl = document.getElementById('readout');
+    btnPlay = document.getElementById('btnPlay');
+    panelEl = document.getElementById('panel');
+    btnFold = document.getElementById('btnFold');
+
+    if (btnPlay) btnPlay.addEventListener('click', togglePlay);
+    const btnResetEl = document.getElementById('btnReset');
+    if (btnResetEl) btnResetEl.addEventListener('click', resetSim);
+    if (btnFold && panelEl) {
+      btnFold.addEventListener('click', () => {
+        const c = panelEl.classList.toggle('collapsed');
+        btnFold.textContent = c ? '+' : '−';
+      });
+      if (window.innerWidth < 760) {
+        panelEl.classList.add('collapsed');
+        btnFold.textContent = '+';
+      }
+    }
+    const btnLangEl = document.getElementById('btnLang');
+    if (btnLangEl) btnLangEl.addEventListener('click', () => setLang(LANG === 'zh' ? 'en' : 'zh'));
+    const verBadge = document.getElementById('verBadge');
+    if (verBadge) verBadge.textContent = 'v' + VERSION;
+
+    buildTabs();
+    buildParams();
+    buildToggles();
+    buildViews();
+    buildPresets();   // 在 switchTab(firstTab) 之前——它要读 lastPreset[id] 同步 state.preset
+
+    Object.keys(SCENES).forEach(id => {
+      const views = SCENES[id].views || {};
+      const first = Object.keys(views)[0];
+      if (!first) return;
+      const v = views[first];
+      cams[id] = { az: v.az, el: v.el, dist: viewDist(v.dist), tx: v.tx || 0, ty: v.ty || 0, tz: v.tz || 0 };
+      lastView[id] = first;
+    });
+    const firstTab = Object.keys(SCENES)[0];
+    if (firstTab) {
+      curTab = null;           // 让 switchTab 的 `id === curTab` 短路检查失效，确保首次真正执行
+      switchTab(firstTab);
+    }
+
+    bindOrbit(canvas);
+    bindKeyboard();
+    applyLang();
+    resetSim();
+    /* autoLoop 默认 true——数学可视化工具的动画从一个持续运行的时钟驱动，
+       "每个 vsync 都重画" 是它们的常态，引擎自带循环因此默认开启。
+       棋类不是这个模型：棋是离散的——重画只该发生在一步棋、一次相机拖拽、
+       或一次显式动画之后，从不该有一个"正在跑的时钟"替它决定何时重画。
+       task-14 的 32 子帧率探针踩过这个坑：_piece-preview.html 自己起了
+       第二条 rAF 循环（drawHarness），engine 的 frame() 同时也在跑——
+       两条循环每个 vsync 都各画一次同一块 canvas：engine 先铺一层昂贵的
+       径向渐变背景（SCENES 为空，铺完就没别的可画），harness 紧接着用
+       一次纯色 fill 把它整个盖掉再画棋盘和棋子。径向渐变因此是纯浪费
+       （量过：1.03ms vs 纯色 fill 的 0.07ms，15 倍开销，且立刻被覆盖）。
+       给 init() 加这个开关，让像 _piece-preview.html 这样自己驱动循环的
+       调用方能关掉引擎自己的循环——以后棋类工具大概率都要这个开关，
+       所以放在引擎里而不是让每个工具各自想办法绕开它。 */
+    if (opts.autoLoop !== false) requestAnimationFrame(frame);
+  }
+
+  /* ================= screen-space 2D 图元层 =================
+     密码学工具的大多数画面是 2D：字母轮、字母网格、矩阵、比特块、频率柱。
+     它们与上面那套相机/投影无关——直接在屏幕坐标里画。3D 那半边留着不是
+     摆设：Bloch 球、Hill 矩阵变换、以及 Caesar 自己把模 26 抬成螺旋的顿悟
+     视角都要用它。两套并存，各画各的。
+
+     颜色一律由调用方显式传入，这一层不内嵌调色板——"一条曲线一种颜色、
+     在六处复用"那条原则要求颜色的唯一真相在工具页的 SCENES 里。
+
+     这些图元画在模块私有的 ctx 上，与 strokePoly/label3 等 3D 图元同一个出口，
+     因此 withContext(targetCtx, fn) 对它们同样有效。 */
+
+  /* 数学符号一律 serif italic（五条原则第 4 条），Canvas 与 HTML 两侧同款。
+     给它一个函数而不是让每处自己拼字符串：拼错一次就会有一个字母突然变
+     无衬线，而那种差异在截图里几乎看不出来、在页面上却很刺眼。
+     字体栈直接复用上面已有的 FONT_MATH / FONT_CN 常量——同一份字符串在同一个
+     闭包里存两遍，早晚会有人只改其中一遍。 */
+  /* 顺序是 `italic <weight> <size>px <stack>`，即 CSS font 简写的规范顺序
+     （font-style → font-variant → font-weight → font-size → font-family）。
+     规范其实允许前三者任意排列，把 weight 写在 italic 之前浏览器多半也认；
+     这里不赌那件事，因为**赌输了没有任何信号**：ctx.font 拿到不能解析的值时
+     既不抛错也不警告，只是静默保留旧值——页面上的表现是某几个字母莫名其妙
+     不是斜体，而这在截图里几乎看不出来。这个函数存在的全部意义就是消灭那类
+     静默偏差，它自己更不该建立在一个需要实测才敢确认的写法上。 */
+  function mathFont(px, weight) { return 'italic ' + (weight ? weight + ' ' : '') + px + 'px ' + FONT_MATH; }
+  function uiFont(px, weight) { return (weight ? weight + ' ' : '') + px + 'px ' + FONT_CN; }
+
+  /* 字母环。letters 默认 A–Z；rotation 是整环旋转的弧度（Caesar 的 k 就是
+     k/26 * 2π）；highlight 传下标时那一个字母用 hiColor 并加一圈辉光。 */
+  function alphabetWheel(cx, cy, r, o) {
+    o = o || {};
+    const letters = o.letters || 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const n = letters.length;
+    const rot = o.rotation || 0;
+    const color = o.color || '#9fb0c8';
+    const size = o.fontSize || 13;
+
+    if (o.ring !== false) {
+      ctx.save();
+      ctx.strokeStyle = o.ringColor || 'rgba(148,163,184,.22)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = mathFont(size, o.weight);
+    for (let i = 0; i < n; i++) {
+      /* -π/2 让下标 0 落在正上方（12 点钟），这样 k 的旋转在视觉上
+         就是钟面的旋转，跟使用者转滑杆的方向一致。 */
+      const a = -Math.PI / 2 + rot + i * TAU / n;
+      const px = cx + Math.cos(a) * r;
+      const py = cy + Math.sin(a) * r;
+      const on = (o.highlight === i);
+      if (on && o.hiGlow !== false) {
+        const g = ctx.createRadialGradient(px, py, 0, px, py, size * 1.6);
+        g.addColorStop(0, (o.hiColor || color) + 'aa');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(px, py, size * 1.6, 0, TAU); ctx.fill();
+      }
+      ctx.fillStyle = on ? (o.hiColor || color) : color;
+      ctx.fillText(letters.charAt(i), px, py);
+      if (o.ticks) {
+        ctx.save();
+        ctx.strokeStyle = o.ringColor || 'rgba(148,163,184,.22)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a) * (r - size * 0.75), cy + Math.sin(a) * (r - size * 0.75));
+        ctx.lineTo(cx + Math.cos(a) * (r - size * 1.25), cy + Math.sin(a) * (r - size * 1.25));
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+    ctx.restore();
+  }
+
+  /* 网格。text(col,row) 与 fill(col,row) 都是回调，返回 null / '' 表示这一格
+     不画内容 / 不填色。x,y 是左上角，cell 是每格边长（px）。 */
+  function cellGrid(x, y, cols, rows, cell, o) {
+    o = o || {};
+    const color = o.color || '#e2e8f0';
+    const stroke = o.stroke || 'rgba(148,163,184,.20)';
+    const size = o.fontSize || Math.round(cell * 0.5);
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = o.mono ? uiFont(size) : mathFont(size, o.weight);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const px = x + c * cell, py = y + r * cell;
+        const f = o.fill ? o.fill(c, r) : null;
+        if (f) { ctx.fillStyle = f; ctx.fillRect(px, py, cell, cell); }
+        if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.strokeRect(px + .5, py + .5, cell - 1, cell - 1); }
+        const s = o.text ? o.text(c, r) : null;
+        if (s != null && s !== '') {
+          ctx.fillStyle = (o.textColor && o.textColor(c, r)) || color;
+          ctx.fillText(String(s), px + cell / 2, py + cell / 2);
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  /* 比特块：bits 是 0/1 数组，1 用 on 色实心、0 用 off 色描边。 */
+  function bitBlock(x, y, bits, o) {
+    o = o || {};
+    const cell = o.cell || 14, gap = o.gap == null ? 2 : o.gap;
+    const on = o.on || '#2dd4ea', off = o.off || 'rgba(148,163,184,.28)';
+    ctx.save();
+    for (let i = 0; i < bits.length; i++) {
+      const px = x + i * (cell + gap);
+      if (bits[i]) { ctx.fillStyle = on; ctx.fillRect(px, y, cell, cell); }
+      else { ctx.strokeStyle = off; ctx.lineWidth = 1; ctx.strokeRect(px + .5, y + .5, cell - 1, cell - 1); }
+    }
+    ctx.restore();
+  }
+
+  /* 频率柱。values 按传入顺序画；内部按 max 归一化（传 o.max 可锁定量程，
+     这在动画里很重要——不锁的话每帧最大值一变，所有柱子都会跳）。 */
+  function barChart(x, y, w, h, values, o) {
+    o = o || {};
+    const n = values.length;
+    if (!n) return;
+    const max = o.max != null ? o.max : Math.max.apply(null, values) || 1;
+    const gap = o.gap == null ? 2 : o.gap;
+    const bw = (w - gap * (n - 1)) / n;
+    ctx.save();
+    for (let i = 0; i < n; i++) {
+      const bh = Math.max(0, Math.min(1, values[i] / max)) * h;
+      ctx.fillStyle = (o.colorAt && o.colorAt(i)) || o.color || '#2dd4ea';
+      ctx.fillRect(x + i * (bw + gap), y + h - bh, bw, bh);
+    }
+    if (o.labels) {
+      ctx.fillStyle = o.labelColor || 'rgba(159,176,200,.75)';
+      ctx.font = mathFont(o.labelSize || 10);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      for (let i = 0; i < n; i++) {
+        ctx.fillText(o.labels[i], x + i * (bw + gap) + bw / 2, y + h + 3);
+      }
+    }
+    ctx.restore();
+  }
+
+  function flowArrow(ax, ay, bx, by, o) {
+    o = o || {};
+    ctx.save();
+    ctx.strokeStyle = o.color || 'rgba(159,176,200,.6)';
+    ctx.lineWidth = o.width || 1.4;
+    if (o.dash) ctx.setLineDash(o.dash);
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+    ctx.setLineDash([]);
+    if (o.head !== false) {
+      const a = Math.atan2(by - ay, bx - ax), L = o.headLen || 8;
+      ctx.fillStyle = o.color || 'rgba(159,176,200,.6)';
+      ctx.beginPath();
+      ctx.moveTo(bx, by);
+      ctx.lineTo(bx - Math.cos(a - 0.4) * L, by - Math.sin(a - 0.4) * L);
+      ctx.lineTo(bx - Math.cos(a + 0.4) * L, by - Math.sin(a + 0.4) * L);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function chip(x, y, w, h, text, o) {
+    o = o || {};
+    const rad = o.radius == null ? 5 : o.radius;
+    ctx.save();
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, rad);
+    else ctx.rect(x, y, w, h);
+    if (o.fill) { ctx.fillStyle = o.fill; ctx.fill(); }
+    if (o.stroke) { ctx.strokeStyle = o.stroke; ctx.lineWidth = o.width || 1; ctx.stroke(); }
+    if (text != null && text !== '') {
+      ctx.fillStyle = o.color || '#e2e8f0';
+      ctx.font = o.mono ? uiFont(o.fontSize || 12) : mathFont(o.fontSize || 12, o.weight);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(text), x + w / 2, y + h / 2);
+    }
+    ctx.restore();
+  }
+
+  return {
+    makeCam, proj, unproject, viewInfo, withContext, strokePoly, line3,
+    glowDot, solidDot, label3, arrowAt,
+    drawAxes, drawGridXY,
+    clamp, fmt, fmtS, t,
+    mathFont, uiFont,
+    alphabetWheel, cellGrid, bitBlock, barChart, flowArrow, chip,
+    init, bindOrbit,
+    syncPresetHighlight,
+    cam,
+    /* PARAMS/toggles 把滑杆与开关的值写进这个对象（buildParams 的
+       state[p.key]、buildToggles 的 state[tg.key]），state.running / state.dt
+       也在这里——它们都曾经只在引擎私有闭包内可见，工具的 SCENES（另一个
+       脚本块，另一个作用域）够不着。导出的是这个对象本身，不是
+       拷贝或冻结视图：starter 的既有语义就是场景读写同一份 state（例如
+       state.running 由 togglePlay() 写、由 frame() 读；state.dt 由 frame()
+       写、工具自己的 frameDt() 读），拷贝或冻结都会破坏这一点。 */
+    state
+  };
+});
+/* <<< GENERATED:VIZ-ENGINE */
+/* >>> GENERATED:INTERACT */
+/* 交互内核：屏幕坐标下的命中区、hover / 拾取 / 拖拽、键盘绑定。
+   纯逻辑 + 一层薄薄的 DOM 绑定 —— 工具负责画，本模块负责「鼠标现在在哪个东西上」。
+   零依赖；node 与浏览器双用。编辑源，运行时被内联进 tools/*.html。
+
+   ⚠ 这个文件**不是** chess/core/interact.js 的 fork，尽管计划书
+   （docs/superpowers/plans/2026-08-09-cryptography-scaffold.md Task 3 Step 1）
+   写的是 `cp chess/core/interact.js cryptography/core/interact.js`。理由是那份
+   同名文件与文件名承诺的东西无关——它是**国际象棋走法逻辑**（选子、合法走法
+   高亮、走法栈 undo/redo、非法走法的理由、升变四选一），UMD 头部硬依赖
+   `require('./chess-core.js')`，而 cryptography/core/ 下永远不会有那个文件。
+   照抄的结果是：① node 里 require 直接 MODULE_NOT_FOUND；② 浏览器里
+   factory(root.ChessCore) 拿到 undefined，模块加载不报错、一调用就炸；
+   ③ 231 行棋规死代码被 inline_core.py 内联进每一个声明了 GENERATED:INTERACT
+   的密码学工具页；④ 计划书自己 Step 2 的验收 `grep -n "chess" …/interact.js`
+   当场就红——那条 grep 期望「只剩来源说明一行」，而照抄的文件里有
+   `./chess-core.js`、`root.ChessCore` 与成片的棋子名。
+
+   真正该住在这个文件名下的东西，由上游架构规范
+   （docs/superpowers/cryptography.md §13）写明：
+   pointer / drag / keyboard / slider interactions / selection / hover-inspection。
+   chess 那边这些能力其实在 viz-engine.js 的 bindOrbit() 里（已随引擎 fork 过来），
+   剩下的「命中区 + 拾取 + hover」上游没有可复用的实现，所以这里按规范新写。
+
+   本期没有任何消费者依赖它的 API（计划书 §Type consistency 点名的五个全局
+   名里没有它，_skeleton.html 的 GENERATED:INTERACT 区间是空的），因此这层
+   接口是可以被后续任务自由重塑的。 */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.CryptoInteract = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  /* ================= 命中区 =================
+     坐标系与 viz-engine 的 2D 图元层完全一致：CSS 像素、原点左上角。
+     引擎在 resize() 里做的是 ctx.setTransform(DPR,…)，所以绘制坐标就是
+     CSS 像素——alphabetWheel(cx, cy, r) 画在哪，就用同一组数字
+     regions.circle(id, cx, cy, r) 注册在哪，中间不需要任何换算。
+     两套坐标一旦分家，就会出现「看得见但点不中」这种最难查的错。 */
+  function createRegions() {
+    const items = [];
+    const R = {
+      items: items,
+
+      clear: function () { items.length = 0; return R; },
+
+      rect: function (id, x, y, w, h, data) {
+        items.push({ kind: 'rect', id: id, x: x, y: y, w: w, h: h, data: data });
+        return R;
+      },
+
+      circle: function (id, cx, cy, r, data) {
+        items.push({ kind: 'circle', id: id, cx: cx, cy: cy, r: r, data: data });
+        return R;
+      },
+
+      /* 倒序遍历：后注册的在上层。这与 canvas 的画家算法一致——后画的盖住
+         先画的，那么后画的也该先被点中。正序遍历会让被盖住的东西抢走点击，
+         而画面上完全看不出为什么。 */
+      hit: function (x, y) {
+        for (let i = items.length - 1; i >= 0; i--) {
+          const it = items[i];
+          if (it.kind === 'rect') {
+            if (x >= it.x && x <= it.x + it.w && y >= it.y && y <= it.y + it.h) return it;
+          } else {
+            const dx = x - it.cx, dy = y - it.cy;
+            if (dx * dx + dy * dy <= it.r * it.r) return it;
+          }
+        }
+        return null;
+      }
+    };
+    return R;
+  }
+
+  /* ================= 指针绑定 =================
+     bind(el, opts) -> unbind()
+
+     opts:
+       regions   命中区对象（或 getRegions() 返回一个）——每帧重建也没关系，
+                 这里只在事件里取一次
+       onHover(hit|null, ev)   命中项变化时才调用，不是每次 pointermove 都调
+       onPick(hit, ev)         按下与抬起之间几乎没动，且命中了某项
+       onDrag(info, ev)        info = { dx, dy, x, y, hit }，dx/dy 是相对上一次
+       onDragEnd(info, ev)
+       cursor    true 时命中/未命中自动切 pointer / default 光标
+
+     ⚠ 与 viz-engine 的 bindOrbit(canvas) 绑在同一个元素上会打架：bindOrbit 的
+     pointerdown 会 setPointerCapture 并把拖拽解释成转相机。纯 2D 的工具页
+     不要调 bindOrbit；既要 3D 又要拾取的页面，把 2D 命中区绑到一层透明的
+     覆盖元素上，或在 onDrag 里自己判断落点。 */
+  function bind(el, opts) {
+    opts = opts || {};
+    const MOVE_SLOP = opts.slop == null ? 4 : opts.slop;   // 判「这是点击不是拖拽」的像素容差
+    let hover = null;      // 当前命中项，用来把 pointermove 去重成「进/出」事件
+    let drag = null;
+
+    function regionsOf() {
+      if (typeof opts.getRegions === 'function') return opts.getRegions();
+      return opts.regions || null;
+    }
+
+    /* clientX/Y 减去元素的 bounding rect —— 不用 offsetX/offsetY：那两个值
+       在事件目标是子元素时是相对子元素的，在 canvas 上覆盖 HTML 面板的
+       布局里会突然偏移一大截。 */
+    function local(ev) {
+      const r = el.getBoundingClientRect();
+      return [ev.clientX - r.left, ev.clientY - r.top];
+    }
+
+    function pick(ev) {
+      const rs = regionsOf();
+      if (!rs) return null;
+      const p = local(ev);
+      return rs.hit(p[0], p[1]);
+    }
+
+    function onDown(ev) {
+      const p = local(ev);
+      drag = { x0: p[0], y0: p[1], x: p[0], y: p[1], moved: 0, hit: pick(ev) };
+    }
+
+    function onMove(ev) {
+      const p = local(ev);
+      if (drag) {
+        const dx = p[0] - drag.x, dy = p[1] - drag.y;
+        drag.moved += Math.abs(dx) + Math.abs(dy);
+        drag.x = p[0]; drag.y = p[1];
+        if (opts.onDrag && drag.moved > MOVE_SLOP) {
+          opts.onDrag({ dx: dx, dy: dy, x: p[0], y: p[1], hit: drag.hit }, ev);
+        }
+        return;                       // 拖拽期间不重算 hover：手指没离开，命中项不该跳
+      }
+      const h = pick(ev);
+      if (h !== hover) {
+        hover = h;
+        if (opts.cursor && el.style) el.style.cursor = h ? 'pointer' : '';
+        if (opts.onHover) opts.onHover(h, ev);
+      }
+    }
+
+    function onUp(ev) {
+      if (!drag) return;
+      const d = drag;
+      drag = null;
+      if (d.moved <= MOVE_SLOP) {
+        /* 没怎么动 = 点击。命中项用**按下时**那一个，不是抬起时重新算的：
+           抬起时重算会让「按下后画面自己动了一下」变成点中了别的东西。 */
+        if (d.hit && opts.onPick) opts.onPick(d.hit, ev);
+      } else if (opts.onDragEnd) {
+        opts.onDragEnd({ dx: 0, dy: 0, x: d.x, y: d.y, hit: d.hit }, ev);
+      }
+    }
+
+    function onLeave(ev) {
+      if (hover !== null) {
+        hover = null;
+        if (opts.cursor && el.style) el.style.cursor = '';
+        if (opts.onHover) opts.onHover(null, ev);
+      }
+    }
+
+    el.addEventListener('pointerdown', onDown);
+    el.addEventListener('pointermove', onMove);
+    el.addEventListener('pointerup', onUp);
+    el.addEventListener('pointercancel', onUp);
+    el.addEventListener('pointerleave', onLeave);
+
+    return function unbind() {
+      el.removeEventListener('pointerdown', onDown);
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointercancel', onUp);
+      el.removeEventListener('pointerleave', onLeave);
+    };
+  }
+
+  /* ================= 键盘 =================
+     bindKeys({ ' ': fn, 'r': fn, ArrowLeft: fn, … }) -> unbind()
+
+     引擎的 bindKeyboard() 已经占了 T 与 1–9，且刻意没占 Space 与 r——它把
+     那两个键留给工具（见 viz-engine.js 里那段注释）。播放/暂停、单步、重置
+     正是本子项目每个工具都要的传输键，所以这里给一个统一入口，而不是让
+     每个工具各写一遍「先判断焦点在不在输入框里」。
+
+     输入框守卫是必须的：密码学工具几乎每一页都有明文/密钥输入框，少了这道
+     判断，用户在框里敲空格就会把动画暂停掉。 */
+  function bindKeys(map, target) {
+    const host = target || (typeof window !== 'undefined' ? window : null);
+    if (!host) return function () {};
+    function onKey(ev) {
+      const el = typeof document !== 'undefined' ? document.activeElement : null;
+      const tag = el && el.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el && el.isContentEditable)) return;
+      const fn = map[ev.key] || map[String(ev.key).toLowerCase()];
+      if (!fn) return;
+      ev.preventDefault();
+      fn(ev);
+    }
+    host.addEventListener('keydown', onKey);
+    return function () { host.removeEventListener('keydown', onKey); };
+  }
+
+  return { createRegions: createRegions, bind: bind, bindKeys: bindKeys };
+});
+/* <<< GENERATED:INTERACT */
+/* >>> GENERATED:ANIMATION */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.CryptoAnim = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  /* 统一的离散时间轴。密码学工具几乎都是"一轮一轮"的：Enigma 的每次按键、
+     DES/AES 的每一轮、hash 的每个 block、BB84 的每个光子。它们共享的是
+     "第几步 + 步内进度"这一对状态，而不是一条连续曲线——所以时间轴的
+     基本单位是 step，不是秒。
+
+     progress 是**步内**归一化进度（0..1），给插值用：第 i 步到第 i+1 步之间
+     的中间画面靠它算。跨步时归零而不是累加，工具页因此永远不必自己取模。 */
+  function createTimeline(opts) {
+    opts = opts || {};
+    const steps = opts.steps;
+    const stepDuration = opts.stepDuration;
+    if (!(steps > 0)) throw new Error('createTimeline: steps 必须是正数，收到 ' + steps);
+    if (!(stepDuration > 0)) throw new Error('createTimeline: stepDuration 必须是正数，收到 ' + stepDuration);
+    const loop = !!opts.loop;
+    const onStep = typeof opts.onStep === 'function' ? opts.onStep : null;
+
+    const tl = {
+      index: 0,
+      progress: 0,
+      playing: false,
+      rate: opts.rate > 0 ? opts.rate : 1,
+      steps: steps
+    };
+
+    function fire(prev, next) {
+      if (prev === next) return;
+      tl.index = next;
+      if (onStep) onStep(next, prev);
+    }
+
+    tl.play = function () { tl.playing = true; return tl; };
+    tl.pause = function () { tl.playing = false; return tl; };
+    tl.toggle = function () { tl.playing = !tl.playing; return tl; };
+    tl.setRate = function (r) { if (r > 0) tl.rate = r; return tl; };
+
+    tl.seek = function (i) {
+      const next = loop ? ((i % steps) + steps) % steps
+                        : Math.max(0, Math.min(steps - 1, i));
+      const prev = tl.index;
+      tl.progress = 0;
+      fire(prev, next);
+      return tl;
+    };
+
+    tl.step = function (d) { return tl.seek(tl.index + (d || 0)); };
+
+    tl.reset = function () {
+      tl.playing = false;
+      tl.progress = 0;
+      const prev = tl.index;
+      tl.index = 0;
+      if (onStep && prev !== 0) onStep(0, prev);
+      return tl;
+    };
+
+    /* 一次 tick 可能跨过好几步（后台标签页回来、或慢机器掉帧）。
+       必须**逐步**触发 onStep 而不是直接跳到最后一步：工具页的 onStep 里
+       往往在累积状态（比如把这一轮的输出接到下一轮的输入上），跳步等于
+       算错。这也是把"步"而不是"秒"当基本单位换来的好处——补步是精确的。
+
+       ⚠ 调用方必须自己夹住 dt。loop 模式下这个 while 每一圈只吃掉 1，
+       所以 tick(1e6) 会真的转一百万圈——引擎的 frame() 已经把 state.dt
+       夹在 [0, 0.05]，工具页照着用即可；直接把 performance.now() 的差值
+       灌进来的调用方要自己夹。这里刻意不加内部上限：静默丢步比卡一帧
+       更难查，而"每一步都回调过"正是上面那段注释要保住的性质。 */
+    tl.tick = function (dt) {
+      if (!tl.playing || !(dt > 0)) return tl;
+      let p = tl.progress + dt * tl.rate / stepDuration;
+      while (p >= 1) {
+        p -= 1;
+        if (!loop && tl.index >= steps - 1) {
+          tl.progress = 0;
+          tl.playing = false;
+          return tl;
+        }
+        const prev = tl.index;
+        const next = loop ? (tl.index + 1) % steps : tl.index + 1;
+        fire(prev, next);
+      }
+      tl.progress = p;
+      return tl;
+    };
+
+    return tl;
+  }
+
+  return { createTimeline };
+});
+/* <<< GENERATED:ANIMATION */
+</script>
+<script>
+/* ================= 手写区 =================
+   工具专属声明写在这里，在 GENERATED 区之外：TOOL / PARAMS / SCENES /
+   末尾那次 VizEngine.init({...})。本页不需要 pushSample()——它的状态是离散的
+   一步一步，时间轴的 index 就是全部历史。
+
+   这一页存在的理由只有一句：**编码不是密码。**
+
+     table              摩尔斯树。点向左、划向右，一个字母就是一条路径。
+                        关键在于字母坐在**内部节点**上而不是叶子上：E 是 I 的
+                        前缀、I 是 S 的前缀——所以摩尔斯**不是**前缀码，裸的
+                        "..." 可以读成 S / EI / IE / EEE 四种。字母之间那个停顿
+                        因此不是排版习惯，它是第三个符号，也是让整套编码可解的
+                        那一个。页面把读法数直接算出来，摆在旁边。
+     encoding-vs-cipher 顿悟视角。同一段明文：左边摩尔斯，右边凯撒。两边对
+                        外行人都是天书，但只有一边是秘密。四步依次交出去——
+                        公开算法、公开码表、公开密钥——左边在第三步就读通了，
+                        右边要等到第四步。**公开码本，编码就没了；公开密钥，
+                        密码就没了；而算法本来就可以公开**，这就是 Kerckhoffs
+                        原则，也是整章里最适合让它落地的一处。三根密钥空间柱
+                        把这句话量成一个数：1 / 26 / 26!。
+     fractionated       现在把摩尔斯当基底用。同一条符号流上，字母括号在上、
+                        三个一组的框在下——变长重写让两排边界系统性地错开，
+                        再配一张有密钥的三元组表，它就成了一个真正的密码。
+                        底下的频率剖面把这件事量出来：单表代换保留**全部**
+                        英文信号，分裂式只剩不到三成。
+
+   颜色绑在**含义**上，跨三个页签一致（与 crypto-polybius.html 同一手法）：
+     cyan     明文，以及任何"公开的东西"
+     rose     密文——那串已经不由明文字母组成的东西；也用于"没有分隔符时能
+              读出来的那些错误答案"，它们同样是"输出"
+     violet   点 ·
+     emerald  划 −，以及被量出来的东西（密钥空间柱、频率剖面的标尺）
+     orange   分隔符 x、补位、机器本身，以及每一处告警
+   最要紧的一次复用在第三页：符号流里紫绿橙三色，而三个一组的框恒等宽——
+   人眼一看就知道"框的边界和字母的边界对不上"，那正是本页要证明的事，
+   它是被看见的，不是被读到的。
+
+   toggles 的颜色按设计规范固定的启用次序 rose → violet → emerald → orange 排，
+   与它所控制的图元的颜色**大多数时候**一致；第三页第二项（字母行，画成青色）
+   是个例外，理由与 crypto-polybius.html 的 aTrack 那一项相同：次序是规范定死的，
+   而次序的价值（第 N 个开关恒是第 N 个颜色，跨工具一致）比单点的色彩巧合更大。 */
+
+const E  = VizEngine;
+const CC = CryptoCore;
+const AN = Cryptanalysis;
+const MO = CryptoAlgos.morse;
+const SB = CryptoAlgos.substitution;
+const CS = CryptoAlgos.caesar;
+const EX = CryptoExamples;
+
+const CYAN = '#2dd4ea', ROSE = '#fb7185', VIOLET = '#a78bfa',
+      EMERALD = '#34d399', ORANGE = '#fb923c',
+      SLATE = '#9fb0c8', BRIGHT = '#e2e8f0';
+const DIM  = 'rgba(159,176,200,.55)';
+const LINE = 'rgba(148,163,184,.22)';
+const V_SOFT = 'rgba(167,139,250,.14)', V_EDGE = 'rgba(167,139,250,.45)';
+const E_SOFT = 'rgba(52,211,153,.13)',  E_EDGE = 'rgba(52,211,153,.45)';
+const O_SOFT = 'rgba(251,146,60,.13)',  O_EDGE = 'rgba(251,146,60,.45)';
+const R_SOFT = 'rgba(251,113,133,.10)', R_EDGE = 'rgba(251,113,133,.42)';
+const C_SOFT = 'rgba(45,212,234,.09)',  C_EDGE = 'rgba(45,212,234,.42)';
+
+/* 版本徽章直接读 <meta name="tool-version">，不在脚本里再抄一遍数字。 */
+const VERSION = (function () {
+  const m = document.querySelector('meta[name="tool-version"]');
+  return (m && m.getAttribute('content')) || '0.0.0';
+})();
+
+var TOOL = {
+  id: 'crypto-codes-morse',
+  title: { en: 'Codes, Morse & Fractionated Morse', zh: '编码与摩尔斯' },
+  /* h1 比 title 短：窄屏上 .brand h1 是 20px、宽度上限 70vw（375px 视口约
+     262px），完整标题会折成两行，而 .tabs 就压在 top:52px——第二行会被页签
+     整条盖住。画廊与标签页读的是 title，那里没有这个约束。 */
+  h1: { en: 'Codes & Morse', zh: '编码与摩尔斯' }
+};
+
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function clip(s, n) { return s.length > n ? s.slice(0, n) + '…' : s; }
+
+/* ================= 两个文本输入：明文、三元组表的关键词 ================= */
+let PLAIN = '';
+let KW_RAW = 'ROUNDTABLE';
+let ACTIVE_NOTE = null;          // 当前预置自带的解说；用户一打字就作废
+let ioText = null, ioLabel = null, ioKw = null, ioKwLabel = null;
+
+function setPlain(s, writeBack) {
+  PLAIN = String(s);
+  if (writeBack && ioText) ioText.value = PLAIN;
+  DERIVED.key = null;            // 让下一帧重算
+}
+
+const KW_PRESETS = ['ROUNDTABLE', 'CIPHER', 'ZEBRA', ''];
+
+function buildIO() {
+  const host = document.getElementById('ioHost');
+  if (!host) return;
+  host.innerHTML =
+    '<div class="iolabel" id="ioLabel"></div>' +
+    '<textarea class="iofield" id="ioText" spellcheck="false" autocomplete="off"></textarea>' +
+    '<div class="iolabel" id="ioKwLabel"></div>' +
+    '<input class="iofield" id="ioKw" spellcheck="false" autocomplete="off" ' +
+    'style="min-height:0;height:32px;resize:none">' +
+    '<div class="iorow" id="ioKwRow"></div>';
+  ioText    = document.getElementById('ioText');
+  ioLabel   = document.getElementById('ioLabel');
+  ioKw      = document.getElementById('ioKw');
+  ioKwLabel = document.getElementById('ioKwLabel');
+  ioKw.value = KW_RAW;
+
+  ioText.addEventListener('input', function () {
+    ACTIVE_NOTE = null;
+    setPlain(ioText.value, false);
+    /* 一动手打字，预置按钮的选中态就不再成立。三个页签共享同一份 presets
+       数组（同一个对象引用），所以调用任意一个页签一次就会同步到全部。 */
+    E.syncPresetHighlight('table', null);
+  });
+  /* 输入框里留**原始值**，不是规范化后的那一份：一边打字一边改写 input.value
+     会把光标弹到末尾。规范化只发生在 derived() 里。 */
+  ioKw.addEventListener('input', function () { KW_RAW = ioKw.value; DERIVED.key = null; });
+
+  const row = document.getElementById('ioKwRow');
+  KW_PRESETS.forEach(function (kw) {
+    const b = document.createElement('button');
+    b.className = 'btn';
+    b.textContent = kw || 'A–Z';
+    b.addEventListener('click', function () {
+      KW_RAW = kw; ioKw.value = kw; DERIVED.key = null;
+    });
+    row.appendChild(b);
+  });
+}
+
+/* #ioHost 的标签是本页自己写进 DOM 的，不在引擎的 RELABEL 名单里，语言切换
+   不会自动重刷它。引擎在 applyLang() 末尾会调 updateReadout()，所以把这次
+   同步挂在 readout() 里搭车——不管语言是怎么变的，readout 都会跟着重算一次。 */
+function syncIoLabels() {
+  const want = [
+    [ioLabel,   { en: 'Plaintext — letters and digits (Morse has codes for both)',
+                  zh: '明文 —— 字母与数字（摩尔斯两样都有码）' }],
+    [ioKwLabel, { en: 'Keyword for the triple table — the only secret on this page',
+                  zh: '三元组表的关键词 —— 本页唯一的秘密' }]
+  ];
+  want.forEach(function (p) {
+    if (!p[0]) return;
+    const s = E.t(p[1]);
+    if (p[0].textContent !== s) p[0].textContent = s;
+  });
+}
+
+const PRESET_LABEL = {
+  'pangram':      { en: 'Pangram',   zh: '全字母句' },
+  'attack':       { en: 'Short',     zh: '短句' },
+  'caesar-quote': { en: 'Caesar',    zh: '凯撒' }
+};
+/* 短句排第一：引擎的 buildPresets() 建面板时就选中第一项，而第一眼看到的
+   应该是一段**一屏放得下**的报文——第三页的符号带上，'ATTACK AT DAWN' 的
+   39 个符号在窄屏上也基本能整条看见，95 个字母的全字母句则要靠窗口滚动。 */
+const PRESET_ORDER = ['attack', 'pangram', 'caesar-quote'];
+const TEXT_PRESETS = PRESET_ORDER.map(function (id) {
+  const p = EX.plaintext(id);
+  return {
+    key: p.id,
+    label: PRESET_LABEL[p.id] || { en: p.id, zh: p.id },
+    onSelect: function () { ACTIVE_NOTE = p.note || null; setPlain(E.t(p.text), true); }
+  };
+});
+const PRESETS_LABEL = { en: 'Text', zh: '明文' };
+
+/* ================= 离散时钟 =================
+   每页各有一条自己的"第几步"：table 走 26 个字母，encoding-vs-cipher 走四个
+   交付阶段，fractionated 走明文的字母。步数随明文变，而 createTimeline 的
+   steps 是建表时钉死的（seek 读的是闭包里那个值），所以步数一变就重建一条，
+   并把当前 index 夹着搬过去——否则换段明文，动画会从第 0 步重新开始。
+
+   **播放与否**归引擎的 state.running（⏵/⏸ 由引擎自己绑），**走到第几步**归
+   时间轴：时间轴一建好就 play() 且永不 pause()，真正的闸门是 advance() 里那个
+   state.running 判断。两边各管一件事，不会出现"按钮显示暂停、画面还在动"。 */
+const CLOCKS = {};
+let CUR_TL = null;
+
+function clockFor(id, steps, dur) {
+  const want = Math.max(1, Math.round(steps));
+  const old = CLOCKS[id];
+  if (old && old.steps === want) return old;
+  const tl = CryptoAnim.createTimeline({ steps: want, stepDuration: dur, loop: true, rate: 1 });
+  tl.play();
+  if (old) tl.seek(Math.min(old.index, want - 1));
+  CLOCKS[id] = tl;
+  return tl;
+}
+
+/* 喂给时间轴的必须是引擎已经夹过的 state.dt（[0, 0.05]），不能是自己用
+   performance.now() 算的差值——tick() 刻意没有内部步长上限，后台标签页回来
+   那一下的时间跳变会让它真的补上几千步。 */
+function advance(id, steps, dur) {
+  const tl = clockFor(id, steps, dur);
+  tl.setRate(E.state.speed > 0 ? E.state.speed : 1);
+  if (E.state.running) tl.tick(E.state.dt);
+  return tl;
+}
+function tickClock(id, steps, dur) {
+  const tl = advance(id, steps, dur);
+  CUR_TL = tl;
+  return tl;
+}
+
+document.getElementById('btnBack').addEventListener('click', function () { if (CUR_TL) CUR_TL.step(-1); });
+document.getElementById('btnStep').addEventListener('click', function () { if (CUR_TL) CUR_TL.step(1); });
+/* ⟲ 上已经挂了引擎的 resetSim()；再挂一条把当前页签的时间轴拨回第 0 步。
+   用 seek(0) 而不是 reset()：reset() 会把 playing 置 false，而 playing 在本页
+   恒为 true（真正的闸门是 advance() 里的 state.running）。 */
+document.getElementById('btnReset').addEventListener('click', function () { if (CUR_TL) CUR_TL.seek(0); });
+
+/* ================= 悬停 =================
+   第一页的核心动作是"把鼠标停在树的某个节点上"，所以指针位置必须是页面自己
+   的状态。这里另挂一对监听器，**不**碰引擎的 bindOrbit()：那一套只在指针按下
+   时才动相机，两者互不干扰。触摸屏上 pointermove 只在按住时才来，所以
+   pointerdown 也记一次——手指点一下同样能点亮一个节点。 */
+const HOVER = { x: -1, y: -1, active: false };
+(function () {
+  const cv = document.getElementById('c');
+  function put(e) {
+    const r = cv.getBoundingClientRect();
+    HOVER.x = e.clientX - r.left;
+    HOVER.y = e.clientY - r.top;
+    HOVER.active = true;
+  }
+  cv.addEventListener('pointermove', put);
+  cv.addEventListener('pointerdown', put);
+  cv.addEventListener('pointerleave', function () { HOVER.active = false; });
+})();
+
+/* 画面与读数必须指着**同一个**东西。命中测试要用 draw() 里那套排版几何，
+   readout() 手上没有这些量；在 readout() 里把几何重算一遍是两份真相，迟早
+   错开。所以 draw() 把结论留在这儿，readout() 只读。 */
+const CURSOR = { letter: 'E', frac: 0 };
+
+var PARAMS = [
+  /* fmt 必须是**函数**：引擎 buildParams() 里是 `p.fmt(parseFloat(input.value))`。
+     写成数字会在建面板时当场 TypeError，整个页面停在空白 canvas 上。 */
+  { key: 'k',
+    label: { en: 'Caesar shift <i>k</i>', zh: '凯撒位移 <i>k</i>' },
+    min: 0, max: 25, step: 1, value: 3,
+    fmt: function (v) { return String(Math.round(v)); } },
+  { key: 'speed',
+    /* 速度不是数学量，所以不加 <i>；<i>k</i> 才是。 */
+    label: { en: 'speed', zh: '速度' },
+    min: 0.25, max: 4, step: 0.25, value: 1,
+    fmt: function (v) { return v.toFixed(2) + '×'; } }
+];
+
+function currentK() {
+  const k = Math.round(E.state.k);
+  return (k >= 0 && k <= 25) ? k : 3;      // init() 之前 state.k 还不存在
+}
+
+/* ================= 每帧一份、只在输入变了才重算的派生量 =================
+   与 crypto-polybius.html 的 derived() 同一手法：不是为了省 CPU，而是为了让
+   画面与读数在同一帧里读的是**同一份**结果，不会因为两次独立计算而错半帧。
+   凯撒那一列不进缓存——它依赖滑杆 k，而 k 每拖一格都会变，进了缓存就要把 k
+   写进缓存键，得不偿失（encrypt 本来就是一趟线性扫描）。 */
+const DERIVED = { key: null };
+
+function derived() {
+  /* 缓存键用 JSON 拼，不用分隔符拼字符串：明文里什么字符都可能有，
+     随便挑一个分隔符就意味着某段输入能伪造出另一段输入的键。 */
+  const key = JSON.stringify([PLAIN, KW_RAW]);
+  if (DERIVED.key === key) return DERIVED;
+  DERIVED.key = key;
+
+  const plain = MO.normalizeText(PLAIN);
+  DERIVED.plain = plain;
+  DERIVED.letters = plain.replace(/ /g, '');
+  DERIVED.n = DERIVED.letters.length;
+  DERIVED.morse = MO.toMorse(PLAIN);
+
+  /* 明文里每个**非空格**字符的下标——第三页的时钟走的是字母，不是字符。 */
+  const idx = [];
+  for (let j = 0; j < plain.length; j++) if (plain.charAt(j) !== ' ') idx.push(j);
+  DERIVED.letterIdx = idx;
+
+  const keyAlpha = SB.keyFromKeyword(KW_RAW);
+  DERIVED.keyAlpha = keyAlpha;
+  DERIVED.tr = MO.fractionatedTrace(PLAIN, keyAlpha);
+  DERIVED.cipher = DERIVED.tr.cipher;
+  /* 对照组：同一把关键词密钥、同一段明文的**单表代换**。选它而不是随便一把
+     密钥，是为了让两条剖面只差一件事——有没有把字母切开。 */
+  DERIVED.subst = plain ? SB.encrypt(plain, keyAlpha) : '';
+
+  /* 两个统计量，都是整段报文的性质，不是某一个字母的：
+       aligned —— 有多少组**正好是一个完整字母**（三个符号同属一个字母，
+                  且恰好是它的全部）。这是"密文字母 = 明文字母"唯一还可能
+                  成立的情形，实测它几乎恒为 0，而 0 正是本页要证明的那句话。
+       mixed   —— 有多少组混着两个或更多字母的符号。
+     为什么要 aligned 而不是只报 mixed：单看某一个字母，它可能恰好整个落在
+     一组里（'A' 的 '.-' 加一个分隔符就凑满一组），那时候光看 mixed 会以为
+     "分裂没发生"；而"没有哪一组是一个完整字母"对每一段明文都成立。
+     分隔符（owner = −1）不算字母：它属于机器，不属于任何人。 */
+  let mixed = 0, aligned = 0;
+  const tr = DERIVED.tr;
+  for (let g = 0; g < tr.groups.length; g++) {
+    const seen = {};
+    let cnt = 0, sep = 0, only = -1;
+    for (let s = 0; s < 3; s++) {
+      const o = tr.owner[g * 3 + s];
+      if (o < 0) { sep++; continue; }
+      if (!seen[o]) { seen[o] = 1; cnt++; only = o; }
+    }
+    if (cnt >= 2) mixed++;
+    if (cnt === 1 && sep === 0 && tr.first[only] === g * 3 && tr.last[only] === g * 3 + 2) aligned++;
+  }
+  DERIVED.mixedGroups = mixed;
+  DERIVED.alignedGroups = aligned;
+  DERIVED.groupCount = tr.groups.length;
+
+  DERIVED.freqSub  = AN.letterCounts(DERIVED.subst);
+  DERIVED.freqFrac = AN.letterCounts(DERIVED.cipher);
+  DERIVED.freqMax  = Math.max(1,
+    Math.max.apply(null, DERIVED.freqSub), Math.max.apply(null, DERIVED.freqFrac));
+  DERIVED.iocPlain = AN.indexOfCoincidence(plain);
+  DERIVED.iocSub   = AN.indexOfCoincidence(DERIVED.subst);
+  DERIVED.iocFrac  = AN.indexOfCoincidence(DERIVED.cipher);
+  /* 离均匀随机（1/26）还剩多少英文信号。分母可能塌成 0（明文太短），这时候
+     比值没有意义，给 null 让画面明说，而不是画一个 NaN。 */
+  const RANDOM = 1 / 26;
+  const span = DERIVED.iocPlain - RANDOM;
+  DERIVED.keptSub  = span > 1e-6 ? (DERIVED.iocSub  - RANDOM) / span : null;
+  DERIVED.keptFrac = span > 1e-6 ? (DERIVED.iocFrac - RANDOM) / span : null;
+
+  /* 第一页的歧义演示：取明文头几个字母，把它们的码首尾相连（分隔符全抹掉），
+     裸串封到 14 个符号以内——再长，读法数会大到只剩一个"很大"的印象，
+     而这一格要的是"你能亲眼数完的那几种"。 */
+  let bare = '', used = 0;
+  const src = DERIVED.letters || 'SOS';
+  for (let i = 0; i < src.length; i++) {
+    const code = MO.MORSE_TABLE[src.charAt(i)];
+    if (bare.length + code.length > 14) break;
+    bare += code; used++;
+  }
+  if (!bare) { bare = MO.MORSE_TABLE[src.charAt(0)]; used = 1; }
+  DERIVED.bare = bare;
+  DERIVED.bareWord = src.slice(0, used);
+  DERIVED.readings = MO.countReadings(bare);
+  DERIVED.readingList = MO.ambiguousReadings(bare, 4);
+  return DERIVED;
+}
+
+/* ================= 版面 =================
+   面板固定占着右边 304px，宽屏时把可用区收窄，让图形不会钻到面板底下。
+   top 给 122 而不是更小：左上角那块 brand（h1 + 两行说明，max-width 到 42vw）
+   底边大约就在 100px，贴着它画会与它并排、读起来像同一句话。窄屏上 brand 被
+   压扁、页签与传输条挪到左上，所以 top 让到 176。 */
+function layout() {
+  const vi = E.viewInfo();
+  /* 面板什么时候贴在右上角，由 CSS 的断点说了算：`@media (max-width:760px)`
+     以下它变成贴底的抽屉，以上它是 top:14 right:14 宽 304 的浮层。所以这里
+     的界线用 760，不用 crypto-polybius.html 那个 900——它那条界线在
+     761–900px 这一段里会让图形整块钻到面板底下（无头驱动在 820px 上量到
+     内容右边缘 780，而面板从 502 起就盖住了）。付出的代价是 820px 上可用宽
+     只剩 442，窄一点，但看得见。 */
+  const rightPad = vi.W > 760 ? 330 : 16;
+  return {
+    W: vi.W, H: vi.H,
+    x0: 24,
+    availW: Math.max(240, vi.W - 48 - rightPad),
+    top: vi.W > 760 ? 122 : 176,
+    bottom: vi.H - 86
+  };
+}
+
+/* chip 把文字**居中**画，而 fillText 不裁剪：句子比盒子长时它从两头一起漫
+   出去，窄屏上左端直接漫出画布。第一道防线是换一句短的： */
+function fit(L, wideMsg, narrowMsg) { return L.availW < 470 ? narrowMsg : wideMsg; }
+
+/* 第二道防线：真的按盒子宽度截断。
+   "换一句短的"只在**语言与视口都在预料之内**时管用，而这两件事都会跑出预料：
+   同一句话的中英文长度能差一倍，而"2758 种读法：…"这类句子里带着一个随明文
+   变的列表，长度根本不是写代码时能知道的。实测（本页的无头驱动，三个视口
+   各跑一遍）抓到两处：第一页的读法列表在 375px 上从 x=−135 一直画到 494，
+   第三页的表头在 1440px 上也漫出左边缘——两处都是"作者以为它够短"。
+
+   VizEngine 不暴露 measureText（它把 ctx 关在闭包里），所以这里用一个**偏保守**
+   的字宽估计：西文 0.55em。无衬线与 Georgia 的平均字宽都在 0.5em 上下，取 0.55
+   意味着宁可早截一个字，也不让文字漫出盒子——反过来的错误是看不见的。
+
+   中日文是**全角**，一个字差不多是一个 em，比西文的平均字宽宽将近一倍。按
+   "数几个字符"去估，会把中文句子系统性地低估到只有实际的一半——同一句话
+   英文不溢出、中文溢出，而这正是"换一句短的"最容易漏掉的那一半。所以宽度
+   按字符分两档算，不按个数算。 */
+const EM_W = 0.55;          // 西文平均字宽（相对字号）
+const EM_WIDE = 1.05;       // 东亚全角
+/* 东亚全角区间（Unicode 的 East Asian Wide/Fullwidth 的常用子集）。
+   写成一个函数而不是一条正则：正则要跨代理对，而这里逐 code unit 判断就够，
+   高位代理落在这些区间之外，会被当成半角——那是**偏窄**的估计，方向安全。 */
+function isWideChar(c) {
+  return (c >= 0x1100 && c <= 0x115F) || (c >= 0x2E80 && c <= 0xA4CF) ||
+         (c >= 0xAC00 && c <= 0xD7A3) || (c >= 0xF900 && c <= 0xFAFF) ||
+         (c >= 0xFE30 && c <= 0xFE6F) || (c >= 0xFF00 && c <= 0xFF60) ||
+         (c >= 0xFFE0 && c <= 0xFFE6);
+}
+function textW(s, fontSize) {
+  let u = 0;
+  for (let i = 0; i < s.length; i++) u += isWideChar(s.charCodeAt(i)) ? EM_WIDE : EM_W;
+  return u * fontSize;
+}
+function fitText(s, boxW, fontSize) {
+  s = String(s);
+  if (textW(s, fontSize) <= boxW) return s;
+  const limit = boxW - fontSize * EM_W;      // 给省略号留一个位置
+  let w = 0, out = '';
+  for (let i = 0; i < s.length; i++) {
+    const cw = (isWideChar(s.charCodeAt(i)) ? EM_WIDE : EM_W) * fontSize;
+    if (w + cw > limit) break;
+    w += cw; out += s.charAt(i);
+  }
+  return (out || s.charAt(0)) + '…';
+}
+/* 画一句话用它，画一个字母/符号仍然用 E.chip——单个字形永远装得下，
+   过一遍截断只会白费一次字符串操作。 */
+function textChip(x, y, w, h, s, o) {
+  o = o || {};
+  E.chip(x, y, w, h, fitText(s, w - 8, o.fontSize || 12), o);
+}
+
+function notice(L, msg, color) {
+  textChip(L.x0, L.top + 40, Math.min(460, L.availW), 30, msg,
+           { mono: true, color: color || ORANGE, fill: O_SOFT,
+             stroke: 'rgba(251,146,60,.38)', fontSize: 12 });
+}
+function needText(L) {
+  notice(L, E.t({ en: 'Nothing encodable in the plaintext yet.',
+                  zh: '明文里还没有任何可编码的字符。' }));
+}
+
+/* 规范化之后的密文是一整串没有空格的字母，浏览器**无处可断行**，于是它会
+   直接从面板右边溢出去。给这几处读数加 word-break，比把长度砍到二三十个
+   字母好——砍短了就看不出"密文比明文长"这件事。 */
+function longVal(color, s) {
+  return '<b style="--c:var(--trace-' + color + ');word-break:break-all">' + esc(s) + '</b>';
+}
+
+/* 一条字符带：把一串字符按格宽铺成若干行，装不下就由调用方明说截断。
+   用 cellGrid 而不是逐字符 chip：cellGrid 整块只做一次 save/restore，而一段
+   95 字母的摩尔斯有三百多个字符，逐个 chip 是每帧三百次 save/roundRect/restore。
+   描边给全透明——这一条读起来该像文字，不像表格。 */
+function charStrip(x, y, availW, text, cell, maxRows, colorOf, o) {
+  o = o || {};
+  const per = Math.max(4, Math.floor(availW / cell));
+  const rowsFull = Math.max(1, Math.ceil(text.length / per));
+  const rows = Math.min(rowsFull, Math.max(1, maxRows));
+  const shown = Math.min(text.length, rows * per);
+  E.cellGrid(x, y, Math.max(1, Math.min(per, shown)), rows, cell, {
+    text: function (c, r) {
+      const i = r * per + c;
+      return i < shown ? text.charAt(i) : '';
+    },
+    textColor: function (c, r) {
+      const i = r * per + c;
+      return i < shown ? colorOf(text.charAt(i), i) : null;
+    },
+    stroke: 'rgba(0,0,0,0)',
+    fontSize: o.fontSize || cell * 0.78,
+    mono: !!o.mono
+  });
+  return { shown: shown, rows: rows, per: per, height: rows * cell };
+}
+
+/* 符号的颜色只在这一处定义：点紫、划绿、分隔橙。三个页签都调它，写成一个
+   函数免得某一处手抖把点画成绿的——画出来一样好看，意思却是反的。 */
+function symColor(ch) {
+  if (ch === MO.DOT) return VIOLET;
+  if (ch === MO.DASH) return EMERALD;
+  if (ch === MO.SEP) return ORANGE;
+  return DIM;                             // 摩尔斯抄本里的空格与斜杠
+}
+function symSoft(ch) {
+  if (ch === MO.DOT) return V_SOFT;
+  if (ch === MO.DASH) return E_SOFT;
+  if (ch === MO.SEP) return O_SOFT;
+  return null;
+}
+
+/* ================= 页签一：摩尔斯树 =================
+   点向左、划向右。一个字母的码就是从根走到它的那条路径，所以**码长就是深度**
+   ——这是"变长"这件事在图上的样子。
+
+   真正要看见的是另一件事：字母坐在**内部节点**上。前缀码要求所有码字都在
+   叶子上，而 E 在第 1 层、I 在第 2 层、S 在第 3 层、H 在第 4 层，四个字母串在
+   同一条全点的枝上。所以在只有点划两种符号的字母表上，摩尔斯是歧义的，
+   而字母之间那个停顿是让它可解的第三个符号。 */
+const TREE_DEPTH = 4;                     // 字母最深到第 4 层；数字在第 5 层，另画一条
+
+/* 深度 d、下标 i 的节点对应哪个码：i 的二进制从高位到低位，0 是点、1 是划。 */
+function nodeCode(d, i) {
+  let s = '';
+  for (let b = d - 1; b >= 0; b--) s += ((i >> b) & 1) ? MO.DASH : MO.DOT;
+  return s;
+}
+/* 反过来：一个码在它那一层的下标。 */
+function codeIndex(code) {
+  let i = 0;
+  for (let b = 0; b < code.length; b++) i = i * 2 + (code.charAt(b) === MO.DASH ? 1 : 0);
+  return i;
+}
+function nodeX(x0, availW, d, i) { return x0 + availW * (i + 0.5) / Math.pow(2, d); }
+
+const tableScene = {
+  label: { en: 'Table', zh: '码表' },
+  brand: { en: 'Dot left, dash right: a letter is a path. The letters sit on inner nodes, not leaves — which is exactly why the gap between letters is a symbol, not a typographic habit.',
+           zh: '点向左、划向右：一个字母就是一条路径。字母坐在内部节点上，不在叶子上 —— 正因如此，字母之间那个停顿是一个符号，不是排版习惯。' },
+  tips: { en: 'Turn on "the all-dot chain": E, I, S, H hang off one branch, each the prefix of the next. A prefix-free code keeps every codeword on a leaf; Morse does not, so with the gaps stripped out the same dots read several ways at once — the strip below counts them. Put the gaps back and the count is exactly one. That third symbol is the whole reason Morse is readable.',
+          zh: '打开「全点链」：E、I、S、H 挂在同一条枝上，每一个都是下一个的前缀。前缀码要求所有码字都落在叶子上，摩尔斯不是——所以把停顿抹掉之后，同一串点可以同时读成好几种，下面那一条把它们数出来。把停顿放回去，读法恰好一种。那个第三符号就是摩尔斯之所以可读的全部原因。' },
+  presets: TEXT_PRESETS,
+  presetsLabel: PRESETS_LABEL,
+  params: ['speed'],
+  /* 本页图元是屏幕坐标的，与相机无关，所以只保留 iso 这一项：它是引擎双击
+     回正的 home，也是页面载入时的机位（规范要求 views 的第一项是它）。 */
+  views: { iso: { label: { en: 'Iso', zh: '等距' }, az: -0.62, el: 0.42, dist: 9 } },
+  toggles: [
+    { key: 'tRead',   label: { en: 'Readings with no gaps', zh: '抹掉停顿后的读法' }, color: ROSE,    checked: true },
+    { key: 'tChain',  label: { en: 'The all-dot chain',      zh: '全点链' },           color: VIOLET,  checked: true },
+    { key: 'tDigits', label: { en: 'Digits 0–9',             zh: '数字 0–9' },         color: EMERALD, checked: false },
+    { key: 'tSep',    label: { en: 'The third symbol',       zh: '第三个符号' },        color: ORANGE,  checked: true }
+  ],
+  draw: function () {
+    const D = derived();
+    const L = layout();
+    const tl = tickClock('table', 26, 0.5);
+
+    /* 底下几条带先把高度预留出来，剩下的才是树的。 */
+    let reserve = 0;
+    if (E.state.tRead) reserve += 96;
+    if (E.state.tDigits) reserve += (L.availW >= 470 ? 48 : 72);   // 窄屏排两行
+    const availH = Math.max(150, L.bottom - L.top - reserve);
+    const levelH = E.clamp(availH / (TREE_DEPTH + 0.6), 26, 76);
+
+    /* 一个格子放不下 15px 就没法读了。375px 上 availW ≈ 311，第 4 层 16 个槽
+       → 19px，正好还够；再窄就**少画一层**，而不是把格子压到看不见——
+       "先定格数再把格宽压到下限"正是 crypto-caesar 1.0.2 修掉的那种做法。 */
+    let depth = TREE_DEPTH;
+    while (depth > 2 && L.availW / Math.pow(2, depth) < 15) depth--;
+    const slot = L.availW / Math.pow(2, depth);
+    const cell = E.clamp(Math.min(slot * 0.82, levelH * 0.62), 11, 34);
+    /* levelH 有上限（76），所以高屏上树只占 300 多像素，剩下的三四百像素会
+       空在树和底下那两条带之间。把树在它自己那一格里**竖直居中**，空白就
+       平分到上下两边，画面重心不再往上吊。 */
+    const top = L.top + 18 + Math.max(0, (availH - (depth * levelH + cell)) / 2);
+
+    /* 悬停优先，没有悬停就跟着时钟走 A→Z。 */
+    let hot = null;
+    if (HOVER.active) {
+      const d = Math.round((HOVER.y - top) / levelH);
+      if (d >= 1 && d <= depth) {
+        const i = Math.floor((HOVER.x - L.x0) / (L.availW / Math.pow(2, d)));
+        if (i >= 0 && i < Math.pow(2, d)) {
+          const code = nodeCode(d, i);
+          if (MO.CODE_TO_CHAR[code] !== undefined) hot = code;
+        }
+      }
+    }
+    if (!hot) hot = MO.MORSE_TABLE[CC.ALPHABET.charAt(tl.index % 26)];
+    CURSOR.letter = MO.CODE_TO_CHAR[hot] || 'E';
+
+    /* ---- 枝：从每个节点连到它的两个孩子 ----
+       先画全部的淡枝，再把被追踪的那条路径重描一遍——顺序反了会被淡枝盖住。 */
+    const chainOn = !!E.state.tChain;
+    for (let d = 0; d < depth; d++) {
+      const cnt = Math.pow(2, d);
+      for (let i = 0; i < cnt; i++) {
+        const px = nodeX(L.x0, L.availW, d, i), py = top + d * levelH;
+        for (let b = 0; b < 2; b++) {
+          const ci = i * 2 + b;
+          const cx = nodeX(L.x0, L.availW, d + 1, ci), cy = top + (d + 1) * levelH;
+          /* 全点链：'.', '..', '...', '....' 那四条枝。它们是本页的主张，
+             所以比别的枝亮、也比别的枝粗。 */
+          const isChain = chainOn && nodeCode(d + 1, ci).indexOf(MO.DASH) < 0;
+          E.flowArrow(px, py + cell * 0.5, cx, cy - cell * 0.5, {
+            color: isChain ? V_EDGE : (b === 0 ? 'rgba(167,139,250,.20)' : 'rgba(52,211,153,.20)'),
+            width: isChain ? 1.8 : 1, head: false
+          });
+        }
+      }
+    }
+    /* 被追踪字母的那条路径，分段画，每一段用它自己那个符号的颜色——
+       "码就是路径"这句话因此是看出来的：路径上的紫绿次序就是它的码。 */
+    for (let d = 0; d < hot.length && d < depth; d++) {
+      const pi = codeIndex(hot.slice(0, d));
+      const ci = codeIndex(hot.slice(0, d + 1));
+      const px = nodeX(L.x0, L.availW, d, pi), py = top + d * levelH;
+      const cx = nodeX(L.x0, L.availW, d + 1, ci), cy = top + (d + 1) * levelH;
+      E.flowArrow(px, py + cell * 0.5, cx, cy - cell * 0.5,
+                  { color: symColor(hot.charAt(d)), width: 2.6, head: false });
+    }
+
+    /* ---- 根 ---- */
+    E.chip(nodeX(L.x0, L.availW, 0, 0) - cell / 2, top - cell / 2, cell, cell, '',
+           { fill: 'rgba(148,163,184,.10)', stroke: LINE, radius: 4 });
+
+    /* ---- 节点 ---- */
+    for (let d = 1; d <= depth; d++) {
+      const cnt = Math.pow(2, d);
+      for (let i = 0; i < cnt; i++) {
+        const code = nodeCode(d, i);
+        const ch = MO.CODE_TO_CHAR[code];
+        const x = nodeX(L.x0, L.availW, d, i) - cell / 2, y = top + d * levelH - cell / 2;
+        if (ch === undefined) {
+          /* 空节点：ITU 的 26 字母里没有这条路径。画一个小点而不是留白——
+             留白会让人以为树在这里就断了，而它并没有。 */
+          E.chip(x + cell * 0.35, y + cell * 0.35, cell * 0.3, cell * 0.3, '',
+                 { fill: 'rgba(148,163,184,.16)', radius: 2 });
+          continue;
+        }
+        const on = (code === hot);
+        const inChain = chainOn && code.indexOf(MO.DASH) < 0;
+        E.chip(x, y, cell, cell, ch, {
+          color: on ? BRIGHT : (inChain ? VIOLET : CYAN),
+          fill: on ? 'rgba(226,232,240,.20)' : (inChain ? V_SOFT : C_SOFT),
+          stroke: on ? 'rgba(226,232,240,.55)' : (inChain ? V_EDGE : C_EDGE),
+          fontSize: cell * 0.54, radius: 4
+        });
+      }
+    }
+
+    /* ---- 第三个符号：图例 ---- */
+    if (E.state.tSep) {
+      textChip(L.x0, L.top - 8, Math.min(470, L.availW), 20,
+               E.t(fit(L,
+                 { en: '·  dot     −  dash     x  the gap  —  three symbols, not two',
+                   zh: '·  点     −  划     x  停顿  ——  三个符号，不是两个' },
+                 { en: '·  dot   −  dash   x  gap', zh: '·  点   −  划   x  停顿' })),
+               { mono: true, color: ORANGE, fontSize: 11 });
+    }
+
+    /* ---- 底下的两条带 ---- */
+    let by = L.bottom - reserve + 24;
+
+    if (E.state.tRead) {
+      const bare = D.bare, word = D.bareWord;
+      const u = E.clamp(Math.floor(L.availW / Math.max(12, bare.length + 2)), 10, 22);
+      textChip(L.x0, by - 20, Math.min(520, L.availW), 16,
+               E.t(fit(L,
+                 { en: 'the first letters of the plaintext, with every gap stripped out',
+                   zh: '明文开头几个字母，把所有停顿都抹掉' },
+                 { en: 'gaps stripped out', zh: '抹掉全部停顿' })),
+               { mono: true, color: ROSE, fontSize: 10.5 });
+      for (let i = 0; i < bare.length; i++) {
+        E.chip(L.x0 + i * u, by, u, u, bare.charAt(i),
+               { color: symColor(bare.charAt(i)), fill: symSoft(bare.charAt(i)),
+                 stroke: 'rgba(148,163,184,.18)', fontSize: u * 0.62, radius: 2 });
+      }
+      /* 读法列表能挤在符号带右边就挤在那儿，挤不下就换到下一行。 */
+      const rx = L.x0 + bare.length * u + 12;
+      const rw = L.availW - bare.length * u - 12;
+      const inline = rw >= 200;
+      const boxW = Math.min(inline ? rw : L.availW, 470);
+      /* 列表是**按装得下多少条**拼的，不是拼完再截：截断会把最后一条读法砍成
+         半截，而每一条读法都是一个完整的答案——半个答案不是更短的答案，
+         是一个错的东西。 */
+      const head = D.readings + E.t({ en: ' readings:  ', zh: ' 种读法：' });
+      const cap = boxW - 8;
+      let list = '';
+      for (let i = 0; i < D.readingList.length; i++) {
+        const next = list ? list + ' / ' + D.readingList[i] : D.readingList[i];
+        if (textW(head + next + ' …', 11) > cap) break;
+        list = next;
+      }
+      const more = D.readings > D.readingList.length || list.split(' / ').length < D.readingList.length;
+      E.chip(inline ? rx : L.x0, inline ? by - 1 : by + u + 6, boxW, u + 2,
+             head + list + (more ? ' …' : ''),
+             { mono: true, color: ROSE, fill: R_SOFT, stroke: R_EDGE, fontSize: 11 });
+      textChip(L.x0, by + u + (inline ? 8 : 8 + u + 6), Math.min(520, L.availW), 20,
+               E.t(fit(L,
+                 { en: 'put the gaps back — “' + word + '” — and there is exactly 1',
+                   zh: '把停顿放回去 —— 「' + word + '」 —— 读法恰好 1 种' },
+                 { en: 'gaps back: exactly 1', zh: '放回停顿：恰好 1 种' })),
+               { mono: true, color: CYAN, fontSize: 11 });
+      by += 96;
+    }
+
+    if (E.state.tDigits) {
+      /* 窄屏上排两行五个：十个挤成一行时每格只有 31px，而 "7 --..." 是七个
+         字符——把字号压到装得下等于压到看不见。少排几列、多排一行，格子的
+         **数量**跟着空间走，格子的**大小**不跟着走。 */
+      const cols = L.availW >= 470 ? 10 : 5;
+      const rows = 10 / cols;
+      const dw = Math.min(L.availW / cols, 92);
+      textChip(L.x0, by - 18, Math.min(420, L.availW), 15,
+               E.t({ en: 'digits live one level deeper — five symbols each',
+                     zh: '数字在更深一层 —— 每个都是五个符号' }),
+               { mono: true, color: EMERALD, fontSize: 10.5 });
+      for (let i = 0; i < 10; i++) {
+        const dch = String(i);
+        const r = Math.floor(i / cols), c = i % cols;
+        E.chip(L.x0 + c * dw, by + r * 24, dw - 3, rows > 1 ? 21 : 26,
+               dch + ' ' + MO.MORSE_TABLE[dch],
+               { mono: true, color: EMERALD, fill: E_SOFT, stroke: 'rgba(52,211,153,.24)',
+                 fontSize: E.clamp((dw - 8) / (7 * EM_W), 8, 11), radius: 3 });
+      }
+    }
+  },
+  readout: function () {
+    syncIoLabels();
+    const D = derived();
+    const ch = CURSOR.letter;
+    const code = MO.MORSE_TABLE[ch];
+    let s = E.t({ en: 'letter ', zh: '字母 ' }) +
+      '<b style="--c:var(--trace-cyan)"><i>' + esc(ch) + '</i></b>' +
+      '<span class="dim"> &#8594; </span>';
+    for (let i = 0; i < code.length; i++) {
+      s += '<b style="--c:var(--trace-' + (code.charAt(i) === MO.DOT ? 'violet' : 'emerald') +
+           ')">' + code.charAt(i) + '</b>';
+    }
+    s += '<span class="dim">   ' +
+      E.t({ en: code.length + (code.length === 1 ? ' symbol · depth ' : ' symbols · depth ') + code.length,
+            zh: code.length + ' 个符号 · 第 ' + code.length + ' 层' }) + '</span><br>';
+
+    /* 前缀关系：这个字母的码是谁的前缀、谁又是它的前缀。这一条是本页的主张，
+       所以它在读数里是一句具体的话，不是一句形容。 */
+    const anc = [], desc = [];
+    Object.keys(MO.MORSE_TABLE).forEach(function (c) {
+      const other = MO.MORSE_TABLE[c];
+      if (c === ch) return;
+      if (code.indexOf(other) === 0) anc.push(c);
+      else if (other.indexOf(code) === 0) desc.push(c);
+    });
+    if (anc.length) {
+      s += '<span class="dim">' + E.t({ en: 'its own prefixes: ', zh: '它的前缀是：' }) + '</span>' +
+        '<b style="--c:var(--trace-orange)">' + esc(anc.join(' ')) + '</b><br>';
+    }
+    if (desc.length) {
+      s += '<span class="dim">' + E.t({ en: 'a prefix of: ', zh: '它是谁的前缀：' }) + '</span>' +
+        '<b style="--c:var(--trace-orange)">' + esc(desc.join(' ')) + '</b><br>';
+    }
+    if (!anc.length && !desc.length) {
+      s += '<span class="dim">' +
+        E.t({ en: 'no prefix relation here — but E, I, S, H are still one chain',
+              zh: '这一个没有前缀关系 —— 但 E、I、S、H 依然串在同一条链上' }) + '</span><br>';
+    }
+    s += '<span class="dim">' + E.t({ en: 'stripped of gaps, ', zh: '抹掉停顿后，' }) + '</span>' +
+      '<b style="--c:var(--trace-rose)">' + esc(D.bare) + '</b>' +
+      '<span class="dim">' + E.t({ en: ' reads ', zh: ' 有 ' }) + '</span>' +
+      '<b style="--c:var(--trace-rose)">' + D.readings + '</b>' +
+      '<span class="dim">' + E.t({ en: ' ways; with them, exactly 1', zh: ' 种读法；放回停顿，恰好 1 种' }) +
+      '</span><br>' +
+      '<span class="dim">' + E.t({ en: 'morse  ', zh: '摩尔斯 ' }) + '</span>' +
+      longVal('violet', clip(D.morse, 72));
+    if (ACTIVE_NOTE) s += '<br><span class="dim">' + esc(E.t(ACTIVE_NOTE)) + '</span>';
+    return s;
+  }
+};
+
+/* ================= 页签二：编码 vs 密码 —— 顿悟视角 =================
+   左右两列是同一段明文的两种"看不懂"。四个阶段依次把东西交出去：
+
+     ① 什么都不给      两边都是天书
+     ② 公开算法        Kerckhoffs：算法可以印在报纸上，两边都还读不出来
+     ③ 公开码表        左边当场读通 —— 编码的保密性归零，因为它本来就是零
+     ④ 交出密钥 k      右边这才读通
+
+   第 ③ 步是全页的支点：**码本一公开，编码就什么也没剩下**；而算法公开之后
+   密码剩下的那一样东西，就是密钥。于是"密码"与"编码"的差别可以量成一个数
+   ——密钥空间的大小：摩尔斯 1，凯撒 26，第三页那张有密钥的三元组表 26!。
+   一个密钥空间只有一个元素的密码，就是一个编码。 */
+const STAGES = [
+  { num: '①', label: { en: 'nothing handed over', zh: '什么都不给' } },
+  { num: '②', label: { en: 'the algorithm is public', zh: '公开算法' } },
+  { num: '③', label: { en: 'the code table is public', zh: '公开码表' } },
+  { num: '④', label: { en: 'the key is handed over', zh: '交出密钥' } }
+];
+function stageText(i) { return STAGES[i].num + ' ' + E.t(STAGES[i].label); }
+
+/* log10(26!)。循环算而不是抄一个常数：抄下来的数字没有任何东西看着它。 */
+const LOG_FACT26 = (function () { let s = 0; for (let i = 2; i <= 26; i++) s += Math.log10(i); return s; })();
+
+const vsScene = {
+  label: { en: 'Code vs cipher', zh: '编码 vs 密码' },
+  brand: { en: 'The same message twice: Morse on the left, Caesar on the right. Both are unreadable to an untrained eye — only one of them is secret.',
+           zh: '同一段报文两遍：左边摩尔斯，右边凯撒。对外行人两边都是天书 —— 但只有一边是秘密。' },
+  tips: { en: 'This is the epiphany view. Press ⏭ four times. At step ③ the code table is published and the left column becomes readable to everyone — a code hides nothing, it only changes the representation. The right column needs one more thing, and that thing is the key. Publish the codebook and the code is gone; publish the key and the cipher is gone; the algorithm may be public either way — that is Kerckhoffs. Key space: Morse 1, Caesar 26. A code is a cipher whose key space has exactly one element.',
+          zh: '这就是顿悟视角。按四次 ⏭。走到第 ③ 步，码表一公开，左边这一列立刻人人可读 —— 编码什么也没藏，它只是换了一种写法。右边还差一样东西，那就是密钥。公开码本，编码就没了；公开密钥，密码就没了；而算法两边都可以公开 —— 这就是 Kerckhoffs 原则。密钥空间：摩尔斯 1，凯撒 26。所谓编码，就是密钥空间只有一个元素的密码。' },
+  presets: TEXT_PRESETS,
+  presetsLabel: PRESETS_LABEL,
+  params: ['k', 'speed'],
+  views: { iso: { label: { en: 'Iso', zh: '等距' }, az: -0.62, el: 0.42, dist: 9 } },
+  toggles: [
+    { key: 'eCipher', label: { en: 'Cipher column (Caesar)', zh: '密码列（凯撒）' },   color: ROSE,    checked: true },
+    { key: 'eCode',   label: { en: 'Code column (Morse)',    zh: '编码列（摩尔斯）' }, color: VIOLET,  checked: true },
+    { key: 'eKeys',   label: { en: 'Key space',              zh: '密钥空间' },         color: EMERALD, checked: true },
+    { key: 'eSecret', label: { en: 'What stays secret',      zh: '什么必须保密' },      color: ORANGE,  checked: true }
+  ],
+  draw: function () {
+    const D = derived();
+    const L = layout();
+    const tl = tickClock('vs', STAGES.length, 1.7);
+    const stage = tl.index % STAGES.length;
+    if (!D.n) { needText(L); return; }
+
+    const k = currentK();
+    const caesar = CS.encrypt(D.plain, k);
+
+    /* ---- 阶段条。宽屏写全名，窄屏只写序号——宽度不够时把四个全名硬塞进去，
+       结果是四团互相压住的字，不如只留序号 + 下面一行当前阶段的全名。 */
+    const wide = L.availW >= 640;
+    const sw = Math.min(210, (L.availW - 3 * 6) / 4);
+    for (let i = 0; i < STAGES.length; i++) {
+      const on = (i === stage), done = (i < stage);
+      textChip(L.x0 + i * (sw + 6), L.top - 8, sw, 22,
+             wide ? stageText(i) : STAGES[i].num,
+             { mono: true,
+               color: on ? BRIGHT : (done ? 'rgba(159,176,200,.85)' : DIM),
+               fill: on ? 'rgba(226,232,240,.10)' : (done ? 'rgba(148,163,184,.06)' : null),
+               stroke: on ? 'rgba(226,232,240,.4)' : LINE,
+               fontSize: wide ? 11 : 12 });
+    }
+    let y = L.top + (wide ? 24 : 46);
+    if (!wide) {
+      textChip(L.x0, L.top + 18, Math.min(360, L.availW), 20, stageText(stage),
+               { mono: true, color: BRIGHT, fontSize: 11.5 });
+    }
+
+    /* ---- 明文（两列共用的输入） ---- */
+    const pu = E.clamp(Math.floor(L.availW / 46), 9, 16);
+    textChip(L.x0, y, Math.min(300, L.availW), 15,
+             E.t({ en: 'the message', zh: '这段报文' }),
+             { mono: true, color: CYAN, fontSize: 10.5 });
+    const ps = charStrip(L.x0, y + 17, L.availW, D.plain, pu, 2,
+                         function () { return CYAN; }, { fontSize: pu * 0.72 });
+    y += 17 + ps.height + 12;
+
+    /* ---- 两列。高度由**剩下多少空间**反推行数，不是先定行数再挤——
+       挤的后果是两列互相压住，或者压到密钥空间那一块上面去。 ---- */
+    const secretH = E.state.eSecret ? 26 : 0;
+    const keysH = E.state.eKeys ? 112 : 0;
+    const remain = Math.max(90, L.bottom - y - keysH - secretH - 8);
+    const twoCol = L.availW >= 620;
+    const colW = twoCol ? (L.availW - 16) / 2 : L.availW;
+    /* 格宽给 colW/34 而不是 /42：/42 在 1280px 上算出 10px 的格子、7.4px 的
+       字，浏览器里点划几乎糊成一条虚线（实测截图确认）。少画几个字符、把
+       "看得清"留住——装不下的部分下面那行截断说明会明说，而这一页要比的是
+       两列的**性质**，不是把整段摩尔斯读一遍。 */
+    const cu = E.clamp(Math.floor(colW / 34), 9, 16);
+    const perColH = twoCol ? remain : (remain - 10) / 2;
+    const CHROME = 22 + 6 + 16 + 20 + 6;     // 表头 + 间隙 + 截断说明 + "还需要什么" + 间隙
+    let rowsTotal = Math.max(2, Math.floor((perColH - CHROME) / cu));
+    const revealRows = Math.min(2, Math.max(1, Math.floor(rowsTotal / 3)));
+    const bodyRows = E.clamp(rowsTotal - revealRows, 1, 3);
+    const colH = CHROME + (bodyRows + revealRows) * cu;
+
+    function column(cx, cy, on, head, headColor, body, bodyColorOf, needs, needsColor, revealAt) {
+      if (!on) return;
+      textChip(cx, cy, colW, 22, head,
+               { mono: true, color: headColor, stroke: LINE, fontSize: 11.5, radius: 6 });
+      const st = charStrip(cx, cy + 28, colW, body, cu, bodyRows, bodyColorOf,
+                           { fontSize: cu * 0.74 });
+      let yy = cy + 28 + bodyRows * cu;
+      if (st.shown < body.length) {
+        textChip(cx, yy, colW, 14,
+                 E.t({ en: '(' + st.shown + ' of ' + body.length + ' shown)',
+                       zh: '（' + body.length + ' 个里画了 ' + st.shown + ' 个）' }),
+                 { mono: true, color: ORANGE, fontSize: 9.5 });
+      }
+      yy += 16;
+      /* "要读它，你还需要什么" —— 这一行是全页的主语。 */
+      textChip(cx, yy, colW, 20, needs, { mono: true, color: needsColor, fontSize: 10.5 });
+      yy += 22;
+      /* 读通了没有：到了这一列的揭晓阶段才把明文摆出来，之前是一排问号。
+         问号不是装饰——它占着同一块位置，所以"什么时候变得可读"这件事是
+         同一处的变化，而不是画面上多出来一块新东西。 */
+      const revealed = stage >= revealAt;
+      const shown = revealed ? D.plain : D.plain.replace(/[^ ]/g, '?');
+      charStrip(cx, yy, colW, shown, cu, revealRows,
+                function () { return revealed ? BRIGHT : 'rgba(159,176,200,.35)'; },
+                { fontSize: cu * 0.72 });
+    }
+
+    column(L.x0, y, !!E.state.eCode,
+           E.t({ en: 'CODE · Morse', zh: '编码 · 摩尔斯' }), CYAN,
+           D.morse, symColor,
+           E.t(stage >= 2
+             ? { en: 'needs: the code table — you now have it',
+                 zh: '需要：码表 —— 你已经拿到了' }
+             : { en: 'needs: the code table (a public document)',
+                 zh: '需要：码表（一份公开文件）' }),
+           stage >= 2 ? CYAN : DIM, 2);
+    column(twoCol ? L.x0 + colW + 16 : L.x0, twoCol ? y : y + colH + 10, !!E.state.eCipher,
+           E.t({ en: 'CIPHER · Caesar k = ' + k, zh: '密码 · 凯撒 k = ' + k }), ROSE,
+           caesar, function () { return ROSE; },
+           E.t(stage >= 3
+             ? { en: 'needs: the key k — you now have it', zh: '需要：密钥 k —— 你已经拿到了' }
+             : (stage >= 1
+                ? { en: 'needs: the key k — nobody published it',
+                    zh: '需要：密钥 k —— 没有人公开过它' }
+                : { en: 'needs: the key k', zh: '需要：密钥 k' })),
+           stage >= 3 ? ROSE : ORANGE, 3);
+
+    y += twoCol ? colH + 10 : 2 * colH + 20;
+
+    /* ---- 密钥空间：把差别量成一个数 ---- */
+    if (E.state.eKeys) {
+      const by = Math.min(y, L.bottom - secretH - 106);
+      const bw = Math.min(430, L.availW);
+      textChip(L.x0, by, bw, 15,
+             E.t(fit(L,
+               { en: 'key space, log scale — this single number is the whole difference',
+                 zh: '密钥空间（对数刻度）—— 差别就是这一个数' },
+               { en: 'key space (log scale)', zh: '密钥空间（对数）' })),
+             { mono: true, color: EMERALD, fontSize: 10.5 });
+      /* barChart 在动画里必须传显式 max：不传的话每帧的最大值一变，所有柱子
+         都会跳。这里量程本来就是固定的（26! 是本页最大的那个），写 27 更诚实。 */
+      E.barChart(L.x0, by + 19, bw, 40, [0, Math.log10(26), LOG_FACT26], {
+        max: 27, gap: 14,
+        colorAt: function (i) { return [ORANGE, ROSE, EMERALD][i]; },
+        labels: [E.t({ en: 'Morse |K|=1', zh: '摩尔斯 |K|=1' }),
+                 E.t({ en: 'Caesar |K|=26', zh: '凯撒 |K|=26' }),
+                 E.t({ en: 'triples |K|=26!', zh: '三元组表 |K|=26!' })],
+        labelSize: 10, labelColor: DIM
+      });
+      /* 第一根柱子的高度是 0——这不是画错了，这就是结论：摩尔斯没有密钥，
+         所以"猜密钥"这件事是免费的。把这句话写在柱子旁边，别让人以为是 bug。
+         第二根只有几个像素也是真话，而且是同一件事的下一句：26 个密钥挡不住
+         任何人。这句子刻意压短——它原来那一版在 1440px 上就被截掉了尾巴。 */
+      textChip(L.x0, by + 19 + 40 + 16, Math.min(540, L.availW), 20,
+             E.t(fit(L,
+               { en: 'zero height means no key at all. 26 is a sliver; 26! is the tower.',
+                 zh: '高度为零就是没有密钥。26 只是一道细缝，26! 才是那座塔。' },
+               { en: 'zero height = no key at all', zh: '高度为零：没有密钥' })),
+             { mono: true, color: BRIGHT, fontSize: 11,
+               fill: 'rgba(226,232,240,.06)', stroke: 'rgba(226,232,240,.26)' });
+    }
+
+    /* ---- 必须保密的是什么 ---- */
+    if (E.state.eSecret) {
+      textChip(L.x0, L.bottom - 22, Math.min(560, L.availW), 20,
+             E.t(fit(L,
+               { en: 'public: the algorithm, the code table, the ciphertext.    secret: k, and only k.',
+                 zh: '可以公开：算法、码表、密文。    必须保密：k，只有 k。' },
+               { en: 'public: everything but k', zh: '除 k 之外都可以公开' })),
+             { mono: true, color: ORANGE, fontSize: 11, fill: O_SOFT, stroke: O_EDGE });
+    }
+  },
+  readout: function () {
+    syncIoLabels();
+    const D = derived();
+    if (!D.n) {
+      return '<b style="--c:var(--trace-orange)">' +
+        E.t({ en: 'nothing encodable', zh: '没有可编码的字符' }) + '</b>';
+    }
+    const tl = CLOCKS.vs;
+    const stage = tl ? tl.index % STAGES.length : 0;
+    const k = currentK();
+    return '<b style="--c:var(--trace-cyan)">' + esc(stageText(stage)) + '</b>' +
+      '<span class="dim">  ' + (stage + 1) + ' / ' + STAGES.length + '</span><br>' +
+      '<span class="dim">' + E.t({ en: 'plain  ', zh: '明文 ' }) + '</span>' +
+      longVal('cyan', clip(D.plain, 56)) + '<br>' +
+      '<span class="dim">' + E.t({ en: 'morse  ', zh: '摩尔斯 ' }) + '</span>' +
+      longVal('violet', clip(D.morse, 56)) + '<br>' +
+      '<span class="dim">' + E.t({ en: 'caesar ', zh: '凯撒 ' }) + '</span>' +
+      longVal('rose', clip(CS.encrypt(D.plain, k), 56)) + '<br>' +
+      '<span class="dim">' + E.t({ en: 'key space  ', zh: '密钥空间 ' }) + '</span>' +
+      '<b style="--c:var(--trace-orange)">1</b>' +
+      '<span class="dim"> · </span>' +
+      '<b style="--c:var(--trace-rose)">26</b>' +
+      '<span class="dim"> · </span>' +
+      '<b style="--c:var(--trace-emerald)">26! &#8776; 4&#215;10&#178;&#8310;</b><br>' +
+      '<span class="dim">' +
+      E.t({ en: 'a code is a cipher whose key space has exactly one element',
+            zh: '所谓编码，就是密钥空间只有一个元素的密码' }) + '</span>';
+  }
+};
+
+/* ================= 页签三：分裂式摩尔斯 =================
+   同一条符号流，上面挂着字母的括号，下面挂着"三个一组"的框。字母括号宽窄
+   不一（摩尔斯是变长的），组框恒等宽——两排边界因此系统性地错开，而错开的
+   那一刀就是这个密码本身：一个密文字母的三个符号来自明文的**两三个不同
+   字母**，于是密文里再没有任何一个字母对应明文里的任何一个字母。
+
+   底下那对频率柱把这句话量出来：同一段明文、同一把关键词密钥，左边是单表
+   代换（字母边界原样保留），右边是分裂式。左边的剖面就是明文的剖面换了个
+   名字，右边被抹平。 */
+const fracScene = {
+  label: { en: 'Fractionated', zh: '分裂式' },
+  brand: { en: 'Now use Morse as a substrate. Variable-length re-expression destroys the letter boundaries, and a keyed table over the 26 possible triples turns what is left into a real cipher.',
+           zh: '现在把摩尔斯当基底用。变长重写把字母边界拆掉，再给 26 个可能的三元组配一张有密钥的表，剩下的东西就成了一个真正的密码。' },
+  tips: { en: 'Watch the two rows of brackets. Above the strip the brackets are letters and they all have different widths; below it every frame is exactly three symbols wide. They do not line up, and they cannot — that mismatch is the cipher. Turn on the frequency profile: the simple substitution keeps every bit of the English signal (its sorted letter counts are identical to the plaintext), while the fractionated ciphertext keeps under a third of it.',
+          zh: '盯住上下两排括号。符号带上面那一排是字母，宽窄不一；下面那一排每一个都正好三个符号宽。它们对不齐，也不可能对齐 —— 这个错位就是这个密码。打开频率剖面：单表代换保留了英文信号的每一点（它排序后的字母计数与明文逐项相等），分裂式则只剩下不到三成。' },
+  presets: TEXT_PRESETS,
+  presetsLabel: PRESETS_LABEL,
+  params: ['speed'],
+  views: { iso: { label: { en: 'Iso', zh: '等距' }, az: -0.62, el: 0.42, dist: 9 } },
+  toggles: [
+    { key: 'fCipher',  label: { en: 'Ciphertext row',      zh: '密文行' },      color: ROSE,    checked: true },
+    { key: 'fLetters', label: { en: 'Letter row',          zh: '字母行' },      color: VIOLET,  checked: true },
+    { key: 'fFreq',    label: { en: 'Frequency profile',   zh: '频率剖面' },     color: EMERALD, checked: true },
+    { key: 'fCuts',    label: { en: 'Where the cuts fall', zh: '切口落在哪' },   color: ORANGE,  checked: true }
+  ],
+  draw: function () {
+    const D = derived();
+    const L = layout();
+    const tl = tickClock('frac', Math.max(1, D.n), 0.6);
+    if (!D.n) { needText(L); return; }
+
+    const tr = D.tr;
+    const total = tr.padded.length;
+
+    /* 格宽先定、每行几格由空间反推——反过来（先定格数再把格宽压到下限）在
+       375px 上会把末尾几格画到画布外面（crypto-caesar 1.0.2 修的就是那个）。
+       窗口宽度取 3 的倍数：组框恒是三格宽，窗口不对齐 3 的话每滚动一次组框
+       都会换个相位，看着像组的宽度在变。 */
+    const cell = E.clamp(Math.floor(L.availW / 30), 11, 26);
+    let per = Math.max(9, Math.floor(L.availW / cell));
+    per -= per % 3;
+    const winCount = Math.min(per, total);
+
+    /* 追踪的字母，以及让它留在窗口里的起点。 */
+    const cur = D.letterIdx[tl.index % D.letterIdx.length];
+    CURSOR.frac = cur;
+    let start = tr.first[cur] - Math.floor(per / 3);
+    start = Math.round(E.clamp(start, 0, Math.max(0, total - per)));
+    start -= start % 3;
+
+    const y0 = L.top + 26;
+    const rowH = 22;
+    const stripY = y0 + rowH + 6;
+    const groupY = stripY + cell + 6;
+    const winEnd = Math.min(total, start + winCount);
+
+    function cellX(i) { return L.x0 + (i - start) * cell; }
+
+    /* 表头拆成两块，不塞成一句：一句里带着"第 a–b 个，共 N 个"这种会变长的
+       数字，再接一段图例，合起来在 1440px 上也漫出了左边缘（无头驱动实测
+       x 从 −1 起）。两块各自有自己的盒子，各自独立截断。 */
+    const headW = Math.min(230, L.availW);
+    textChip(L.x0, L.top + 2, headW, 18,
+             E.t({ en: 'symbols ' + (start + 1) + '–' + winEnd + ' of ' + total,
+                   zh: '第 ' + (start + 1) + '–' + winEnd + ' 个符号 / 共 ' + total + ' 个' }),
+             { mono: true, color: SLATE, fontSize: 10.5 });
+    if (L.availW >= headW + 240) {
+      textChip(L.x0 + headW + 10, L.top + 2, L.availW - headW - 10, 18,
+               E.t({ en: 'above: letters, each a different width   ·   below: groups of three, all the same',
+                     zh: '上：字母，宽窄不一   ·   下：三个一组，恒等宽' }),
+               { mono: true, color: SLATE, fontSize: 10.5 });
+    }
+
+    /* ---- 上排：字母括号。宽度就是这个字母的码长——变长在这里是看出来的。 ---- */
+    if (E.state.fLetters) {
+      for (let j = 0; j < D.plain.length; j++) {
+        const a = tr.first[j], b = tr.last[j];
+        if (a < 0) continue;                          // 空格没有自己的符号
+        if (b < start || a >= winEnd) continue;
+        const lo = Math.max(a, start), hi = Math.min(b, winEnd - 1);
+        const on = (j === cur);
+        E.chip(cellX(lo), y0, (hi - lo + 1) * cell - 2, rowH, D.plain.charAt(j),
+               { color: on ? BRIGHT : CYAN,
+                 fill: on ? 'rgba(226,232,240,.18)' : C_SOFT,
+                 stroke: on ? 'rgba(226,232,240,.55)' : C_EDGE,
+                 fontSize: Math.min(15, cell * 0.72), radius: 3 });
+      }
+    }
+
+    /* ---- 中间：符号带 ---- */
+    E.cellGrid(L.x0, stripY, winEnd - start, 1, cell, {
+      text: function (c) { return tr.padded.charAt(start + c); },
+      fill: function (c) {
+        const i = start + c;
+        if (i >= tr.stream.length) return 'rgba(251,146,60,.24)';   // 补位
+        return symSoft(tr.padded.charAt(i));
+      },
+      textColor: function (c) {
+        const i = start + c;
+        return i >= tr.stream.length ? ORANGE : symColor(tr.padded.charAt(i));
+      },
+      stroke: LINE, fontSize: cell * 0.6
+    });
+
+    /* ---- 切口：组边界的竖线，穿过上面那一排字母括号 ----
+       画在字母行里，不画在别处：要看的正是"这一刀落在某个字母的中间"。 ---- */
+    if (E.state.fCuts) {
+      for (let i = Math.ceil(start / 3) * 3; i < winEnd; i += 3) {
+        E.flowArrow(cellX(i), y0 - 5, cellX(i), stripY + cell + 5,
+                    { color: 'rgba(251,146,60,.55)', width: 1, head: false, dash: [3, 3] });
+      }
+    }
+
+    /* ---- 下排：三个一组，每一组正好一个密文字母 ---- */
+    let yy = groupY + rowH + 10;
+    if (E.state.fCipher) {
+      const g0 = Math.floor(start / 3);
+      const gN = Math.ceil(winEnd / 3);
+      const curG = [Math.floor(tr.first[cur] / 3), Math.floor(tr.last[cur] / 3)];
+      for (let g = g0; g < gN; g++) {
+        const on = (g >= curG[0] && g <= curG[1]);
+        E.chip(cellX(g * 3), groupY, 3 * cell - 2, rowH, tr.cipher.charAt(g),
+               { color: on ? BRIGHT : ROSE,
+                 fill: on ? 'rgba(226,232,240,.18)' : R_SOFT,
+                 stroke: on ? 'rgba(226,232,240,.5)' : R_EDGE,
+                 fontSize: Math.min(15, cell * 0.7), radius: 3 });
+      }
+      /* 这一句是本页的全部主张，所以它是一句带数字的话。
+         两个数一起说：被追踪的那个字母跨了几组（看得见的那一件事），以及
+         整段报文里有多少组是**混**的（永远成立的那一件事）。只说前者不够——
+         某个字母可能恰好整个落在一组里（'A' 就会），那时候光看它会以为
+         "分裂没发生"，而它其实发生在它的邻居身上。 */
+      const span = curG[1] - curG[0] + 1;
+      const claim = D.alignedGroups === 0
+        ? { en: 'not one of the ' + D.groupCount + ' groups is a whole letter',
+            zh: D.groupCount + ' 个组里，没有一组正好是一个完整字母' }
+        : (D.alignedGroups === 1
+          ? { en: 'just 1 of the ' + D.groupCount + ' groups is a whole letter',
+              zh: D.groupCount + ' 组里只有 1 组碰巧是一个完整字母' }
+          : { en: 'only ' + D.alignedGroups + ' of the ' + D.groupCount +
+                  ' groups are whole letters',
+              zh: D.groupCount + ' 组里只有 ' + D.alignedGroups + ' 组碰巧是完整字母' });
+      textChip(L.x0, yy, Math.min(560, L.availW), 22,
+             E.t(fit(L,
+               { en: '“' + D.plain.charAt(cur) + '” lands in ' + span +
+                     (span === 1 ? ' group' : ' groups') + '  ·  ' + claim.en,
+                 zh: '「' + D.plain.charAt(cur) + '」落在 ' + span + ' 个组里  ·  ' + claim.zh },
+               { en: D.alignedGroups + '/' + D.groupCount + ' groups are a whole letter',
+                 zh: D.groupCount + ' 组里 ' + D.alignedGroups + ' 组是完整字母' })),
+             { mono: true, color: BRIGHT, fontSize: 11.5,
+               fill: 'rgba(226,232,240,.06)', stroke: 'rgba(226,232,240,.28)' });
+      yy += 28;
+    }
+
+    textChip(L.x0, yy, Math.min(560, L.availW), 18,
+           D.n + E.t({ en: ' letters → ', zh: ' 个字母 → ' }) + tr.stream.length +
+           E.t({ en: ' symbols', zh: ' 个符号' }) +
+           (tr.pad ? E.t({ en: '  (+' + tr.pad + ' padding)', zh: '（+' + tr.pad + ' 补位）' }) : '') +
+           E.t({ en: ' → ', zh: ' → ' }) + tr.groups.length +
+           E.t({ en: ' cipher letters', zh: ' 个密文字母' }),
+           { mono: true, color: EMERALD, fontSize: 11 });
+    yy += 24;
+
+    /* ---- 频率剖面：把"边界没了"量出来 ---- */
+    if (E.state.fFreq) {
+      const room = L.bottom - yy;
+      if (room < 96) {
+        textChip(L.x0, L.bottom - 20, Math.min(480, L.availW), 18,
+               E.t({ en: 'not enough room for the frequency panel — the readout has the numbers',
+                     zh: '这里放不下频率面板 —— 数字在右边读数里' }),
+               { mono: true, color: ORANGE, fontSize: 10.5 });
+      } else {
+        const twoCol = L.availW >= 620;
+        const cw = twoCol ? (L.availW - 18) / 2 : L.availW;
+        const barW = (cw - 2 * 25) / 26;                 // barChart 的 gap 默认 2
+        const labelsOn = barW >= 7;
+        /* 柱子的高度吃掉剩下的空间，整块**贴着底边**摆。不贴底的话高屏上
+           这一块会吊在画面中间，下面空掉三四百像素；而把 chH 写死成 60 则是
+           另一头的浪费——同一份数据，柱子越高越读得出差别，而这一页要读的
+           正是两条剖面的高低差。 */
+        const CHROME = 15 + 3 + 17 + (labelsOn ? 11 : 1);
+        const perPanel = twoCol ? room : (room - 8) / 2;
+        const chH = E.clamp(perPanel - CHROME - 4, 22, 170);
+        const blockH = CHROME + chH + 4;
+        /* 整块在剩下的空间里**竖直居中**：贴底会在符号带和柱子之间留下一大片
+           空白，吊在上面又会在底下留同样一片。居中把它平分到两边。 */
+        const stackH = twoCol ? blockH : 2 * blockH + 8;
+        const topY = yy + Math.max(0, (room - stackH) / 2);
+        const panels = [
+          { x: L.x0, y: topY, v: D.freqSub, color: CYAN,
+            head: E.t(fit(L,
+              { en: 'simple substitution — same key, letter boundaries intact',
+                zh: '单表代换 —— 同一把钥匙，字母边界原样' },
+              { en: 'simple substitution', zh: '单表代换' })),
+            ioc: D.iocSub, kept: D.keptSub },
+          { x: twoCol ? L.x0 + cw + 18 : L.x0, y: twoCol ? topY : topY + blockH + 8,
+            v: D.freqFrac, color: ROSE,
+            head: E.t(fit(L,
+              { en: 'fractionated Morse — boundaries gone',
+                zh: '分裂式摩尔斯 —— 边界没了' },
+              { en: 'fractionated Morse', zh: '分裂式摩尔斯' })),
+            ioc: D.iocFrac, kept: D.keptFrac }
+        ];
+        panels.forEach(function (p) {
+          if (p.y + chH + 34 > L.bottom + 2) return;
+          textChip(p.x, p.y, cw, 15, p.head, { mono: true, color: p.color, fontSize: 10 });
+          /* max 显式传：不锁量程的话每帧最高的那根一变，全部柱子都会跳。
+             两块共用**同一个** max，否则两张图各自归一化、看着一样高——而
+             "右边那张被抹平了"正是要看的东西。 */
+          E.barChart(p.x, p.y + 18, cw, chH, p.v, {
+            max: D.freqMax, gap: 2, color: p.color,
+            labels: labelsOn ? CC.ALPHABET.split('') : null,
+            labelSize: 9, labelColor: DIM
+          });
+          const iocTxt = 'IoC ' + p.ioc.toFixed(4) +
+            (p.kept == null ? '' :
+              E.t({ en: '    English signal kept ' + Math.round(Math.max(0, p.kept) * 100) + '%',
+                    zh: '    保留英文信号 ' + Math.round(Math.max(0, p.kept) * 100) + '%' }));
+          textChip(p.x, p.y + 18 + chH + (labelsOn ? 11 : 1), cw, 17, iocTxt,
+                 { mono: true, color: p.color, fontSize: 10.5 });
+        });
+      }
+    }
+  },
+  readout: function () {
+    syncIoLabels();
+    const D = derived();
+    if (!D.n) {
+      return '<b style="--c:var(--trace-orange)">' +
+        E.t({ en: 'nothing encodable', zh: '没有可编码的字符' }) + '</b>';
+    }
+    const tr = D.tr;
+    const i = Math.min(CURSOR.frac, D.plain.length - 1);
+    const ch = D.plain.charAt(i);
+    const code = tr.codes[i] || '';
+    const g0 = Math.floor(tr.first[i] / 3), g1 = Math.floor(tr.last[i] / 3);
+    let s = E.t({ en: 'letter ', zh: '字母 ' }) +
+      '<b style="--c:var(--trace-cyan)"><i>' + esc(ch) + '</i></b>' +
+      '<span class="dim"> &#8594; </span>';
+    for (let q = 0; q < code.length; q++) {
+      s += '<b style="--c:var(--trace-' + (code.charAt(q) === MO.DOT ? 'violet' : 'emerald') +
+           ')">' + code.charAt(q) + '</b>';
+    }
+    s += '<span class="dim">  ' + E.t({ en: 'lands in group ', zh: '落在第 ' }) + '</span>' +
+      '<b style="--c:var(--trace-rose)">' + (g0 + 1) +
+      (g1 > g0 ? '&#8211;' + (g1 + 1) : '') + '</b>' +
+      '<span class="dim">' + E.t({ en: ' of ' + tr.groups.length,
+                                   zh: ' 组，共 ' + tr.groups.length + ' 组' }) + '</span><br>' +
+      '<span class="dim">' + E.t({ en: 'groups  ', zh: '分组 ' }) + '</span>' +
+      '<b style="--c:var(--trace-rose)">' + D.alignedGroups + '</b>' +
+      '<span class="dim">' + E.t({ en: ' of ' + D.groupCount + ' are a whole letter · ',
+                                   zh: ' / ' + D.groupCount + ' 组正好是一个完整字母 · ' }) + '</span>' +
+      '<b style="--c:var(--trace-orange)">' + D.mixedGroups + '</b>' +
+      '<span class="dim">' + E.t({ en: ' mix two or more', zh: ' 组混着两个以上字母' }) + '</span><br>' +
+      '<span class="dim">' + E.t({ en: 'key alphabet ', zh: '密钥字母表 ' }) + '</span>' +
+      longVal('emerald', D.keyAlpha) + '<br>' +
+      '<span class="dim">' + E.t({ en: 'stream ', zh: '符号流 ' }) + '</span>' +
+      longVal('violet', clip(tr.stream, 60)) + '<br>' +
+      '<span class="dim">' + E.t({ en: 'cipher ', zh: '密文 ' }) + '</span>' +
+      longVal('rose', clip(tr.cipher, 60)) + '<br>' +
+      '<span class="dim">' + E.t({ en: 'IoC   plain ', zh: '重合指数 明文 ' }) + '</span>' +
+      '<b style="--c:var(--trace-cyan)">' + D.iocPlain.toFixed(4) + '</b>' +
+      '<span class="dim"> · ' + E.t({ en: 'substitution ', zh: '单表代换 ' }) + '</span>' +
+      '<b style="--c:var(--trace-cyan)">' + D.iocSub.toFixed(4) + '</b>' +
+      '<span class="dim"> · ' + E.t({ en: 'fractionated ', zh: '分裂式 ' }) + '</span>' +
+      '<b style="--c:var(--trace-rose)">' + D.iocFrac.toFixed(4) + '</b><br>' +
+      '<span class="dim">' +
+      E.t({ en: 'uniform random is 0.0385 — substitution keeps the plaintext IoC exactly, because it only renames letters',
+            zh: '均匀随机是 0.0385 —— 单表代换分毫不差地保留明文的重合指数，因为它只是给字母改名' }) +
+      '</span>';
+    if (ACTIVE_NOTE) s += '<br><span class="dim">' + esc(E.t(ACTIVE_NOTE)) + '</span>';
+    return s;
+  }
+};
+
+var SCENES = { 'table': tableScene, 'encoding-vs-cipher': vsScene, 'fractionated': fracScene };
+
+/* #ioHost 必须在 init() 之前搭好：引擎的 buildPresets() 会在建面板时就选中
+   第一个预置并调它的 onSelect，而那个回调要往 textarea 里写字。 */
+buildIO();
+
+E.init({ canvas: document.getElementById('c'), SCENES: SCENES, PARAMS: PARAMS,
+         TOOL: TOOL, VERSION: VERSION });
+</script>
+</body>
+</html>

@@ -405,6 +405,79 @@ def algos_gate() -> int:
               f'（其中 {deep} 个另跑了 caesar 性质断言）')
     return rc
 
+
+# 模块间依赖：浏览器分支里 root.CryptoAlgos.X = factory(..., root.CryptoAlgos.Y)
+# 表示 X 依赖 Y，因此 Y 必须在同一页的 ALGOS 清单里排得更靠前。
+ALGOS_ASSIGN_RE = re.compile(r'root\.CryptoAlgos(?:\.(\w+)|\[[\'"]([\w-]+)[\'"]\])\s*=\s*factory\(([^;]*)\);')
+ALGOS_DEP_RE = re.compile(r'root\.CryptoAlgos(?:\.(\w+)|\[[\'"]([\w-]+)[\'"]\])')
+
+
+def _algo_deps() -> dict:
+    """算法文件名 -> 它在浏览器分支里捕获的其它算法（文件名）。"""
+    key_to_file, deps_by_key = {}, {}
+    for src in sorted((ROOT / 'core' / 'algos').glob('*.js')):
+        if src.name.endswith('.test.js'):
+            continue
+        text = src.read_text(encoding='utf-8')
+        for m in ALGOS_ASSIGN_RE.finditer(text):
+            key = m.group(1) or m.group(2)
+            key_to_file[key] = src.name
+            deps = set()
+            for d in ALGOS_DEP_RE.finditer(m.group(3)):
+                deps.add(d.group(1) or d.group(2))
+            deps_by_key.setdefault(src.name, set()).update(deps)
+    return key_to_file, deps_by_key
+
+
+def algos_dep_order_check() -> int:
+    """ALGOS 清单必须满足模块间的加载顺序依赖。
+
+    这道门补的是 algos_gate() docstring 里点名的那个缺口，而那个缺口在补它的
+    当天被撞了**两次**：fractionation 的清单我写成 `fractionation.js,polybius.js`
+    （真链是 transposition → polybius → fractionation，三层），quagmire 的写成
+    `quagmire.js,vigenere.js,substitution.js`（quagmire 加载时捕获 substitution）。
+    两次都是实现者靠推理挡下的，门一声不吭——因为顺序写反时被依赖方捕获的是
+    undefined，**模块仍然挂得上**，algos_gate 的「挂上了且有函数」因此照样通过，
+    要到使用者第一次交互才炸。
+
+    静态可判定，不需要冒烟调用：依赖边就写在每个模块的 UMD 头里。
+    """
+    key_to_file, deps_by_file = _algo_deps()
+    rc = 0
+    checked = 0
+    for path in all_tool_pages():
+        m = ALGOS_BLOCK_RE.search(path.read_text(encoding='utf-8'))
+        if not m:
+            continue
+        names = [n.strip() for n in m.group(1).strip().split(',') if n.strip()]
+        if not names or names == ['none']:
+            continue
+        checked += 1
+        pos = {n: i for i, n in enumerate(names)}
+        for fname in names:
+            for depkey in sorted(deps_by_file.get(fname, ())):
+                depfile = key_to_file.get(depkey)
+                if depfile is None:
+                    print(f'ERROR: {path.name} 的 {fname} 依赖 CryptoAlgos.{depkey}，'
+                          f'但 core/algos/ 下没有任何模块挂这个键', file=sys.stderr)
+                    rc = 1
+                    continue
+                if depfile not in pos:
+                    print(f'ERROR: {path.name} 的 ALGOS 清单有 {fname}，但缺它依赖的 '
+                          f'{depfile}——页面加载时 CryptoAlgos.{depkey} 是 undefined，'
+                          f'一调用就炸', file=sys.stderr)
+                    rc = 1
+                elif pos[depfile] > pos[fname]:
+                    print(f'ERROR: {path.name} 的 ALGOS 清单顺序不对：{fname} 在加载时捕获 '
+                          f'CryptoAlgos.{depkey}，所以 {depfile} 必须排在它前面。\n'
+                          f'       现在的清单：{",".join(names)}\n'
+                          f'       顺序写反不会报错——模块照样挂得上，捕获到的是 undefined，'
+                          f'要到第一次交互才炸。', file=sys.stderr)
+                    rc = 1
+    if rc == 0:
+        print(f'ALGOS 依赖顺序：{checked} 个页面的清单满足模块加载顺序')
+    return rc
+
 # 允许出现出站引用的文件与次数。除这两处外，整个子树必须是零。
 # 数值是 1 而不是「随便几次」：两页都已经把这条路径收敛到唯一的 PARENT_HOME
 # 常量上，多出来的一次就意味着有人绕过了那个常量。
@@ -592,6 +665,7 @@ if __name__ == '__main__':
         outbound_ref_check(),
         inline_order_check(),
         script_literal_check(),
+        algos_dep_order_check(),
         control_byte_check(),
     ]
     sys.exit(1 if any(rc) else 0)
