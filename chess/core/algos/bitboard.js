@@ -25,7 +25,11 @@
    意味着从 h 线滑到了下一行的 a 线。a 线上的马往左移一位，不会报错，会
    悄没声地借位跳到 h 线去 —— 结果依然是一个合法的 BigInt，只是错的。四张
    掩码（`NOT_A` / `NOT_H` / `NOT_AB` / `NOT_GH`）就是用来把这种「跑过界」
-   的位在移位前抹掉的，源码里写的是完整正确的一份，**不许写成
+   的位抹掉的。⚠ **抹的时机是移位之后**（`<<` 比 `&` 结合得紧，
+   `(one << 17n) & NOT_A` 先移后掩）——**掩码筛的是「落点」，不是「出发点」**。
+   这句话初稿在本文件写反过两处（维护者注释一处、生成源码的教学注释一处），
+   而写反它的直接后果是计划里那条 `tips` 让读者删错了掩码、删完什么都看不见
+   （阶段 9d 第七、八处订正）。源码里写的是完整正确的一份，**不许写成
    `if (USE_MASK)` 这类人造开关** —— 将来 `tips` 会叫读者亲手删掉某一张
    试试，删完就得看见错误答案，那才是这道题的落点。
 
@@ -237,9 +241,9 @@
         '   错得悄无声息，比抛一个异常更难发现。',
         '',
         '   下面四张掩码（NOT_A / NOT_H / NOT_AB / NOT_GH）就是专门堵这个洞的：',
-        '   挪动前先把「挪了就会越界」的那些源格从 `one` 里抹掉。想亲眼看看没有',
-        '   它们会发生什么，就去把某一行的 `& NOT_A` 删掉，跑一下测试——马会从',
-        '   棋盘的这一边，悄悄冒到另一边去。 */',
+        '   移位**之后**才 & 上去，把「落错了线」的位抹掉——掩码筛的是**落点**，',
+        '   不是出发点。想亲眼看看没有它们会怎样：把马拖到 a 线（比如 a4），把',
+        '   末尾带 `& NOT_H` 与 `& NOT_GH` 的那四行删掉再跑——幽灵格冒在 g、h 线。 */',
       ],
       en: [
         '/* Warning: this problem has exactly one trap, and it doubles as the one lesson',
@@ -252,10 +256,10 @@
         '   the right edge of the row above — the knight slides from a-file to h-file.',
         '   No error is raised at all — it is silently wrong, which is worse.',
         '',
-        '   The four masks below (NOT_A / NOT_H / NOT_AB / NOT_GH) exist to plug that',
-        '   hole: before shifting, they erase from `one` any source square that would',
-        '   wrap out of bounds. Want to see it happen? Delete one `& NOT_A` below and',
-        '   run the test — watch the knight quietly reappear on the far edge. */',
+        '   The four masks below (NOT_A / NOT_H / NOT_AB / NOT_GH) plug that hole. They',
+        '   are applied **after** the shift, wiping bits that landed on a file they had',
+        '   no business reaching: a mask filters **destinations**, not origins. To watch',
+        '   it fail, put the knight on a4 and delete the four `& NOT_H` / `& NOT_GH`. */',
       ],
     },
     '',
