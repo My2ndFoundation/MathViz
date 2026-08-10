@@ -12,8 +12,8 @@
 | | |
 |---|---|
 | 第 1 章 古典密码 | **13/13 完成** |
-| 第 2 章 机械密码 | 2 个（`crypto-cipher-machines`、`crypto-enigma`）—— 见 §6 确认状态 |
-| 断言 | 约 5900 条，17+ 个测试文件 |
+| 第 2 章 机械密码 | **2/2 完成**（`crypto-cipher-machines`、`crypto-enigma`） |
+| 断言 | 约 7250 条，19 个测试文件 |
 | 校验门 | **12 道**，`cryptography/scripts/check.py` |
 | 引擎 | `crypto-1.2.0` |
 | 根项目影响 | `tools.json` / `outputs/` / `chess/` **零改动**，只有 `index.html` 一张子项目卡片 |
@@ -168,7 +168,10 @@ Files (NOTHING else): `cryptography/core/algos/<mod>.js` + `.test.js`, `cryptogr
 - ALGOS list must name **every** algo the page calls, **in dependency order** (a module capturing `root.CryptoAlgos.X` at load needs X listed first — gate 12 enforces this).
 - Never write a literal `<`+`script`+`>` anywhere including comments (gate 10). **No C0 control bytes** (gate 11).
 - **Use `VizEngine.fitCells(availW, wanted, {gap})`** for any row/grid of cells — never floor the cell size and let content spill. That shape shipped five overflow bugs here. State truncation explicitly.
-- `barChart` needs explicit `o.max` during animation. No `bindOrbit` on 2D tabs. Feed the timeline `E.state.dt`. Use `VizEngine.mathFont()`.
+- `barChart` needs explicit `o.max` during animation. Feed the timeline `E.state.dt`. Use `VizEngine.mathFont()`.
+  （**不要**再写「2D 页签不许调 bindOrbit」——`VizEngine.init()` 无条件调用它，
+  在不改共享 core 的前提下做不到。屏幕空间 2D 页签上它无害：相机变化不可见，
+  而 `CryptoInteract.bind` 能与它共存于同一个 canvas。）
 - **Check 375px** on every tab, both languages, before calling it done.
 
 ## Verification
@@ -196,11 +199,6 @@ REPORT: worktree path; files; `check.py` output; the measured numbers; per-tab b
 ## 6. 第 3 章：密码分析
 
 规范只列了一个工具：`crypto-cryptanalysis`（密码分析工作台）。
-
-**先确认第 2 章是否已合并**：`python3 -c "import json;print([t['id'] for t in json.load(open('cryptography/cryptography-tools.json'))['tools']])"`。
-若 `crypto-cipher-machines` / `crypto-enigma` 不在其中，先按 §3 收工并合并它们
-（worktree 在 `.claude/worktrees/` 下，agent id 见上一会话记录；若 worktree 已被清掉，
-就重新起 agent）。
 
 ### `crypto-cryptanalysis` — 密码分析工作台（chapter 3，accent 建议 `violet`）
 
@@ -272,6 +270,12 @@ REPORT: worktree path; files; `check.py` output; the measured numbers; per-tab b
 ---
 
 ## 9. 已知坑（每一条都真实发生过）
+
+0. **brief 里写错的事实会被实现者挡下——这是设计，不是意外。** 第 1–2 章里被挡下
+   的有：一句数学上假的话、一个不可能的扩散论断、一个不存在的历史密码、一个会自我
+   否定的演示、「摩尔斯是前缀码」、「crib 能排除大多数位置」（只对长 crib 成立，
+   比例恰好 1−(25/26)^L），以及「2D 页签不许调 bindOrbit」（做不到）。
+   **写 brief 时把可证伪的数字写进去并要求实现者复核**，比写得含糊安全得多。
 
 1. **预览面板会连续几分钟送旧的 `file://` 快照。** 两个 agent 加编排者各撞一次，
    都出现过「修复看起来验过了」其实根本没加载。在探针里断言源码标记，或起本地 HTTP。
