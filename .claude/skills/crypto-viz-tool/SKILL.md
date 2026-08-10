@@ -86,6 +86,32 @@ Subprojects card, and it already exists.
 5. Every tool needs an **epiphany view** (顿悟视角): a preset that makes the abstract relation
    suddenly visible. For Caesar it is the mod-26 helix, where "wrapping around" becomes one turn.
 
+## Fitting things to the canvas — the rule five bugs taught
+
+Canvas neither clips nor complains: content that doesn't fit simply runs off the edge, and
+the clipped cells still look like part of the message. It is invisible on a desktop viewport,
+so it ships. This has happened **five** times here (Caesar's message strip, Hill's break tab,
+Quagmire's Chinese copy overflowing by 84.5px, Morse's readings list, and the skeleton's
+title/tab-bar overlap).
+
+Every one had the same shape:
+
+```js
+const cell = clamp((availW - gap * (n - 1)) / n, MIN, MAX);   // WRONG
+```
+
+Fixing the cell **count** first and then clamping the width means `MIN` turns "doesn't fit"
+into "draws past the edge". Do it the other way round — use `VizEngine.fitCells()`:
+
+```js
+const { n, cell, total, truncated } = VizEngine.fitCells(availW, letters.length, { gap: 3 });
+// draw n cells; if truncated, say so — an ellipsis, or "1–24 / 26"
+```
+
+Truncation must be **stated**, never left to the canvas edge. And always check 375px before
+you call a tool done; the design system's five principles say the canvas is the star, which
+means it is also the thing most likely to lie to you at a width you didn't look at.
+
 ## Versioning
 
 Three places move together on every publish or upgrade:
