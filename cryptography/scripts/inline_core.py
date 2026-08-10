@@ -29,12 +29,23 @@ SOURCES = {
     'INTERACT': ROOT / 'core' / 'interact.js',
     'ANIMATION': ROOT / 'core' / 'animation.js',
     'CRYPTANALYSIS': ROOT / 'core' / 'cryptanalysis.js',
+    # 第 5 章（量子时代密码学）五页共享的模拟核心。dict 的顺序在这里不起作用：
+    # render() 是**就地替换**每一对标记，页面里的物理顺序由 html 自己决定，
+    # 所以 CRYPTO-CORE 必须排在 QUANTUM-SIM 之前这件事由 check.py 的第 9 道门
+    # （inline_order_check）守，不是靠这里的字典序。
+    'QUANTUM-SIM': ROOT / 'core' / 'quantum-sim.js',
 }
 
 # 只有部分工具有这些标记区；其余 html 缺它们是正常的，不该 WARN。
 # CRYPTANALYSIS 只有带破解页的工具要；EXAMPLES / ALGOS 逐页按需。
 # VIZ-ENGINE 与 CRYPTO-CORE 不在此列——每个工具都必须有这两块。
-OPTIONAL_TAGS = {'INTERACT', 'ANIMATION', 'CRYPTANALYSIS', 'EXAMPLES', 'ALGOS'}
+#
+# QUANTUM-SIM 在此列，而且 **_skeleton.html 有意不带这对标记**。骨架是以后每一个
+# 新工具的复制源，把一个量子模拟器内联进凯撒页面是纯粹的体积负担（读到的人还会
+# 问"这是干嘛的"）。第 5 章的五个页面各自在自己的 html 里写上这对标记即可——
+# 那是一次显式的、逐页的选择，正如 ALGOS 清单也是逐页显式列出的。
+OPTIONAL_TAGS = {'INTERACT', 'ANIMATION', 'CRYPTANALYSIS', 'EXAMPLES', 'ALGOS',
+                 'QUANTUM-SIM'}
 
 
 def block(tag: str, body: str) -> str:

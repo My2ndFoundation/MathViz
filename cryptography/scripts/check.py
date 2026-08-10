@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""cryptography 子项目校验门（设计文档 §5）。
+"""cryptography 子项目校验门（设计文档 §5、§19）。
 
-十道门全部**无条件**跑到底，最后按「任一失败则整体失败」汇总退出码。
+十六道门全部**无条件**跑到底，最后按「任一失败则整体失败」汇总退出码。
 
 | # | 函数                              | 守什么 |
 |---|-----------------------------------|--------|
@@ -13,8 +13,18 @@
 | 6 | version_meta_check()              | 注册表 version == html 的 tool-version meta |
 | 7 | algos_gate()                      | 内联的 ALGOS 块在**浏览器分支**下能跑，且 Caesar 全 k 往返成立 |
 | 8 | outbound_ref_check()              | `../` 只出现在 app/index 各一次，其余目录零次 |
-| 9 | inline_order_check()              | CRYPTO-CORE 的标记必须排在 CRYPTANALYSIS / ALGOS 之前 |
+| 9 | inline_order_check()              | CRYPTO-CORE 的标记必须排在 CRYPTANALYSIS / ALGOS / QUANTUM-SIM 之前 |
 |10 | script_literal_check()            | core/ 与 examples/ 的 js 里不许出现 <script / </script 字面量 |
+|11 | algos_dep_order_check()           | ALGOS 清单满足模块之间的加载顺序依赖 |
+|12 | control_byte_check()              | core/ examples/ tools/ 里不许有 C0 控制字符 |
+|13 | quantum_probability_check()       | 量子模块产出的每一个概率 ∈ [0,1]，成组的加到 1 |
+|14 | quantum_norm_check()              | 长序列酉演化后 \\|α\\|²+\\|β\\|² 仍在 NORM_TOL 内 |
+|15 | quantum_determinism_check()       | 量子测试跑两遍输出逐字节相同；源码里没有未拴住的随机源 |
+|16 | quantum_bb84_check()              | 无 Eve QBER 恰为 0、拦截—重发 QBER ≈ 25%、筛选率 ≈ 50% |
+
+13–16 是规范 §19 给量子工具额外列的四条。注意它们跑的是**裸 vm 沙箱**里的
+浏览器分支：在第一个量子页面出现之前，没有任何 html 内联 QUANTUM-SIM，
+所以第 7 道门那种"从页面里挖内联副本"的路子覆盖不到 quantum-sim.js。
 """
 import json
 import pathlib
@@ -524,17 +534,23 @@ def outbound_ref_check() -> int:
     return rc
 
 
-# 依赖在前：这两个模块的浏览器分支都是 factory(root.CryptoCore)，
+# 依赖在前：这三个模块的浏览器分支都是 factory(root.CryptoCore)，
 # crypto-core 必须已经跑过。顺序错了页面**加载时毫无征兆**。
-INLINE_ORDER_AFTER_CORE = ('CRYPTANALYSIS', 'ALGOS')
+#
+# QUANTUM-SIM 是第 5 章加进来的第三条边，形状与前两条一模一样：它在
+# keyHex() 里用 CryptoCore 的 fromBits / toHex，而那个捕获发生在**加载时**。
+# quantum-sim.test.js 末尾有一段在裸 vm 里复现这个洞的断言——没有 CryptoCore
+# 时 QuantumSim 照样挂得上、概率计算照常返回正确答案，要到第一次调用 keyHex
+# 才炸。加载时毫无征兆，正是这道门存在的理由。
+INLINE_ORDER_AFTER_CORE = ('CRYPTANALYSIS', 'ALGOS', 'QUANTUM-SIM')
 
 
 def inline_order_check() -> int:
     """CRYPTO-CORE 的标记必须排在依赖它的模块之前。
 
-    这道门守的是一个**静默**失败：caesar.js 与 cryptanalysis.js 的浏览器分支
-    都写 factory(root.CryptoCore)。若 crypto-core.js 内联在它们之后，页面加载
-    时什么都不会发生——C 捕获成 undefined，模块照常挂上 root，直到使用者敲
+    这道门守的是一个**静默**失败：caesar.js、cryptanalysis.js 与 quantum-sim.js
+    的浏览器分支都写 factory(root.CryptoCore)。若 crypto-core.js 内联在它们之后，
+    页面加载时什么都不会发生——C 捕获成 undefined，模块照常挂上 root，直到使用者敲
     第一个键才炸在 "Cannot read properties of undefined (reading 'mod')"。
     建这个子项目时在 vm 沙箱里复现过。
 
@@ -649,6 +665,396 @@ def control_byte_check() -> int:
     return rc
 
 
+# ================= 第 5 章：量子模拟器的四道门（规范 §19）=================
+#
+# 规范给量子工具额外列了四条：概率落在 [0,1]、态归一化、确定性种子测试、
+# BB84 的统计行为。它们在这里比在别处更要紧，原因是一件容易被忽略的事：
+# **今天没有任何工具页内联 QUANTUM-SIM**（骨架有意不带这对标记，见
+# inline_core.py 的注释），所以 algos_gate 那种"从页面里挖出内联副本再求值"
+# 的做法一行都覆盖不到它。在第一个量子页面出现之前，这四道门是
+# core/quantum-sim.js **浏览器分支的唯一覆盖**——沙箱因此必须是裸的，
+# 而不是图省事直接 require()。
+#
+# 四道门共用一个裸 vm 沙箱：只有 self 与 console，没有 module、没有 require。
+# `node -e` 与 node 从 stdin 读脚本**都会**定义 module 与 require，那样跑到的
+# 是 UMD 的 node 分支——一道测错分支的门，比没有门更坏，因为它宣称了自己
+# 并不具备的覆盖。外层脚本仍然走 node 分支（它要 require vm 与 fs），
+# 裸的是内层沙箱，脚本自己会断言这一点。
+
+# 门 15 用的种子。写死而不是随取，是因为这道门的每个数字都要可复现；
+# 用三个而不是一个，是为了让"恰好这个种子对"与"性质成立"分得开。
+QUANTUM_SEEDS = (20260810, 7, 991)
+# 统计门的容差 = K_SIGMA × √(p(1−p)/m)，m 是**当次真实的样本量**。
+# 写成样本量的函数而不是一个魔数：魔数在 n 变大时会莫名其妙地变松，在 n 变小
+# 时会变成随机变红。K 取 6 是量出来的——200 个种子、n=4000 的普查里最大偏差
+# 是 4.05σ，6σ 留了足够的余量让换种子不至于变红；而真正的错误（Eve 不塌缩 →
+# QBER 0、不做基对账 → 筛选率 1）在 n=20000 上都在 50σ 以上，6σ 完全拦得住。
+K_SIGMA = 6
+
+
+def _quantum_script(body: str) -> str:
+    """把 crypto-core.js 与 quantum-sim.js 装进裸 vm 沙箱，再跑 body。
+
+    两个文件按**依赖顺序**求值（core 在前）——这既是页面里必须成立的顺序，
+    也让这段脚本本身成为 inline_order_check 那条规则的一个活样例。
+    """
+    core = ROOT / 'core' / 'crypto-core.js'
+    qsim = ROOT / 'core' / 'quantum-sim.js'
+    return (
+        'const vm = require("vm"), fs = require("fs");\n'
+        'const sandbox = {}; sandbox.self = sandbox; sandbox.console = console;\n'
+        'vm.createContext(sandbox);\n'
+        f'vm.runInContext(fs.readFileSync({json.dumps(str(core))}, "utf8"), sandbox);\n'
+        f'vm.runInContext(fs.readFileSync({json.dumps(str(qsim))}, "utf8"), sandbox);\n'
+        'if (typeof sandbox.module !== "undefined" || typeof sandbox.require !== "undefined") {\n'
+        '  console.error("沙箱不干净：module/require 泄漏进来了，测的还是 node 分支");\n'
+        '  process.exit(1);\n'
+        '}\n'
+        'const Q = sandbox.QuantumSim;\n'
+        'if (!Q) { console.error("QuantumSim 没有挂到 root——浏览器分支坏了"); process.exit(1); }\n'
+        'function fail(msg) { console.error(msg); process.exit(1); }\n'
+        + body)
+
+
+def _report_node(name: str, proc) -> int:
+    if proc.returncode != 0:
+        print(f'ERROR: {name}\n{(proc.stderr or "").strip()}', file=sys.stderr)
+        return 1
+    out = (proc.stdout or '').strip()
+    if out:
+        print(out)
+    return 0
+
+
+def quantum_probability_check() -> int:
+    """本模块能产出的**每一个**概率都必须落在 [0,1]，成组的还要加到 1。
+
+    覆盖的产出点逐个列出来，免得下次加了新出口没人想起要扫它：
+      probabilities / probabilityOf / malus / jointProbabilities /
+      measure().p / measurePair().p / bb84Run().siftRate / qber.rate /
+      每个光子里 Eve 那次测量的 p。
+
+    最后要求 checked > 0：一个循环体一次都没转的门会安安静静地报绿，
+    本仓真发出过这样的探针。
+    """
+    body = r'''
+let checked = 0;
+function p01(v, what) {
+  if (typeof v !== 'number' || !isFinite(v)) fail(what + ' 不是有限数：' + v);
+  if (v < 0 || v > 1) fail(what + ' 落在 [0,1] 之外：' + v);
+  checked++;
+}
+function sum1(arr, what) {
+  let s = 0; for (const x of arr) s += x;
+  if (Math.abs(s - 1) > Q.NORM_TOL) fail(what + ' 的概率和不是 1：' + s);
+}
+
+// 1) probabilities / probabilityOf：Bloch 球上的网格 × 三个基
+const states = [];
+for (let ti = 0; ti <= 12; ti++) {
+  for (let pi = 0; pi < 12; pi++) {
+    states.push(Q.fromBloch(ti * Math.PI / 12, pi * Math.PI / 6));
+  }
+}
+for (const s of states) {
+  for (const id of Object.keys(Q.BASES)) {
+    const pr = Q.probabilities(s, id);
+    p01(pr[0], 'probabilities(' + id + ')[0]');
+    p01(pr[1], 'probabilities(' + id + ')[1]');
+    sum1(pr, 'probabilities(' + id + ')');
+  }
+  for (const t of states) p01(Q.probabilityOf(s, t), 'probabilityOf');
+}
+
+// 2) malus：整周角，含钝角——cos 在那里是负的，忘了平方就会在这里露馅
+for (let d = -360; d <= 360; d += 3) p01(Q.malus(d), 'malus(' + d + ')');
+
+// 3) jointProbabilities：四个贝尔态 × 角度网格
+for (const id of Object.keys(Q.BELL)) {
+  for (let i = 0; i <= 8; i++) {
+    for (let j = 0; j <= 8; j++) {
+      const jp = Q.jointProbabilities(Q.bellState(id), i * Math.PI / 4, j * Math.PI / 4);
+      jp.forEach((x, k) => p01(x, 'jointProbabilities(' + id + ')[' + k + ']'));
+      sum1(jp, 'jointProbabilities(' + id + ')');
+    }
+  }
+}
+
+// 4) 测量返回的 p
+const r = Q.rng32(20260810);
+for (let i = 0; i < 3000; i++) {
+  const s = states[i % states.length];
+  p01(Q.measure(s, 'rect', r).p, 'measure().p');
+  p01(Q.measure(s, 'diag', r).p, 'measure().p');
+  p01(Q.measure(s, 'circ', r).p, 'measure().p');
+  const mp = Q.measurePair(Q.BELL['psi-'], i * 0.01, i * 0.017, r);
+  p01(mp.p, 'measurePair().p');
+  sum1(mp.probabilities, 'measurePair().probabilities');
+}
+
+// 5) 协议层：筛选率、QBER、Eve 每一次测量的 p
+for (const eve of [false, true]) {
+  const run = Q.bb84Run({ n: 4000, rng: Q.rng32(991), eve: eve });
+  p01(run.siftRate, 'bb84Run().siftRate');
+  p01(run.qber.rate, 'bb84Run().qber.rate');
+  for (const ph of run.photons) if (ph.eve) p01(ph.eve.p, '光子记录里 Eve 那次测量的 p');
+}
+// 空比对返回 null 而不是 0：没有证据不等于没有错误。null 不该被当成概率检查。
+if (Q.qberOf([], []).rate !== null) fail('qberOf([],[]) 的 rate 应该是 null');
+
+if (checked === 0) fail('一个概率都没检查到——这道门扫空了');
+console.log('量子概率门：' + checked.toLocaleString('en-US') + ' 个概率全部落在 [0,1]，成组的都加到 1');
+'''
+    return _report_node('量子概率门失败', run_node(_quantum_script(body)))
+
+
+def quantum_norm_check() -> int:
+    """|α|²+|β|² = 1，在 QuantumSim.NORM_TOL 的容差内。
+
+    **必须在一段序列之后测，不能只测一次。** 单次施加酉门的误差在 1e-16
+    量级，任何容差都过得去；只有连着施加成千上万次，浮点误差才积到能说明
+    问题的量级（实测 20000 步 4.8e-13、200000 步 4.8e-12，大致按 √步数 走）。
+    容差 1e-9 因此有五到六个数量级的余量，而真实的错误（H 门的 1/√2 写成
+    0.707 一步就把模长打到 0.99970）比它大五个数量级以上——两边都够远。
+
+    容差从模块自己的 NORM_TOL 读，不在这里另写一个常数：两处各写各的时，
+    改了一处而忘了另一处不会有任何东西报警。
+
+    防真空的那一条比看上去难写，这里记下踩过的那一脚。最初写的是
+    `worst > 0`——想法是"如果 applyGate 哪天偷偷重新归一化，偏差会恒为 0，
+    这道门就只是在比较 1 和 1"。**负控证明这条守卫不成立**：把 applyGate 换成
+    unitQubit(...) 之后，偏差不是 0 而是 6.661e-16（除以 √模长本身还剩一个
+    ulp），门照样报绿，还印出"余量 1501200×"这种听着很安全的话。
+    真正区分得开的是**增长**：真实的累积是随机游走，20000 步的最大偏差比
+    100 步大两个数量级（实测 4.0e-15 → 4.8e-13，约 120 倍）；而被重新归一化过的
+    序列不管跑多长都停在一个 ulp 上，比值约等于 1。所以这道门要求长序列的偏差
+    至少是短前缀的 GROWTH_MIN 倍——这才是"我确实在观测累积"的证据。
+    """
+    body = r'''
+const SEQ = [Q.GATES.H, Q.GATES.X, Q.GATES.Y, Q.GATES.Z, Q.GATES.S, Q.GATES.T,
+             Q.rx(0.7), Q.ry(1.3), Q.rz(2.1), Q.rx(-0.37), Q.ry(-2.9), Q.rz(0.11)];
+for (const k of Object.keys(Q.GATES)) {
+  if (!Q.isUnitary(Q.GATES[k])) fail('GATES.' + k + ' 不是酉矩阵');
+}
+// SHORT 是"短前缀"，LONG 是整条序列；两者的最大偏差之比就是增长证据。
+const SHORT = 100, LONG = 20000, GROWTH_MIN = 8;
+let worst = 0, steps = 0, worstAt = '';
+let seqShort = 0, seqLong = 0;
+function note(dev, where) {
+  if (!isFinite(dev)) fail(where + ' 的模方不是有限数');
+  if (dev > worst) { worst = dev; worstAt = where; }
+}
+for (const seed of [20260810, 7, 991]) {
+  for (const start of [Q.KET.zero, Q.KET.plus, Q.KET.right]) {
+    const r = Q.rng32(seed);
+    let s = start;
+    for (let i = 0; i < LONG; i++) {
+      s = Q.applyGate(s, Q.randomChoice(r, SEQ));
+      steps++;
+      const dev = Math.abs(Q.norm2(s) - 1);
+      note(dev, '种子 ' + seed + ' 第 ' + i + ' 步');
+      if (dev > seqLong) seqLong = dev;
+      if (i < SHORT && dev > seqShort) seqShort = dev;
+      // 纯态必然落在 Bloch 球面上；半径是同一条守恒律的另一张脸。
+      if (dev <= Q.NORM_TOL) {
+        note(Math.abs(Q.blochRadius(s) - 1), '种子 ' + seed + ' 第 ' + i + ' 步的 Bloch 半径');
+      }
+    }
+  }
+}
+// 塌缩后的态、fromBloch 造出来的态、双比特态也一并查——归一化不是只有门会破坏它。
+const r2 = Q.rng32(20260810);
+for (let i = 0; i < 4000; i++) {
+  const st = Q.fromBloch(Math.PI * (i % 97) / 96, Math.PI * (i % 53) / 26);
+  note(Math.abs(Q.norm2(st) - 1), 'fromBloch');
+  const m = Q.measure(st, ['rect', 'diag', 'circ'][i % 3], r2);
+  note(Math.abs(Q.norm2(m.state) - 1), '塌缩后的态');
+  steps += 2;
+}
+for (const id of Object.keys(Q.BELL)) {
+  let s = 0;
+  for (const c of Q.BELL[id]) s += Q.cAbs2(c);
+  note(Math.abs(s - 1), '贝尔态 ' + id);
+  steps++;
+}
+if (steps === 0) fail('一步都没跑——这道门扫空了');
+if (!(seqLong > 0)) fail('整条序列的最大偏差恰好是 0——这道门在比较 1 和 1');
+// 防真空：偏差必须随序列变长而增大。停在一个 ulp 上说明有人在 applyGate 里
+// 重新归一化了，那时这道门测的是"我什么都没测"（见 docstring 里的负控记录）。
+const growth = seqShort > 0 ? seqLong / seqShort : Infinity;
+if (growth < GROWTH_MIN) {
+  fail('偏差没有随序列长度增长：前 ' + SHORT + ' 步 ' + seqShort.toExponential(3) +
+       '，' + LONG + ' 步 ' + seqLong.toExponential(3) + '（仅 ' + growth.toFixed(1) +
+       '×，至少要 ' + GROWTH_MIN + '×）。applyGate 是不是偷偷重新归一化了？' +
+       '那样的话这道门观测不到任何累积，报出来的绿是空的。');
+}
+if (worst > Q.NORM_TOL) {
+  fail('归一化偏差 ' + worst.toExponential(3) + ' 超过容差 ' + Q.NORM_TOL +
+       '（' + worstAt + '）');
+}
+console.log('量子归一化门：' + steps.toLocaleString('en-US') + ' 步后最大偏差 ' +
+            worst.toExponential(3) + '，容差 ' + Q.NORM_TOL +
+            '（余量 ' + Math.round(Q.NORM_TOL / worst) + '×）；' +
+            '累积可观测：前 ' + SHORT + ' 步 ' + seqShort.toExponential(3) +
+            ' → ' + LONG + ' 步 ' + seqLong.toExponential(3) +
+            '（' + growth.toFixed(0) + '×）');
+'''
+    return _report_node('量子归一化门失败', run_node(_quantum_script(body)))
+
+
+# 未拴住的随机源。**只匹配调用形态**（名字后面跟一个左括号），不匹配裸名字。
+#
+# 这条区分是必须的，而且是被自己绊了一跤才写下来的：本模块与它的测试里到处
+# 在注释与报错文案里写"本模块内不使用 Math.random"——一条裸的子串规则会把
+# 这些**在讲不要用它**的句子判成违规。那样的门只有两个结局：被绕过，或者
+# 被删掉。要在注释里提它，写成不带括号的名字即可。
+#
+# 已知残余缺口，写出来而不是假装不存在：`const f = Math.random; f();` 这样绕开
+# 调用形态的写法这条正则抓不到。抓它的是本门的另一半——把测试跑两遍比对字节。
+# 文本扫描的职责是"在引入的那一刻指出是哪一行"，双跑的职责才是"证明确定性"。
+NONDETERMINISM_RE = re.compile(
+    r'(?:Math\.random|Date\.now|new\s+Date|performance\.now|process\.hrtime'
+    r'|getRandomValues)\s*\(')
+
+
+def quantum_determinism_check() -> int:
+    """量子测试必须是确定性的：跑两遍，输出逐字节相同。
+
+    为什么以**行为**为准而不是只 grep：grep 'Math.random' 抓不到 Date.now()、
+    抓不到 Set / Map 的遍历顺序、抓不到一次没上种子的洗牌，也抓不到"输出里
+    印了一个耗时"。跑两遍比对字节能一次抓住全部——这是唯一真正证明了
+    确定性的做法。文本扫描仍然保留，因为它能在**引入的那一刻**指出是哪一行，
+    而双跑只会告诉你"两次不一样"。两者一起才既抓得住又指得出。
+
+    两条防真空的守卫：输出必须非空（两份空输出当然逐字节相同），
+    测试文件必须存在。
+    """
+    rc = 0
+    test = ROOT / 'core' / 'quantum-sim.test.js'
+    if not test.exists():
+        print(f'ERROR: 找不到 {test.relative_to(ROOT)}——这道门本该跑它', file=sys.stderr)
+        return 1
+
+    for name in ('quantum-sim.js', 'quantum-sim.test.js'):
+        path = ROOT / 'core' / name
+        text = path.read_text(encoding='utf-8')
+        for m in NONDETERMINISM_RE.finditer(text):
+            line = text[:m.start()].count('\n') + 1
+            print(f'ERROR: {path.relative_to(ROOT)} 第 {line} 行调用了 '
+                  f'{m.group(0).strip()!r}。\n'
+                  f'       量子模块的随机性必须全部来自显式种子——一个只在某些\n'
+                  f'       运行里变红的测量测试，比没有测试更糟。用注入的 rng '
+                  f'或 rng32(seed)。', file=sys.stderr)
+            rc = 1
+
+    runs = []
+    for _ in range(2):
+        proc = subprocess.run(['node', str(test)], capture_output=True, text=True)
+        if proc.returncode != 0:
+            print(f'ERROR: {test.name} 未通过\n{proc.stderr.strip()}', file=sys.stderr)
+            return 1
+        runs.append(proc.stdout + proc.stderr)
+    if not runs[0].strip():
+        print(f'ERROR: {test.name} 什么都没输出——两份空输出当然逐字节相同，'
+              f'这道门会因此报出一个没有内容的绿', file=sys.stderr)
+        return 1
+    if runs[0] != runs[1]:
+        print('ERROR: 量子测试跑两遍的输出不一致——有随机性没被种子拴住。\n'
+              f'       第一遍：{runs[0].strip()[:200]}\n'
+              f'       第二遍：{runs[1].strip()[:200]}', file=sys.stderr)
+        rc = 1
+    if rc == 0:
+        print(f'量子确定性门：{test.name} 跑两遍输出逐字节相同'
+              f'（{len(runs[0])} 字节），源码里没有未拴住的随机源')
+    return rc
+
+
+def quantum_bb84_check() -> int:
+    """BB84 的三个统计数字必须对得上教科书。
+
+      · 无 Eve：筛后密钥逐位相同，QBER **恰好** 0（不是"约等于"）。
+      · 有 Eve（拦截—重发）：QBER 期望 25% —— Eve 有 1/2 的机会选对基（此时
+        无害），另 1/2 里 Bob 的结果完全随机、其中一半出错，0.5 × 0.5 = 0.25。
+      · 基对账保留约 50% 的光子（双方各自独立地在两个基里等概率选）。
+
+    每一个"零"都配了负控，否则它证明不了任何事：QBER = 0 那一条后面紧跟着
+    "不做基对账时错误率跳到 25%"——若模拟器根本不会出错，后一条会当场变红。
+
+    容差 = K_SIGMA × √(p(1−p)/m)，m 取当次真实的样本量（QBER 用筛后长度，
+    筛选率用 n），不是魔数。
+    """
+    body = r'''
+const N = 20000;
+const SEEDS = __SEEDS__;
+const K = __K__;
+const lines = [];
+for (const seed of SEEDS) {
+  const clean = Q.bb84Run({ n: N, rng: Q.rng32(seed), eve: false });
+  const spied = Q.bb84Run({ n: N, rng: Q.rng32(seed), eve: true });
+
+  // 防真空：一个空的筛后密钥也能让 "errors === 0" 报绿。
+  if (!(clean.qber.compared > N / 4)) {
+    fail('种子 ' + seed + ' 的筛后密钥只有 ' + clean.qber.compared + ' 位，太少，' +
+         '后面的断言会退化成真空');
+  }
+  if (clean.qber.rate !== 0 || clean.qber.errors !== 0) {
+    fail('种子 ' + seed + '：无 Eve 时 QBER 必须恰好为 0，实际 ' + clean.qber.rate +
+         '（' + clean.qber.errors + '/' + clean.qber.compared + '）');
+  }
+  // 上面那个 0 的负控：不做基对账时错误率必须跳到 25%。若这一条不成立，
+  // "QBER = 0" 就只说明这个模拟器根本不会出错，什么也没证明。
+  let raw = 0;
+  for (const p of clean.photons) if (p.bobBit !== p.aliceBit) raw++;
+  const rawRate = raw / N;
+  const rawTol = K * Math.sqrt(0.25 * 0.75 / N);
+  if (Math.abs(rawRate - 0.25) > rawTol) {
+    fail('种子 ' + seed + '：不筛选时的错误率是 ' + rawRate.toFixed(5) +
+         '，期望 0.25 ± ' + rawTol.toFixed(5) +
+         '——那个 "QBER = 0" 于是不是基对账带来的');
+  }
+
+  const qTol = K * Math.sqrt(0.25 * 0.75 / spied.qber.compared);
+  if (Math.abs(spied.qber.rate - 0.25) > qTol) {
+    fail('种子 ' + seed + '：拦截—重发的 QBER 是 ' + spied.qber.rate.toFixed(5) +
+         '，期望 0.25 ± ' + qTol.toFixed(5) + '（' + K + 'σ，样本量 ' +
+         spied.qber.compared + '）');
+  }
+  const sTol = K * Math.sqrt(0.25 / N);
+  if (Math.abs(clean.siftRate - 0.5) > sTol) {
+    fail('种子 ' + seed + '：筛选率是 ' + clean.siftRate.toFixed(5) +
+         '，期望 0.5 ± ' + sTol.toFixed(5) + '（' + K + 'σ，样本量 ' + N + '）');
+  }
+  if (spied.siftRate !== clean.siftRate) {
+    fail('种子 ' + seed + '：Eve 不该改变筛选率，' + clean.siftRate + ' -> ' + spied.siftRate);
+  }
+  // 开关 Eve 只改变一件事：同种子下 Alice 比特与双方基必须逐位不变。
+  // 这条性质是 DRAWS_PER_PHOTON 恒为 6 的理由，破了它页面就分不清多出来的
+  // 错误是 Eve 造成的还是换了一批光子造成的。
+  for (let i = 0; i < N; i++) {
+    const a = clean.photons[i], b = spied.photons[i];
+    if (a.aliceBit !== b.aliceBit || a.aliceBasis !== b.aliceBasis ||
+        a.bobBasis !== b.bobBasis) {
+      fail('种子 ' + seed + ' 第 ' + i + ' 个光子：开关 Eve 后光子链错位了');
+    }
+  }
+  lines.push('  种子 ' + seed + '：筛选率 ' + clean.siftRate.toFixed(5) +
+             '（筛后 ' + clean.qber.compared + ' 位）· 无 Eve QBER ' + clean.qber.rate +
+             ' · 有 Eve QBER ' + spied.qber.rate.toFixed(5) +
+             ' · 不筛选时 ' + rawRate.toFixed(5));
+}
+console.log('BB84 统计门：' + SEEDS.length + ' 个种子 × n=' + N +
+            '，无 Eve QBER 恰为 0、拦截—重发 QBER ≈ 0.25、筛选率 ≈ 0.5（容差 ' +
+            K + 'σ，随样本量计算）');
+lines.forEach(l => console.log(l));
+'''
+    # 用占位符替换而不是 % 或 .format()：这段 JS 里到处是百分号（"25%"、"50%"），
+    # 走 % 格式化会当场炸在一个跟内容毫无关系的 "not enough arguments"，
+    # 走 .format() 则要把每一对花括号都转义——而 JS 全是花括号。
+    body = (body.replace('__SEEDS__', json.dumps(list(QUANTUM_SEEDS)))
+                .replace('__K__', str(K_SIGMA)))
+    return _report_node('BB84 统计门失败', run_node(_quantum_script(body)))
+
+
 if __name__ == '__main__':
     # 十道门都要跑到底、都要报——**不能用 `or` 短路**。`a() or b() or c()`
     # 一旦 a() 非零就跳过后面的，意味着一份过期的内联副本（或任何语法错误）
@@ -667,5 +1073,9 @@ if __name__ == '__main__':
         script_literal_check(),
         algos_dep_order_check(),
         control_byte_check(),
+        quantum_probability_check(),
+        quantum_norm_check(),
+        quantum_determinism_check(),
+        quantum_bb84_check(),
     ]
     sys.exit(1 if any(rc) else 0)
