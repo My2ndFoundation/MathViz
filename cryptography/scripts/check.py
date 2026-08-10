@@ -510,6 +510,52 @@ def script_literal_check() -> int:
     return rc
 
 
+# C0 控制字符里只有这三个在源码里是正常的。其余（尤其 NUL）一旦混进来，
+# 各个工具对它的解释就不再一致，而**语法门恰恰是看不见它的那一个**。
+CONTROL_OK = {'\t', '\n', '\r'}
+
+
+def control_byte_check() -> int:
+    """源码里不许出现 C0 控制字符（\\t \\n \\r 除外）。
+
+    这道门是从一次真实的擦肩而过里来的：建换位密码那一页时，一个 NUL 字节
+    混进了某个字符串字面量。**`node --check` 接受它**——NUL 在 JS 字符串里
+    是合法字符——所以语法门（门 2）当场报绿；而本仓到处在用的 awk 抽取配方
+    在 NUL 处把那一行截断，报出一个跟真实代码毫无关系的 SyntaxError，grep
+    则直接把文件当二进制、静默不匹配。
+
+    失败形状与门 10 守的 `<`+`script` 完全一样：**门检查的字节与浏览器真正
+    执行的字节不是同一份**。门 10 只挡那一个特定子串，挡不住这一类。一个
+    看不见的字节能让三样工具给出三种答案，而最权威的那一样（语法门）说没事。
+
+    范围比门 10 宽：core/ 与 examples/ 会被内联，tools/ 是最终产物，
+    三处都必须干净。
+    """
+    rc = 0
+    scanned = 0
+    for base, pattern in (('core', '*.js'), ('examples', '*.js'), ('tools', '*.html')):
+        for path in sorted((ROOT / base).rglob(pattern)):
+            scanned += 1
+            text = path.read_text(encoding='utf-8')
+            bad = {}
+            for ch in text:
+                if ch < ' ' and ch not in CONTROL_OK:
+                    bad[ch] = bad.get(ch, 0) + 1
+            if bad:
+                detail = '、'.join(f'U+{ord(c):04X}×{n}' for c, n in sorted(bad.items()))
+                line = text[:text.index(min(bad, key=lambda c: text.index(c)))].count('\n') + 1
+                print(f'ERROR: {path.relative_to(ROOT)} 含 C0 控制字符（{detail}），'
+                      f'首次出现在第 {line} 行。\n'
+                      f'       node --check 看不见它（NUL 在 JS 字符串里合法），但 awk 抽取\n'
+                      f'       配方会在那里截断、grep 会把文件当二进制——门检查的字节与浏览器\n'
+                      f'       执行的字节于是不是同一份。用 JSON.stringify 或转义写法重写那个\n'
+                      f'       字面量。', file=sys.stderr)
+                rc = 1
+    if rc == 0:
+        print(f'控制字符：{scanned} 个文件干净')
+    return rc
+
+
 if __name__ == '__main__':
     # 十道门都要跑到底、都要报——**不能用 `or` 短路**。`a() or b() or c()`
     # 一旦 a() 非零就跳过后面的，意味着一份过期的内联副本（或任何语法错误）
@@ -526,5 +572,6 @@ if __name__ == '__main__':
         outbound_ref_check(),
         inline_order_check(),
         script_literal_check(),
+        control_byte_check(),
     ]
     sys.exit(1 if any(rc) else 0)
