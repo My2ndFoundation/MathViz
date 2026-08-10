@@ -474,9 +474,27 @@ function idFromPath(path) {
   return null;
 }
 
+/* 注册表指纹：把每条 id:version 拼起来做 djb2-xor。画廊页自己内嵌了一份
+   FALLBACK，所以它的"版本"不是某一个工具的版本，而是整张表的版本——任何一个
+   工具升级，这个哈希就变，画廊的缓存副本随之失效。与主站 app.html 同源。 */
+function regFingerprint() {
+  var s = '';
+  for (var i = 0; i < TOOLS.length; i++) s += TOOLS[i].id + ':' + (TOOLS[i].version || '?') + ';';
+  var h = 5381;
+  for (var j = 0; j < s.length; j++) h = ((h * 33) ^ s.charCodeAt(j)) >>> 0;   /* djb2-xor */
+  return h.toString(36);
+}
+
+/* iframe 地址带上 ?v=<版本>：GitHub Pages 把 HTML 按 max-age=600 发出去，
+   地址恒定不变时浏览器可能长期端出旧副本——升级过的工具要用户清缓存才看得见。
+   主站真实遇到过（pi 已经是 1.2.0，页面仍显示 1.1.1），CLAUDE.md 记着这件事；
+   这一页此前漏了这层，是本次补上的。版本进了地址，版本一变地址就变，旧副本
+   自然失效；版本没变则照旧命中缓存，不牺牲二次访问的速度。工具本身不读这个
+   参数，多一个查询串对它没有任何影响。 */
 function srcFor(id) {
-  var f = id ? fileOf(id) : 'index.html';
-  return (f || 'index.html') + '?lang=' + LANG;
+  var d = id ? byId(id) : null;
+  if (d && d.file) return d.file + '?lang=' + LANG + '&v=' + encodeURIComponent(d.version || '0');
+  return 'index.html?lang=' + LANG + '&v=' + regFingerprint();
 }
 
 /* 换页面用 location.replace 而不是赋值 frame.src——这一条抄自主站 app.html，
@@ -505,7 +523,11 @@ function renderChrome() {
   document.title = d ? t(d.title) + ' · MathViz' : t(L.title);
   var alone = document.getElementById('btnAlone');
   alone.title = t(L.alone);
-  alone.href = (d ? d.file : 'index.html') + '?lang=' + LANG;
+  /* 与 srcFor() 用同一套版本戳：这两个地址指向同一个文件，只有一处带缓存键
+     就会出现「iframe 里是新版、在新标签页单独打开却是旧版」的错位。 */
+  alone.href = d
+    ? d.file + '?lang=' + LANG + '&v=' + encodeURIComponent(d.version || '0')
+    : 'index.html?lang=' + LANG + '&v=' + regFingerprint();
 }
 
 /* ================= 地址栏同步 =================
