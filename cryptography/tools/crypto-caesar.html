@@ -17,8 +17,8 @@
      `<` + `script` + `>` 这个字面量：语法门与 CI 都靠它切分脚本块，注释里
      多出来的一个会让切分从那里开始，把整段 HTML 当成 JS 去检查，报一个跟
      真实代码毫无关系的错。 -->
-<meta name="tool-version" content="1.0.2">
-<meta name="tool-engine" content="crypto-1.1.0">
+<meta name="tool-version" content="1.0.3">
+<meta name="tool-engine" content="crypto-1.2.0">
 <title>Caesar Cipher · 凯撒密码</title>
 <!-- 版本记录（changelog，新→旧）：
      1.0.2  2026-08-10  修窄屏上报文条被画布裁掉两端的问题。原先先定格数（最多 26）
@@ -193,9 +193,15 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
   .brand{top:12px;left:14px;max-width:70vw}
   .brand h1{font-size:20px}
   .brand p{display:none}
-  .tabs{top:52px;left:14px;transform:none}
+  /* 页签必须让开标题。窄屏上 .brand 从 top:12px 起，eyebrow（10px 字 + 6px
+     下边距）之后是 20px 的 h1，整块底边落在约 60px——而这里原来写的是 52px，
+     于是标题与页签重叠 8px。它是**继承性**的：这段 CSS 在骨架里，13 个工具
+     各存一份逐字节相同的副本，所以一处写错就是十四处一起错，而且只在 ≤760px
+     出现，桌面上永远看不见（本项目为此在窄屏上连栽五次）。
+     66px 给 60px 的底边留 6px 余量；传输条跟着同幅下移。 */
+  .tabs{top:66px;left:14px;transform:none}
   /* 传输条挪到页签下方：手机上面板是贴底的抽屉，底部中央那个位置会被它盖住。 */
-  .transport{top:96px;left:14px;bottom:auto;transform:none}
+  .transport{top:110px;left:14px;bottom:auto;transform:none}
   .panel{left:10px;right:10px;top:auto;bottom:10px;width:auto;max-height:62vh}
   .hint{display:none}
 }
@@ -1888,6 +1894,35 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
 
   /* 字母环。letters 默认 A–Z；rotation 是整环旋转的弧度（Caesar 的 k 就是
      k/26 * 2π）；highlight 传下标时那一个字母用 hiColor 并加一圈辉光。 */
+  /* ================= 放得下多少格 =================
+     本项目在窄屏上连栽五次，五次是同一个形状：
+
+         const cell = clamp((availW - gap*(n-1)) / n, MIN, MAX);
+
+     先定**格数**、再把格宽 clamp 到一个下限。那个下限本意是保住可读性，
+     实际效果是把「放不下」变成「画出去」——canvas 不会裁剪也不会报错，
+     内容就那么越过边缘，而首尾几个格子看上去仍像内容的一部分。桌面上
+     永远看不见，于是每次都是发货之后才被发现（Caesar 报文条、Hill 的
+     break 页、Quagmire 的中文文案 84.5px、摩尔斯的读法列表、骨架的
+     标题与页签重叠）。
+
+     正确的次序是反过来的：**先用最小可读格宽反推放得下几格**，再让格宽
+     在剩余空间里长大到上限为止。放不下的部分由调用方明说（省略号、
+     「1–24 / 26」这样的窗口提示），而不是交给画布边缘去吃掉。
+
+     返回 { n, cell, total, truncated }。调用方只需照 n 画、并在
+     truncated 为真时给出提示。 */
+  function fitCells(availW, wanted, o) {
+    o = o || {};
+    const gap = o.gap == null ? 3 : o.gap;
+    const min = o.min == null ? 12 : o.min;
+    const max = o.max == null ? 26 : o.max;
+    const fit = Math.max(1, Math.floor((availW + gap) / (min + gap)));
+    const n = Math.max(1, Math.min(wanted, fit));
+    const cell = clamp((availW - gap * (n - 1)) / n, min, max);
+    return { n: n, cell: cell, total: n * cell + (n - 1) * gap, truncated: n < wanted };
+  }
+
   function alphabetWheel(cx, cy, r, o) {
     o = o || {};
     const letters = o.letters || 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -2049,7 +2084,7 @@ input[type=range]:focus-visible{outline:2px solid rgba(45,212,234,.7);outline-of
     glowDot, solidDot, label3, arrowAt,
     drawAxes, drawGridXY,
     clamp, fmt, fmtS, t,
-    mathFont, uiFont,
+    mathFont, uiFont, fitCells,
     alphabetWheel, cellGrid, bitBlock, barChart, flowArrow, chip,
     init, bindOrbit,
     syncPresetHighlight,

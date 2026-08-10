@@ -969,6 +969,35 @@
 
   /* 字母环。letters 默认 A–Z；rotation 是整环旋转的弧度（Caesar 的 k 就是
      k/26 * 2π）；highlight 传下标时那一个字母用 hiColor 并加一圈辉光。 */
+  /* ================= 放得下多少格 =================
+     本项目在窄屏上连栽五次，五次是同一个形状：
+
+         const cell = clamp((availW - gap*(n-1)) / n, MIN, MAX);
+
+     先定**格数**、再把格宽 clamp 到一个下限。那个下限本意是保住可读性，
+     实际效果是把「放不下」变成「画出去」——canvas 不会裁剪也不会报错，
+     内容就那么越过边缘，而首尾几个格子看上去仍像内容的一部分。桌面上
+     永远看不见，于是每次都是发货之后才被发现（Caesar 报文条、Hill 的
+     break 页、Quagmire 的中文文案 84.5px、摩尔斯的读法列表、骨架的
+     标题与页签重叠）。
+
+     正确的次序是反过来的：**先用最小可读格宽反推放得下几格**，再让格宽
+     在剩余空间里长大到上限为止。放不下的部分由调用方明说（省略号、
+     「1–24 / 26」这样的窗口提示），而不是交给画布边缘去吃掉。
+
+     返回 { n, cell, total, truncated }。调用方只需照 n 画、并在
+     truncated 为真时给出提示。 */
+  function fitCells(availW, wanted, o) {
+    o = o || {};
+    const gap = o.gap == null ? 3 : o.gap;
+    const min = o.min == null ? 12 : o.min;
+    const max = o.max == null ? 26 : o.max;
+    const fit = Math.max(1, Math.floor((availW + gap) / (min + gap)));
+    const n = Math.max(1, Math.min(wanted, fit));
+    const cell = clamp((availW - gap * (n - 1)) / n, min, max);
+    return { n: n, cell: cell, total: n * cell + (n - 1) * gap, truncated: n < wanted };
+  }
+
   function alphabetWheel(cx, cy, r, o) {
     o = o || {};
     const letters = o.letters || 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -1130,7 +1159,7 @@
     glowDot, solidDot, label3, arrowAt,
     drawAxes, drawGridXY,
     clamp, fmt, fmtS, t,
-    mathFont, uiFont,
+    mathFont, uiFont, fitCells,
     alphabetWheel, cellGrid, bitBlock, barChart, flowArrow, chip,
     init, bindOrbit,
     syncPresetHighlight,
