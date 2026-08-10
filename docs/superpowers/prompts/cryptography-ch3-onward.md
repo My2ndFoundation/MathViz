@@ -95,6 +95,7 @@ L = ['var FALLBACK = [']
 for i, t in enumerate(d['tools']):
     L.append('  {')
     L.append(f"    id: {q(t['id'])}, file: {q(t['file'])}, accent: {q(t['accent'])}, chapter: {t['chapter']},")
+    L.append(f"    version: {q(t['version'])},")      # ← 必须有，见下
     for f in ('kicker', 'title', 'tag'):
         L.append(f"    {f}: {{ en: {q(t[f]['en'])}, zh: {q(t[f]['zh'])} }}" + (',' if f != 'tag' else ''))
     L.append('  }' + (',' if i < len(d['tools']) - 1 else ''))
@@ -103,6 +104,12 @@ blk = '\n'.join(L); pat = re.compile(r'var FALLBACK = \[.*?\n\];', re.DOTALL)
 for n in ('cryptography/app.html', 'cryptography/index.html'):
     p = pathlib.Path(n); p.write_text(pat.sub(lambda _m: blk, p.read_text(), count=1))
 ```
+
+**`version` 那一行不能省。** 画廊卡片上的版本徽章与链接上的 `?v=` 缓存键都读它，而
+`file://` 下 `fetch` 会失败、FALLBACK 是**唯一**的数据来源——漏掉它，离线打开的画廊
+上每张卡都是 `vundefined`，而线上一切正常。`check.py` 的 `fallback_check()` 只比对
+**id 集合**，不会替你发现这件事（主站 CLAUDE.md 记过同源的教训：一个没人校验的镜像
+字段一定会漂移，48/62 条曾经静静对不上）。
 
 然后 `python3 cryptography/scripts/inline_core.py && python3 cryptography/scripts/check.py`。
 
