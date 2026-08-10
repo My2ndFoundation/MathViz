@@ -498,12 +498,23 @@ console.log("fmtInt(5n)   =", fmtInt(5n), "  ← BigInt 被当成「不知道」
      用十六进制而不是十进制：一个 64 位位盘的十进制是 20 位数字、读不出
      结构；十六进制正好 16 个字符，**每 2 个字符是一整行棋盘**。 */
   function fmtBB(b) {
-    if (typeof b !== 'bigint') return '—';
+    if (typeof b !== 'bigint') return '—';   // ⚠ 这一行是错的，见下
     let s = b.toString(16);
     while (s.length < 16) s = '0' + s;
     return '0x' + s;
   }
 ```
+
+⚠⚠ **上面那个守卫是错的，Task 3 的实现者正当地拒绝照抄了它**（2026-08-10 订正，本阶段第六处）。**别整段抄走。**
+
+`typeof b !== 'bigint' → '—'` **把这条改动本身要修的那个谎换了个地方复活**：§2.8 明确邀请她改源码，改完 `atk` 完全可能回来一个普通 Number —— 那是**算出来了、只是类型不对**的值，把它印成「—」＝「不知道」，跟 `fmtInt` 干的是同一件事。**全页的规矩是只有 `null` 才是「不知道」。**
+
+落地的写法是：`null` / `undefined` → `—`；**能无损当 64 位位盘看的（BigInt 或非负安全整数）→ 十六进制**；其余 → 原样把它是什么说出来（转义后）。
+
+另两处一并记在这里，同样别照抄：
+
+- `let c = 0, t = m.result;` 会**遮蔽页面级的 `t()` 翻译函数**（`const t = function (s) { return E.t(s); }`）。隔壁 `knightPath` 的 readout 在同一位置就写着 `t(KP.roNever)` —— 这一段碰巧没调 `t()` 才没炸，那是运气。落地版把 popcount 抽成了模块级的 `bbPopcount()`。
+- `m.result === undefined` 是**死分支**：`trackView` 已经把 undefined 归一成 null。
 
 ⚠ **自己验一次**：`fmtBB(0n)` 应当给 `0x0000000000000000`（**不是 `—`**）—— 一枚马**没有**攻击格是不可能的（最少 2 个），但 `0n` 仍是一个合法的位盘值，**「0 不是不知道」这条规矩在这里同样成立**。
 
