@@ -75,6 +75,158 @@
     return mod(r[1], n);
   }
 
+  /* ================= ℤ/nℤ 上的矩阵（Hill 密码） =================
+     Hill 把每 k 个字母看成 ℤ/nℤ 上的一个列向量，密钥是 k×k 矩阵：c = M·p (mod n)。
+     解密要的不是"除以 M"，而是 M 在**模 n 意义下**的逆，它存在的充要条件是
+     gcd(det M, n) = 1 —— 不是实数意义上的 det ≠ 0。这一条差别正是 Hill 那一页
+     要讲的东西：行列式为 13 的矩阵在实数上完全可逆，模 26 却是死的（13 与 26
+     不互素）。所以下面的逆元一律走 modInverse，绝不新写第二份模逆实现——
+     两份模逆实现总有一天会给出两个答案，而那天没人知道该信哪个。 */
+
+  /* 行列式按 Laplace 展开，代价是 k!：k=8 是 4 万次乘法、还在一帧之内；
+     k=12 是 4.8 亿次，页面当场假死。Hill 页面只用 2×2 / 3×3，把门开在 8
+     是免费的，而"用户手滑贴进一个 12 阶方阵就整页无响应"不是。 */
+  const MAT_MAX_DIM = 8;
+
+  /* 形状检查集中在一处。矩阵参数只有三种坏法：不是数组、行长不齐、元素不是整数。
+     整数这一条不是洁癖——M[i][j] = 2.5 时 mod(2.5, 26) 老老实实返回 2.5，
+     一路传到 fromIndices 就成了 charAt(2.5) === ''，密文凭空少一个字母，
+     而中间没有任何一步报错。在入口拒绝，比在输出端反查便宜得多。 */
+  function matShape(M, name) {
+    if (!Array.isArray(M) || M.length === 0) throw new Error(name + ' 需要非空的二维数组');
+    const rows = M.length;
+    if (!Array.isArray(M[0]) || M[0].length === 0) throw new Error(name + ' 的行必须是非空数组');
+    const cols = M[0].length;
+    for (let i = 0; i < rows; i++) {
+      const r = M[i];
+      if (!Array.isArray(r) || r.length !== cols) {
+        throw new Error(name + ' 第 ' + i + ' 行的长度与第 0 行不齐（应为 ' + cols + '）');
+      }
+      for (let j = 0; j < cols; j++) {
+        if (!Number.isInteger(r[j])) {
+          throw new Error(name + ' 的元素 [' + i + '][' + j + '] 不是整数：' + r[j]);
+        }
+      }
+    }
+    return [rows, cols];
+  }
+
+  function matSquareDim(M, name) {
+    const s = matShape(M, name);
+    if (s[0] !== s[1]) throw new Error(name + ' 需要方阵，收到 ' + s[0] + '×' + s[1]);
+    if (s[0] > MAT_MAX_DIM) {
+      throw new Error(name + ' 只支持 ' + MAT_MAX_DIM + ' 阶以内的方阵（行列式按 Laplace 展开，代价是 k!），收到 ' + s[0]);
+    }
+    return s[0];
+  }
+
+  /* 划去第 r 行第 c 列，返回 (k−1)×(k−1) 的子阵。k=1 时会得到空数组，
+     所以调用方必须自己拦住 k=1（matInverse 里那一支）。 */
+  function matMinor(M, r, c) {
+    const k = M.length;
+    const out = [];
+    for (let i = 0; i < k; i++) {
+      if (i === r) continue;
+      const row = [];
+      for (let j = 0; j < k; j++) if (j !== c) row.push(M[i][j]);
+      out.push(row);
+    }
+    return out;
+  }
+
+  /* 沿第 0 行的 Laplace 展开。每个因子进乘法前先规约到 [0,n)，于是任何中间量
+     都小于 n²——传进来一个 1e10 的元素也不会让乘积溜出 2^53 变成错的整数。 */
+  function detRec(M, n) {
+    const k = M.length;
+    if (k === 1) return mod(M[0][0], n);
+    if (k === 2) return mod(mod(M[0][0], n) * mod(M[1][1], n) - mod(M[0][1], n) * mod(M[1][0], n), n);
+    let d = 0;
+    for (let j = 0; j < k; j++) {
+      const term = mod(M[0][j], n) * detRec(matMinor(M, 0, j), n);
+      d = mod(j % 2 === 0 ? d + term : d - term, n);
+    }
+    return d;
+  }
+
+  function matDet(M, n) {
+    matSquareDim(M, 'matDet');
+    return detRec(M, n);
+  }
+
+  /* c = M·v (mod n)。M 行主序 k×k，v 长度 k，返回长度 k 的新数组。 */
+  function matMulVec(M, v, n) {
+    const k = matSquareDim(M, 'matMulVec');
+    if (!Array.isArray(v) || v.length !== k) {
+      throw new Error('matMulVec 的向量长度应为 ' + k + '，收到 ' + (Array.isArray(v) ? v.length : typeof v));
+    }
+    for (let j = 0; j < k; j++) {
+      if (!Number.isInteger(v[j])) throw new Error('matMulVec 的向量元素 [' + j + '] 不是整数：' + v[j]);
+    }
+    const out = [];
+    for (let i = 0; i < k; i++) {
+      let s = 0;
+      for (let j = 0; j < k; j++) s = mod(s + mod(M[i][j], n) * mod(v[j], n), n);
+      out.push(s);
+    }
+    return out;
+  }
+
+  /* A·B (mod n)。不限方阵：r×m 乘 m×c 都收，因为 Hill 页面要用它验证
+     M·M⁻¹ = I，也要用它把明文按列拼成矩阵一次乘完。 */
+  function matMul(A, B, n) {
+    const sa = matShape(A, 'matMul 的左矩阵');
+    const sb = matShape(B, 'matMul 的右矩阵');
+    if (sa[1] !== sb[0]) {
+      throw new Error('matMul 维度不匹配：' + sa[0] + '×' + sa[1] + ' 乘 ' + sb[0] + '×' + sb[1]);
+    }
+    const out = [];
+    for (let i = 0; i < sa[0]; i++) {
+      const row = [];
+      for (let j = 0; j < sb[1]; j++) {
+        let s = 0;
+        for (let t = 0; t < sa[1]; t++) s = mod(s + mod(A[i][t], n) * mod(B[t][j], n), n);
+        row.push(s);
+      }
+      out.push(row);
+    }
+    return out;
+  }
+
+  /* M⁻¹ = (det M)⁻¹ · adj M (mod n)；adj 是代数余子式矩阵的**转置**。
+     用伴随矩阵而不是高斯消元：ℤ/26ℤ 不是域（2·13 ≡ 0），消元里"用主元去除"
+     这一步随时会撞上一个不可逆的主元，得再写一套换行换列的启发式，而且那套
+     启发式失败时给不出干净的"不可逆"结论。伴随法只需要一次模逆，
+     而那一次模逆恰好就是可逆性判据本身。
+     不可逆时返回 null（不是抛异常）：模 n 下不可逆是一个**正常的数学事实**，
+     Hill 页面要靠它把"这个密钥不能用"画出来，不是要靠它中断。 */
+  function matInverse(M, n) {
+    const k = matSquareDim(M, 'matInverse');
+    const dInv = modInverse(matDet(M, n), n);
+    if (dInv === null) return null;          // gcd(det, n) ≠ 1
+    const out = [];
+    for (let i = 0; i < k; i++) {
+      const row = [];
+      for (let j = 0; j < k; j++) {
+        /* adj[i][j] = C_ji = (−1)^(i+j) · （划去第 j 行第 i 列的余子式）。
+           下标是 (j, i) 而不是 (i, j)——伴随矩阵是代数余子式矩阵的转置。
+           漏掉这次转置，在对称矩阵上照样测得过，非对称矩阵才露馅，
+           所以测试里必须有非对称的用例。
+           k=1 时 matMinor 会给出空数组，1×1 的伴随矩阵按定义就是 [[1]]。 */
+        const c = (k === 1) ? 1 : detRec(matMinor(M, j, i), n);
+        row.push(mod(dInv * ((i + j) % 2 === 0 ? c : -c), n));
+      }
+      out.push(row);
+    }
+    return out;
+  }
+
+  /* 判据直接写成 gcd(det, n) === 1，而不是 matInverse(...) !== null：
+     两者等价，但这一行把"为什么可逆"印在了代码上，页面上要显示的也正是这句。 */
+  function matIsInvertible(M, n) {
+    return gcd(matDet(M, n), n) === 1;
+  }
+
   return { ALPHABET, N, isAlpha, normalize, letters, fromIndices,
-           mod, gcd, egcd, modInverse };
+           mod, gcd, egcd, modInverse,
+           MAT_MAX_DIM, matMulVec, matMul, matDet, matInverse, matIsInvertible };
 });
