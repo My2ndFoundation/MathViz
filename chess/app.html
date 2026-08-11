@@ -6,11 +6,18 @@
 <meta name="color-scheme" content="dark">
 <meta name="description" content="Chess teaching tools — navigation shell. 国际象棋教学工具导航壳。">
 <!-- 版本记录（changelog，新→旧）：
+     1.1.0  2026-08-11  把 cryptography 那边先落地的两条导航行为搬回上游：
+                        ① iframe 与「单独打开」的地址都带上 ?v=<版本> 缓存键
+                        （chess-board-algorithms 已到 1.7.0，此前六次升级都可能
+                        躲在 GitHub Pages 的旧副本后面）；画廊首页用整张注册表的
+                        指纹当版本。FALLBACK 每条随之补上 version。
+                        ② 「返回 MathViz」改由 PARENT_HOME + wireParentLink() 驱动：
+                        唯一一处出站引用集中成一个常量，父目录不在时自己藏起来。
      1.0.0  2026-08-04  首发：子项目导航壳。左侧按阶段分组列出工具，右侧 iframe 装
                         工具整页；home 项装 chess/index.html 当画廊。?tool=<id> 深链、
                         ?lang= 贯穿壳与工具、Ctrl/Cmd+B 与 [ 折叠侧边栏。
                         工具页一行未改，仍可独立打开。 -->
-<meta name="tool-version" content="1.0.0">
+<meta name="tool-version" content="1.1.0">
 <title>Chess Teaching Tools · 国际象棋教学工具</title>
 <!-- 子项目导航壳。**不是工具**，所以不进 chess/chess-tools.json（主站的 app.html
      同样不在 tools.json 里）。结构照搬主站 app.html：侧边栏 + iframe 舞台。
@@ -119,8 +126,10 @@ body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)
     <div class="sb-head">
       <!-- 目的地是 MathViz 的导航壳 app.html，不是扁平画廊：去程是「壳 → 壳」
            （根 index.html 的子项目卡片带 target="_top"），回程对称。
-           target="_top" 在顶层是空操作，加上是为了让这条规则在四个入口处一致。 -->
-      <a class="brand" id="brandLink" href="../app.html" target="_top">
+           target="_top" 在顶层是空操作，加上是为了让这条规则在四个入口处一致。
+           href 是占位的 '#'：真实地址由 wireParentLink() 在运行时写入（见脚本里的
+           PARENT_HOME 一节）。这一页 100% 靠 JS 驱动，无 JS 兜底本就不成立。 -->
+      <a class="brand" id="brandLink" href="#" target="_top">
         <div class="eyebrow">Interactive Chess</div>
         <div class="name" id="brandName">Chess</div>
       </a>
@@ -167,38 +176,70 @@ function esc(s) {
                   .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/* ================= 唯一的出站引用 =================
+   这是整个 chess 子树里唯一一处指向父目录的路径。它的存在是为了「返回 MathViz」
+   这一个链接；除它之外，core、games、tools 三个目录里不许出现任何父目录形式的
+   相对路径——check.py 的 outbound_ref_check() 逐文件数着这件事。
+
+   为什么要数：设计约束是「把 chess 整个目录复制到任何别处仍可用」。一条随手写下
+   的越界相对路径会在**别人搬走目录的那一刻**才失效，而那时没有任何东西会报警。
+   把它变成一条提交前就会响的断言。
+
+   自愈：http(s) 下对这个 URL 发一次 HEAD 探测，404/网络失败就把链接藏掉。
+   file:// 下 fetch 探测本来就会失败（同源限制），无法区分「文件不在」与
+   「协议不让探」，所以那种情况保持显示——file:// 的使用者基本都在仓库里。
+   （这一段与 cryptography/app.html 的同名一段同源；那边先落地，这里补齐。） */
+var PARENT_HOME = '../app.html';
+
+function wireParentLink(el) {
+  if (!el) return;
+  el.href = PARENT_HOME + '?lang=' + LANG;
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+  try {
+    fetch(PARENT_HOME, { method: 'HEAD' }).then(function (r) {
+      if (!r.ok) el.style.display = 'none';
+    })['catch'](function () { el.style.display = 'none'; });
+  } catch (e) { el.style.display = 'none'; }
+}
+
 /* ================= 回退列表 =================
    运行时优先 fetch('chess-tools.json')；file:// 下 fetch 会因同源限制失败，
    靠这份内嵌副本兜底——一个在 file:// 下只剩 home 一项的导航壳等于没有。
    代价是这份副本与 chess/index.html 里的那份都要跟注册表同步，由
-   chess/scripts/check.py 的 fallback_check() 逐页比对 id 集合来保证。 */
+   chess/scripts/check.py 的 fallback_check() 逐页比对 id 集合来保证。
+
+   每条都必须带 version：srcFor() 拿它当缓存键，画廊卡片还要把它显示出来，而
+   file:// 下 FALLBACK 是唯一的数据源——漏一个字段，离线打开的地址就退化成
+   ?v=undefined，线上却一切正常，是那种只在别人机器上出现的 bug。
+   fallback_check() 只比 id 集合，不会替你发现这件事，所以另有一道
+   fallback_version_check()。 */
 var FALLBACK = [
   {
-    id: 'chess-moves-geometry', file: 'tools/chess-moves-geometry.html', accent: 'rose', phase: 1,
+    id: 'chess-moves-geometry', file: 'tools/chess-moves-geometry.html', accent: 'rose', phase: 1, version: '1.1.0',
     kicker: { en: 'Rules', zh: '规则' },
     title: { en: 'Geometry of Movement', zh: '走法的几何本质' },
     tag: { en: 'attack domain · min-move field · mobility', zh: '攻击域 · 最少步数场 · 机动性' }
   },
   {
-    id: 'chess-rules-check-mate', file: 'tools/chess-rules-check-mate.html', accent: 'violet', phase: 1,
+    id: 'chess-rules-check-mate', file: 'tools/chess-rules-check-mate.html', accent: 'violet', phase: 1, version: '1.1.0',
     kicker: { en: 'Rules', zh: '规则' },
     title: { en: 'Rules, Legality and Mate', zh: '规则、合法性与将杀' },
     tag: { en: 'pseudo-legal minus legal · castling · mate', zh: '伪合法减合法 · 易位 · 将杀' }
   },
   {
-    id: 'chess-game-replay', file: 'tools/chess-game-replay.html', accent: 'emerald', phase: 2,
+    id: 'chess-game-replay', file: 'tools/chess-game-replay.html', accent: 'emerald', phase: 2, version: '1.1.0',
     kicker: { en: 'Games', zh: '棋局' },
     title: { en: 'Reading a Game', zh: '读懂一局棋' },
     tag: { en: '30 games · piece traces · evaluation curves · heat map', zh: '30 局棋谱 · 子力轨迹 · 评估曲线 · 热力图' }
   },
   {
-    id: 'chess-search-minimax', file: 'tools/chess-search-minimax.html', accent: 'orange', phase: 4,
+    id: 'chess-search-minimax', file: 'tools/chess-search-minimax.html', accent: 'orange', phase: 4, version: '1.1.0',
     kicker: { en: 'Search', zh: '搜索' },
     title: { en: 'Game Trees and Search', zh: '博弈树与搜索' },
     tag: { en: 'minimax · alpha-beta · move ordering · Shannon number', zh: '极小极大 · α-β 剪枝 · 走法排序 · 香农数' }
   },
   {
-    id: 'chess-board-algorithms', file: 'tools/chess-board-algorithms.html', accent: 'cyan', phase: 5,
+    id: 'chess-board-algorithms', file: 'tools/chess-board-algorithms.html', accent: 'cyan', phase: 5, version: '1.7.0',
     kicker: { en: 'Algorithms', zh: '算法' },
     title: { en: 'Classic Problems on the Board', zh: '棋盘上的经典算法' },
     tag: { en: "N-Queens · Knight's Tour · shortest path · rooks & lines · king domination · count paths · bitboards · independent knights · field of fewest moves", zh: 'N 皇后 · 骑士巡游 · 最短路 · 车与线 · 王的支配集 · 数路径 · 位盘 · 互不攻击的马 · 最少步数场' }
@@ -312,9 +353,28 @@ function idFromPath(path) {
   return null;
 }
 
+/* 注册表指纹：把每条 id:version 拼起来做 djb2-xor。画廊页自己内嵌了一份
+   FALLBACK，所以它的「版本」不是某一个工具的版本，而是整张表的版本——任何一个
+   工具升级，这个哈希就变，画廊的缓存副本随之失效。与主站 app.html 同源。 */
+function regFingerprint() {
+  var s = '';
+  for (var i = 0; i < TOOLS.length; i++) s += TOOLS[i].id + ':' + (TOOLS[i].version || '?') + ';';
+  var h = 5381;
+  for (var j = 0; j < s.length; j++) h = ((h * 33) ^ s.charCodeAt(j)) >>> 0;   /* djb2-xor */
+  return h.toString(36);
+}
+
+/* iframe 地址带上 ?v=<版本>：GitHub Pages 把 HTML 按 max-age=600 发出去，
+   地址恒定不变时浏览器可能长期端出旧副本——升级过的工具要用户清缓存才看得见。
+   主站真实遇到过（pi 已经是 1.2.0，页面仍显示 1.1.1），CLAUDE.md 记着这件事；
+   这一页此前漏了这层，是本次补上的（chess-board-algorithms 已经到 1.7.0，
+   一路升上来的六次都可能躲在旧副本后面）。版本进了地址，版本一变地址就变，
+   旧副本自然失效；版本没变则照旧命中缓存，不牺牲二次访问的速度。工具本身不读
+   这个参数，多一个查询串对它没有任何影响。 */
 function srcFor(id) {
-  var f = id ? fileOf(id) : 'index.html';
-  return (f || 'index.html') + '?lang=' + LANG;
+  var d = id ? byId(id) : null;
+  if (d && d.file) return d.file + '?lang=' + LANG + '&v=' + encodeURIComponent(d.version || '0');
+  return 'index.html?lang=' + LANG + '&v=' + regFingerprint();
 }
 
 /* 换页面用 location.replace 而不是赋值 frame.src——这一条抄自主站 app.html，
@@ -334,7 +394,7 @@ function setFrame(url) {
 function renderChrome() {
   document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
   document.getElementById('brandName').textContent = t(L.brand);
-  document.getElementById('brandLink').href = '../app.html?lang=' + LANG;
+  wireParentLink(document.getElementById('brandLink'));
   document.getElementById('brandLink').title = t(L.back);
   document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
   document.getElementById('btnHide').title = t(L.hide) + ' (Ctrl+B)';
@@ -343,7 +403,11 @@ function renderChrome() {
   document.title = d ? t(d.title) + ' · MathViz' : t(L.title);
   var alone = document.getElementById('btnAlone');
   alone.title = t(L.alone);
-  alone.href = (d ? d.file : 'index.html') + '?lang=' + LANG;
+  /* 与 srcFor() 用同一套版本戳：这两个地址指向同一个文件，只有一处带缓存键
+     就会出现「iframe 里是新版、在新标签页单独打开却是旧版」的错位。 */
+  alone.href = d
+    ? d.file + '?lang=' + LANG + '&v=' + encodeURIComponent(d.version || '0')
+    : 'index.html?lang=' + LANG + '&v=' + regFingerprint();
 }
 
 /* ================= 地址栏同步 =================
