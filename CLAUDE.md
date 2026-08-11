@@ -133,6 +133,34 @@ both define `module` and `require`, so a UMD module tested that way takes its **
 exercise the browser branch you need `vm` with a bare context. A gate that tests the wrong branch is
 worse than no gate — it advertises coverage it does not have.
 
+## Branding is generated too
+
+`docs/logo.png` is the source of truth for the brand mark. `scripts/apply_branding.py` derives a
+transparent M/V mark from it and writes it into **every tracked `.html`** — the favicon as an inline
+`data:` URI in a `GENERATED:FAVICON` region, plus a `GENERATED:BRAND-LOGO` CSS region on the six
+navigation pages. Never hand-edit inside those markers.
+
+```bash
+python3 scripts/apply_branding.py          # derive + write all pages
+python3 scripts/apply_branding.py --check  # verify only; exit 1 if out of sync
+```
+
+Inline `data:` URIs rather than a `favicon.ico` because all three of this repo's hard rules forbid the
+file: single-file/zero-dependency, `file://`-openable, and subprojects portable (`outbound_ref_check()`
+allows exactly one outbound reference per root page — `PARENT_HOME`). Cost is ~1 KB/page, ~100 KB total.
+
+The original logo cannot be used as-is: its axes are `#001241`, which is **1.12:1** against `--bg-deep`
+— invisible. The script keys out the white ground and drops the axes, keeping M, V and the sine curve.
+Two details that look like bugs but are load-bearing: the axes are painted *over* the letterforms with a
+white halo, so removal is bridged by a morphological closing **intersected with the axis band** (bridging
+everywhere would also fill the design's own white gap where the curve crosses, turning it into a pale
+smear); and the bridge colour comes from normalized convolution, because nearest-neighbour fill streaks
+visibly. Full rationale in `design-system/math-viz-design-system.md` §3.8.
+
+The gate runs in `.githooks/pre-commit` (on changes to the logo or the script) and in
+`registry-sync.yml` on every push/PR — the CI one scans *all* of `git ls-files '*.html'`, so a newly
+added page that never got branded fails there rather than showing a blank tab icon in production.
+
 ## Commands
 
 There is no build/lint/test toolchain. To develop:

@@ -209,6 +209,43 @@ tips：**一段话只讲一个顿悟点**，并指向具体操作（某视角 / 
 
 24×24，`−` / `+` 切换；折叠时隐藏 `.panel-body` 且面板头去掉底部分隔线（`.panel:not(.collapsed) .panel-head { border-bottom: … }`）。
 
+### 3.8 品牌标记 `.brand-logo` 与 favicon
+
+标记是 M 与 V（MathViz）叠在一条正弦曲线上。唯一真相是 `docs/logo.png`；
+派生与铺设由 `scripts/apply_branding.py` 完成，**不要手改任何 `GENERATED:FAVICON` /
+`GENERATED:BRAND-LOGO` 标记区之间的内容**：
+
+```bash
+python3 scripts/apply_branding.py          # 派生 + 写入全部页面
+python3 scripts/apply_branding.py --check  # 只校验，不同步则 exit 1
+```
+
+**为什么是内联 data URI**：本设计系统第 1 条不可协商原则是「单文件、零依赖」。
+`<link rel="icon" href="/favicon.ico">` 在 `file://` 下取不到，在被搬走的 `chess/`、
+`cryptography/` 里 404，而且是一条出站引用（子项目的 `outbound_ref_check()` 只允许
+`PARENT_HOME` 一条）。所以图标以 base64 内联，每页约 1 KB。
+
+**为什么原图不能直接用**：原图白底，坐标轴是近黑的 `#001241`——在 `--bg-deep`（#05070d）
+上对比度只有 **1.12:1**，等于看不见。派生脚本抠掉白底、去掉坐标轴，只留 M/V 与正弦曲线。
+这一步是刻意的取舍（2026-08-11 与作者确认）：M/V 标记在浅色与深色标签栏下表现一致，
+只需要一份图，16px 仍可辨认；代价是失去「画在坐标系上」这层含义。
+
+| 用途 | 出图尺寸 | 显示尺寸 | 位置 |
+|---|---|---|---|
+| favicon | 32px | 浏览器自行降采样 | **每一个** `.html`（含 starter 与两个 `_skeleton`） |
+| 页眉标记 | 64px | 34px | `index.html` 页眉最前 |
+| 侧栏标记 | 64px | 28px | 三个 `app.html` 的 `.brand` |
+| 返回链接标记 | 64px | 16px | 两个子项目 `index.html` 的 `← MathViz` |
+
+出图一律是显示尺寸的 2×，`background-size:contain`，高分屏下不糊。
+
+**工具页只拿 favicon，不放可见标记**——工具页已经有自己的标题与图例，再塞一个品牌标记
+只会跟「一条曲线一个颜色」的图例抢注意力（原则 3）。
+
+子项目 `index.html` 的 `← MathViz` 前面那枚标记是 **MathViz 的**，不是子项目自己的：
+它标的是**目的地**。相应地，那两页把返回链接的文字节点包进 `#backText`——
+`render()` 每次切语言都会重写它的 `textContent`，直接写在 `<a>` 上会把标记一起抹掉。
+
 ---
 
 ## 4. Canvas 绘制语言
