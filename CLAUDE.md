@@ -67,6 +67,24 @@ change `core/`, then re-run the script. Each subproject also owns its i18n keys
 (`chess-lang` / `chess-nav`, `cryptography-lang` / `cryptography-nav`) and defaults to **English**,
 unlike the maths tools' Chinese default.
 
+**The two shells share no code, so they share a contract instead:
+`docs/superpowers/subproject-nav-contract.md`.** Eight clauses the four navigation pages
+(each subproject's `app.html` + `index.html`) must satisfy — the `?v=` cache key on every
+outbound URL, `version` on every FALLBACK entry, the single self-healing `PARENT_HOME`,
+`target="_top"` on the return link, the gallery filling the stage, the closed accent set,
+i18n semantics, and iframe history. Read it **before touching either shell, and before
+adding a third subproject** — it doubles as that subproject's acceptance list. It also
+records, per clause, which gate enforces it in which subproject, and the two rows that are
+still ❌ (chess has no `registry_check()`; C4–C8 have no mechanical gate at all).
+
+A navigation behaviour landing in only one subproject is the failure mode this exists for:
+`?v=` shipped in cryptography and was missing from chess for a whole season — six upgrades
+of `chess-board-algorithms` (up to 1.7.0) could have been sitting behind stale GitHub Pages
+copies (PR #158). Worse, the FALLBACK-`version` rule was written down *here* and in
+cryptography's own source comments while all 54 of its FALLBACK entries lacked the field —
+under `file://` every card read `v0`. **A clause with no gate is not a clause**; when you add
+one to the contract, add its gate and prove the gate goes red.
+
 ### cryptography/ specifics
 
 **All five chapters are built — 27 tools, 16 gates.** The planned scope is closed, so new work here
@@ -85,8 +103,12 @@ implementers caught.
 
 Two more things that bite and are not guessable. **The FALLBACK arrays must carry `version`**: the
 gallery's version badge and the `?v=` cache key both read it, and under `file://` FALLBACK is the only
-data source — omit it and every card offline reads `vundefined` while the site looks perfect.
-`fallback_check()` only compares **id sets**, so it will not catch this for you. And **`_skeleton.html`
+data source — omit it and every card offline reads `v0` while the site looks perfect.
+`fallback_check()` only compares **id sets**, so it cannot catch this; `fallback_version_check()` now
+does. That gate arrived late, and this paragraph is why it had to: the rule was written down here *and*
+in `cryptography/index.html`'s own comment ("FALLBACK 现在也带 version") while **all 54 entries across
+the two pages lacked the field** — documented, believed, and false for as long as the gate was missing.
+And **`_skeleton.html`
 deliberately has no `GENERATED:QUANTUM-SIM` markers** — inlining a quantum simulator into a Caesar page
 is dead weight; the pages that need it add the pair themselves.
 
