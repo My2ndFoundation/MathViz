@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """cryptography 子项目校验门（设计文档 §5、§19）。
 
-十六道门全部**无条件**跑到底，最后按「任一失败则整体失败」汇总退出码。
+十七道门全部**无条件**跑到底，最后按「任一失败则整体失败」汇总退出码。
 
 | # | 函数                              | 守什么 |
 |---|-----------------------------------|--------|
@@ -10,6 +10,7 @@
 | 3 | core_tests()                      | core/**/*.test.js + examples/**/*.test.js 全绿 |
 | 4 | registry_check()                  | id/file/accent/chapter/version/engine/双语/重复/双向存在 |
 | 5 | fallback_check()                  | 两页 FALLBACK 的 id 集合 == 注册表 id 集合 |
+| 5b| fallback_version_check()          | 两页 FALLBACK 每条都带 version 且与注册表同值（第 5 道只比 id 集合，抓不到） |
 | 6 | version_meta_check()              | 注册表 version == html 的 tool-version meta |
 | 7 | algos_gate()                      | 内联的 ALGOS 块在**浏览器分支**下能跑，且 Caesar 全 k 往返成立 |
 | 8 | outbound_ref_check()              | `../` 只出现在 app/index 各一次，其余目录零次 |
@@ -39,6 +40,11 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 REGISTRY = ROOT / 'cryptography-tools.json'
 SCRIPT_RE = re.compile(r'<script>(.*?)</script>', re.DOTALL)
 FALLBACK_ID_RE = re.compile(r"id:\s*'([\w-]+)'")
+# version 不是展示文案，是**缓存键**（?v=<version>），而 file:// 下 FALLBACK 是唯一的
+# 数据源。所以另抓一遍 id → version 的配对，见 fallback_version_check()。
+# 夹取到下一个 id: 为止，不靠「同一行」这种脆弱假设。与 chess 的同名两条同源。
+FALLBACK_ENTRY_RE = re.compile(r"id:\s*'([\w-]+)'(.*?)(?=id:\s*'|\Z)", re.DOTALL)
+FALLBACK_VERSION_RE = re.compile(r"version:\s*'([^']*)'")
 META_VERSION_RE = re.compile(r'<meta\s+name="tool-version"\s+content="([^"]+)"')
 # node --check -（从 stdin 读）报错时行号前缀是 [stdin]:<n>；把 <n> 换算回该脚本块
 # 在原文件里的真实行号，见 node_check() 里的用法。
@@ -290,6 +296,50 @@ def fallback_check() -> int:
             rc = 1
     if rc == 0:
         print(f'FALLBACK：两页各 {len(reg_ids)} 条，与注册表一致')
+    return rc
+
+
+def fallback_version_check() -> int:
+    """两页 FALLBACK 的每一条都要带 version，且必须等于注册表里的那个。
+
+    为什么这道门必须单独存在：**fallback_check() 只比 id 集合**，一条缺了 version 的
+    条目在它眼里完全正常。而 version 同时是缓存键——app.html 的 srcFor() 与画廊卡片
+    都把它拼进 URL（?v=<version>），卡片角上还要把它印出来。
+
+    这不是假想。2026-08-11 写导航契约时实测发现：**两页 27×2 = 54 条 FALLBACK 条目，
+    version 字段一个都没有**——尽管根 CLAUDE.md 和本子项目 index.html 自己的注释都
+    白纸黑字写着「FALLBACK 必须带 version」「现在也带了」。线上 fetch 拿得到注册表，
+    一切正常；file:// 下 TOOLS = FALLBACK，27 张卡片全部渲染成 v0、地址全部 ?v=0。
+    规则被写下、被相信、并且是假的，整整持续到这道门出现为止。
+
+    契约见 docs/superpowers/subproject-nav-contract.md 的 C2；chess 侧有一份同源实现。
+    """
+    reg_ver = {t['id']: t['version'] for t in load_registry()['tools']}
+    rc = 0
+    checked = 0
+    for name in ('app.html', 'index.html'):
+        text = (ROOT / name).read_text(encoding='utf-8')
+        m = re.search(r'var FALLBACK = \[(.*?)\n\];', text, re.DOTALL)
+        if not m:
+            continue                     # 缺 FALLBACK 由 fallback_check 报，不重复报
+        for tid, body in FALLBACK_ENTRY_RE.findall(m.group(1)):
+            vm = FALLBACK_VERSION_RE.search(body)
+            if not vm:
+                print(f'ERROR: {name} 的 FALLBACK 条目 {tid} 没有 version 字段——'
+                      f'file:// 下卡片会渲染成 v0、地址退化成 ?v=0', file=sys.stderr)
+                rc = 1
+                continue
+            want = reg_ver.get(tid)
+            if want is None:
+                continue                 # id 对不上由 fallback_check 报
+            if vm.group(1) != want:
+                print(f'ERROR: {name} 的 FALLBACK 条目 {tid} 版本是 '
+                      f'{vm.group(1)!r}，注册表是 {want!r}', file=sys.stderr)
+                rc = 1
+                continue
+            checked += 1
+    if rc == 0:
+        print(f'FALLBACK 版本戳：{checked} 条内嵌条目全部带 version 且与注册表同值')
     return rc
 
 
@@ -1066,6 +1116,7 @@ if __name__ == '__main__':
         core_tests(),
         registry_check(),
         fallback_check(),
+        fallback_version_check(),
         version_meta_check(),
         algos_gate(),
         outbound_ref_check(),
