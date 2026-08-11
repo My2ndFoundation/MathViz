@@ -216,9 +216,14 @@ tips：**一段话只讲一个顿悟点**，并指向具体操作（某视角 / 
 `GENERATED:BRAND-LOGO` 标记区之间的内容**：
 
 ```bash
-python3 scripts/apply_branding.py          # 派生 + 写入全部页面
-python3 scripts/apply_branding.py --check  # 只校验，不同步则 exit 1
+python3 scripts/apply_branding.py          # 派生 + 写入全部页面（需要 pillow/numpy）
+python3 scripts/apply_branding.py --check  # 只校验，不同步则 exit 1（不需要图像库）
 ```
+
+两条命令之间隔着 `docs/brand-assets.json`：生成时把两条 data URI 与源图的 sha256 写进去，
+校验时只跟它做字符串比对，外加重算一次 `docs/logo.png` 的 sha256。
+**校验不重新派生**——PNG 的压缩字节取决于 pillow/zlib 的版本，不是像素的函数，
+第一版就是因此在 CI 上 107 页全红而本机全绿。哈希输入，比较已提交的输出。
 
 **为什么是内联 data URI**：本设计系统第 1 条不可协商原则是「单文件、零依赖」。
 `<link rel="icon" href="/favicon.ico">` 在 `file://` 下取不到，在被搬走的 `chess/`、

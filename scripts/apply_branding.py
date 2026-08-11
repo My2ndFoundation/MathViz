@@ -30,26 +30,45 @@
    桥接处的颜色用归一化卷积（多尺度模糊的加权比值）扩散填充，而不是最近邻填充——
    后者会沿一个方向拉出条纹，实测很明显。
 
-派生是**幂等**的：同一张 docs/logo.png 永远得到同一份 base64，所以 --check 有意义。
+## 派生与校验是两件事，中间隔着 docs/brand-assets.json
+
+第一版把两件事合成了一件：--check 当场重新派生一遍，再跟页面里的 base64 逐字节比。
+**在 CI 上 107 个页面全部报不同步，本机 107 个页面全部通过**（PR #160）。
+
+原因不是派生逻辑不确定，而是**比较对象选错了**：比的是 PNG 的压缩字节，而那不是像素的
+函数——它还取决于 Pillow / libpng / zlib 的版本。开发机是 Pillow 11.3 + macOS，CI 是
+ubuntu 上 pip 装的另一个组合，同样的像素压出不同的字节。这正是根 CLAUDE.md 那条
+「本机绿不算绿」的同一类事故，只是换了个面目。
+
+所以现在拆成两步：
+
+- **派生**（人手跑，需要 pillow/numpy）：从 docs/logo.png 算出标记，把两条 data URI
+  连同源图的 sha256 写进 `docs/brand-assets.json`，再铺进所有页面。
+- **校验**（CI 跑，**不需要任何图像库**）：只做字符串比对——页面里的 base64 是否等于
+  brand-assets.json 里的那一份，以及 docs/logo.png 的 sha256 是否仍等于文件里记的那个。
+
+第二条 sha256 保住了「换了源图却忘了重新派生」这个失败模式，而**不需要**在 CI 上
+重新派生。要点是：**哈希输入，比较已提交的输出。**
 """
+# 注解延后求值。没有这一行，`def derive_mark() -> Image.Image:` 会在**定义时**
+# 就去取 Image.Image；PIL 缺席时 Image 是 None，整个模块 import 不进来，
+# --check 也就跟着挂——而 --check 本该完全不需要图像库。
+# 这不是推测：加这行之前，把 numpy/PIL 屏蔽掉跑 --check 直接 AttributeError。
+from __future__ import annotations
+
 import argparse
 import base64
+import hashlib
 import io
+import json
 import pathlib
-import re
 import subprocess
 import sys
-
-try:
-    import numpy as np
-    from PIL import Image, ImageFilter
-except ImportError:                                    # pragma: no cover
-    print('ERROR: 需要 pillow 与 numpy：pip install pillow numpy', file=sys.stderr)
-    raise
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOURCE = ROOT / 'docs' / 'logo.png'
 MASTER = ROOT / 'docs' / 'logo-mark.png'
+ASSETS = ROOT / 'docs' / 'brand-assets.json'
 
 FAVICON_PX = 32          # 标签页图标。浏览器会自己降采样到 16
 BRAND_PX = 64            # 侧栏/页眉里的可见 logo，按 2× 出图给高分屏
@@ -70,6 +89,25 @@ BRAND_PAGES = (
 
 
 # ---------------------------------------------------------------- 派生
+#
+# 这一段（到 png_data_uri 为止）**只在人手跑生成时执行**，import 图像库也推迟到
+# 那时候。--check 不碰这里，所以 CI 不需要 pillow/numpy。
+
+try:
+    import numpy as np
+    from PIL import Image, ImageFilter
+    HAVE_IMAGING = True
+except ImportError:                                    # pragma: no cover
+    np = Image = ImageFilter = None
+    HAVE_IMAGING = False
+
+
+def _require_imaging():
+    if not HAVE_IMAGING:
+        print('ERROR: 生成品牌资产需要 pillow 与 numpy：pip install pillow numpy\n'
+              '       （--check 不需要它们，只做字符串比对）', file=sys.stderr)
+        sys.exit(2)
+
 
 def _box1d(x, r, axis):
     n = x.shape[axis]
@@ -213,7 +251,20 @@ def apply_page(path: pathlib.Path, favicon_uri: str, brand_uri: str, check: bool
         return False, ''
     if not check:
         path.write_text(text, encoding='utf-8')
-    return True, f'{rel}: favicon/brand 与 docs/logo.png 不同步'
+    return True, f"{rel}: 与 docs/brand-assets.json 不同步"
+
+
+def source_sha256() -> str:
+    return hashlib.sha256(SOURCE.read_bytes()).hexdigest()
+
+
+def load_assets() -> dict:
+    """读已提交的 docs/brand-assets.json。校验路径只认它，不重新派生。"""
+    if not ASSETS.exists():
+        print(f'ERROR: 找不到 {ASSETS.relative_to(ROOT)}——'
+              f'跑一次 `python3 scripts/apply_branding.py` 生成它。', file=sys.stderr)
+        return {}
+    return json.loads(ASSETS.read_text(encoding='utf-8'))
 
 
 def main(check_only=False) -> int:
@@ -221,13 +272,39 @@ def main(check_only=False) -> int:
         print(f'ERROR: 找不到 {SOURCE.relative_to(ROOT)}', file=sys.stderr)
         return 1
 
-    mark = derive_mark()
-    favicon_uri = png_data_uri(mark, FAVICON_PX)
-    brand_uri = png_data_uri(mark, BRAND_PX)
-
-    if not check_only:
+    if check_only:
+        assets = load_assets()
+        if not assets:
+            return 1
+        # 第一条断言：源图有没有在没重新派生的情况下被换掉。
+        # 哈希输入、比较已提交的输出——CI 因此不必装 pillow，也就不会再被
+        # 「同样的像素、不同的 PNG 压缩字节」判成不同步（PR #160）。
+        actual = source_sha256()
+        if assets.get('source_sha256') != actual:
+            print('ERROR: docs/logo.png 变了，但 docs/brand-assets.json 没有重新生成。',
+                  file=sys.stderr)
+            print(f'  记录的 sha256: {assets.get("source_sha256")}', file=sys.stderr)
+            print(f'  当前的 sha256: {actual}', file=sys.stderr)
+            print('  跑一次 `python3 scripts/apply_branding.py`。', file=sys.stderr)
+            return 1
+        favicon_uri, brand_uri = assets['favicon'], assets['brand']
+    else:
+        _require_imaging()
+        mark = derive_mark()
+        favicon_uri = png_data_uri(mark, FAVICON_PX)
+        brand_uri = png_data_uri(mark, BRAND_PX)
         MASTER.parent.mkdir(parents=True, exist_ok=True)
         mark.save(MASTER)
+        ASSETS.write_text(json.dumps({
+            'note': '由 scripts/apply_branding.py 从 docs/logo.png 生成，请勿手改。'
+                    ' --check 只跟这个文件比对，不重新派生——PNG 压缩字节依赖 '
+                    'pillow/zlib 版本，跨平台不可复现。',
+            'source_sha256': source_sha256(),
+            'favicon_px': FAVICON_PX,
+            'brand_px': BRAND_PX,
+            'favicon': favicon_uri,
+            'brand': brand_uri,
+        }, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
     pages = tracked_pages()
     stale = []
@@ -240,14 +317,15 @@ def main(check_only=False) -> int:
 
     if check_only:
         if stale:
-            print(f'ERROR: {len(stale)} 个页面的品牌资产与 docs/logo.png 不同步：', file=sys.stderr)
+            print(f'ERROR: {len(stale)} 个页面与 docs/brand-assets.json 不同步：', file=sys.stderr)
             for s in stale[:12]:
                 print(f'  {s}', file=sys.stderr)
             if len(stale) > 12:
                 print(f'  …… 另有 {len(stale)-12} 个', file=sys.stderr)
-            print('  跑一次 `python3 scripts/apply_branding.py` 重新生成。', file=sys.stderr)
+            print('  跑一次 `python3 scripts/apply_branding.py` 重新铺设。', file=sys.stderr)
             return 1
-        print(f'品牌资产：{len(pages)} 个页面的 favicon 均与 docs/logo.png 同步'
+        print(f'品牌资产：{len(pages)} 个页面与 docs/brand-assets.json 一致，'
+              f'且该文件对应当前的 docs/logo.png'
               f'（favicon {len(favicon_uri)} B · brand {len(brand_uri)} B）')
         return 0
 
