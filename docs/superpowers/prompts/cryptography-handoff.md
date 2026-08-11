@@ -442,8 +442,13 @@ chsh(pair, angles)               // pair 是 4 个复振幅 [c00,c01,c10,c11]
 
 12. **骨架的 `.tabs{top:66px}` 假定 h1 只有一行。** `.brand` 在 375px 下限宽
     70vw = 262.5px，标题超过它就折行、第二行落在 78px，**与页签条重叠 12px**。
-    实测 27 个标题里 **12 个**超标（`cipher-machines` 433px、`codes-morse` 368px），
-    `crypto-substitution` 已在 main 上带着这个缺陷。见 §11。
+    **已修**（见 §11.1）。
+
+    ⚠ 顺带记一条**编排者量错了对象**的教训：第一次普查我量的是**注册表 title**，
+    得出"27 个里 12 个超标"。但页面上显示的是 `TOOL.h1`，是**另一个、通常更短的**
+    字符串（`crypto-cipher-machines` 的 title 是 "Cipher Machines — Wheels & Pin-and-Lug"，
+    而 h1 只是 "Cipher Machines"）。按 h1 重量，真正超标的是 **5 个，且只在英文下**。
+    量之前先确认量的是不是屏幕上那一个东西。
 
 13. **一个自称"不可能"的性质，要分清它是结构性的还是统计性的。**
     Playfair 不产叠字是**结构性**的（三条规则各自保证），可以穷举证明；
@@ -492,11 +497,15 @@ brief 里写错的事实，实现者有责任报回来，而不是把测试改�
 
 ## 11. 已知未做的事
 
-1. **375px 下标题与页签条重叠 12px。** 见 §9.12。27 个标题里 12 个超标，
-   `crypto-substitution` 等已在 main 上带着它。那段 CSS 有约 14 份逐字节副本
-   **加骨架**，且**不在 GENERATED 区间内**（`inline_core.py` 不会替你传播修复），
-   所以要么脚本化改全部页面、要么把规则改成自适应（让页签位置跟随实际 brand 高度）。
-   **无论哪种，`_skeleton.html` 必须改对**，否则下一个工具又会带回来。
+1. ~~375px 下标题与页签条重叠~~ **已修**，而且是**结构性**地修的，不是又改一个常数：
+   窄屏媒体查询里给 `.brand h1` 加 `white-space:nowrap;overflow:hidden;text-overflow:ellipsis`。
+   于是 `.tabs{top:66px}` / `.transport{top:110px}` 这对**按单行算出来的常数永远成立**，
+   也**不必动任何一页的 `layout()` 内容上边距**——那是 27 份各不相同的页面级常数，
+   动它们才是真正的大工程。
+   同时把 5 个会溢出的英文 h1 缩短到 320px 下也放得进（实测上限 224px），
+   并撤掉了 `crypto-cryptanalysis` 的页面级绕行——那段媒体查询现在 **28 份逐字节相同**。
+   负对照：塞一个病态长标题，有网时裁成一行、余量 −11px；把网关掉它折成 3 行、
+   压上去 **+35px**。
 2. **`examples/examples-modern.js` 与 `examples-quantum.js` 没有建。**
    规范里有它们，但至今**没有消费者**——第 4、5 章的工具要么用现成的
    `examples-classical.js`，要么参数就该是滑杆而不是冻结的数据。
