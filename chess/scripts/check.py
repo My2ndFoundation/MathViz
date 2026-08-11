@@ -18,6 +18,13 @@ SCRIPT_RE = re.compile(r'<script>(.*?)</script>', re.DOTALL)
 # 会因同源限制失败，靠它兜底渲染）。只抓 id 字段——FALLBACK 里其余字段
 # （kicker/title/tag）是给人看的展示文案，不是这道检查关心的东西。
 FALLBACK_ID_RE = re.compile(r"id:\s*'([\w-]+)'")
+# version 是例外：它不是展示文案，是**缓存键**（?v=<version>），而 file:// 下
+# FALLBACK 是唯一的数据源。所以另抓一遍 id → version 的配对，见
+# fallback_version_check()。夹取到下一个 id: 为止，不靠「同一行」这种脆弱假设。
+FALLBACK_ENTRY_RE = re.compile(r"id:\s*'([\w-]+)'(.*?)(?=id:\s*'|\Z)", re.DOTALL)
+FALLBACK_VERSION_RE = re.compile(r"version:\s*'([^']*)'")
+# 工具页头部的版本声明。注册表、这条 meta、面板角标三处必须同值（规格 §10）。
+META_VERSION_RE = re.compile(r'<meta\s+name="tool-version"\s+content="([^"]+)"')
 # node --check -（从 stdin 读）报错时行号前缀是 [stdin]:<n>；把 <n> 换算回
 # 该脚本块在原文件里的真实行号，见 node_check() 里的用法。
 STDIN_LINE_RE = re.compile(r'^\[stdin\]:(\d+)$', re.MULTILINE)
@@ -419,6 +426,125 @@ def fallback_check() -> int:
         rc = 1
     if rc == 0:
         print(f'FALLBACK 一致性：{copies} 份内嵌副本 · {len(registry_ids)} 个 id 全部对上')
+    return rc
+
+
+def fallback_version_check() -> int:
+    """FALLBACK 的每一条都要带 version，且必须等于 chess-tools.json 里的那个。
+
+    为什么单独一道门，而不是并进上面那条：**fallback_check() 只比 id 集合**，
+    一条缺了 version 的 FALLBACK 条目在它眼里是完全正常的。而 version 在这个
+    仓库不只是标签，它同时是缓存键——app.html 的 srcFor() 和画廊卡片都把它拼进
+    URL（?v=<version>），画廊页本身还要把它印在卡片角上。
+
+    真正的失败模式是「只在别人机器上出现」那一类：线上 fetch 得到注册表，一切
+    正常；file:// 下 FALLBACK 是唯一数据源，于是每个地址变成 ?v=undefined、
+    每张卡片写着 vundefined。上游 cryptography 的 CLAUDE.md 把这条单独记了一笔，
+    正因为 id 集合那道门看不见它。
+    """
+    registry = json.loads((ROOT / 'chess-tools.json').read_text(encoding='utf-8'))
+    reg_ver = {t['id']: t['version'] for t in registry['tools']}
+
+    rc = 0
+    checked = 0
+    for page in root_pages():
+        text = page.read_text(encoding='utf-8')
+        m = re.search(r'var FALLBACK = \[(.*?)\n\];', text, re.DOTALL)
+        if not m:
+            continue                     # 缺 FALLBACK 由 fallback_check 报，不重复报
+        for tid, body in FALLBACK_ENTRY_RE.findall(m.group(1)):
+            vm = FALLBACK_VERSION_RE.search(body)
+            if not vm:
+                print(f'ERROR: {page.name} 的 FALLBACK 条目 {tid} 没有 version 字段——'
+                      f'file:// 下它的地址会退化成 ?v=undefined', file=sys.stderr)
+                rc = 1
+                continue
+            want = reg_ver.get(tid)
+            if want is None:
+                continue                 # id 对不上由 fallback_check 报
+            if vm.group(1) != want:
+                print(f'ERROR: {page.name} 的 FALLBACK 条目 {tid} 版本是 '
+                      f'{vm.group(1)!r}，注册表是 {want!r}', file=sys.stderr)
+                rc = 1
+                continue
+            checked += 1
+    if rc == 0:
+        print(f'FALLBACK 版本戳：{checked} 条内嵌条目全部带 version 且与注册表同值')
+    return rc
+
+
+def version_meta_check() -> int:
+    """chess-tools.json 的 version 必须等于工具页 <meta name="tool-version">。
+
+    版本号是缓存键（见上一道门）：app.html 与画廊把注册表里的那个数字拼进 URL，
+    工具页的面板角标读的却是自己的 meta。两处分岔时，一次已发布的升级会躲在
+    浏览器的旧副本后面直到使用者清缓存——根 CLAUDE.md 记着这事在主站真发生过
+    （pi 已经是 1.2.0，页面仍显示 1.1.1）。
+    """
+    registry = json.loads((ROOT / 'chess-tools.json').read_text(encoding='utf-8'))
+    rc = 0
+    for d in registry['tools']:
+        path = ROOT / d['file']
+        if not path.exists():
+            print(f'ERROR: 注册表里的 {d["file"]} 在磁盘上不存在', file=sys.stderr)
+            rc = 1
+            continue
+        m = META_VERSION_RE.search(path.read_text(encoding='utf-8'))
+        if not m:
+            print(f'ERROR: {d["file"]} 缺 <meta name="tool-version">', file=sys.stderr)
+            rc = 1
+            continue
+        if m.group(1) != d['version']:
+            print(f'ERROR: {d["id"]} 版本不一致——注册表 {d["version"]}、'
+                  f'html meta {m.group(1)}', file=sys.stderr)
+            rc = 1
+    if rc == 0:
+        print(f'版本元数据：{len(registry["tools"])} 个工具的注册表与 html meta 一致')
+    return rc
+
+
+# app.html 与 index.html 各自的 PARENT_HOME 常量，一处一条，别处一律零。
+OUTBOUND_ALLOW = {'app.html': 1, 'index.html': 1}
+
+
+def outbound_ref_check() -> int:
+    """整个 chess/ 子树的父目录引用普查。
+
+    设计约束：把 chess/ 整个目录复制到任何别处，双击 app.html 仍然完整可用。
+    这条约束的敌人不是某一次错误，而是**熵**——第 N 个工具随手写一条
+    ../outputs/foo.js，在别人搬走目录的那一刻才失效，而那时没有任何东西会报警。
+    这道门把它变成提交前就会响的断言。（下游 cryptography 先有这道门，
+    这里是搬回上游。）
+
+    只扫会被浏览器加载的文件（html / js / json）。两处排除：
+      · scripts/ 下的 Python 不扫——它们是构建工具，不解析成 URL；而且这个
+        文件自己就得写出那个字符串。
+      · `*.test.js` 不扫——测试文件永远不会被内联进 html，也不随页面被浏览器
+        加载，它们跨目录 require（`../_test.js`）是正常的。
+    needle 拼出来而不是写成字面量，让这段代码即便被扫也不会自己踩雷。
+    """
+    needle = '..' + '/'
+    rc = 0
+    total = 0
+    for path in sorted(ROOT.rglob('*')):
+        if not path.is_file():
+            continue
+        if path.suffix not in ('.html', '.js', '.json'):
+            continue
+        rel = path.relative_to(ROOT)
+        if rel.parts[0] == 'scripts' or path.name.endswith('.test.js'):
+            continue
+        n = path.read_text(encoding='utf-8').count(needle)
+        total += n
+        allowed = OUTBOUND_ALLOW.get(str(rel), 0)
+        if n != allowed:
+            print(f'ERROR: {rel} 里的父目录引用有 {n} 处，允许 {allowed} 处。\n'
+                  f'       chess/ 必须能被整体搬走后独立运行；除 app.html 与\n'
+                  f'       index.html 各自的 PARENT_HOME 常量外，任何文件都不许\n'
+                  f'       指向子项目之外。', file=sys.stderr)
+            rc = 1
+    if rc == 0:
+        print(f'出站引用：全子树共 {total} 处，全部在 PARENT_HOME 上')
     return rc
 
 
@@ -954,15 +1080,25 @@ if __name__ == '__main__':
     # 消息抹掉插值算结构形状——不是简单数字面消息条数）则等于没有判别力
     # （当场失败）——阶段 7 三条同前缀错误消息撞上恒真 pattern、四条守卫
     # 全删仍全绿，就是这道门要防的事故。
+    # fallback_version_check / version_meta_check / outbound_ref_check 是
+    # 2026-08-11 从下游 cryptography 搬回来的三道，跟着这一轮把 ?v= 缓存键与
+    # PARENT_HOME 补进导航壳一起加：前两道守版本号这条**缓存键**的三处同值
+    # （注册表 / FALLBACK / html meta），第三道守「chess/ 整个目录搬走后仍可
+    # 独立运行」。三道守的都是「本机全绿、别人机器上才坏」那一类，正是
+    # fallback_check() 只比 id 集合看不见的那一层。
     rc_inline = inline_core.main(check_only=True)
     rc_node = node_check()
     rc_html_safety = js_string_literal_html_safety_check()
     rc_marker = algos_marker_shape_check()
     rc_algos = algos_roundtrip_check()
     rc_fallback = fallback_check()
+    rc_fb_version = fallback_version_check()
+    rc_version_meta = version_meta_check()
+    rc_outbound = outbound_ref_check()
     rc_core = core_tests()
     rc_bilingual = bilingual_algos_check()
     rc_throws = throws_discrimination_check()
     sys.exit(1 if (rc_inline or rc_node or rc_html_safety or rc_marker or
-                    rc_algos or rc_fallback or rc_core or rc_bilingual or
-                    rc_throws) else 0)
+                    rc_algos or rc_fallback or rc_fb_version or
+                    rc_version_meta or rc_outbound or rc_core or
+                    rc_bilingual or rc_throws) else 0)
