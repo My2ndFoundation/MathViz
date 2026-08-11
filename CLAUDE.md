@@ -133,6 +133,48 @@ both define `module` and `require`, so a UMD module tested that way takes its **
 exercise the browser branch you need `vm` with a bare context. A gate that tests the wrong branch is
 worse than no gate — it advertises coverage it does not have.
 
+## Branding is generated too
+
+`docs/logo.png` is the source of truth for the brand mark. `scripts/apply_branding.py` derives a
+transparent M/V mark from it and writes it into **every tracked `.html`** — the favicon as an inline
+`data:` URI in a `GENERATED:FAVICON` region, plus a `GENERATED:BRAND-LOGO` CSS region on the six
+navigation pages. Never hand-edit inside those markers.
+
+```bash
+python3 scripts/apply_branding.py          # derive + write all pages
+python3 scripts/apply_branding.py --check  # verify only; exit 1 if out of sync
+```
+
+Inline `data:` URIs rather than a `favicon.ico` because all three of this repo's hard rules forbid the
+file: single-file/zero-dependency, `file://`-openable, and subprojects portable (`outbound_ref_check()`
+allows exactly one outbound reference per root page — `PARENT_HOME`). Cost is ~1 KB/page, ~100 KB total.
+
+The original logo cannot be used as-is: its axes are `#001241`, which is **1.12:1** against `--bg-deep`
+— invisible. The script keys out the white ground and drops the axes, keeping M, V and the sine curve.
+Two details that look like bugs but are load-bearing: the axes are painted *over* the letterforms with a
+white halo, so removal is bridged by a morphological closing **intersected with the axis band** (bridging
+everywhere would also fill the design's own white gap where the curve crosses, turning it into a pale
+smear); and the bridge colour comes from normalized convolution, because nearest-neighbour fill streaks
+visibly. Full rationale in `design-system/math-viz-design-system.md` §3.8.
+
+**Derivation and verification are separate, with `docs/brand-assets.json` between them.** Generating
+needs pillow/numpy and is run by hand; it writes the two data URIs plus the source logo's sha256 into
+that file. `--check` needs *no* imaging libraries — it compares strings (page vs. asset file) and
+re-hashes `docs/logo.png` to catch "source changed, never regenerated".
+
+That split is not tidiness. The first version re-derived inside `--check` and compared the base64:
+**all 107 pages failed on CI while all 107 passed locally** (PR #160). PNG *compressed bytes* are not
+a function of the pixels — they depend on the pillow/libpng/zlib build, and macOS and ubuntu disagree.
+Same family as the `MAX_ARG_STRLEN` incident: the check was comparing something that was never stable.
+The rule that fixes it: **hash the input, compare the committed output.** A related trap the negative
+control caught: `def derive_mark() -> Image.Image:` evaluates the annotation at *definition* time, so
+without `from __future__ import annotations` the module cannot even import when PIL is absent — and
+`--check` dies on the very machine it was meant to run libraries-free.
+
+The gate runs in `.githooks/pre-commit` (on changes to the logo or the script) and in
+`registry-sync.yml` on every push/PR — the CI one scans *all* of `git ls-files '*.html'`, so a newly
+added page that never got branded fails there rather than showing a blank tab icon in production.
+
 ## Commands
 
 There is no build/lint/test toolchain. To develop:
