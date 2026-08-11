@@ -69,6 +69,9 @@ unlike the maths tools' Chinese default.
 
 ### cryptography/ specifics
 
+**All five chapters are built — 27 tools, 16 gates.** The planned scope is closed, so new work here
+is upgrades, fixes, or tools beyond the original plan, not "continue chapter N".
+
 Chapters are a fixed closed set — 1 古典密码 · 2 机械密码 · 3 密码分析 · 4 现代密码学 ·
 5 量子时代密码学; both `app.html` and `index.html` group by `chapter` and their `CHAPTER_LABELS`
 must stay byte-identical. Accents are the closed set cyan / rose / violet / emerald / orange.
@@ -76,6 +79,16 @@ New tools are copied from `cryptography/tools/_skeleton.html` — the template o
 with `GENERATED:ALGOS none` and *does* participate in inlining; an **empty** list is a hard error on
 purpose, because empty is the shape a slip takes (write the markers, fill them in later).
 Authoring workflow: `.claude/skills/crypto-viz-tool/SKILL.md`. Architecture: `docs/superpowers/cryptography.md`.
+**How it was built and what to know before changing it: `docs/superpowers/prompts/cryptography-handoff.md`** —
+it carries the API signatures that trip people up, the four quantum gates, and every brief error that
+implementers caught.
+
+Two more things that bite and are not guessable. **The FALLBACK arrays must carry `version`**: the
+gallery's version badge and the `?v=` cache key both read it, and under `file://` FALLBACK is the only
+data source — omit it and every card offline reads `vundefined` while the site looks perfect.
+`fallback_check()` only compares **id sets**, so it will not catch this for you. And **`_skeleton.html`
+deliberately has no `GENERATED:QUANTUM-SIM` markers** — inlining a quantum simulator into a Caesar page
+is dead weight; the pages that need it add the pair themselves.
 
 Three invariants `check.py` enforces that you will not guess, each with an incident behind it:
 
@@ -88,9 +101,9 @@ Three invariants `check.py` enforces that you will not guess, each with an incid
    inside comments.** The repo's `awk '/<script>/{f=1;next}…'` extraction recipe silently drops such
    lines, so the syntax gate would be checking different bytes than the browser runs; paired with a
    `<` + `!--` it can flip the HTML tokenizer and swallow the page. One was inherited from chess.
-3. **`CRYPTO-CORE` must be inlined before `CRYPTANALYSIS` and `ALGOS`.** Those modules capture
-   `root.CryptoCore` at load, so the wrong order gives a page that loads clean and then dies on the
-   user's first interaction. Verified: with the order swapped, the inline gate, the syntax gate and
+3. **`CRYPTO-CORE` must be inlined before `CRYPTANALYSIS`, `ALGOS` and `QUANTUM-SIM`.** Those modules
+   capture `root.CryptoCore` at load, so the wrong order gives a page that loads clean and then dies on
+   the user's first interaction. Verified: with the order swapped, the inline gate, the syntax gate and
    the algorithm-evaluation gate are all green — only the order gate is red.
 
 A related trap worth knowing when adding gates: `node -e` **and** `node` reading a script on stdin
@@ -133,6 +146,43 @@ Multiple sessions and multiple build agents routinely run against this repo at o
 5. **A pre-commit hook that regenerates files can pull another session's uncommitted work into your commit.** `.githooks/pre-commit` re-runs `chess/scripts/inline_core.py`, which reads `chess/core/**/*.js` **off disk** — not from the index. So whatever another session has saved but not committed gets inlined into the HTML the hook then re-stages. This is how one chess phase-6 commit carried off another session's half-written BLANK markers. **"Stage explicit paths" does not stop this** — the hook stages more after you do. Read every path in `git status --short` after the hook runs, not just before.
 
 Before committing, `git status --short` and confirm every listed path is yours.
+
+## Verifying your own work
+
+Four rules from a 27-tool build in which **5 of the 13 subagents dispatched for chapters 4–5 returned
+a factual error in the brief they were given, and every one of them was right** (a sixth surfaced a
+real bug in shared core). The failures were never sloppiness; they were measurements that could not
+have detected what they claimed to rule out.
+
+1. **A result of "zero" or "all passed" is not evidence until a negative control fails.** Break the
+   thing the check guards and confirm it goes red. Three probes shipped in one session without this
+   and all three measured nothing: one compared `String(object)` to itself (`'[object Object]'`) and
+   reported a structural law "confirmed" over 3600 cases; one ran a loop whose body never executed
+   because every candidate was shorter than the required length; one enumerated too small a coefficient
+   range and reported a lattice mismatch that did not exist. Each looked like a strong positive result.
+   This is the same family as the `node -e` branch trap below — *a method that structurally cannot
+   observe the thing it is used to exclude.*
+
+2. **For standard algorithms, check against an independent implementation, not against the agent that
+   used the constant.** Node's built-in `crypto` is a free OpenSSL: AES-128-ECB, SHA-256 and MD5 over
+   every byte length 0–200 (covers the 55/56 and 63/64 padding boundaries). **OpenSSL 3 disables single
+   DES**, but `3DES(k,k,k) === DES`, so `des-ede3-ecb` with a tripled key still gives a reference. An
+   implementation agreeing with a vector *you* supplied only proves self-consistency.
+
+3. **Put the measurement protocol in a brief, never the expected value.** Numbers that reproduce on
+   your bench routinely do not reproduce on theirs — different corpus, different RNG stream ordering,
+   different sample size — and an implementer told to match a number will either waste time or quietly
+   tune until it matches. Ask for their number and the protocol that produced it. When the two disagree,
+   prefer the claim that holds on both benches over the sharper one that holds only on yours.
+
+4. **Verify the artifact, not the intention.** `git mv` stages the *pre-edit* blob, so a commit made
+   after editing-then-moving a file can record only the rename — `git show --name-status` said `R100`
+   while 198 lines of content sat unstaged. Read what the commit actually contains.
+
+When a constant has already been "fixed" once by making it bigger, **do not make it bigger again**.
+The narrow-screen tab bar was moved 52 → 66px for exactly this bug and broke again, because both fixes
+assumed a single-line title. Making the assumption *true* (`white-space:nowrap`) cost less than moving
+the constant would have, and cannot recur.
 
 ## Design-system-first discipline
 
