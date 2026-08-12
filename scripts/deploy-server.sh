@@ -5,7 +5,7 @@
 #
 # 这是**规范副本**，不从 $SRC 直接执行——部署过程中脚本自我覆盖是自找的麻烦。
 # 改动后手动同步：
-#   sudo cp /srv/mathviz-src/scripts/deploy-server.sh /usr/local/bin/mathviz-deploy
+#   sudo cp /data/primeforge.app/MathViz/src/scripts/deploy-server.sh /usr/local/bin/mathviz-deploy
 #
 set -euo pipefail
 
@@ -13,8 +13,8 @@ REPO=My2ndFoundation/MathViz
 REPO_URL=https://github.com/My2ndFoundation/MathViz.git
 BRANCH=main
 GATE_WORKFLOW=registry-sync.yml
-SRC=/srv/mathviz-src
-WEB=/srv/mathviz
+SRC=/data/primeforge.app/MathViz/src   # git clone，不对外
+WEB=/data/primeforge.app/MathViz/www   # Caddy 的 root
 SITE=https://mathviz.primeforge.app
 
 echo "== 1/4 CI 闸门 =="

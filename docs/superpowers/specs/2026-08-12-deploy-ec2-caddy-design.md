@@ -134,8 +134,8 @@ fetch**（`git fetch --depth 1 origin <sha>`），所以这个竞态窗口是直
 ## 4. 两个目录：失败隔离
 
 ```
-/srv/mathviz-src   ← git clone（浅克隆，28MB）
-/srv/mathviz       ← Caddy 的 root
+/data/primeforge.app/MathViz/src   ← git clone（浅克隆，28MB），不对外
+/data/primeforge.app/MathViz/www   ← Caddy 的 root
 ```
 
 脚本是 `set -euo pipefail`，两个目录之间因此隔着一道成功判定：
@@ -246,7 +246,7 @@ Caddyfile 里既易写错又难验证。境内延迟的大头是传输量而非�
 部署过程中脚本自我覆盖是自找的麻烦。改动后手动同步：
 
 ```bash
-sudo cp /srv/mathviz-src/scripts/deploy-server.sh /usr/local/bin/mathviz-deploy
+sudo cp /data/primeforge.app/MathViz/src/scripts/deploy-server.sh /usr/local/bin/mathviz-deploy
 ```
 
 ## 9. 验证与负向对照
@@ -282,7 +282,7 @@ sudo cp /srv/mathviz-src/scripts/deploy-server.sh /usr/local/bin/mathviz-deploy
 
 ```caddyfile
 mathviz.primeforge.app {
-	root * /srv/mathviz
+	root * /data/primeforge.app/MathViz/www
 	encode zstd gzip
 	file_server
 
@@ -323,14 +323,14 @@ DNS 已就位，证书由 Caddy 自动签发，reload 后数秒生效。
 ## 附录 B：服务器一次性设置
 
 ```bash
-sudo mkdir -p /srv/mathviz-src /srv/mathviz
-sudo chown -R "$USER":"$USER" /srv/mathviz-src /srv/mathviz
-chmod 755 /srv/mathviz
+sudo mkdir -p /data/primeforge.app/MathViz/src /data/primeforge.app/MathViz/www
+sudo chown -R "$USER":"$USER" /data/primeforge.app/MathViz/src /data/primeforge.app/MathViz/www
+chmod 755 /data/primeforge.app/MathViz/www
 
 git clone --depth 1 --branch main \
-  https://github.com/My2ndFoundation/MathViz.git /srv/mathviz-src
+  https://github.com/My2ndFoundation/MathViz.git /data/primeforge.app/MathViz/src
 
-sudo cp /srv/mathviz-src/scripts/deploy-server.sh /usr/local/bin/mathviz-deploy
+sudo cp /data/primeforge.app/MathViz/src/scripts/deploy-server.sh /usr/local/bin/mathviz-deploy
 sudo chmod +x /usr/local/bin/mathviz-deploy
 ```
 
