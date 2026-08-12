@@ -1,17 +1,57 @@
 # 部署到自有 EC2 + Caddy 设计
 
 日期：2026-08-12
-域名：`mathviz.primeforge.app`（A 记录已指向 EC2）
+域名：`mathviz.primeforge.app`（A 记录已指向 EC2 `18.135.222.248`，eu-west-2 伦敦）
 服务器：已在跑的 EC2，Caddy 处理 HTTP，由维护者自行操作
 
 ## 1. 目标与范围
 
 把这个纯静态站点（107 个 HTML、22MB、零后端）从 GitHub Pages 扩展到自有服务器。
 
+### 首要动因：境内可达
+
+这套工具的 UI 默认中文，主要受众在中国大陆，而 **GitHub Pages 在境内基本不可
+达**。这不是"控制响应头"之类的优化，而是决定站点对主要用户是否存在的前提。
+自建的第一理由是它，其余（缓存控制、脱离 GitHub 依赖）都是附带收益。
+
+这条约束也决定了下面几处设计取向，先在此点明：**GitHub 不能出现在用户请求的
+路径上**，只能出现在部署时刻。
+
 **GitHub 侧一行不改。** 现有的 `registry-sync.yml` 原样保留，它自然成为部署的
 前置条件（§3）。仓库里不新增 workflow，不新增 secret。
 
-GitHub Pages **保留**，不下线：零成本，作为后备和第二意见。
+GitHub Pages **保留**，不下线：零成本，服务境外用户，兼作后备与第二意见。
+
+### 未采用：Caddy `reverse_proxy` 到 GitHub Pages
+
+看起来能"不占服务器资源"，实测三处当场翻车，且并不省资源：
+
+| 实测 | 结果 |
+|---|---|
+| `curl -H 'Host: mathviz.primeforge.app' …github.io/MathViz/` | **404**——Pages 按 Host 路由，`reverse_proxy` 默认透传原 Host |
+| 站点实际位置 | `/MathViz/` 而非根，需 `rewrite`；且 `/MathViz` 返回 301，`Location` 指回 `github.io`，**把用户弹出自有域名** |
+| 响应头 | `cache-control: max-age=600` 原样透传，另有一层无法清除的 Fastly（`via: 1.1 varnish`） |
+
+决定性的一条：**stock Caddy 的 `reverse_proxy` 不缓存响应**（需 souin 等插件），
+所以每个用户请求都真的去 GitHub 取一趟——GitHub 仍在热路径上，只是换了个位置
+被依赖。在"境内可达"这个目标下，这等于什么都没解决，还多了一跳和一个单点。
+
+反代也不省资源：从本地磁盘发文件比"再去一趟 GitHub 再回来"开销更小。
+
+### 未采用：Pages 自定义域名
+
+若不考虑境内可达，这是最优解——零服务器、GitHub 免费 TLS 与全球 CDN。
+但它把站点完全放在境内不可达的服务上，与首要动因直接冲突。
+
+### 待定：服务器区域
+
+当前在 **eu-west-2（伦敦）**。若境内可达是主要目标，东京（ap-northeast-1）或
+新加坡（ap-southeast-1）是数量级上更合适的落点，其影响大于本文讨论的所有细节。
+本设计不依赖具体区域，换区不需要改动任何内容。
+
+**这一项需要实测后决定，不要凭猜**：从境内网络对当前 IP 与一个东京节点各跑
+`curl -w '%{time_total}'` 对比。（境内 CDN 需 ICP 备案，`primeforge.app` 走不通，
+故不在选项内。）
 
 ## 2. 方向：服务器拉，不是 CI 推
 
@@ -169,8 +209,19 @@ grep -oE '(href|src|url\()[^)"]*docs/[^)")]*' $(git ls-files '*.html')   # 无�
 
 本仓的 `?v=<version>` 缓存键机制，是为了绕开 GitHub Pages 强加的
 `max-age=600` 才存在的——升级藏在陈旧副本后面这件事真实发生过。自有 Caddy
-上响应头由自己控制：HTML 与三份注册表 JSON 发 `no-cache`（每次回源校验，
-304 很便宜），派生的 PNG 发长缓存。
+上响应头由自己控制：HTML 与三份注册表 JSON 发 `no-cache`，派生的 PNG 发长缓存。
+
+**`no-cache` 不是"不缓存"，是"用之前先校验"。** 浏览器保留副本并发
+`If-None-Match`，命中就是一个 304 空响应。对 1.1MB 的
+`chess-board-algorithms.html`，这省下的是整次传输，只付一个往返——在高延迟
+链路上这恰恰是想要的行为。
+
+**曾考虑并否决的分层缓存**：让带 `?v=` 的工具页走长缓存，只对无版本键的入口
+文档回源校验，可再省掉那一个往返。否决理由有二：直接书签了不带 `?v=` 的工具页
+会被钉在旧副本上；而所需的 matcher 组合（`path` 与 `not query` 的交并）在
+Caddyfile 里既易写错又难验证。境内延迟的大头是传输量而非往返数，压缩
+（`encode zstd gzip`，文本压 4–5 倍）与 HTTP/2 的收益远大于此，两者已默认启用。
+不为一个往返换一类陈旧风险。
 
 `?v=` **保留**。它不只是缓存产物：`app.html` 用它作为 iframe 的刷新触发器，
 去掉会改变导航行为。它现在是双保险。
@@ -206,7 +257,7 @@ sudo cp /srv/mathviz-src/scripts/deploy-server.sh /usr/local/bin/mathviz-deploy
 |---|---|---|---|
 | 1 | 线上 `/tools.json` 的 sha256 == `$SRC` 中该文件 | Caddy root 指错、服务的是旧副本、rsync 静默漏传 | 临时把 `root *` 指向空目录，reload，重跑 |
 | 2 | `/docs/superpowers/specs/` 返回 404 | §6 的发布边界被破坏 | 临时去掉 `--exclude='docs/'`，重跑 |
-| 3 | `/index.html` 的 `Cache-Control` 含 `no-cache` | Caddy 的 header 段没生效或被覆盖 | 临时注释掉 `header @nocache`，reload，重跑 |
+| 3 | `/index.html` 的 `Cache-Control` 含 `no-cache` | Caddy 的 header 段没生效、被覆盖，**或 matcher 写成了永不命中的形式**（附录 A 的 ⚠） | 临时注释掉 `header @revalidate`，reload，重跑 |
 
 按本仓规矩，"全绿"在负向对照失败之前不算证据。**第 2 条尤其要跑**——它守的
 是 45 份内部工程文档不上公网，而这是三条里唯一**在浏览器里看不出来**的。
@@ -236,14 +287,17 @@ mathviz.primeforge.app {
 	file_server
 
 	# 只有这几类会"内容变了而路径不变"，必须每次回源校验。见 §7。
-	@nocache {
-		path *.html
-		path /
-		path /tools.json
-		path /chess/chess-tools.json
-		path /cryptography/cryptography-tools.json
-	}
-	header @nocache Cache-Control "no-cache"
+	#
+	# ⚠ 多个路径必须写在**同一行**。Caddy 文档：同一 named matcher 块内的多个
+	# 条件是 AND，而同一 path 行内的多个路径才是 OR。写成
+	#     @nocache {
+	#         path *.html
+	#         path /
+	#     }
+	# 是"既是 *.html 又是 /"——不可能同时成立，这条规则**永不命中且不报错**，
+	# 缓存策略静默失效。本文初稿就是这么写的。
+	@revalidate path *.html / /tools.json /chess/chess-tools.json /cryptography/cryptography-tools.json
+	header @revalidate Cache-Control "no-cache"
 
 	@static path *.png *.ico
 	header @static Cache-Control "public, max-age=31536000, immutable"
