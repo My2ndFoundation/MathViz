@@ -145,6 +145,8 @@ body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)
   .shell.hid .sidebar{margin-left:calc(-1 * var(--sb-w) - 8px)}
   .shell:not(.hid) .scrim{display:block}
   .edge{height:64px}
+  /* .sb-rec 的窄屏显示规则不在这里，在 .sb-rec 基础规则之后——那条规则声明
+     display:none，同特异性下后写的赢，放这里会被它盖掉（本次就先这么写错过一次）。 */
 }
 
 /* ===== 录制器 ===== */
@@ -176,6 +178,26 @@ body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)
   border:1px solid rgba(255,90,138,.5);background:rgba(255,90,138,.16);color:#ffd7e3}
 .rec-go[disabled]{opacity:.45;cursor:not-allowed}
 .rec-note{margin-top:9px;color:#6f7f99;font-size:11px;line-height:1.5}
+
+/* 窄屏：录制控件收进侧边栏，不再浮在 iframe 上。
+   ≤760px 时工具把自己的 .panel 变成贴底抽屉（left:10;right:10;bottom:10），
+   折叠按钮因此落到右下角——正是 .rec-btn 钉死的 right:16/bottom:16。实测
+   375×812：折叠按钮 x326–350/y767–791 完全落在 Record 的 x270–359/y761–796
+   之内，命中测试显示点击被 SPAN#recBtnTxt 接走，面板再也打不开。横版宽 812
+   不触发工具的窄屏规则，面板回到右上，所以只在竖版出现。
+
+   不换个角落，是因为量过窄屏下**没有空闲的角**：上方 brand+tabs 占到 y110，
+   下方整条归面板抽屉，中间那片是要拖动旋转的 canvas。挪去哪都在抢别人的地方，
+   那只是把常数改大——本仓在窄屏上已经这样栽过（52→66 那次）。
+   壳看不进 iframe、工具也看不见壳，两边单独测都是绿的；唯一结构性的出路是
+   让壳的控件待在壳自己的地盘里。 */
+.sb-rec{display:none;padding:10px 12px;border-top:1px solid var(--panel-line)}
+.sb-rec .rec-btn{position:static;width:100%;justify-content:center;backdrop-filter:none}
+.sb-rec .rec-panel{position:static;width:auto;margin-top:10px;z-index:auto;backdrop-filter:none}
+/* 必须写在上面那条 display:none 之后：同特异性下后写的赢。放进文件前面那个
+   @media 块里会被 .sb-rec 的基础规则盖掉，得到一个永远不显示的空槽——
+   JS 把按钮搬进去了，用户却看不见，录制功能等于消失。 */
+@media (max-width:760px){ .sb-rec{display:block} }
 .rec-eff{color:#ffd7e3;font-weight:600}
 .rec-bar{height:3px;margin-top:9px;border-radius:2px;background:rgba(255,255,255,.09);overflow:hidden}
 .rec-bar i{display:block;height:100%;width:0;background:#ff5a8a;transition:width .1s linear}
@@ -208,6 +230,8 @@ body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn)
     </div>
     <div class="sb-search"><input id="q" type="search" autocomplete="off" spellcheck="false"></div>
     <nav class="sb-list" id="navList"></nav>
+    <!-- 窄屏时 #recBtn / #recPanel 被搬到这里（见 placeRecUI）。宽屏为空且 display:none。 -->
+    <div class="sb-rec" id="sbRecSlot"></div>
     <div class="sb-foot">
       <button id="btnLang" title="切换语言 / Switch language">EN</button>
       <span class="sp"></span>
@@ -1348,6 +1372,12 @@ function go(id, push){
     }catch(e){}
   }
   if (window.innerWidth <= 760) setSidebar(false);
+  /* 自愈：录制控件的落点平时由 MQL 的 change 事件维护，但那条路径依赖一个
+     我们无法在每种环境里验证的事件。切工具是必然会发生的用户动作，在这里
+     无条件重算一次，漏掉的那次转屏就不会一直错下去。
+     漏掉的后果不对称：宽→窄没搬回来，Record 会继续盖住工具面板的折叠按钮
+     （就是本次修的 bug）。 */
+  if (window.REC && REC.UI && REC.UI.placeRecUI) REC.UI.placeRecUI();
 }
 
 /* ================= 侧栏显隐 ================= */
@@ -2227,11 +2257,35 @@ REC.UI.render = function(){
   for (var i = 0; i < segs.length; i++) segs[i].textContent = segs[i].getAttribute('data-v');
 };
 
+/* 录制控件的落点随宽度切换：≤760px 收进侧边栏，否则浮在 stage 右下。
+   搬的是同两个节点，不是两套副本——复制一份就会有两个 __mounted、两份 on 状态。
+
+   为什么必须搬走而不是换个角落：≤760px 时工具把 .panel 变成贴底抽屉，
+   #btnFold 落在右下，与钉死在 right:16/bottom:16 的 .rec-btn 完全重叠
+   （实测 375×812：折叠按钮 x326–350/y767–791 ⊂ Record x270–359/y761–796），
+   点击被 Record 接走，工具面板再也打不开。而窄屏下没有空闲的角可以让：
+   上方 brand+tabs 到 y110，下方整条是面板，中间是要拖动旋转的 canvas。 */
+REC.UI.placeRecUI = function(){
+  var btn = document.getElementById('recBtn');
+  var pan = document.getElementById('recPanel');
+  var slot = document.getElementById('sbRecSlot');
+  var stage = document.querySelector('main.stage');
+  if (!btn || !pan || !slot || !stage) return;
+  var host = window.matchMedia('(max-width:760px)').matches ? slot : stage;
+  if (btn.parentNode !== host){ host.appendChild(btn); host.appendChild(pan); }
+};
+
 REC.UI.mount = function(){
   var btn = document.getElementById('recBtn');
   var pan = document.getElementById('recPanel');
   if (!btn || !pan || btn.__mounted) { if (btn && btn.__mounted) REC.UI.render(); return; }
   btn.__mounted = true;
+  REC.UI.placeRecUI();
+  /* MediaQueryList 存在 REC.UI 上而不是丢给临时变量：监听器挂在一个没人引用的
+     MQL 上时不保证被保活，实测过一次——窗口从 375 拉到 1280，change 没触发，
+     按钮留在了 display:none 的侧栏槽里，桌面上录制功能整个消失。 */
+  REC.UI._mq = window.matchMedia('(max-width:760px)');
+  REC.UI._mq.addEventListener('change', REC.UI.placeRecUI);
   document.getElementById('recBtnTxt').textContent = REC.t(REC.UI.L.rec);
   REC.UI.render();
 
@@ -2431,6 +2485,20 @@ REC.UI.__test = function(){
   ok('录制按钮存在', !!btn);
   ok('面板已渲染出内容', !!pan && pan.innerHTML.length > 0);
   ok('面板默认收起', pan.className.indexOf('on') < 0);
+  /* 落点随宽度切换。这条断言存在的原因：Record 曾在 ≤760px 下钉在
+     right:16/bottom:16，而工具在同一断点把面板变成贴底抽屉，两者右下角
+     完全重叠，工具面板的折叠按钮被整个盖住、点不开。壳看不进 iframe，
+     所以没有任何跨文档的测试会发现它——只能在这一侧断言落点。
+     这里**不能**先调 placeRecUI() 再断言——那等于先把状态修好再检查，断言就
+     结构上永远不会失败。第一版就是这么写的，它在「拉宽后按钮留在隐藏侧栏槽里」
+     这个真回归面前照样报绿。断言的是当前状态本身。 */
+  var narrow = window.matchMedia('(max-width:760px)').matches;
+  var stage = document.querySelector('main.stage');
+  ok('录制控件落点与当前宽度一致（当前 ' + (narrow ? '窄' : '宽') + '屏）',
+     btn.parentNode === (narrow ? document.getElementById('sbRecSlot') : stage));
+  ok('录制控件所在容器可见',
+     btn.parentNode && getComputedStyle(btn.parentNode).display !== 'none');
+  ok('面板与按钮同处一个容器', pan.parentNode === btn.parentNode);
   btn.click();
   ok('点按钮展开面板', pan.className.indexOf('on') >= 0);
   /* 画幅分段器：点 9:16 应写回 CFG */
