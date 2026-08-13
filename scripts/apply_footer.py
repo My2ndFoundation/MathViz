@@ -89,23 +89,30 @@ def gallery_block() -> str:
             f'<!-- <<< {BEGIN} -->')
 
 
-# 侧栏是 268px 宽、内容区 244px，而完整串在 10px 下实测 260px——**一行放不下**。
-# 这里允许折行：不折行的要求针对的是工具面板那一行，侧栏页脚是块状区域，
-# 两行完全正常。也**不能**塞进 .sb-foot——那是 display:flex 的一行控件，塞进去
-# 会被当成 flex 项挤到右边并溢出侧栏（实测盒 105×64、右边缘超出 3px）。
-# 所以给它自己的块，放在 .sb-foot 之前。
+# 壳里**不放版权文字**。壳是个容器：它的 iframe 里装的要么是画廊（页脚有版权）、
+# 要么是工具（面板底部有版权），所以壳自己再放一份，任何时刻屏幕上都会同时出现
+# 两条。实测确认过两种状态各自都是 2 条。
+#
+# 这是「把 6 个导航页当成平级」的后果——其中 3 个壳**包含**另外 3 个画廊。同一个
+# 结构盲点在 GA 那边被抓住了（iframe 双计 pageview），在版权这边漏了。
+#
+# 但「Cookie 设置」必须留在壳里：GA 代码块在 iframe 内提前 return，所以那个链接
+# 只存在于壳，不重复（实测壳里 1 个、iframe 里 0 个）。因此这里留一个只承载它的
+# 窄槽。不塞进 .sb-foot——那是 display:flex 的一行控件，长内容会被挤到右边并溢出
+# 侧栏（版权文字放进去时实测盒 105×64、右边缘超出 3px）。
 SHELL_CSS = """<style>
-.sb-copyright{padding:10px 12px 0;font-size:10px;line-height:1.55;color:#5f6e86}
-.sb-copyright a{color:#8b9bb4;text-decoration:none}
-.sb-copyright a:hover{color:#bfefff}
+.sb-cookie{padding:9px 12px 0;font-size:10px;line-height:1.5;color:#5f6e86}
+.sb-cookie a{color:#8b9bb4;text-decoration:none}
+.sb-cookie a:hover{color:#bfefff}
+.sb-cookie:empty{display:none}
 </style>"""
 
 
 def shell_block() -> str:
+    """壳只留一个空槽给「Cookie 设置」；没有 GA 时 :empty 让它自己消失。"""
     return (f'<!-- >>> {BEGIN} -->\n'
             f'{SHELL_CSS}\n'
-            f'<div class="sb-copyright">{FULL.format(pf=PRIMEFORGE, dh=DARKHORSEONE)}</div>\n'
-            f'{YEAR_JS}\n'
+            f'<div class="sb-cookie"></div>\n'
             f'<!-- <<< {BEGIN} -->')
 
 
@@ -230,10 +237,12 @@ def analytics_block(sub: str) -> str:
   }}
 
   /* 撤回要和给出同意一样容易（ICO）：版权那一行旁边常驻一个入口。 */
-  var foot = document.querySelector('.copyright, .sb-copyright');
+  var foot = document.querySelector('.copyright, .sb-cookie');
   if (foot) {{
     var a = document.createElement('a');
-    a.className = 'mv-cookie-link'; a.href = '#'; a.textContent = '· ' + T.set;
+    a.className = 'mv-cookie-link'; a.href = '#';
+    /* 画廊页脚里它跟在版权后面，要一个分隔点；壳里那个槽是空的，不要前导点。 */
+    a.textContent = (foot.textContent.trim() ? '· ' : '') + T.set;
     a.onclick = function (e) {{ e.preventDefault(); banner(); }};
     foot.appendChild(a);
   }}
