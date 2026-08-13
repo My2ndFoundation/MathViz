@@ -539,9 +539,17 @@ def algos_dep_order_check() -> int:
     return rc
 
 # 允许出现出站引用的文件与次数。除这两处外，整个子树必须是零。
-# 数值是 1 而不是「随便几次」：两页都已经把这条路径收敛到唯一的 PARENT_HOME
-# 常量上，多出来的一次就意味着有人绕过了那个常量。
-OUTBOUND_ALLOW = {'app.html': 1, 'index.html': 1}
+# 数值是精确值而不是「随便几次」：多出来的一次就意味着有人绕过了既有的常量。
+#
+# 2 = PARENT_HOME 常量 + cookie 同意横幅里指向根目录 privacy.html 的链接
+# （GENERATED:ANALYTICS 区间，由 scripts/apply_footer.py 写入）。
+#
+# 从 1 提到 2 是有代价的，写清楚免得后人以为可以随手再提：这条额度削弱的正是本门
+# 守着的那个约束——「把子项目整个目录搬走后仍完整可用」。PARENT_HOME 用「父级不
+# 存在就自己隐藏」化解了它；隐私说明链接目前没有这层兜底，搬走后会 404。之所以
+# 仍然接受，是因为 ICO 要求同意横幅必须能点到一份说明，而把 privacy.html 在三个
+# 子站各复制一份是更糟的选择（同一份法律文本三个副本，正是本仓反复吃亏的漂移形态）。
+OUTBOUND_ALLOW = {'app.html': 2, 'index.html': 2}
 
 
 def outbound_ref_check() -> int:
@@ -580,7 +588,7 @@ def outbound_ref_check() -> int:
                   f'       子项目之外。', file=sys.stderr)
             rc = 1
     if rc == 0:
-        print(f'出站引用：全子树共 {total} 处，全部在 PARENT_HOME 上')
+        print(f'出站引用：全子树共 {total} 处，全部在白名单内（PARENT_HOME 与同意横幅的隐私链接）')
     return rc
 
 
