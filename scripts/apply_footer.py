@@ -96,24 +96,9 @@ def gallery_block() -> str:
 # 这是「把 6 个导航页当成平级」的后果——其中 3 个壳**包含**另外 3 个画廊。同一个
 # 结构盲点在 GA 那边被抓住了（iframe 双计 pageview），在版权这边漏了。
 #
-# 但「Cookie 设置」必须留在壳里：GA 代码块在 iframe 内提前 return，所以那个链接
-# 只存在于壳，不重复（实测壳里 1 个、iframe 里 0 个）。因此这里留一个只承载它的
-# 窄槽。不塞进 .sb-foot——那是 display:flex 的一行控件，长内容会被挤到右边并溢出
-# 侧栏（版权文字放进去时实测盒 105×64、右边缘超出 3px）。
-SHELL_CSS = """<style>
-.sb-cookie{padding:9px 12px 0;font-size:10px;line-height:1.5;color:#5f6e86}
-.sb-cookie a{color:#8b9bb4;text-decoration:none}
-.sb-cookie a:hover{color:#bfefff}
-.sb-cookie:empty{display:none}
-</style>"""
-
-
-def shell_block() -> str:
-    """壳只留一个空槽给「Cookie 设置」；没有 GA 时 :empty 让它自己消失。"""
-    return (f'<!-- >>> {BEGIN} -->\n'
-            f'{SHELL_CSS}\n'
-            f'<div class="sb-cookie"></div>\n'
-            f'<!-- <<< {BEGIN} -->')
+# 壳因此**完全没有 COPYRIGHT 区间**：连承载「Cookie 设置」的槽也不需要了——那个
+# 入口现在是个图标按钮，由 GA 代码块直接插进已有的 .sb-foot，继承那一行控件
+# （中 / ↗ / GitHub）的现成样式，不引入新的视觉元素。
 
 
 # ============================ GA4 + Cookie 同意 ============================
@@ -149,7 +134,10 @@ CONSENT_CSS = """<style>
   border:1px solid rgba(45,212,234,.45);background:rgba(45,212,234,.12);color:#bfefff}
 .mv-consent button:hover{border-color:rgba(45,212,234,.8)}
 .mv-consent button:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:2px}
-.mv-cookie-link{margin-left:8px;cursor:pointer;text-decoration:none}
+/* 画廊页脚里的文字链接。壳里的图标按钮在 .sb-foot 内，样式由页面既有的
+   `.sb-foot a,.sb-foot button` 规则提供，这里不要再加尺寸相关的声明——
+   加了就会和那一行的 中 / ↗ / GitHub 不齐。 */
+a.mv-cookie-link{margin-left:8px;cursor:pointer;text-decoration:none}
 </style>"""
 
 
@@ -236,15 +224,29 @@ def analytics_block(sub: str) -> str:
     document.body.appendChild(box);
   }}
 
-  /* 撤回要和给出同意一样容易（ICO）：版权那一行旁边常驻一个入口。 */
-  var foot = document.querySelector('.copyright, .sb-cookie');
-  if (foot) {{
-    var a = document.createElement('a');
-    a.className = 'mv-cookie-link'; a.href = '#';
-    /* 画廊页脚里它跟在版权后面，要一个分隔点；壳里那个槽是空的，不要前导点。 */
-    a.textContent = (foot.textContent.trim() ? '· ' : '') + T.set;
-    a.onclick = function (e) {{ e.preventDefault(); banner(); }};
-    foot.appendChild(a);
+  /* 撤回要和给出同意一样容易（ICO），所以入口必须常驻。两种宿主：
+     · 壳：做成图标按钮插进 .sb-foot 的语言键旁边，继承那一行控件的现成样式，
+       不引入新的视觉元素（此前是一条独占一行的文字链接，太重）。
+     · 画廊页：页脚里跟在版权后面，一条文字链接。
+     两处都用 title/aria-label 说明具体含义——⚙ 本身只表达「设置」。 */
+  var lang = document.getElementById('btnLang');
+  var bar = lang && lang.parentNode && lang.parentNode.classList.contains('sb-foot')
+            ? lang.parentNode : null;
+  if (bar) {{
+    var g = document.createElement('button');
+    g.type = 'button'; g.className = 'mv-cookie-link'; g.textContent = '⚙';
+    g.title = T.set; g.setAttribute('aria-label', T.set);
+    g.onclick = function (e) {{ e.preventDefault(); banner(); }};
+    lang.parentNode.insertBefore(g, lang.nextSibling);
+  }} else {{
+    var foot = document.querySelector('.copyright');
+    if (foot) {{
+      var a = document.createElement('a');
+      a.className = 'mv-cookie-link'; a.href = '#'; a.textContent = '· ' + T.set;
+      a.title = T.set;
+      a.onclick = function (e) {{ e.preventDefault(); banner(); }};
+      foot.appendChild(a);
+    }}
   }}
 
   var c = ls(CKEY);
@@ -349,9 +351,15 @@ def main() -> int:
                 if token in s:
                     errs.append(f'{rel}: 仍有占位符 {token}，隐私说明不能带占位符上线')
 
-        anchor_kind = 'gallery' if kind == 'legal' else kind
-        new = anchor_replace(s, {'tool': tool_block, 'gallery': gallery_block,
-                                 'shell': shell_block}[anchor_kind](), anchor_kind, rel)
+        if kind == 'shell':
+            # 壳没有 COPYRIGHT 区间。必须**主动删掉**残留的旧区间，而不是只是
+            # 不再写入——否则历史上写进去的那份会一直留在页面上，而 --check
+            # 因为「不写就不比」永远报绿。
+            new = re.sub(rf'\s*<!-- >>> {BEGIN} -->.*?<!-- <<< {BEGIN} -->', '', s, flags=re.S)
+        else:
+            anchor_kind = 'gallery' if kind == 'legal' else kind
+            new = anchor_replace(s, {'tool': tool_block,
+                                     'gallery': gallery_block}[anchor_kind](), anchor_kind, rel)
         if kind in ('gallery', 'shell'):
             new = analytics_replace(new, p, rel)
             # 包装 go 只对壳有意义；壳里若没有 go，说明它被改名了，包装会静默失效。
