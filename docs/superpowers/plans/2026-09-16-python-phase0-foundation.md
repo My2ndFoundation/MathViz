@@ -2035,6 +2035,7 @@ if __name__ == '__main__':
         library.anchor_check(),
         library.exemption_check(),
         library.source_ascii_check(),
+        library.source_bmp_check(),
         library.source_indent_check(),
         library.blank_directive_check(),
         library.program_meta_check(),
@@ -2100,11 +2101,17 @@ if __name__ == '__main__':
 | `chapter_manifest_check` | 清单点名的 `.py` 存在；目录里的 `.py` 都被点名；**章目录与注册表工具页一一对应** | 往章目录扔一个没被点名的 `.py` → 红 |
 | `anchor_check` | `lineNotes.at` / `chunks.from` / `chunks.to` 的整行原文在源码里**存在且唯一** | 把某条 `at` 改掉一个空格 → 红 |
 | `exemption_check` | **例外豁免**（`runtime == 'cpython'` 且 `requires` 不含 pygame，却标了 `compile-only`）必须带 `why`，每页 ≤ 2，且每次运行**逐条打印**；结构性豁免自动放行 | 临时加一个无 `why` 的 compile-only → 红 |
-| `source_ascii_check` | 每段 `.py` 纯 ASCII | 往注释塞一个中文字 → 红 |
+| `source_ascii_check` | 每段 `.py` 的**程序体**纯 ASCII（`# >>> BLANK` 指令行豁免——`hint=` 按双语设计就是中文，见全局约束 6） | 往**普通**注释塞一个中文字 → 红；往 `hint=` 塞中文 → **仍绿**（否则豁免就退化成「跳过所有注释行」） |
+| **`source_bmp_check`** | `.py` 里不许出现**非 BMP** 字符（码位 > U+FFFF）。CPython `tokenize` 给**字符**偏移、JS 给 **UTF-16 码元**偏移，两者只在全 BMP 时相等——一个 emoji 就让该行之后所有偏移**静默平移且不报错**。实测本章最高码位 U+FF1B、482 字符 == 482 码元；换成 `x = 1  # 🚀` 立刻是 17 字符 vs 18 码元 | 往某条 `hint=` 塞一个 emoji → 红 |
 | `source_indent_check` | 无制表符；缩进是 4 的倍数；行尾无多余空白；LF 结尾 | 把某行 4 个空格换成 Tab → 红 |
 | `blank_directive_check` | 指令成对；`id/level/hint/hintEn` 齐全；id 页内唯一；`level ∈ 1..3`；挖空体非空 | 删掉某个 BLANK 的 `hintEn` → 红 |
 | `program_meta_check` | id 全库唯一；`kind/level/boards/runtime` 在闭集；`title/blurb/notes` 中英齐全；`notes` 是数组；`requires` 在白名单；**`chapter.json` 里不许出现 `lines` 字段**（派生字段不手写） | 给某条加一个 `"lines": 20` → 红 |
 | `variant_check` | **只对成员数 > 1 的 `problem` 组**校验 `title.en` 互不相同（绝大多数程序是单例，"每个 problem ≥ 2"会把任何一章判红）；**另加一条**：全库至少存在一个多变体组——否则这道门在一个全是单例的库上永远绿，等于没有门 | 把两个 `max-of-three-*` 的 `problem` 改成不同值 → 红（多变体组归零） |
+
+**编码纪律（裁决 R21）**：R16 允许指令行含中文之后，`.py` **不再保证 ASCII 可解码**——
+T5 的实现者自己的脚本当场炸了 `UnicodeDecodeError`。`build_programs.py` 与**每一道读 `.py`
+的门**都必须显式 `encoding='utf-8'`；`program_embed_roundtrip_check()` 的逐字节比对，
+两边必须**同在 bytes 层或同在 str 层**，不许一边 bytes 一边 str。
 
 `program_run_check` 与 `algorithm_property_check` 的三层策略（spec §5.4）：
 
