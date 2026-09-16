@@ -101,6 +101,7 @@ GATES = [
     ('C', 'node_check',            syntax.node_check),
     ('C', 'core_tests',            syntax.core_tests),
     ('C', 'browser_branch_check',  syntax.browser_branch_check),
+    ('C', 'closed_set_mirror_check',  syntax.closed_set_mirror_check),
 
     ('D·库', 'program_run_check',              library.program_run_check),
     ('D·库', 'algorithm_property_check',       library.algorithm_property_check),

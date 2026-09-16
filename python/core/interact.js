@@ -151,6 +151,11 @@
                   en: 'This browser will not let the page use local storage: nothing you type is being saved.' },
     bannerMigrated:{ zh: '存储格式已升级，旧的草稿与进度已被清除。',
                   en: 'The storage format changed; old drafts and progress were cleared.' },
+    metaLevel:   { zh: '难度 L{0}', en: 'Level {0}' },
+    blanksCount: { zh: '{0} 个空',  en: '{0} blank(s)' },
+    tags:        { zh: '标签',      en: 'Tags' },
+    runtime:     { zh: '运行环境',  en: 'Runtime' },
+    notTagged:   { zh: '未标注',    en: 'Not tagged' },
     needsPip:    { zh: '需要先装：', en: 'Install first: ' }
   };
 
@@ -182,6 +187,66 @@
   function asList(v) {
     if (Array.isArray(v)) { return v; }
     return (v === undefined || v === null || v === '') ? [] : [v];
+  }
+
+  /* ---- 程序元数据的四个闭集 ----
+     与 python/scripts/gates/library.py 的 LEVELS / KINDS / BOARDS / RUNTIMES 同值，由
+     syntax.closed_set_mirror_check 比对。第 0 期前三个是 mount() 里的局部变量，与门里的
+     闭集是一对没人看管的镜像。数组有序：选择器按这个顺序排 chip。 */
+  var LEVELS = [1, 2, 3, 4, 5];
+  var KINDS = ['syntax', 'pattern', 'algorithm', 'project', 'embedded'];
+  var BOARDS = ['AQA', 'OCR', 'Edexcel', 'CIE'];
+  var RUNTIMES = ['cpython', 'micropython-microbit', 'micropython-pico'];
+
+  var KIND_LABELS = {
+    syntax:    { zh: '语法',     en: 'Syntax' },
+    pattern:   { zh: '惯用模式', en: 'Pattern' },
+    algorithm: { zh: '算法',     en: 'Algorithm' },
+    project:   { zh: '项目',     en: 'Project' },
+    embedded:  { zh: '嵌入式',   en: 'Embedded' }
+  };
+  var RUNTIME_LABELS = {
+    'cpython':              { zh: 'CPython', en: 'CPython' },
+    'micropython-microbit': { zh: 'MicroPython · micro:bit', en: 'MicroPython · micro:bit' },
+    'micropython-pico':     { zh: 'MicroPython · Pico', en: 'MicroPython · Pico' }
+  };
+
+  /* 未知值原样给出而不是空串：一个看得出是错的标签，好过一块看起来正常的空白。 */
+  function kindLabel(kind, lang) {
+    var e = KIND_LABELS[kind];
+    return e ? (lang === 'en' ? e.en : e.zh) : String(kind == null ? '' : kind);
+  }
+  function runtimeLabel(rt, lang) {
+    var e = RUNTIME_LABELS[rt];
+    return e ? (lang === 'en' ? e.en : e.zh) : String(rt == null ? '' : rt);
+  }
+
+  /* panelMeta(program, lang, blankCount) → [{ key, label, items }]
+
+     说明面板顶部那几行元数据（第 1 期设计 B7）。决定显示什么的逻辑放在这里、可测；
+     renderPanel 只负责画。三种模式都显示——元数据不泄题。
+       summary  难度 · 类型 · 行数 · 空数（blankCount 不是数字时省略，不编）
+       boards   考试局；空时显式写「未标注」
+       tags     标签；空时整行不出
+       runtime  只在非 cpython 时出 */
+  function panelMeta(program, lang, blankCount) {
+    if (!program) { return []; }
+    var head = [ts('metaLevel', lang, [program.level]), kindLabel(program.kind, lang)];
+    if (typeof program.lines === 'number') { head.push(ts('lines', lang, [program.lines])); }
+    if (typeof blankCount === 'number') { head.push(ts('blanksCount', lang, [blankCount])); }
+    var rows = [{ key: 'summary', label: '', items: [head.join(' · ')] }];
+
+    var boards = asList(program.boards);
+    rows.push({ key: 'boards', label: t('boards', lang),
+                items: boards.length ? boards.slice() : [t('notTagged', lang)] });
+
+    var tags = asList(program.tags);
+    if (tags.length) { rows.push({ key: 'tags', label: t('tags', lang), items: tags.slice() }); }
+
+    if (program.runtime && program.runtime !== 'cpython') {
+      rows.push({ key: 'runtime', label: t('runtime', lang), items: [runtimeLabel(program.runtime, lang)] });
+    }
+    return rows;
   }
 
   /* filterPrograms(programs, filters) → Program[]
@@ -700,6 +765,14 @@
     '.py-warn{color:var(--trace-orange,#fb923c)}',
     '.py-toast{position:absolute;left:50%;bottom:58px;transform:translateX(-50%);z-index:9;',
     '  padding:7px 14px;font-size:13px;border-radius:8px;color:#05070d;background:var(--py-accent)}',
+    '.py-meta{margin:0 0 12px;padding:0 0 10px;border-bottom:1px solid var(--panel-line,rgba(148,163,184,.16))}',
+    '.py-meta-row{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 6px;margin:0 0 4px;',
+    '  font-size:12px;color:var(--ui-slate,#9fb0c8)}',
+    '.py-meta-v{color:var(--ui-bright,#e2e8f0)}',
+    '.py-board{padding:0 7px;border-radius:999px;border:1px solid var(--panel-line,rgba(148,163,184,.3));',
+    '  color:var(--ui-bright,#e2e8f0)}',
+    '.py-tag{padding:0 6px;border-radius:4px;background:rgba(148,163,184,.12);',
+    '  font-family:var(--font-code,ui-monospace,monospace);font-size:11px}',
     '.py-note{margin:0 0 9px}',
     '.py-note.py-anchor{background:rgba(45,212,234,.12);border-radius:5px;padding:3px 6px}',
     '.py-note-at{display:block;font-family:var(--font-code,ui-monospace,monospace);font-size:11px;',
@@ -877,9 +950,6 @@
     }
 
     /* ================= 程序选择器 ================= */
-    var LEVELS = [1, 2, 3, 4, 5];
-    var KINDS = ['syntax', 'pattern', 'algorithm', 'project', 'embedded'];
-    var BOARDS = ['AQA', 'OCR', 'Edexcel', 'CIE'];
     var LINE_CAPS = [0, 20, 40, 80];
 
     function toggleFilter(dim, value) {
@@ -909,7 +979,7 @@
       fs.appendChild(h('h4', null, t('level', S.lang)));
       fs.appendChild(chipRow('level', LEVELS, function (v) { return 'L' + v; }));
       fs.appendChild(h('h4', null, t('kind', S.lang)));
-      fs.appendChild(chipRow('kind', KINDS, function (v) { return v; }));
+      fs.appendChild(chipRow('kind', KINDS, function (v) { return kindLabel(v, S.lang); }));
       fs.appendChild(h('h4', null, t('boards', S.lang)));
       fs.appendChild(chipRow('boards', BOARDS, function (v) { return v; }));
       fs.appendChild(h('h4', null, t('filters', S.lang)));
@@ -937,7 +1007,7 @@
         li.setAttribute('aria-current', p.id === S.progId ? 'true' : 'false');
         var tx = h('div', 'py-item-t', pick(p.title, S.lang) || p.id);
         var meta = h('span', 'py-item-m',
-          'L' + p.level + ' · ' + (p.kind || '') + ' · ' + ts('lines', S.lang, [p.lines]));
+          'L' + p.level + ' · ' + kindLabel(p.kind, S.lang) + ' · ' + ts('lines', S.lang, [p.lines]));
         tx.appendChild(meta);
         li.appendChild(tx);
         li.addEventListener('click', function () { setProgram(p.id); });
@@ -1562,6 +1632,26 @@
       wipe(panel);
       var p = current();
       if (!p) { return; }
+      /* 元数据在最上面（第 1 期设计 B7）。空数现数：parse 失败时挖空模式自己会把错误
+         摆在舞台上，这里只是不显示空数，不另报一次。 */
+      var blankCount = null;
+      try {
+        blankCount = exercise().parse(typeof p.source === 'string' ? p.source : '').blanks.length;
+      } catch (e) {
+        blankCount = null;
+      }
+      var metaRows = panelMeta(p, S.lang, blankCount);
+      if (metaRows.length) {
+        var meta = h('div', 'py-meta');
+        metaRows.forEach(function (row) {
+          var r = h('div', 'py-meta-row');
+          if (row.label) { r.appendChild(h('span', 'py-meta-k', row.label)); }
+          var cls = row.key === 'tags' ? 'py-tag' : (row.key === 'boards' ? 'py-board' : 'py-meta-v');
+          row.items.forEach(function (it) { r.appendChild(h('span', cls, it)); });
+          meta.appendChild(r);
+        });
+        panel.appendChild(meta);
+      }
       panel.appendChild(h('h4', null, pick(p.title, S.lang) || p.id));
       var blurb = pick(p.blurb, S.lang);
       if (blurb) { panel.appendChild(h('p', 'py-note', blurb)); }
@@ -1775,6 +1865,12 @@
     charMatches: charMatches,
     blockedHint: blockedHint,
     applyFollowEnter: applyFollowEnter,
-    STYLE_CSS: CSS
+    STYLE_CSS: CSS,
+    LEVELS: LEVELS,
+    KINDS: KINDS,
+    BOARDS: BOARDS,
+    RUNTIMES: RUNTIMES,
+    kindLabel: kindLabel,
+    panelMeta: panelMeta
   };
 });

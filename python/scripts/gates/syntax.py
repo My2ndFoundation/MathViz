@@ -205,3 +205,60 @@ console.log('OK ' + spec.length);
     print(f'浏览器分支：{len(BROWSER_GLOBALS)} 个 core 模块在裸 vm 沙箱里'
           f'按依赖**反序**装载后全部挂上并可调用')
     return 0
+
+
+def closed_set_mirror_check() -> int:
+    """interact.js 导出的 LEVELS / KINDS / BOARDS / RUNTIMES / HINT_MARK 与
+    library.py 的规格常量逐项相同。
+
+    两边各存一份：门那份是规格（design §2.3），页面那份决定选择器的 chip 与面板的
+    标签。门里加了一个 kind、页面没加，这个 kind 的程序在选择器里筛不出来、面板上
+    显示成英文枚举值——没有任何东西报错。在 vm 裸 context 里走浏览器分支取值
+    （browser_branch_check 同法），测的是页面里真正执行的那份。
+    """
+    from . import library               # 惰性导入：library 导入期会加载 refs
+    script = r'''
+const vm = require('vm'), fs = require('fs');
+const sandbox = {};
+sandbox.self = sandbox;
+vm.createContext(sandbox);
+if (typeof sandbox.module !== 'undefined' || typeof sandbox.require !== 'undefined') {
+  console.error('FAIL 沙箱不干净：module/require 泄漏进来了');
+  process.exit(1);
+}
+vm.runInContext(fs.readFileSync(%s, 'utf8'), sandbox, { filename: 'interact.js' });
+const P = sandbox.PyInteract;
+if (!P) { console.error('FAIL 没有挂上 root.PyInteract'); process.exit(1); }
+process.stdout.write(JSON.stringify({ LEVELS: P.LEVELS, KINDS: P.KINDS, BOARDS: P.BOARDS,
+                                      RUNTIMES: P.RUNTIMES, HINT_MARK: P.HINT_MARK }));
+''' % json.dumps(str(CORE_DIR / 'interact.js'))
+    proc = run_node(script)
+    if proc.returncode != 0:
+        print(f'ERROR: 在 vm 里装载 interact.js 失败：{proc.stderr.strip()}', file=sys.stderr)
+        return 1
+    got = json.loads(proc.stdout)
+    rc = 0
+    for key, spec in (('LEVELS', library.LEVELS), ('KINDS', library.KINDS),
+                      ('BOARDS', library.BOARDS), ('RUNTIMES', library.RUNTIMES)):
+        arr = got.get(key)
+        if not isinstance(arr, list):
+            print(f'ERROR: PyInteract.{key} 没有导出成数组（实际 {arr!r}）', file=sys.stderr)
+            rc = 1
+            continue
+        if len(arr) != len(set(arr)):
+            print(f'ERROR: PyInteract.{key} 有重复值：{arr}', file=sys.stderr)
+            rc = 1
+        if set(arr) != spec:
+            print(f'ERROR: PyInteract.{key} 与 library.{key} 不同——'
+                  f'只在页面：{sorted(set(arr) - spec, key=str)}；'
+                  f'只在门：{sorted(spec - set(arr), key=str)}', file=sys.stderr)
+            rc = 1
+    if got.get('HINT_MARK') != library.HINT_MARK:
+        print(f'ERROR: PyInteract.HINT_MARK={got.get("HINT_MARK")!r} 与 '
+              f'library.HINT_MARK={library.HINT_MARK!r} 不同——门数出的段数与页面切出的段数会分岔',
+              file=sys.stderr)
+        rc = 1
+    if rc == 0:
+        print('闭集镜像：interact.js 的 LEVELS/KINDS/BOARDS/RUNTIMES/HINT_MARK 与 library.py 逐项相同'
+              '（vm 裸 context，浏览器分支）')
+    return rc

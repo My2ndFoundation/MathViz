@@ -478,4 +478,35 @@ T.throws(function () { PI.mount({ programs: PROGS }); },
   });
 })();
 
+/* 说明面板顶部的元数据（第 1 期设计 B7） */
+(function () {
+  T.ok(typeof PI.panelMeta === 'function', 'panelMeta 已导出');
+  if (typeof PI.panelMeta !== 'function') { return; }
+  const prog = { id: 'm', level: 2, kind: 'pattern', lines: 23, boards: ['AQA', 'OCR'],
+                 tags: ['selection', 'if-elif-else'], runtime: 'cpython' };
+  const zh = PI.panelMeta(prog, 'zh', 2);
+  T.eq(zh.map(function (r) { return r.key; }), ['summary', 'boards', 'tags'], 'cpython 不显示运行环境行');
+  T.eq(zh[0].items, ['难度 L2 · 惯用模式 · 23 行 · 2 个空'], '中文摘要行');
+  T.eq(PI.panelMeta(prog, 'en', 2)[0].items, ['Level 2 · Pattern · 23 lines · 2 blank(s)'], '英文摘要行');
+  T.eq(zh[1].label, '考试局', '考试局行的标签');
+  T.eq(zh[1].items, ['AQA', 'OCR'], '考试局按声明顺序原样给');
+  T.eq(zh[2].items, ['selection', 'if-elif-else'], '标签原样给（英文标识符，不翻译）');
+  T.eq(PI.panelMeta(Object.assign({}, prog, { boards: [] }), 'zh', 2)[1].items, ['未标注'],
+       '考试局为空时显式写未标注（program_meta_check 要求非空，这是 UI 兜底）');
+  T.eq(PI.panelMeta(Object.assign({}, prog, { tags: [] }), 'zh', 2).map(function (r) { return r.key; }),
+       ['summary', 'boards'], '没有标签就不出标签行');
+  T.eq(PI.panelMeta(prog, 'zh', null)[0].items, ['难度 L2 · 惯用模式 · 23 行'], '空数算不出来时不编一个');
+  const pico = Object.assign({}, prog, { runtime: 'micropython-pico' });
+  const picoRows = PI.panelMeta(pico, 'en', 1);
+  T.eq(picoRows.map(function (r) { return r.key; }), ['summary', 'boards', 'tags', 'runtime'], '非 cpython 才显示运行环境');
+  T.eq(picoRows[3].items, ['MicroPython · Pico'], '运行环境用标签而不是枚举值');
+  T.eq(PI.panelMeta(null, 'zh', 0), [], '没有当前程序：空数组');
+
+  T.eq(PI.KINDS, ['syntax', 'pattern', 'algorithm', 'project', 'embedded'], 'KINDS 导出且有序');
+  PI.KINDS.forEach(function (k) {
+    T.ok(PI.kindLabel(k, 'zh') !== k && PI.kindLabel(k, 'en') !== k, 'kind ' + k + ' 中英标签都存在');
+  });
+  T.eq(PI.kindLabel('quiz', 'zh'), 'quiz', '未知 kind 原样给出，不给空串');
+})();
+
 T.report('interact');
