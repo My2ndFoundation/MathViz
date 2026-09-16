@@ -348,22 +348,26 @@ def lazy_dep_check() -> int:
 
 
 LINE_NOTE_READERS = ('panelLineNotes', 'noteLineIndex')
-LINE_NOTE_READ_RE = re.compile(r"\.\s*lineNotes\b|\[\s*['\"]lineNotes['\"]\s*\]")
+# 单词级：抓住 `lineNotes` 这个词的**任何**拼出方式——点读取、引号/模板字面量
+# 方括号、解构、裸字符串——只要它逐字出现就命中。round-1 复评员实测：旧版
+# `\.\s*lineNotes\b|\[\s*['"]lineNotes['"]\s*\]` 只认点读取与引号方括号，
+# `var { lineNotes } = p` 与 `` p[`lineNotes`] `` 两条真实绕法都能全绿通过，
+# 还照样打印「4 处读取」——正则结构性看不见它们，不是偶然漏测。
+LINE_NOTE_WORD_RE = re.compile(r'\blineNotes\b')
+# 白名单 (c)：`t('lineNotes', ...)` / `t("lineNotes", ...)`——t() 调用本身就是
+# 经白名单函数取值再显示，不是又一条读取路径。允许 `t(` 后有空白，不允许别的
+# 字符插在中间（否则「像 t() 调用」的字符串拼接也会被放过）。
+T_CALL_RE = re.compile(r"""\bt\(\s*(['"])lineNotes\1""")
 
 
-def _function_span(code: str, name: str):
-    """在已剥注释的代码里找 `function name(` 的函数体区间 [起, 止)；找不到返回 None。
+def _brace_span(code: str, start: int):
+    """给一个左花括号的下标 `start`，配对扫描出 `[start, 止)` 的区间；找不到收尾返回 None。
 
-    只数花括号，跳过字符串字面量。两个目标函数体内没有正则字面量；若将来有了、
-    又恰好含未配对的花括号，这里会切错区间——门会因「允许的函数里一处读取都没有」
-    或「读取落在函数外」而红，不会静默放行。
+    只数花括号，跳过字符串/模板字面量——`_function_span` 与 `_str_table_span`
+    共用这一段扫描：两处都是「给一个已知的左花括号位置，找它的右花括号」，
+    区别只在起点怎么找（`function name(` 后的第一个 `{` vs `var STR = ` 后的
+    那个 `{`），配对算法完全相同。
     """
-    m = re.search(r'\bfunction\s+' + re.escape(name) + r'\s*\(', code)
-    if not m:
-        return None
-    start = code.find('{', m.end())
-    if start < 0:
-        return None
     depth = 0
     quote = None
     i = start
@@ -388,17 +392,57 @@ def _function_span(code: str, name: str):
     return None
 
 
+def _function_span(code: str, name: str):
+    """在已剥注释的代码里找 `function name(` 的函数体区间 [起, 止)；找不到返回 None。
+
+    两个目标函数体内没有正则字面量；若将来有了、又恰好含未配对的花括号，这里
+    会切错区间——门会因「允许的函数里一处读取都没有」或「读取落在函数外」而红，
+    不会静默放行。
+    """
+    m = re.search(r'\bfunction\s+' + re.escape(name) + r'\s*\(', code)
+    if not m:
+        return None
+    start = code.find('{', m.end())
+    if start < 0:
+        return None
+    return _brace_span(code, start)
+
+
+def _str_table_span(code: str):
+    """`var STR = { ... };`（i18n 键表）的对象字面量区间 [起, 止)；找不到返回 None。
+
+    白名单 (b)：`STR` 是键名的**声明**处，`lineNotes:` 这个键理所当然会在这里
+    出现一次——那不是读取，是定义。找不到这个区间本身就是一条具名的红（不是
+    静默放行）：找不到往往意味着 interact.js 换了写法，这道门的假设就该重新
+    核实，而不是悄悄认为「没有 STR 表所以没什么要挡」。
+    """
+    m = re.search(r'\bvar\s+STR\s*=\s*\{', code)
+    if not m:
+        return None
+    return _brace_span(code, m.end() - 1)
+
+
 def line_note_reader_check() -> int:
-    """core/ 里读取 `lineNotes` 属性的地方只能在 `panelLineNotes` 与 `noteLineIndex` 两个函数体内。
+    """core/ 里出现 `lineNotes` 这个词，只能在三处：`panelLineNotes` / `noteLineIndex`
+    两个函数体内（读取）、`STR` 的 i18n 键表内（声明该键名）、`t('lineNotes', ...)`
+    调用内（经白名单函数取值再显示）。别处出现这个词——不论是靠哪种 JS 语法拼出来
+    的——都当场红。
 
-    第 1 期设计 D7 解禁了「行注锚在挖空体内」，于是泄题的第二道防线从数据层挪到
-    读取点：面板把 `note.at` 的整行原文逐字打出来，而锚可以落在挖空体里。
-    `panelLineNotes` 按模式白名单决定给不给（只有读模式给）；`noteLineIndex` 只把锚
-    换算成行号、在读模式的文档渲染里点小圆点，不输出正文。任何别处直接读
-    `p.lineNotes`，都是绕过白名单的一条新路——这道门让它当场红。
+    **这道门抓的是「这个词逐字出现」，不是某一种语法。** 单词级正则 `\\blineNotes\\b`
+    在剥完注释的源码上扫，不区分点读取（`p.lineNotes`）、引号/模板字面量方括号
+    （`p['lineNotes']` / `` p[`lineNotes`] ``）、解构赋值（`var { lineNotes } = p`），
+    甚至一条裸字符串（`'lineNotes'`）——只要不在三处白名单区间内，字面拼出这个
+    键名就是红。round-1 的旧版正则只认「点」与「引号方括号」两种写法，`var { lineNotes }
+    = p` 与 `` p[`lineNotes`] `` 两条真实存在的绕法能全绿通过——这一版把「认语法」
+    换成了「认词」，堵的是同一类问题的所有已知形状，不是再补两条正则分支。
 
-    **先剥注释再扫**（R47）：interact.js 的注释里会提到 lineNotes；i18n 键
-    `lineNotes:` 与 `t('lineNotes', …)` 不是属性读取，正则也不匹配它们。
+    **这道门结构性看不见的东西**：一个在运行时才拼出来的键名（如
+    `p['line' + 'Notes']`），或反射式遍历（`Object.keys(p)` / `for...in`）——那些
+    代码里从来没有逐字出现 `lineNotes` 这个词，`\\blineNotes\\b` 天生扫不到它们。
+    这不是本门的覆盖范围，是诚实地说明「认词」这个方法的边界。
+
+    **先剥注释再扫**（R47）：interact.js 的注释里会提到 lineNotes，剥注释后那些
+    提及会变成等长空格，不会被计入。
     """
     rc = 0
     reads = 0
@@ -407,6 +451,8 @@ def line_note_reader_check() -> int:
     for path in core_modules():
         code = strip_js_comments(read_text(path))
         spans = {}
+        str_span = None
+        t_call_spans = []
         if path.name == 'interact.js':
             saw_interact = True
             for name in LINE_NOTE_READERS:
@@ -417,17 +463,35 @@ def line_note_reader_check() -> int:
                     rc = 1
                 else:
                     spans[name] = span
-        for m in LINE_NOTE_READ_RE.finditer(code):
-            reads += 1
-            owner = next((nm for nm, (a, b) in spans.items() if a <= m.start() < b), None)
-            if owner is None:
-                line = code[:m.start()].count('\n') + 1
-                print(f'ERROR: core/{path.name}:{line} 直接读取了 lineNotes——只允许在 '
-                      f'{" / ".join(LINE_NOTE_READERS)} 里读。行注的原文会泄露挖空答案，'
-                      f'要给行注请经过 panelLineNotes(program, mode)。', file=sys.stderr)
+            str_span = _str_table_span(code)
+            if str_span is None:
+                print('ERROR: core/interact.js 里找不到 `var STR = {...}`（i18n 键表）——'
+                      '白名单 (b) 无处安放，这道门关于 lineNotes 声明处的假设不再成立',
+                      file=sys.stderr)
                 rc = 1
-            else:
+            t_call_spans = [m.span() for m in T_CALL_RE.finditer(code)]
+
+        lines_src = code.split('\n')
+        for m in LINE_NOTE_WORD_RE.finditer(code):
+            pos = m.start()
+            owner = next((nm for nm, (a, b) in spans.items() if a <= pos < b), None)
+            if owner is not None:
                 hits[owner] += 1
+                reads += 1
+                continue
+            if str_span is not None and str_span[0] <= pos < str_span[1]:
+                continue                          # (b) STR 键表：声明，不是读取
+            if any(a <= pos < b for a, b in t_call_spans):
+                continue                          # (c) t('lineNotes', ...) 调用
+            line = code[:pos].count('\n') + 1
+            snippet = lines_src[line - 1].strip()[:100]
+            print(f'ERROR: core/{path.name}:{line} 出现了 lineNotes，不在白名单内——'
+                  f'只允许出现在 {" / ".join(LINE_NOTE_READERS)} 函数体、STR 的 i18n '
+                  f'键表、或 t(\'lineNotes\', ...) 调用里。点读取、引号/模板字面量'
+                  f'方括号、解构赋值、裸字符串——这个词不管怎么拼出来，落在别处都'
+                  f'算绕过白名单。\n'
+                  f'    {snippet}', file=sys.stderr)
+            rc = 1
     if not saw_interact:
         print('ERROR: core_modules() 里没有 interact.js——这道门无处可扫', file=sys.stderr)
         return 1
@@ -438,7 +502,8 @@ def line_note_reader_check() -> int:
             rc = 1
     if rc == 0:
         print(f'行注读取点：core/ 共 {reads} 处读取 lineNotes，全部在 '
-              f'{" / ".join(LINE_NOTE_READERS)} 内（已先剥注释，见 R47）')
+              f'{" / ".join(LINE_NOTE_READERS)} 内（STR 键表声明与 t() 调用各自另有'
+              f'一处，不计入 reads；已先剥注释，见 R47）')
     return rc
 
 
