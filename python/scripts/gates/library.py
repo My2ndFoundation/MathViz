@@ -887,9 +887,31 @@ def _hint_parts(raw: str) -> int:
     return len(raw.split(HINT_MARK))
 
 
+_WELL_FORMED_MARK_RE = re.compile(r'(?<!\s) \|\| (?!\s)')
+
+
 def _stray_marks(raw: str) -> int:
-    """出现了 `||` 却不是「两侧各一个空格」的形状的次数——十有八九是写错的分级标记。"""
-    return raw.count('||') - raw.count(HINT_MARK)
+    """出现了 `||` 却不是「两侧各恰好一个空格，且那个空格不再挨着别的空白」的形状的
+    次数——十有八九是写错的分级标记。
+
+    「恰好一个空格」不能只靠字面找 `' || '`：`'a  ||  b'`（两侧各两个空格）里
+    仍然嵌着一段逐字符相等的 `' || '` 子串（挨着标记的那个空格 + 标记 + 挨着的
+    下一个空格），`raw.count(HINT_MARK)` 会数到它，于是段数照样对得上、门却看不出
+    多出来的空白——那段空白会原样留在切出来的那一级里。`_WELL_FORMED_MARK_RE`
+    额外要求标记前后各只有那一个空格（左右各挡一次相邻空白），把这种情况从
+    「合规」里踢出来。
+
+    标记落在整条提示的最前或最后（`' || b'` / `'a || '`）也算写错：那样切出来的
+    一段是空串——正则的环视在字符串边界上会**通过**（那里没有相邻字符，谈不上
+    是不是空白），所以额外按匹配位置排除开头/结尾的命中。
+    """
+    total = raw.count('||')
+    well = 0
+    for m in _WELL_FORMED_MARK_RE.finditer(raw):
+        if m.start() == 0 or m.end() == len(raw):
+            continue
+        well += 1
+    return total - well
 
 
 _HINT_EN_RE = re.compile(r'\bhintEn="((?:[^"\\]|\\.)*)"')
