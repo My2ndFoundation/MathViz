@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Python teaching tools — navigation shell. Python 编程练习工具导航壳。">
+<!-- 版本记录（changelog，新→旧）：
+     1.0.0  2026-09-16  首发：子项目导航壳。左侧按模块分组列出工具，右侧 iframe 装
+                        工具整页；home 项装 python/index.html 当画廊。?tool=<id>
+                        深链、?lang= 贯穿壳与工具、Ctrl/Cmd+B 与 [ 折叠侧边栏。
+                        工具页一行未改，仍可独立打开。 -->
+<meta name="tool-version" content="1.0.0">
+<!-- >>> GENERATED:FAVICON -->
+<link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAA/1BMVEUUVrceN6YEl50nKYgDod8FapoEX3V6I+AEZ8gDbtxPFYdQIJ4DOTgCwv+GE8sFU1kDQDtmIL8pEVcGyrkDgdAAAABoKNkWCSwDSasAevQEGSgBqfc3F3QBs/paKNADJTUAa/SPG+pPIawCFRdzJuQDNUcDNlcEZcUAW/dGGY0lBzgjDEUBnPMDRIcQJVMCK0kyEmYCU7AHV4WiE/MOXLoEQ1sMedVSIqsHZY50FLoFNpdRHqkEhYdNDHYEOWwBgfYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADRsqliAAAAQHRSTlOjjpdhy2lM7KvNXYwU/74wGMUn+bkA/AuR/Qf5TPz4Df39rwP/GCKt/mwPGfNVIxc5lU7/pSnOnV+tdaV0RjX/bR25hAAAAVdJREFUeNqtk2d/gyAQh40rq7sFRECDK0Oz92jz/b9V/ZmYgCTpm/JCT+7hTu7+p4E/lvZPQGiasbw/bA5FwH9mzJf8GE9FwGWMEYGwcQc7MkAIMd3S/4NxpyMDhFkZMcOLfzpVgLFPsq/iI8F4ARwFSECSkUZujzHuAhUgSe5qrDR/VPgVIGMxiO3NbKYdj01wA2BWrFvLeLmxut3iMk5PAvzZq34qQ7I6vZ1eTeqFfShr4C7OEXYX4C30dftaRbc4owkRPvXDk9iHkZE/dg3jAoRhtcMjVQ9oMBA2ayhfMjCYz1+E36i16uuKor7nvHUlqEFRVXJbztPS7rdpX9Ek4rxemjCi6ZqmqA9F0X5zfj4WQC9P8EGNSSqpesuj4ioUwslN2aM6fC8SwODOXEyiiJYJbg/OHsJ2ACG9O1l5dAi94MHo0cjzpATKbO49jz4cXlRJAMAvD+ldcxDlRcsAAAAASUVORK5CYII=">
+<!-- <<< GENERATED:FAVICON -->
+<title>Python Teaching Tools · Python 编程练习工具</title>
+<!-- 子项目导航壳。**不是工具**，所以不进 python-tools.json（主站的 app.html
+     同样不在 tools.json 里）。结构 fork 自 cryptography/app.html（2026-09-16）：
+     侧边栏 + iframe 舞台。子项目之间不共享代码文件——这是「整个 python 目录可以
+     单独搬走」的前提，往上游同步改动要手工搬。
+     用 iframe 而不是把工具注入本页——CLAUDE.md 写明的理由：每个工具是一整页，
+     有自己的顶层 state/cam、全屏 canvas 与键盘绑定，两个塞进同一个文档必然互踩。
+     本子项目没有 canvas/运行时（design spec §0），这条理由仍然成立：工具页
+     各自持有自己的编辑器/临摹状态，同一份文档装不下两个。
+     设计令牌与 i18n 语义与 python/index.html 逐字同源。 -->
+<style>
+:root{
+  --bg-deep:#05070d;
+  --bg-mid:#0c1526;
+  --trace-cyan:#2dd4ea;
+  --trace-rose:#fb7185;
+  --trace-violet:#a78bfa;
+  --trace-emerald:#34d399;
+  --trace-orange:#fb923c;
+  /* 调色板之外的第六个值，**不是给任何工具用的**：safeAccent() 认不出的 accent
+     退到它。刻意刺眼、刻意不属于任何工具——见下面 safeAccent 处的注释。 */
+  --trace-unpaired:#ff2fd0;
+  --ui-slate:#9fb0c8;
+  --ui-bright:#e2e8f0;
+  --panel-bg:rgba(13,20,36,.74);
+  --panel-line:rgba(148,163,184,.16);
+  --font-cn:ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Mono",monospace;
+  --font-math:Georgia,"Times New Roman","Songti SC","Noto Serif SC",serif;
+  --sb-w:246px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;overflow:hidden}
+body{background:var(--bg-deep);color:var(--ui-bright);font-family:var(--font-cn);-webkit-font-smoothing:antialiased}
+
+.shell{display:flex;height:100vh;height:100dvh;width:100%}
+.sidebar{flex:0 0 var(--sb-w);width:var(--sb-w);height:100%;display:flex;flex-direction:column;
+  background:linear-gradient(180deg,rgba(12,21,38,.96),rgba(5,7,13,.96));
+  border-right:1px solid var(--panel-line);transition:margin-left .22s ease}
+.shell.hid .sidebar{margin-left:calc(-1 * var(--sb-w))}
+
+.sb-head{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:14px 12px 10px;border-bottom:1px solid var(--panel-line)}
+/* 品牌区：标记 + 文字块并排。标记是 docs/logo.png 派生出的 M/V 透明标记，
+   由 scripts/apply_branding.py 写进下面的 GENERATED 区——不要手改那两行之间的内容。
+   用 background-image 而不是 <img>：data URI 很长，放进 CSS 才不会把标记塞满整段 HTML；
+   顺带 background-size:contain 让它在任意 DPR 下都不糊（出图是 2× 的 64px）。 */
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit}
+.brand-logo{flex:none;width:28px;height:28px;background-repeat:no-repeat;
+  background-position:center;background-size:contain;
+  filter:drop-shadow(0 0 10px rgba(45,212,234,.28));transition:filter .15s}
+.brand:hover .brand-logo{filter:drop-shadow(0 0 14px rgba(45,212,234,.5))}
+/* >>> GENERATED:BRAND-LOGO */
+.brand-logo{background-image:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAAA/1BMVEVuJtUWXN8dH1QHYZkGm90HS14D1dgJXbIHWHlXHagbMI8GmaEKa8NSSfEaGjiHHegHi8oExrgGiYsjL3tMEXtZFpCEE8WAEb4GQz4EsL9HDWw6N64AAABnJ9QBp/cAdewAaOlaJ84BtfgGGSmSF+duKOQDmPUAWegBhvUIKFMXCiwAVN0FFBkGJC43GXSEG90Ek9YqE1ZWIrILZ8YKF0MEU7tVJbumE/cFa9Y4C1YGdrMjEEZKGIwHS70DxPE8HYUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADcYYXGAAAAQHRSTlPl6yZq0zH+kEqSa5qu+BH9qvF6Tk5quK0ayDqXAPv9+vz7/Aj7//v9/SEL+AMLS/nHKK2wGKnM/swjixxptP9rwDeOPwAAAvtJREFUeNrtl9liqjAQhkPYRFy7nS0BkbVUUbS1brXv/1ZNIlaKJKH29oxetfxf5s/MJALQDwP8B1QAk58BVE0bQPHjvrleqzyAfziMD+OpSD9Zu+7IfeQBxixEhLU7GkkBGp+wdEkCMoAz1nyhXgJwHC6B6hsBHGdeV04zYXISAgBdnxIGk3q9KwWM5yohRM6gqleZ3uzIAWjrRNEF4ah/QaYQwOyjgrCt6l13idBLE8CREG1r9BQQywGMkETm6R8tpl+j5gDUiZIkiYqp0Y96VhhzFDcCEALNgRFgSU8yiJ/EAO1k2zQ1QoCPRf5Fc3YaAyYk/FZC8qB65dTcFBALABEDTFs2beq5OvV1Nynr0UssBESOo6Kpehjbqq63tpHTmUI6QufhkgCcCCL9cGidTgSoRVpnWdITwNNTDLmAuY9s46Y8zGQX9PLjbxTwzAMM0FQz9K9DMFXKCYgBpGWMPxfnmb9U/KaAlmHXnSRlAgEoPMDENlr1Z6GilABKDeC3rdP0q/bPLpTPuXpTSFwAhsbwZmjY/OMcKrenZOK4JgPbGA5veqIb6fa0DW0a/sUe9KSXamkbrrreU6Xb/uHvA9iFDQAbuCFR/+C/ru/nu5x8BYD7VxpWPaFrIRCSsEQWHvpBELze1QKeu7cIYAyEe9B7DWj0ONuQIwx24k28Y4SHWj3KQI4yWRV+sRTuayoZLlAbZNIypgHHxAITQgYW6fnR+j74G8zI5+LPWYjpBu5w2C4Q1rEel41kMcK+khjG+FiBfRgusjyHFqloPSAl+tmsDysGaLC104y4CUOwt3JOK28o4KsJZiB8Py+SCmfBCkAf9PdVA6vmwwRmAIMQfjHg4V1zwKYPcKlpqQEPv39nnPd96nkvN8A9D2gGOEylBrgAGH6uCkOPb4B/Iu1Z4e5hnnlkfQ98/5UHHHsP0PX5BgSAHjNBV/cEBkSH6l1YyD1vdd1b2+oT8HwdIC3k3vu1740ZlhqQXCwrBoDXA1KpAdnVlskMIPQBmP7NE9n/xkgAAAAASUVORK5CYII=)}
+/* <<< GENERATED:BRAND-LOGO */
+.brand-tx{display:block;min-width:0}
+.brand .eyebrow{display:block;font-size:9.5px;letter-spacing:.2em;color:rgba(159,176,200,.62);text-transform:uppercase}
+.brand .name{display:block;margin-top:3px;font-family:var(--font-math);font-weight:600;font-size:17px;
+  letter-spacing:.04em;color:#eaf1fb;transition:color .15s}
+.brand:hover .name{color:#bfefff}
+.iconbtn{flex:none;width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;
+  background:rgba(5,7,13,.6);border:1px solid var(--panel-line);border-radius:8px;
+  color:var(--ui-slate);font-size:12px;cursor:pointer;transition:border-color .15s,color .15s}
+.iconbtn:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.iconbtn:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:2px}
+
+.sb-list{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:6px 8px 14px}
+.sb-list::-webkit-scrollbar{width:8px}
+.sb-list::-webkit-scrollbar-thumb{background:rgba(148,163,184,.24);border-radius:8px}
+
+.grp{margin:13px 6px 5px;font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;
+  color:rgba(159,176,200,.55)}
+.item{display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+  padding:8px 10px;margin:2px 0;border-radius:10px;cursor:pointer;
+  background:transparent;border:1px solid transparent;color:var(--ui-slate);
+  font-family:var(--font-cn);font-size:12.5px;line-height:1.35;transition:background .15s,border-color .15s,color .15s}
+.item:hover{background:rgba(45,212,234,.07);border-color:rgba(148,163,184,.2);color:#eaf1fb}
+.item:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:-2px}
+.item .dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--c,var(--ui-slate));
+  box-shadow:0 0 8px var(--c,transparent)}
+.item .tx{flex:1;min-width:0}
+.item.on{background:rgba(45,212,234,.12);border-color:rgba(45,212,234,.42);color:#fff}
+.item.on .tx{font-weight:600}
+.item.home{margin-bottom:2px}
+.item.home .dot{background:transparent;border:1.5px dashed rgba(159,176,200,.55);box-shadow:none;
+  width:9px;height:9px}
+
+.sb-foot{display:flex;align-items:center;gap:8px;padding:10px 12px;
+  border-top:1px solid var(--panel-line)}
+.sb-foot .sp{flex:1}
+.sb-foot a,.sb-foot button{font-family:var(--font-mono);font-size:11px;letter-spacing:.04em;
+  color:rgba(159,176,200,.8);text-decoration:none;background:rgba(5,7,13,.6);
+  border:1px solid var(--panel-line);border-radius:7px;padding:4px 9px;cursor:pointer;
+  transition:border-color .15s,color .15s}
+.sb-foot a:hover,.sb-foot button:hover{border-color:rgba(45,212,234,.5);color:#bfefff}
+.sb-foot a:focus-visible,.sb-foot button:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:2px}
+
+.stage{position:relative;flex:1;min-width:0;height:100%;background:var(--bg-deep)}
+#frame{display:block;width:100%;height:100%;border:0;background:var(--bg-deep)}
+
+.edge{position:fixed;left:0;top:50%;transform:translateY(-50%);z-index:30;
+  display:none;align-items:center;justify-content:center;width:22px;height:56px;
+  background:rgba(13,20,36,.86);border:1px solid var(--panel-line);border-left:0;
+  border-radius:0 10px 10px 0;color:var(--ui-slate);font-size:11px;cursor:pointer;
+  transition:background .15s,color .15s,border-color .15s}
+.edge:hover{background:rgba(20,30,52,.94);color:#bfefff;border-color:rgba(45,212,234,.5)}
+.edge:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:2px}
+.shell.hid .edge{display:flex}
+
+/* 窄屏：侧边栏浮在舞台之上，点击遮罩收起 */
+.scrim{display:none}
+@media (max-width:760px){
+  .sidebar{position:fixed;left:0;top:0;z-index:25;box-shadow:0 0 60px rgba(0,0,0,.6)}
+  .shell:not(.hid) .scrim{display:block;position:fixed;inset:0;z-index:20;background:rgba(5,7,13,.55)}
+}
+</style>
+</head>
+<body>
+
+<div class="shell" id="shell">
+  <aside class="sidebar" id="sidebar" aria-label="Python tools">
+    <div class="sb-head">
+      <!-- href 是占位的 '#'：真实地址由 wireParentLink() 在运行时写入（见脚本里的
+           PARENT_HOME 一节）。这一页 100% 靠 JS 驱动，无 JS 兜底本就不成立。 -->
+      <a class="brand" id="brandLink" href="#" target="_top">
+        <span class="brand-logo" aria-hidden="true"></span>
+        <span class="brand-tx">
+          <span class="eyebrow">Interactive Python</span>
+          <span class="name" id="brandName">Python</span>
+        </span>
+      </a>
+      <button class="iconbtn" id="btnHide" type="button">❮</button>
+    </div>
+    <nav class="sb-list" id="navList"></nav>
+    <div class="sb-foot">
+      <button id="btnLang" type="button">中</button>
+      <span class="sp"></span>
+      <a id="btnAlone" href="index.html" target="_blank" rel="noopener">↗</a>
+        </div>
+  </aside>
+
+  <div class="scrim" id="scrim"></div>
+  <button class="edge" id="btnShow" type="button">❯</button>
+
+  <main class="stage">
+    <iframe id="frame" title="Python tool" allow="fullscreen"></iframe>
+  </main>
+</div>
+
+<script>
+'use strict';
+
+/* ================= i18n =================
+   与 python/index.html 同源的那 15 行。这个子项目没有 viz-engine.js 那一类
+   运行时模块可抄（design spec §0：无 canvas、无运行时），所以直接照抄既有
+   chess/app.html、cryptography/app.html 两份的写法。语义必须一致：存储键
+   python-lang，两处兜底都是 en 不是 zh——否则缺 key 时英文页面会突然
+   冒出中文。存储键绝不能沿用别的子项目的：三个子项目的语言状态各自独立，
+   共用一个键会让在那边切成中文的动作把这边也一起切了。 */
+var LANG_KEY = 'python-lang';
+var NAV_KEY = 'python-nav';
+function resolveLang() {
+  try {
+    var q = new URLSearchParams(location.search).get('lang');
+    if (q === 'en' || q === 'zh') return q;
+    var s = localStorage.getItem(LANG_KEY);
+    if (s === 'en' || s === 'zh') return s;
+  } catch (e) { /* file:// 下 localStorage 可能不可用 */ }
+  return 'en';
+}
+var LANG = resolveLang();
+function t(s) { return (s && typeof s === 'object') ? (s[LANG] != null ? s[LANG] : s.en) : s; }
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/* ================= 唯一的出站引用 =================
+   这是整个 python 子树里唯一一处指向父目录的路径。它的存在是为了
+   「返回 MathViz」这一个按钮；除它之外，core、tools、programs、scripts 四个
+   目录里不许出现任何父目录形式的相对路径——check.py 的 outbound_ref_check()
+   逐文件数着这件事。
+
+   为什么要数：设计约束是「把 python 整个目录复制到任何别处仍可用」。
+   一条随手写下的越界相对路径会在**别人搬走目录的那一刻**才失效，而那时没有
+   任何东西会报警。把它变成一条提交前就会响的断言。
+
+   自愈：http(s) 下对这个 URL 发一次 HEAD 探测，404/网络失败就把按钮藏掉。
+   file:// 下 fetch 探测本来就会失败（同源限制），无法区分「文件不在」与
+   「协议不让探」，所以那种情况保持显示——file:// 的使用者基本都在仓库里。 */
+var PARENT_HOME = '../app.html';
+/* 目的地是 MathViz 的**导航壳** app.html，不是它的扁平画廊 index.html。
+   去程已经是「壳 → 壳」（根 index.html 的子项目卡片带 target="_top" 直接进
+   python/app.html），回程就该对称：落在 MathViz 自己的壳上，侧边栏是
+   数学工具那一条。指向 index.html 会把人扔在一张没有侧边栏的画廊上——那正是
+   cryptography 那一轮修的两个 bug 的同一个形状，只是换了个方向。 */
+
+function wireParentLink(el) {
+  if (!el) return;
+  el.href = PARENT_HOME + '?lang=' + LANG;
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+  try {
+    fetch(PARENT_HOME, { method: 'HEAD' }).then(function (r) {
+      if (!r.ok) el.style.display = 'none';
+    })['catch'](function () { el.style.display = 'none'; });
+  } catch (e) { el.style.display = 'none'; }
+}
+
+/* ================= 回退列表 =================
+   运行时优先 fetch('python-tools.json')；file:// 下 fetch 会因同源限制
+   失败，靠这份内嵌副本兜底——一个在 file:// 下只剩 home 一项的导航壳等于没有。
+   代价是这份副本与 python/index.html 里的那份都要跟注册表同步，由
+   python/scripts/check.py 的 fallback_check() 逐页比对 id 集合来保证。
+
+   第 0 期只有一条：py-basics（模块 1 · 语言基础）。tools/py-basics.html
+   还不存在（后续任务补），此刻 iframe 会 404——这是预期状态，不是本页的 bug。 */
+var FALLBACK = [
+  {
+    id: 'py-basics', file: 'tools/py-basics.html', accent: 'cyan', module: 1, version: '1.0.0',
+    kicker: { en: 'Language Foundations', zh: '语言基础' },
+    title: { en: 'Basics: Values & Output', zh: '基础：值与输出' },
+    tag: { en: 'input() is always str · f-strings · swap without a temp · read-only for now', zh: 'input() 永远是 str · f-string · 不用临时变量的交换 · 暂时只读' }
+  }
+];
+var TOOLS = FALLBACK;
+
+/* 模块标签。app.html 与 index.html 各存一份、必须逐字节相同——分组不是
+   「开发阶段」而是真正的知识模块，两页共用同一套排序（design spec §6.1）。
+
+   八个模块是固定的，不像 chess 的阶段那样会往后长，所以 moduleLabel 末尾那个
+   兜底分支**不是**扩展机制：越界的 module 该被 check.py 的 module ∈ 1–8
+   那道门在提交前拦住，而不是靠页面长出一个叫「第 9 模块」的无名栏目。留着它
+   只是为了在真漏过去时给出「第 9 模块」而不是 undefined —— 一个看得出是错的
+   标题，好过一个看起来像正常空白的标题。 */
+var MODULE_LABELS = {
+  1: { en: 'Language Foundations',   zh: '语言基础' },
+  2: { en: 'Control Flow',           zh: '控制逻辑' },
+  3: { en: 'Data Structures',        zh: '数据结构' },
+  4: { en: 'Algorithms & Analysis',  zh: '算法分析' },
+  5: { en: 'Applied Projects',       zh: '综合运用' },
+  6: { en: 'Scientific Computing',   zh: '科学计算与数理统计' },
+  7: { en: 'Graphics & Games',       zh: '图形与游戏' },
+  8: { en: 'Embedded Python',        zh: '嵌入式 Python' }
+};
+function moduleLabel(n) { return MODULE_LABELS[n] || { en: 'Module ' + n, zh: '第 ' + n + ' 模块' }; }
+
+var L = {
+  title: { en: 'Python Teaching Tools · MathViz', zh: 'Python 编程练习工具 · MathViz' },
+  brand: { en: 'Python', zh: 'Python' },
+  home: { en: 'All tools · Gallery', zh: '全部工具 · 画廊' },
+  hide: { en: 'Hide sidebar', zh: '收起侧栏' },
+  show: { en: 'Show sidebar', zh: '展开侧栏' },
+  alone: { en: 'Open current tool in a new tab', zh: '在新标签页单独打开当前工具' },
+  back: { en: 'Back to MathViz', zh: '返回 MathViz' }
+};
+
+/* ================= DOM 引用与状态 ================= */
+var shell = document.getElementById('shell');
+var navList = document.getElementById('navList');
+var frame = document.getElementById('frame');
+var curId = null;      // null = home（iframe 里装画廊）
+var syncing = false;   // 区分「壳驱动的换页」与「使用者在画廊里点了卡片」
+
+/* ================= 查表 ================= */
+function byId(id) {
+  for (var i = 0; i < TOOLS.length; i++) { if (TOOLS[i].id === id) return TOOLS[i]; }
+  return null;
+}
+function fileOf(id) { var d = byId(id); return d ? d.file : null; }
+
+/* accent 白名单——不能靠 esc() 兜底：accent 被拼进 style="" 属性值内部
+   （--c:var(--trace-<accent>)），esc() 只转义 & < > "，一个像
+   `x); background:url(//evil/leak?` 这样的 CSS 层面 payload 一个都不含，
+   会原样穿透进 style 并被当成任意 CSS 声明执行。 python-tools.json 今天是
+   仓库自控内容，但它是运行时 fetch 进来的，所以必须在插值点就收紧成闭集。
+
+   ⚠ 退路选 unpaired 而不是某个调色板颜色，是上游 chess 子项目上真出过的事故
+   换来的，原样记在这里：那边的退路曾经是 cyan，理由是「四个真实工具都不用这个
+   色，退回它时一眼能看出这项没配对」。阶段 5 的工具⑤ 用掉了 cyan（五工具五色），
+   那个哨兵当场失效——一个拼错了 accent 的条目会显示成跟工具⑤ 一样的青色，看上去
+   完全正常。本子项目从第一个工具起就用掉了 cyan（py-basics，模块 1），那条退路
+   在这里连一天都不成立。
+   新的不变量因此不再依赖「哪个调色板颜色恰好没人用」——退路换成调色板之外的
+   `--trace-unpaired`，一块刺眼的洋红，取的是三维渲染里 missing texture 的老规矩：
+   它**永远**不会是任何工具的品牌色，无论以后加多少个工具、用掉多少种颜色。
+   要维持这条不变量只需一件事：给新工具选 accent 时只能从 ACCENTS 的五个键里选，
+   不许把 unpaired 加进这张表。
+
+   ⚠ 作用域：这条不变量在 python/index.html 上同样成立——那一页有一份逐字
+   同源的 ACCENTS/safeAccent，`--trace-unpaired` 也在它自己的 `:root` 里定义（本文件
+   是第 38 行；这个 token 是 per-file 的，两页各定义一次，不共享）。两页要一起改：
+   只在一页收紧白名单，另一页照样把 accent 原样插进 style。
+   但两页**没有白名单时的失效模式**并不相同：本页有 unpaired 兜底、所以失效时是
+   「悄悄套错颜色」，而 index.html 那页拼错的 accent 指向一个未定义的变量，卡片是
+   没有颜色。要照抄结论时先读 python/index.html 里同名注释的第二段。 */
+var ACCENTS = { cyan: 1, rose: 1, violet: 1, emerald: 1, orange: 1 };
+function safeAccent(a) { return ACCENTS.hasOwnProperty(a) ? a : 'unpaired'; }
+
+/* ================= 侧边栏渲染 =================
+   分组依据是 module（主站 app.html 用的是 cat）。模块顺序按数值升序，
+   只画注册表里真出现过的模块——没有工具的模块不留空组，也不占位。 */
+function renderNav() {
+  var html = '<button class="item home' + (curId === null ? ' on' : '') + '" data-id="">' +
+             '<span class="dot"></span><span class="tx">' + esc(t(L.home)) + '</span></button>';
+
+  var modules = [];
+  for (var i = 0; i < TOOLS.length; i++) {
+    var p = TOOLS[i].module || 1;
+    if (modules.indexOf(p) < 0) modules.push(p);
+  }
+  modules.sort(function (a, b) { return a - b; });
+
+  for (var k = 0; k < modules.length; k++) {
+    var md = modules[k];
+    html += '<div class="grp">' + esc(t(moduleLabel(md))) + '</div>';
+    for (var j = 0; j < TOOLS.length; j++) {
+      var d = TOOLS[j];
+      if ((d.module || 1) !== md) continue;
+      html += '<button class="item' + (d.id === curId ? ' on' : '') + '"' +
+              ' data-id="' + esc(d.id) + '"' +
+              ' style="--c:var(--trace-' + safeAccent(d.accent) + ')"' +
+              ' title="' + esc(t(d.tag)) + '">' +
+              '<span class="dot"></span><span class="tx">' + esc(t(d.title)) + '</span></button>';
+    }
+  }
+  navList.innerHTML = html;
+}
+
+/* ================= 从 iframe 的路径反推 id =================
+   使用者在画廊（home）里点了一张卡片时，导航不是壳发起的——iframe 自己换了
+   页面。载入回调里靠文件名反查 id，才能把侧边栏高亮与地址栏同步过去。 */
+function idFromPath(path) {
+  var f = String(path).split('/').pop();
+  for (var i = 0; i < TOOLS.length; i++) {
+    if (TOOLS[i].file.split('/').pop() === f) return TOOLS[i].id;
+  }
+  return null;
+}
+
+/* 注册表指纹：把每条 id:version 拼起来做 djb2-xor。画廊页自己内嵌了一份
+   FALLBACK，所以它的"版本"不是某一个工具的版本，而是整张表的版本——任何一个
+   工具升级，这个哈希就变，画廊的缓存副本随之失效。与主站 app.html 同源。 */
+function regFingerprint() {
+  var s = '';
+  for (var i = 0; i < TOOLS.length; i++) s += TOOLS[i].id + ':' + (TOOLS[i].version || '?') + ';';
+  var h = 5381;
+  for (var j = 0; j < s.length; j++) h = ((h * 33) ^ s.charCodeAt(j)) >>> 0;   /* djb2-xor */
+  return h.toString(36);
+}
+
+/* iframe 地址带上 ?v=<版本>：GitHub Pages 把 HTML 按 max-age=600 发出去，
+   地址恒定不变时浏览器可能长期端出旧副本——升级过的工具要用户清缓存才看得见。
+   主站真实遇到过（pi 已经是 1.2.0，页面仍显示 1.1.1），CLAUDE.md 记着这件事；
+   这一页此前漏了这层，是本次补上的。版本进了地址，版本一变地址就变，旧副本
+   自然失效；版本没变则照旧命中缓存，不牺牲二次访问的速度。工具本身不读这个
+   参数，多一个查询串对它没有任何影响。 */
+function srcFor(id) {
+  var d = id ? byId(id) : null;
+  if (d && d.file) return d.file + '?lang=' + LANG + '&v=' + encodeURIComponent(d.version || '0');
+  return 'index.html?lang=' + LANG + '&v=' + regFingerprint();
+}
+
+/* 换页面用 location.replace 而不是赋值 frame.src——这一条抄自主站 app.html，
+   理由也照抄：赋值 src 会往「联合会话历史」里塞一条 iframe 记录，与壳自己的
+   pushState 交错，后退键就会出现「地址与侧栏都退了、画面还停在上一个工具」的
+   错位。replace 不产生历史记录，历史完全由壳掌握。
+   try/catch 不是防跨源——location.replace 本身就是少数几个跨源仍可访问的
+   成员，file:// 下一样调用得通，不会抛。catch 兜的是 contentWindow 本身
+   为假值这种边缘情形（iframe 尚未挂好窗口对象），此时才退回赋值 src。 */
+function setFrame(url) {
+  try {
+    if (frame.contentWindow) { frame.contentWindow.location.replace(url); return; }
+  } catch (e) { /* 理论上的边缘情形，见上 */ }
+  frame.src = url;
+}
+
+function renderChrome() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  document.getElementById('brandName').textContent = t(L.brand);
+  wireParentLink(document.getElementById('brandLink'));
+  document.getElementById('brandLink').title = t(L.back);
+  document.getElementById('btnLang').textContent = LANG === 'zh' ? 'EN' : '中';
+  document.getElementById('btnHide').title = t(L.hide) + ' (Ctrl+B)';
+  document.getElementById('btnShow').title = t(L.show) + ' (Ctrl+B)';
+  var d = curId ? byId(curId) : null;
+  document.title = d ? t(d.title) + ' · MathViz' : t(L.title);
+  var alone = document.getElementById('btnAlone');
+  alone.title = t(L.alone);
+  /* 与 srcFor() 用同一套版本戳：这两个地址指向同一个文件，只有一处带缓存键
+     就会出现「iframe 里是新版、在新标签页单独打开却是旧版」的错位。 */
+  alone.href = d
+    ? d.file + '?lang=' + LANG + '&v=' + encodeURIComponent(d.version || '0')
+    : 'index.html?lang=' + LANG + '&v=' + regFingerprint();
+}
+
+/* ================= 地址栏同步 =================
+   换工具、iframe 自己换页后的回同步、切语言、别处切语言——四条路径都要把
+   当前的 curId 与 LANG 写回地址栏，所以只留这一份实现：地址栏在任何时刻都是
+   一条完整可复制的链接（tool 与 lang 同时在），不会因为某一条路径漏写一个
+   参数而退化。push 只在「换工具」时为真——那才算一次导航；切语言与回同步
+   都用 replaceState，否则后退键会退到「同一页只是语言不同」这种空档上。 */
+function syncUrl(push) {
+  try {
+    var u = new URL(location.href);
+    if (curId) u.searchParams.set('tool', curId); else u.searchParams.delete('tool');
+    u.searchParams.set('lang', LANG);
+    history[push ? 'pushState' : 'replaceState']({ tool: curId }, '', u);
+  } catch (e) {}
+}
+
+function go(id, push) {
+  if (id && !byId(id)) id = null;      // 未知 id 一律落回 home，不留 undefined
+  curId = id || null;
+  syncing = true;
+  setFrame(srcFor(curId));
+  renderNav();
+  renderChrome();
+  if (push !== false) syncUrl(true);
+  if (window.innerWidth <= 760) setSidebarOpen(false, false);
+}
+
+/* 侧边栏点击：事件委托到容器上，renderNav() 每次重画都不必重新绑。
+   点已经是当前项的那一个——不出手：go() 无条件会重推一条历史（地址不变
+   但 history.length 白长一条）并重新 setFrame() 同一个 URL（iframe 硬重
+   载，工具内部状态——回放进度、相机、当前 tab——全丢）。这个判断只放在
+   点击这一条路径：boot() 首次调用 go(id,false) 时 curId 还是 null，若把
+   守卫塞进 go() 本身，无 query 的首次加载会被当成「已经在这」而提前返回，
+   iframe 就永远不会被指向画廊；popstate 同理也不能加这层判断。「点到已经
+   在的那项就不动」只在使用者主动点击时才成立。 */
+navList.addEventListener('click', function (e) {
+  var btn = e.target.closest ? e.target.closest('.item') : null;
+  if (!btn) return;
+  var id = btn.dataset.id || null;
+  if (id === curId) return;
+  go(id, true);
+});
+
+/* 后退/前进 */
+window.addEventListener('popstate', function (e) {
+  var id = (e.state && e.state.tool) || null;
+  if (!id) {
+    try { id = new URLSearchParams(location.search).get('tool'); } catch (err) { id = null; }
+  }
+  go(id, false);
+});
+
+/* iframe 载入后回同步：使用者在画廊里点卡片时，导航不是壳发起的 */
+frame.addEventListener('load', function () {
+  if (syncing) { syncing = false; return; }
+  var id = null;
+  try { id = idFromPath(frame.contentWindow.location.pathname); } catch (e) { return; }
+  if (id === curId) return;
+  curId = id;
+  renderNav();
+  renderChrome();
+  syncUrl(false);
+});
+
+/* ================= 侧边栏显隐 =================
+   remember 默认 true，由调用方按语义传 false：窄屏（≤760px）上的自动收起
+   是布局行为，不是「使用者选择了收起」，不该被记进 NAV_KEY——go() 换页后的
+   那次、以及 .scrim 上的那次（遮罩只在 ≤760px 存在）都属于这一类。
+   折叠按钮、快捷键与「恢复上次状态」都在下面几段里调用它。 */
+function setSidebarOpen(open, remember) {
+  shell.classList.toggle('hid', !open);
+  if (remember !== false) {
+    try { localStorage.setItem(NAV_KEY, open ? 'open' : 'hid'); } catch (e) {}
+  }
+}
+
+function boot() {
+  var id = null;
+  try { id = new URLSearchParams(location.search).get('tool'); } catch (e) {}
+  go(id, false);
+  try { history.replaceState({ tool: curId }, '', location.href); } catch (e) {}
+}
+boot();
+
+function toggleSidebar() { setSidebarOpen(shell.classList.contains('hid')); }
+
+document.getElementById('btnHide').addEventListener('click', function () { setSidebarOpen(false); });
+document.getElementById('btnShow').addEventListener('click', function () { setSidebarOpen(true); });
+/* 遮罩只在 ≤760px 存在，点它收起属于布局行为，不记进 NAV_KEY——与 go() 一致 */
+document.getElementById('scrim').addEventListener('click', function () { setSidebarOpen(false, false); });
+
+/* ================= 键盘 =================
+   只认两枚：Ctrl/Cmd+B 与 [。工具页那边用 Tab（缩进）与 Enter（换行并沿用当前行
+   缩进，见 core/editor.js 的 applyTab/applyEnter）——壳不许碰这两个键。
+   isTyping() 挡住在代码编辑器/挖空输入框里敲 [ 的情形：Python 源码离不开方括号
+   （列表字面量、下标、切片），这不是边缘情形，是常态。 */
+function isTyping(el) {
+  if (!el) return false;
+  var tag = (el.tagName || '').toUpperCase();
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+function hotkey(e) {
+  if (isTyping(e.target)) return;
+  var mod = e.ctrlKey || e.metaKey;
+  if ((mod && (e.key === 'b' || e.key === 'B')) || (!mod && !e.altKey && e.key === '[')) {
+    e.preventDefault();
+    toggleSidebar();
+  }
+}
+document.addEventListener('keydown', hotkey);
+
+/* 工具在 iframe 里，键盘事件落在它的文档上，壳收不到——载入后把同一个
+   handler 也挂进去（同源才行，跨源会抛，try/catch 兜住）。 */
+frame.addEventListener('load', function () {
+  try { frame.contentDocument.addEventListener('keydown', hotkey); } catch (e) {}
+});
+
+/* 恢复上次的折叠状态。不 remember，否则「恢复」这件事本身会写一次存储。 */
+try {
+  if (localStorage.getItem(NAV_KEY) === 'hid') setSidebarOpen(false, false);
+} catch (e) {}
+
+/* ================= 语言 =================
+   切换要同时做两件事：① 重渲壳自己的文案 ② 重设 iframe 的 ?lang=。
+   只做①会得到「壳是中文、工具是英文」。 */
+function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+  renderNav();
+  renderChrome();
+  syncing = true;
+  setFrame(srcFor(curId));
+  syncUrl(false);
+}
+document.getElementById('btnLang').addEventListener('click', function () {
+  setLang(LANG === 'zh' ? 'en' : 'zh');
+});
+
+/* 工具页与画廊自己都有一枚 #btnLang，iframe 里点的是它们的，不是壳的——
+   两枚同时可见。同源写 localStorage 会在其它 window 触发 storage 事件
+   （规范只排除发起写入的那个 window），所以壳收得到自家 iframe 的那次写入。
+   收到就跟着改 LANG、重渲侧栏与 chrome、把地址栏的 lang 带上，但绝不 setFrame()。
+   事件里读不出写入者是谁，而写入者有两种：可能是我们自己的 iframe，也可能是
+   另一个标签页里独立打开的 python 工具（它写的是同一个 python-lang
+   键）。前者
+   下不重指 iframe 是必须的——触发事件的正是它那次自我重渲染，再 setFrame()
+   等于重载工具、扔掉它刚刚的状态；后者下 iframe 里那一页确实还停在旧语言上，
+   代价是它要等到下次换页才跟上，仍比无条件重载丢状态划算。
+   newValue 要挡 null（storage 被清空）和非 en/zh（别的 key、别的写入）。 */
+window.addEventListener('storage', function (e) {
+  if (e.key !== LANG_KEY) return;
+  if (e.newValue !== 'en' && e.newValue !== 'zh') return;
+  if (e.newValue === LANG) return;
+  LANG = e.newValue;
+  renderNav();
+  renderChrome();
+  syncUrl(false);
+});
+
+/* 优先取 python-tools.json（有服务器时永远最新）；file:// 或离线时 fetch
+   失败，静默沿用内嵌的 FALLBACK，不弹错误、不阻塞渲染（boot() 已经先渲染过一次）。
+   覆盖之后要重渲侧边栏——注册表里可能多出 FALLBACK 还没有的工具。curId 不动：
+   它此刻装的那一页是有效的，重新 go() 会白白重载一次 iframe。 */
+(function () {
+  try {
+    fetch('python-tools.json', { cache: 'no-cache' }).then(function (r) {
+      return r.ok ? r.json() : null;
+    }).then(function (j) {
+      if (j && j.tools && j.tools.length) {
+        TOOLS = j.tools;
+        /* 新注册表可能不再含 curId 指向的工具（下架、编辑）。只纠正内存里的 id，
+           不动 iframe——它此刻装的那一页依然是有效画面，frame 不该跟着重载。 */
+        if (curId && !byId(curId)) curId = null;
+        renderNav();
+        renderChrome();
+        /* 反方向的同一件事：内嵌的 FALLBACK 落后于注册表时（部署错位——
+           check.py 只在提交时把两者钉在一起），boot() 会把一个它还不认识的
+           ?tool= 判成未知 id 落回画廊。此刻新注册表认得它，就把这条深链补上。
+           只在还没装任何工具时才补——已经装上工具的情形归上面那条「不动
+           iframe」管，不能因为注册表到货就把使用者正在看的一页重载掉。 */
+        if (!curId) {
+          var want = null;
+          try { want = new URLSearchParams(location.search).get('tool'); } catch (e2) {}
+          if (want && byId(want)) { go(want, false); syncUrl(false); }
+        }
+      }
+    })['catch'](function () {});
+  } catch (e) {}
+})();
+</script>
+<!-- >>> GENERATED:ANALYTICS -->
+<style>
+.mv-consent{position:fixed;left:14px;right:14px;bottom:14px;z-index:9000;max-width:660px;
+  margin:0 auto;padding:14px 16px;border-radius:14px;font-size:12.5px;line-height:1.6;
+  border:1px solid rgba(255,255,255,.14);background:rgba(8,13,24,.96);
+  backdrop-filter:blur(12px);color:#c8d6ea;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+.mv-consent p{margin:0 0 11px}
+.mv-consent a{color:#7fd8ef}
+.mv-consent .row{display:flex;gap:9px}
+/* 拒绝与接受**同样的尺寸与视觉权重**——ICO 明确要求拒绝不得比接受更难。
+   不要把其中一个改成小字链接或次要色。 */
+.mv-consent button{flex:1;padding:9px 0;border-radius:9px;cursor:pointer;font-size:12.5px;
+  border:1px solid rgba(45,212,234,.45);background:rgba(45,212,234,.12);color:#bfefff}
+.mv-consent button:hover{border-color:rgba(45,212,234,.8)}
+.mv-consent button:focus-visible{outline:2px solid rgba(45,212,234,.85);outline-offset:2px}
+/* 画廊页脚里的文字链接。壳里的图标按钮在 .sb-foot 内，样式由页面既有的
+   `.sb-foot a,.sb-foot button` 规则提供，这里不要再加尺寸相关的声明——
+   加了就会和那一行的 中 / ↗ / GitHub 不齐。 */
+a.mv-cookie-link{margin-left:8px;cursor:pointer;text-decoration:none}
+</style>
+<script>
+(function(){
+  /* 在 iframe 里什么都不做：三个壳的 srcFor(null) 都返回 index.html，即画廊是被
+     装进 iframe 的。不拦就是一次访问打两次 pageview、叠两个同意横幅。
+     这里自己判断，不依赖各页的 IN_SHELL——那个变量只有根目录的 index.html 有。 */
+  try { if (window.self !== window.top) return; } catch (e) { return; }
+
+  var GA_ID = 'G-QJZ5Y8HQG9', CKEY = 'mathviz-consent', LKEY = 'python-lang';
+  function ls(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function save(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function lang() {
+    try {
+      var q = new URLSearchParams(location.search).get('lang');
+      if (q === 'zh' || q === 'en') return q;
+      var s = ls(LKEY);
+      if (s === 'zh' || s === 'en') return s;
+    } catch (e) {}
+    return 'en';
+  }
+  var T = {
+    zh: { msg: '我们使用 Google Analytics 了解哪些工具更有用。仅在你同意后才会设置 cookie。',
+          ok: '接受', no: '拒绝', priv: '隐私说明', set: 'Cookie 设置' },
+    en: { msg: 'We use Google Analytics to see which tools are useful. Cookies are set only if you agree.',
+          ok: 'Accept', no: 'Reject', priv: 'Privacy', set: 'Cookie settings' }
+  }[lang()];
+
+  var loaded = false;
+  function loadGA() {
+    if (loaded) return; loaded = true;
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = function () { window.dataLayer.push(arguments); };
+    gtag('js', new Date());
+    /* send_page_view:false 是必须的。壳初始加载会调一次 go() 去恢复 ?tool=，
+       不关掉自动 pageview 就会把第一个工具计两次。 */
+    gtag('config', GA_ID, { send_page_view: false });
+    var s = document.createElement('script');
+    s.async = true;
+    s.src = 'https://www.googletagmanager.com/gtag/js?id=' + GA_ID;
+    document.head.appendChild(s);
+    send();
+  }
+  function path() {
+    var id = null;
+    try { id = new URLSearchParams(location.search).get('tool'); } catch (e) {}
+    var base = location.pathname.replace(/\/[^\/]*$/, '/');
+    return id ? base + 'tool/' + id : base;
+  }
+  function send() {
+    if (!window.gtag) return;
+    gtag('event', 'page_view', { page_path: path(), page_title: document.title });
+  }
+
+  /* 包装 go 而不是在三个壳里各手写一行：go 是壳换工具的唯一漏斗，包装它
+     让整件事 100% 由生成器产出，三个壳一行不改。GA 看不进 iframe，所以这是
+     唯一能知道「用户开了哪个工具」的地方。 */
+  if (typeof window.go === 'function') {
+    var _go = window.go;
+    window.go = function () { var r = _go.apply(this, arguments); send(); return r; };
+  }
+
+  var box = null;
+  function banner() {
+    if (box) { box.hidden = false; return; }
+    box = document.createElement('div');
+    box.className = 'mv-consent';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-label', T.set);
+    box.innerHTML = '<p>' + T.msg + ' <a href="../privacy.html">' + T.priv + '</a></p>'
+      + '<div class="row"><button type="button" data-a="1"></button>'
+      + '<button type="button" data-a="0"></button></div>';
+    var b = box.querySelectorAll('button');
+    b[0].textContent = T.ok; b[1].textContent = T.no;
+    b[0].onclick = function () { save(CKEY, 'granted'); box.hidden = true; loadGA(); };
+    /* 关闭 / Esc 等同**拒绝**，不等同同意。 */
+    b[1].onclick = function () { save(CKEY, 'denied'); box.hidden = true; };
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && box && !box.hidden) { save(CKEY, 'denied'); box.hidden = true; }
+    });
+    document.body.appendChild(box);
+  }
+
+  /* 撤回要和给出同意一样容易（ICO），所以入口必须常驻。两种宿主：
+     · 壳：做成图标按钮插进 .sb-foot 的语言键旁边，继承那一行控件的现成样式，
+       不引入新的视觉元素（此前是一条独占一行的文字链接，太重）。
+     · 画廊页：页脚里跟在版权后面，一条文字链接。
+     两处都用 title/aria-label 说明具体含义——⚙ 本身只表达「设置」。 */
+  var lang = document.getElementById('btnLang');
+  var bar = lang && lang.parentNode && lang.parentNode.classList.contains('sb-foot')
+            ? lang.parentNode : null;
+  if (bar) {
+    var g = document.createElement('button');
+    g.type = 'button'; g.className = 'mv-cookie-link'; g.textContent = '⚙';
+    g.title = T.set; g.setAttribute('aria-label', T.set);
+    g.onclick = function (e) { e.preventDefault(); banner(); };
+    lang.parentNode.insertBefore(g, lang.nextSibling);
+  } else {
+    var foot = document.querySelector('.copyright');
+    if (foot) {
+      var a = document.createElement('a');
+      a.className = 'mv-cookie-link'; a.href = '#'; a.textContent = '· ' + T.set;
+      a.title = T.set;
+      a.onclick = function (e) { e.preventDefault(); banner(); };
+      foot.appendChild(a);
+    }
+  }
+
+  var c = ls(CKEY);
+  if (c === 'granted') loadGA();
+  else if (c !== 'denied') banner();   /* 未做选择 = 未同意，不加载 GA */
+})();
+</script>
+<!-- <<< GENERATED:ANALYTICS -->
+</body>
+</html>
