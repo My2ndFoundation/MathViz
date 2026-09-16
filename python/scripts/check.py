@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """python 子项目的校验门运行器（spec §5）。
 
-**34 个返回码全部无条件跑到底**，最后按「任一非零则整体失败」汇总。
-两个构建脚本的 `--check` 各算一个，`gates/` 下 32 道门各算一个。
+**全部返回码无条件跑到底**，最后按「任一非零则整体失败」汇总。
+生成脚本的 `--check` 各算一道门，`gates/` 下每个函数各算一道门。
 
-| 组 | 模块 | 门 |
-|----|------|----|
-| —  | `inline_core` / `build_programs` | 两份内联副本与编辑源一致（2） |
-| A  | `gates/registry.py` | 注册表 / FALLBACK / 版本 / 计数 / 标签 / 配色（7） |
-| B  | `gates/hygiene.py`  | 出站引用 / script 字面量 / 控制字节 / 惰性依赖 / 骨架哨兵 / 骨架泄漏（6） |
-| C  | `gates/syntax.py`   | node --check / core 测试 / 浏览器分支（3） |
-| D  | `gates/library.py`  | 程序库十二道（12） |
-| D  | `gates/lexer.py`    | 词法器四道（4） |
+门数**不写在这里**：它是一个可数的事实，写进散文就会漂——`chess/check.py`
+的同类数字漂出过三个答案。运行结束时 `main()` 按组打印自己数出来的数目。
+
+| 组 | 模块 | 守什么 |
+|----|------|--------|
+| 生成   | `inline_core` / `build_programs` / `sync_fallback` | 生成物与编辑源一致 |
+| A      | `gates/registry.py` | 注册表 / FALLBACK / 版本 / 计数 / 标签 / 配色 / 页面镜像 |
+| B      | `gates/hygiene.py`  | 出站引用 / script 字面量 / 控制字节 / 惰性依赖 / 骨架 |
+| C      | `gates/syntax.py`   | node --check / core 测试 / 浏览器分支 |
+| D·库   | `gates/library.py`  | 程序库 |
+| D·词法 | `gates/lexer.py`    | 词法器 |
 
 ── 两条铁律 ─────────────────────────────────────────────────────────
 
@@ -21,7 +24,7 @@
 
 2. **一道门抛异常不许带走别的门。** `build_programs.py` 的每条硬错误路径都是
    `raise SystemExit(...)`；直接写进 `rc` 列表的话，一个拼错的 `file` 字段会让
-   它后面 32 道门一道都不跑——效果与 `or` 短路完全相同，只是伪装成了异常。
+   它后面的门一道都不跑——效果与 `or` 短路完全相同，只是伪装成了异常。
    所以每一项都过 `_guard()`：异常被就地翻成「这道门红了」，别的门照跑。
    `_guard()` 打印异常本身（含 traceback 摘要），不吞。
 
@@ -73,57 +76,66 @@ def _guard(name, fn, *args, **kwargs) -> int:
 
 
 GATES = [
-    ('inline_core --check',   lambda: inline_core.main(check_only=True)),
-    ('build_programs --check', lambda: build_programs.main(check_only=True)),
+    ('生成', 'inline_core --check',    lambda: inline_core.main(check_only=True)),
+    ('生成', 'build_programs --check', lambda: build_programs.main(check_only=True)),
 
-    ('registry_check',         registry.registry_check),
-    ('fallback_check',         registry.fallback_check),
-    ('fallback_version_check', registry.fallback_version_check),
-    ('version_meta_check',     registry.version_meta_check),
-    ('program_count_check',    registry.program_count_check),
-    ('module_label_check',     registry.module_label_check),
-    ('accent_module_check',    registry.accent_module_check),
+    ('A', 'registry_check',         registry.registry_check),
+    ('A', 'fallback_check',         registry.fallback_check),
+    ('A', 'fallback_version_check', registry.fallback_version_check),
+    ('A', 'version_meta_check',     registry.version_meta_check),
+    ('A', 'program_count_check',    registry.program_count_check),
+    ('A', 'module_label_check',     registry.module_label_check),
+    ('A', 'accent_module_check',    registry.accent_module_check),
 
-    ('outbound_ref_check',       hygiene.outbound_ref_check),
-    ('script_literal_check',     hygiene.script_literal_check),
-    ('control_byte_check',       hygiene.control_byte_check),
-    ('lazy_dep_check',           hygiene.lazy_dep_check),
-    ('skeleton_sentinel_check',  hygiene.skeleton_sentinel_check),
-    ('skeleton_leak_check',      hygiene.skeleton_leak_check),
+    ('B', 'outbound_ref_check',       hygiene.outbound_ref_check),
+    ('B', 'script_literal_check',     hygiene.script_literal_check),
+    ('B', 'control_byte_check',       hygiene.control_byte_check),
+    ('B', 'lazy_dep_check',           hygiene.lazy_dep_check),
+    ('B', 'skeleton_sentinel_check',  hygiene.skeleton_sentinel_check),
+    ('B', 'skeleton_leak_check',      hygiene.skeleton_leak_check),
 
-    ('node_check',            syntax.node_check),
-    ('core_tests',            syntax.core_tests),
-    ('browser_branch_check',  syntax.browser_branch_check),
+    ('C', 'node_check',            syntax.node_check),
+    ('C', 'core_tests',            syntax.core_tests),
+    ('C', 'browser_branch_check',  syntax.browser_branch_check),
 
-    ('program_run_check',              library.program_run_check),
-    ('algorithm_property_check',       library.algorithm_property_check),
-    ('program_embed_roundtrip_check',  library.program_embed_roundtrip_check),
-    ('chapter_manifest_check',         library.chapter_manifest_check),
-    ('anchor_check',                   library.anchor_check),
-    ('exemption_check',                library.exemption_check),
-    ('source_ascii_check',             library.source_ascii_check),
-    ('source_bmp_check',               library.source_bmp_check),
-    ('source_indent_check',            library.source_indent_check),
-    ('blank_directive_check',          library.blank_directive_check),
-    ('program_meta_check',             library.program_meta_check),
-    ('variant_check',                  library.variant_check),
+    ('D·库', 'program_run_check',              library.program_run_check),
+    ('D·库', 'algorithm_property_check',       library.algorithm_property_check),
+    ('D·库', 'program_embed_roundtrip_check',  library.program_embed_roundtrip_check),
+    ('D·库', 'chapter_manifest_check',         library.chapter_manifest_check),
+    ('D·库', 'anchor_check',                   library.anchor_check),
+    ('D·库', 'exemption_check',                library.exemption_check),
+    ('D·库', 'source_ascii_check',             library.source_ascii_check),
+    ('D·库', 'source_bmp_check',               library.source_bmp_check),
+    ('D·库', 'source_indent_check',            library.source_indent_check),
+    ('D·库', 'blank_directive_check',          library.blank_directive_check),
+    ('D·库', 'program_meta_check',             library.program_meta_check),
+    ('D·库', 'variant_check',                  library.variant_check),
 
-    ('lex_roundtrip_check',    lexer.lex_roundtrip_check),
-    ('lex_vs_cpython_check',   lexer.lex_vs_cpython_check),
-    ('judge_strictness_check', lexer.judge_strictness_check),
-    ('lex_never_throws_check', lexer.lex_never_throws_check),
+    ('D·词法', 'lex_roundtrip_check',    lexer.lex_roundtrip_check),
+    ('D·词法', 'lex_vs_cpython_check',   lexer.lex_vs_cpython_check),
+    ('D·词法', 'judge_strictness_check', lexer.judge_strictness_check),
+    ('D·词法', 'lex_never_throws_check', lexer.lex_never_throws_check),
 ]
+
+
+def _tally() -> str:
+    """按组自数，保持 GATES 里各组第一次出现的顺序。"""
+    counts: dict = {}
+    for group, _name, _fn in GATES:
+        counts[group] = counts.get(group, 0) + 1
+    return ' · '.join(f'{g} {n}' for g, n in counts.items())
 
 
 def main() -> int:
     # 全部跑到底、全部要报——**不能用 `or` 短路**，见文件头。
-    rc = [_guard(name, fn) for name, fn in GATES]
-    bad = [name for (name, _), code in zip(GATES, rc) if code]
+    rc = [_guard(name, fn) for _group, name, fn in GATES]
+    bad = [name for (_group, name, _fn), code in zip(GATES, rc) if code]
     print()
     if bad:
-        print(f'{len(bad)} / {len(GATES)} 道门红了：{", ".join(bad)}', file=sys.stderr)
+        print(f'{len(bad)} / {len(GATES)} 道门红了：{", ".join(bad)}（{_tally()}）',
+              file=sys.stderr)
     else:
-        print(f'{len(GATES)} 道门全绿。')
+        print(f'{len(GATES)} 道门全绿（{_tally()}）。')
     return 1 if any(rc) else 0
 
 
