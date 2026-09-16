@@ -289,8 +289,16 @@ def version_meta_check() -> int:
 def program_count_check() -> int:
     """注册表的 programs / lines 必须等于从 programs/ch*/ 现场重算的结果。
 
-    `lines` 的定义（Task 11c 追加裁决 T11-1，源自 Task 11 评审 I4）：源码去掉
-    BLANK 指令行（`# >>> BLANK …` 与 `# <<< BLANK`）之后的行数——**不含**指令行。
+    `lines` 的定义（Task 11c 追加裁决 T11-1，源自 Task 11 评审 I4）：源码**按 `\\n`
+    切**、去掉文件末尾换行产生的那个空尾巴、再去掉 BLANK 指令行（`# >>> BLANK …` 与
+    `# <<< BLANK`）之后的行数——**不含**指令行。
+
+    按 `\\n` 切、不认 U+0085 / U+2028 / U+2029 为换行，因为页面不认
+    （`Exercise.clean()` 是 `split('\\n')`；第 1 期地基终审 G3）。原来这里与
+    build_programs.py 都用 `splitlines()`：一个带 U+0085 的程序两边会一起多数一行、
+    彼此一致，门绿而数字与页面不符——两份「独立」实现共用了同一个错的切法。页面
+    自己的 `clean()` 算出来的数由 `syntax.js_parser_parity_check` 在裸 vm 里核对。
+
     页面把 `lines` 当「程序有多长」显示（左侧列表、说明面板顶部），选择器
     「不超过 20 / 40 / 80 行」也按它筛；每挖一个空就多算两行的旧定义
     （`len(src.splitlines())`，含指令行）会让程序在筛选器里显得比她实际看到的
@@ -319,9 +327,10 @@ def program_count_check() -> int:
         tool = data.get('tool')
         if not py_path.exists():
             continue                     # 缺文件由 chapter_manifest_check 报
-        src = read_text(py_path)
-        body_lines = sum(1 for line in src.splitlines()
-                          if not library._is_directive(line))
+        parts = read_text(py_path).split('\n')
+        if parts[-1] == '':
+            parts.pop()                  # 文件末尾换行之后的那个空尾巴
+        body_lines = sum(1 for line in parts if not library._is_directive(line))
         n, total = counts.get(tool, (0, 0))
         counts[tool] = (n + 1, total + body_lines)
 

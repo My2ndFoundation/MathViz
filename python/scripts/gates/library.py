@@ -887,6 +887,33 @@ _ID_RE = re.compile(r'\bid=(\S+)')
 _LEVEL_RE = re.compile(r'\blevel=(\S+)')
 
 
+def _split_attrs(attrs: str):
+    """按 `exercise.js` 的顺序摘属性：先摘 `hintEn`、再摘 `hint`，返回
+    (hintEn 匹配或 None, hint 匹配或 None, 摘干净引号文本后的裸文本)。
+
+    `_check_attrs` 与 `blank_ids` 共用这一份——「Python 侧怎么解析指令行」只写一次，
+    `syntax.js_parser_parity_check` 拿它的结论去对页面里 `Exercise.parse` 的结论。
+    """
+    hint_en_m = _HINT_EN_RE.search(attrs)
+    rest = attrs if not hint_en_m else attrs[:hint_en_m.start()] + attrs[hint_en_m.end():]
+    hint_m = _HINT_RE.search(rest)
+    bare = rest if not hint_m else rest[:hint_m.start()] + rest[hint_m.end():]
+    return hint_en_m, hint_m, bare
+
+
+def blank_ids(src: str) -> list:
+    """按本模块解析指令行的规则，列出一段源码里每个 BLANK 的 id（出现顺序；
+    缺 id 的记成 None）。只看开始行，不查配对——配对与属性是否齐全由
+    `blank_directive_check` 报。"""
+    ids = []
+    for line in src.split('\n'):
+        om = BLANK_OPEN_RE.match(line)
+        if om:
+            id_m = _ID_RE.search(_split_attrs(om.group(1))[2])
+            ids.append(id_m.group(1) if id_m else None)
+    return ids
+
+
 def blank_presence_check() -> int:
     """每个程序至少一个 BLANK（第 1 期设计 D2），无豁免。
 
@@ -993,31 +1020,24 @@ def blank_directive_check() -> int:
 
 def _check_attrs(name, py_path, line_no, attrs, seen_ids) -> int:
     rc = 0
-    hint_en_m = _HINT_EN_RE.search(attrs)
+    hint_en_m, hint_m, bare = _split_attrs(attrs)
     if not hint_en_m:
         print(f'ERROR: {name}:{line_no} 的 BLANK 指令缺 hintEn="..."：'
               f'{py_path}:{line_no}', file=sys.stderr)
         rc = 1
-        rest = attrs
-    else:
-        if not hint_en_m.group(1).strip():
-            print(f'ERROR: {name}:{line_no} 的 hintEn 是空串：{py_path}:{line_no}',
-                  file=sys.stderr)
-            rc = 1
-        rest = attrs[:hint_en_m.start()] + attrs[hint_en_m.end():]
+    elif not hint_en_m.group(1).strip():
+        print(f'ERROR: {name}:{line_no} 的 hintEn 是空串：{py_path}:{line_no}',
+              file=sys.stderr)
+        rc = 1
 
-    hint_m = _HINT_RE.search(rest)
     if not hint_m:
         print(f'ERROR: {name}:{line_no} 的 BLANK 指令缺 hint="..."：'
               f'{py_path}:{line_no}', file=sys.stderr)
         rc = 1
-        bare = rest
-    else:
-        if not hint_m.group(1).strip():
-            print(f'ERROR: {name}:{line_no} 的 hint 是空串：{py_path}:{line_no}',
-                  file=sys.stderr)
-            rc = 1
-        bare = rest[:hint_m.start()] + rest[hint_m.end():]
+    elif not hint_m.group(1).strip():
+        print(f'ERROR: {name}:{line_no} 的 hint 是空串：{py_path}:{line_no}',
+              file=sys.stderr)
+        rc = 1
 
     id_m = _ID_RE.search(bare)
     if not id_m:

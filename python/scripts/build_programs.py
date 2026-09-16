@@ -38,15 +38,25 @@
 
 `lines` 的定义（Task 11c 追加裁决 T11-1，源自 Task 11 评审 I4；T14 的
 `program_count_check` 用同一个定义重算，两边必须同法，否则那道门会在一处无害
-的差异上永远报红）：源码去掉 BLANK 指令行（`# >>> BLANK …` 与 `# <<< BLANK`）
-之后的行数，**不含**指令行——这正是读模式与临摹模式里她看到的程序
-（`core/exercise.js` 的 `clean()`）的行数。页面把 `lines` 当「程序有多长」显示，
-选择器「不超过 20 / 40 / 80 行」也按它筛：旧定义（含指令行）每挖一个空就多算
-两行，ch01 的 `int-float-str`（看得到 17 行、旧定义显示 21 行）与
+的差异上永远报红）：源码**按 `\\n` 切**、去掉文件末尾换行产生的那个空尾巴、再去掉
+BLANK 指令行（`# >>> BLANK …` 与 `# <<< BLANK`）之后的行数——这正是读模式与临摹模式
+里她看到的程序（`core/exercise.js` 的 `clean()`）的行数。读模式的行号栏会因为文件
+末尾的换行多显示一个空行号；`lines` 不数它（控制方裁决：不改 `renderDoc`，改说明）。
+
+只按 `\\n` 切，**不用 `splitlines()`**（第 1 期地基终审 G3）：`splitlines()` 还把
+U+0085 / U+2028 / U+2029 / `\\r` / `\\x0b` 等当换行，而页面的 `clean()` 是
+`source.split('\\n')`，不认它们。旧写法在一个带 U+0085 的程序上会多数一行，而
+`program_count_check` 用同一个 `splitlines()`，两边一起数错、彼此一致——门绿、
+数字与页面不符。`syntax.js_parser_parity_check` 在裸 vm 里跑页面自己的 `clean()`
+来核对这个数，并禁止 `.py` 里出现 U+2028 / U+2029 / U+0085。
+
+页面把 `lines` 当「程序有多长」显示，选择器「不超过 20 / 40 / 80 行」也按它筛：
+旧定义（含指令行）每挖一个空就多算两行，ch01 的 `int-float-str`（看得到 17 行、旧定义显示 21 行）与
 `divmod-and-floor`（看得到 19 行、旧定义显示 21 行）都因此被「不超过 20 行」的
 筛选漏掉。
 
-判定「是不是指令行」本脚本自带一份实现（见下面 `_IS_DIRECTIVE_LINE_RE`），与
+判定「是不是指令行」本脚本自带一份实现（见下面 `_is_directive_line()` 与它用的
+`_DIRECTIVE_OPEN_RE` / `_DIRECTIVE_CLOSE_RE`），与
 `program_count_check` 复用的 `gates/library.py` 判定各自独立——构建脚本与门
 互为独立测量，谁都不导入对方的函数。
 
@@ -91,8 +101,16 @@ def _is_directive_line(line: str) -> bool:
 
 
 def count_lines(src: str) -> int:
-    """`lines` 的定义：源码去掉 BLANK 指令行之后的行数（见文件头）。"""
-    return sum(1 for line in src.splitlines() if not _is_directive_line(line))
+    """`lines` 的定义（见文件头）：按 `\\n` 切、去掉文件末尾换行产生的空尾巴、
+    再去掉 BLANK 指令行之后的行数。
+
+    按 `\\n` 切、不认 U+0085 / U+2028 / U+2029 为换行，因为页面不认——
+    `Exercise.clean()` 是 `split('\\n')`。
+    """
+    parts = src.split('\n')
+    if parts[-1] == '':
+        parts.pop()                      # 文件末尾换行之后的那个空尾巴
+    return sum(1 for line in parts if not _is_directive_line(line))
 
 
 def encode_payload(payload: dict) -> str:

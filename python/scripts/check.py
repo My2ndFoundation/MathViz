@@ -12,7 +12,7 @@
 | 生成   | `inline_core` / `build_programs` / `sync_fallback` | 生成物与编辑源一致 |
 | A      | `gates/registry.py` | 注册表 / FALLBACK / 版本 / 计数 / 标签 / 配色 / 页面镜像 |
 | B      | `gates/hygiene.py`  | 出站引用 / script 字面量 / 控制字节 / 惰性依赖 / 骨架 |
-| C      | `gates/syntax.py`   | node --check / core 测试 / 浏览器分支 |
+| C      | `gates/syntax.py`   | node --check / core 测试 / 浏览器分支 / 页面解析器对齐 |
 | D·库   | `gates/library.py`  | 程序库 |
 | D·词法 | `gates/lexer.py`    | 词法器 |
 
@@ -102,6 +102,7 @@ GATES = [
     ('C', 'core_tests',            syntax.core_tests),
     ('C', 'browser_branch_check',  syntax.browser_branch_check),
     ('C', 'closed_set_mirror_check',  syntax.closed_set_mirror_check),
+    ('C', 'js_parser_parity_check',   syntax.js_parser_parity_check),
 
     ('D·库', 'program_run_check',              library.program_run_check),
     ('D·库', 'algorithm_property_check',       library.algorithm_property_check),

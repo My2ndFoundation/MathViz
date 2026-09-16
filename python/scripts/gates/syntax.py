@@ -9,15 +9,22 @@
 
 所以 `browser_branch_check` 用 `vm` + **裸 context**，而且脚本自己会先断言沙箱
 里确实没有 module / require——一道门宣称自己跑在裸沙箱里，得有人去查那句话。
+
+`js_parser_parity_check` 用同一个裸 context，把**真实程序库**喂给页面自己的
+`Exercise.parse` / `clean`：D 组解析指令的门全是 Python 写的，而 JS 与 Python 的
+正则方言（`.` / `\\s` / `\\b`）并不相同——只在 Python 那一侧看，看不见页面上的坏。
 """
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+import tempfile
 
-from . import (CORE_DIR, ROOT, SCRIPT_RE, STDIN_LINE_RE, all_tool_pages,
-               core_modules, read_text, root_pages, run_node)
+from . import (CORE_DIR, PROGRAMS_DIR, ROOT, SCRIPT_RE, STDIN_LINE_RE,
+               all_tool_pages, core_modules, iter_programs, load_registry,
+               read_text, root_pages, run_node, tool_pages)
 
 ROOT_PAGE_MIN = 2      # index.html + app.html
 
@@ -261,4 +268,220 @@ process.stdout.write(JSON.stringify({ LEVELS: P.LEVELS, KINDS: P.KINDS, BOARDS: 
     if rc == 0:
         print('闭集镜像：interact.js 的 LEVELS/KINDS/BOARDS/RUNTIMES/HINT_MARK 与 library.py 逐项相同'
               '（vm 裸 context，浏览器分支）')
+    return rc
+
+
+# 页面不认、Python 却认的「换行」码位（第 1 期地基终审 G3）。`.py` 里一律不许出现：
+#   U+2028 / U+2029 —— JS 正则的 `.` 不匹配它们（它们是 JS 的行终止符），指令行里
+#                       有一个，`Exercise.DIRECTIVE_OPEN` 就失配，`clean()` 当场抛；
+#                       Python 的 `.` 照样匹配，Python 侧的门全都看不出来。
+#   U+0085 (NEL)     —— Python 的 `str.splitlines()` 把它当换行，页面的 `split('\n')`
+#                       不当；行数会在两边分岔。
+FORBIDDEN_LINE_BREAKS = {' ': 'LINE SEPARATOR', ' ': 'PARAGRAPH SEPARATOR',
+                         '': 'NEXT LINE (NEL)'}
+
+
+def js_parser_parity_check() -> int:
+    """在 `vm` **裸 context** 里装载 `py-lex.js` / `exercise.js`，对章目录里的每个
+    `.py`（**从磁盘读**，不从 HTML）调页面自己的 `Exercise.parse` 与 `Exercise.clean`。
+
+    为什么需要它（第 1 期地基终审 G3）：在 `swap-two-tuple` 的提示里放一个 U+2028，
+    `Exercise.clean()` 抛「<<< BLANK 没有对应的 >>> BLANK」，该程序三种模式全坏——
+    而当时的每一道门都是绿的：Python 的 `.` 匹配 U+2028；ASCII 门豁免指令行；U+2028
+    不是 C0 控制字节；它在 BMP 内。**库里所有「解析指令」的门都是 Python 写的，页面
+    跑的是 JS**——两份解析器在正则方言上的分歧，没有任何一道门站在页面那一侧去看。
+
+    逐项，任何一项不满足都红：
+      1. `.py` 里不许有 U+2028 / U+2029 / U+0085（`FORBIDDEN_LINE_BREAKS`）。
+      2. `Exercise.parse` / `Exercise.clean` 都不许抛——抛了就点名程序与 JS 的报错。
+      3. JS 解析出的挖空 id 列表 == Python 侧（`library.blank_ids`，与
+         `blank_directive_check` 同一套摘属性的规则）的 id 列表，顺序也算。
+      4. `clean(src)` 的行数（与 `lines` 同一口径：按 `\\n` 切，源码以换行结尾时
+         去掉最后那个空尾巴）== 嵌入页面里该程序的 `lines`，逐个比；每页之和 ==
+         注册表该工具的 `lines`（注册表只存每页总和）。
+      5. 一个程序都没核对到 → 红（跑了个寂寞）。
+
+    第 4 条里「空尾巴」按**源码**是否以 `\\n` 结尾来判，不按 `clean()` 输出的最后
+    一个元素是不是空串来判：一个文件若不以换行结尾、最后一行恰是 `# <<< BLANK`、
+    挖空体最后一行是空行，`clean()` 输出的末元素是那个真实的空行，不是尾巴。
+    """
+    from . import library               # 惰性导入：library 导入期会加载 refs
+
+    modules = {p.name: p for p in core_modules()}
+    need = ('py-lex.js', 'exercise.js')
+    missing = [n for n in need if n not in modules]
+    if missing:
+        print(f'ERROR: core/ 缺模块 {missing}，无法在页面的解析器上核对程序',
+              file=sys.stderr)
+        return 1
+
+    rc = 0
+    # (显示名, .py 路径, 工具页 id 或 None, 程序 id 或 None)
+    targets = []
+    listed = set()
+    for chapter_dir, data, prog, py_path in iter_programs():
+        if not py_path.is_file():
+            continue                     # 缺文件由 chapter_manifest_check 报
+        listed.add(py_path.resolve())
+        targets.append((f'{chapter_dir.name}/{prog.get("id")}', py_path,
+                        data.get('tool'), prog.get('id')))
+    # 章目录里没被 chapter.json 点名的 .py：不进页面、没有 lines 可比，但照样要
+    # 能被页面的解析器吃下去（chapter_manifest_check 会另外报它没登记）。
+    for py_path in sorted(PROGRAMS_DIR.glob('ch*/*.py')):
+        if py_path.resolve() not in listed:
+            targets.append((f'{py_path.parent.name}/{py_path.name}', py_path, None, None))
+    if not targets:
+        print('ERROR: 一个 .py 都没扫到——这道门跑了个寂寞', file=sys.stderr)
+        return 1
+
+    sources = {}
+    for name, py_path, _tool, _pid in targets:
+        text = py_path.read_bytes().decode('utf-8')   # 不经通用换行转换：node 读的也是原字节
+        sources[name] = text
+        for n, line in enumerate(text.split('\n'), 1):
+            for col, ch in enumerate(line, 1):
+                if ch in FORBIDDEN_LINE_BREAKS:
+                    print(f'ERROR: {name} 有 U+{ord(ch):04X} {FORBIDDEN_LINE_BREAKS[ch]}：'
+                          f'{py_path}:{n}:{col}\n'
+                          f'       Python 与页面的 JS 对它是不是「换行」意见不一——'
+                          f'.py 里一律不许出现 U+2028 / U+2029 / U+0085',
+                          file=sys.stderr)
+                    rc = 1
+
+    with tempfile.TemporaryDirectory() as td:
+        blocks = []
+        for page in tool_pages():
+            m = library.PROGRAMS_BLOCK_RE.search(read_text(page))
+            if not m or m.group(1).strip() == 'none':
+                continue                 # 缺标记 / 弃权由 program_embed_roundtrip_check 等报
+            block = os.path.join(td, page.stem + '.js')
+            with open(block, 'w', encoding='utf-8') as fh:
+                fh.write(m.group(2))
+            blocks.append({'page': page.stem, 'file': block})
+
+        script = r'''
+const vm = require('vm'), fs = require('fs');
+const core = %s;
+const progs = %s;
+const blocks = %s;
+const sandbox = {};
+sandbox.self = sandbox;
+vm.createContext(sandbox);
+if (typeof sandbox.module !== 'undefined' || typeof sandbox.require !== 'undefined') {
+  console.error('FAIL 沙箱不干净：module/require 泄漏进来了，测的还是 node 分支');
+  process.exit(1);
+}
+for (const f of core) { vm.runInContext(fs.readFileSync(f, 'utf8'), sandbox, { filename: f }); }
+const E = sandbox.Exercise;
+if (!E || typeof E.parse !== 'function' || typeof E.clean !== 'function') {
+  console.error('FAIL 裸沙箱里没有可调用的 Exercise.parse / Exercise.clean');
+  process.exit(1);
+}
+const out = { programs: {}, pages: {} };
+for (const p of progs) {
+  const src = fs.readFileSync(p.path, 'utf8');
+  const r = {};
+  try { r.ids = E.parse(src).blanks.map(function (b) { return b.id; }); }
+  catch (e) { r.parseError = String(e && e.message); }
+  try {
+    let n = E.clean(src).split('\n').length;
+    if (src === '' || src.charAt(src.length - 1) === '\n') { n--; }
+    r.lines = n;
+  } catch (e) { r.cleanError = String(e && e.message); }
+  out.programs[p.name] = r;
+}
+for (const b of blocks) {
+  const sb = {};
+  sb.self = sb;
+  vm.createContext(sb);
+  try {
+    vm.runInContext(fs.readFileSync(b.file, 'utf8'), sb);
+    out.pages[b.page] = { programs: sb.PyPrograms.programs.map(function (x) {
+      return { id: x.id, lines: x.lines };
+    }) };
+  } catch (e) { out.pages[b.page] = { error: String(e && e.message) }; }
+}
+process.stdout.write(JSON.stringify(out));
+''' % (json.dumps([str(modules[n]) for n in need]),
+       json.dumps([{'name': name, 'path': str(p)} for name, p, _t, _i in targets]),
+       json.dumps(blocks))
+        proc = run_node(script)
+
+    if proc.returncode != 0:
+        print('ERROR: 在 vm 裸 context 里装载 py-lex.js / exercise.js 失败：', file=sys.stderr)
+        print((proc.stderr or proc.stdout).strip(), file=sys.stderr)
+        return 1
+    got = json.loads(proc.stdout)
+
+    embedded = {}                        # 工具页 id -> {程序 id: lines}
+    for page, info in got['pages'].items():
+        if 'error' in info:
+            print(f'ERROR: {page}.html 的 GENERATED:PROGRAMS 块在裸 vm 里求值失败：'
+                  f'{info["error"]}', file=sys.stderr)
+            rc = 1
+            continue
+        embedded[page] = {x['id']: x['lines'] for x in info['programs']}
+
+    checked = 0
+    page_sums: dict = {}
+    uncounted = set()                    # 有程序没数出行数的工具：加总无意义，不再比注册表
+    for name, py_path, tool, pid in targets:
+        r = got['programs'][name]
+        bad = False
+        for key, fn in (('parseError', 'parse'), ('cleanError', 'clean')):
+            if key in r:
+                mode = '挖空模式' if fn == 'parse' else '读 / 临摹模式'
+                print(f'ERROR: {name} 在页面的解析器上 Exercise.{fn}() 抛错——这个程序在'
+                      f'页面的{mode}里打不开：{py_path}\n'
+                      f'       JS：{r[key]}', file=sys.stderr)
+                rc = 1
+                bad = True
+        if 'ids' in r:
+            py_ids = library.blank_ids(sources[name])
+            if r['ids'] != py_ids:
+                print(f'ERROR: {name} 的挖空 id 两边解析得不一样：{py_path}\n'
+                      f'       页面 Exercise.parse：{r["ids"]}\n'
+                      f'       门 library.blank_ids：{py_ids}\n'
+                      f'       两份解析器在正则方言上分岔了（\\b / \\s / . 在 JS 与 Python '
+                      f'里含义不同）——门验的不是页面看到的那份', file=sys.stderr)
+                rc = 1
+                bad = True
+        if 'lines' not in r and tool is not None:
+            uncounted.add(tool)
+        if 'lines' in r and tool is not None:
+            page_sums[tool] = page_sums.get(tool, 0) + r['lines']
+            want = embedded.get(tool, {}).get(pid)
+            if want is None:
+                print(f'ERROR: {name} 在 {tool}.html 的嵌入数据里找不到 lines——'
+                      f'没法核对页面显示的行数（修复：python3 python/scripts/'
+                      f'build_programs.py）', file=sys.stderr)
+                rc = 1
+                bad = True
+            elif want != r['lines']:
+                print(f'ERROR: {name} 嵌入页面的 lines={want!r}，页面自己的 clean() '
+                      f'数出来是 {r["lines"]}：{py_path}\n'
+                      f'       口径：按 \\n 切、去掉末尾换行的空尾巴、不含 BLANK 指令行',
+                      file=sys.stderr)
+                rc = 1
+                bad = True
+        if not bad:
+            checked += 1
+
+    by_id = {t.get('id'): t for t in load_registry().get('tools') or []}
+    for tool, total in sorted(page_sums.items()):
+        entry = by_id.get(tool)
+        if entry is None or tool in uncounted:
+            continue                     # 前者由 program_count_check 报；后者上面已经红过
+        if entry.get('lines') != total:
+            print(f'ERROR: 注册表 {tool} 的 lines={entry.get("lines")!r}，页面的 clean() '
+                  f'逐程序数出来加总是 {total}', file=sys.stderr)
+            rc = 1
+
+    if checked == 0 and rc == 0:
+        print('ERROR: 一个程序都没核对到——这道门跑了个寂寞', file=sys.stderr)
+        return 1
+    if rc == 0:
+        print(f'JS 解析器对齐：{len(targets)} 个 .py 在裸 vm 里过 Exercise.parse/clean 不抛，'
+              f'挖空 id 与门的解析一致，clean() 行数与嵌入的 lines、'
+              f'{len(page_sums)} 个工具的注册表 lines 一致；无 U+2028/U+2029/U+0085')
     return rc
