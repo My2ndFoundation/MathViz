@@ -1,4 +1,4 @@
-"""C 组 · 语法与运行时的三道门。
+"""C 组 · 语法与运行时。
 
 `node_check` 与 `core_tests` 是照抄 cryptography 的两道；`browser_branch_check`
 是这个子项目自己的，守的是 UMD 的**另一条分支**。

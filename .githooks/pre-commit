@@ -149,7 +149,20 @@ fi
 #                          外加把 programs / lines 两个派生字段回写进 python-tools.json
 # 触发条件因此比 chess 段多一个 programs/。两个脚本都只暂存自己 --print-changed
 # 打印出来的路径——同 chess 段那条纪律：整体 glob 会把别的会话半写的文件卷进本次提交。
-if git diff --cached --name-only | grep -qE '^python/(core|programs|tools|scripts)/'; then
+# 触发条件多了注册表与两个导航页：FALLBACK 从第 1 期起由 sync_fallback.py 生成，
+# 只改 python-tools.json 的提交也必须重新生成。三个分支写成顶层交替、不套可选捕获组
+# ——导航契约段注释里记着本机 ugrep 7.8.4 在 `(…)?` 套交替时静默漏匹配（R53）。
+if git diff --cached --name-only | grep -qE '^python/(core|programs|tools|scripts)/|^python/python-tools\.json$|^python/(app|index)\.html$'; then
+  # sync_fallback.py 改的是两个导航页——同根目录段（第 17-49 行，尤其 32-41 行
+  # 那个 DIRTY_BEFORE 循环）对 app.html/index.html 防过的同一件事（CLAUDE.md
+  # 「并行开工纪律」第 5 条）：若另一个会话在这两页里留了未暂存的手改，跑脚本
+  # 之后再整页 git add 会把那份手改一起卷进本次提交。在跑任何生成脚本之前，
+  # 先记下两页此刻是否已经是脏的。
+  PY_DIRTY_BEFORE=
+  for f in python/app.html python/index.html; do
+    git diff --quiet -- "$f" || PY_DIRTY_BEFORE="$PY_DIRTY_BEFORE $f"
+  done
+
   PY_CORE_CHANGED=$(python3 python/scripts/inline_core.py --print-changed)
   if [ $? -ne 0 ]; then
     echo "python: inline_core.py 失败，提交中止" >&2
@@ -160,12 +173,55 @@ if git diff --cached --name-only | grep -qE '^python/(core|programs|tools|script
     echo "python: build_programs.py 失败，提交中止" >&2
     exit 1
   fi
+  # 排在 build_programs.py 之后：它会回写注册表的 programs / lines。FALLBACK 今天
+  # 不带这两个字段，但顺序本身不该依赖「今天不带」。
+  PY_FALLBACK_CHANGED=$(python3 python/scripts/sync_fallback.py --print-changed)
+  if [ $? -ne 0 ]; then
+    echo "python: sync_fallback.py 失败，提交中止" >&2
+    exit 1
+  fi
+
   for CHANGED in "$PY_CORE_CHANGED" "$PY_PROG_CHANGED"; do
     [ -n "$CHANGED" ] || continue
     echo "$CHANGED" | while IFS= read -r f; do
       [ -n "$f" ] && git add "$f"
     done
   done
+
+  # sync_fallback.py 单独处理，不并进上面那个循环：它改的两个导航页可能与
+  # PY_DIRTY_BEFORE 记的未暂存手改撞在一起。原本干净的页面才代为 git add；
+  # 原本就脏的不 add——FALLBACK 已经在磁盘上重新生成，但那份改动和页面里
+  # 别人的未暂存内容混在一起，不能不经人看就进提交，所以让提交中止、请人工
+  # 核对后自行暂存重提（与根目录段第 32-41 行对 app.html/index.html 的处理
+  # 保持一致，只是那里的情形不需要中止提交——这里因为 FALLBACK 已经在磁盘上
+  # 与新提交的 python-tools.json 内容对齐，不中止会让已提交的两页落后于
+  # python-tools.json，把「登记表与镜像不同步」的洞重新打开）。
+  # 用 `for` 接这份列表、不用 `| while`：后者的循环体在子 shell 里跑，
+  # PY_FALLBACK_ABORT 出了循环会读不到。
+  PY_FALLBACK_ABORT=
+  if [ -n "$PY_FALLBACK_CHANGED" ]; then
+    OLD_IFS=$IFS
+    IFS='
+'
+    for f in $PY_FALLBACK_CHANGED; do
+      [ -n "$f" ] || continue
+      rel="python/$(basename "$f")"
+      case " $PY_DIRTY_BEFORE " in
+        *" $rel "*)
+          echo "pre-commit: $rel 在 sync_fallback.py 重新生成 FALLBACK 之前就有未暂存改动，不代为 git add —— FALLBACK 已重新生成但没有暂存，请人工检查这份改动后自行 git add 并重新提交" >&2
+          PY_FALLBACK_ABORT=1
+          ;;
+        *)
+          git add "$f" ;;
+      esac
+    done
+    IFS=$OLD_IFS
+  fi
+  if [ -n "$PY_FALLBACK_ABORT" ]; then
+    echo "python: 导航页的 FALLBACK 与未暂存改动冲突，提交中止" >&2
+    exit 1
+  fi
+
   if ! python3 python/scripts/check.py; then
     echo "python: check.py 未通过，提交中止" >&2
     exit 1

@@ -1,4 +1,4 @@
-"""A 组 · 注册表与两个导航页的七道门。
+"""A 组 · 注册表与两个导航页。
 
 这一组守的是「同一份事实被抄在几个地方」这一类的漂移。本仓的历史记录给了三条
 不用再论证的结论：
@@ -12,35 +12,60 @@
     副本后面（PR #158）。
 
 所以这一组的每一道门都只问一件事：**两份字节是不是真的一样**——期望值来自磁盘上
-的另一份数据，不是来自我写下的常量。只有 MODULES / ACCENTS 两个闭集是例外，它们
-本身就是规格（design §6.1 与两页的 ACCENTS 白名单）。
+的另一份数据，不是来自我写下的常量。例外是 MODULES / ACCENTS / MODULE_ACCENTS /
+FALLBACK_FIELDS 这几个闭集：它们不是我编的期望值，本身就是规格——MODULES 与
+ACCENTS 是主规格 §6.1 的模块数与两页共用的 accent 白名单，MODULE_ACCENTS 是同一节
+定死的模块配色表，FALLBACK_FIELDS 是第 1 期设计 D5 规定的两页 FALLBACK 各自的字段
+集。规格变了就改常量本身，而不是拿磁盘上的另一份数据去核对规格。
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
 
 from . import (ACCENTS, BILINGUAL_FIELDS, ENGINE_PREFIX,
-               META_VERSION_RE, MODULES, PROGRAMS_DIR, ROOT, ROOT_PAGES,
-               iter_programs, load_registry, read_text, tool_pages)
+               META_VERSION_RE, MODULE_ACCENTS, MODULES, PROGRAMS_DIR, ROOT,
+               ROOT_PAGES, TOOLS_DIR, iter_programs, load_registry, read_text,
+               run_node, tool_pages)
 
-FALLBACK_ARRAY_RE = re.compile(r'var FALLBACK = \[(.*?)\n\];', re.DOTALL)
-FALLBACK_ID_RE = re.compile(r"id:\s*'([\w-]+)'")
-# 夹取到下一个 id: 为止，不靠「同一行」这种脆弱假设——与 cryptography / chess
-# 的同名两条同源。
-FALLBACK_ENTRY_RE = re.compile(r"id:\s*'([\w-]+)'(.*?)(?=id:\s*'|\Z)", re.DOTALL)
-FALLBACK_VERSION_RE = re.compile(r"version:\s*'([^']*)'")
+FALLBACK_REGION_RE = re.compile(
+    r'/\* >>> GENERATED:FALLBACK \*/\nvar FALLBACK = (.*?);\n/\* <<< GENERATED:FALLBACK \*/',
+    re.DOTALL)
+
+# 第 1 期设计 D5：两页 FALLBACK 各自必须**恰好**带这些字段。这是规格，故意不从
+# sync_fallback.py 导入——门若与生成器共用同一份字段表，从表里删掉一个字段时
+# 两边会一起「同意」：全绿，而页面上少了它。
+FALLBACK_FIELDS = {
+    'app.html':   ('id', 'file', 'accent', 'module', 'version', 'kicker', 'title', 'tag'),
+    'index.html': ('id', 'file', 'accent', 'module', 'version', 'kicker', 'title', 'tag',
+                   'desc'),
+}
+
 MODULE_LABELS_RE = re.compile(r'var MODULE_LABELS = \{(.*?)\n\};', re.DOTALL)
 MODULE_LABEL_ROW_RE = re.compile(
     r"^\s*(\d+):\s*\{\s*en:\s*'((?:[^'\\]|\\.)*)',\s*zh:\s*'((?:[^'\\]|\\.)*)'\s*\},?\s*$",
     re.MULTILINE)
 
 
-def _fallback_body(name: str):
-    """取出一页的 FALLBACK 数组体；取不到返回 None（由调用方各自报错）。"""
-    text = read_text(ROOT / name)
-    m = FALLBACK_ARRAY_RE.search(text)
-    return m.group(1) if m else None
+def _fallback_entries(name: str):
+    """解析一页的 GENERATED:FALLBACK 区段。返回 (条目列表, None) 或 (None, 错误文本)。
+
+    用 json.loads 而不是正则抠字段：区段由 sync_fallback.py 用 json.dumps 写出，
+    门这边用独立的解码器读回来比对——一个比字节（sync_fallback --check），
+    一个比语义（本函数的调用方），两次测量互不依赖。
+    """
+    m = FALLBACK_REGION_RE.search(read_text(ROOT / name))
+    if not m:
+        return None, (f'{name} 里找不到 GENERATED:FALLBACK 区段'
+                      f'（形如 var FALLBACK = [...]; 夹在两条标记之间）')
+    try:
+        data = json.loads(m.group(1))
+    except ValueError as exc:
+        return None, f'{name} 的 FALLBACK 区段不是合法 JSON：{exc}'
+    if not isinstance(data, list) or not all(isinstance(e, dict) for e in data):
+        return None, f'{name} 的 FALLBACK 不是对象数组'
+    return data, None
 
 
 def registry_check() -> int:
@@ -133,37 +158,69 @@ def registry_check() -> int:
 
 
 def fallback_check() -> int:
-    """两页内嵌的 FALLBACK 与注册表的 id 集合必须完全相同。
+    """两页 FALLBACK 与注册表：id 顺序相同；字段集恰为 FALLBACK_FIELDS；
+    除 version（归 fallback_version_check）外逐字段相等。
 
-    FALLBACK 是 file:// 下唯一的数据来源（fetch 会因同源限制失败）。它一旦落后
-    于注册表，本地双击打开的画廊就会少工具，而线上是全的——一个只在离线时出现
-    的差异，没有这道门就只能靠人撞见。
+    FALLBACK 是 file:// 下唯一的数据来源。第 0 期这道门只比 id 集合，于是把
+    accent 改成 orange、module 改成 7、title 改成 WRONG TITLE，34 道门全绿——
+    离线打开的侧栏会把工具归进错的模块、画错的颜色（账本 §一.1）。
     """
-    reg_ids = set(d['id'] for d in load_registry()['tools'])
+    tools = load_registry()['tools']
+    reg_ids = [t['id'] for t in tools]
+    by_id = {t['id']: t for t in tools}
     rc = 0
+    compared = 0
     for name in ROOT_PAGES:
-        body = _fallback_body(name)
-        if body is None:
-            print(f'ERROR: {name} 里找不到 FALLBACK 数组', file=sys.stderr)
+        entries, err = _fallback_entries(name)
+        if err:
+            print(f'ERROR: {err}', file=sys.stderr)
             rc = 1
             continue
-        ids = set(FALLBACK_ID_RE.findall(body))
+        ids = [e.get('id') for e in entries]
         if ids != reg_ids:
-            print(f'ERROR: {name} 的 FALLBACK 与注册表不一致\n'
-                  f'    只在 FALLBACK：{sorted(ids - reg_ids)}\n'
-                  f'    只在注册表：  {sorted(reg_ids - ids)}', file=sys.stderr)
+            print(f'ERROR: {name} 的 FALLBACK 条目与注册表不一致（顺序也算）\n'
+                  f'    FALLBACK：{ids}\n'
+                  f'    注册表：  {reg_ids}', file=sys.stderr)
             rc = 1
+            continue
+        want_fields = set(FALLBACK_FIELDS[name])
+        for e in entries:
+            tid = e['id']
+            got_fields = set(e)
+            if got_fields != want_fields:
+                print(f'ERROR: {name} 的 FALLBACK 条目 {tid} 字段集不符——'
+                      f'多出 {sorted(got_fields - want_fields)}，'
+                      f'缺少 {sorted(want_fields - got_fields)}', file=sys.stderr)
+                rc = 1
+            for field in sorted((want_fields & got_fields) - {'version'}):
+                if e[field] != by_id[tid].get(field):
+                    print(f'ERROR: {name} 的 FALLBACK 条目 {tid} 的 {field} 与注册表不同\n'
+                          f'    FALLBACK：{e[field]!r}\n'
+                          f'    注册表：  {by_id[tid].get(field)!r}\n'
+                          f'    修复：python3 python/scripts/sync_fallback.py',
+                          file=sys.stderr)
+                    rc = 1
+                else:
+                    compared += 1
+    if rc == 0 and compared == 0:
+        print('ERROR: 一个 FALLBACK 字段都没比到——这道门跑了个寂寞', file=sys.stderr)
+        return 1
     if rc == 0:
-        print(f'FALLBACK：两页各 {len(reg_ids)} 条，与注册表一致')
+        print(f'FALLBACK：两页各 {len(reg_ids)} 条，id 顺序与注册表相同，'
+              f'{compared} 个镜像字段逐一相等')
     return rc
 
 
 def fallback_version_check() -> int:
     """两页 FALLBACK 的每一条都要带 version，且必须等于注册表里的那个。
 
-    为什么这道门必须单独存在：**fallback_check() 只比 id 集合**，一条缺了
-    version 的条目在它眼里完全正常。而 version 同时是缓存键——app.html 的
-    iframe 地址与画廊卡片都把它拼进 URL（?v=<version>），卡片角上还要印出来。
+    为什么这道门必须单独存在：`fallback_check()` 按设计**跳过 version 的取值
+    比较**——它逐字段比对时显式排除了 version（见该函数 for 循环里的
+    `- {'version'}`），只在「字段集恰为 FALLBACK_FIELDS」这一步顺带查出
+    version 缺失。也就是说，**缺一个 version 字段**会被 fallback_check 的字段集
+    检查抓到，但 version **取值对不对**从来不是它管的——那正是这道门要单独存在
+    的理由。而 version 同时是缓存键——app.html 的 iframe 地址与画廊卡片都把它
+    拼进 URL（?v=<version>），卡片角上还要印出来，值本身必须有专门的门盯着。
 
     cryptography 实测过这个洞：两页 27×2 = 54 条条目，version 字段一个都没有，
     而根 CLAUDE.md 和那一页自己的注释都写着「现在也带 version」。线上 fetch
@@ -173,12 +230,12 @@ def fallback_version_check() -> int:
     rc = 0
     checked = 0
     for name in ROOT_PAGES:
-        body = _fallback_body(name)
-        if body is None:
-            continue                     # 缺 FALLBACK 由 fallback_check 报，不重复报
-        for tid, entry in FALLBACK_ENTRY_RE.findall(body):
-            vm = FALLBACK_VERSION_RE.search(entry)
-            if not vm:
+        entries, err = _fallback_entries(name)
+        if err:
+            continue                     # 解析不了由 fallback_check 报，不重复报
+        for e in entries:
+            tid = e.get('id')
+            if 'version' not in e:
                 print(f'ERROR: {name} 的 FALLBACK 条目 {tid} 没有 version 字段——'
                       f'file:// 下卡片会渲染成 v0、地址退化成 ?v=0', file=sys.stderr)
                 rc = 1
@@ -186,12 +243,15 @@ def fallback_version_check() -> int:
             want = reg_ver.get(tid)
             if want is None:
                 continue                 # id 对不上由 fallback_check 报
-            if vm.group(1) != want:
+            if e['version'] != want:
                 print(f'ERROR: {name} 的 FALLBACK 条目 {tid} 版本是 '
-                      f'{vm.group(1)!r}，注册表是 {want!r}', file=sys.stderr)
+                      f'{e["version"]!r}，注册表是 {want!r}', file=sys.stderr)
                 rc = 1
                 continue
             checked += 1
+    if rc == 0 and checked == 0:
+        print('ERROR: 一条 FALLBACK 版本戳都没比到——这道门跑了个寂寞', file=sys.stderr)
+        return 1
     if rc == 0:
         print(f'FALLBACK 版本戳：{checked} 条内嵌条目全部带 version 且与注册表同值')
     return rc
@@ -332,49 +392,133 @@ def module_label_check() -> int:
 
 
 def accent_module_check() -> int:
-    """同模块同 accent；**相邻**模块必须异 accent。
+    """注册表每条的 accent == MODULE_ACCENTS[module]；表本身覆盖 1–8、取值在闭集、相邻异色。
 
-    颜色在这套导航里是分组的第二条线索（侧栏圆点、卡片左边条）。同一个模块里
-    两个工具用两种颜色，读者会以为它们不是一组；相邻两个模块用同一种颜色，
-    分组线索当场消失——而这两种坏法都不会让任何页面报错。
-
-    第 0 期只有一个模块，所以「相邻异色」这一条**今天在真实数据上无事可做**。
-    它的负控制因此必须往注册表里临时加一条 module:2 / accent:'cyan' 的假条目，
-    否则这道门的后半截是一条从没被执行过的断言——那正是本仓反复抓到的
-    「在结构上无法观察到它声称排除之物」的形状。
+    第 0 期这道门只查「同模块同色、相邻异色」，而且因为只有一个模块，后半截在真实
+    数据上从没执行过。改成「照表」之后：同模块同色是表的推论；相邻异色从「临场挑色
+    时碰运气」变成「对表做一次静态断言」——这条断言每次运行都在真实数据（表）上执行。
     """
-    reg = load_registry()
-    by_module: dict = {}
     rc = 0
-    for d in reg['tools']:
+    if set(MODULE_ACCENTS) != MODULES:
+        print(f'ERROR: MODULE_ACCENTS 的键应恰为模块 1–8，实际 {sorted(MODULE_ACCENTS)}',
+              file=sys.stderr)
+        rc = 1
+    for mod, accent in sorted(MODULE_ACCENTS.items()):
+        if accent not in ACCENTS:
+            print(f'ERROR: MODULE_ACCENTS[{mod}]={accent!r} 不在五色闭集 {sorted(ACCENTS)} 内',
+                  file=sys.stderr)
+            rc = 1
+        nxt = MODULE_ACCENTS.get(mod + 1)
+        if nxt is not None and nxt == accent:
+            print(f'ERROR: MODULE_ACCENTS 相邻模块 {mod} 与 {mod + 1} 都是 {accent!r}——'
+                  f'分组的颜色线索会消失', file=sys.stderr)
+            rc = 1
+
+    checked = 0
+    for d in load_registry()['tools']:
         mod = d.get('module')
         if mod not in MODULES:
             continue                     # 非法 module 由 registry_check 报
-        by_module.setdefault(mod, []).append(d)
-
-    accent_of = {}
-    for mod, items in sorted(by_module.items()):
-        accents = {d.get('accent') for d in items}
-        if len(accents) > 1:
-            detail = '、'.join(f'{d["id"]}={d.get("accent")!r}' for d in items)
-            print(f'ERROR: 模块 {mod} 内部 accent 不统一：{detail}', file=sys.stderr)
+        want = MODULE_ACCENTS.get(mod)
+        if d.get('accent') != want:
+            print(f'ERROR: {d.get("id")} 在模块 {mod}，accent 应为 {want!r}（主规格 §6.1），'
+                  f'实际 {d.get("accent")!r}', file=sys.stderr)
             rc = 1
-        accent_of[mod] = sorted(accents)[0] if accents else None
-
-    mods = sorted(accent_of)
-    adjacent = 0
-    for a, b in zip(mods, mods[1:]):
-        if b - a != 1:
-            continue                     # 中间还没有工具的模块不算相邻
-        adjacent += 1
-        if accent_of[a] == accent_of[b]:
-            ids_a = '、'.join(d['id'] for d in by_module[a])
-            ids_b = '、'.join(d['id'] for d in by_module[b])
-            print(f'ERROR: 相邻模块 {a}（{ids_a}）与 {b}（{ids_b}）都用了 '
-                  f'{accent_of[a]!r}——分组的颜色线索会消失', file=sys.stderr)
-            rc = 1
+            continue
+        checked += 1
+    if rc == 0 and checked == 0:
+        print('ERROR: 一条注册表 accent 都没比到——这道门跑了个寂寞', file=sys.stderr)
+        return 1
     if rc == 0:
-        print(f'配色：{len(by_module)} 个模块内部同色，{adjacent} 对相邻模块异色'
-              + ('（第 0 期只有一个模块，相邻这一条今天无事可做——'
-                 '它的负控制靠临时加一条假条目来执行）' if adjacent == 0 else ''))
+        print(f'配色：{checked} 个工具的 accent 与模块配色表一致；表本身覆盖 1–8 且相邻异色')
+    return rc
+
+
+TOOL_BLOCK_RE = re.compile(r'var TOOL = (\{.*?\n\});', re.DOTALL)
+META_ENGINE_RE = re.compile(r'<meta\s+name="tool-engine"\s+content="([^"]+)"')
+
+
+def _eval_tool_blocks(paths: list) -> dict:
+    """{文件名: {'value': TOOL 对象} | {'error': 文本}}。在 node vm 里求值对象字面量，
+    不用正则抠字段——TOOL 块里有注释、有嵌套对象，正则抠出来的是「看起来像」的值。"""
+    blocks = {}
+    for p in paths:
+        m = TOOL_BLOCK_RE.search(read_text(p))
+        blocks[p.name] = m.group(1) if m else None
+    script = r'''
+const vm = require('vm');
+const blocks = %s;
+const out = {};
+for (const name of Object.keys(blocks)) {
+  if (blocks[name] === null) { out[name] = { error: '找不到 var TOOL = {...};' }; continue; }
+  try { out[name] = { value: vm.runInNewContext('(' + blocks[name] + ')', {}) }; }
+  catch (e) { out[name] = { error: 'TOOL 块求值抛错：' + e.message }; }
+}
+process.stdout.write(JSON.stringify(out));
+''' % json.dumps(blocks, ensure_ascii=False)
+    proc = run_node(script)
+    if proc.returncode != 0:
+        raise RuntimeError('node 求值 TOOL 块失败：' + proc.stderr)
+    return json.loads(proc.stdout)
+
+
+def page_mirror_check() -> int:
+    """每个已注册工具页的 TOOL.id / accent / title 与 tool-engine meta 都等于注册表；
+    全部工具的 engine 相同，且等于 _skeleton.html 的 tool-engine。
+
+    这几处是第 0 期账本没点到的镜像：TOOL 块每页一份，`TOOL.id` 全页零读者、只有一句
+    「必须与注册表一致」的注释；engine 在注册表与页面 meta 各存一份，也无门。
+    所有页面内联的是同一份 core，所以 engine 只可能有一个真值——骨架也要对上，否则
+    下一个从骨架复制出来的新页会带着旧 engine 出生。
+    """
+    reg = load_registry()['tools']
+    present = [d for d in reg if (ROOT / d['file']).exists()]   # 缺文件由 registry_check 报
+    skeleton = TOOLS_DIR / '_skeleton.html'
+    evaluated = _eval_tool_blocks([ROOT / d['file'] for d in present])
+    rc = 0
+    checked = 0
+    for d in present:
+        path = ROOT / d['file']
+        res = evaluated.get(path.name) or {'error': '没有求值结果'}
+        if 'error' in res:
+            print(f'ERROR: {d["file"]}：{res["error"]}', file=sys.stderr)
+            rc = 1
+            continue
+        tool = res['value']
+        for field in ('id', 'accent', 'title'):
+            if tool.get(field) != d.get(field):
+                print(f'ERROR: {d["file"]} 的 TOOL.{field} 与注册表不同\n'
+                      f'    页面：  {tool.get(field)!r}\n'
+                      f'    注册表：{d.get(field)!r}', file=sys.stderr)
+                rc = 1
+        m = META_ENGINE_RE.search(read_text(path))
+        if not m:
+            print(f'ERROR: {d["file"]} 缺 <meta name="tool-engine">', file=sys.stderr)
+            rc = 1
+        elif m.group(1) != d.get('engine'):
+            print(f'ERROR: {d["file"]} 的 tool-engine meta 是 {m.group(1)!r}，'
+                  f'注册表是 {d.get("engine")!r}', file=sys.stderr)
+            rc = 1
+        checked += 1
+
+    engines = sorted({str(d.get('engine')) for d in reg})
+    if len(engines) != 1:
+        print(f'ERROR: 注册表里的 engine 不止一个：{engines}——所有页面内联同一份 core，'
+              f'engine 只能有一个真值', file=sys.stderr)
+        rc = 1
+    sm = META_ENGINE_RE.search(read_text(skeleton)) if skeleton.exists() else None
+    if not sm:
+        print('ERROR: tools/_skeleton.html 缺 <meta name="tool-engine">', file=sys.stderr)
+        rc = 1
+    elif len(engines) == 1 and sm.group(1) != engines[0]:
+        print(f'ERROR: _skeleton.html 的 tool-engine 是 {sm.group(1)!r}，工具们是 '
+              f'{engines[0]!r}——从骨架复制出来的新页会带着旧 engine 出生', file=sys.stderr)
+        rc = 1
+
+    if rc == 0 and checked == 0:
+        print('ERROR: 一个工具页都没比到——这道门跑了个寂寞', file=sys.stderr)
+        return 1
+    if rc == 0:
+        print(f'页面镜像：{checked} 个工具页的 TOOL.id/accent/title 与 tool-engine 与注册表一致；'
+              f'engine 全库唯一（{engines[0]}），骨架同值')
     return rc
