@@ -2364,8 +2364,9 @@ git commit -m "test(python): 29 道门，每一道都见过红
 | C4 | 每个子项目页的父链接 `<a>` 带 `target="_top"`；根 `index.html` 三张子项目卡片都带 | 删掉 python 的 → 红 |
 | C5 | 三个子项目 `index.html` 的 `.wrap` 是 `max-width:min(2600px,96vw)` | 改成 `1200px` → 红 |
 | C7 | `resolveLang` / `t` 的兜底字面量是 `'en'`；存储键前缀与所在子项目一致 | 把 python 的兜底改成 `'zh'` → 红 |
-| C8 | 出现 `contentWindow.location.replace`；**不出现禁用形状 `frame.src =`** | 往 python `app.html` 加一行 `frame.src = url` → 红 |
+| C8 | 出现 `contentWindow.location.replace`；`frame.src =` 查**位置**不查**存在**（裁决 R52）——实测 `chess/app.html:409` 与 `cryptography/app.html:537` **各有恰好一处**，都在 `setFrame()` 里当设计内退路；按「不许出现」写会把四份正确代码全判红。判据：全页恰好一次 + 在 `setFrame()` 内 + 排在 `location.replace` 之后 | 往 `go()` 里加一行 `frame.src = url`（即出现在 `setFrame()` 之外）→ 红 |
 | 卡片 | 根 `index.html` 里三张子项目卡片齐全（chess / cryptography / python） | 注释掉 python 卡片 → 红 |
+| ⚠️ 工具链 | **钩子的触发正则不要依赖本机 `grep`**（裁决 R53）。实测本机是 ugrep 7.8.4，在 `^((chess|cryptography|python)/)?(app|index)\.html$` 上**稳定漏掉 `cryptography/app.html`**——只漏这一条，而 `/usr/bin/grep` 与 Python `re` 都能匹配。后果：改了那个文件、钩子静默不跑、没有任何提示。把触发条件拆成多个顶层分支绕开 | 用该正则过滤一份含全部六个路径的清单，`cryptography/app.html` 必须在结果里 |
 
 抽代码块的实测命令（写门之前先手跑一遍，确认六份真的相同）：
 
