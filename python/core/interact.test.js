@@ -435,4 +435,44 @@ T.eq(PI.clearScope('all', PROGS, 'b'), null, '整项清空交给 Store.clearAll�
 T.throws(function () { PI.mount({ programs: PROGS }); },
          'mount 没有根节点时当场抛，不静默什么都不做', /root/);
 
+/* token 类型 × 配色（第 1 期设计 B2）：每个类型要么有 .tok-<type> 规则，要么在
+   显式的不上色名单里。第 0 期 decorator 这个类型是专为高亮合成的（CPython 没有它），
+   R14 整套裁决都为它服务——而它没有任何 CSS 规则，@property / @dataclass 一直是白字。 */
+(function () {
+  const PyLex = require('./py-lex.js');
+  const CORPUS = [
+    '@dataclass\nclass P:\n    x: int = 0\n',
+    '@property\ndef area(self) -> float:\n    return self.w * self.h  # note\n',
+    'm = a @ b\n',
+    's = f"{name!r:>10}" + r"\\d" + b"x" + """doc"""\n',
+    'n = 0x1f + 1_000 + 1.5j\n',
+    'match cmd:\n    case "go":\n        pass\n    case _:\n        print(len(cmd))\n',
+    'total = a \\\n    + b\n',
+    'if (y := 3):\n    z = [i for i in range(y)]\n'
+  ].join('');
+  const UNCOLORED = {
+    ws: '空白：透出底色即可',
+    nl: '换行：不可见'
+  };
+
+  T.ok(Array.isArray(PyLex.TYPES) && PyLex.TYPES.length > 0, 'PyLex.TYPES 是非空数组');
+  const types = Array.isArray(PyLex.TYPES) ? PyLex.TYPES : [];
+  const seen = {};
+  PyLex.tokenize(CORPUS).forEach(function (tk) { seen[tk.type] = true; });
+  Object.keys(seen).forEach(function (ty) {
+    T.ok(types.indexOf(ty) !== -1, '词法器吐出的类型 ' + ty + ' 登记在 PyLex.TYPES 里');
+  });
+  T.ok(seen.decorator === true, '语料里真的切出了 decorator（否则下面对它的断言无话可说）');
+
+  const styled = {};
+  String(PI.STYLE_CSS || '').replace(/\.tok-([a-z]+)/g, function (m, ty) { styled[ty] = true; return m; });
+  types.forEach(function (ty) {
+    T.ok(styled[ty] === true || Object.prototype.hasOwnProperty.call(UNCOLORED, ty),
+         'token 类型 ' + ty + ' 要么有 .tok-' + ty + ' 配色，要么在不上色名单里');
+  });
+  Object.keys(UNCOLORED).forEach(function (ty) {
+    T.ok(types.indexOf(ty) !== -1, '不上色名单里的 ' + ty + ' 必须是真实类型（名单不许过期）');
+  });
+})();
+
 T.report('interact');
