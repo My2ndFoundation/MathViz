@@ -47,10 +47,15 @@ GALLERIES = [f'{s}/index.html' for s in SUBPROJECTS]
 NAV_PAGES = SHELLS + GALLERIES          # 契约管的这六页
 ROOT_INDEX = 'index.html'
 
-# 根 index.html 上的三张子项目卡片。id → 目的地。
-ROOT_CARDS = {'chessCard': 'chess/app.html',
-              'cryptoCard': 'cryptography/app.html',
-              'pythonCard': 'python/app.html'}
+# 根 index.html 上的三张子项目卡片。id → (目的地, accent)。
+#
+# accent 跟着卡片一起守：C6 那个闭集管的是**注册表里的工具**，这三张卡片不在任何
+# 注册表里（`sync_registry.py` 不管它们），所以它们的 accent 没有任何别的东西看着。
+# 一张丢了 `--c`、或改用已被占掉的 cyan 的卡片，在只查存在性与 target 的门下会通过。
+ACCENT_SET = ('cyan', 'rose', 'violet', 'emerald', 'orange')
+ROOT_CARDS = {'chessCard': ('chess/app.html', 'cyan'),
+              'cryptoCard': ('cryptography/app.html', 'violet'),
+              'pythonCard': ('python/app.html', 'emerald')}
 
 failures: list[str] = []
 passes: list[str] = []
@@ -179,7 +184,7 @@ def top_target_check() -> None:
             ok('C4', f'{rel}: #backLink target="_top"')
 
     s = markup(ROOT_INDEX)
-    for cid, dest in ROOT_CARDS.items():
+    for cid, (dest, _accent) in ROOT_CARDS.items():
         m = re.search(rf'<a[^>]*id="{cid}"[^>]*>', s)
         if not m:
             fail('C4', f'{ROOT_INDEX}: 找不到子项目卡片 `#{cid}`（应指向 {dest}）')
@@ -191,14 +196,19 @@ def top_target_check() -> None:
 
 
 def card_check() -> None:
-    """三张子项目卡片齐全，且运行时 href 指向各自的壳、带 ?lang=。
+    """三张子项目卡片齐全，运行时 href 指向各自的壳、带 ?lang=，accent 是约定的那一个。
 
     `sync_registry.py` **不管这三张卡片**（根注册表里没有它们的 id），在这道门之前
     它们一处门都没有——而根页面已经因为「把工具数抄进文案」漏改过两次。
+
+    accent 单独查一遍，理由同 C6：它被拼进 `style=""` 属性值内部
+    （`--c:var(--trace-<accent>)`），而且三张卡片各占一个颜色、互不重复——
+    只查存在性与 `target` 的门放得过一张丢了 `--c` 的卡片，也放得过两张撞色的卡片。
     """
     s = markup(ROOT_INDEX)
-    for cid, dest in ROOT_CARDS.items():
-        if not re.search(rf'<a[^>]*id="{cid}"[^>]*href=|<a[^>]*href=[^>]*id="{cid}"', s):
+    for cid, (dest, accent) in ROOT_CARDS.items():
+        m = re.search(rf'<a[^>]*id="{cid}"[^>]*href=[^>]*>|<a[^>]*href=[^>]*id="{cid}"[^>]*>', s)
+        if not m:
             fail('卡片', f'{ROOT_INDEX}: 缺子项目卡片 `<a id="{cid}">`（{dest}）')
             continue
         pat = rf"getElementById\('{cid}'\)\.href = '{re.escape(dest)}\?lang=' \+ LANG;"
@@ -207,6 +217,25 @@ def card_check() -> None:
                          f"'{dest}?lang=' + LANG")
         else:
             ok('卡片', f'{ROOT_INDEX}: #{cid} → {dest}?lang=')
+
+        got = re.search(r'--c:var\(--trace-([a-z]+)\)', m.group(0))
+        if not got:
+            fail('卡片', f'{ROOT_INDEX}: `#{cid}` 的 style 里没有 '
+                         f'`--c:var(--trace-…)`（应为 {accent}）')
+        elif got.group(1) != accent:
+            fail('卡片', f'{ROOT_INDEX}: `#{cid}` 的 accent 是 {got.group(1)}，'
+                         f'约定是 {accent}——三张卡片各占一个颜色，不许撞色'
+                         + ('' if got.group(1) in ACCENT_SET
+                            else f'；而且 {got.group(1)} 不在闭集 {list(ACCENT_SET)} 里'))
+        else:
+            ok('卡片', f'{ROOT_INDEX}: #{cid} accent={accent}')
+
+    used = [a for _, a in ROOT_CARDS.values()]
+    if len(set(used)) != len(used):
+        fail('卡片', f'ROOT_CARDS 自己就有撞色：{used}')
+    stray = [a for a in used if a not in ACCENT_SET]
+    if stray:
+        fail('卡片', f'ROOT_CARDS 里的 accent {stray} 不在闭集 {list(ACCENT_SET)} 里')
 
 
 WRAP_WIDTH = 'max-width:min(2600px,96vw)'

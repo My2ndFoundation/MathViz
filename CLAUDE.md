@@ -190,8 +190,13 @@ and by `registry-sync.yml`.
 
 `docs/logo.png` is the source of truth for the brand mark. `scripts/apply_branding.py` derives a
 transparent M/V mark from it and writes it into **every tracked `.html`** — the favicon as an inline
-`data:` URI in a `GENERATED:FAVICON` region, plus a `GENERATED:BRAND-LOGO` CSS region on the six
-navigation pages. Never hand-edit inside those markers.
+`data:` URI in a `GENERATED:FAVICON` region, plus a `GENERATED:BRAND-LOGO` CSS region on the
+navigation pages listed in the script's `BRAND_PAGES` (the root pair plus each subproject's pair).
+Never hand-edit inside those markers. **Adding a subproject means adding its two nav pages there** —
+until you do, their BRAND-LOGO region is written by nobody and verified by nobody, and `--check`
+stays green while the region rots. (No count is written here on purpose: this sentence said "six"
+and went stale the day `python/` landed. The tuple is the count, and the script prints the real
+one — "其中 N 个另带可见 logo".)
 
 ```bash
 python3 scripts/apply_branding.py          # derive + write all pages
