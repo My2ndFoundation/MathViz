@@ -177,7 +177,15 @@ MALFORMED_CORPUS = {
     'at-decorator-dotted': '@a.b.c\ndef f(): pass\n',
     'crlf': 'x = 1\r\ny = 2\r\n',
     'lone-cr': 'x = 1\ry = 2\r',
-    'emoji': 'x = 1  # rocket\n',
+    # ⚠ 这里必须是**真的**非 BMP 字符（U+1F680 在 JS 里是一对代理项），不是
+    # 「rocket」这个词。写成单词的版本让整份畸形语料的最高码位停在 U+007D，于是
+    #   · `lex_vs_cpython_check` 那条「含非 BMP → 跳过」的分支一次都不执行；
+    #   · PyLex 在代理对上的行为，四道词法门一条都没测过——而
+    #     `source_bmp_check` 存在的全部理由就是「CPython 给字符偏移、JS 给
+    #     UTF-16 码元偏移」，那条分歧在词法器侧从未被观察；
+    #   · 一条叫 emoji 的语料会让下一个人相信这件事有覆盖。
+    # 第三条最要命：那正是本仓反复点名的「广告一份它并不具备的覆盖」。
+    'emoji': 'x = 1  # \U0001F680\n',
     'fullwidth': 'x = 1  # \uff1b\n',
     'tabs': 'def f():\n\treturn 1\n',
     'nul-ish-control': 'x = 1\x0b\n',
@@ -324,7 +332,17 @@ def lex_roundtrip_check() -> int:
     语料 = 全部 `.py` + 畸形语料。畸形那一份尤其重要：使用者打字打到一半，源码
     几乎总是暂时不合法，而那正是编辑器最需要不塌的时刻。
     """
-    items, _ = _corpus()
+    items, stdlib_found = _corpus()
+    # 与 lex_vs_cpython_check 同一条守卫，理由也一模一样：stdlib 那一路语料是
+    # 这道门最真实的那一批（8 份陌生代码，不是我自己写的十个教学程序），而它在
+    # CI 上**会**因为发行版裁剪 stdlib 而整条消失。没有这条判据时，少跑 8 份语料
+    # 的表现是 `n` 变小——一个只被打印、不被比对的数字，也就是报绿。
+    # 同一个 `_corpus()`、同一批文件、同一个失败模式，两道门必须同一条守卫。
+    if stdlib_found < STDLIB_MIN:
+        print(f'ERROR: 只找到 {stdlib_found} 个标准库语料文件，至少要 {STDLIB_MIN} 个。\n'
+              f'       stdlib 那一路语料整条消失而门照样报绿，是这道门最容易出现的'
+              f'空转形态。', file=sys.stderr)
+        return 1
     sources = {name: src for name, src in items}
     for name, src in MALFORMED_CORPUS.items():
         sources[f'<畸形>/{name}'] = src
