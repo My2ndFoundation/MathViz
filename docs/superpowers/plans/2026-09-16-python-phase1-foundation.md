@@ -69,7 +69,9 @@
   1. 基线：什么都不改先跑一次门，必须绿——否则之后的「红」可能是它本来就红。
   2. 破坏：替换模式下逐对做字符串替换，断言每对命中次数恰为 --count、改后字节与改前不同；
      创建模式下新建一个原本不存在的文件。
-  3. 判定：输出里必须出现 --must-say 的文本；期望红时还不许出现 Traceback
+  3. 判定：输出里必须出现 --must-say 的文本；期望红时还不许出现崩溃特征——
+     Python 的 'Traceback (most recent call last)'、编译期的 'SyntaxError:' /
+     'IndentationError:' / 'TabError:'，或 node 未捕获异常的调用栈行 '\n    at '
      ——否则红可能来自脚本崩溃而不是断言失败（「红得没有理由」）。
   4. 复原：把内存里的原字节写回（创建模式则删掉文件和它的 pyc），断言复原。绝不用 git checkout。
 
@@ -86,6 +88,19 @@ import argparse
 import pathlib
 import subprocess
 import sys
+
+# 崩溃特征：出现任一条，红就不算断言失败，而是脚本自己坏了（「红得没有理由」）。
+# Python 未捕获异常打 'Traceback (most recent call last)'；编译期错误
+# （SyntaxError / IndentationError / TabError）不打 Traceback，只打
+# 'File "...", line N' + '<XxxError>:' 那一段；node 未捕获异常打一段
+# '\n    at ...' 调用栈，也没有 'Traceback' 字样。
+CRASH_MARKERS = (
+    'Traceback (most recent call last)',
+    'SyntaxError:',
+    'IndentationError:',
+    'TabError:',
+    '\n    at ',
+)
 
 
 def run_gate(root, gate):
@@ -164,16 +179,20 @@ def main():
 
     out = res.stdout + res.stderr
     red = res.returncode != 0
+    crash = next((m for m in CRASH_MARKERS if m in out), None)
     if a.expect == 'green':
         ok = (not red) and (a.must_say in out)
     else:
-        ok = red and (a.must_say in out) and ('Traceback' not in out)
+        ok = red and (a.must_say in out) and (crash is None)
+    if a.expect == 'red' and crash is not None:
+        print(f'CRASH — 输出里有崩溃特征 {crash!r}，这个红不算数')
     print(f'{"PASS" if ok else "FAIL"}: 期望 {a.expect}，实际 {"red" if red else "green"}'
           f'（rc={res.returncode}），must-say {a.must_say!r} '
           f'{"出现" if a.must_say in out else "未出现"}')
     for line in out.splitlines():
-        if ('ERROR' in line or 'FAIL' in line or 'Traceback' in line or '✗' in line
-                or a.must_say in line):
+        if ('ERROR' in line or 'FAIL' in line or '✗' in line
+                or a.must_say in line
+                or any(m.strip('\n') in line for m in CRASH_MARKERS)):
             print('  | ' + line)
     return 0 if ok else 1
 
@@ -195,6 +214,20 @@ python3 $S/p1-negctl.py --root $W --gate registry.fallback_check \
 ```
 
 Expected: `FAIL: 期望 red，实际 green`，`rc=1`。然后 `git -C $W status --short` 必须为空（文件已复原）。
+
+第二个自测：断言只测「有没有 Traceback」会漏掉编译期错误——SyntaxError / IndentationError /
+TabError 不打 Traceback，只打 `File "...", line N` + `<XxxError>:`。故意把 `check.py` 改出语法
+错误，期望 red，must-say 是随便一个总会出现在崩溃输出里的字符串（文件名），必须得到 FAIL：
+
+```bash
+python3 $S/p1-negctl.py --root $W --gate 'cmd:python3 python/scripts/check.py' \
+  --file python/scripts/check.py \
+  --old 'GATES = [' --new 'GATES = [[' \
+  --expect red --must-say 'check.py'
+```
+
+Expected: `FAIL`，且带一行 `CRASH — 输出里有崩溃特征 'SyntaxError:'，这个红不算数`。然后
+`git -C $W status --short` 必须为空（文件已复原）。
 
 ---
 
