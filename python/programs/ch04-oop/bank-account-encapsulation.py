@@ -6,7 +6,7 @@ class BankAccount:
         self.owner = owner
         self._balance = 0
 
-# >>> BLANK id=read-only level=2 hint="三行：一行装饰器，一个只收 self 的方法，方法体只有一个 return；方法名就是外面读的那个名字 || 装饰器用内置的那个把方法变成「像属性一样读」的装饰器，它让外面写 acc.balance 不带括号也能调到这个方法；交回去的是带下划线的那个属性" hintEn="Three lines: a decorator, a method taking only self, and a body that is a single return; the method's name is the name the outside reads || The decorator is the built-in one that turns a method into something read like an attribute (Chinese: 属性), which lets outside code write acc.balance with no brackets and still reach this method; what it hands back is the underscored attribute"
+# >>> BLANK id=read-only level=2 hint="三行：一行装饰器，一个只收 self 的方法，方法体只有一个 return；方法名就是外面读的那个名字 || 装饰器用内置的那个把方法变成「像属性一样读」的装饰器，它让外面写 acc.balance 不带括号也能调到这个方法；交回去的是带下划线的那个属性" hintEn="Three lines: a decorator, a method taking only self, and a body that is a single return; the method's name is the name the outside reads || The decorator is the built-in one that turns a method into something you read like an attribute, which lets outside code write acc.balance with no brackets and still reach this method; what it hands back is the underscored attribute"
     @property
     def balance(self):
         return self._balance
