@@ -99,7 +99,7 @@ for f in python/core/*.test.js; do node "$f"; done
   && TOOL.id === 'py-<页>'
 ```
 不成立就作废这次测量。每次调用都传显式 `tabId`。核对：中英 × 读 / 挖空 / 临摹；面板顶部元数据；每个程序挖空模式都有输入框；
-每页挑一个空打错一处，确认反馈不印出字符串字面量；临摹三层在 `document.body.style.zoom` = 0.9 / 1 / 1.25 下对齐（量坐标，不凭截图说对齐）：往输入层打入影子的前几行，
+每页挑一个空打错一处，确认反馈不印出字符串字面量（探针找不到含字符串的空时返回 null——那是**没测**，先确认该页确实没有含字符串的空，再改做一个非字面量错答，确认判错且不印整行）；临摹三层在 `document.body.style.zoom` = 0.9 / 1 / 1.25 下对齐（量坐标，不凭截图说对齐）：往输入层打入影子的前几行，
 用 `Range` 量**同一个字符**在 `.py-typed` 与 `.py-shadow` 里的矩形，dx = dy = 0；只比层外框宽度会得到假差异（`pre` 随内容收缩）。
 负控制：给 `.py-typed` 加一点 `padding-left`，dx 必须变成非零。探针脚本放在集成 worktree 的 `.superpowers/`（预览服务器能取到），
 每次导航后 `eval(await (await fetch(...)).text())` 重新注入；localStorage 复原后按**排序后的键**比较（键序会变）。
@@ -119,6 +119,7 @@ for f in python/core/*.test.js; do node "$f"; done
 | worktree 的基线不一定是派发时的 HEAD | 评审包 diff 里出现假删除 | 构建者第一步 `merge --ff-only` 并报告实测 merge-base；打包一律 `git merge-base` 实测 |
 | 集成后删构建者分支用 `git branch -d` | 主工作区的 `main` 不 pull，`-d` 按它判「未合并」而拒删 | 先 `merge-base --is-ancestor <分支> origin/main` 确认，再 `-D` |
 | 在不带引号的 heredoc 里写含反引号的 PR 文案 | 反引号被当命令替换执行，文案被吃掉 | heredoc 一律 `<<'EOF'`，路径走环境变量 |
+| 命令后接 `\| tail` / `\| head` 再 `echo rc=$?` | 打印的是管道末端的退出码，崩溃显示 `rc=0` | 要看退出码就不接管道，或先存 `rc` |
 | 评审员或实现者自己又派子代理 | 重复一个评审席位 | 简报里写明不许派子代理 |
 
 ## 红旗——停下来重看本 skill
