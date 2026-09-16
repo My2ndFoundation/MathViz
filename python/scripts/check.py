@@ -112,6 +112,7 @@ GATES = [
     ('D·库', 'source_ascii_check',             library.source_ascii_check),
     ('D·库', 'source_bmp_check',               library.source_bmp_check),
     ('D·库', 'source_indent_check',            library.source_indent_check),
+    ('D·库', 'blank_presence_check',           library.blank_presence_check),
     ('D·库', 'blank_directive_check',          library.blank_directive_check),
     ('D·库', 'program_meta_check',             library.program_meta_check),
     ('D·库', 'variant_check',                  library.variant_check),

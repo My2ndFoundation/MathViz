@@ -887,6 +887,35 @@ _ID_RE = re.compile(r'\bid=(\S+)')
 _LEVEL_RE = re.compile(r'\blevel=(\S+)')
 
 
+def blank_presence_check() -> int:
+    """每个程序至少一个 BLANK（第 1 期设计 D2），无豁免。
+
+    第 0 期 ch01 十个程序里七个一个空都没有。挖空模式对它们照常逐行渲染：没有输入框、
+    没有说明，使用者面对的是一页无事可做的代码——不报错，也没有任何东西会发现。
+    挖空是三种模式里唯一带判定的一种，所以「零个空」不是合法的内容形状。
+    """
+    rc = 0
+    scanned = 0
+    total = 0
+    for chapter_dir, _data, prog, py_path in iter_programs():
+        if not py_path.exists():
+            continue                     # 缺文件由 chapter_manifest_check 报
+        scanned += 1
+        n = sum(1 for line in read_text(py_path).split('\n') if BLANK_OPEN_RE.match(line))
+        total += n
+        if n == 0:
+            print(f'ERROR: {_pid(chapter_dir, prog)} 一个挖空都没有：{py_path}\n'
+                  f'       挖空模式下这个程序整页无事可做，而且不会有任何提示。至少挖一行'
+                  f'（规则见 .claude/skills/python-drill-tool/SKILL.md）。', file=sys.stderr)
+            rc = 1
+    if scanned == 0:
+        print('ERROR: 一个程序都没扫到——这道门跑了个寂寞', file=sys.stderr)
+        return 1
+    if rc == 0:
+        print(f'挖空下限：{scanned} 个程序每个都至少有一个空（共 {total} 个）')
+    return rc
+
+
 def blank_directive_check() -> int:
     """BLANK 指令成对；四属性齐全；id 页内唯一；`level ∈ 1..3`；挖空体非空；
     **`hint` 与 `hintEn` 切出来的段数都恰好等于 `level`**。
