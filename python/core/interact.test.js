@@ -44,10 +44,41 @@ T.eq(PI.requirementLine(PROGS[2]), 'pip install numpy pandas', '依赖行按声�
   T.ok(PI.hintAt(blank, 2, 'zh').indexOf('中三') === -1, '第二级看不到第三级');
   T.eq(PI.hintAt(blank, 0, 'zh'), '', '一级都没点开时什么都不给');
 
-  /* 作者没有按分隔符分级时（ch01 的英文提示就有这样的），整条给出去，
-     而不是给空串——她点了提示却什么都看不见是更坏的一种"正确"。 */
+  /* 作者没有按分隔符分级时，整条给出去，而不是给空串——她点了提示却什么都
+     看不见是更坏的一种"正确"。这是 hintAt 的**兜底**，不是允许的数据形状：
+     `blank_directive_check()` 现在要求 hint/hintEn 切出的段数都 == level，
+     所以下面这个 fixture 在真实数据里会被门当场拦掉（ch01 的三条英文提示
+     一度正是这个样子——level=2 而一个分隔符都没有，按钮印着 L2、点第二下
+     什么都不变）。 */
   const flat = { level: 2, hint: '只有一句话', hintEn: 'just one sentence' };
   T.eq(PI.hintAt(flat, 1, 'zh'), '只有一句话', '没有分隔符时第一级就是整条');
+})();
+
+/* 面板行注的模式白名单 —— 三个模式都要点到名 */
+(function () {
+  const notes = [
+    { at: '    seconds = rest % 60', zh: '…', en: '…' },
+    { at: '    return hours, minutes, seconds', zh: '…', en: '…' }
+  ];
+  const prog = { id: 'divmod-and-floor', lineNotes: notes };
+
+  T.eq(PI.panelLineNotes(prog, 'read'), notes, '读模式：行注照给');
+
+  /* 挖空模式：面板把 note.at 的整行原文逐字打出来，而锚可以落在挖空体里。 */
+  T.eq(PI.panelLineNotes(prog, 'blank'), [], '挖空模式：一条都不给');
+
+  /* 临摹模式：与上一条**对称**，而且不是"顺手也挡一下"。临摹有 alphaBlind 档
+     （S.alpha = 0，影子层全透明，她凭记忆敲）——那一档下右侧面板照样印着整行
+     原文，泄的是同一件事，只换了个模式。
+     这一条是这个文件里唯一会因为把判据写回 `!== 'blank'` 而变红的断言。 */
+  T.eq(PI.panelLineNotes(prog, 'trace'), [], '临摹模式：一条都不给（盲打档下同样是泄题）');
+
+  /* 白名单而不是黑名单：没见过的模式默认**不**给。黑名单在加第四个模式时
+     会默认放行，而"默认放行"正是这个洞的形状。 */
+  T.eq(PI.panelLineNotes(prog, 'whatever'), [], '未知模式：默认不给');
+
+  T.eq(PI.panelLineNotes({ id: 'x' }, 'read'), [], '没有 lineNotes 的程序：空数组，不是 undefined');
+  T.eq(PI.panelLineNotes(null, 'read'), [], '没有当前程序：空数组，不抛');
 })();
 
 /* 清空范围 */

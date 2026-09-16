@@ -176,14 +176,14 @@ function safeAccent(a) { return ACCENTS.hasOwnProperty(a) ? a : 'unpaired'; }
 
 | 条款 | 门 | chess | cryptography | python |
 |---|---|---|---|---|
-| C1 版本即缓存键（注册表 == html meta） | `<sub>/scripts/check.py: version_meta_check()` | ✅ | ✅ | ⏳ 见下方注① |
+| C1 版本即缓存键（注册表 == html meta） | `<sub>/scripts/check.py: version_meta_check()` | ✅ | ✅ | ✅ |
 | **C1 `#btnAlone` 与 iframe 同值** | `scripts/check_nav_contract.py: eval_checks()` | ✅ 6 组地址 | ✅ 28 组地址 | ✅ 2 组地址 |
-| C2 FALLBACK 带 version | `<sub>/scripts/check.py: fallback_version_check()` | ✅ | ✅ | ⏳ 见下方注① |
-| C2 FALLBACK id 集合 | `<sub>/scripts/check.py: fallback_check()` | ✅ | ✅ | ⏳ 见下方注① |
+| C2 FALLBACK 带 version | `<sub>/scripts/check.py: fallback_version_check()` | ✅ | ✅ | ✅ |
+| C2 FALLBACK id 集合 | `<sub>/scripts/check.py: fallback_check()` | ✅ | ✅ | ✅ |
 | **C2 求值后三个绑定非空** | `scripts/check_nav_contract.py: eval_checks()` | ✅ | ✅ | ✅ |
-| C3 出站引用唯一 | `<sub>/scripts/check.py: outbound_ref_check()` | ✅ | ✅ | ⏳ 见下方注① |
+| C3 出站引用唯一 | `<sub>/scripts/check.py: outbound_ref_check()` | ✅ | ✅ | ✅ |
 | **C3 `PARENT_HOME` 形状与去向** | `scripts/check_nav_contract.py: parent_home_check()` | ✅ | ✅ | ✅ |
-| C1 注册表字段/semver | `<sub>/scripts/check.py: registry_check()` | ✅ | ✅ | ⏳ 见下方注① |
+| C1 注册表字段/semver | `<sub>/scripts/check.py: registry_check()` | ✅ | ✅ | ✅ |
 | **C3/C6 三块代码六页逐字节相同** | `scripts/check_nav_contract.py: shared_block_check()` | ✅ | ✅ | ✅ |
 | **C4 `target="_top"`** | `scripts/check_nav_contract.py: top_target_check()` | ✅ | ✅ | ✅ |
 | **C5 `.wrap` 撑满舞台** | `scripts/check_nav_contract.py: wrap_width_check()` | ✅ | ✅ | ✅ |
@@ -201,16 +201,29 @@ grep -oE '^def (registry_check|fallback_check|fallback_version_check|version_met
      chess/scripts/check.py cryptography/scripts/check.py
 # → chess 与 cryptography 五道门齐全；chess 的 registry_check() 在 check.py:1114
 
+# python 把五道门拆在 gates/ 下（check.py 只是运行器），所以换个地方 grep：
+grep -oE '^def (registry_check|fallback_check|fallback_version_check|version_meta_check|outbound_ref_check)' \
+     python/scripts/gates/*.py
+# → registry.py 四道 + hygiene.py 的 outbound_ref_check()，五道齐全；
+#   check.py:79-87 逐条无条件调用
+
 python3 chess/scripts/check.py           # exit 0
 python3 cryptography/scripts/check.py    # exit 0
+python3 python/scripts/check.py          # exit 0，34 道门全绿
 python3 scripts/check_nav_contract.py -v # exit 0，100 项断言
 ```
 
-> **注①** —— `python/scripts/check.py` 由并行任务落地，写这张表时磁盘上还**没有**它，
-> 所以那五格**没有实测过，故意不写 ✅**。它落地之后，跑一次
-> `python3 python/scripts/check.py` 再逐格改。**不要照抄 chess / cryptography 那两列**——
-> 那正是第 4 节记着的那种写法。（注：这五条的**状态**倒是量过：六个导航页的
-> FALLBACK 条目 5/5、27/27、1/1 条全带 `version`，一条不缺；缺的是「谁在守它」。）
+**python 那一列的五行是 2026-09-16 实测改绿的**，输出逐条如下（`python3
+python/scripts/check.py` 的第 10–17 行）：
+
+```
+注册表：1 个工具，字段与磁盘双向一致                        ← registry_check
+FALLBACK：两页各 1 条，与注册表一致                         ← fallback_check
+FALLBACK 版本戳：2 条内嵌条目全部带 version 且与注册表同值   ← fallback_version_check
+版本元数据：1 个页面的 tool-version 与注册表一致             ← version_meta_check
+出站引用：14 个文件共 4 处，全部在白名单内（PARENT_HOME 与同意横幅的隐私链接）
+                                                            ← outbound_ref_check
+```
 
 > 加新门时请遵守本仓的规矩：**一道门在你把它守的东西改坏、看到它变红之前，不算数。**
 > `fallback_version_check()` 的四个负控制见 PR #158；

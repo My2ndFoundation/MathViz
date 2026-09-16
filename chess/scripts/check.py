@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""chess 子项目校验门。十二道全部**无条件**跑到底，最后按「任一失败则整体失败」汇总退出码。
+"""chess 子项目校验门。十三道全部**无条件**跑到底，最后按「任一失败则整体失败」汇总退出码。
+
+**这张表必须把自己数全。** 2026-09-16 的整分支评审发现它对自己的门数有三个
+答案：文件头写「十二道」、`__main__` 里两处写「九道 / 九个」、而
+`grep -c '^    rc_' chess/scripts/check.py` 数出来是 **13**。原因是表里曾有一行
+编号为 `6b`——补第 7 道的人不想动后面的编号，于是清单从此数不全自己。现在
+6b 已并回正序，编号 1–13 与运行器里的 13 行 `rc_… = …()` 一一对应。加一道门
+就把编号续下去，不要再出现 `6b`。（同一条教训在本仓另一处写过：
+`python/core/py-lex.js:40`——「**这张清单必须把自己数全。**」）
 
 | #  | 函数                                   | 守什么 |
 |----|----------------------------------------|--------|
@@ -9,15 +17,15 @@
 | 4  | algos_marker_shape_check()             | ALGOS 标记区间「扫得到」本身——空区间会被内联，缺清单/清单写错当场报错 |
 | 5  | algos_roundtrip_check()                | 内联的 ALGOS 块在 node 里求值后与 core/algos/ 源文件字节一致 |
 | 6  | fallback_check()                       | 根级页面 FALLBACK 与 chess-tools.json 的 id 集合一致 |
-| 6b | fallback_version_check()               | FALLBACK 每条都带 version 且与注册表同值（第 6 道只比 id 集合，抓不到）|
-| 7  | version_meta_check()                   | 注册表 version == html 的 tool-version meta |
-| 8  | outbound_ref_check()                   | chess/ 整个目录搬走后仍可独立运行——父目录引用普查 |
-| 9  | core_tests()                           | core/ 与 games/ 下 *.test.js 全绿（含子目录）|
-| 10 | bilingual_algos_check()                | core/algos/ 双语机制普查 + render(parts, lang) 助手逐字节一致 |
-| 11 | throws_discrimination_check()          | T.throws 断言本身的判别力（pattern 缺第三参 / 恒真）|
-| 12 | registry_check()                       | id/file/accent/phase/version/engine/双语字段/重复/磁盘双向存在 |
+| 7  | fallback_version_check()               | FALLBACK 每条都带 version 且与注册表同值（第 6 道只比 id 集合，抓不到）|
+| 8  | version_meta_check()                   | 注册表 version == html 的 tool-version meta |
+| 9  | outbound_ref_check()                   | chess/ 整个目录搬走后仍可独立运行——父目录引用普查 |
+| 10 | core_tests()                           | core/ 与 games/ 下 *.test.js 全绿（含子目录）|
+| 11 | bilingual_algos_check()                | core/algos/ 双语机制普查 + render(parts, lang) 助手逐字节一致 |
+| 12 | throws_discrimination_check()          | T.throws 断言本身的判别力（pattern 缺第三参 / 恒真）|
+| 13 | registry_check()                       | id/file/accent/phase/version/engine/双语字段/重复/磁盘双向存在 |
 
-12 是 2026-09-16 补的——之前只有 fallback_check() 比 id 集合，注册表里写错一个
+13 是 2026-09-16 补的——之前只有 fallback_check() 比 id 集合，注册表里写错一个
 file 路径要到运行时才暴露（docs/superpowers/subproject-nav-contract.md 第 2 节
 记着这一格 ❌）。照 cryptography 同名门的形状搬来，把 chapter 换成 chess 的
 phase、把 CHAPTERS 换成 chess 实测出的合法阶段集合。
@@ -1112,7 +1120,7 @@ def throws_discrimination_check() -> int:
 
 
 def registry_check() -> int:
-    """chess-tools.json 自洽 + 与磁盘双向一致（2026-09-16 补，第 12 道门）。
+    """chess-tools.json 自洽 + 与磁盘双向一致（2026-09-16 补，第 13 道门）。
 
     契约文档 docs/superpowers/subproject-nav-contract.md 第 2 节记着 chess
     一直没有这道门——只有 fallback_check() 比 id 集合，注册表里写错一个
@@ -1192,11 +1200,13 @@ def registry_check() -> int:
 
 
 if __name__ == '__main__':
-    # 九道门都要跑到底、都要报——不能用 `or` 短路。之前 `a() or b() or c()`
+    # 十三道门都要跑到底、都要报——不能用 `or` 短路。之前 `a() or b() or c()`
     # 一旦 a() 非零就直接跳过 b()/c()，意味着一份过期的内联副本（或任何语法
     # 错误）会让 406 条断言的 core_tests() 门根本不执行，问题只报出第一个，
-    # 最有分量的那道门被悄悄跳过了。这里九个都无条件跑，各自打印自己的
+    # 最有分量的那道门被悄悄跳过了。这里十三个都无条件跑，各自打印自己的
     # ERROR，最后按「任一失败则整体失败」汇总退出码。
+    # 「十三」这个数字与下面 13 行 `rc_… = …()`、与文件头那张表的 13 行编号
+    # 三处同值。改动门的数量时三处一起改——它们曾经分别是 九 / 12 / 13。
     # js_string_literal_html_safety_check 与 algos_roundtrip_check 是阶段 4
     # 新加的两道门：前者查转义结果对 HTML 分词器是否安全（`<!--` + 裸
     # `<script` 那类坑，`node -e` 天生看不见），后者查转义结果求值出来的
@@ -1210,7 +1220,8 @@ if __name__ == '__main__':
     # task 5 把 MONOLINGUAL_ALGOS 白名单连机制一起删了），以及
     # render(parts, lang) 助手在八份里是否逐字节相同（它在每份里各存一份，
     # 没有门就必然漂移）。
-    # throws_discrimination_check 是阶段 9a 新加的第九道，守 T.throws 断言
+    # throws_discrimination_check 是阶段 9a 加的（当时是第九道，今天是表里第
+    # 12 道），守 T.throws 断言
     # 本身的**判别力**：pattern 缺第三参会退化成「抛了就算过」（**一条都
     # 不许**——ALLOW_MISSING 自 2026-08-08 起是 0），补上的 pattern 若真的匹中
     # 同文件里 ≥2 种不同结构的消息（先按 pattern 真实语义匹配、再对匹中的
@@ -1223,7 +1234,7 @@ if __name__ == '__main__':
     # （注册表 / FALLBACK / html meta），第三道守「chess/ 整个目录搬走后仍可
     # 独立运行」。三道守的都是「本机全绿、别人机器上才坏」那一类，正是
     # fallback_check() 只比 id 集合看不见的那一层。
-    # registry_check 是 2026-09-16 新加的第十二道，补上契约文档第 2 节记着
+    # registry_check 是 2026-09-16 新加的第十三道（表里 13），补上契约文档第 2 节记着
     # 的 chess 缺口：chess-tools.json 自洽（字段齐全、id/file 不重复、
     # version 是 semver、accent/phase 在合法集合里、四个双语字段都双语）
     # 加与磁盘的双向存在——写错的 file 路径此前要到运行时才暴露。
