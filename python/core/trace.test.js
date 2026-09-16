@@ -87,4 +87,55 @@ T.eq(Trace.alignLines('a\nbb\n', 'a\nbb\n').length, 3, '按行对齐，含末尾
   T.ok(r.stats.lineTimes[1] > 0, '第二行的耗时为正');
 })();
 
+/* 裁决 R38：回车前多打一个字符，不能抢占下一行的下标。
+   'x = 1!\ny = 2\n' 在第 1 行该按回车的地方多打了一个 '!'，第 2 行的下标 6
+   本该记她把 'y' 打对了；如果溢出字符沿用 refStart+j 继续编号，6 会被
+   溢出字符先占，永久记成一次错误。 */
+(function () {
+  const s = Trace.create('x = 1\ny = 2\n');
+  const r = s.update('x = 1!\ny = 2\n');
+  const at6 = r.marks.filter(m => m.index === 6);
+  T.eq(at6.length, 1, '下一行的下标只应出现一次，不能被溢出字符重复占用');
+  T.ok(at6.length === 1 && at6[0].state === 'ok', '她把下一行第一个字符打对了，必须是 ok');
+  T.eq(r.stats.errors, 1, '溢出的那个感叹号不该额外算一次错（只有它自己算，不能连累下一行）');
+})();
+
+/* 裁决 R38：退化到极端的溢出——参考只有 2 个字符，却打了 6 个。
+   errors <= total、accuracy ∈ [0,1]、marks 的 index 全部 < total，
+   这三条不变量都要守住，不能出现负的正确率或越界下标。 */
+(function () {
+  const s = Trace.create('ab\n');
+  const r = s.update('abcdef\n');
+  T.ok(r.stats.errors <= r.stats.total, '不变量：errors 不能超过 total');
+  T.ok(r.stats.accuracy >= 0 && r.stats.accuracy <= 1, '不变量：accuracy 必须落在 [0,1]');
+  T.ok(r.marks.every(m => m.index < r.stats.total), '不变量：marks 的 index 全部要小于 total');
+})();
+
+/* 裁决 R39：多打一行——lineDelta 要能说清楚"不是每个字都打错了，
+   是整体多了一行"。这里刻意不做 LCS 对齐，只加一个行数差信号。 */
+(function () {
+  const s = Trace.create('a\nb\nc\n');
+  const r = s.update('a\nX\nb\nc\n');
+  T.eq(r.stats.lineDelta, 1, '多插了一行，lineDelta 应该是 +1');
+})();
+
+/* 裁决 R39：少一个换行（把两行误合并成一行）——lineDelta 应该是负的。 */
+(function () {
+  const s = Trace.create('a\nb\nc\n');
+  const r = s.update('a\nbc\n');
+  T.eq(r.stats.lineDelta, -1, '两行被合并成一行，lineDelta 应该是 -1');
+})();
+
+/* reset()：清空所有计数器和历史判定，之前的错误不再计分 */
+(function () {
+  const s = Trace.create(REF);
+  NOW = 0; s.update('a = 9');   // 第 5 个字符先打错，进 firstWrong
+  s.noteBackspace();
+  s.reset();
+  NOW = 100; const r = s.update('a');
+  T.eq(r.stats.backspaces, 0, 'reset 后退格计数清零');
+  T.eq(r.stats.errors, 0, 'reset 后 firstWrong 清空，之前的错误不再计分');
+  T.ok(r.marks.every(m => m.state === 'ok'), 'reset 后重新输入正确字符应为 ok');
+})();
+
 T.report('trace');

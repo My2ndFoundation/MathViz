@@ -39,7 +39,41 @@
    模拟**（每次 update 只新增一个字符，delta 就是那次按键的间隔）。定长规则
    下，“一次 update 里挤进很多新字符、且距上次 update 隔了很久”这种情况会被
    正确地按空闲封顶，不会因为字符多就豁免——这一点由下面测试里的
-   “一次性大跳跃仍按定长空闲处理”那条断言守着，也是它专门要防的退化。 */
+   “一次性大跳跃仍按定长空闲处理”那条断言守着，也是它专门要防的退化。
+
+   ── Critical：溢出字符不能抢占下一行的下标（裁决 R38）──────────────────
+   上一版行内比较循环的上界取的是“打出来那一行”的长度（typedFull.length），
+   不是“参考那一行”的长度（refFull.length）。一行被打超长时，多出来的字符
+   会继续沿用 refStart+j 往后编号，而 refStart+row.refFull.length 恰好就是
+   下一行的 refStart——于是溢出字符的下标撞进了下一行的地盘：下一行本该
+   记一次“ok”的位置，会被溢出字符先占（先到先得的 seen 集合一旦写入就不再
+   清空），永久记成错误；参考文本很短时甚至会把 index 推到 total 以外，
+   errors 也能超过 total、accuracy 变成负数——直接违反“index 是 reference
+   全文偏移”和“accuracy ∈ [0,1]”这两条契约。
+   修法：行内比较的上界必须是 Math.min(typedFull.length, refFull.length)，
+   不能只检查“index < total”（同一份复现里 index < total 依然成立，照样
+   污染了下一行，说明这个更宽松的检查不够）。溢出出来的那部分字符不产出
+   带 reference 下标的 mark，也不进 seen/firstWrong；但学生确实多打了，
+   UI 需要能标红，所以单独开一个 `overflow` 数组承载
+   `{ line, col }`（col 是这些字符在 typedFull 里的位置，不是 reference
+   偏移——它们根本没有对应的 reference 偏移）。
+   `errors <= total`、`accuracy ∈ [0,1]`、marks 的 index 全部 `< total`
+   这三条不变量现在靠“上界永远不超过 refFull.length”这一处保证；测试里
+   专门用退化用例（一整行的参考只有两个字符、却打了六个）验证过。
+
+   ── Important：行数不匹配是诚实的错位，不做 LCS 对齐（裁决 R39）────────
+   如果学生多打/少打了一个换行，从那一行起，按行下标配对的结果确实会
+   “整体错位”——但这正是应该发生的：参考就垫在她下面，她自己也会看到画面
+   整体错位了，如实报告错位比用 LCS 之类的算法“宽恕”那一行更符合“一字不差
+   地临摹”这个练习的目的。所以这里刻意不引入最长公共子序列对齐，行还是按
+   下标一一配对。唯一要补的是一个信号，让 UI 能对学生说清楚“不是你后面每个
+   字都打错了，是你比参考多/少了一行”：`stats.lineDelta` =
+   “本次 typed 的真实行数” − “reference 的真实行数”（真实行数的定义跟
+   session.realLineCount 一致，见 realLineCountOf；用真实行数而不是裸的
+   split 长度，是因为只要 typed 恰好以 '\n' 结尾就会在裸长度上多出一个
+   空尾行，两边都用同一条“去掉纯粹由结尾换行切出的空尾行”的规则才不会被这
+   个人为噪声干扰）。正号＝比参考多行，负号＝比参考少行（含相邻两行被误
+   合并成一行的情况）。 */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory();
@@ -84,14 +118,20 @@
     return rows;
   }
 
+  /* “真实行数”排除仅由结尾换行符切出来的那一个空尾行——lineTimes 只为
+     学生实际要打的行计时，参考文本末尾那个 '\n' 之后不存在的“第 N+1 行”
+     不该被当成一行来等它“完成”；lineDelta（裁决 R39）也用同一条规则算
+     reference 和 typed 双方的行数，两边规则一致，才不会被“typed 恰好也以
+     '\n' 结尾”这种表面噪声干扰。 */
+  function realLineCountOf(text) {
+    var lines = text.split('\n');
+    return (text.length > 0 && text.charAt(text.length - 1) === '\n')
+      ? Math.max(0, lines.length - 1)
+      : lines.length;
+  }
+
   function create(reference) {
-    var refLines = reference.split('\n');
-    /* “真实行数”排除仅由结尾换行符切出来的那一个空尾行——lineTimes 只为
-       学生实际要打的行计时，参考文本末尾那个 '\n' 之后不存在的“第 N+1 行”
-       不该被当成一行来等它“完成”。 */
-    var realLineCount = (reference.length > 0 && reference.charAt(reference.length - 1) === '\n')
-      ? Math.max(0, refLines.length - 1)
-      : refLines.length;
+    var realLineCount = realLineCountOf(reference);
 
     var session = {
       reference: reference,
@@ -144,20 +184,29 @@
       var now = tick();
       var rows = alignLines(reference, typed);
       var marks = [];
+      var overflow = [];
 
       for (var i = 0; i < rows.length; i++) {
         var row = rows[i];
-        var len = row.typedFull.length;
-        for (var j = 0; j < len; j++) {
+        /* 上界必须是 refFull.length，不能是 typedFull.length（裁决 R38）：
+           这一行打超长时，超出参考长度的那部分字符没有对应的 reference
+           偏移，绝不能继续沿用 refStart+j 编号——那会一路撞进下一行的
+           下标空间。 */
+        var matchLen = Math.min(row.typedFull.length, row.refFull.length);
+        for (var j = 0; j < matchLen; j++) {
           var index = row.refStart + j;
-          var refChar = j < row.refFull.length ? row.refFull.charAt(j) : null;
-          var state = (refChar !== null && row.typedFull.charAt(j) === refChar) ? 'ok' : 'bad';
+          var state = (row.typedFull.charAt(j) === row.refFull.charAt(j)) ? 'ok' : 'bad';
           marks.push({ index: index, state: state });
 
           if (!session.seen.has(index)) {
             session.seen.add(index);
             if (state === 'bad') { session.firstWrong.add(index); }
           }
+        }
+        /* 溢出的字符单独收集，不占用任何 reference 偏移、不进 seen/firstWrong，
+           UI 仍可以用 line/col 把它们标红。 */
+        for (var j2 = matchLen; j2 < row.typedFull.length; j2++) {
+          overflow.push({ line: i, col: j2 });
         }
 
         /* 某一真实行首次被完整、正确地打出来时，记下完成时刻（只记第一次）。 */
@@ -184,9 +233,14 @@
       var accuracy = total > 0 ? (total - errors) / total : 1;
       /* activeMs 为 0 时直接返回 0，绝不产出 Infinity（0/0 或 x/0）。 */
       var cpm = session.activeMs > 0 ? correct / (session.activeMs / 60000) : 0;
+      /* 正号＝typed 比 reference 多行，负号＝少行（含误把两行合并成一行）；
+         两边都用 realLineCountOf，排除各自末尾那个纯粹由结尾换行切出的
+         空行，避免“typed 恰好也以 \n 结尾”这类表面噪声（裁决 R39）。 */
+      var lineDelta = realLineCountOf(typed) - session.realLineCount;
 
       return {
         marks: marks,
+        overflow: overflow,
         stats: {
           correct: correct,
           total: total,
@@ -195,7 +249,8 @@
           elapsedMs: session.activeMs,
           cpm: cpm,
           accuracy: accuracy,
-          lineTimes: lineTimes
+          lineTimes: lineTimes,
+          lineDelta: lineDelta
         }
       };
     }
