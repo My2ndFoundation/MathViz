@@ -47,13 +47,17 @@ T.eq(Editor.indentOf(''), 0, '空行缩进为 0');
   const a = Editor.applyEnter('    x = 1', 9);
   T.eq(a.value, '    x = 1\n    ', '沿用上一行缩进');
   T.eq(a.selStart, 14, '光标落在新缩进之后');
+  T.eq(a.selEnd, a.selStart, 'Enter 之后选区必然塌陷（裁决 R32：三字段契约的一部分）');
   const b = Editor.applyEnter('    if x:', 9);
   T.eq(b.value, '    if x:\n        ', '冒号结尾再加四格');
+  T.eq(b.selEnd, b.selStart, 'Enter 之后选区必然塌陷（裁决 R32）');
   const c = Editor.applyEnter('    if x:  # note', 17);
   T.eq(c.value, '    if x:  # note\n        ',
        '注释在后也算冒号结尾（判断前先剥掉注释再 rstrip）');
+  T.eq(c.selEnd, c.selStart, 'Enter 之后选区必然塌陷（裁决 R32）');
   const d = Editor.applyEnter('x = "a:"', 8);
   T.eq(d.value, 'x = "a:"\n', '字符串里的冒号不算——用 PyLex 判最后一个有效 token');
+  T.eq(d.selEnd, d.selStart, 'Enter 之后选区必然塌陷（裁决 R32）');
 })();
 
 T.report('editor');
