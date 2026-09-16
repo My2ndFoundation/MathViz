@@ -4,8 +4,9 @@
 
   · `program_run_check` 让真正的 CPython 跑，比对 stdout —— 「我挑的程序对不对、
     输出符不符合预期」从作者说了算变成 CPython 说了算。
-  · `algorithm_property_check` 的参照登记在 `properties.py`，每一条都刻意选了与
-    被测程序**不同的机制**（裁决 R26：不能拿 `max` 当 `return max(a,b,c)` 的参照）。
+  · `algorithm_property_check` 的参照按章登记在 `gates/refs/chNN_<slug>.py`
+    （由 `properties.py` 汇总），每一条都刻意选了与被测程序**不同的机制**
+    （裁决 R26：不能拿 `max` 当 `return max(a,b,c)` 的参照）。
   · `program_embed_roundtrip_check` 比的是 HTML 里的那份副本与磁盘上的 `.py`。
   · `source_indent_check` 用 CPython 的 `tokenize` 认出多行字符串，避免在一段
     合法的续行文本上误报。
