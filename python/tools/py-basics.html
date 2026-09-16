@@ -3530,7 +3530,15 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
         notes.forEach(function (para) { panel.appendChild(h('p', 'py-note', String(para))); });
       }
 
-      var ln = p.lineNotes || [];
+      /* 行注只挂在**读模式**（spec §1.1 的模式表）。挖空模式下必须整段跳过：
+         下面那行 `h('code', 'py-note-at', note.at)` 把锚的**整行原文**逐字打进
+         面板，而锚完全可以落在挖空体里——ch01 实测三个挖空全被泄（其中
+         divmod-and-floor 那条注的正文「是 rest，不是 total」直接说了这个空唯一
+         要考的判断）。两道防线各守一半，缺一不可：
+           · 这里：切到挖空模式时面板里不再有行注段；
+           · anchor_check()：锚一开始就不许落在挖空体内。
+         临摹模式保留行注——那边参考源码本来就垫在下面，不存在泄漏。 */
+      var ln = (S.mode === 'blank') ? [] : (p.lineNotes || []);
       if (ln.length) {
         panel.appendChild(h('h4', null, t('lineNotes', S.lang)));
         var lines = cleanSource(p).split('\n');
@@ -3610,6 +3618,9 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
       renderTopBar();
       renderStage();
       renderBottom();
+      /* 面板**必须**跟着重渲：行注段是按模式取舍的（见 renderPanel），
+         不重渲的话按 2 切到挖空模式时，上一模式留在右侧的行注会原样挂着。 */
+      renderPanel();
       if (mode === 'trace') { paintTrace(); }
     }
 
@@ -3906,14 +3917,9 @@ var PyPrograms = {
           "zh": "and \u662f\u77ed\u8def\u7684\uff1a\u53ea\u8981 a >= b \u5df2\u7ecf\u4e3a\u5047\uff0ca >= c \u6839\u672c\u4e0d\u4f1a\u88ab\u6c42\u503c\u3002\u8fd9\u662f\u767d\u9001\u7684\uff0c\u4e5f\u6b63\u662f\u300c\u6700\u4fbf\u5b9c\u7684\u5224\u65ad\u653e\u524d\u9762\u300d\u7684\u7406\u7531\u3002"
         },
         {
-          "at": "    elif b >= c:",
-          "en": "Only two candidates are left here, so one comparison settles it. That is the saving the chain buys you.",
-          "zh": "\u8d70\u5230\u8fd9\u91cc\u53ea\u5269\u4e24\u4e2a\u5019\u9009\uff0c\u6240\u4ee5\u4e00\u6b21\u6bd4\u8f83\u5c31\u5b9a\u4e86\u3002\u8fd9\u5c31\u662f\u8fd9\u6761\u94fe\u66ff\u4f60\u7701\u4e0b\u6765\u7684\u3002"
-        },
-        {
-          "at": "    else:",
-          "en": "The else is not tidiness. It is the guarantee that largest is never left unassigned.",
-          "zh": "\u8fd9\u4e2a else \u4e0d\u662f\u4e3a\u4e86\u6574\u9f50\u3002\u5b83\u662f\u300clargest \u7edd\u4e0d\u4f1a\u6ca1\u88ab\u8d4b\u503c\u300d\u8fd9\u6761\u4fdd\u8bc1\u672c\u8eab\u3002"
+          "at": "    return largest",
+          "en": "This line can only be reached with largest already assigned, and that guarantee comes from the chain above ending in a branch with no condition on it. A chain that ends on a condition instead has a path where nothing is assigned, and the failure arrives here, one line later, as a NameError.",
+          "zh": "\u80fd\u8d70\u5230\u8fd9\u4e00\u884c\uff0clargest \u5c31\u4e00\u5b9a\u5df2\u7ecf\u88ab\u8d4b\u8fc7\u503c\u4e86\uff0c\u800c\u8fd9\u6761\u4fdd\u8bc1\u6765\u81ea\u4e0a\u9762\u90a3\u6761\u94fe**\u4ee5\u4e00\u4e2a\u4e0d\u5e26\u6761\u4ef6\u7684\u5206\u652f\u6536\u5c3e**\u3002\u82e5\u90a3\u6761\u94fe\u662f\u4ee5\u4e00\u4e2a\u5e26\u6761\u4ef6\u7684\u5206\u652f\u7ed3\u675f\u7684\uff0c\u5c31\u5b58\u5728\u4e00\u6761\u4ec0\u4e48\u90fd\u6ca1\u8d4b\u503c\u7684\u8def\u5f84\uff0c\u800c\u5931\u8d25\u4f1a\u5728\u8fd9\u91cc\u3001\u5728\u665a\u4e00\u884c\u7684\u5730\u65b9\uff0c\u4ee5 NameError \u7684\u5f62\u5f0f\u51fa\u73b0\u3002"
         }
       ],
       "run": {
@@ -3924,7 +3930,7 @@ var PyPrograms = {
       "check": {
         "property": "pure"
       },
-      "source": "\"\"\"Find the largest of three numbers with explicit comparisons.\"\"\"\n\n\ndef max_of_three(a, b, c):\n    if a >= b and a >= c:\n        largest = a\n# >>> BLANK id=three-way level=2 hint=\"\u80fd\u8d70\u5230\u8fd9\u91cc\uff0ca \u5df2\u7ecf\u8f93\u4e86\uff1b\u53ea\u5269\u4e24\u4e2a\u5019\u9009\uff0c\u4e00\u6b21\u6bd4\u8f83\u5c31\u591f\uff0c\u4e0d\u5fc5\u518d\u63d0 a\" hintEn=\"a has already lost here, so each branch only has to beat what is left\"\n    elif b >= c:\n        largest = b\n    else:\n        largest = c\n# \u003c\u003c\u003c BLANK\n    return largest\n\n\nif __name__ == \"__main__\":\n    print(max_of_three(3, 9, 5))\n    print(max_of_three(9, 3, 5))\n    print(max_of_three(3, 5, 9))\n    print(max_of_three(7, 7, 7))\n",
+      "source": "\"\"\"Find the largest of three numbers with explicit comparisons.\"\"\"\n\n\ndef max_of_three(a, b, c):\n    if a >= b and a >= c:\n        largest = a\n# >>> BLANK id=three-way level=2 hint=\"\u80fd\u8d70\u5230\u8fd9\u91cc\uff0ca \u5df2\u7ecf\u8f93\u4e86\uff1b\u53ea\u5269\u4e24\u4e2a\u5019\u9009\uff0c\u4e00\u6b21\u6bd4\u8f83\u5c31\u591f\uff0c\u4e0d\u5fc5\u518d\u63d0 a\" hintEn=\"Getting past the first test already tells you a has lost; so only two candidates are left, and one comparison between them settles it without naming a again\"\n    elif b >= c:\n        largest = b\n    else:\n        largest = c\n# \u003c\u003c\u003c BLANK\n    return largest\n\n\nif __name__ == \"__main__\":\n    print(max_of_three(3, 9, 5))\n    print(max_of_three(9, 3, 5))\n    print(max_of_three(3, 5, 9))\n    print(max_of_three(7, 7, 7))\n",
       "lines": 20
     },
     {
@@ -4154,11 +4160,6 @@ var PyPrograms = {
           "at": "    total = 0",
           "en": "Before the loop. This single line is the difference between a counter and a flag. The step below is spelled out as total = total + 1 so you can see what is happening, but the idiom you will meet everywhere - and in every mark scheme - is total += 1. They are the same operation; += is just the short way to say \"add this to what is already there\".",
           "zh": "\u5728\u5faa\u73af\u4e4b\u524d\u3002\u5c31\u8fd9\u4e00\u884c\uff0c\u51b3\u5b9a\u4e86\u5b83\u662f\u4e2a\u8ba1\u6570\u5668\u8fd8\u662f\u4e2a\u6807\u5fd7\u4f4d\u3002\u4e0b\u9762\u90a3\u4e00\u6b65\u5199\u6210\u4e86 total = total + 1\uff0c\u662f\u4e3a\u4e86\u8ba9\u4f60\u770b\u6e05\u53d1\u751f\u4e86\u4ec0\u4e48\uff1b\u4f46\u4f60\u5728\u522b\u5904\u3001\u5728\u6bcf\u4e00\u4efd\u8bc4\u5206\u65b9\u6848\u4e0a\u4f1a\u9047\u5230\u7684\u60ef\u7528\u5199\u6cd5\u662f total += 1\u3002\u4e24\u8005\u662f\u540c\u4e00\u4e2a\u64cd\u4f5c\uff0c+= \u53ea\u662f\u300c\u628a\u8fd9\u4e2a\u52a0\u5230\u5df2\u7ecf\u6709\u7684\u4e1c\u897f\u4e0a\u300d\u7684\u7b80\u5199\u3002"
-        },
-        {
-          "at": "        if ch in vowels:",
-          "en": "The test and the counting are separate steps on purpose: when the rule changes, only this line changes.",
-          "zh": "\u5224\u65ad\u548c\u8ba1\u6570\u523b\u610f\u5206\u6210\u4e24\u6b65\uff1a\u89c4\u5219\u4e00\u53d8\uff0c\u53ea\u6709\u8fd9\u4e00\u884c\u8981\u6539\u3002"
         }
       ],
       "run": {
@@ -4169,7 +4170,7 @@ var PyPrograms = {
       "check": {
         "property": "pure"
       },
-      "source": "\"\"\"Count the vowels in a word, one character at a time.\"\"\"\n\n\ndef count_vowels(text):\n    vowels = \"aeiouAEIOU\"\n    total = 0\n# >>> BLANK id=accumulate level=2 hint=\"\u9010\u4e2a\u5b57\u7b26\u8d70\u4e00\u904d\uff0c\u547d\u4e2d\u5c31\u8ba9\u8ba1\u6570\u5668\u52a0\u4e00\uff1b\u5224\u65ad\u548c\u8ba1\u6570\u5206\u5f00\u5199\" hintEn=\"test each character in turn, add one on a hit\"\n    for ch in text:\n        if ch in vowels:\n            total = total + 1\n# \u003c\u003c\u003c BLANK\n    return total\n\n\nif __name__ == \"__main__\":\n    print(count_vowels(\"Programming\"))\n    print(count_vowels(\"rhythm\"))\n    print(count_vowels(\"\"))\n",
+      "source": "\"\"\"Count the vowels in a word, one character at a time.\"\"\"\n\n\ndef count_vowels(text):\n    vowels = \"aeiouAEIOU\"\n    total = 0\n# >>> BLANK id=accumulate level=2 hint=\"\u9010\u4e2a\u5b57\u7b26\u8d70\u4e00\u904d\uff0c\u547d\u4e2d\u5c31\u8ba9\u8ba1\u6570\u5668\u52a0\u4e00\uff1b\u5224\u65ad\u548c\u8ba1\u6570\u5206\u5f00\u5199\" hintEn=\"Every character gets looked at exactly once, and only some of them change the total; so that is a walk over the characters with the test inside it, and the counting on a line of its own\"\n    for ch in text:\n        if ch in vowels:\n            total = total + 1\n# \u003c\u003c\u003c BLANK\n    return total\n\n\nif __name__ == \"__main__\":\n    print(count_vowels(\"Programming\"))\n    print(count_vowels(\"rhythm\"))\n    print(count_vowels(\"\"))\n",
       "lines": 18
     },
     {
@@ -4281,13 +4282,8 @@ var PyPrograms = {
       "lineNotes": [
         {
           "at": "    hours, rest = divmod(total, 3600)",
-          "en": "One call, two results, one pass over the arithmetic. The name rest says what the second value is for: it is the input to the next split.",
-          "zh": "\u4e00\u6b21\u8c03\u7528\u3001\u4e24\u4e2a\u7ed3\u679c\u3001\u7b97\u672f\u53ea\u8d70\u4e00\u904d\u3002rest \u8fd9\u4e2a\u540d\u5b57\u8bf4\u660e\u4e86\u7b2c\u4e8c\u4e2a\u503c\u7684\u7528\u9014\uff1a\u5b83\u662f\u4e0b\u4e00\u6b21\u62c6\u5206\u7684\u8f93\u5165\u3002"
-        },
-        {
-          "at": "    seconds = rest % 60",
-          "en": "rest, not total. Taking total % 60 happens to give the same answer here only because 3600 is a multiple of 60 - relying on that is how this pattern breaks on units that do not divide evenly.",
-          "zh": "\u662f rest\uff0c\u4e0d\u662f total\u3002\u8fd9\u91cc\u5199\u6210 total % 60 \u6070\u597d\u4e5f\u5bf9\uff0c\u53ea\u56e0\u4e3a 3600 \u662f 60 \u7684\u500d\u6570\u2014\u2014\u4f9d\u8d56\u8fd9\u4e00\u70b9\uff0c\u6b63\u662f\u8fd9\u4e2a\u5957\u8def\u5728\u300c\u9664\u4e0d\u5c3d\u7684\u5355\u4f4d\u300d\u4e0a\u51fa\u4e8b\u7684\u65b9\u5f0f\u3002"
+          "en": "One call, two results, one pass over the arithmetic. The name rest says what the second value is for: it is the input to the next split - what is left after the hours have been taken out, and the only thing the rest of the function is allowed to measure. Working from total again below happens to agree here only because 3600 is a multiple of 60; leaning on that coincidence is how this pattern breaks on units that do not divide evenly.",
+          "zh": "\u4e00\u6b21\u8c03\u7528\u3001\u4e24\u4e2a\u7ed3\u679c\u3001\u7b97\u672f\u53ea\u8d70\u4e00\u904d\u3002rest \u8fd9\u4e2a\u540d\u5b57\u8bf4\u660e\u4e86\u7b2c\u4e8c\u4e2a\u503c\u7684\u7528\u9014\uff1a\u5b83\u662f\u4e0b\u4e00\u6b21\u62c6\u5206\u7684\u8f93\u5165\u2014\u2014\u5c0f\u65f6\u88ab\u53d6\u8d70\u4e4b\u540e\u5269\u4e0b\u7684\u90a3\u4e00\u6bb5\uff0c\u4e5f\u662f\u8fd9\u4e2a\u51fd\u6570\u5f80\u4e0b\u552f\u4e00\u8be5\u53bb\u91cf\u7684\u4e1c\u897f\u3002\u4e0b\u9762\u82e5\u6539\u56de\u4ece total \u51fa\u53d1\uff0c\u5728\u8fd9\u91cc\u6070\u597d\u4e5f\u5bf9\uff0c\u53ea\u56e0\u4e3a 3600 \u662f 60 \u7684\u500d\u6570\uff1b\u4f9d\u8d56\u8fd9\u4e2a\u5de7\u5408\uff0c\u6b63\u662f\u8fd9\u4e2a\u5957\u8def\u5728\u300c\u9664\u4e0d\u5c3d\u7684\u5355\u4f4d\u300d\u4e0a\u51fa\u4e8b\u7684\u65b9\u5f0f\u3002"
         },
         {
           "at": "    print(10 % 2 == 0, 7 % 2 != 0)",
@@ -4305,7 +4301,7 @@ var PyPrograms = {
         "expect": "0 -> 0:00:00\n59 -> 0:00:59\n61 -> 0:01:01\n3600 -> 1:00:00\n7325 -> 2:02:05\n(2, 125)\n3 1 -4 1\nTrue True\n142 6\n2 4 2.67\n",
         "timeout": 5
       },
-      "source": "\"\"\"Break a whole number of seconds into hours, minutes and seconds.\"\"\"\n\n\ndef split_seconds(total):\n    hours, rest = divmod(total, 3600)\n# >>> BLANK id=minutes-seconds level=2 hint=\"\u5bf9 rest \u518d\u62c6\u4e00\u6b21\uff1b\u8fd9\u6b21\u628a\u4e24\u4e2a\u8fd0\u7b97\u7b26\u5206\u5f00\u5199\uff0c\u597d\u770b\u6e05\u4e0a\u4e00\u884c divmod \u4e00\u6b21\u4ea4\u56de\u6765\u7684\u6b63\u662f\u8fd9\u4e00\u5bf9\" hintEn=\"split rest the same way again, but write the two operators out separately - so you can see that the pair is exactly what divmod handed back on the line above\"\n    minutes = rest // 60\n    seconds = rest % 60\n# \u003c\u003c\u003c BLANK\n    return hours, minutes, seconds\n\n\nif __name__ == \"__main__\":\n    for total in (0, 59, 61, 3600, 7325):\n        hours, minutes, seconds = split_seconds(total)\n        print(f\"{total} -> {hours}:{minutes:02d}:{seconds:02d}\")\n    print(divmod(7325, 3600))\n    print(7 // 2, 7 % 2, -7 // 2, -7 % 2)\n    print(10 % 2 == 0, 7 % 2 != 0)\n    print(10 ** 3 // 7, 10 ** 3 % 7)\n    print(round(2.5), round(3.5), round(2.675, 2))\n",
+      "source": "\"\"\"Break a whole number of seconds into hours, minutes and seconds.\"\"\"\n\n\ndef split_seconds(total):\n    hours, rest = divmod(total, 3600)\n# >>> BLANK id=minutes-seconds level=2 hint=\"\u5bf9 rest \u518d\u62c6\u4e00\u6b21\uff1b\u8fd9\u6b21\u628a\u4e24\u4e2a\u8fd0\u7b97\u7b26\u5206\u5f00\u5199\uff0c\u597d\u770b\u6e05\u4e0a\u4e00\u884c divmod \u4e00\u6b21\u4ea4\u56de\u6765\u7684\u6b63\u662f\u8fd9\u4e00\u5bf9\" hintEn=\"The hours are already out of the way, so the value still to be cut up is rest, not total; cut it the same way as the line above but spell the two operators out separately this time - the pair you get is exactly what divmod handed back in one go\"\n    minutes = rest // 60\n    seconds = rest % 60\n# \u003c\u003c\u003c BLANK\n    return hours, minutes, seconds\n\n\nif __name__ == \"__main__\":\n    for total in (0, 59, 61, 3600, 7325):\n        hours, minutes, seconds = split_seconds(total)\n        print(f\"{total} -> {hours}:{minutes:02d}:{seconds:02d}\")\n    print(divmod(7325, 3600))\n    print(7 // 2, 7 % 2, -7 // 2, -7 % 2)\n    print(10 % 2 == 0, 7 % 2 != 0)\n    print(10 ** 3 // 7, 10 ** 3 % 7)\n    print(round(2.5), round(3.5), round(2.675, 2))\n",
       "lines": 21
     },
     {

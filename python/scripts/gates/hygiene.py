@@ -13,8 +13,8 @@ from __future__ import annotations
 import re
 import sys
 
-from . import (CORE_DIR, META_DESC_RE, PROGRAMS_DIR, ROOT, TOOLS_DIR,
-               all_tool_pages, load_registry, read_text, tool_pages)
+from . import (CORE_DIR, META_DESC_RE, PROGRAMS_DIR, REGISTRY, ROOT, TOOLS_DIR,
+               all_tool_pages, load_registry, read_text, root_pages, tool_pages)
 
 # app.html / index.html 各自允许的父目录引用条数。
 #
@@ -107,7 +107,19 @@ def script_literal_check() -> int:
 
 
 def control_byte_check() -> int:
-    """core/ programs/ tools/ 里不许有 BOM、CRLF、或杂散 C0 控制字符。
+    """core/ programs/ tools/ **两个导航页与注册表** 里不许有 BOM、CRLF、或杂散 C0。
+
+    ⚠ 扫描集里那两个根级页面（`app.html` / `index.html`）与 `python-tools.json`
+    是最终评审补进来的。原来的扫描集是 `CORE_DIR / PROGRAMS_DIR / TOOLS_DIR` 三个
+    目录，而那两页在 `python/` **根**、注册表也在根——三个目录一个都罩不到它们。
+    评审员往两页的内联脚本各塞一个 NUL 和一个 VT，**34 道门全绿**，本门还照样
+    打印「28 个文件无 BOM、无 CRLF、无杂散 C0」。
+
+    这正是本包 `root_pages()` 的文档字符串记着的那件事：chess 的 `node_check()`
+    只 glob `tools/*.html`，CI 的语法门只扫主站文件，合起来 `chess/index.html`
+    从来没被任何语法门覆盖过。`node_check()` 用了 `root_pages()`，本门没用——
+    **同一个错误隔了一个函数又犯了一次**。新增子目录或根级文件时，先问一句
+    「这道门看得见它吗」。
 
     三样分开说，因为它们的坏法不同：
 
@@ -123,41 +135,47 @@ def control_byte_check() -> int:
     """
     rc = 0
     scanned = 0
+    paths = []
     for base, patterns in ((CORE_DIR, ('*.js',)),
                            (PROGRAMS_DIR, ('*.py', '*.json')),
                            (TOOLS_DIR, ('*.html',))):
         for pattern in patterns:
-            for path in sorted(base.rglob(pattern)):
-                scanned += 1
-                raw = path.read_bytes()
-                rel = path.relative_to(ROOT)
-                if raw.startswith(b'\xef\xbb\xbf'):
-                    print(f'ERROR: {rel} 以 UTF-8 BOM 开头——它会被原样编进内联副本，'
-                          f'逐字节往返比对抓不到；js 里它还是语法错。', file=sys.stderr)
-                    rc = 1
-                text = raw.decode('utf-8', errors='replace')
-                if '\r' in text:
-                    line = text[:text.index('\r')].count('\n') + 1
-                    print(f'ERROR: {rel}:{line} 含 CR（CRLF 行尾）——'
-                          f'三层逐字符对齐会从那一行起错位。', file=sys.stderr)
-                    rc = 1
-                bad = {}
-                for ch in text:
-                    if ch < ' ' and ch not in CONTROL_OK and ch != '\r':
-                        bad[ch] = bad.get(ch, 0) + 1
-                if bad:
-                    first = min(bad, key=lambda c: text.index(c))
-                    line = text[:text.index(first)].count('\n') + 1
-                    detail = '、'.join(f'U+{ord(c):04X}×{n}' for c, n in sorted(bad.items()))
-                    print(f'ERROR: {rel} 含 C0 控制字符（{detail}），首次出现在第 '
-                          f'{line} 行。\n'
-                          f'       node --check 看不见它（NUL 在 JS 字符串里合法），'
-                          f'但 awk 抽取配方会在那里截断、\n'
-                          f'       grep 会把文件当二进制——门检查的字节与浏览器执行的'
-                          f'字节于是不是同一份。', file=sys.stderr)
-                    rc = 1
+            paths.extend(sorted(base.rglob(pattern)))
+    # 根级的两个导航页 + 注册表：不在上面任何一个目录下，必须单独点名。
+    paths.extend(root_pages())
+    paths.append(REGISTRY)
+    for path in paths:
+        scanned += 1
+        raw = path.read_bytes()
+        rel = path.relative_to(ROOT)
+        if raw.startswith(b'\xef\xbb\xbf'):
+            print(f'ERROR: {rel} 以 UTF-8 BOM 开头——它会被原样编进内联副本，'
+                  f'逐字节往返比对抓不到；js 里它还是语法错。', file=sys.stderr)
+            rc = 1
+        text = raw.decode('utf-8', errors='replace')
+        if '\r' in text:
+            line = text[:text.index('\r')].count('\n') + 1
+            print(f'ERROR: {rel}:{line} 含 CR（CRLF 行尾）——'
+                  f'三层逐字符对齐会从那一行起错位。', file=sys.stderr)
+            rc = 1
+        bad = {}
+        for ch in text:
+            if ch < ' ' and ch not in CONTROL_OK and ch != '\r':
+                bad[ch] = bad.get(ch, 0) + 1
+        if bad:
+            first = min(bad, key=lambda c: text.index(c))
+            line = text[:text.index(first)].count('\n') + 1
+            detail = '、'.join(f'U+{ord(c):04X}×{n}' for c, n in sorted(bad.items()))
+            print(f'ERROR: {rel} 含 C0 控制字符（{detail}），首次出现在第 '
+                  f'{line} 行。\n'
+                  f'       node --check 看不见它（NUL 在 JS 字符串里合法），'
+                  f'但 awk 抽取配方会在那里截断、\n'
+                  f'       grep 会把文件当二进制——门检查的字节与浏览器执行的'
+                  f'字节于是不是同一份。', file=sys.stderr)
+            rc = 1
     if rc == 0:
-        print(f'控制字节：{scanned} 个文件无 BOM、无 CRLF、无杂散 C0')
+        print(f'控制字节：{scanned} 个文件无 BOM、无 CRLF、无杂散 C0'
+              f'（含根级 {len(root_pages())} 个导航页与注册表 {REGISTRY.name}）')
     return rc
 
 

@@ -1550,7 +1550,15 @@
         notes.forEach(function (para) { panel.appendChild(h('p', 'py-note', String(para))); });
       }
 
-      var ln = p.lineNotes || [];
+      /* 行注只挂在**读模式**（spec §1.1 的模式表）。挖空模式下必须整段跳过：
+         下面那行 `h('code', 'py-note-at', note.at)` 把锚的**整行原文**逐字打进
+         面板，而锚完全可以落在挖空体里——ch01 实测三个挖空全被泄（其中
+         divmod-and-floor 那条注的正文「是 rest，不是 total」直接说了这个空唯一
+         要考的判断）。两道防线各守一半，缺一不可：
+           · 这里：切到挖空模式时面板里不再有行注段；
+           · anchor_check()：锚一开始就不许落在挖空体内。
+         临摹模式保留行注——那边参考源码本来就垫在下面，不存在泄漏。 */
+      var ln = (S.mode === 'blank') ? [] : (p.lineNotes || []);
       if (ln.length) {
         panel.appendChild(h('h4', null, t('lineNotes', S.lang)));
         var lines = cleanSource(p).split('\n');
@@ -1630,6 +1638,9 @@
       renderTopBar();
       renderStage();
       renderBottom();
+      /* 面板**必须**跟着重渲：行注段是按模式取舍的（见 renderPanel），
+         不重渲的话按 2 切到挖空模式时，上一模式留在右侧的行注会原样挂着。 */
+      renderPanel();
       if (mode === 'trace') { paintTrace(); }
     }
 
