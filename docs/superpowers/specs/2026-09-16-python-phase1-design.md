@@ -348,6 +348,12 @@ PR-A 与 PR-B **串行**：B 改 core、重生成 `py-basics.html`、迁移提�
 | 带持久化的银行系统 | M5 py-systems（py-oop 只做最小的类） |
 | 自己写过的问题 | 不跨页重复：三数取大、交换、数元音已在 ch01 |
 
+*第 1 期波 1 终审改（§6.5 与 §7 冲突）*：§7 逐条点名要教的程序，可以把上表里本属他页的模式作为讲解重点——
+§7 是逐条审过的，比这张概括表更具体。波 1 用到这条例外的有：`password-rules`（标志位，本属 py-loops）、
+`mutate-vs-return` 与 `mutable-default-trap`（引用与共享，本属 M3 / M4）、`class-vs-instance-attributes`
+（可变类属性被所有实例共享，本属 M3 / M4）。归属页以后讲这些模式时，换一个问题讲，不重复这几题——
+**波 2 py-loops 讲标志位时，不重复 password-rules 这一题**。
+
 ---
 
 ## 7. 程序清单
