@@ -189,6 +189,11 @@ one that breaks the most assumptions inherited from the other two:
 Its gate is `python3 python/scripts/check.py`, run by the hook (on `python/{core,programs,tools,scripts}/`,
 `python/python-tools.json` and the two navigation pages) and by `registry-sync.yml`.
 
+Two skills carry the working knowledge: `.claude/skills/python-drill-tool/SKILL.md` is the author's
+rulebook (how to write a program, blank a line, add a page, and which gate guards what), and
+`.claude/skills/python-content-wave/SKILL.md` is the orchestrator's run for a batch of pages — program
+list, parallel builders, one integration branch, one final review, one PR per wave.
+
 ## Branding is generated too
 
 `docs/logo.png` is the source of truth for the brand mark. `scripts/apply_branding.py` derives a

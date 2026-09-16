@@ -541,11 +541,14 @@ PR-A 与 PR-B **串行**：B 改 core、重生成 `py-basics.html`、迁移提�
 - 偏离清单、简报错误、拿不准的 `boards`
 - 注册表条目已由构建者加入 `python-tools.json`（文案是草稿，控制方集成时审改；§8.1，第 1 期地基终审改）
 
-每页两轮评审：
+**整波终审一次**（opus），不做逐页评审——*第 1 期地基合并后改（用户指示「一口气干完之后再做一次评审」）*；
+原文是「每页两轮评审：对规格（sonnet）、对内容（opus）」。终审同时看两面：
 
-1. **对规格**（sonnet）：清单一致、页面边界、每程序 ≥ 1 空、变体组、元数据闭集。
-2. **对内容**（opus）：挖的行写法是否唯一；提示逐级更具体且不给答案；中英讲解准确且对等；
-   A-level 学生读得懂。
+1. **规格**：清单一致、页面边界、每程序 ≥ 1 空、每页 ≥ 1 个变体组、元数据闭集。
+2. **内容**：挖的行写法是否唯一（或第 1 级提示钉住）；提示逐级更具体且不给答案；
+   `notes` / `blurb` 不逐字写出挖空行、不示范判定器会判错的写法；中英讲解准确且对等；A-level 学生读得懂。
+
+有发现时一次修复、一次范围复审，残留问题记进台账。具体做法见 `.claude/skills/python-content-wave/SKILL.md`。
 
 评审包的 BASE 一律用 `git merge-base` 实测（R44）。
 
@@ -569,15 +572,16 @@ PR-A 与 PR-B **串行**：B 改 core、重生成 `py-basics.html`、迁移提�
 | 本规格与实施计划 | `claude/python-phase1-design`，随 PR-A 提交 |
 | PR-A | 同上分支 |
 | PR-B | PR-A 合并后从 main 切 |
-| 波 1 | `claude/py-strings` → `claude/py-functions` → `claude/py-oop` → `claude/py-files-errors`，依次堆叠 |
-| 波 2 | `claude/py-conditionals` → `claude/py-loops` → `claude/py-comprehensions` → `claude/py-recursion`，依次堆叠 |
+| 波 1 | 集成分支 `claude/python-wave-m1`（构建者分支 `claude/python-wave-m1-py-<页>` 各一条），**一个 PR** |
+| 波 2 | 集成分支 `claude/python-wave-m2`（同上），**一个 PR** |
 
-- 同一波的四个构建者并行；控制方按上表顺序逐个集成进堆叠分支。注册表条目按模块内顺序追加，
-  FALLBACK 由脚本重新生成，不手工解冲突：`python-tools.json` 与两页 FALLBACK 冲突时取基线版本、补回本页条目、
-  重跑生成脚本（§8.1）。
-- 所有 PR 以 main 为基底，合并顺序写进 PR 描述。
-- **每个 PR 等用户在对话里说合并才动手**；合并前读 `gh pr checks`。合并后 `pull --ff-only`，
-  删本地与远程分支。
+*第 1 期地基合并后改（用户选定「一波一个 PR」）*：原文是每页一条堆叠分支、每页一个 PR。
+
+- 同一波的四个构建者并行；控制方按模块内页序逐个合进本波集成分支，每合一页跑一次 `check.py`。
+  `python-tools.json` 与两页 FALLBACK 冲突时取集成分支版本、补回本页条目、重跑生成脚本（§8.1），不手工合并。
+- 集成、亲验、整波终审之后，本波开一个 PR（以 main 为基底）。
+- **PR 等用户在对话里说合并才动手**；合并前读 `gh pr checks`。合并后删集成分支与各构建者分支（本地与远程）。
+- 全部做法见 `.claude/skills/python-content-wave/SKILL.md`。
 
 **波间复盘**（波 1 全部合并后、波 2 派发前）：
 
