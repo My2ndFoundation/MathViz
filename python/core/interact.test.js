@@ -465,7 +465,10 @@ T.throws(function () { PI.mount({ programs: PROGS }); },
   T.ok(seen.decorator === true, '语料里真的切出了 decorator（否则下面对它的断言无话可说）');
 
   const styled = {};
-  String(PI.STYLE_CSS || '').replace(/\.tok-([a-z]+)/g, function (m, ty) { styled[ty] = true; return m; });
+  /* 先剥掉 CSS 注释：字符串里若有人写 "/* 参考 .tok-name * /" 这样的说明性注释，
+     裸扫会把它当成一条真的规则数进 styled——剥注释关掉这个假阳性口子。 */
+  const cssNoComments = String(PI.STYLE_CSS || '').replace(/\/\*[\s\S]*?\*\//g, '');
+  cssNoComments.replace(/\.tok-([a-z]+)/g, function (m, ty) { styled[ty] = true; return m; });
   types.forEach(function (ty) {
     T.ok(styled[ty] === true || Object.prototype.hasOwnProperty.call(UNCOLORED, ty),
          'token 类型 ' + ty + ' 要么有 .tok-' + ty + ' 配色，要么在不上色名单里');
