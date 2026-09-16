@@ -135,7 +135,7 @@ function safeAccent(a) { return ACCENTS.hasOwnProperty(a) ? a : 'unpaired'; }
 | C2 FALLBACK 带 version | `fallback_version_check()` | ✅ | ✅（本次补上） |
 | C2 FALLBACK id 集合 | `fallback_check()` | ✅ | ✅ |
 | C3 出站引用唯一 | `outbound_ref_check()` | ✅ | ✅ |
-| C1 注册表字段/semver | `registry_check()` | ❌ **无** | ✅ |
+| C1 注册表字段/semver | `registry_check()` | ✅ | ✅ |
 | C4–C8 | — | ❌ 无机械门 | ❌ 无机械门 |
 
 两处仍然只靠人看：
