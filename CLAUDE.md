@@ -174,9 +174,10 @@ one that breaks the most assumptions inherited from the other two:
   on every page, there is no per-page opt-in list. `python/scripts/build_programs.py` injects
   `programs/ch*/` (a `chapter.json` plus the `.py` files it names) into `GENERATED:PROGRAMS`, and
   writes the derived `programs` / `lines` fields back into `python-tools.json`.
-  **Never hand-edit either region**; edit `core/*.js` or `programs/ch*/`, then re-run.
   `python/scripts/sync_fallback.py` writes the `GENERATED:FALLBACK` region of both navigation
   pages from `python-tools.json` (`app.html` without `desc`, `index.html` with it).
+  **Never hand-edit any of these regions**; edit `core/*.js`, `programs/ch*/` or
+  `python-tools.json`, then re-run the corresponding script.
 - **Module order does not matter here.** Unlike cryptography's `CRYPTO-CORE`-first rule, every
   python core module takes its dependency lazily (`factory(function () { return root.PyLex; })`),
   so the gate to write is "did someone grab `root.X` in the factory arguments", not an order check.

@@ -151,8 +151,11 @@ PR-A 与 PR-B **串行**：B 改 core、重生成 `py-basics.html`、迁移提�
 
 - 新目录 `python/scripts/gates/refs/`，每章一个文件：`ch01_basics.py` ↔ `programs/ch01-basics/`
   （连字符换下划线）。每个文件导出 `REFERENCES`。
-- `properties.py` 保留 `SAMPLES` / `SEED` / 公共实参生成器，负责汇总各章文件。它的文件头那段
-  「举例子要举能被观察到的那一种」原样保留，这是本期构建者最需要读的一段。
+- `properties.py` 保留 `SAMPLES` / `SEED`，负责汇总各章文件；公共实参生成器放在
+  `refs/_gen.py`，不放 `properties.py`——放这里是为了避免 refs 反向导入
+  properties 形成循环（properties 已经要 `from .refs import load_references`）。
+  它的文件头那段「举例子要举能被观察到的那一种」原样保留，这是本期构建者最需要读的
+  一段。
 - 硬错误：同一个 id 出现在两个章文件里；章文件对不上任何章目录；
   **某条参照所指的 id 在该章里不存在或没有 `check.property`**（悬空的参照是一道守着空气的门）。
 

@@ -1,4 +1,4 @@
-"""D 组 · 词法器与判定器的四道门。
+"""D 组 · 词法器与判定器。
 
 > **验证一个自己写的词法器，最坏的方式是用自己写的测试用例。** CPython 的
 > `tokenize` 是这里的「免费 OpenSSL」——根 CLAUDE.md 拿 node 的 `crypto` 当独立
@@ -286,7 +286,7 @@ def _pylex_tokens(sources: dict) -> dict:
     """在裸 vm 沙箱里跑 py-lex 的**浏览器分支**，返回 {名字: [[type, start, end], ...]}。
 
     抛错的那一条返回 {'throw': 消息}，由调用方各自决定怎么处理——这个函数不替
-    调用方判定，因为「抛了算不算红」在四道门里不是同一个答案。
+    调用方判定，因为「抛了算不算红」在调用它的几道门里不是同一个答案。
     """
     with tempfile.TemporaryDirectory() as td:
         data = os.path.join(td, 'corpus.json')

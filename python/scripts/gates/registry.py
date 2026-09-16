@@ -1,4 +1,4 @@
-"""A 组 · 注册表与两个导航页的七道门。
+"""A 组 · 注册表与两个导航页。
 
 这一组守的是「同一份事实被抄在几个地方」这一类的漂移。本仓的历史记录给了三条
 不用再论证的结论：
@@ -12,8 +12,11 @@
     副本后面（PR #158）。
 
 所以这一组的每一道门都只问一件事：**两份字节是不是真的一样**——期望值来自磁盘上
-的另一份数据，不是来自我写下的常量。只有 MODULES / ACCENTS 两个闭集是例外，它们
-本身就是规格（design §6.1 与两页的 ACCENTS 白名单）。
+的另一份数据，不是来自我写下的常量。例外是 MODULES / ACCENTS / MODULE_ACCENTS /
+FALLBACK_FIELDS 这几个闭集：它们不是我编的期望值，本身就是规格——MODULES 与
+ACCENTS 是主规格 §6.1 的模块数与两页共用的 accent 白名单，MODULE_ACCENTS 是同一节
+定死的模块配色表，FALLBACK_FIELDS 是第 1 期设计 D5 规定的两页 FALLBACK 各自的字段
+集。规格变了就改常量本身，而不是拿磁盘上的另一份数据去核对规格。
 """
 from __future__ import annotations
 
@@ -211,9 +214,13 @@ def fallback_check() -> int:
 def fallback_version_check() -> int:
     """两页 FALLBACK 的每一条都要带 version，且必须等于注册表里的那个。
 
-    为什么这道门必须单独存在：**fallback_check() 只比 id 集合**，一条缺了
-    version 的条目在它眼里完全正常。而 version 同时是缓存键——app.html 的
-    iframe 地址与画廊卡片都把它拼进 URL（?v=<version>），卡片角上还要印出来。
+    为什么这道门必须单独存在：`fallback_check()` 按设计**跳过 version 的取值
+    比较**——它逐字段比对时显式排除了 version（见该函数 for 循环里的
+    `- {'version'}`），只在「字段集恰为 FALLBACK_FIELDS」这一步顺带查出
+    version 缺失。也就是说，**缺一个 version 字段**会被 fallback_check 的字段集
+    检查抓到，但 version **取值对不对**从来不是它管的——那正是这道门要单独存在
+    的理由。而 version 同时是缓存键——app.html 的 iframe 地址与画廊卡片都把它
+    拼进 URL（?v=<version>），卡片角上还要印出来，值本身必须有专门的门盯着。
 
     cryptography 实测过这个洞：两页 27×2 = 54 条条目，version 字段一个都没有，
     而根 CLAUDE.md 和那一页自己的注释都写着「现在也带 version」。线上 fetch

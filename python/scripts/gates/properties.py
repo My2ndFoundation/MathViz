@@ -1,4 +1,8 @@
-"""property 的参考实现登记表。
+"""property 参考实现的汇总器。
+
+真正的登记在 `gates/refs/chNN_<slug>.py`（每章一个文件），这里只是
+`from .refs import load_references` 把它们收拢成一份 REFERENCES /
+REF_SOURCES / REF_ERRORS，外加 SAMPLES / SEED 两个门共用的常量。
 
 规矩（spec §2.3）：新增一个 property 必须**同时写出它的参考实现**，
 而且参考实现要用**与被测程序不同的机制**——否则这道门就退化成拿自己验自己
