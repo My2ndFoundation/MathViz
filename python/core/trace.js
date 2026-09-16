@@ -25,15 +25,21 @@
    Date.now。本模块零依赖，factory() 无参是对的，不为了“看起来统一”造一个
    用不上的参数。
 
-   ── 空闲剔除为什么要按新增字符数缩放阈值（对简报的一处偏离，见 report）──
-   simplest 版本是“两次 update 之间的间隔一超过 IDLE_PAUSE_MS 就整段按
-   IDLE_PAUSE_MS 计”，这在“一次 update 只对应一次按键”的常见情况下是对的。
-   但一次 update 也可能带来一大段新输入（比如批量赋值/粘贴式的测试用例），
-   这时该次 update 内部实际发生了多次“打字”，用同一个阈值卡死会把一段正常
-   的、只是打字慢一点的持续输入误判成“走神后突然爆发”。所以真正比较的是
-   “平均每个新字符花了多久”：把阈值按本次新增字符数 n 放大成 IDLE_PAUSE_MS*n
-   再和原始 delta 比较——n=1（逐键调用的常规场景）时这就退化成最朴素的版本，
-   和 brief 的文字描述完全一致；n>1 时才体现出区别。 */
+   ── 空闲剔除是定长规则，不按新增字符数缩放（裁决 R34）────────────────────
+   第一版实现在这里按“本次新增字符数 n”把阈值放大成 IDLE_PAUSE_MS*n，理由是
+   brief 原来给的 cpm 用例把 11 个新字符一次性塞进一次 update()，与定长规则
+   算出的 72 cpm 对不上、只有按 n 缩放才能凑出 brief 要的 12 cpm。这个矛盾
+   本身是真的（两个用例的裸 delta 都是 60000，却要求相反的处理），但矛盾的
+   根源是那条 cpm 用例本身不真实——真实使用中 update() 是按键驱动的，一次
+   对应一个字符，delta 就是击键间隔。按 n 缩放能让不真实的用例通过，代价是
+   在真实场景里出问题：学生粘贴一大段文本（或任何一次 update 挟带很多新
+   字符）时，n 很大，阈值被放得很宽，一段真实的长时间走神会被整段算进
+   activeMs——统计是要给学生本人看的，一个把走神算进“打字速度”的数字，比
+   没有数字更糟。所以裁决是反过来：**规则维持定长，把不真实的用例换成逐键
+   模拟**（每次 update 只新增一个字符，delta 就是那次按键的间隔）。定长规则
+   下，“一次 update 里挤进很多新字符、且距上次 update 隔了很久”这种情况会被
+   正确地按空闲封顶，不会因为字符多就豁免——这一点由下面测试里的
+   “一次性大跳跃仍按定长空闲处理”那条断言守着，也是它专门要防的退化。 */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory();
@@ -96,7 +102,6 @@
       backspaces: 0,
       lastTickAt: null,   /* 上一次 update 的时刻；null 表示还没有第一次 */
       firstTickAt: null,  /* 第一次 update 的时刻，作为 lineTimes[0] 的基准 */
-      prevTypedLen: 0,    /* 上一次 update 时 typed 的长度，用来算本次新增了几个字符 */
       activeMs: 0,        /* 剔除空闲后的累计用时 */
       lineDone: null      /* number[]：每个真实行首次完成的时刻，未完成为 null */
     };
@@ -107,7 +112,6 @@
       session.backspaces = 0;
       session.lastTickAt = null;
       session.firstTickAt = null;
-      session.prevTypedLen = 0;
       session.activeMs = 0;
       session.lineDone = new Array(session.realLineCount).fill(null);
     }
@@ -121,24 +125,23 @@
       resetState();
     }
 
-    function tick(typed) {
+    function tick() {
       var now = clock();
       if (session.lastTickAt !== null) {
         var delta = now - session.lastTickAt;
-        var grown = typed.length - session.prevTypedLen;
-        var n = grown > 0 ? grown : 1;
-        var cap = IDLE_PAUSE_MS * n;
-        session.activeMs += Math.max(0, Math.min(delta, cap));
+        /* 定长规则：超过 IDLE_PAUSE_MS 的那一段只记 IDLE_PAUSE_MS，不管这次
+           update() 里挟带了多少新字符——不能因为一次性打字/粘贴的字符多，
+           就把走神的时间也算成有效时间（裁决 R34）。 */
+        session.activeMs += Math.max(0, Math.min(delta, IDLE_PAUSE_MS));
       } else {
         session.firstTickAt = now;
       }
       session.lastTickAt = now;
-      session.prevTypedLen = typed.length;
       return now;
     }
 
     function update(typed) {
-      var now = tick(typed);
+      var now = tick();
       var rows = alignLines(reference, typed);
       var marks = [];
 

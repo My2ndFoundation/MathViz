@@ -34,14 +34,28 @@ const REF = 'a = 1\nb = 2\n';
 
 T.eq(Trace.alignLines('a\nbb\n', 'a\nbb\n').length, 3, '按行对齐，含末尾空行');
 
-/* 统计 */
+/* 统计（逐键模拟——真实使用中 update() 是按键驱动的，一次一个字符）*/
+(function () {
+  const s = Trace.create(REF);          // REF 共 12 个字符
+  NOW = 0;
+  for (let i = 1; i <= REF.length; i++) { s.update(REF.slice(0, i)); NOW += 5000; }
+  const r = s.update(REF);              // NOW = 60000，无新增字符
+  T.eq(r.stats.accuracy, 1, '全对时正确率为 1');
+  T.eq(r.stats.correct, 12, '12 个字符全部正确');
+  T.eq(r.stats.cpm, 12, '每 5 秒一个键、总计 60 秒打完 12 个字符 = 12 cpm');
+  T.eq(r.stats.errors, 0, '没有错字');
+})();
+
+/* 空闲剔除是定长规则：一次 update 里挟带很多新字符、且距上次隔了很久，
+   也要按 IDLE_PAUSE_MS 封顶，不能因为字符多就豁免（裁决 R34）。这条断言
+   专门守住"定长而非按新增字符数缩放"这一点——把规则改回按 n 缩放，
+   它必须变红（因为缩放后 60000 的 delta 会被 n=11 的宽阈值放过，不会
+   被砍到 10000）。 */
 (function () {
   const s = Trace.create(REF);
-  NOW = 0;  s.update('a');
-  NOW = 60000; const r = s.update('a = 1\nb = 2\n');
-  T.eq(r.stats.accuracy, 1, '全对时正确率为 1');
-  T.eq(r.stats.cpm, 12, '60 秒打完 12 个字符 = 12 cpm');
-  T.eq(r.stats.errors, 0, '没有错字');
+  NOW = 0; s.update('a');
+  NOW = 60000; const r = s.update(REF);   // 一次性从 1 个字符跳到全部 12 个
+  T.eq(r.stats.elapsedMs, 10000, '一次性大跳跃仍按定长空闲处理，不因新增字符多而豁免');
 })();
 
 /* 正确率按「首次输入即正确」算：改对了也不还给你 */
