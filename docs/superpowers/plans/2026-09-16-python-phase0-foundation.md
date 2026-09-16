@@ -2046,7 +2046,10 @@ tool-version/tool-engine 两个 meta 与 i18n，去掉 canvas、动画时钟与�
 
 ---
 
-### Task 14: `check.py` 与 `gates/` —— 31 道门 + 31 个负控制
+### Task 14: `check.py` 与 `gates/` —— **34 道门 + 每道门的负控制**
+
+> ⚠️ 门数在本节里曾经自相矛盾（标题写 31、正文三处写 29、下面四张表实际定义 34）。
+> **以表格为准：34。** 实现者按表格建、并申报了这处矛盾，是对的（裁决 R55）。
 
 **Files:**
 - Create: `python/scripts/check.py`（运行器）
@@ -2066,7 +2069,9 @@ tool-version/tool-engine 两个 meta 与 i18n，去掉 canvas、动画时钟与�
 
 ```python
 if __name__ == '__main__':
-    # 29 道门全部**无条件跑到底**——不能用 `or` 短路。
+    # 34 个返回码全部**无条件跑到底**——不能用 `or` 短路。
+    # ⚠️ `build_programs.main()` 会抛 `SystemExit`，直接塞进 rc 会掐死它后面的门；
+    #    必须包一层守卫（裁决 R56）。
     # `a() or b() or c()` 一旦 a() 非零就跳过后面的，意味着一份过期的内联副本
     # 会让最有分量的那几道门根本不执行，问题只报出第一个。
     rc = [
@@ -2131,9 +2136,9 @@ if __name__ == '__main__':
 
 | 门 | 守什么 | 负控制 |
 |---|---|---|
-| `outbound_ref_check` | `core/` `programs/` `tools/` 里零个 `../`；`app.html`/`index.html` 各**恰好一处** | 往 `core/store.js` 加一行 `// see ../foo` → 红 |
+| `outbound_ref_check` | `core/` `programs/` `tools/` 里零个 `../`；`app.html`/`index.html` 各**恰好两处**——`PARENT_HOME` 与同意横幅的 `../privacy.html`（裁决 R54）。实测 cryptography 两页各有这两处；写成「恰好一处」会把四份正确代码从第一天起判红 | 往 `core/store.js` 加一行 `// see ../foo` → 红 |
 | `script_literal_check` | 任何 `.js` 里不许出现 `<`+`script`+`>` 或 `<`+`/script` | 往 `core/editor.js` 注释里塞一个 → 红 |
-| `control_byte_check` | `core/` `programs/` `tools/` 无 BOM、无 CRLF、无杂散 C0 控制字符 | 给某个 `.py` 加 BOM → 红 |
+| `control_byte_check` | `core/` `programs/` `tools/` **加两个导航页与注册表**无 BOM、无 CRLF、无杂散 C0 控制字符。⚠️ 最终评审的负控制：往 `app.html`/`index.html` 的内联脚本塞 NUL+VT，**34 道门全绿**——而 `root_pages()` 的 docstring 记着 chess 正是这样让 `index.html` 一年没被任何门覆盖的。**同一个错误隔了一个函数又犯一次** | 给某个 `.py` 加 BOM → 红；往某个**导航页**塞 NUL → 红 |
 | `lazy_dep_check` | **没有任何 core 模块在 UMD 工厂参数里直接抓 `root.X`**。⚠️ **必须先剥掉注释再扫，不能写成裸 grep**（裁决 R47）：实测 `editor.js:16` 与 `judge.js:31` 的注释里都把 `factory(root.PyLex)` 当**反面教材**引用了，裸 grep 会在完全正确的代码上报两处红。一道从第一天起就误报的门，结局只有被调弱或被无视 | 把 `editor.js` 的**真实工厂调用**改成 `factory(root.PyLex)` → 红；**同时验证：只在注释里出现那句话时必须仍绿** |
 | `skeleton_sentinel_check` | `_skeleton.html` 的 `GENERATED:PROGRAMS` 标记行必须是 `none`；非模板页**不许**用 `none` | 把骨架的 `none` 去掉 → 红 |
 | **`skeleton_leak_check`** | 已注册的 `tools/*.html` **不许**携带骨架的 `description` meta 原文，也**不许**保留 `none` 哨兵（裁决 R51）。前者：`description` 是逐页字段却不在骨架的复制清单里，照清单抄的人会原样带走骨架的描述；后者：**忘删 `none` 且忘写 `chapter.json` 的 `tool` 字段，今天在任何地方都不报错**——`render_page` 走弃权分支、没有章节冲突、注册表也不被触碰 | 把某个真页面的 `description` 改回骨架原文 → 红；给某个真页面加回 `none` → 红 |
@@ -2164,9 +2169,9 @@ if __name__ == '__main__':
 | `source_ascii_check` | 每段 `.py` 的**程序体**纯 ASCII（`# >>> BLANK` 指令行豁免——`hint=` 按双语设计就是中文，见全局约束 6） | 往**普通**注释塞一个中文字 → 红；往 `hint=` 塞中文 → **仍绿**（否则豁免就退化成「跳过所有注释行」） |
 | **`source_bmp_check`** | `.py` 里不许出现**非 BMP** 字符（码位 > U+FFFF）。CPython `tokenize` 给**字符**偏移、JS 给 **UTF-16 码元**偏移，两者只在全 BMP 时相等——一个 emoji 就让该行之后所有偏移**静默平移且不报错**。实测本章最高码位 U+FF1B、482 字符 == 482 码元；换成 `x = 1  # 🚀` 立刻是 17 字符 vs 18 码元 | 往某条 `hint=` 塞一个 emoji → 红 |
 | `source_indent_check` | 无制表符；缩进是 4 的倍数；行尾无多余空白；LF 结尾 | 把某行 4 个空格换成 Tab → 红 |
-| `blank_directive_check` | 指令成对；`id/level/hint/hintEn` 齐全；id 页内唯一；`level ∈ 1..3`；挖空体非空 | 删掉某个 BLANK 的 `hintEn` → 红 |
+| `blank_directive_check` | 指令成对；`id/level/hint/hintEn` 齐全；id 页内唯一；`level ∈ 1..3`；挖空体非空；**`hint` 与 `hintEn` 按分隔符切出的段数都必须 == `level`**。⚠️ 最终评审发现三条 `hintEn` 一个分隔符都没有 → `cap=1`，而按钮写着「Hint (L2)」，**而子项目默认英文**——「分级」这件事整条门链一次都没被观察过 | 删掉某个 BLANK 的 `hintEn` → 红；把某条 `hintEn` 的分隔符删掉（段数 1 < level 2）→ 红 |
 | `program_meta_check` | id 全库唯一；`kind/level/boards/runtime` 在闭集；`title/blurb/notes` 中英齐全；`notes` 是数组；`requires` 在白名单；**`chapter.json` 里不许出现 `lines` 字段**（派生字段不手写） | 给某条加一个 `"lines": 20` → 红 |
-| `variant_check` | **只对成员数 > 1 的 `problem` 组**校验 `title.en` 互不相同（绝大多数程序是单例，"每个 problem ≥ 2"会把任何一章判红）；**另加一条**：全库至少存在一个多变体组——否则这道门在一个全是单例的库上永远绿，等于没有门 | 把两个 `max-of-three-*` 的 `problem` 改成不同值 → 红（多变体组归零） |
+| `variant_check` | **只对成员数 > 1 的 `problem` 组**校验 `title.en` 互不相同（绝大多数程序是单例，"每个 problem ≥ 2"会把任何一章判红）；**另加一条**：全库至少存在一个多变体组——否则这道门在一个全是单例的库上永远绿，等于没有门 | ⚠️ 只拆 `max-of-three` **不够**：本章有**两**个多变体组，拆一个另一个还在，「至少存在一个多变体组」那条断言根本不会被触发（裁决 R57）。要**全部拆开**，并对 `title.en` 那条分支另加一个负控制 |
 
 **编码纪律（裁决 R21）**：R16 允许指令行含中文之后，`.py` **不再保证 ASCII 可解码**——
 T5 的实现者自己的脚本当场炸了 `UnicodeDecodeError`。`build_programs.py` 与**每一道读 `.py`
@@ -2251,7 +2256,7 @@ Expected: A 组 7 道全绿（其余门尚未接入）。
 - [ ] **Step 2: 依次实现 B / C / D 四组，每组写完立刻跑**
 
 每组接进 `rc` 列表后立刻 `python3 python/scripts/check.py`，确认**全绿**再写下一组。
-不要攒到最后一起调——29 道门一起变红时，你分不清是哪一道的问题。
+不要攒到最后一起调——三十几道门一起变红时，你分不清是哪一道的问题。
 
 - [ ] **Step 3: 31 个负控制，逐个见红**
 
