@@ -16,6 +16,9 @@ import calendar
 
 _MOVES = ("rock", "paper", "scissors")
 
+# 每 400 年 97 个闰年：4 的倍数，去掉不是 400 倍数的三个整百年。
+_LEAP_RESIDUES = frozenset(range(0, 400, 4)) - {100, 200, 300}
+
 
 def _mark(rng):
     # 只在 0..100：两个 grade 变体对超过 100 的分数本来就不同（descending 给 A、
@@ -46,6 +49,11 @@ def _two_moves(rng):
 
 def _sides(rng):
     # 小范围整数（含 0 与负数）：相等的边、恰好共线（a + b == c）都要常常出现。
+    # 三边全等单独以 1/4 概率抽：纯随机时三边相等只有 11/1331，边长为正的只有 8/1331，
+    # 200 组里期望约 1 组——曾经一组都没抽到，把 "equilateral" 改成 "isosceles" 门仍是绿的。
+    if rng.random() < 0.25:
+        k = rng.randint(-1, 8)
+        return k, k, k
     return tuple(rng.randint(-2, 8) for _ in range(3))
 
 
@@ -96,11 +104,11 @@ REFERENCES = {
         'cases': _year,
     },
     'leap-year-one-expression': {
-        # 被测：一个 and / or 表达式；参照：标准库 calendar.isleap（第 1 期设计 §7.5 点名）。
-        # ⚠ 3.12 的 calendar.isleap 源码恰好就是同一个表达式——机制并不「不同」。它仍守得住
-        # 被测 .py 里的变异（改的是被测文件，标准库那份不跟着变；实测变异见构建报告），
-        # 守不住的是「表达式本身写错、而标准库也写错」，后者不现实。已上报，未擅自换参照。
-        'ref': calendar.isleap,
+        # 被测：一个 and / or 表达式；参照：只取一次 % 400、再查 400 年周期里的闰年余数集合。
+        # 不用 calendar.isleap：3.12 的它源码恰好就是被测的同一个表达式，机制并不「不同」。
+        # 余数集合对负年份与 0 同样成立（Python 的 % 结果与除数同号），实测在 −100000..100000
+        # 上与 calendar.isleap 逐年一致。
+        'ref': lambda year: year % 400 in _LEAP_RESIDUES,
         'cases': _year,
     },
     'ticket-price-nested': {

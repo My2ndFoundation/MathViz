@@ -17,7 +17,7 @@ def rising_triples_comprehension(n):
 def rising_triples_loop(n):
     triples = []
     for a in range(n):
-# >>> BLANK id=inner-start level=2 hint="第二层循环，循环变量叫 b：b 从比 a 大 1 的数开始、到 n 之前为止，这样 a < b 不用再判断；range 用两个实参，a 写在加号左边 || 比 a 小或等于 a 的 b 根本不会出现，所以省掉了推导式版本里白白跑的那些组合" hintEn="The second loop, with loop variable b: b starts one above a and stops before n, so a < b never needs testing; range takes two arguments, with a on the left of the plus || A b that is not bigger than a never comes up at all, which skips the combinations the comprehension version runs through for nothing"
+# >>> BLANK id=inner-start level=2 hint="第二层循环，循环变量叫 b：b 从比 a 大 1 的数开始、到 n 之前为止，这样 a < b 不用再判断；range 用两个实参，a 写在加号左边 || 比 a 小或等于 a 的 b 根本不会出现，所以 rising_triples_comprehension 先造出来、再被它的 if 扔掉的那些组合，这里一个都不产生" hintEn="The second loop, with loop variable b: b starts one above a and stops before n, so a < b never needs testing; range takes two arguments, with a on the left of the plus || A b that is not bigger than a never comes up at all, so none of the combinations that rising_triples_comprehension builds and then throws away with its if are ever produced"
         for b in range(a + 1, n):
 # <<< BLANK
             for c in range(b + 1, n):
