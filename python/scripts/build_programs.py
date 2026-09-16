@@ -79,6 +79,43 @@ def encode_payload(payload: dict) -> str:
     return text.replace('<', '\\u003c')
 
 
+def load_chapter(chapter_path: pathlib.Path) -> dict:
+    """读取并解析一个 chapter.json，产出干净的 ERROR 而不是裸 traceback。
+
+    每一章的 chapter.json 由不同的实现者手写，畸形是必然会发生的（JSON 语法错、
+    漏字段、字段类型错）。这个脚本的其余每一条失败路径都产出点名文件的
+    `ERROR: ...` 信息（目标页不存在、.py 缺失、哨兵内容不认识、注册表缺条目）——
+    解析 chapter.json 不该是唯一一条留着裸 KeyError / JSONDecodeError 的路径，
+    那对下一个写 chapter.json 的人是完全不同的两种体验。
+    """
+    try:
+        text = chapter_path.read_text(encoding='utf-8')
+    except OSError as exc:
+        raise SystemExit(f'ERROR: {chapter_path} 读取失败：{exc}') from None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f'ERROR: {chapter_path} 不是合法 JSON：{exc}') from None
+    if not isinstance(data, dict):
+        raise SystemExit(
+            f'ERROR: {chapter_path} 顶层必须是一个 JSON 对象，实际是 '
+            f'{type(data).__name__}')
+    return data
+
+
+def required_field(data, key: str, context: str):
+    """从一个已解析的 JSON 对象里取必需字段；缺失或对象本身形状不对时报干净的
+    ERROR（点名 context 与字段名），不是裸 KeyError/TypeError。
+    """
+    try:
+        return data[key]
+    except KeyError:
+        raise SystemExit(f'ERROR: {context} 缺少必需字段 "{key}"') from None
+    except TypeError:
+        raise SystemExit(
+            f'ERROR: {context} 不是一个 JSON 对象，无法取字段 "{key}"') from None
+
+
 def discover_chapters() -> dict:
     """`python/programs/ch*/chapter.json` -> {tool 名: [(章目录, chapter 数据), ...]}。
 
@@ -89,21 +126,34 @@ def discover_chapters() -> dict:
     groups: dict = {}
     for chapter_path in sorted(PROGRAMS_DIR.glob('ch*/chapter.json')):
         chapter_dir = chapter_path.parent
-        data = json.loads(chapter_path.read_text(encoding='utf-8'))
-        tool = data['tool']
+        data = load_chapter(chapter_path)
+        tool = required_field(data, 'tool', str(chapter_path))
         groups.setdefault(tool, []).append((chapter_dir, data))
     return groups
 
 
 def build_programs_for_chapter(chapter_dir: pathlib.Path, data: dict) -> tuple:
     """返回 (本章的 programs 列表[含 source/lines], 本章总行数)。"""
+    chapter_path = chapter_dir / 'chapter.json'
+    programs_list = required_field(data, 'programs', str(chapter_path))
+    if not isinstance(programs_list, list):
+        raise SystemExit(
+            f'ERROR: {chapter_path} 的 "programs" 字段必须是数组，实际是 '
+            f'{type(programs_list).__name__}')
+
     programs = []
     total_lines = 0
-    for prog in data['programs']:
-        py_path = chapter_dir / prog['file']
+    for i, prog in enumerate(programs_list):
+        entry_context = f'{chapter_path}#programs[{i}]'
+        if not isinstance(prog, dict):
+            raise SystemExit(
+                f'ERROR: {entry_context} 必须是一个 JSON 对象，实际是 '
+                f'{type(prog).__name__}')
+        file_name = required_field(prog, 'file', entry_context)
+        py_path = chapter_dir / file_name
         if not py_path.exists():
             raise SystemExit(
-                f'ERROR: {chapter_dir / "chapter.json"} 点名的程序文件不存在：{py_path}')
+                f'ERROR: {chapter_path} 点名的程序文件不存在：{py_path}')
         src = py_path.read_text(encoding='utf-8')
         lines = len(src.splitlines())
         prog_out = dict(prog)
@@ -159,12 +209,14 @@ def render_page(page: pathlib.Path, original: str, chapters: list) -> tuple:
     programs: list = []
     total_lines = 0
     for chapter_dir, data in chapters:
+        chapter_path = chapter_dir / 'chapter.json'
+        chapter_module = required_field(data, 'module', str(chapter_path))
         if module is None:
-            module = data['module']
-        elif module != data['module']:
+            module = chapter_module
+        elif module != chapter_module:
             raise SystemExit(
                 f'ERROR: 工具页 {tool!r} 下的章节 module 不一致：{module} 与 '
-                f'{data["module"]}（{chapter_dir / "chapter.json"}）')
+                f'{chapter_module}（{chapter_path}）')
         progs, lines = build_programs_for_chapter(chapter_dir, data)
         programs.extend(progs)
         total_lines += lines
