@@ -355,9 +355,12 @@ LINE_NOTE_READERS = ('panelLineNotes', 'noteLineIndex')
 # 还照样打印「4 处读取」——正则结构性看不见它们，不是偶然漏测。
 LINE_NOTE_WORD_RE = re.compile(r'\blineNotes\b')
 # 白名单 (c)：`t('lineNotes', ...)` / `t("lineNotes", ...)`——t() 调用本身就是
-# 经白名单函数取值再显示，不是又一条读取路径。允许 `t(` 后有空白，不允许别的
-# 字符插在中间（否则「像 t() 调用」的字符串拼接也会被放过）。
-T_CALL_RE = re.compile(r"""\bt\(\s*(['"])lineNotes\1""")
+# 经白名单函数取值再显示，不是又一条读取路径。允许 `t(` 后有空白；`t` 前用**负向
+# 回顾断言**挡掉 `.`、`$`、任何单词字符——round-2 复评员实测：`\b` 在 `.` 与字母
+# 之间也算「边界」（非单词字符到单词字符的跳变），`\bt\(` 于是照样匹配
+# `foo.t('lineNotes'`，把任意对象上一个恰好叫 `t` 的方法认成白名单函数。挡住
+# `.`/`$`/单词字符三类前导，才只放行「独立调用」的 `t(`，不放行「成员调用」。
+T_CALL_RE = re.compile(r"""(?<![\w.$])t\(\s*(['"])lineNotes\1""")
 
 
 def _brace_span(code: str, start: int):
@@ -411,8 +414,9 @@ def _function_span(code: str, name: str):
 def _str_table_span(code: str):
     """`var STR = { ... };`（i18n 键表）的对象字面量区间 [起, 止)；找不到返回 None。
 
-    白名单 (b)：`STR` 是键名的**声明**处，`lineNotes:` 这个键理所当然会在这里
-    出现一次——那不是读取，是定义。找不到这个区间本身就是一条具名的红（不是
+    这个区间只是「白名单 (b) 可能生效的范围」，不是白名单本身——区间内的每处
+    `lineNotes` 出现还要另过 `_is_str_key_position()` 才算声明（见该函数与
+    `line_note_reader_check` 的说明）。找不到这个区间本身就是一条具名的红（不是
     静默放行）：找不到往往意味着 interact.js 换了写法，这道门的假设就该重新
     核实，而不是悄悄认为「没有 STR 表所以没什么要挡」。
     """
@@ -422,19 +426,57 @@ def _str_table_span(code: str):
     return _brace_span(code, m.end() - 1)
 
 
+def _is_str_key_position(code: str, start: int, end: int) -> bool:
+    """`code[start:end]`（一处 `lineNotes` 的匹配）是否处于对象字面量的**键位置**。
+
+    round-2 复评员实测：原判据只看「落在 STR 的花括号区间内」，没看这个词在
+    区间里长什么样——在 STR 里新插一条 `leakKey: { zh: current().lineNotes,
+    en: current().lineNotes },`，两处 `current().lineNotes` 也落在区间内，
+    门照样绿。区间是「白名单 (b) 可能生效的范围」，不是白名单本身：真正的声明
+    形状是**紧跟一个冒号**（可以隔着空白）、**紧靠在前面的是 `{` 或 `,`**（可以
+    隔着空白）——`lineNotes:   { zh: …, en: … },` 这一条本身就是这个形状；
+    `current().lineNotes` 前面是 `.`、后面是 `,`，两条都不满足，判定为读取。
+    """
+    n = len(code)
+    j = end
+    while j < n and code[j] in ' \t\n':
+        j += 1
+    if j >= n or code[j] != ':':
+        return False
+    i = start - 1
+    while i >= 0 and code[i] in ' \t\n':
+        i -= 1
+    return i >= 0 and code[i] in '{,'
+
+
 def line_note_reader_check() -> int:
     """core/ 里出现 `lineNotes` 这个词，只能在三处：`panelLineNotes` / `noteLineIndex`
-    两个函数体内（读取）、`STR` 的 i18n 键表内（声明该键名）、`t('lineNotes', ...)`
-    调用内（经白名单函数取值再显示）。别处出现这个词——不论是靠哪种 JS 语法拼出来
-    的——都当场红。
+    两个函数体内（读取）、`STR` 的 i18n 键表内**且处于键位置**（声明该键名）、
+    `t('lineNotes', ...)` 调用**且 `t` 前不接 `.`/`$`/单词字符**（经白名单函数取值
+    再显示，不是任意对象上的同名成员方法调用）。别处出现这个词——不论是靠哪种
+    JS 语法拼出来的——都当场红。
 
     **这道门抓的是「这个词逐字出现」，不是某一种语法。** 单词级正则 `\\blineNotes\\b`
     在剥完注释的源码上扫，不区分点读取（`p.lineNotes`）、引号/模板字面量方括号
     （`p['lineNotes']` / `` p[`lineNotes`] ``）、解构赋值（`var { lineNotes } = p`），
-    甚至一条裸字符串（`'lineNotes'`）——只要不在三处白名单区间内，字面拼出这个
-    键名就是红。round-1 的旧版正则只认「点」与「引号方括号」两种写法，`var { lineNotes }
-    = p` 与 `` p[`lineNotes`] `` 两条真实存在的绕法能全绿通过——这一版把「认语法」
+    甚至一条裸字符串（`'lineNotes'`）——只要不在三处白名单里，字面拼出这个键名
+    就是红。round-1 的旧版正则只认「点」与「引号方括号」两种写法，`var { lineNotes }
+    = p` 与 `` p[`lineNotes`] `` 两条真实存在的绕法能全绿通过——round-1 把「认语法」
     换成了「认词」，堵的是同一类问题的所有已知形状，不是再补两条正则分支。
+
+    **round-2：STR 区间与 t() 调用都从「落在范围内就算」收紧成「长得像声明/调用
+    才算」**——两处都曾经是「区间宽松」的静默漏洞：
+      · **STR 键位置**：`_is_str_key_position()` 要求这个词紧跟一个冒号（可隔
+        空白），紧靠在前面的是 `{` 或 `,`（可隔空白）——`lineNotes:   { zh: …,
+        en: … },` 满足；`current().lineNotes`（哪怕整行是塞进 STR 表里新写的
+        一条 `leakKey: { zh: current().lineNotes, … }`）前面是 `.`，不满足，
+        判定为读取，当场红。只看「落在 STR 花括号区间内」不看形状，会放过任何
+        塞进 STR 表里的读取表达式——这正是 round-2 复评员验证过的真实绕法。
+      · **t() 独立调用**：`T_CALL_RE` 用 `(?<![\\w.$])` 挡住 `t` 前面是 `.`、`$`
+        或单词字符——`\\bt\\(` 会把 `.` 到 `t` 也算一次「边界」，所以任意对象上
+        一个恰好叫 `t` 的方法（`foo.t('lineNotes'`、`S.t('lineNotes'`）都能诚实
+        地写成「调用了 t()」的样子而蒙混过关；收紧后这类成员调用不再匹配
+        `T_CALL_RE`，落回默认判定，当场红。
 
     **这道门结构性看不见的东西**：一个在运行时才拼出来的键名（如
     `p['line' + 'Notes']`），或反射式遍历（`Object.keys(p)` / `for...in`）——那些
@@ -479,10 +521,11 @@ def line_note_reader_check() -> int:
                 hits[owner] += 1
                 reads += 1
                 continue
-            if str_span is not None and str_span[0] <= pos < str_span[1]:
-                continue                          # (b) STR 键表：声明，不是读取
+            if (str_span is not None and str_span[0] <= pos < str_span[1]
+                    and _is_str_key_position(code, pos, m.end())):
+                continue                          # (b) STR 键表：键位置的声明，不是读取
             if any(a <= pos < b for a, b in t_call_spans):
-                continue                          # (c) t('lineNotes', ...) 调用
+                continue                          # (c) t('lineNotes', ...) 独立调用
             line = code[:pos].count('\n') + 1
             snippet = lines_src[line - 1].strip()[:100]
             print(f'ERROR: core/{path.name}:{line} 出现了 lineNotes，不在白名单内——'
