@@ -118,7 +118,13 @@ LANG_CFG = {
     '': ('mathviz-lang', "(navigator.language||'zh').toLowerCase().indexOf('zh')===0?'zh':'en'", 'privacy.html'),
     'chess': ('chess-lang', "'en'", '../privacy.html'),
     'cryptography': ('cryptography-lang', "'en'", '../privacy.html'),
+    'python': ('python-lang', "'en'", '../privacy.html'),
 }
+
+# 子项目名单在**两处**用到：这张字典与 subproject_of()。两处必须同时加，
+# 否则新子项目的导航页会被当成根页面处理——拿到 'mathviz-lang' 与 'privacy.html'，
+# 而且脚本跑一遍就会把页面里写对的那份覆盖掉。SUBPROJECTS 让它只有一处真相。
+SUBPROJECTS = tuple(k for k in LANG_CFG if k)
 
 CONSENT_CSS = """<style>
 .mv-consent{position:fixed;left:14px;right:14px;bottom:14px;z-index:9000;max-width:660px;
@@ -307,7 +313,7 @@ def anchor_replace(s: str, block: str, kind: str, rel: str) -> str:
 
 def subproject_of(p: Path) -> str:
     parts = p.relative_to(ROOT).parts
-    return parts[0] if parts[0] in ('chess', 'cryptography') else ''
+    return parts[0] if parts[0] in SUBPROJECTS else ''
 
 
 def analytics_replace(s: str, p: Path, rel: str) -> str:

@@ -1,7 +1,34 @@
 #!/usr/bin/env python3
-"""子项目校验门：内联副本一致性 + 每个 html 的内联脚本语法。
+"""chess 子项目校验门。十三道全部**无条件**跑到底，最后按「任一失败则整体失败」汇总退出码。
 
-对应规格 §7 的第 5、6 道门。第 1–4 道由 node 测试文件负责。
+**这张表必须把自己数全。** 2026-09-16 的整分支评审发现它对自己的门数有三个
+答案：文件头写「十二道」、`__main__` 里两处写「九道 / 九个」、而
+`grep -c '^    rc_' chess/scripts/check.py` 数出来是 **13**。原因是表里曾有一行
+编号为 `6b`——补第 7 道的人不想动后面的编号，于是清单从此数不全自己。现在
+6b 已并回正序，编号 1–13 与运行器里的 13 行 `rc_… = …()` 一一对应。加一道门
+就把编号续下去，不要再出现 `6b`。（同一条教训在本仓另一处写过：
+`python/core/py-lex.js:40`——「**这张清单必须把自己数全。**」）
+
+| #  | 函数                                   | 守什么 |
+|----|----------------------------------------|--------|
+| 1  | inline_core.main(check_only=True)      | 内联副本与编辑源一致 |
+| 2  | node_check()                           | 每个 html 每个 <script> 块语法（含 app/index 两个根级页） |
+| 3  | js_string_literal_html_safety_check()  | js_string_literal 的转义结果对 HTML 分词器安全（`<!--` + 裸 `<script` 那类坑）|
+| 4  | algos_marker_shape_check()             | ALGOS 标记区间「扫得到」本身——空区间会被内联，缺清单/清单写错当场报错 |
+| 5  | algos_roundtrip_check()                | 内联的 ALGOS 块在 node 里求值后与 core/algos/ 源文件字节一致 |
+| 6  | fallback_check()                       | 根级页面 FALLBACK 与 chess-tools.json 的 id 集合一致 |
+| 7  | fallback_version_check()               | FALLBACK 每条都带 version 且与注册表同值（第 6 道只比 id 集合，抓不到）|
+| 8  | version_meta_check()                   | 注册表 version == html 的 tool-version meta |
+| 9  | outbound_ref_check()                   | chess/ 整个目录搬走后仍可独立运行——父目录引用普查 |
+| 10 | core_tests()                           | core/ 与 games/ 下 *.test.js 全绿（含子目录）|
+| 11 | bilingual_algos_check()                | core/algos/ 双语机制普查 + render(parts, lang) 助手逐字节一致 |
+| 12 | throws_discrimination_check()          | T.throws 断言本身的判别力（pattern 缺第三参 / 恒真）|
+| 13 | registry_check()                       | id/file/accent/phase/version/engine/双语字段/重复/磁盘双向存在 |
+
+13 是 2026-09-16 补的——之前只有 fallback_check() 比 id 集合，注册表里写错一个
+file 路径要到运行时才暴露（docs/superpowers/subproject-nav-contract.md 第 2 节
+记着这一格 ❌）。照 cryptography 同名门的形状搬来，把 chapter 换成 chess 的
+phase、把 CHAPTERS 换成 chess 实测出的合法阶段集合。
 """
 import json
 import os
@@ -35,6 +62,17 @@ STDIN_LINE_RE = re.compile(r'^\[stdin\]:(\d+)$', re.MULTILINE)
 # "node 求值 ALGOS 失败"，这是**期望行为**：要么内联、要么响亮地报错。
 ALGOS_BLOCK_RE = re.compile(
     r'/\* >>> GENERATED:ALGOS(.*?) \*/\n(.*?)/\* <<< GENERATED:ALGOS \*/', re.DOTALL)
+
+REGISTRY = ROOT / 'chess-tools.json'
+ACCENTS = {'cyan', 'rose', 'violet', 'emerald', 'orange'}
+BILINGUAL_FIELDS = ('kicker', 'title', 'desc', 'tag')
+# chess 的「phase」跟的是规格里的**建设阶段**编号，不是像 cryptography 的
+# chapter 那样的封闭内容分类——阶段 3（解释器/调试器）本身不产出工具页，
+# 所以合法集合里没有 3；这里照 registry_check() 的用法**从 chess-tools.json
+# 实测**出当前已注册的阶段号，不去猜规格文档里数到几（PHASE_LABELS 的注释
+# 也确认了同一件事：新阶段的工具进注册表能自己长出分组，不必先改这里，但
+# 「先改这里」正是这道门要守住的动作——新阶段落地时连同这个集合一起改）。
+CHESS_PHASES = {1, 2, 4, 5}
 
 # ---- 跑 node 的唯一入口（2026-08-07 加）----
 #
@@ -89,6 +127,25 @@ ROOT_PAGE_MIN = 2
 # 结果不会是显眼的 0，而是「根级 2 个」照样凑出一个像模像样的总数，
 # 七个工具页悄悄全部失踪却没人发现——跟 ROOT_PAGE_MIN 要防的是同一类坑。
 TOOL_PAGE_MIN = 7
+
+
+def load_registry() -> dict:
+    return json.loads(REGISTRY.read_text(encoding='utf-8'))
+
+
+def registered_tool_pages() -> list:
+    """**注册表意义上**的工具页：排除下划线开头的模板与预览页。
+
+    只给 registry_check() 用——`_skeleton.html` / `_piece-preview.html` /
+    `_debugger-preview.html` 不是发布的工具，没有注册表条目，也不该被反方向
+    检查（「磁盘上有、注册表里没有」）当成漏注册来报错。命名上跟 node_check()
+    里那个同名局部变量（含下划线页面，服务于语法门）分开，避免两者互相
+    误用：语法门要扫全部页面，注册表门只认发布页。
+    """
+    return sorted(p for p in (ROOT / 'tools').glob('*.html')
+                  if not p.name.startswith('_'))
+
+
 def root_pages() -> list:
     """chess/ 根目录下的 html 页面，按文件名排序。
 
@@ -1062,12 +1119,94 @@ def throws_discrimination_check() -> int:
     return rc
 
 
+def registry_check() -> int:
+    """chess-tools.json 自洽 + 与磁盘双向一致（2026-09-16 补，第 13 道门）。
+
+    契约文档 docs/superpowers/subproject-nav-contract.md 第 2 节记着 chess
+    一直没有这道门——只有 fallback_check() 比 id 集合，注册表里写错一个
+    file 路径要到运行时才暴露。照 cryptography 的同名门（约在
+    cryptography/scripts/check.py:203）逐条对应搬来，把 chapter 换成 chess
+    的 phase、CHAPTERS 换成上面从 chess-tools.json 实测出的 CHESS_PHASES。
+
+    双向很重要：只查「注册表里的文件存在」会漏掉反方向——一个写完但忘了
+    注册的工具页会悄悄躺在 tools/ 里进不了任何导航（cryptography 那道门的
+    文档字符串记着根仓库真出过这事：main 上 61 个 output 文件对 60 条注册）。
+    """
+    reg = load_registry()
+    rc = 0
+    if reg.get('schemaVersion') != 1:
+        print(f'ERROR: schemaVersion 应为 1，实际 {reg.get("schemaVersion")!r}', file=sys.stderr)
+        rc = 1
+    tools = reg.get('tools') or []
+    if not tools:
+        print('ERROR: 注册表里一个工具都没有', file=sys.stderr)
+        return 1
+
+    seen_ids, seen_files = {}, {}
+    for d in tools:
+        tid = d.get('id')
+        if not tid:
+            print('ERROR: 有条目缺 id', file=sys.stderr); rc = 1; continue
+        if tid in seen_ids:
+            print(f'ERROR: 重复的 id：{tid}', file=sys.stderr); rc = 1
+        seen_ids[tid] = 1
+
+        f = d.get('file', '')
+        if f in seen_files:
+            print(f'ERROR: 重复的 file：{f}', file=sys.stderr); rc = 1
+        seen_files[f] = 1
+        if not f.startswith('tools/'):
+            print(f'ERROR: {tid} 的 file 必须在 tools/ 下，实际 {f!r}', file=sys.stderr); rc = 1
+        # 硬边界：本注册表只管 chess/tools/*.html。一条指向 ../outputs/ 的
+        # 路径既越了注册表边界，也毁了可搬迁性（与 outbound_ref_check 守的
+        # 是同一条线，那道门扫全子树，这里专门盯注册表这一份数据）。
+        if '..' + '/' in f:
+            print(f'ERROR: {tid} 的 file 指向了子项目之外：{f!r}', file=sys.stderr); rc = 1
+        if not (ROOT / f).exists():
+            print(f'ERROR: {tid} 的 file 不存在：{f}', file=sys.stderr); rc = 1
+
+        if d.get('phase') not in CHESS_PHASES:
+            print(f'ERROR: {tid} 的 phase 必须是 {sorted(CHESS_PHASES)} 之一，'
+                  f'实际 {d.get("phase")!r}', file=sys.stderr); rc = 1
+        if d.get('accent') not in ACCENTS:
+            print(f'ERROR: {tid} 的 accent 必须是 {sorted(ACCENTS)} 之一，'
+                  f'实际 {d.get("accent")!r}', file=sys.stderr); rc = 1
+        if not re.fullmatch(r'\d+\.\d+\.\d+', str(d.get('version', ''))):
+            print(f'ERROR: {tid} 的 version 不是 semver：{d.get("version")!r}',
+                  file=sys.stderr); rc = 1
+        if not str(d.get('engine', '')).startswith('chess-'):
+            print(f'ERROR: {tid} 的 engine 应形如 chess-x.y.z，'
+                  f'实际 {d.get("engine")!r}', file=sys.stderr); rc = 1
+        if not isinstance(d.get('changelog'), list):
+            print(f'ERROR: {tid} 的 changelog 必须是数组', file=sys.stderr); rc = 1
+
+        for field in BILINGUAL_FIELDS:
+            v = d.get(field)
+            if not isinstance(v, dict) or not v.get('en') or not v.get('zh'):
+                print(f'ERROR: {tid} 的 {field} 必须同时有非空的 zh 与 en',
+                      file=sys.stderr); rc = 1
+
+    # 反方向：磁盘上有、注册表里没有
+    registered = set(seen_files)
+    for p in registered_tool_pages():
+        rel = 'tools/' + p.name
+        if rel not in registered:
+            print(f'ERROR: {rel} 在磁盘上但没进注册表——它进不了任何导航',
+                  file=sys.stderr); rc = 1
+
+    if rc == 0:
+        print(f'注册表：{len(tools)} 个工具，字段与磁盘双向一致')
+    return rc
+
+
 if __name__ == '__main__':
-    # 九道门都要跑到底、都要报——不能用 `or` 短路。之前 `a() or b() or c()`
+    # 十三道门都要跑到底、都要报——不能用 `or` 短路。之前 `a() or b() or c()`
     # 一旦 a() 非零就直接跳过 b()/c()，意味着一份过期的内联副本（或任何语法
     # 错误）会让 406 条断言的 core_tests() 门根本不执行，问题只报出第一个，
-    # 最有分量的那道门被悄悄跳过了。这里九个都无条件跑，各自打印自己的
+    # 最有分量的那道门被悄悄跳过了。这里十三个都无条件跑，各自打印自己的
     # ERROR，最后按「任一失败则整体失败」汇总退出码。
+    # 「十三」这个数字与下面 13 行 `rc_… = …()`、与文件头那张表的 13 行编号
+    # 三处同值。改动门的数量时三处一起改——它们曾经分别是 九 / 12 / 13。
     # js_string_literal_html_safety_check 与 algos_roundtrip_check 是阶段 4
     # 新加的两道门：前者查转义结果对 HTML 分词器是否安全（`<!--` + 裸
     # `<script` 那类坑，`node -e` 天生看不见），后者查转义结果求值出来的
@@ -1081,7 +1220,8 @@ if __name__ == '__main__':
     # task 5 把 MONOLINGUAL_ALGOS 白名单连机制一起删了），以及
     # render(parts, lang) 助手在八份里是否逐字节相同（它在每份里各存一份，
     # 没有门就必然漂移）。
-    # throws_discrimination_check 是阶段 9a 新加的第九道，守 T.throws 断言
+    # throws_discrimination_check 是阶段 9a 加的（当时是第九道，今天是表里第
+    # 12 道），守 T.throws 断言
     # 本身的**判别力**：pattern 缺第三参会退化成「抛了就算过」（**一条都
     # 不许**——ALLOW_MISSING 自 2026-08-08 起是 0），补上的 pattern 若真的匹中
     # 同文件里 ≥2 种不同结构的消息（先按 pattern 真实语义匹配、再对匹中的
@@ -1094,6 +1234,10 @@ if __name__ == '__main__':
     # （注册表 / FALLBACK / html meta），第三道守「chess/ 整个目录搬走后仍可
     # 独立运行」。三道守的都是「本机全绿、别人机器上才坏」那一类，正是
     # fallback_check() 只比 id 集合看不见的那一层。
+    # registry_check 是 2026-09-16 新加的第十三道（表里 13），补上契约文档第 2 节记着
+    # 的 chess 缺口：chess-tools.json 自洽（字段齐全、id/file 不重复、
+    # version 是 semver、accent/phase 在合法集合里、四个双语字段都双语）
+    # 加与磁盘的双向存在——写错的 file 路径此前要到运行时才暴露。
     rc_inline = inline_core.main(check_only=True)
     rc_node = node_check()
     rc_html_safety = js_string_literal_html_safety_check()
@@ -1106,7 +1250,8 @@ if __name__ == '__main__':
     rc_core = core_tests()
     rc_bilingual = bilingual_algos_check()
     rc_throws = throws_discrimination_check()
+    rc_registry = registry_check()
     sys.exit(1 if (rc_inline or rc_node or rc_html_safety or rc_marker or
                     rc_algos or rc_fallback or rc_fb_version or
                     rc_version_meta or rc_outbound or rc_core or
-                    rc_bilingual or rc_throws) else 0)
+                    rc_bilingual or rc_throws or rc_registry) else 0)
