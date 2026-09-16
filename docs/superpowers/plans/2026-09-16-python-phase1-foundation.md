@@ -70,9 +70,13 @@
   2. 破坏：替换模式下逐对做字符串替换，断言每对命中次数恰为 --count、改后字节与改前不同；
      创建模式下新建一个原本不存在的文件。
   3. 判定：输出里必须出现 --must-say 的文本；期望红时还不许出现崩溃特征——
-     Python 的 'Traceback (most recent call last)'、编译期的 'SyntaxError:' /
-     'IndentationError:' / 'TabError:'，或 node 未捕获异常的调用栈行 '\n    at '
-     ——否则红可能来自脚本崩溃而不是断言失败（「红得没有理由」）。
+     见 crash_marker()：逐行、只认行首。Python 未捕获异常顶格打
+     'Traceback (most recent call last)'；编译期错误（SyntaxError /
+     IndentationError / TabError）不打 Traceback，最后一行顶格是
+     '<XxxError>: ...'；node 未捕获异常顶格打一段以四个空格 + 'at ' 开头的调用
+     栈帧。library.py / lexer.py 在**正常的红**里也会打印 type(exc).__name__
+     （可能恰好是 'SyntaxError: ...'），但那些都是缩进过的说明性文字，不会顶格
+     ——只有真的顶格才算脚本自己崩了，不算断言失败（「红得没有理由」）。
   4. 复原：把内存里的原字节写回（创建模式则删掉文件和它的 pyc），断言复原。绝不用 git checkout。
 
 用法：
@@ -89,18 +93,30 @@ import pathlib
 import subprocess
 import sys
 
-# 崩溃特征：出现任一条，红就不算断言失败，而是脚本自己坏了（「红得没有理由」）。
-# Python 未捕获异常打 'Traceback (most recent call last)'；编译期错误
-# （SyntaxError / IndentationError / TabError）不打 Traceback，只打
-# 'File "...", line N' + '<XxxError>:' 那一段；node 未捕获异常打一段
-# '\n    at ...' 调用栈，也没有 'Traceback' 字样。
-CRASH_MARKERS = (
+# 崩溃特征：逐行、只认行首，命中即认为红是脚本自己崩了，不算断言失败
+# （「红得没有理由」）。library.py / lexer.py 在**正常的红**里会打印
+# type(exc).__name__（可能恰好是 'SyntaxError: ...'），但那些都是缩进过的
+# 说明性文字（如「跳过 x：CPython 自己就拒绝它：SyntaxError: y」），不会顶格——
+# 所以必须按行首匹配，不能按整段输出做子串匹配，否则这类正常的红会被误判成崩溃。
+LINE_START_MARKERS = (
     'Traceback (most recent call last)',
     'SyntaxError:',
     'IndentationError:',
     'TabError:',
-    '\n    at ',
 )
+# node 未捕获异常的调用栈帧：四个空格 + 'at '，也只认行首。
+NODE_FRAME_PREFIX = '    at '
+
+
+def crash_marker(out: str) -> str | None:
+    """逐行扫 out，命中任一崩溃特征就返回那个特征（行首匹配），没有命中返回 None。"""
+    for line in out.splitlines():
+        for marker in LINE_START_MARKERS:
+            if line.startswith(marker):
+                return marker
+        if line.startswith(NODE_FRAME_PREFIX):
+            return NODE_FRAME_PREFIX
+    return None
 
 
 def run_gate(root, gate):
@@ -179,7 +195,7 @@ def main():
 
     out = res.stdout + res.stderr
     red = res.returncode != 0
-    crash = next((m for m in CRASH_MARKERS if m in out), None)
+    crash = crash_marker(out)
     if a.expect == 'green':
         ok = (not red) and (a.must_say in out)
     else:
@@ -192,7 +208,7 @@ def main():
     for line in out.splitlines():
         if ('ERROR' in line or 'FAIL' in line or '✗' in line
                 or a.must_say in line
-                or any(m.strip('\n') in line for m in CRASH_MARKERS)):
+                or crash_marker(line) is not None):
             print('  | ' + line)
     return 0 if ok else 1
 
