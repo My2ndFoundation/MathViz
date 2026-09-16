@@ -1563,9 +1563,13 @@ git commit -m "build(python): core 内联脚本
 2. **编码后的文本里不许出现 `<` + `script` + `>` 或 `<` + `/script` 序列。**
    `json.dumps` 不会替你处理这件事——把 `<` 统一转成 `\u003c` 即可（JSON 与 JS
    都接受，解码后逐字节还原）。
-3. **`U+2028` / `U+2029` 必须转义**（JS 字符串字面量里它们是换行符，
-   会当场造成语法错）。`json.dumps(..., ensure_ascii=True)` 已覆盖这两个码位；
-   若改用 `ensure_ascii=False` 就必须另行处理——**本任务一律用 `ensure_ascii=True`**。
+3. **`U+2028` / `U+2029` 必须转义**，`json.dumps(..., ensure_ascii=True)` 已覆盖这两个码位；
+   **本任务一律用 `ensure_ascii=True`**。
+   ⚠️ **但验证方式不能用 `node --check`。** 实测（node v25.4.0）：ES2019 的
+   JSON-superset 语法变更之后，**裸 U+2028 在 JS 字符串字面量里是合法的**，
+   `node --check` 与 `new Function` 都照单全收。转义仍然要做——它在旧引擎与许多
+   工具链里会被当成换行、而且肉眼不可见——但它的理由不再是「会造成语法错」，
+   验证也必须**直接检查生成文本里有没有裸 U+2028/U+2029**（裁决 R41）。
 
 **`lines` 的定义**（T14 的 `program_count_check` 会重算，两边必须同法）：
 `.py` 文件的行数 = `len(src.splitlines())`，**含** BLANK 指令行。
@@ -1644,8 +1648,9 @@ Expected: `10 <真实总行数>`
 
 1. 临时往某个 `.py` 的注释里加一行 `# see <` + `script` + `>tag`，重跑构建，
    确认生成的 HTML 里**不含**该字面序列，而往返比对仍然逐字节相同。
-2. 把 `ensure_ascii=True` 改成 `False`，往某个 `.py` 里塞一个 `U+2028`，
-   重跑，确认页面语法门（`node --check`）变红；改回 `True` 后变绿。
+2. 把 `ensure_ascii=True` 改成 `False`，往某个 `.py` 里塞一个 `U+2028`，重跑，
+   **确认生成文本里出现了裸 U+2028**；改回 `True` 后确认它被转义成 `\u2028`。
+   **不要用 `node --check` 当判据**——实测它接受裸 U+2028（见上方 R41）。
 
 两次都从内存恢复 `.py` 原字节。
 
@@ -2321,7 +2326,12 @@ git commit -m "test(python): 29 道门，每一道都见过红
 2. 跑 `python3 scripts/apply_branding.py`，给全部新页面铺 `GENERATED:FAVICON`。
    ⚠️ **CI 的那道门扫的是 `git ls-files '*.html'` 的全部页面**——
    新加的页面不打品牌就会「本地全绿、CI 全红」。
-3. 跑 `python3 scripts/apply_footer.py`，给新页面铺 `GENERATED:COPYRIGHT`（同上）。
+3. **先改 `scripts/apply_footer.py`，再跑它**（裁决 R43）。它只认 chess / cryptography：
+   `:119-120` 是一张写死的字典，`:310` 是一句 `parts[0] in ('chess', 'cryptography')`。
+   不先补上 `'python': ('python-lang', "'en'", '../privacy.html')` 与那句判断，
+   python 的两个导航页会被当成**根页面**处理——拿到错误的 `LKEY` 与错误的隐私链接路径，
+   而且跑一遍就会把 T11 已经写对的 `LKEY` 覆盖回去。补好之后再跑，
+   给新页面铺 `GENERATED:COPYRIGHT`（CI 的门同样扫全部 html）。
 4. `.githooks/pre-commit`：照 cryptography 段加一段 python 段，
    触发条件 `^python/(core|programs|tools|scripts)/`，
    先跑 `inline_core.py --print-changed` 与 `build_programs.py --print-changed`
