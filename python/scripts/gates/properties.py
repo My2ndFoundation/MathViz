@@ -8,7 +8,8 @@
 `ref` 拿被测程序的实参跑一遍，结果必须与被测程序的 `entry` 相同。
 `cases` 产出随机实参（元组），跑 `SAMPLES` 组，种子固定为 `SEED`（门必须逐次可复现）。
 
-裁决 R6：本表**按被测程序的 `id` 索引，不是按 property 族名**。`chapter.json` 里的
+裁决 R6：参照**按被测程序的 `id` 索引、按章分文件登记在 `gates/refs/chNN_<slug>.py`**
+（第 1 期设计 A4），不是按 property 族名。`chapter.json` 里的
 `check.property`（第 0 期合法取值只有 `"pure"`）只是一个族名，T14 的
 `algorithm_property_check()` 用它挑错误信息的措辞，真正的参考实现与实参生成器
 都是逐个程序单独登记的——同一个族名下的两个程序（这里 `max-of-three-if` 与
@@ -31,7 +32,9 @@
 - `count-vowels-loop`（索引循环 + 累加器）—— 参照用生成式 `sum(...)`：
   被测程序若把判断写反（`if ch in vowels` 变成 `not in`）或者干脆漏掉那次加一，
   累加器路径与生成式路径给出的计数会不一致，两条路径没有共享的中间状态。
-  实测 500 条随机串：分别 475 / 412 条不匹配。
+  实测 500 条随机串：分别 475 / 412 条不匹配。（这 500 条的生成协议没有写下来，
+  复评员用 `rand_words` + 本文件的种子复现出 475 / 414，见账本 §三.3——写协议，
+  别写期望值。）
 
 ⚠ **举例子要举能被观察到的那一种。** 上面三条的原文各举过一个「漏等号 / 参数顺序
 写错」的例子，而它们在值比对下**一个都测不出来**：`elif b > c` 与
@@ -42,40 +45,11 @@
 到」，是「解释一个有效测量时举了一个它测不到的例子」。每条例子在写进来之前都要
 先跑一遍，看它真的会让门变红。
 """
-import random
-import string
+from .refs import load_references
 
-
-def _rand_words(rng):
-    return (''.join(rng.choice(string.ascii_letters + ' ') for _ in range(rng.randint(0, 30))),)
-
-
-def _rand_triples(rng):
-    return (rng.randint(-50, 50), rng.randint(-50, 50), rng.randint(-50, 50))
-
-
-REFERENCES = {
-    # 被测程序 id -> {'ref': 参考实现, 'cases': 实参生成器}
-    'count-vowels-loop': {
-        # 被测的是「索引循环 + 累加」，参考的是「生成式 + sum」：机制不同
-        'ref': lambda s: sum(ch in 'aeiouAEIOU' for ch in s),
-        'cases': _rand_words,
-    },
-    'max-of-three-if': {
-        # 被测的是手写的 if/elif/else 分支链，参考的是内置 max()：机制不同。
-        # 实测能被它抓住的变异见文件头（交错变量 / 比错一对）；「漏等号」那一类
-        # 抓不住，因为漏掉 `=` 之后落到的那一支返回的是一个相等的值。
-        'ref': lambda a, b, c: max(a, b, c),
-        'cases': _rand_triples,
-    },
-    'max-of-three-builtin': {
-        # 被测的是 max()，参考的是「排序取末位」：机制不同——绝不能拿 max 当
-        # max() 自己的参照，那是拿自己验自己。实测抓得住的是「漏参数 / 用错内置
-        # 函数」；「参数顺序写错」抓不住，因为 max 本来就与实参顺序无关。
-        'ref': lambda a, b, c: sorted([a, b, c])[-1],
-        'cases': _rand_triples,
-    },
-}
+# 汇总各章文件。REF_ERRORS 非空时由 library.algorithm_property_check 报红——
+# 这里不抛，理由见 gates/refs/__init__.py 文件头。
+REFERENCES, REF_SOURCES, REF_ERRORS = load_references()
 
 SAMPLES = 200
 SEED = 20260916          # 固定种子：门必须逐次可复现

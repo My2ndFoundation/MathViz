@@ -22,6 +22,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -33,6 +34,7 @@ import traceback
 from . import (PROGRAMS_DIR, iter_programs, load_chapters, load_registry,
                read_text, run_node, tool_pages)
 from . import properties
+from . import refs
 
 # ── design §2.3 的闭集。这几个是**规格**，所以可以写成常量。 ────────────────
 KINDS = {'syntax', 'pattern', 'algorithm', 'project', 'embedded'}
@@ -198,6 +200,24 @@ def _indent(text: str, pad: str = '    ') -> str:
 # 2. algorithm_property_check
 # ══════════════════════════════════════════════════════════════════════════
 
+def _ref_chapter_mismatches(prog_chapter: dict, ref_sources: dict) -> list:
+    """参照所在的章文件必须对应程序所在的章目录。纯函数，负控制直接喂合成数据。
+
+    prog_chapter：{程序 id: 章目录名}（只含带 check.property 的程序）
+    ref_sources： {程序 id: refs 文件名}
+    """
+    out = []
+    for pid, fname in sorted(ref_sources.items()):
+        home = prog_chapter.get(pid)
+        if home is None:
+            continue                     # 程序不存在由「反方向」那条报
+        want = refs.chapter_dir_name(pathlib.PurePath(fname).stem)
+        if want != home:
+            out.append(f'程序 {pid!r} 在 programs/{home}/，参照却登记在 gates/refs/{fname}'
+                       f'（那个文件对应 programs/{want}/）')
+    return out
+
+
 def algorithm_property_check() -> int:
     """带 `check.property` 的程序：拿 `properties.REFERENCES[id]['ref']` 当独立裁判。
 
@@ -216,12 +236,14 @@ def algorithm_property_check() -> int:
     checked = 0
     cases_total = 0
     with_property = set()
+    prog_chapter = {}
     for chapter_dir, _data, prog, py_path in iter_programs():
         check = prog.get('check') or {}
         prop = check.get('property')
         if not prop:
             continue
         with_property.add(prog.get('id'))
+        prog_chapter[prog.get('id')] = chapter_dir.name
         name = _pid(chapter_dir, prog)
         if prop not in PROPERTIES:
             print(f'ERROR: {name} 的 check.property={prop!r} 不在闭集 '
@@ -235,10 +257,10 @@ def algorithm_property_check() -> int:
             continue
         ref_entry = properties.REFERENCES.get(prog['id'])
         if ref_entry is None:
-            print(f'ERROR: {name} 有 check.property={prop!r}，但 '
-                  f'gates/properties.py 的 REFERENCES 里没有它的参考实现。\n'
-                  f'       参照按**程序 id** 登记（R6），不能跟同族的别的程序共用'
-                  f'一份。', file=sys.stderr)
+            print(f'ERROR: {name} 有 check.property={prop!r}，但 gates/refs/ 里没有它的参考实现'
+                  f'（应写在 gates/refs/{chapter_dir.name.replace("-", "_")}.py）。\n'
+                  f'       参照按**程序 id** 登记（R6），不能跟同族的别的程序共用一份。',
+                  file=sys.stderr)
             rc = 1
             continue
         entry_name = prog.get('entry')
@@ -295,9 +317,23 @@ def algorithm_property_check() -> int:
     # 反方向：REFERENCES 里登记了、库里却没有这个程序。一条这样的参照什么都不验，
     # 但会让 `REFERENCES` 看上去比实际覆盖更宽——同一类「广告了并不具备的覆盖」。
     for stale in sorted(set(properties.REFERENCES) - with_property):
-        print(f'ERROR: gates/properties.py 的 REFERENCES 里有 {stale!r} 的参考实现，'
+        print(f'ERROR: gates/refs/{properties.REF_SOURCES.get(stale)} 里有 {stale!r} 的参考实现，'
               f'但程序库里没有带 check.property 的同名程序——这条参照一次都不会被'
               f'执行', file=sys.stderr)
+        rc = 1
+
+    for err in properties.REF_ERRORS:
+        print(f'ERROR: {err}', file=sys.stderr)
+        rc = 1
+    chapter_names = {d.name for d, _ in load_chapters()}
+    for path in sorted(refs.REFS_DIR.glob('ch*.py')):
+        want_dir = refs.chapter_dir_name(path.stem)
+        if want_dir not in chapter_names:
+            print(f'ERROR: gates/refs/{path.name} 对不上任何章目录（期望 programs/{want_dir}/）'
+                  f'——这个文件里的参照永远找不到程序', file=sys.stderr)
+            rc = 1
+    for msg in _ref_chapter_mismatches(prog_chapter, properties.REF_SOURCES):
+        print(f'ERROR: {msg}', file=sys.stderr)
         rc = 1
 
     if checked == 0 and rc == 0:
