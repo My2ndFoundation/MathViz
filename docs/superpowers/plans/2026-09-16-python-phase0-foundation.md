@@ -1822,7 +1822,9 @@ PyInteract.copyPayload(mode, program, state) -> string
 PyInteract.requirementLine(program) -> string | null
 //   requires 非空时返回 'pip install numpy pandas'，否则 null
 PyInteract.hintAt(blank, tier, lang) -> string
-//   tier 1..blank.level，逐级展开；lang 决定取 hint 还是 hintEn
+//   tier 1..blank.level，逐级展开；lang 决定取 hint 还是 hintEn。
+//   ⚠️ 分隔符不能只认 ' · '——ch01 的真实提示用的是中文分号 `；`（实测三条 hint 全是）。
+//   要认一个分隔符**链**，否则分级提示在真实内容上直接失效（裁决 R46）。
 PyInteract.clearScope(scope, programs, currentId) -> string[]
 //   scope ∈ 'program' | 'module' | 'all'，返回要交给 Store 的 id 列表
 ```
@@ -1963,7 +1965,9 @@ GENERATED:PY-LEX  STORE  EXERCISE  EDITOR  JUDGE  TRACE  INTERACT  PROGRAMS
 ```bash
 cp cryptography/tools/_skeleton.html python/tools/_skeleton.html
 ```
-删掉 canvas 相关整块，换上三层舞台 + 三个面板的 DOM，写上八对 GENERATED 标记
+删掉 canvas 相关整块。**页面不自己建三层舞台**——实测 `PyInteract.mount()` 第一步就是
+`wipe(rootEl)`（`interact.js:770`）、自己建整棵树，页面只负责提供一个挂载根（裁决 R48）。
+写上八对 GENERATED 标记
 （**区段先留空**，交给脚本填）。`tool-engine` 写 `py-1.0.0`。
 
 `_skeleton.html` 的 `GENERATED:PROGRAMS` 区段：**骨架不带任何程序**，
@@ -2000,7 +2004,10 @@ for f in python/tools/*.html; do
     && echo "$f OK  $(du -h "$f" | cut -f1)"
 done
 ```
-Expected: 两个都 OK；`py-basics.html` 约 120 KB 上下（spec §4.7 的估算）。
+Expected: 两个都 OK。**实测体积**：`py-basics.html` 235 KB、`_skeleton.html` 180 KB
+（`core/` 源码合计 264 KB）。计划原本估的「120 KB/页、35 页 4.2 MB」**少算了一半**——
+按实测 35 页约 **8 MB**，比 cryptography 的 `tools/` 6.2 MB 大。量级仍可接受，但
+**第 1 期开始前要复核一次**：若继续膨胀，就要考虑按模式拆区段、让读模式页不内联临摹引擎（裁决 R49）。
 
 - [ ] **Step 5: `file://` 手工验收 —— 六条，全部要过**
 
@@ -2127,7 +2134,7 @@ if __name__ == '__main__':
 | `outbound_ref_check` | `core/` `programs/` `tools/` 里零个 `../`；`app.html`/`index.html` 各**恰好一处** | 往 `core/store.js` 加一行 `// see ../foo` → 红 |
 | `script_literal_check` | 任何 `.js` 里不许出现 `<`+`script`+`>` 或 `<`+`/script` | 往 `core/editor.js` 注释里塞一个 → 红 |
 | `control_byte_check` | `core/` `programs/` `tools/` 无 BOM、无 CRLF、无杂散 C0 控制字符 | 给某个 `.py` 加 BOM → 红 |
-| `lazy_dep_check` | **没有任何 core 模块在 UMD 工厂参数里直接抓 `root.X`**。扫法：找 `factory(` 的实参，出现 `root.` 且不在 `function` 体内即红 | 把 `editor.js` 改成 `factory(root.PyLex)` → 红 |
+| `lazy_dep_check` | **没有任何 core 模块在 UMD 工厂参数里直接抓 `root.X`**。⚠️ **必须先剥掉注释再扫，不能写成裸 grep**（裁决 R47）：实测 `editor.js:16` 与 `judge.js:31` 的注释里都把 `factory(root.PyLex)` 当**反面教材**引用了，裸 grep 会在完全正确的代码上报两处红。一道从第一天起就误报的门，结局只有被调弱或被无视 | 把 `editor.js` 的**真实工厂调用**改成 `factory(root.PyLex)` → 红；**同时验证：只在注释里出现那句话时必须仍绿** |
 | `skeleton_sentinel_check` | `_skeleton.html` 的 `GENERATED:PROGRAMS` 标记行必须是 `none`；非模板页**不许**用 `none` | 把骨架的 `none` 去掉 → 红 |
 
 #### C 组 · `gates/syntax.py`
@@ -2351,6 +2358,8 @@ git commit -m "test(python): 29 道门，每一道都见过红
 | 条款 | 检查 | 负控制 |
 |---|---|---|
 | C3/C6 | 抽出 `wireParentLink` / `ACCENTS` / `safeAccent` 三块，跨六页比 sha 相同 | 改掉 python 那份的一个空格 → 红 |
+| **C1 子款** | **`#btnAlone` 的 `?v=` 必须与工具 iframe 的 `?v=` 同值**（裁决 R45）。这是契约 C1 里最容易漏的一条——「壳里是新版、单开是旧版」。T11 的验证脚本恰好在这一条上有盲点：评审员把 `#btnAlone` 的版本写死成 `v=0`、`srcFor` 保持正确，那套断言**全部报 PASS** | 把某一页的 `#btnAlone` 版本写死成 `v=0` → 红 |
+| **绑定存在** | 页面求值后 `TOOLS` / `FALLBACK` / `MODULE_LABELS` 三个绑定必须存在且非空（裁决 R45）。T11 自审时误删过 `var TOOLS = FALLBACK;`——**语法门完全看不见**，语法合法而语义全坏 | 删掉 `var TOOLS = FALLBACK;` → 语法门仍绿、本门必须红 |
 | C4 | 每个子项目页的父链接 `<a>` 带 `target="_top"`；根 `index.html` 三张子项目卡片都带 | 删掉 python 的 → 红 |
 | C5 | 三个子项目 `index.html` 的 `.wrap` 是 `max-width:min(2600px,96vw)` | 改成 `1200px` → 红 |
 | C7 | `resolveLang` / `t` 的兜底字面量是 `'en'`；存储键前缀与所在子项目一致 | 把 python 的兜底改成 `'zh'` → 红 |
