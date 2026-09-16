@@ -2,7 +2,7 @@
 
 
 def swap(a, b):
-# >>> BLANK id=three-assignments level=2 hint="a 一被覆盖，旧值就没了，所以先把它存起来 || 三行简单赋值，临时变量叫 temp：先存的是 a 而不是 b；最后一行从 temp 取，不从 a 取" hintEn="Once a is overwritten its old value is gone, so put it somewhere safe first || three plain assignments with a temporary called temp: temp saves a, not b; the last line reads from temp, not from a"
+# >>> BLANK id=three-assignments level=2 hint="a 一被覆盖，旧值就没了，所以先把 a（不是 b）存进临时变量 temp || 三行简单赋值：存、覆盖、取回；最后一行从 temp 取，不从 a 取" hintEn="Once a is overwritten its old value is gone, so first put a (not b) somewhere safe, in a temporary called temp || three plain assignments - save, overwrite, restore; the last line reads from temp, not from a"
     temp = a
     a = b
     b = temp

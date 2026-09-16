@@ -2,7 +2,7 @@
 
 
 def to_fahrenheit(celsius):
-# >>> BLANK id=formula level=2 hint="华氏度等于摄氏度乘以五分之九、再加 32，算好交回去 || 照这个次序从左往右一口气写：先乘 9，再用 / 除以 5，最后加 32；不加括号，也不把五分之九换成 1.8" hintEn="Fahrenheit is the Celsius value times nine fifths, plus 32 - work it out and hand it back || write it left to right in exactly that order: multiply by 9, divide by 5 with /, then add 32; no brackets, and no swapping nine fifths for 1.8"
+# >>> BLANK id=formula level=2 hint="华氏度等于摄氏度乘以五分之九、再加 32，算好交回去；五分之九就用 9 和 5 写，不换成 1.8，也不加括号 || 照公式的次序从左往右一口气写：先乘 9，再用 / 除以 5，最后加 32" hintEn="Fahrenheit is the Celsius value times nine fifths, plus 32 - work it out and hand it back; write nine fifths with a 9 and a 5, not as 1.8, and use no brackets || write it left to right in the order of the formula: multiply by 9, divide by 5 with /, then add 32"
     return celsius * 9 / 5 + 32
 # <<< BLANK
 
