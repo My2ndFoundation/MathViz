@@ -66,6 +66,19 @@ T.eq(Store.getPrefs().alpha, 0.5, '整项清空默认保留偏好');
 Store.clearAll({ prefs: true });
 T.eq(Store.getPrefs().alpha, undefined, '全部重置连偏好一起清');
 
+/* ---- patchProgress 是浅合并、整值替换，不是深合并 ----
+   评审 R9：调用方按接口约定传"完整"的子对象，一次补丁本该整体替换掉 blank/trace
+   这一层，而不是逐字段拼进旧值——否则一次"重置"式的补丁会悄悄留着上一次的
+   陈旧字段（这里是 hintsUsed/at）。setPrefs 一直是这个语义（Object.assign 不递归），
+   patchProgress 必须跟它一致。 */
+(function () {
+  Store._useStorage(makeFakeStorage(null));
+  Store.patchProgress('p1', { blank: { done: false, hintsUsed: 2, at: 111 } });
+  Store.patchProgress('p1', { blank: { done: true } });
+  T.eq(Store.getProgress('p1').blank, { done: true },
+       'patchProgress 整值替换：第二次补丁不留上一次的 hintsUsed/at');
+})();
+
 /* ---- 配额爆掉必须喊出来，不能静默 ---- */
 (function () {
   let called = 0, lastReason = null;

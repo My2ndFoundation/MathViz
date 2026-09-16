@@ -211,21 +211,6 @@
   function draftKey(progId, mode) { return DRAFT_PREFIX + progId + ':' + mode; }
   function progressKey(progId) { return PROGRESS_PREFIX + progId; }
 
-  /* 一层深的合并：{blank:{...}} 这样的子对象逐字段并进去，而不是整体替换——
-     这样调用方分两次 patch 不同字段（比如先记 done，再记 hintsUsed）不会互相顶掉。 */
-  function mergeOneLevel(base, patch) {
-    const out = Object.assign({}, base);
-    Object.keys(patch).forEach(function (k) {
-      const pv = patch[k];
-      if (pv && typeof pv === 'object' && !Array.isArray(pv)) {
-        out[k] = Object.assign({}, (out[k] && typeof out[k] === 'object') ? out[k] : {}, pv);
-      } else {
-        out[k] = pv;
-      }
-    });
-    return out;
-  }
-
   function parseJSON(raw) {
     if (raw === null) return null;
     try { return JSON.parse(raw); } catch (e) { return null; }
@@ -277,9 +262,14 @@
     return parseJSON(readKey(progressKey(progId)));
   }
 
+  /* 浅合并、整值替换：顶层键若在 patch 里出现，整个值（哪怕是 {blank:{...}} 这样的
+     对象）原样覆盖旧值，不递归进去逐字段拼。调用方按接口约定传"完整"的子对象——
+     一次「重置」补丁本该连同旧的 hintsUsed/at 一起抹掉，深合并会让它们悄悄留着。
+     与 setPrefs 用的是同一套语义（同样是 Object.assign({}, base, patch)），
+     两个方法必须一致，不然同一个 Store 上出现两种"patch"含义。 */
   function patchProgress(progId, patch) {
     const existing = getProgress(progId) || {};
-    writeKey(progressKey(progId), JSON.stringify(mergeOneLevel(existing, patch || {})));
+    writeKey(progressKey(progId), JSON.stringify(Object.assign({}, existing, patch || {})));
   }
 
   function getPrefs() {
