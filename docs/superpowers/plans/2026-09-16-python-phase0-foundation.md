@@ -34,6 +34,10 @@
    存储键前缀 `python-`；导航两键是 `python-lang` / `python-nav`。
 6. **程序源码纯 ASCII、注释一律英文。** 中文只出现在 `chapter.json` 的
    `title` / `blurb` / `notes` / `lineNotes` 与 UI 文案里。
+   **唯一豁免：`# >>> BLANK` 指令行的 `hint="…"`**——它按双语设计就该是中文
+   （`hintEn` 才是英文），而指令行**永远不进入任何渲染层**（见接口表的
+   `Exercise.clean`），所以三层对齐与复制保真都不受影响。
+   `source_ascii_check()` 必须跳过指令行。
 7. **缩进只用 4 个空格；`.py` 里不许出现制表符；行尾 LF；行末无多余空白。**
 8. **accent 闭集** `{cyan, rose, violet, emerald, orange}`，退路 `--trace-unpaired`。
    `module` 闭集 `1..8`。第 0 期只用到 `module: 1`、`accent: 'cyan'`。
@@ -158,6 +162,10 @@ Exercise.parse(src) -> {
   lineMap: [ { kind: 'code' | 'blank', blankId: string|null, srcLine: number } ]
   //   stripped 每一行一条
 }
+Exercise.clean(src) -> string
+//   剥掉两种指令行、**保留挖空体原文**。读模式显示的、临摹要打的、复制出去的
+//   都是它——裸 `source` 里带着 `# >>> BLANK …`，直接拿去显示就是把出题标记
+//   摆给学习者看，拿去临摹就是让她把中文提示也打一遍。
 Exercise.merge(src, answers) -> string
 //   answers = { [blankId]: string }；把 src 里每个挖空体（含两条指令行）换成答案文本，
 //   缺的 id 用原 body。返回可直接复制进 PyCharm 的完整程序。
@@ -380,10 +388,17 @@ UMD 外壳（**这是本仓所有 core 模块的统一形状，后续任务照�
    —— 这两条一起保证无缝与终止。
 2. `\n` / `\r\n` → `nl`；其他空白连续吃完 → `ws`。
 3. `#` 吃到行尾（不含换行）→ `comment`。
-4. `@` 后紧跟标识符首字符 → `decorator`（`@` + 点分名字）；否则是 `op`（`@=` / `@`）。
+4. `@` **只有在它是该逻辑行的第一个有效 token 时**才是 `decorator`（`@` + 点分名字）；
+   否则一律是 `op`（`@=` / `@`）。实测依据：CPython 对 `c = a@b` 给的是 `OP @` + `NAME b`
+   ——不加这个限定，无空格的矩阵乘会被读成装饰器，而 numpy 那几页到处是 `a @ b`。
 5. 字符串：先尝试匹配前缀 `[rRbBuUfF]{0,3}`（且是 `r`/`b`/`u`/`f` 的合法组合）后接引号。
    三引号优先于单引号。带 `f` 的归 `fstring`，其余归 `string`。
-   转义 `\\` 在非 raw 串里跳过下一个字符；**未闭合时吃到文件尾**。
+   **转义 `\\` 在 raw 串里同样挡住收尾引号**（实测：CPython 把 `r"\\""` 切成一个 STRING
+   token）——若照"raw 串里反斜杠无特殊含义"处理，`r"\\""` 会让串一路开到文件尾，
+   正是本模块要防的那种失败。
+   **未闭合时：三引号吃到文件尾，单引号止于行尾。** 后者 CPython 直接抛 TokenError，
+   没有标准可依；止于行尾把一个打了一半的引号的破坏限制在一行内，
+   吃到文件尾则会让下面整篇失色——那正是 chess 整篇降级的同一种代价。
 6. 数字：`0x/0X` `0o/0O` `0b/0B` 前缀走各自字符集；否则十进制，允许 `_`、小数点、
    `e/E` 指数（含符号）、结尾 `j/J`。**`0x` 与 `1e` 这种残缺写法也要吃掉已有字符
    并归 `number`**，不抛。
@@ -663,7 +678,7 @@ T.eq(p.blanks[0].hint, '用整除', '中文提示');
 T.eq(p.blanks[0].hintEn, 'floor division', '英文提示');
 T.eq(p.blanks[0].body, '        mid = (lo + hi) // 2', '单行挖空体');
 T.eq(p.blanks[0].indent, '        ', '缩进取挖空体第一行的前导空白');
-T.eq(p.blanks[1].body.split('\n').length, 5, '多行挖空体保留全部五行');
+T.eq(p.blanks[1].body.split('\n').length, 4, '多行挖空体保留全部四行');
 T.eq(p.blanks[1].indent, '        ', '多行空的缩进取第一行');
 
 /* 占位版：指令行消失，挖空体塌成一行 `<indent>___` */
@@ -735,10 +750,13 @@ Expected: FAIL —— `Cannot find module './exercise.js'`
 - UMD 外壳同 T1，无依赖。
 - 逐行扫描；遇到 `DIRECTIVE_OPEN` 进入收集态，遇到 `DIRECTIVE_CLOSE` 结束。
   文件结束仍在收集态 → 抛「未闭合的 BLANK」。
-- 属性解析：`id` / `level` 用 `/\bid=(\S+)/` `/\blevel=(\S+)/`；
-  `hint` / `hintEn` 用 `/\bhintEn="((?:[^"\\]|\\.)*)"/` 与
-  `/\bhint="((?:[^"\\]|\\.)*)"/`。**先匹配 `hintEn` 再匹配 `hint`**，
-  否则 `\bhint=` 会先咬到 `hintEn=` 的前半段。
+- 属性解析分两步。**先**用 `/\bhintEn="((?:[^"\\]|\\.)*)"/` 与
+  `/\bhint="((?:[^"\\]|\\.)*)"/` 取出两个带引号的属性（**先 `hintEn` 再 `hint`**，
+  否则 `\bhint=` 会先咬到 `hintEn=` 的前半段），**并把这两段从指令行里摘掉**；
+  **再**在剩余文本上用 `/\bid=(\S+)/` `/\blevel=(\S+)/` 取裸值。
+  两步的顺序是硬的：属性顺序不作要求，所以
+  `# >>> BLANK hint="see id=5 example" id=real level=2 hintEn="y"`
+  在一步式写法下会把 id 解析成 `5`——不属于必须抛错的三种形状，是静默的数据损坏。
   四个属性缺任何一个 → 抛，消息里点名缺的是哪一个。
 - `level` 必须是 `1|2|3`，否则抛。
 - 挖空体为空（两条指令行贴在一起）→ 抛。这是手滑最常见的形状，
@@ -1745,8 +1763,8 @@ PyInteract.filterPrograms(programs, filters) -> Program[]
 //   filters = { level: [1,2], kind: ['pattern'], boards: ['AQA'], maxLines: 40 }
 //   空/缺省的维度不筛。多个维度是**与**关系，同一维度内是**或**关系。
 PyInteract.copyPayload(mode, program, state) -> string
-//   'read'  -> program.source
-//   'blank' -> Exercise.merge(program.source, state.answers)
+//   'read'  -> Exercise.clean(program.source)   ← 不是裸 source，见接口表
+//   'blank' -> Exercise.merge(program.source, state.answers)   （merge 本就剥掉指令行）
 //   'trace' -> state.typed
 //   返回值**只有纯源码**：pip 提示、行注、模式名一概不进剪贴板
 PyInteract.requirementLine(program) -> string | null
@@ -2086,7 +2104,7 @@ if __name__ == '__main__':
 | `source_indent_check` | 无制表符；缩进是 4 的倍数；行尾无多余空白；LF 结尾 | 把某行 4 个空格换成 Tab → 红 |
 | `blank_directive_check` | 指令成对；`id/level/hint/hintEn` 齐全；id 页内唯一；`level ∈ 1..3`；挖空体非空 | 删掉某个 BLANK 的 `hintEn` → 红 |
 | `program_meta_check` | id 全库唯一；`kind/level/boards/runtime` 在闭集；`title/blurb/notes` 中英齐全；`notes` 是数组；`requires` 在白名单；**`chapter.json` 里不许出现 `lines` 字段**（派生字段不手写） | 给某条加一个 `"lines": 20` → 红 |
-| `variant_check` | 同一 `problem` 的变体 ≥ 2 且 `title.en` 互不相同 | 把两个 `max-of-three-*` 的 `problem` 改成不同值 → 红 |
+| `variant_check` | **只对成员数 > 1 的 `problem` 组**校验 `title.en` 互不相同（绝大多数程序是单例，"每个 problem ≥ 2"会把任何一章判红）；**另加一条**：全库至少存在一个多变体组——否则这道门在一个全是单例的库上永远绿，等于没有门 | 把两个 `max-of-three-*` 的 `problem` 改成不同值 → 红（多变体组归零） |
 
 `program_run_check` 与 `algorithm_property_check` 的三层策略（spec §5.4）：
 
@@ -2132,6 +2150,9 @@ TOKEN_MAP = {
 # 不参与比对的 CPython 类别，以及为什么：
 #   NEWLINE / NL / INDENT / DEDENT / ENDMARKER —— PyLex 不维护缩进栈（spec §4.2），
 #       它把换行当 'nl'、把缩进当 'ws'，两边结构不同源，比对没有意义。
+#   行续反斜杠 —— CPython 对 `t = a \\<换行>    + b` 里的 `\\` **一个 token 都不发**
+#       （实测确认），而 PyLex 必须发一个才能保持无缝全覆盖。这条排除是 T1 的实现者
+#       撞出来的真红，不是推测。
 #   FSTRING_START / MIDDLE / END（3.12+）—— PyLex 把整个 f 串当一个 token。
 #       所以 f 串在这里只比**整体区间**：CPython 的 START..END 合并后的 (start, end)
 #       必须等于 PyLex 那一个 fstring token 的 (start, end)。
