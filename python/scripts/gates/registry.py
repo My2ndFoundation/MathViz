@@ -289,14 +289,29 @@ def version_meta_check() -> int:
 def program_count_check() -> int:
     """注册表的 programs / lines 必须等于从 programs/ch*/ 现场重算的结果。
 
-    `lines` 的定义**必须与 build_programs.py 同法**：`len(src.splitlines())`，
-    **含** BLANK 指令行。两边不同法这道门就会在一处无害的差异上永远报红，
-    而一道从第一天起就误报的门，结局只有被调弱或被无视。
+    `lines` 的定义（Task 11c 追加裁决 T11-1，源自 Task 11 评审 I4）：源码去掉
+    BLANK 指令行（`# >>> BLANK …` 与 `# <<< BLANK`）之后的行数——**不含**指令行。
+    页面把 `lines` 当「程序有多长」显示（左侧列表、说明面板顶部），选择器
+    「不超过 20 / 40 / 80 行」也按它筛；每挖一个空就多算两行的旧定义
+    （`len(src.splitlines())`，含指令行）会让程序在筛选器里显得比她实际看到的
+    （`Exercise.clean()` 之后的行数，读模式/临摹模式给她看的就是这份）更长，
+    ch01 的 `int-float-str`（看得到 17 行、旧定义显示 21 行）与
+    `divmod-and-floor`（看得到 19 行、旧定义显示 21 行）都因此被「不超过 20 行」
+    的筛选漏掉。`lines` 的定义**必须与 build_programs.py 同法**，否则这道门会
+    在一处无害的差异上永远报红。
+
+    「去掉指令行」的判定复用 `library.py` 已有的 `_is_directive`——两边都在
+    校验门这一侧，是同一件事的同一个判定，不是独立测量。真正要求互相独立的是
+    构建脚本（build_programs.py）与这道门：门不导入构建脚本的函数，构建脚本
+    也不导入这里的，各自维护一份与 `core/exercise.js` 的
+    `DIRECTIVE_OPEN`/`DIRECTIVE_CLOSE` 同义的判定。
 
     与 build_programs --check 不重复：那一道只在「回写后有变化」时报红，靠的是
     同一份计算逻辑；这一道从 `.py` 文件重新数一遍行，是对同一事实的第二次独立
     测量——注册表被人手改过一个数字时，它是先响的那个。
     """
+    from . import library  # 惰性导入：与 syntax.py 的做法一致，避开模块级耦合
+
     reg = load_registry()
     by_id = {t['id']: t for t in reg['tools']}
     counts: dict = {}
@@ -305,8 +320,10 @@ def program_count_check() -> int:
         if not py_path.exists():
             continue                     # 缺文件由 chapter_manifest_check 报
         src = read_text(py_path)
+        body_lines = sum(1 for line in src.splitlines()
+                          if not library._is_directive(line))
         n, total = counts.get(tool, (0, 0))
-        counts[tool] = (n + 1, total + len(src.splitlines()))
+        counts[tool] = (n + 1, total + body_lines)
 
     rc = 0
     for tool, (n, total) in sorted(counts.items()):
@@ -322,7 +339,7 @@ def program_count_check() -> int:
             rc = 1
         if entry.get('lines') != total:
             print(f'ERROR: {tool} 的 lines 注册表写 {entry.get("lines")!r}，'
-                  f'重算是 {total}（定义：len(src.splitlines())，含 BLANK 指令行）',
+                  f'重算是 {total}（定义：去掉 BLANK 指令行之后的行数，不含指令行）',
                   file=sys.stderr)
             rc = 1
     if not counts:
@@ -330,7 +347,8 @@ def program_count_check() -> int:
               '不是跑了个寂寞', file=sys.stderr)
         return 1
     if rc == 0:
-        print(f'程序计数：{len(counts)} 个工具的 programs/lines 与磁盘重算一致')
+        print(f'程序计数：{len(counts)} 个工具的 programs/lines 与磁盘重算一致'
+              f'（lines 不含 BLANK 指令行）')
     return rc
 
 

@@ -36,9 +36,19 @@
      行终止符，原样出现会在解析期就截断字符串字面量、造成语法错。**不要**改用
      `ensure_ascii=False`，那样两个码位就不再被转义。
 
-`lines` 的定义（T14 的 `program_count_check` 会用同一个定义重算，两边必须同法，
-否则那道门会在一处无害的差异上永远报红）：`len(src.splitlines())`，**含** BLANK
-指令行——`.py` 文件本身能跑，BLANK 指令是 Python 注释，计入总行数是诚实的。
+`lines` 的定义（Task 11c 追加裁决 T11-1，源自 Task 11 评审 I4；T14 的
+`program_count_check` 用同一个定义重算，两边必须同法，否则那道门会在一处无害
+的差异上永远报红）：源码去掉 BLANK 指令行（`# >>> BLANK …` 与 `# <<< BLANK`）
+之后的行数，**不含**指令行——这正是读模式与临摹模式里她看到的程序
+（`core/exercise.js` 的 `clean()`）的行数。页面把 `lines` 当「程序有多长」显示，
+选择器「不超过 20 / 40 / 80 行」也按它筛：旧定义（含指令行）每挖一个空就多算
+两行，ch01 的 `int-float-str`（看得到 17 行、旧定义显示 21 行）与
+`divmod-and-floor`（看得到 19 行、旧定义显示 21 行）都因此被「不超过 20 行」的
+筛选漏掉。
+
+判定「是不是指令行」本脚本自带一份实现（见下面 `_IS_DIRECTIVE_LINE_RE`），与
+`program_count_check` 复用的 `gates/library.py` 判定各自独立——构建脚本与门
+互为独立测量，谁都不导入对方的函数。
 
 编码纪律（裁决 R21）：R16 允许 BLANK 指令行里写中文提示（`hint="…" hintEn="…"`）
 之后，`.py` **不再保证 ASCII 可解码**。本脚本读写任何 `.py` / `chapter.json` /
@@ -66,6 +76,23 @@ END_MARK = '/* <<< GENERATED:PROGRAMS */'
 MARK_RE = re.compile(
     r'/\* >>> GENERATED:PROGRAMS(.*?) \*/\n(.*?)/\* <<< GENERATED:PROGRAMS \*/',
     re.DOTALL)
+
+# 与 core/exercise.js 的 DIRECTIVE_OPEN / DIRECTIVE_CLOSE 同义（同一对正则，
+# 各自独立抄写一份——本脚本不导入 gates/library.py 的 _is_directive，那道门
+# 也不导入这两个常量，见文件头「lines 的定义」）：
+#   DIRECTIVE_OPEN  = /^\s*#\s*>>>\s*BLANK\s+(.*)$/
+#   DIRECTIVE_CLOSE = /^\s*#\s*<<<\s*BLANK\s*$/
+_DIRECTIVE_OPEN_RE = re.compile(r'^\s*#\s*>>>\s*BLANK\s+(.*)$')
+_DIRECTIVE_CLOSE_RE = re.compile(r'^\s*#\s*<<<\s*BLANK\s*$')
+
+
+def _is_directive_line(line: str) -> bool:
+    return bool(_DIRECTIVE_OPEN_RE.match(line) or _DIRECTIVE_CLOSE_RE.match(line))
+
+
+def count_lines(src: str) -> int:
+    """`lines` 的定义：源码去掉 BLANK 指令行之后的行数（见文件头）。"""
+    return sum(1 for line in src.splitlines() if not _is_directive_line(line))
 
 
 def encode_payload(payload: dict) -> str:
@@ -155,7 +182,7 @@ def build_programs_for_chapter(chapter_dir: pathlib.Path, data: dict) -> tuple:
             raise SystemExit(
                 f'ERROR: {chapter_path} 点名的程序文件不存在：{py_path}')
         src = py_path.read_text(encoding='utf-8')
-        lines = len(src.splitlines())
+        lines = count_lines(src)
         prog_out = dict(prog)
         prog_out['source'] = src
         prog_out['lines'] = lines
