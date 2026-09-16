@@ -68,6 +68,11 @@ def _fallback_entries(name: str):
     return data, None
 
 
+def _canon(value) -> str:
+    """类型也算数的比较键：`json.dumps(True) == 'true'`、`json.dumps(1) == '1'`。"""
+    return json.dumps(value, sort_keys=True, ensure_ascii=False)
+
+
 def registry_check() -> int:
     """注册表自洽 + 与磁盘双向一致。
 
@@ -116,9 +121,11 @@ def registry_check() -> int:
             print(f'ERROR: {tid} 的 file 不存在：{f}', file=sys.stderr)
             rc = 1
 
-        if d.get('module') not in MODULES:
-            print(f'ERROR: {tid} 的 module 必须是 1–8，实际 {d.get("module")!r}',
-                  file=sys.stderr)
+        # `type(...) is int`，不是 `in MODULES`：Python 里 `True == 1`、`True in {1..8}`
+        # 都成立，`"module": true` 会原样通过，而页面的 JS 按 `=== 1` 分组时它哪组都不是。
+        if type(d.get('module')) is not int or d.get('module') not in MODULES:
+            print(f'ERROR: {tid} 的 module 必须是整数 1–8，实际 {d.get("module")!r}'
+                  f'（{type(d.get("module")).__name__}）', file=sys.stderr)
             rc = 1
         if d.get('accent') not in ACCENTS:
             print(f'ERROR: {tid} 的 accent 必须是 {sorted(ACCENTS)} 之一，'
@@ -193,7 +200,9 @@ def fallback_check() -> int:
                       f'缺少 {sorted(want_fields - got_fields)}', file=sys.stderr)
                 rc = 1
             for field in sorted((want_fields & got_fields) - {'version'}):
-                if e[field] != by_id[tid].get(field):
+                # 比 JSON 文本而不是 `!=`：`True == 1`、`1.0 == 1` 在 Python 里都成立，
+                # 而页面的 JS 拿 `===` 比，类型不同就是不同。sort_keys 让双语对象的键序无关。
+                if _canon(e[field]) != _canon(by_id[tid].get(field)):
                     print(f'ERROR: {name} 的 FALLBACK 条目 {tid} 的 {field} 与注册表不同\n'
                           f'    FALLBACK：{e[field]!r}\n'
                           f'    注册表：  {by_id[tid].get(field)!r}\n'
