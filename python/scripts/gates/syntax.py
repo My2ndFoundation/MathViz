@@ -277,8 +277,8 @@ process.stdout.write(JSON.stringify({ LEVELS: P.LEVELS, KINDS: P.KINDS, BOARDS: 
 #                       Python 的 `.` 照样匹配，Python 侧的门全都看不出来。
 #   U+0085 (NEL)     —— Python 的 `str.splitlines()` 把它当换行，页面的 `split('\n')`
 #                       不当；行数会在两边分岔。
-FORBIDDEN_LINE_BREAKS = {' ': 'LINE SEPARATOR', ' ': 'PARAGRAPH SEPARATOR',
-                         '': 'NEXT LINE (NEL)'}
+FORBIDDEN_LINE_BREAKS = {'\u2028': 'LINE SEPARATOR', '\u2029': 'PARAGRAPH SEPARATOR',
+                         '\u0085': 'NEXT LINE (NEL)'}
 
 
 def js_parser_parity_check() -> int:
