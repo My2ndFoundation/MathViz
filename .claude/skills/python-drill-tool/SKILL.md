@@ -21,15 +21,20 @@ description: >-
 
 ## 你碰什么、不碰什么
 
-| 你写 | 生成 / 中央登记，**不要手改** |
+| 你写 | 生成，**不要手改**（但重新生成的结果**要一起提交**） |
 |---|---|
 | `python/programs/chNN-<slug>/chapter.json` 与其中点名的 `.py` | `tools/*.html` 里的全部 `GENERATED:*` 区段 |
 | `python/programs/chNN-<slug>/_fixtures/`（程序要读的数据文件） | `python/app.html` / `index.html` 的 `GENERATED:FALLBACK` |
 | `python/scripts/gates/refs/chNN_<slug>.py`（property 参照） | `python-tools.json` 的 `programs` / `lines` |
-| 新工具页：从 `tools/_skeleton.html` 复制后改那 6 处 | 注册表条目（写进报告，由中央登记） |
+| 新工具页：从 `tools/_skeleton.html` 复制后改那 6 处 | |
+| 新工具页的注册表条目：自己追加进 `python/python-tools.json`（`desc` / `tag` / `changelog` 可以是草稿，控制方集成时审改） | |
 
 生成脚本：`inline_core.py`（core → 页面）、`build_programs.py`（程序 → 页面 + 注册表计数）、
-`sync_fallback.py`（注册表 → 两个导航页）。钩子会代跑，但提交后要读 `git status --short` 的每一行。
+`sync_fallback.py`（注册表 → 两个导航页）。钩子会代跑一部分，但提交后要读 `git status --short` 的每一行。
+
+为什么注册表条目由你自己加（第 1 期地基终审改；原先写的是「写进报告、由中央登记」，工具链上跑不通）：
+`build_programs.py` 在工具页没有注册表条目时**硬错误退出**（`python-tools.json 里没有 id='py-…' 的条目，
+无法回写 programs/lines`），`page_mirror_check` / `registry_check` 也要求条目存在——不先加条目，你一道门都跑不绿。
 
 `lines`（选择器「不超过 20/40/80 行」筛的就是它，面板顶部也显示它）是源码**去掉 BLANK 指令行**
 之后的行数（Task 11c）——这是读模式/临摹模式里她真正看到的程序的长度，挖多一个空不会让它变长。
@@ -177,14 +182,32 @@ EOF
 
 ## 三种作业
 
-**A. 新增一页**
-1. `cp python/tools/_skeleton.html python/tools/py-<name>.html`，改文件开头注释列出的 6 处（description meta、tool-version、`<title>`、版本记录、`GENERATED:PROGRAMS none` 去掉 `none`、`TOOL` 块）。`TOOL.accent` 查上面的配色表。
-2. 建 `python/programs/chNN-<slug>/`：`chapter.json`（顶层 `"module"` 与 `"tool": "py-<name>"`）+ `.py` + 需要时 `_fixtures/`。
+**A. 新增一页**（命令都在仓库根目录跑）
+1. `cp python/tools/_skeleton.html python/tools/py-<name>.html`，改文件开头注释列出的 6 处（description meta、tool-version、`<title>`、版本记录、`GENERATED:PROGRAMS none` 去掉 `none`、`TOOL` 块）。`TOOL.accent` 查上面的配色表；`TOOL.title` 必须与下面第 4 步注册表条目的 `title` 逐字相同（`page_mirror_check`）。
+2. 建 `python/programs/chNN-<slug>/`：`chapter.json`（顶层 `"module"` 与 `"tool": "py-<name>"`）+ `.py` + 需要时 `_fixtures/`。`run.expect` 照下面「生成 `run.expect`」一节粘贴真实输出。
 3. 需要 property 时建 `gates/refs/chNN_<slug>.py`（章目录名的连字符换成下划线）。
-4. 注册表条目（id / file / accent / module / kicker / title / desc / tag / version `1.0.0` / engine 与其他工具相同 / changelog）写进报告，由中央登记。
+4. **自己在 `python/python-tools.json` 的 `tools` 数组末尾追加本页条目**，字段顺序照已有条目：
+   `id`（= `py-<name>`）/ `file`（`tools/py-<name>.html`）/ `accent` / `module` / `kicker` / `title` / `desc` / `tag`（后四个都是 `{"en": …, "zh": …}`）/
+   `version` `"1.0.0"` / `engine`（与其他工具相同，= 页面 `tool-engine` meta）/ `programs` `0` / `lines` `0`（占位，第 5 步由脚本回写）/
+   `changelog` `[{"version": "1.0.0", "date": "YYYY-MM-DD", "en": …, "zh": …}]`。`desc` / `tag` / `changelog` 写草稿即可。
 5. `python3 python/scripts/build_programs.py && python3 python/scripts/inline_core.py && python3 python/scripts/sync_fallback.py && python3 python/scripts/check.py`
+   ——`build_programs.py` 回写 `programs` / `lines` 并注入页面，`sync_fallback.py` 改写两个导航页的 FALLBACK。必须全绿。
+6. **按显式路径一起提交**（绝不 `git add -A`）：`python/tools/py-<name>.html`、`python/programs/chNN-<slug>/`、
+   （有的话）`python/scripts/gates/refs/chNN_<slug>.py`、`python/python-tools.json`、`python/app.html`、`python/index.html`。
+   提交后读 `git status --short` 的每一行。
 
-**B. 给已有页加程序**：第 2、3 步 + 跑同一串命令；注册表的 `programs` / `lines` 由脚本回写。
+**B. 给已有页加程序**：第 2、3 步 + 第 5 步那一串命令；`build_programs.py` 回写注册表的 `programs` / `lines`
+（FALLBACK 不含这两个字段，两个导航页不会变）。提交 `.py` / `chapter.json` / refs、`python/tools/py-<name>.html`、`python/python-tools.json`。
+
+**堆叠分支之间的冲突**（多页并行时，`python-tools.json` 与两个导航页的 FALLBACK 必然冲突——都是数组末尾追加）：
+**不手工合并。** 取基线分支（`main`，或你堆叠在其上的那个分支；下面记作 `main`）的版本、补回本页条目、重跑生成脚本：
+```bash
+git checkout main -- python/python-tools.json python/app.html python/index.html   # 合并冲突中照样可用，直接按 main 的内容解决
+# 把本页那一条注册表条目重新追加到 tools 数组末尾（从自己分支的版本里拷：git show <你的分支>:python/python-tools.json）
+python3 python/scripts/build_programs.py && python3 python/scripts/sync_fallback.py && python3 python/scripts/check.py
+git add python/python-tools.json python/app.html python/index.html
+```
+工具页的 `GENERATED:PROGRAMS` 区段若也冲突，同理：取任一边，重跑 `build_programs.py`。
 
 **C. 升级一页**：版本三处同步——注册表 `version` + `changelog`（最新的放最前）、页面 `tool-version` meta、页面头部版本记录注释（右上角徽章读 meta，不用改）。改了 `core/` 时 engine 升一次，**所有工具与 `_skeleton.html` 一起升**（`page_mirror_check` 要求全库唯一）。版本号是缓存键：不升，线上用户会一直看到旧页面。
 
