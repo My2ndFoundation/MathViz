@@ -14,6 +14,9 @@
 2. {{REQUIRED 清单出处，如 docs/superpowers/specs/2026-09-16-python-phase1-design.md §7.1}} —— 本页程序清单（id / 变体组 / 教什么 / P 参照）。清单审过了：**不增、不删、不换**；觉得某个程序不够经典或有更好的替换，写进报告，不擅自改。
 3. {{REQUIRED 内容标准出处，如同一文件 §6}} —— 内容标准与页面边界。
 
+**全库已用的 `problem` 名**（`variant_check` 按全库分组：单例程序的 `problem` 名若与下列重名，会被误并成跨页变体组，门不会红）：
+{{REQUIRED 控制方从 `python/programs/*/chapter.json` 现取的 problem 名清单}}
+
 ## 工作区与基线
 
 - 你在自己的 worktree 里工作。**第一步**：`git merge --ff-only {{REQUIRED 集成分支名，如 claude/python-wave-m1}}`，然后把 `git rev-parse HEAD` 与 `git merge-base HEAD origin/main` 两个值写进报告第一行。
