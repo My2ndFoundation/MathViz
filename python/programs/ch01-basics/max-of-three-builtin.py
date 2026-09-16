@@ -2,7 +2,9 @@
 
 
 def max_of_three(a, b, c):
+# >>> BLANK id=builtin-call level=1 hint="不自己比，让内置函数取最大值再交回去——三个数作为三个分开的参数传进去，按参数表的先后，不先装进列表或元组" hintEn="No comparisons of your own: let the built-in pick the largest and hand it back - pass the three numbers as three separate arguments in parameter order, not packed into a list or tuple first"
     return max(a, b, c)
+# <<< BLANK
 
 
 if __name__ == "__main__":
