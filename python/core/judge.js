@@ -58,19 +58,24 @@
     return m[0].length;
   }
 
-  /* 每一行相对第一条**非空行**的缩进差，空行整条跳过（不占数组里的一格）。
-     这样整体缩进（由占位块的前缀撑出）被吞掉，行间的相对缩进保留。 */
+  /* 每一条**非空行**相对第一条非空行的缩进差，空行整条跳过（不占数组里的一格）。
+     这样整体缩进（由占位块的前缀撑出）被吞掉，行间的相对缩进保留。
+     relLines 与 rel 一一对应，记的是每一项在源码里的**物理行号（0 起）**——
+     跳过空行之后 rel 数组的下标就不再等于物理行号了，UI 拿 index 去放光标，
+     指错行是静默的坏（裁决 R31），所以必须把物理行号单独带出来。 */
   function relativeIndent(src) {
     var lines = src.split('\n');
     var leads = [];
+    var relLines = [];
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
       if (/^[ \t]*$/.test(line)) { continue; } /* 空行：跳过，不计入 */
       leads.push(leadingWidth(line));
+      relLines.push(i);
     }
-    if (leads.length === 0) { return []; }
+    if (leads.length === 0) { return { rel: [], relLines: [] }; }
     var base = leads[0];
-    return leads.map(function (w) { return w - base; });
+    return { rel: leads.map(function (w) { return w - base; }), relLines: relLines };
   }
 
   /* src 里每一个字符偏移量所在的行起始偏移量表：starts[k] 是第 k 行（0 起）
@@ -84,10 +89,11 @@
     return starts;
   }
 
-  /* normalize(src) -> { toks: [{text, line, col}], rel: number[] }
-     toks：滤掉 ws/nl/comment 之后，每个 token 的原文切片 + 行列号（1 起行号，
-           0 起列号，对齐 CPython tokenize 的记号习惯）。
-     rel ：见 relativeIndent。 */
+  /* normalize(src) -> { toks: [{text, line, col}], rel: number[], relLines: number[] }
+     toks     ：滤掉 ws/nl/comment 之后，每个 token 的原文切片 + 行列号（1 起行号，
+                0 起列号，对齐 CPython tokenize 的记号习惯）。
+     rel      ：见 relativeIndent——每条非空行相对第一条非空行的缩进差。
+     relLines ：与 rel 一一对应的物理行号（0 起）。 */
   function normalize(src) {
     var L = pyLex();
     var tokens = L.significant(L.tokenize(src));
@@ -102,7 +108,8 @@
         col: t.start - starts[lineIdx]
       };
     });
-    return { toks: toks, rel: relativeIndent(src) };
+    var ind = relativeIndent(src);
+    return { toks: toks, rel: ind.rel, relLines: ind.relLines };
   }
 
   /* 两个数组第一处不同的下标；一个是另一个的前缀时，下标取较短那个的长度；
@@ -119,16 +126,35 @@
   /* compare(answer, reference) -> { ok, index, expected, got, kind }
      kind ∈ 'equal' | 'different' | 'missing' | 'extra' | 'indent'
 
-     顺序：先比 rel（不同 -> 'indent'，index 取 rel 数组里第一处不同的
-     行序号，跳过空行之后的序号——见 relativeIndent 的"空行跳过"）；
-     rel 相同再逐 token 比原文，短的一方先到头分类成 missing / extra。 */
+     顺序：先比 rel（不同 -> 'indent'）；rel 相同再逐 token 比原文，
+     短的一方先到头分类成 missing / extra。
+
+     'indent' 分支的 expected/got/index（裁决 R30/R31）：
+       expected = 参考在该处的相对缩进数值，got = 答案在该处的相对缩进数值——
+       两者都是数字，不是 null：UI 要说得出"第 N 行缩进应为 8，你写了 4"，
+       填 null 等于让调用方无话可说，这个模块存在的全部理由就是"报错报得
+       有意义"，缩进这一支不该是例外。
+       index 是**物理行号（0 起）**，不是 rel 数组的下标——rel 数组跳过了
+       空行，下标与物理行号只在挖空体内部没有空行时才碰巧重合；用下标去
+       给 UI 放光标，挖空体一旦出现空行就会指错行，而指错行是静默的坏
+       （她看到光标停在一行没问题的代码上，会开始怀疑自己）。 */
   function compare(answer, reference) {
     var na = normalize(answer);
     var nr = normalize(reference);
 
     var relIdx = firstDiffIndex(na.rel, nr.rel);
     if (relIdx !== -1) {
-      return { ok: false, index: relIdx, expected: null, got: null, kind: 'indent' };
+      var got = relIdx < na.rel.length ? na.rel[relIdx] : null;
+      var expected = relIdx < nr.rel.length ? nr.rel[relIdx] : null;
+      /* 物理行号优先取答案自己的——UI 是在她打的文本里放光标。极端情况下
+         两边非空行数量本身就不同（relIdx 落在较短一方的末尾之外），退而
+         取参考的行号；两边都取不到（理论上不会发生，因为此时 rel 至少
+         一方非空）时退到答案最后一条非空行。 */
+      var line;
+      if (relIdx < na.relLines.length) { line = na.relLines[relIdx]; }
+      else if (relIdx < nr.relLines.length) { line = nr.relLines[relIdx]; }
+      else { line = na.relLines.length ? na.relLines[na.relLines.length - 1] : 0; }
+      return { ok: false, index: line, expected: expected, got: got, kind: 'indent' };
     }
 
     var at = na.toks, rt = nr.toks;

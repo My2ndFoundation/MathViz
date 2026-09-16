@@ -43,6 +43,17 @@ no('for i in r:\nprint(i)', 'for i in r:\n    print(i)', '空内部的相对缩�
   T.eq(r.kind, 'indent', '缩进不同单独分类，不混进 different');
 })();
 
+/* ---- 裁决 R30/R31：indent 的 expected/got 是缩进数值，index 是物理行号 ---- */
+(function () {
+  const ans = 'a = 1\n\n  b = 2';        // 中间一个空行，第 2 行（物理行号 2）多缩进两格
+  const ref = 'a = 1\n\nb = 2';
+  const r = J.compare(ans, ref);
+  T.eq(r.kind, 'indent', '缩进不同');
+  T.eq(r.index, 2, 'index 是物理行号 2，不是 rel 下标 1');
+  T.eq(r.expected, 0, 'expected 是参考的相对缩进');
+  T.eq(r.got, 2, 'got 是她写的相对缩进');
+})();
+
 ok('x = 1', 'x = 1', '完全相同判同');
 T.eq(J.compare('x = 1', 'x = 1').index, -1, '判同时 index 为 -1');
 
