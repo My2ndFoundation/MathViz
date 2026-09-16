@@ -708,7 +708,7 @@
     '.tok-keyword{color:#c4b5fd}.tok-string,.tok-fstring{color:#86efac}.tok-number{color:#fbbf24}',
     '.tok-comment{color:#64748b;font-style:italic}.tok-op,.tok-punct{color:#94a3b8}',
     '.tok-builtin{color:#67e8f9}.tok-softkw{color:#a5b4fc}.tok-name{color:#e2e8f0}',
-    '.tok-decorator{color:#fda4af}',
+    '.tok-decorator{color:#bef264}',
     '@media (max-width:880px){.py-picker{flex-basis:170px}.py-panel{display:none}}'
   ].join('\n');
 
