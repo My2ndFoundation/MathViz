@@ -142,4 +142,53 @@ if git diff --cached --name-only | grep -qE '^cryptography/(core|examples|tools|
   fi
 fi
 
+# ---- python 子项目 ----
+# 与 chess / cryptography 两段同构，但**有两个生成脚本**而不是一个：
+#   · inline_core.py    —— python/core/**/*.js  → tools/*.html 的 GENERATED:<模块> 区段
+#   · build_programs.py —— python/programs/ch*/ → tools/*.html 的 GENERATED:PROGRAMS 区段，
+#                          外加把 programs / lines 两个派生字段回写进 python-tools.json
+# 触发条件因此比 chess 段多一个 programs/。两个脚本都只暂存自己 --print-changed
+# 打印出来的路径——同 chess 段那条纪律：整体 glob 会把别的会话半写的文件卷进本次提交。
+if git diff --cached --name-only | grep -qE '^python/(core|programs|tools|scripts)/'; then
+  PY_CORE_CHANGED=$(python3 python/scripts/inline_core.py --print-changed)
+  if [ $? -ne 0 ]; then
+    echo "python: inline_core.py 失败，提交中止" >&2
+    exit 1
+  fi
+  PY_PROG_CHANGED=$(python3 python/scripts/build_programs.py --print-changed)
+  if [ $? -ne 0 ]; then
+    echo "python: build_programs.py 失败，提交中止" >&2
+    exit 1
+  fi
+  for CHANGED in "$PY_CORE_CHANGED" "$PY_PROG_CHANGED"; do
+    [ -n "$CHANGED" ] || continue
+    echo "$CHANGED" | while IFS= read -r f; do
+      [ -n "$f" ] && git add "$f"
+    done
+  done
+  if ! python3 python/scripts/check.py; then
+    echo "python: check.py 未通过，提交中止" >&2
+    exit 1
+  fi
+fi
+
+# ---- 导航契约（六个导航页）----
+# 触发条件是任何一个导航页或本门自己被改动。这道门守的是「同一个导航行为必须
+# 同时落在全部子项目上」：`?v=` 曾经只在 cryptography 有、chess 整整一季没有，
+# 六个导航页之间没有共享代码，只能靠跨页比对。
+#
+# ⚠ 根目录那两页与子项目那六页**分开写成两个顶层分支**，故意不合并成
+#   `^((chess|cryptography|python)/)?(app|index)\.html$`。那个更短的写法在
+#   ugrep 7.8.4（本机 PATH 上的 `grep`）下**会漏掉 `cryptography/app.html`**
+#   ——只漏这一条，chess/ 与 python/ 照常命中，且稳定复现；/usr/bin/grep 与
+#   Python 的 re 都认为它该匹配。可选捕获组 `(…)?` 套交替是触发条件。
+#   漏掉的后果是这道门对那一页静默失效，而本机与 CI 会给出不同的结论——
+#   正是 CLAUDE.md 里「本机绿不算绿」那一类。下面的写法在两个 grep 下都对。
+if git diff --cached --name-only | grep -qE '^(app|index)\.html$|^(chess|cryptography|python)/(app|index)\.html$|^scripts/check_nav_contract\.py$'; then
+  if ! python3 scripts/check_nav_contract.py; then
+    echo "nav-contract: check_nav_contract.py 未通过，提交中止" >&2
+    exit 1
+  fi
+fi
+
 exit 0

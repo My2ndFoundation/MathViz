@@ -85,6 +85,7 @@ BRAND_PAGES = (
     'index.html', 'app.html',
     'chess/index.html', 'chess/app.html',
     'cryptography/index.html', 'cryptography/app.html',
+    'python/index.html', 'python/app.html',
 )
 
 

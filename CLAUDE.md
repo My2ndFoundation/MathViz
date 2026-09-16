@@ -13,7 +13,7 @@ A collection of **single-file, zero-dependency HTML math/physics visualization t
 - `app.html` — the navigation shell: a collapsible sidebar plus a main content area that loads a tool in an **iframe** (iframe, not injection: every tool is a whole page with its own top-level `state`/`cam`, full-screen canvas and keyboard shortcuts, so two of them in one document would collide). It reads `tools.json` at runtime when served, and falls back to its own embedded minimal list (id / file / cat / accent / title / kicker) when opened from `file://`. That fallback list is **generated, not hand-maintained** — see below. Tools themselves are never modified and stay independently openable.
 - `archive/` — retired tools that are no longer registered or linked from the landing page (e.g. `trig-essence-3d.html`, the original hand-written tool the design system was extracted from).
 - `scripts/sync_registry.py` — propagates `tools.json` into its mirrors (see below).
-- `chess/` and `cryptography/` — two **independent subprojects**, each with its own registry, core modules, navigation shell and validation gate. Everything above this line describes the maths collection only; see "Subprojects" below before touching either.
+- `chess/`, `cryptography/` and `python/` — three **independent subprojects**, each with its own registry, core modules, navigation shell and validation gate. Everything above this line describes the maths collection only; see "Subprojects" below before touching any of them.
 
 ## Registry sync is automated
 
@@ -36,46 +36,53 @@ python3 scripts/sync_registry.py --check  # verify only; exit 1 if out of sync
 - `.githooks/pre-commit` runs it on any commit touching `tools.json` / `app.html` / `index.html`, re-stages a regenerated `app.html`, and blocks the commit if `index.html` still lags. Enable once per clone: `git config core.hooksPath .githooks` (bypass with `--no-verify`).
 - `.github/workflows/registry-sync.yml` re-runs `--check` on every push and PR, plus the `node --check` syntax gate over `app.html`, `index.html` and every tool — so a clone without the hook configured still can't merge drift.
 
-## Subprojects — `chess/` and `cryptography/`
+## Subprojects — `chess/`, `cryptography/` and `python/`
 
 > **MathViz owns the ecosystem; each subproject owns itself.**
 
-`chess/` and `cryptography/` sit beside the maths collection, not inside it. They share the
-repository, the deployment, the design philosophy and the single-file/bilingual rules — and share
-nothing else. Both have the same shape:
+`chess/`, `cryptography/` and `python/` sit beside the maths collection, not inside it. They share
+the repository, the deployment, the design philosophy and the single-file/bilingual rules — and
+share nothing else. All three have the same shape:
 
 ```
 <sub>/app.html  <sub>/index.html  <sub>/<sub>-tools.json  core/  tools/  scripts/
 ```
 
-**Registry isolation is a hard boundary.** Three registries, mutually disjoint:
+**Registry isolation is a hard boundary.** Four registries, mutually disjoint:
 `tools.json` → `outputs/*.html`, `chess/chess-tools.json` → `chess/tools/*.html`,
-`cryptography/cryptography-tools.json` → `cryptography/tools/*.html`.
-**Never register a chess or cryptography tool in the root `tools.json`**, and never point a
+`cryptography/cryptography-tools.json` → `cryptography/tools/*.html`,
+`python/python-tools.json` → `python/tools/*.html`.
+**Never register a subproject tool in the root `tools.json`**, and never point a
 subproject registry at `../outputs/`. `scripts/sync_registry.py` does not govern subprojects; each
 has its own gate, run by `.githooks/pre-commit` and `.github/workflows/registry-sync.yml`:
 
 ```bash
 python3 chess/scripts/check.py
 python3 cryptography/scripts/check.py
+python3 python/scripts/check.py
 ```
 
-**Editing model (both).** `core/**/*.js` is the single edit source; `scripts/inline_core.py`
+**Editing model (all three).** `core/**/*.js` is the single edit source; `scripts/inline_core.py`
 injects it into the `/* >>> GENERATED:X */ … /* <<< GENERATED:X */` regions of `tools/*.html` so
 each page stays self-contained and `file://`-openable. **Never hand-edit a GENERATED region** —
 change `core/`, then re-run the script. Each subproject also owns its i18n keys
-(`chess-lang` / `chess-nav`, `cryptography-lang` / `cryptography-nav`) and defaults to **English**,
-unlike the maths tools' Chinese default.
+(`chess-lang` / `chess-nav`, `cryptography-lang` / `cryptography-nav`,
+`python-lang` / `python-nav`) and defaults to **English**, unlike the maths tools' Chinese default.
 
-**The two shells share no code, so they share a contract instead:
-`docs/superpowers/subproject-nav-contract.md`.** Eight clauses the four navigation pages
+**The three shells share no code, so they share a contract instead:
+`docs/superpowers/subproject-nav-contract.md` (v2.0).** Eight clauses the six navigation pages
 (each subproject's `app.html` + `index.html`) must satisfy — the `?v=` cache key on every
 outbound URL, `version` on every FALLBACK entry, the single self-healing `PARENT_HOME`,
 `target="_top"` on the return link, the gallery filling the stage, the closed accent set,
-i18n semantics, and iframe history. Read it **before touching either shell, and before
-adding a third subproject** — it doubles as that subproject's acceptance list. It also
-records, per clause, which gate enforces it in which subproject, and the two rows that are
-still ❌ (chess has no `registry_check()`; C4–C8 have no mechanical gate at all).
+i18n semantics, and iframe history. Read it **before touching any shell, and before
+adding a fourth subproject** — it doubles as that subproject's acceptance list.
+
+Nine of those rows now have a mechanical gate: **`scripts/check_nav_contract.py`** scans all six
+nav pages plus the root `index.html`/`app.html`, and for the two clauses that static text cannot
+see it evaluates the page script in node's `vm` against a stub DOM — `#btnAlone`'s `?v=` must equal
+the iframe's (hardcoding one to `v=0` passes every "does it have a `?v=`" assertion), and `TOOLS` /
+`FALLBACK` / `<group>_LABELS` must exist and be non-empty after evaluation (deleting
+`var TOOLS = FALLBACK;` leaves the syntax gate green and the page semantically dead).
 
 A navigation behaviour landing in only one subproject is the failure mode this exists for:
 `?v=` shipped in cryptography and was missing from chess for a whole season — six upgrades
@@ -84,6 +91,22 @@ copies (PR #158). Worse, the FALLBACK-`version` rule was written down *here* and
 cryptography's own source comments while all 54 of its FALLBACK entries lacked the field —
 under `file://` every card read `v0`. **A clause with no gate is not a clause**; when you add
 one to the contract, add its gate and prove the gate goes red.
+
+**Adding a subproject touches five wiring points outside its own directory.** Miss one and the
+symptom is usually "green locally, red on CI", because two of the gates enumerate
+`git ls-files '*.html'` rather than what you changed:
+
+1. `scripts/apply_branding.py` — `BRAND_PAGES` (the two nav pages get a `GENERATED:BRAND-LOGO`
+   region; every page gets `GENERATED:FAVICON`).
+2. `scripts/apply_footer.py` — `LANG_CFG` **and** the `SUBPROJECTS` tuple `subproject_of()` reads.
+   Miss it and the new nav pages are treated as root pages: wrong `LKEY`, wrong privacy path, and
+   **running the script overwrites the correct values the pages already had**.
+3. Root `index.html` — a subproject card (`target="_top"`, `href` with `?lang=`, an accent from the
+   closed set). `sync_registry.py` does not govern these cards; `check_nav_contract.py` does.
+4. `.githooks/pre-commit` — a section that runs the subproject's generators and its `check.py`.
+5. `.github/workflows/registry-sync.yml` — the subproject's `check.py`, plus its pages in the
+   inline-script syntax loop. **Actions runs the workflow file of the branch under test**, so a
+   branch cut before this change never runs the new steps.
 
 ### cryptography/ specifics
 
@@ -132,6 +155,36 @@ A related trap worth knowing when adding gates: `node -e` **and** `node` reading
 both define `module` and `require`, so a UMD module tested that way takes its **node** branch. To
 exercise the browser branch you need `vm` with a bare context. A gate that tests the wrong branch is
 worse than no gate — it advertises coverage it does not have.
+
+### python/ specifics
+
+Python programming practice for one A-level Computer Science student. Design:
+`docs/superpowers/specs/2026-09-16-python-subproject-design.md`. It is the third subproject and the
+one that breaks the most assumptions inherited from the other two:
+
+- **No canvas and no runtime.** The other two subprojects render a scene; these pages are a code
+  editor with three modes — read a worked program with per-line notes, fill in the blanks it leaves
+  behind, or shadow-trace it keystroke by keystroke. **Nothing executes Python in the browser**;
+  correctness is decided by comparing what the student typed against the source
+  (`core/judge.js`), not by running it. The expected stdout is checked at build time by CPython
+  instead, which is the whole reason the programs are real `.py` files.
+- **Two generator scripts, so `.py` is a second class of edit source.**
+  `python/scripts/inline_core.py` injects `core/**/*.js` into the seven
+  `GENERATED:{PY-LEX,STORE,EXERCISE,EDITOR,JUDGE,TRACE,INTERACT}` regions — all seven are required
+  on every page, there is no per-page opt-in list. `python/scripts/build_programs.py` injects
+  `programs/ch*/` (a `chapter.json` plus the `.py` files it names) into `GENERATED:PROGRAMS`, and
+  writes the derived `programs` / `lines` fields back into `python-tools.json`.
+  **Never hand-edit either region**; edit `core/*.js` or `programs/ch*/`, then re-run.
+- **Module order does not matter here.** Unlike cryptography's `CRYPTO-CORE`-first rule, every
+  python core module takes its dependency lazily (`factory(function () { return root.PyLex; })`),
+  so the gate to write is "did someone grab `root.X` in the factory arguments", not an order check.
+- **Modules are a fixed closed set of 8** (`MODULE_LABELS`, byte-identical in `app.html` and
+  `index.html`), accents the same closed cyan / rose / violet / emerald / orange, new tools copied
+  from `python/tools/_skeleton.html` — which opts out with `GENERATED:PROGRAMS none`, the same
+  "empty is the shape a slip takes" sentinel cryptography uses.
+
+Its gate is `python3 python/scripts/check.py`, run by the hook (on `^python/(core|programs|tools|scripts)/`)
+and by `registry-sync.yml`.
 
 ## Branding is generated too
 
