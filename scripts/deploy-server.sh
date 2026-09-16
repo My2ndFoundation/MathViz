@@ -17,6 +17,37 @@ SRC=/data/primeforge.app/MathViz/src   # git clone，不对外
 WEB=/data/primeforge.app/MathViz/www   # Caddy 的 root
 SITE=https://mathviz.primeforge.app
 
+# ---- 运行位置守卫 ----
+# 这是**服务器端**脚本：$SRC / $WEB 都是服务器上的本地路径，第 1 步的闸门却查的是
+# GitHub API，在任何机器上都会通过。所以从笔记本上误跑时，你会先看到「闸门全绿」，
+# 再突然吃一句 git 的 "cannot change to ...: No such file or directory"——看起来像
+# 服务器坏了，其实只是跑错了机器。这道守卫把那个困惑换成一句话，并且必须排在
+# 第 1 步**之前**：提示出现在闸门之后就没有意义了。
+if [ ! -d "$SRC" ] || [ ! -d "$WEB" ]; then
+  ROOT_DIR="$(dirname "$SRC")"
+  echo "" >&2
+  if [ ! -d "$ROOT_DIR" ]; then
+    echo "✗ 这个脚本要在**服务器上**运行，当前这台机器不是。" >&2
+    echo "" >&2
+    echo "  找不到 $ROOT_DIR —— 说明这里没有部署目录。" >&2
+    echo "  从本机部署请用：" >&2
+    echo "" >&2
+    echo "      ssh <你的服务器> mathviz-deploy" >&2
+  else
+    echo "✗ 服务器上的一次性设置没做完。" >&2
+    echo "" >&2
+    [ -d "$SRC" ] || echo "  缺少源码目录：$SRC" >&2
+    [ -d "$WEB" ] || echo "  缺少 web 根：   $WEB" >&2
+    echo "" >&2
+    echo "  补建（见 spec 附录 B）：" >&2
+    echo "      sudo mkdir -p $SRC $WEB" >&2
+    echo "      sudo chown -R \"\$USER\":\"\$USER\" $ROOT_DIR" >&2
+    echo "      git clone --depth 1 --branch $BRANCH $REPO_URL $SRC" >&2
+  fi
+  echo "" >&2
+  exit 1
+fi
+
 echo "== 1/4 CI 闸门 =="
 # 先拿到 tip 的 sha，再单独验它——不查 /commits/main/check-runs。
 # 两个理由：
