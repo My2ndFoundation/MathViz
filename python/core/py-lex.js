@@ -22,21 +22,47 @@
      tokens[i].end                       === tokens[i+1].start
      tokens[tokens.length-1].end         === src.length
 
-   ── 与 brief 的两处偏离（都是为了与 CPython tokenize 对齐）──────────────
+   ── 与 brief 的三处偏离，以及它们共同的那条规则（裁决 R23）──────────────
    下游有一道门（T14 lex_vs_cpython_check）拿 CPython 的 tokenize 模块切同一段
-   源码来对区间，所以凡是能和标准对齐的地方都对齐了。两处与 brief 字面不同：
+   源码来对区间，所以凡是能和标准对齐的地方都对齐了。规则是：
 
-   1. 反斜杠在 **raw 串里也**转义下一个字符。brief 第 5 条写的是「转义只在非 raw
-      串里跳过下一个字符」，但 Python 不是这样：raw 串里反斜杠仍然为**切词**目的
-      转义引号（反斜杠本身留在值里）。实测 CPython 3.12：
-        tokenize('r"\\""')  ->  STRING 'r"\\""'  (1,0)-(1,5)     ← 一个 token
-      按 brief 的字面实现，r"\"" 会在第二个引号处收尾，剩下的引号再开一个到
-      文件尾的串——正是本模块存在的理由所要消灭的那种「一个引号毁掉后面整篇」。
+       **CPython 有答案就对齐；CPython 抛错就自己选。**
 
-   2. 未闭合的**单**引号串只吃到行尾，不吃到文件尾（三引号仍吃到文件尾）。
-      brief 第 5 条的「未闭合时吃到文件尾」对三引号是对的（Python 语义如此，
-      brief 的说理段也只举三引号），对单引号串则会把损害放大到整篇。CPython 在
-      这里报的是「未终止的字符串字面量」并把 token 断在行尾，同样只影响一行。
+   这条规则解释了为什么下面第 3 条里 `0x` 留在 brief 字面、而 `1e` 对齐 CPython——
+   看着自相矛盾，其实是同一条规则的两次应用。实测 CPython 3.12.9：
+       tokenize('0x')   ->  TokenError: invalid hexadecimal literal
+       tokenize('0b')   ->  TokenError: invalid binary literal
+       tokenize('1e+')  ->  TokenError: invalid decimal literal
+       tokenize('1e')   ->  不抛，给 NUMBER '1' (1,0)-(1,1) + NAME 'e' (1,1)-(1,2)
+   前三个没有标准可依（标准的答案是「拒绝」，而本模块不许拒绝），所以按 brief
+   字面吃掉已有字符；最后一个有标准，所以照标准切。
+
+   **这张清单必须把自己数全。** 第一版只写了「两处」，漏掉了第 3 条——而 R12/R13/R14
+   三条裁决之所以成立，全靠它们被申报过。一份少算自己的偏离清单，在一个把
+   「写下来了、也信了、但是假的」当头号失败模式的仓库里，本身就是那个失败。
+
+   1. 反斜杠在 **raw 串里也**转义下一个字符。（裁决 R12）
+      · brief 第 5 条：转义只在非 raw 串里跳过下一个字符。
+      · 这里：不分 raw 与否，一律跳过下一个字符。
+      · CPython 3.12：tokenize('r"\\""') -> STRING 'r"\\""' (1,0)-(1,5)，一个 token。
+        raw 串里反斜杠仍然为**切词**目的转义引号（反斜杠本身留在值里）。
+      按 brief 的字面实现，r"\"" 会在第二个引号处收尾，剩下的引号再开一个到文件尾
+      的串——正是本模块存在的理由所要消灭的那种「一个引号毁掉后面整篇」。
+
+   2. 未闭合的**单**引号串只吃到行尾，不吃到文件尾。（裁决 R13）
+      · brief 第 5 条：未闭合时吃到文件尾。
+      · 这里：单引号串止于行尾；三引号仍吃到文件尾（Python 语义如此，brief 的
+        说理段举的也只有三引号）。
+      · CPython 3.12：对未闭合串直接抛 TokenError——**没有标准可依**，所以这一条
+        是设计选择而不是对齐。止于行尾把一个打了一半的引号的破坏限制在一行内。
+
+   3. 残缺指数 `1e` 不把 `e` 吞进数字。（本轮新申报）
+      · brief 第 6 条：「`0x` 与 `1e` 这种残缺写法也要吃掉已有字符并归 number」。
+      · 这里：`0x` 照办（一个 number:'0x'）；`1e` **不**照办，切成 number:'1' +
+        name:'e'。两者的分野就是上面那条规则——`0x` 抛错，`1e` 不抛。
+      · CPython 3.12：tokenize('1e') -> NUMBER '1' + NAME 'e'。
+      两种写法都有断言钉住（`typesOf('n = 0x\n')` 与 `typesOf('x = 1e\n')）——
+      申报了却不测的偏离，等于把同一个缺陷犯两次。
 
    还有一处**不是**偏离、但会让人以为是 bug 的地方：'type' 同时在
    keyword.softkwlist 和 dir(builtins) 里，查表顺序是 keyword → softkw → builtin，
@@ -183,8 +209,11 @@
     return { type: type, end: j > n ? n : j };
   }
 
-  /* 从 i 开始切一个数字，返回结束下标。残缺写法（'0x'、'0b'）照样吃掉已有
-     字符并算 number，绝不抛。 */
+  /* 从 i 开始切一个数字，返回结束下标。
+     进制前缀的残缺写法（'0x'、'0b'）照 brief 第 6 条，吃掉已有字符并算 number；
+     残缺指数 '1e' 反而不这么办，照 CPython 切成 number '1' + name 'e'。
+     分野是文件头那条规则：CPython 对 '0x' 抛错（无标准可依），对 '1e' 不抛
+     （有标准）。见文件头偏离 3。绝不抛。 */
   function scanNumber(src, i) {
     var n = src.length;
     var j = i;
@@ -202,7 +231,7 @@
       while (j < n && (isDigit(src.charAt(j)) || src.charAt(j) === '_')) { j++; }
     }
     /* 指数只有真的跟着数字才吃。残缺的 '1e' 按 CPython 切成 NUMBER '1' + NAME 'e'，
-       而不是把 e 吞进数字里。 */
+       而不是把 e 吞进数字里——这是文件头申报的偏离 3（brief 第 6 条要求吞）。 */
     var e = src.charAt(j);
     if (e === 'e' || e === 'E') {
       var k = j + 1;

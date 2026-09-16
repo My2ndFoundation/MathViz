@@ -132,7 +132,7 @@ T.eq(typesOf('x = 1.\n'), ['name:x', 'op:=', 'number:1.'], '点结尾的浮点�
 
 /* CPython: STRING 'r"\\""' 一个 token —— raw 串里反斜杠**仍然**为切词目的转义引号
    （反斜杠本身留在值里）。brief 第 5 条写的「转义只在非 raw 串里跳过下一个字符」
-   与此不符，见 py-lex.js 文件头「与 brief 的两处偏离」第 1 条。 */
+   与此不符，见 py-lex.js 文件头「与 brief 的三处偏离」第 1 条。 */
 T.eq(typesOf('r"\\""\n'), ['string:r"\\""'], 'raw 串里反斜杠照样转义引号（与 CPython 一致）');
 
 /* CPython: OP '...' 一个 token，不是三个 '.'。靠的是运算符表的长度顺序。 */
@@ -175,8 +175,16 @@ T.eq(typesOf('f(x)\n@dec\n'),
 /* 文件以 @ 开头（连着 EOF 没有换行）。 */
 T.eq(typesOf('@dec'), ['decorator:@dec'], '文件以装饰器收尾（无末换行）');
 
-/* 残缺指数：CPython 给 NUMBER '1' + NAME 'e'，这里照此切，不把 e 吞进数字。 */
-T.eq(typesOf('x = 1e\n'), ['name:x', 'op:=', 'number:1', 'name:e'], '残缺指数不把 e 吞进数字');
+/* ---- 偏离 3（文件头）：残缺写法的两种归宿，靠的是同一条规则 ----
+   规则（裁决 R23）：CPython 有答案就对齐；CPython 抛错就自己选。
+   实测 CPython 3.12.9：
+     '0x'  -> TokenError: invalid hexadecimal literal   → 无标准，按 brief 第 6 条吃掉
+     '1e'  -> NUMBER '1' + NAME 'e'（不抛）             → 有标准，照标准切
+   两条都要钉住。只钉住 '1e' 而不钉 '0x'，就是「申报了却没测」——今天一次重构
+   把 '0x' 改成 number:'0' + name:'x'，全部测试仍会全绿。 */
+T.eq(typesOf('n = 0x\n'), ['name:n', 'op:=', 'number:0x'], '残缺进制前缀整体吃成一个 number（brief 第 6 条）');
+T.eq(typesOf('n = 0b\n'), ['name:n', 'op:=', 'number:0b'], '残缺二进制前缀同理');
+T.eq(typesOf('x = 1e\n'), ['name:x', 'op:=', 'number:1', 'name:e'], '残缺指数不把 e 吞进数字（对齐 CPython）');
 T.eq(typesOf('x = 1e-5\n'), ['name:x', 'op:=', 'number:1e-5'], '带符号指数属于数字');
 
 /* 查表用 Object.create(null)：否则 'constructor' / 'toString' 会命中
@@ -196,7 +204,7 @@ T.eq(typesOf('for _ in range(3):\n'),
 T.eq(typesOf('type(x)\n'), ['softkw:type', 'punct:(', 'name:x', 'punct:)'], 'type 归 softkw 而不是 builtin');
 
 /* 未闭合的**单**引号串只吃到行尾——不是吃到文件尾。见 py-lex.js 文件头
-   「与 brief 的两处偏离」第 2 条：这正是本模块存在的理由所指的那种代价，
+   「与 brief 的三处偏离」第 2 条：这正是本模块存在的理由所指的那种代价，
    一个引号没闭合不该让后面整篇变色。三引号仍然吃到文件尾（Python 语义如此）。 */
 (function () {
   const src = 'x = "oops\ny = 1\n';
