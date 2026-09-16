@@ -22,8 +22,8 @@ import re
 import sys
 
 from . import (ACCENTS, BILINGUAL_FIELDS, ENGINE_PREFIX,
-               META_VERSION_RE, MODULES, PROGRAMS_DIR, ROOT, ROOT_PAGES,
-               iter_programs, load_registry, read_text, tool_pages)
+               META_VERSION_RE, MODULE_ACCENTS, MODULES, PROGRAMS_DIR, ROOT,
+               ROOT_PAGES, iter_programs, load_registry, read_text, tool_pages)
 
 FALLBACK_REGION_RE = re.compile(
     r'/\* >>> GENERATED:FALLBACK \*/\nvar FALLBACK = (.*?);\n/\* <<< GENERATED:FALLBACK \*/',
@@ -384,49 +384,43 @@ def module_label_check() -> int:
 
 
 def accent_module_check() -> int:
-    """同模块同 accent；**相邻**模块必须异 accent。
+    """注册表每条的 accent == MODULE_ACCENTS[module]；表本身覆盖 1–8、取值在闭集、相邻异色。
 
-    颜色在这套导航里是分组的第二条线索（侧栏圆点、卡片左边条）。同一个模块里
-    两个工具用两种颜色，读者会以为它们不是一组；相邻两个模块用同一种颜色，
-    分组线索当场消失——而这两种坏法都不会让任何页面报错。
-
-    第 0 期只有一个模块，所以「相邻异色」这一条**今天在真实数据上无事可做**。
-    它的负控制因此必须往注册表里临时加一条 module:2 / accent:'cyan' 的假条目，
-    否则这道门的后半截是一条从没被执行过的断言——那正是本仓反复抓到的
-    「在结构上无法观察到它声称排除之物」的形状。
+    第 0 期这道门只查「同模块同色、相邻异色」，而且因为只有一个模块，后半截在真实
+    数据上从没执行过。改成「照表」之后：同模块同色是表的推论；相邻异色从「临场挑色
+    时碰运气」变成「对表做一次静态断言」——这条断言每次运行都在真实数据（表）上执行。
     """
-    reg = load_registry()
-    by_module: dict = {}
     rc = 0
-    for d in reg['tools']:
+    if set(MODULE_ACCENTS) != MODULES:
+        print(f'ERROR: MODULE_ACCENTS 的键应恰为模块 1–8，实际 {sorted(MODULE_ACCENTS)}',
+              file=sys.stderr)
+        rc = 1
+    for mod, accent in sorted(MODULE_ACCENTS.items()):
+        if accent not in ACCENTS:
+            print(f'ERROR: MODULE_ACCENTS[{mod}]={accent!r} 不在五色闭集 {sorted(ACCENTS)} 内',
+                  file=sys.stderr)
+            rc = 1
+        nxt = MODULE_ACCENTS.get(mod + 1)
+        if nxt is not None and nxt == accent:
+            print(f'ERROR: MODULE_ACCENTS 相邻模块 {mod} 与 {mod + 1} 都是 {accent!r}——'
+                  f'分组的颜色线索会消失', file=sys.stderr)
+            rc = 1
+
+    checked = 0
+    for d in load_registry()['tools']:
         mod = d.get('module')
         if mod not in MODULES:
             continue                     # 非法 module 由 registry_check 报
-        by_module.setdefault(mod, []).append(d)
-
-    accent_of = {}
-    for mod, items in sorted(by_module.items()):
-        accents = {d.get('accent') for d in items}
-        if len(accents) > 1:
-            detail = '、'.join(f'{d["id"]}={d.get("accent")!r}' for d in items)
-            print(f'ERROR: 模块 {mod} 内部 accent 不统一：{detail}', file=sys.stderr)
+        want = MODULE_ACCENTS.get(mod)
+        if d.get('accent') != want:
+            print(f'ERROR: {d.get("id")} 在模块 {mod}，accent 应为 {want!r}（主规格 §6.1），'
+                  f'实际 {d.get("accent")!r}', file=sys.stderr)
             rc = 1
-        accent_of[mod] = sorted(accents)[0] if accents else None
-
-    mods = sorted(accent_of)
-    adjacent = 0
-    for a, b in zip(mods, mods[1:]):
-        if b - a != 1:
-            continue                     # 中间还没有工具的模块不算相邻
-        adjacent += 1
-        if accent_of[a] == accent_of[b]:
-            ids_a = '、'.join(d['id'] for d in by_module[a])
-            ids_b = '、'.join(d['id'] for d in by_module[b])
-            print(f'ERROR: 相邻模块 {a}（{ids_a}）与 {b}（{ids_b}）都用了 '
-                  f'{accent_of[a]!r}——分组的颜色线索会消失', file=sys.stderr)
-            rc = 1
+            continue
+        checked += 1
+    if rc == 0 and checked == 0:
+        print('ERROR: 一条注册表 accent 都没比到——这道门跑了个寂寞', file=sys.stderr)
+        return 1
     if rc == 0:
-        print(f'配色：{len(by_module)} 个模块内部同色，{adjacent} 对相邻模块异色'
-              + ('（第 0 期只有一个模块，相邻这一条今天无事可做——'
-                 '它的负控制靠临时加一条假条目来执行）' if adjacent == 0 else ''))
+        print(f'配色：{checked} 个工具的 accent 与模块配色表一致；表本身覆盖 1–8 且相邻异色')
     return rc

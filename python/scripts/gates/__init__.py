@@ -35,6 +35,11 @@ STDIN_LINE_RE = re.compile(r'^\[stdin\]:(\d+)$', re.MULTILINE)
 # 八个知识模块是固定闭集（design §6.1），五个 accent 也是（两页的 ACCENTS 白名单）。
 MODULES = set(range(1, 9))
 ACCENTS = {'cyan', 'rose', 'violet', 'emerald', 'orange'}
+# 主规格 §6.1 的模块配色表：同模块同色、相邻模块异色。八个模块五种颜色，所以表必须
+# **事先定死**——按「相邻异色」临场挑，第六个落地的模块起一定撞色，被迫回头改一个
+# 已发布模块的颜色（账本 §一.3）。accent_module_check 同时校验表本身相邻异色。
+MODULE_ACCENTS = {1: 'cyan', 2: 'violet', 3: 'emerald', 4: 'rose',
+                  5: 'orange', 6: 'cyan', 7: 'violet', 8: 'emerald'}
 BILINGUAL_FIELDS = ('kicker', 'title', 'desc', 'tag')
 ENGINE_PREFIX = 'py-'
 
