@@ -88,6 +88,7 @@ GATES = [
     ('A', 'program_count_check',    registry.program_count_check),
     ('A', 'module_label_check',     registry.module_label_check),
     ('A', 'accent_module_check',    registry.accent_module_check),
+    ('A', 'page_mirror_check',      registry.page_mirror_check),
 
     ('B', 'outbound_ref_check',       hygiene.outbound_ref_check),
     ('B', 'script_literal_check',     hygiene.script_literal_check),

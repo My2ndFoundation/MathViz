@@ -23,7 +23,8 @@ import sys
 
 from . import (ACCENTS, BILINGUAL_FIELDS, ENGINE_PREFIX,
                META_VERSION_RE, MODULE_ACCENTS, MODULES, PROGRAMS_DIR, ROOT,
-               ROOT_PAGES, iter_programs, load_registry, read_text, tool_pages)
+               ROOT_PAGES, TOOLS_DIR, iter_programs, load_registry, read_text,
+               run_node, tool_pages)
 
 FALLBACK_REGION_RE = re.compile(
     r'/\* >>> GENERATED:FALLBACK \*/\nvar FALLBACK = (.*?);\n/\* <<< GENERATED:FALLBACK \*/',
@@ -423,4 +424,94 @@ def accent_module_check() -> int:
         return 1
     if rc == 0:
         print(f'配色：{checked} 个工具的 accent 与模块配色表一致；表本身覆盖 1–8 且相邻异色')
+    return rc
+
+
+TOOL_BLOCK_RE = re.compile(r'var TOOL = (\{.*?\n\});', re.DOTALL)
+META_ENGINE_RE = re.compile(r'<meta\s+name="tool-engine"\s+content="([^"]+)"')
+
+
+def _eval_tool_blocks(paths: list) -> dict:
+    """{文件名: {'value': TOOL 对象} | {'error': 文本}}。在 node vm 里求值对象字面量，
+    不用正则抠字段——TOOL 块里有注释、有嵌套对象，正则抠出来的是「看起来像」的值。"""
+    blocks = {}
+    for p in paths:
+        m = TOOL_BLOCK_RE.search(read_text(p))
+        blocks[p.name] = m.group(1) if m else None
+    script = r'''
+const vm = require('vm');
+const blocks = %s;
+const out = {};
+for (const name of Object.keys(blocks)) {
+  if (blocks[name] === null) { out[name] = { error: '找不到 var TOOL = {...};' }; continue; }
+  try { out[name] = { value: vm.runInNewContext('(' + blocks[name] + ')', {}) }; }
+  catch (e) { out[name] = { error: 'TOOL 块求值抛错：' + e.message }; }
+}
+process.stdout.write(JSON.stringify(out));
+''' % json.dumps(blocks, ensure_ascii=False)
+    proc = run_node(script)
+    if proc.returncode != 0:
+        raise RuntimeError('node 求值 TOOL 块失败：' + proc.stderr)
+    return json.loads(proc.stdout)
+
+
+def page_mirror_check() -> int:
+    """每个已注册工具页的 TOOL.id / accent / title 与 tool-engine meta 都等于注册表；
+    全部工具的 engine 相同，且等于 _skeleton.html 的 tool-engine。
+
+    这几处是第 0 期账本没点到的镜像：TOOL 块每页一份，`TOOL.id` 全页零读者、只有一句
+    「必须与注册表一致」的注释；engine 在注册表与页面 meta 各存一份，也无门。
+    所有页面内联的是同一份 core，所以 engine 只可能有一个真值——骨架也要对上，否则
+    下一个从骨架复制出来的新页会带着旧 engine 出生。
+    """
+    reg = load_registry()['tools']
+    present = [d for d in reg if (ROOT / d['file']).exists()]   # 缺文件由 registry_check 报
+    skeleton = TOOLS_DIR / '_skeleton.html'
+    evaluated = _eval_tool_blocks([ROOT / d['file'] for d in present])
+    rc = 0
+    checked = 0
+    for d in present:
+        path = ROOT / d['file']
+        res = evaluated.get(path.name) or {'error': '没有求值结果'}
+        if 'error' in res:
+            print(f'ERROR: {d["file"]}：{res["error"]}', file=sys.stderr)
+            rc = 1
+            continue
+        tool = res['value']
+        for field in ('id', 'accent', 'title'):
+            if tool.get(field) != d.get(field):
+                print(f'ERROR: {d["file"]} 的 TOOL.{field} 与注册表不同\n'
+                      f'    页面：  {tool.get(field)!r}\n'
+                      f'    注册表：{d.get(field)!r}', file=sys.stderr)
+                rc = 1
+        m = META_ENGINE_RE.search(read_text(path))
+        if not m:
+            print(f'ERROR: {d["file"]} 缺 <meta name="tool-engine">', file=sys.stderr)
+            rc = 1
+        elif m.group(1) != d.get('engine'):
+            print(f'ERROR: {d["file"]} 的 tool-engine meta 是 {m.group(1)!r}，'
+                  f'注册表是 {d.get("engine")!r}', file=sys.stderr)
+            rc = 1
+        checked += 1
+
+    engines = sorted({str(d.get('engine')) for d in reg})
+    if len(engines) != 1:
+        print(f'ERROR: 注册表里的 engine 不止一个：{engines}——所有页面内联同一份 core，'
+              f'engine 只能有一个真值', file=sys.stderr)
+        rc = 1
+    sm = META_ENGINE_RE.search(read_text(skeleton)) if skeleton.exists() else None
+    if not sm:
+        print('ERROR: tools/_skeleton.html 缺 <meta name="tool-engine">', file=sys.stderr)
+        rc = 1
+    elif len(engines) == 1 and sm.group(1) != engines[0]:
+        print(f'ERROR: _skeleton.html 的 tool-engine 是 {sm.group(1)!r}，工具们是 '
+              f'{engines[0]!r}——从骨架复制出来的新页会带着旧 engine 出生', file=sys.stderr)
+        rc = 1
+
+    if rc == 0 and checked == 0:
+        print('ERROR: 一个工具页都没比到——这道门跑了个寂寞', file=sys.stderr)
+        return 1
+    if rc == 0:
+        print(f'页面镜像：{checked} 个工具页的 TOOL.id/accent/title 与 tool-engine 与注册表一致；'
+              f'engine 全库唯一（{engines[0]}），骨架同值')
     return rc
