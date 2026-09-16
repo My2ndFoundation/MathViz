@@ -96,6 +96,7 @@ GATES = [
     ('B', 'lazy_dep_check',           hygiene.lazy_dep_check),
     ('B', 'skeleton_sentinel_check',  hygiene.skeleton_sentinel_check),
     ('B', 'skeleton_leak_check',      hygiene.skeleton_leak_check),
+    ('B', 'line_note_reader_check',   hygiene.line_note_reader_check),
 
     ('C', 'node_check',            syntax.node_check),
     ('C', 'core_tests',            syntax.core_tests),

@@ -14,7 +14,8 @@ import re
 import sys
 
 from . import (CORE_DIR, META_DESC_RE, PROGRAMS_DIR, REGISTRY, ROOT, TOOLS_DIR,
-               all_tool_pages, load_registry, read_text, root_pages, tool_pages)
+               all_tool_pages, core_modules, load_registry, read_text, root_pages,
+               tool_pages)
 
 # app.html / index.html 各自允许的父目录引用条数。
 #
@@ -343,6 +344,101 @@ def lazy_dep_check() -> int:
     if rc == 0:
         print(f'惰性依赖：{scanned} 个 core 模块、{checked_calls} 处 factory(...) 调用，'
               f'没有一处在实参里直接抓 root.*（已先剥注释，见 R47）')
+    return rc
+
+
+LINE_NOTE_READERS = ('panelLineNotes', 'noteLineIndex')
+LINE_NOTE_READ_RE = re.compile(r"\.\s*lineNotes\b|\[\s*['\"]lineNotes['\"]\s*\]")
+
+
+def _function_span(code: str, name: str):
+    """在已剥注释的代码里找 `function name(` 的函数体区间 [起, 止)；找不到返回 None。
+
+    只数花括号，跳过字符串字面量。两个目标函数体内没有正则字面量；若将来有了、
+    又恰好含未配对的花括号，这里会切错区间——门会因「允许的函数里一处读取都没有」
+    或「读取落在函数外」而红，不会静默放行。
+    """
+    m = re.search(r'\bfunction\s+' + re.escape(name) + r'\s*\(', code)
+    if not m:
+        return None
+    start = code.find('{', m.end())
+    if start < 0:
+        return None
+    depth = 0
+    quote = None
+    i = start
+    n = len(code)
+    while i < n:
+        c = code[i]
+        if quote:
+            if c == '\\':
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in '\'"`':
+            quote = c
+        elif c == '{':
+            depth += 1
+        elif c == '}':
+            depth -= 1
+            if depth == 0:
+                return start, i + 1
+        i += 1
+    return None
+
+
+def line_note_reader_check() -> int:
+    """core/ 里读取 `lineNotes` 属性的地方只能在 `panelLineNotes` 与 `noteLineIndex` 两个函数体内。
+
+    第 1 期设计 D7 解禁了「行注锚在挖空体内」，于是泄题的第二道防线从数据层挪到
+    读取点：面板把 `note.at` 的整行原文逐字打出来，而锚可以落在挖空体里。
+    `panelLineNotes` 按模式白名单决定给不给（只有读模式给）；`noteLineIndex` 只把锚
+    换算成行号、在读模式的文档渲染里点小圆点，不输出正文。任何别处直接读
+    `p.lineNotes`，都是绕过白名单的一条新路——这道门让它当场红。
+
+    **先剥注释再扫**（R47）：interact.js 的注释里会提到 lineNotes；i18n 键
+    `lineNotes:` 与 `t('lineNotes', …)` 不是属性读取，正则也不匹配它们。
+    """
+    rc = 0
+    reads = 0
+    hits = {name: 0 for name in LINE_NOTE_READERS}
+    saw_interact = False
+    for path in core_modules():
+        code = strip_js_comments(read_text(path))
+        spans = {}
+        if path.name == 'interact.js':
+            saw_interact = True
+            for name in LINE_NOTE_READERS:
+                span = _function_span(code, name)
+                if span is None:
+                    print(f'ERROR: core/interact.js 里找不到允许读取 lineNotes 的函数 {name}()'
+                          f'——改名了就同步改 LINE_NOTE_READERS', file=sys.stderr)
+                    rc = 1
+                else:
+                    spans[name] = span
+        for m in LINE_NOTE_READ_RE.finditer(code):
+            reads += 1
+            owner = next((nm for nm, (a, b) in spans.items() if a <= m.start() < b), None)
+            if owner is None:
+                line = code[:m.start()].count('\n') + 1
+                print(f'ERROR: core/{path.name}:{line} 直接读取了 lineNotes——只允许在 '
+                      f'{" / ".join(LINE_NOTE_READERS)} 里读。行注的原文会泄露挖空答案，'
+                      f'要给行注请经过 panelLineNotes(program, mode)。', file=sys.stderr)
+                rc = 1
+            else:
+                hits[owner] += 1
+    if not saw_interact:
+        print('ERROR: core_modules() 里没有 interact.js——这道门无处可扫', file=sys.stderr)
+        return 1
+    for name, n in hits.items():
+        if n == 0 and name in LINE_NOTE_READERS and rc == 0:
+            print(f'ERROR: 允许的读取点 {name}() 里一处 lineNotes 读取都没扫到——'
+                  f'要么剥注释剥坏了，要么函数不再读它（那就把它移出白名单）', file=sys.stderr)
+            rc = 1
+    if rc == 0:
+        print(f'行注读取点：core/ 共 {reads} 处读取 lineNotes，全部在 '
+              f'{" / ".join(LINE_NOTE_READERS)} 内（已先剥注释，见 R47）')
     return rc
 
 

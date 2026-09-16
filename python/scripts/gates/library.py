@@ -538,44 +538,22 @@ def chapter_manifest_check() -> int:
 # 5. anchor_check
 # ══════════════════════════════════════════════════════════════════════════
 
-def _blank_body_lines(lines: list) -> set:
-    """挖空**体**的行下标（0 基），不含 `# >>> BLANK` / `# <<< BLANK` 两条指令行。
-
-    只做区间切分，不做配对校验——成对/属性齐全是 `blank_directive_check()` 的活，
-    两道门各守各的。这里对"开了没关"取宽松解释（扫到文件尾），宁可多圈几行也
-    不要漏圈：漏圈的后果是一条泄题的行注被判绿。
-    """
-    body = set()
-    open_at = -1
-    for n, line in enumerate(lines):
-        if BLANK_OPEN_RE.match(line):
-            open_at = n
-            continue
-        if BLANK_CLOSE_RE.match(line) and open_at >= 0:
-            body.update(range(open_at + 1, n))
-            open_at = -1
-    if open_at >= 0:
-        body.update(range(open_at + 1, len(lines)))
-    return body
-
-
 def anchor_check() -> int:
     """`lineNotes.at` / `chunks.from` / `chunks.to` 的整行原文在源码里存在且唯一，
-    **在 `clean()` 之后仍然存在且唯一**，且 `lineNotes.at` **不许落在挖空体内**。
+    **在 `clean()` 之后仍然存在且唯一**。
 
     锚用整行原文而不是行号（design §2.3）：行号会在编辑上方任何一行时静默错位，
     把注解挂到错的行上——而那是一种**看起来完全正常**的坏。所以「找不到」与
     「不唯一」都必须当场红：失败得响亮，好过挂错行。
 
-    另外两条判据都是最终评审抓出来的，各自补一个真实的洞：
+    **行注可以锚在挖空体内**（第 1 期设计 D7）。第 0 期这里禁止它（最终评审 I1）：
+    面板曾在挖空模式照样打印 `note.at` 的整行原文。那个泄题现在由两道防线挡：
+    `panelLineNotes` 的模式白名单（只有读模式给行注，interact.test.js 钉着），以及
+    hygiene.line_note_reader_check（全仓只有两个函数能读 lineNotes）。数据层的禁令
+    在「每程序 ≥ 1 空」之后代价太高——值得讲解的行通常正是值得挖掉的行，ch01 待补空
+    的 7 个程序里有 5 个就是这样。
 
-    ① **锚不许落在挖空体内**（I1）。`renderPanel()` 把 `note.at` 的**整行原文**
-       逐字打进面板，而 ch01 三个挖空的行注**全部**锚在挖空体里——`divmod-and-floor`
-       那条的正文还直接写着「是 rest，不是 total」，正是这个空唯一要考的判断。
-       UI 那边已经在挖空模式跳过整段行注，但**数据层面也不该这样写**：两道防线
-       独立，UI 哪天回退了，这道门仍然红。
-
-    ② **锚要在 `clean()` 之后仍然成立**（M3）。这道门验的是**原文**，而 UI 解析的
+    ① **锚要在 `clean()` 之后仍然成立**（M3）。这道门验的是**原文**，而 UI 解析的
        是 `Exercise.clean()` 之后的文本——`clean()` 剥掉两条 BLANK 指令行，所以
        clean 后的行是原文行的**子集**：「原文里存在且唯一」并**不蕴含**「clean 后
        仍存在」。一条锚在指令行上的 lineNote 会门绿、面板静默失锚（点行号没反应，
@@ -588,16 +566,15 @@ def anchor_check() -> int:
             continue
         name = _pid(chapter_dir, prog)
         lines = read_text(py_path).split('\n')
-        body = _blank_body_lines(lines)
         # 与 core/exercise.js 的 clean() 同法：只剥两条指令行，别的一律照抄。
         cleaned = [line for line in lines if not _is_directive(line)]
         targets = []
         for i, note in enumerate(prog.get('lineNotes') or []):
-            targets.append((f'lineNotes[{i}].at', note.get('at'), True))
+            targets.append((f'lineNotes[{i}].at', note.get('at')))
         for i, chunk in enumerate(prog.get('chunks') or []):
-            targets.append((f'chunks[{i}].from', chunk.get('from'), False))
-            targets.append((f'chunks[{i}].to', chunk.get('to'), False))
-        for where, text, is_note in targets:
+            targets.append((f'chunks[{i}].from', chunk.get('from')))
+            targets.append((f'chunks[{i}].to', chunk.get('to')))
+        for where, text in targets:
             if not isinstance(text, str) or not text:
                 print(f'ERROR: {name} 的 {where} 不是非空字符串：{text!r}',
                       file=sys.stderr)
@@ -620,17 +597,7 @@ def anchor_check() -> int:
                 rc = 1
                 continue
 
-            # ① 行注不许锚在挖空体里——那是把答案印在面板上。
-            if is_note and (hits[0] - 1) in body:
-                print(f'ERROR: {name} 的 {where} 锚在**挖空体内**'
-                      f'（{py_path}:{hits[0]}）——面板会把这一行的原文逐字打出来，'
-                      f'等于把答案印在屏幕右侧。\n'
-                      f'    锚：{text!r}\n'
-                      f'    行注只讲挖空**之外**的行；要讲挖空里的事，写进 '
-                      f'BLANK 的 hint/hintEn。', file=sys.stderr)
-                rc = 1
-
-            # ② clean() 之后再验一遍：指令行会整条消失，UI 就是在那份文本上解析的。
+            # clean() 之后再验一遍：指令行会整条消失，UI 就是在那份文本上解析的。
             c_hits = [n + 1 for n, line in enumerate(cleaned) if line == text]
             if len(c_hits) != 1:
                 gone = '在 clean() 后消失了（锚落在 BLANK 指令行上？指令行整条会被剥掉）' \
@@ -644,7 +611,7 @@ def anchor_check() -> int:
         return 1
     if rc == 0:
         print(f'行锚：{anchors} 条 lineNotes/chunks 锚在源码里都存在且唯一，'
-              f'clean() 之后仍然存在且唯一，且没有一条行注锚在挖空体内')
+              f'clean() 之后仍然存在且唯一')
     return rc
 
 
