@@ -648,4 +648,7 @@ for f in python/core/*.test.js; do node "$f"; done
 | §2.3 锚点 | 行注锚点可以落在挖空体内；泄题由读取点结构门防（B6） |
 | §3.1 / §3.3 面板与提示 | 面板顶部显示元数据（B7）；提示分级标记为 ` \|\| `（B1） |
 | §4.7 编辑模型 | 第三个生成脚本 `sync_fallback.py`（A1） |
-| §7.1 门表 | 新增五道门：`sync_fallback --check` · `page_mirror_check` · `blank_presence_check` · `line_note_reader_check` · `closed_set_mirror_check` |
+| §7.1 门表 | 新增六道门：`sync_fallback --check` · `page_mirror_check` · `blank_presence_check` · `line_note_reader_check` · `closed_set_mirror_check` · `js_parser_parity_check`（第 1 期地基终审 G3） |
+| §3.3 挖空反馈 | 期待的 token 是字符串 / f-string 时，反馈只报类别与第几个字符起不同，绝不印出标准答案的字面量原文（Task 11b） |
+| §2.3 / §6.1 `lines` | `lines` 不含 BLANK 指令行，也不含文件末尾换行产生的空尾巴；按 `\n` 切，不认 U+0085 / U+2028 / U+2029（Task 11c；第 1 期地基终审 G3） |
+| §9 分期交付（「中央注册」一句） | 按本文 §8.1 的分工：构建者自己在 `python-tools.json` 追加本页条目（文案可为草稿），连同重新生成的两个导航页一起提交；冲突取基线版本 + 补回条目 + 重跑生成脚本（第 1 期地基终审 G2） |

@@ -36,12 +36,14 @@ description: >-
 `build_programs.py` 在工具页没有注册表条目时**硬错误退出**（`python-tools.json 里没有 id='py-…' 的条目，
 无法回写 programs/lines`），`page_mirror_check` / `registry_check` 也要求条目存在——不先加条目，你一道门都跑不绿。
 
-`lines`（选择器「不超过 20/40/80 行」筛的就是它，面板顶部也显示它）是源码**去掉 BLANK 指令行**
-之后的行数（Task 11c）——这是读模式/临摹模式里她真正看到的程序的长度，挖多一个空不会让它变长。
+`lines`（选择器「不超过 20/40/80 行」筛的就是它，面板顶部也显示它）是源码按 `\n` 切、**去掉 BLANK 指令行**、
+**不含文件末尾换行产生的那个空尾巴**之后的行数（Task 11c）——这是读模式/临摹模式里她真正看到的程序的长度，
+挖多一个空不会让它变长。读模式的行号栏会因为文件末尾的换行多显示一个空行号，`lines` 不数它。
 
-只要碰 `python/core/*.js`：`lineNotes` 这个词在 `core/` 里只能出现在四处——`panelLineNotes` /
-`noteLineIndex` 这两个函数名、STR 键表里 `lineNotes: { zh:…` 那一行声明、以及 `t('lineNotes'` 的调用，
-多一处会被 `line_note_reader_check`（B 组）拦下。
+只要碰 `python/core/*.js`：`lineNotes` 这个词（剥掉注释之后）在 `core/` 里只放行三种位置——
+① `panelLineNotes` / `noteLineIndex` **这两个函数的函数体内**（白名单读取点，体内出现几次都行）；
+② STR 键表里 `lineNotes: { zh:…` 那**一行**声明；③ `t('lineNotes', …)` 这个独立调用。
+落在这三种位置之外的任何一处都会被 `line_note_reader_check`（B 组）拦下。
 
 ## 硬规矩与守门
 
@@ -54,9 +56,13 @@ description: >-
 | `\|\|` 必须写成两侧各一个空格的 ` \|\| `；标记落在整条提示的最前或最后，或两侧空白不止一个，同样算写错 | `blank_directive_check` | `疑似写错的分级标记` |
 | 源码纯 ASCII（BLANK 指令行的 `hint=` 除外） | `source_ascii_check` | 点名行号与字符 |
 | 整份 `.py` 不许出现非 BMP 字符（含提示里的 emoji） | `source_bmp_check` | 点名码位 |
-| 4 空格缩进、无 Tab、行尾无空白、LF | `source_indent_check` | 点名行号 |
+| 4 空格缩进、无 Tab、行尾无空白、文件以单个换行结尾 | `source_indent_check` | 点名行号 |
+| 无 BOM、无 CRLF、无杂散 C0 控制字节（`.py` / `chapter.json`、`core/`、`tools/`、两个导航页、注册表）——`source_indent_check` 读文件走通用换行，**看不见 CRLF**，这一条归它 | `control_byte_check`（B 组） | `以 UTF-8 BOM 开头` / `含 CR（CRLF 行尾）` / `含 C0 控制字符` |
+| `.py` 里不许出现 U+2028 / U+2029 / U+0085（Python 与页面的 JS 对它们是不是换行意见不一）；页面自己的 `Exercise.parse` / `clean` 吃得下每个程序，挖空 id 与门的解析一致，`clean()` 行数与 `lines` 一致 | `js_parser_parity_check`（C 组） | `有 U+2028 …` / `Exercise.parse() 抛错` / `挖空 id 两边解析得不一样` / `嵌入页面的 lines=…` |
 | `lineNotes.at` / `chunks.from/to` 是**整行原文**、存在且唯一、`clean()` 之后仍唯一 | `anchor_check` | `找不到` / `出现 N 次` / `在 clean() 后消失了` |
 | `kind` / `level` / `boards` / `runtime` 在闭集；`title` `blurb` 双语；`notes` 是段落数组；`problem` `entry` 非空；不手写 `lines` / `source` | `program_meta_check` | 点名字段 |
+| `requires` 是白名单 `numpy` / `pandas` / `matplotlib` / `scipy` / `pygame` 的子集（可以是空数组） | `program_meta_check` | `requires=… 必须是 … 的子集` |
+| `"tier": "compile-only"`（普通 cpython 程序的例外豁免）必须带非空 `why`，每页至多 2 个 | `exemption_check` | `没有非空的 why` / `有 N 条例外豁免，上限是 2` |
 | 带 `check.property` 的程序在 `gates/refs/` 里**同章文件**有参照 | `algorithm_property_check` | `没有它的参考实现` / `参照却登记在` |
 | 参照与被测函数对 200 组随机实参给出同值同类型 | `algorithm_property_check` | `与参考实现不符`，附反例实参 |
 | 同一 `problem` 的变体标题互不相同 | `variant_check` | 点名组 |
@@ -83,52 +89,71 @@ description: >-
 - 右侧的说明面板在三种模式下都显示这个程序的 level / kind / lines / 挖空数 / boards / tags（非
   cpython 的 runtime 也显示）——**boards 必须写准**，她看到的就是这一份。
 - 中英文对等。`boards` 只有**确知**某考纲不含时才去掉；拿不准就上报，不猜。
-- 一个知识点只在一页**讲**（页面边界见第 1 期设计 §6.5）。
+- 一个知识点只在一页**讲**（页面边界见第 1 期设计 §6.5）；做过的问题不跨页重复。
+- 输出确定：**不用 `random`、不读时间**；写文件只写当前目录；数据文件放 `_fixtures/`，要输入就用 `run.stdin`。
+- 整个程序约 10–40 行（不含 BLANK 指令行；是取向，不是门）。
+- 一般 2–3 个空（门只要求至少 1 个），**挖整行**。
+- 本期**不用 `chunks`**。
+- **每页至少一个变体组**（同一 `problem` 两个以上写法）——`variant_check` 只要求**全库**至少一个，管不到每页。
 
 ## 一个程序长什么样
 
 `.py`（注释英文；指令行从第 0 列开始）：
 
 ```python
-"""Count how many times a letter appears in a word."""
+"""Keep a number inside a range."""
 
 
-def count_letter(word, letter):
-    count = 0
-# >>> BLANK id=tally level=2 hint="逐个字符看一遍，和目标字母比较 || 相等时计数器加一；比较与加一各占一行" hintEn="Look at every character once and compare it with the letter || When they match, add one to the counter; the test and the addition get a line each"
-    for ch in word:
-        if ch == letter:
-            count += 1
+def clamp(value, low, high):
+    if value < low:
+        return low
+# >>> BLANK id=upper level=2 hint="和上面判下界的那两行写成对称的样子：同样是一个 if、下一行单独一个 return（不用 elif）；value 写在比较号左边，用严格的大于号 || value 超过上界 high 时，交回去的就是 high 本身" hintEn="Write it as the mirror image of the two lower-bound lines above: again an if with its own return on the next line (not elif); value on the left of the comparison, with a strict greater-than || When value is past the upper bound high, what comes back is high itself"
+    if value > high:
+        return high
 # <<< BLANK
-    return count
+    return value
 
 
 if __name__ == "__main__":
-    print(count_letter("banana", "a"))
-    print(count_letter("rhythm", "e"))
+    print(clamp(5, 0, 10))
+    print(clamp(-3, 0, 10))
+    print(clamp(42, 0, 10))
 ```
 
 （提示里的「；」和「; 」只是标点——分级只认 ` || `。）
+
+这一空有好几种**同样对**的写法，判定只认一种，所以第 1 级就把选择钉死，而且不说出整行：
+
+| 她可能写的 | 判定 | 第 1 级里钉住它的话 |
+|---|---|---|
+| `elif value > high:` | 错 | 不用 elif / not elif |
+| `if high < value:` | 错 | value 写在比较号左边 / value on the left of the comparison |
+| `if value >= high:` | 错 | 用严格的大于号 / with a strict greater-than |
+| `return min(value, high)` | 错 | 同样是一个 if、下一行单独一个 return / again an if with its own return on the next line |
+
+写示例时先把这张表列出来、逐条拿 `PyInteract.blankFeedback(写法, 标准答案)` 跑一遍：判错的每一条，
+第 1 级提示里都得有一句话钉住它；钉不住又不想念出整行，就换一行挖。**判对的就不用钉**——比如
+`if value > high: return high` 写成一行，判定认它与两行写法相同，提示里再去禁止它只会误导。
 
 `chapter.json` 里对应的一条：
 
 ```json
 {
-  "id": "count-letter-loop",
-  "file": "count-letter-loop.py",
-  "problem": "count-letter",
+  "id": "clamp-to-range",
+  "file": "clamp-to-range.py",
+  "problem": "clamp",
   "kind": "pattern",
   "level": 2,
   "boards": ["AQA", "OCR", "Edexcel", "CIE"],
-  "tags": ["loop", "counting"],
+  "tags": ["if", "return"],
   "requires": [],
   "runtime": "cpython",
-  "entry": "count_letter",
-  "title": { "en": "Count a Letter", "zh": "数一个字母" },
+  "entry": "clamp",
+  "title": { "en": "Clamp to a Range", "zh": "夹进区间" },
   "blurb": { "en": "…", "zh": "…" },
   "notes": { "en": ["段落一", "段落二"], "zh": ["…", "…"] },
-  "lineNotes": [ { "at": "    count = 0", "en": "…", "zh": "…" } ],
-  "run": { "stdin": "", "expect": "3\n0\n", "timeout": 5 },
+  "lineNotes": [ { "at": "    return value", "en": "…", "zh": "…" } ],
+  "run": { "stdin": "", "expect": "5\n0\n10\n", "timeout": 5 },
   "check": { "property": "pure" }
 }
 ```
@@ -136,35 +161,47 @@ if __name__ == "__main__":
 `gates/refs/chNN_<slug>.py` 里对应的参照：
 
 ```python
-from ._gen import rand_words
+from ._gen import rand_triples
+
+
+def _value_low_high(rng):
+    value, a, b = rand_triples(rng)
+    return value, min(a, b), max(a, b)
+
 
 REFERENCES = {
-    'count-letter-loop': {
-        # 被测的是「循环 + 计数器」，参照用 str.count：机制不同。
-        'ref': lambda word, letter: word.count(letter),
-        'cases': lambda rng: (rand_words(rng)[0], rng.choice('aeiou')),
+    'clamp-to-range': {
+        # 被测的是「两个 if 各自提前 return」，参照取三个数排序后的中间那个：机制不同。
+        'ref': lambda value, low, high: sorted((low, value, high))[1],
+        'cases': _value_low_high,
     },
 }
 ```
 
+（这个问题不在第 1 期设计 §7 的清单里，也不在 ch01 里——照抄它当某一页的程序之前先对一遍 §6.5。）
+
 ## 生成 `run.expect`：粘贴真实输出，不要想
 
 门在一个全新临时目录里跑：`_fixtures/` 拷成 `<临时目录>/_fixtures/`、`PYTHONHASHSEED=0`、
-喂 `run.stdin`、超时 `run.timeout` 秒。照同样的条件生成：
+`PYTHONIOENCODING=utf-8`、`MPLBACKEND=Agg`、喂 `run.stdin`、超时 `run.timeout` 秒（缺省 5）。
+照同样的条件生成，**用 Python 3.12**（CI 钉的版本；别的版本的 `repr` / 报错文字可能不同）。
+第一个自变量是程序路径，第二个是超时秒数（与 `run.timeout` 相同，不给就是 5）：
 
 ```bash
-python3 - <<'EOF'
+python3 - python/programs/chNN-slug/prog-id.py 5 <<'EOF'
 import json, os, pathlib, shutil, subprocess, sys, tempfile
-prog = pathlib.Path('python/programs/chNN-slug/prog-id.py').resolve()   # 改这里
-stdin = ''                                                              # 与 run.stdin 相同
+prog = pathlib.Path(sys.argv[1]).resolve()
+timeout = float(sys.argv[2]) if len(sys.argv) > 2 else 5
+stdin = ''                                                  # 与 run.stdin 相同（改这里）
+print('python', sys.version.split()[0])                     # 应是 3.12.x
 with tempfile.TemporaryDirectory() as td:
-    shutil.copy(prog, td)
+    shutil.copyfile(prog, os.path.join(td, prog.name))
     fx = prog.parent / '_fixtures'
     if fx.is_dir():
         shutil.copytree(fx, os.path.join(td, '_fixtures'))
-    env = dict(os.environ, PYTHONHASHSEED='0', PYTHONIOENCODING='utf-8')
+    env = dict(os.environ, PYTHONHASHSEED='0', PYTHONIOENCODING='utf-8', MPLBACKEND='Agg')
     r = subprocess.run([sys.executable, prog.name], cwd=td, env=env, input=stdin,
-                       capture_output=True, text=True, timeout=5)
+                       capture_output=True, text=True, timeout=timeout)
 print('returncode', r.returncode)
 print(json.dumps(r.stdout, ensure_ascii=False))   # 这一行原样粘进 "expect"
 EOF
