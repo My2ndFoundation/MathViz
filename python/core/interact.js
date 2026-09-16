@@ -211,14 +211,22 @@
     'micropython-pico':     { zh: 'MicroPython · Pico', en: 'MicroPython · Pico' }
   };
 
-  /* 未知值原样给出而不是空串：一个看得出是错的标签，好过一块看起来正常的空白。 */
+  /* 未知值原样给出而不是空串：一个看得出是错的标签，好过一块看起来正常的空白。
+     已知键但缺了一种语言的翻译时，退到另一种语言，两者都缺才退到原始值——
+     绝不吐 undefined 或空串（那会在面板/选择器上现出一块空白或字面 "undefined"，
+     R1 修复轮：这条退化路径原来没有，project.zh 少写一个键就能让 UI 出现空白，
+     而闭集镜像门/kindLabel 的旧完整性测试都测不出来）。 */
   function kindLabel(kind, lang) {
     var e = KIND_LABELS[kind];
-    return e ? (lang === 'en' ? e.en : e.zh) : String(kind == null ? '' : kind);
+    if (!e) { return String(kind == null ? '' : kind); }
+    return (lang === 'en' ? e.en : e.zh) || (lang === 'en' ? e.zh : e.en) ||
+           String(kind == null ? '' : kind);
   }
   function runtimeLabel(rt, lang) {
     var e = RUNTIME_LABELS[rt];
-    return e ? (lang === 'en' ? e.en : e.zh) : String(rt == null ? '' : rt);
+    if (!e) { return String(rt == null ? '' : rt); }
+    return (lang === 'en' ? e.en : e.zh) || (lang === 'en' ? e.zh : e.en) ||
+           String(rt == null ? '' : rt);
   }
 
   /* panelMeta(program, lang, blankCount) → [{ key, label, items }]
@@ -226,7 +234,9 @@
      说明面板顶部那几行元数据（第 1 期设计 B7）。决定显示什么的逻辑放在这里、可测；
      renderPanel 只负责画。三种模式都显示——元数据不泄题。
        summary  难度 · 类型 · 行数 · 空数（blankCount 不是数字时省略，不编）
-       boards   考试局；空时显式写「未标注」
+       boards   考试局；空时显式写「未标注」，并带 placeholder:true——渲染层靠这个
+                布尔判断是不是占位符，而不是拿翻译后的字符串去比「未标注」/'Not tagged'
+                （R1 修复轮：字符串比较在换语言、改文案时会悄悄失效）
        tags     标签；空时整行不出
        runtime  只在非 cpython 时出 */
   function panelMeta(program, lang, blankCount) {
@@ -237,8 +247,10 @@
     var rows = [{ key: 'summary', label: '', items: [head.join(' · ')] }];
 
     var boards = asList(program.boards);
-    rows.push({ key: 'boards', label: t('boards', lang),
-                items: boards.length ? boards.slice() : [t('notTagged', lang)] });
+    var boardsRow = { key: 'boards', label: t('boards', lang),
+                       items: boards.length ? boards.slice() : [t('notTagged', lang)] };
+    if (!boards.length) { boardsRow.placeholder = true; }
+    rows.push(boardsRow);
 
     var tags = asList(program.tags);
     if (tags.length) { rows.push({ key: 'tags', label: t('tags', lang), items: tags.slice() }); }
@@ -768,6 +780,7 @@
     '.py-meta{margin:0 0 12px;padding:0 0 10px;border-bottom:1px solid var(--panel-line,rgba(148,163,184,.16))}',
     '.py-meta-row{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 6px;margin:0 0 4px;',
     '  font-size:12px;color:var(--ui-slate,#9fb0c8)}',
+    '.py-meta-k{font-weight:600}',
     '.py-meta-v{color:var(--ui-bright,#e2e8f0)}',
     '.py-board{padding:0 7px;border-radius:999px;border:1px solid var(--panel-line,rgba(148,163,184,.3));',
     '  color:var(--ui-bright,#e2e8f0)}',
@@ -1633,10 +1646,14 @@
       var p = current();
       if (!p) { return; }
       /* 元数据在最上面（第 1 期设计 B7）。空数现数：parse 失败时挖空模式自己会把错误
-         摆在舞台上，这里只是不显示空数，不另报一次。 */
+         摆在舞台上，这里只是不显示空数，不另报一次——但 exercise() 本身必须留在
+         try 外面：need() 找不到模块时故意抛得很响，那种炸是「装配错了」，跟
+         「这一份源码 parse 不出空数」完全是两件事，不能被这层 catch 一起吞掉
+         （R1 修复轮：原来整段都在 try 里，两种炸法分不出来）。 */
       var blankCount = null;
+      var ex = exercise();
       try {
-        blankCount = exercise().parse(typeof p.source === 'string' ? p.source : '').blanks.length;
+        blankCount = ex.parse(typeof p.source === 'string' ? p.source : '').blanks.length;
       } catch (e) {
         blankCount = null;
       }
@@ -1646,7 +1663,11 @@
         metaRows.forEach(function (row) {
           var r = h('div', 'py-meta-row');
           if (row.label) { r.appendChild(h('span', 'py-meta-k', row.label)); }
-          var cls = row.key === 'tags' ? 'py-tag' : (row.key === 'boards' ? 'py-board' : 'py-meta-v');
+          /* 占位符（考试局为空时的「未标注」）用普通值样式，不套 py-board 药丸——
+             靠 row.placeholder 这个布尔判断，不拿翻译后的字符串去比对
+             （R1 修复轮：字符串比较换语言就失效，布尔标记不会）。 */
+          var cls = row.key === 'tags' ? 'py-tag' :
+                    (row.key === 'boards' && !row.placeholder ? 'py-board' : 'py-meta-v');
           row.items.forEach(function (it) { r.appendChild(h('span', cls, it)); });
           meta.appendChild(r);
         });
@@ -1871,6 +1892,9 @@
     BOARDS: BOARDS,
     RUNTIMES: RUNTIMES,
     kindLabel: kindLabel,
+    runtimeLabel: runtimeLabel,
+    KIND_LABELS: KIND_LABELS,
+    RUNTIME_LABELS: RUNTIME_LABELS,
     panelMeta: panelMeta
   };
 });

@@ -490,9 +490,13 @@ T.throws(function () { PI.mount({ programs: PROGS }); },
   T.eq(PI.panelMeta(prog, 'en', 2)[0].items, ['Level 2 · Pattern · 23 lines · 2 blank(s)'], '英文摘要行');
   T.eq(zh[1].label, '考试局', '考试局行的标签');
   T.eq(zh[1].items, ['AQA', 'OCR'], '考试局按声明顺序原样给');
+  T.ok(!zh[1].placeholder, '有真实考试局时不是占位符');
   T.eq(zh[2].items, ['selection', 'if-elif-else'], '标签原样给（英文标识符，不翻译）');
-  T.eq(PI.panelMeta(Object.assign({}, prog, { boards: [] }), 'zh', 2)[1].items, ['未标注'],
+  const emptyBoardsRow = PI.panelMeta(Object.assign({}, prog, { boards: [] }), 'zh', 2)[1];
+  T.eq(emptyBoardsRow.items, ['未标注'],
        '考试局为空时显式写未标注（program_meta_check 要求非空，这是 UI 兜底）');
+  T.eq(emptyBoardsRow.placeholder, true,
+       '占位符带 placeholder:true——渲染层靠这个布尔判断，不拿翻译后的字符串去比「未标注」');
   T.eq(PI.panelMeta(Object.assign({}, prog, { tags: [] }), 'zh', 2).map(function (r) { return r.key; }),
        ['summary', 'boards'], '没有标签就不出标签行');
   T.eq(PI.panelMeta(prog, 'zh', null)[0].items, ['难度 L2 · 惯用模式 · 23 行'], '空数算不出来时不编一个');
@@ -503,10 +507,65 @@ T.throws(function () { PI.mount({ programs: PROGS }); },
   T.eq(PI.panelMeta(null, 'zh', 0), [], '没有当前程序：空数组');
 
   T.eq(PI.KINDS, ['syntax', 'pattern', 'algorithm', 'project', 'embedded'], 'KINDS 导出且有序');
+
+  /* 标签表完整性：直接查表，不经过 kindLabel/runtimeLabel 的兜底——R1 修复轮加了
+     语言兜底之后，kindLabel(k,'zh') 即使 zh 缺了也会退到 en、仍然是非空且不等
+     于原始键，从函数这一侧根本看不出翻译丢了哪一条。只有直接查
+     KIND_LABELS[k].zh / RUNTIME_LABELS[rt].en 这种表级完整性检查，才抓得住
+     "少写一个键"这种作者失误。 */
   PI.KINDS.forEach(function (k) {
-    T.ok(PI.kindLabel(k, 'zh') !== k && PI.kindLabel(k, 'en') !== k, 'kind ' + k + ' 中英标签都存在');
+    var e = PI.KIND_LABELS[k];
+    T.ok(!!e, 'KIND_LABELS 有 ' + k + ' 这一项');
+    T.ok(typeof (e && e.zh) === 'string' && e.zh.length > 0, 'KIND_LABELS.' + k + '.zh 是非空字符串');
+    T.ok(typeof (e && e.en) === 'string' && e.en.length > 0, 'KIND_LABELS.' + k + '.en 是非空字符串');
+  });
+  PI.RUNTIMES.forEach(function (rt) {
+    var e = PI.RUNTIME_LABELS[rt];
+    T.ok(!!e, 'RUNTIME_LABELS 有 ' + rt + ' 这一项');
+    T.ok(typeof (e && e.zh) === 'string' && e.zh.length > 0, 'RUNTIME_LABELS.' + rt + '.zh 是非空字符串');
+    T.ok(typeof (e && e.en) === 'string' && e.en.length > 0, 'RUNTIME_LABELS.' + rt + '.en 是非空字符串');
+  });
+
+  /* kindLabel/runtimeLabel 的完整性循环：两个闭集、两种语言都过一遍——第 0 版
+     只测了 KINDS，RUNTIMES 只在别处测了 micropython-pico 一个值（R1 修复轮的
+     Minor #1）。kind 额外要求标签不等于原始键（真有翻译，不是原样吐回去）；
+     runtime 不作这条要求——CPython 的中英标签本来就都写成 'CPython'，是合法的
+     产品名，不是漏翻译。 */
+  ['zh', 'en'].forEach(function (lang) {
+    PI.KINDS.forEach(function (k) {
+      var label = PI.kindLabel(k, lang);
+      T.ok(typeof label === 'string' && label.length > 0,
+           'kindLabel(' + k + ',' + lang + ') 是非空字符串');
+      T.ok(label !== k, 'kindLabel(' + k + ',' + lang + ') 不等于原始键（真有翻译）');
+    });
+    PI.RUNTIMES.forEach(function (rt) {
+      var label = PI.runtimeLabel(rt, lang);
+      T.ok(typeof label === 'string' && label.length > 0,
+           'runtimeLabel(' + rt + ',' + lang + ') 是非空字符串');
+    });
   });
   T.eq(PI.kindLabel('quiz', 'zh'), 'quiz', '未知 kind 原样给出，不给空串');
+  T.eq(PI.runtimeLabel('esp32', 'en'), 'esp32', '未知 runtime 原样给出，不给空串（对称于上一条）');
+
+  /* kindLabel/runtimeLabel 的语言兜底本身：真表里两种语言永远齐全（上面两段已经
+     守住），所以要看到兜底真的生效，只能就地摘掉一种语言、调一次、立刻补回去——
+     摘掉的是 kindLabel/runtimeLabel 实际闭包住的那个对象（PI.KIND_LABELS /
+     PI.RUNTIME_LABELS 和内部变量是同一个引用），不是造一份自己的假表。 */
+  (function () {
+    var savedZh = PI.KIND_LABELS.project.zh;
+    delete PI.KIND_LABELS.project.zh;
+    T.eq(PI.kindLabel('project', 'zh'), 'Project', '中文标签缺失时退到英文，不给 undefined');
+    PI.KIND_LABELS.project.zh = savedZh;
+    T.eq(PI.kindLabel('project', 'zh'), '项目', '补回中文键后标签恢复原样（确认复原到位）');
+
+    var savedEn = PI.RUNTIME_LABELS['micropython-pico'].en;
+    delete PI.RUNTIME_LABELS['micropython-pico'].en;
+    T.eq(PI.runtimeLabel('micropython-pico', 'en'), 'MicroPython · Pico',
+         '英文标签缺失时退到中文，不给 undefined');
+    PI.RUNTIME_LABELS['micropython-pico'].en = savedEn;
+    T.eq(PI.runtimeLabel('micropython-pico', 'en'), 'MicroPython · Pico',
+         '补回英文键后标签恢复原样（确认复原到位）');
+  })();
 })();
 
 T.report('interact');
