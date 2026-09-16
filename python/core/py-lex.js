@@ -43,10 +43,25 @@
    所以 type(x) 的 type 归 softkw。软关键字一律不看上下文（brief 的简化），
    所以 m = match 里的 match 也归 softkw。
 
-   另一处已知的粗糙：'@' 后紧跟标识符首字符就整体算 decorator（brief 第 4 条），
-   于是矩阵乘法写成不带空格的 a@b 时，'@b' 会被当成装饰器。CPython 给的是
-   OP '@' + NAME 'b'。教学程序里不出现无空格矩阵乘法，先按 brief 来；真要修，
-   改成「只有 '@' 是本行第一个非空白字符时才算 decorator」即可。
+   ── 装饰器的判定条件（裁决 R14）────────────────────────────────────────
+   '@' **只有在它是该逻辑行的第一个有效 token 时**才是 decorator（'@' + 点分
+   名字）；否则一律是 op。brief 原本写的是「'@' 后紧跟标识符首字符就算装饰器」，
+   那条规则会把不带空格的矩阵乘法 a@b 里的 '@b' 读成装饰器——实测 CPython 对
+   c = a@b 给的是 OP '@' + NAME 'b'，对 @dec 给的也是 OP '@' + NAME 'dec'
+   （CPython 压根没有装饰器这个 token 类型，是这里为了高亮才合成的）。
+   M6 的 numpy 页面里 a @ b 到处都是，留着这条错会让 lex_vs_cpython_check
+   正确地判红，而现场离原因隔着一整个子项目。
+
+   「逻辑行」不是「物理行」，所以判定要绕开两种续行：括号内换行（隐式续行）
+   与行尾反斜杠（显式续行）。二者都不开新逻辑行，于是
+
+       result = (
+           a
+           @b        ← 这里的 @ 是矩阵乘法，不是装饰器
+       )
+
+   里的 '@b' 仍然切成 op + name。为此 push() 维护 depth 与 lineStart 两个量，
+   见下面的 tokenize()。
 
    ── 三张表怎么来的 ────────────────────────────────────────────────────
    KEYWORDS / SOFTKW / BUILTINS 是 CPython 3.12 的实测输出，一次生成写成字面量：
@@ -207,6 +222,32 @@
     var n = src.length;
     var i = 0;
 
+    /* 装饰器判定要知道「@ 是不是本逻辑行的第一个有效 token」（裁决 R14）。
+       两个量都在 push() 里维护，好处是每个 token 只有一条记账路径：
+         depth     —— 括号嵌套深度。深度 > 0 时换行是**隐式续行**，不开新逻辑行。
+         lineStart —— 本逻辑行还没出现有效 token。ws 与 comment 不影响它。
+       行尾反斜杠是**显式续行**，同样不开新逻辑行，用 prevBackslash 记住。 */
+    var depth = 0;
+    var lineStart = true;
+    var prevBackslash = false;
+
+    function push(type, s, e) {
+      out.push({ type: type, start: s, end: e });
+      if (type === 'ws' || type === 'comment') { return; }
+      if (type === 'nl') {
+        if (depth === 0 && !prevBackslash) { lineStart = true; }
+        prevBackslash = false;
+        return;
+      }
+      if (type === 'punct') {
+        var ch = src.charAt(s);
+        if (ch === '(' || ch === '[' || ch === '{') { depth++; }
+        else if (ch === ')' || ch === ']' || ch === '}') { if (depth > 0) { depth--; } }
+      }
+      prevBackslash = (type === 'op' && e - s === 1 && src.charAt(s) === '\\');
+      lineStart = false;
+    }
+
     /* 每一轮：读出一个 token 的 [start, i)，push，继续。i 必须严格增长。 */
     while (i < n) {
       var start = i;
@@ -216,38 +257,40 @@
       /* 1. 换行：\r\n 算一个 token */
       if (c === '\n') {
         i += 1;
-        out.push({ type: 'nl', start: start, end: i });
+        push('nl', start, i);
         continue;
       }
       if (c === '\r') {
         i += src.charAt(i + 1) === '\n' ? 2 : 1;
-        out.push({ type: 'nl', start: start, end: i });
+        push('nl', start, i);
         continue;
       }
 
       /* 2. 行内空白 */
       if (isSpace(c)) {
         while (i < n && isSpace(src.charAt(i))) { i++; }
-        out.push({ type: 'ws', start: start, end: i });
+        push('ws', start, i);
         continue;
       }
 
       /* 3. 注释：吃到行尾，不含换行 */
       if (c === '#') {
         while (i < n && src.charAt(i) !== '\n' && src.charAt(i) !== '\r') { i++; }
-        out.push({ type: 'comment', start: start, end: i });
+        push('comment', start, i);
         continue;
       }
 
-      /* 4. 装饰器：@ 紧跟标识符首字符，整体（含点分名字）一个 token */
-      if (c === '@' && isIdStart(src.charAt(i + 1))) {
+      /* 4. 装饰器：@ 必须是本逻辑行的第一个有效 token，且紧跟标识符首字符，
+            整体（含点分名字）一个 token。lineStart 为假时 @ 落到运算符表，
+            切成 op —— c = a@b 里的那个 @ 走的就是这条路（裁决 R14）。 */
+      if (c === '@' && lineStart && isIdStart(src.charAt(i + 1))) {
         i++;
         while (i < n && isIdPart(src.charAt(i))) { i++; }
         while (src.charAt(i) === '.' && isIdStart(src.charAt(i + 1))) {
           i++;
           while (i < n && isIdPart(src.charAt(i))) { i++; }
         }
-        out.push({ type: 'decorator', start: start, end: i });
+        push('decorator', start, i);
         continue;
       }
 
@@ -256,14 +299,14 @@
       var str = scanString(src, i);
       if (str) {
         i = str.end;
-        out.push({ type: str.type, start: start, end: i });
+        push(str.type, start, i);
         continue;
       }
 
       /* 6. 数字。'.5' 也是数字（CPython: NUMBER '.5'），所以点后跟数字时进这里。 */
       if (isDigit(c) || (c === '.' && isDigit(src.charAt(i + 1)))) {
         i = scanNumber(src, i);
-        out.push({ type: 'number', start: start, end: i });
+        push('number', start, i);
         continue;
       }
 
@@ -275,7 +318,7 @@
              : SOFTKW[word] ? 'softkw'
              : BUILTINS[word] ? 'builtin'
              : 'name';
-        out.push({ type: type, start: start, end: i });
+        push(type, start, i);
         continue;
       }
 
@@ -286,14 +329,14 @@
       }
       if (op !== null) {
         i += op.length;
-        out.push({ type: 'op', start: start, end: i });
+        push('op', start, i);
         continue;
       }
 
       /* 9. 标点 */
       if (PUNCT.indexOf(c) >= 0) {
         i++;
-        out.push({ type: 'punct', start: start, end: i });
+        push('punct', start, i);
         continue;
       }
 
@@ -301,7 +344,7 @@
              吃一个字符，归 op。绝不抛错、绝不跳过——跳过会在 token 之间留洞，
              拼回去就不等于原文了。 */
       i++;
-      out.push({ type: 'op', start: start, end: i });
+      push('op', start, i);
     }
 
     return out;

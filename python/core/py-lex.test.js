@@ -142,6 +142,39 @@ T.eq(typesOf('x = ...\n'), ['name:x', 'op:=', 'op:...'], '省略号是一个 tok
 T.eq(typesOf('a @= b\n'), ['name:a', 'op:@=', 'name:b'], '@= 是运算符不是装饰器');
 T.eq(typesOf('@a.b.c\n'), ['decorator:@a.b.c'], '点分装饰器整体一个 token');
 
+/* ---- 裁决 R14：'@' 只有在它是该逻辑行的第一个有效 token 时才是装饰器 ----
+   CPython 对 c = a@b 给 OP '@' + NAME 'b'，对 @dec 给 OP '@' + NAME 'dec'
+   （它没有装饰器 token 类型，decorator 是这里为高亮合成的）。原先「@ 后紧跟
+   标识符首字符就算装饰器」会把不带空格的矩阵乘法读成装饰器——M6 的 numpy 页
+   到处是 a @ b，留着这条错会让 lex_vs_cpython_check 正确地判红。 */
+T.eq(typesOf('c = a@b\n'),
+     ['name:c', 'op:=', 'name:a', 'op:@', 'name:b'],
+     '不带空格的矩阵乘法：@ 是 op 不是装饰器');
+T.eq(typesOf('c = a @ b\n'),
+     ['name:c', 'op:=', 'name:a', 'op:@', 'name:b'],
+     '带空格的矩阵乘法同样是 op');
+/* 行首但缩进（类体里的装饰器）仍然是装饰器：ws 不算有效 token。 */
+T.eq(typesOf('class C:\n    @property\n    def f(self):\n        pass\n'),
+     ['keyword:class', 'name:C', 'punct::', 'decorator:@property',
+      'keyword:def', 'name:f', 'punct:(', 'name:self', 'punct:)', 'punct::', 'keyword:pass'],
+     '缩进的装饰器仍是装饰器（ws 不算有效 token）');
+/* 注释之后换行，下一行的 @ 仍是行首。 */
+T.eq(typesOf('# c\n@dec\n'), ['decorator:@dec'], '注释行之后的 @ 仍是装饰器');
+/* 「逻辑行」不是「物理行」：括号内换行是隐式续行，行尾反斜杠是显式续行，
+   两种情况下的 @ 都不在逻辑行首，所以是矩阵乘法而不是装饰器。 */
+T.eq(typesOf('r = (\n    a\n    @b\n)\n'),
+     ['name:r', 'op:=', 'punct:(', 'name:a', 'op:@', 'name:b', 'punct:)'],
+     '括号内隐式续行：@ 不在逻辑行首，是 op');
+T.eq(typesOf('r = a \\\n@b\n'),
+     ['name:r', 'op:=', 'name:a', 'op:\\', 'op:@', 'name:b'],
+     '反斜杠显式续行：@ 不在逻辑行首，是 op');
+/* 括号闭合之后回到深度 0，下一行的装饰器要认得出来。 */
+T.eq(typesOf('f(x)\n@dec\n'),
+     ['name:f', 'punct:(', 'name:x', 'punct:)', 'decorator:@dec'],
+     '括号闭合后深度归零，下一行的装饰器照常识别');
+/* 文件以 @ 开头（连着 EOF 没有换行）。 */
+T.eq(typesOf('@dec'), ['decorator:@dec'], '文件以装饰器收尾（无末换行）');
+
 /* 残缺指数：CPython 给 NUMBER '1' + NAME 'e'，这里照此切，不把 e 吞进数字。 */
 T.eq(typesOf('x = 1e\n'), ['name:x', 'op:=', 'number:1', 'name:e'], '残缺指数不把 e 吞进数字');
 T.eq(typesOf('x = 1e-5\n'), ['name:x', 'op:=', 'number:1e-5'], '带符号指数属于数字');
