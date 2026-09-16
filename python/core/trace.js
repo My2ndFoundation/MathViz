@@ -73,7 +73,31 @@
    split 长度，是因为只要 typed 恰好以 '\n' 结尾就会在裸长度上多出一个
    空尾行，两边都用同一条“去掉纯粹由结尾换行切出的空尾行”的规则才不会被这
    个人为噪声干扰）。正号＝比参考多行，负号＝比参考少行（含相邻两行被误
-   合并成一行的情况）。 */
+   合并成一行的情况）。
+
+   ── Important：多打 2 行以上时，内容会被 alignLines 自己吞掉（裁决 R40）─
+   `alignLines` 原来只按 `i < refLines.length` 迭代——多出来的 typed 行只要
+   超出参考行数**两行以上**，压根不会被访问到，既不会出现在 marks 里，也
+   不会出现在 R38 新加的 overflow 里，凭空消失。多 1 行之所以恰好没事，是
+   因为参考最后一行（通常是结尾换行切出来的那个空行）这唯一一个"还在循环
+   范围内、但 refFull 为空"的位置，刚好能吸收*一个*额外的 typed 行进
+   overflow；多 2 行、3 行时，第二个、第三个额外的 typed 行没有任何 row
+   去装它们，直接被 alignLines 吞掉，marks.length + overflow.length 从此
+   小于 typed.length。
+   修法：循环上界改成 `Math.max(refLines.length, typedLines.length)`；
+   超出参考行数的每一个 typed 行都单独产出一个 `refFull === ''` 的 row，
+   这样它的全部字符必然落进 overflow（`matchLen` 在 `refFull` 为空时恒为
+   0）。`refStart` 对这些没有参考内容的行不再前进（因为 refFull.length
+   恒为 0），多条这样的行会共享同一个 refStart（也就是 reference 的末尾
+   偏移）——这是有意的：它们本来就没有对应的 reference 位置可占。
+   把这一条与 R38 合起来看，能提炼出一条更上位的不变量：**每一个打出来的
+   字符都要么落进 marks、要么落进 overflow，一个不能少**——
+   `marks.length + overflow.length === typed.length`。R38 是它在"行内"的
+   一半（溢出字符不能越界抢占下一行），这一条是它在"行间"的一半（多出来的
+   整行也不能被循环边界漏过）。这条不变量已经作为测试断言常驻，覆盖
+   +1/+2/+3 行与对应的少行方向（合并 2/3/4 行），而不是只测 ±1——±1 恰好
+   是"最后一行吸收一行溢出"这个旧机制唯一兜得住的档位，只测 ±1 会让 +2/+3
+   这一类回归永远测不出来。 */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory();
@@ -90,9 +114,12 @@
   function _useClock(fn) { clock = fn; }
 
   /* 按 '\n' 把 reference / typed 都切成行，逐行配对。
-     行数以 reference 为准（reference.split('\n').length）——它是练习的固定骨架；
-     typed 缺的行按空字符串补齐，多出来的行（typed 比 reference 长）直接忽略，
-     因为参考文本里没有对应位置可以安放它们的下标。
+     行数取两边较大者（裁决 R40）——typed 缺的行按空字符串补齐；typed 比
+     reference 多出来的行，每一行也都要单独产出一个 row（refLine/refFull
+     为空字符串），这样它们的字符才有地方落进 update() 的 overflow，不会
+     被循环边界直接漏过。这些"没有参考内容"的行的 refStart 不再前进（因为
+     refFull.length 恒为 0），是有意的：它们本来就没有对应的 reference
+     位置可占。
      每一项除了原始行内容，还带上 refFull / typedFull：把“这一行是否有后续
      换行符”折算成末尾追加的 '\n'，换行符本身因此成为一个可参与逐字符比较的
      位置——这正是“提前按回车”被判错、以及行内比较不会越界污染下一行的关键。 */
@@ -101,19 +128,22 @@
     var typedLines = typed.split('\n');
     var rows = [];
     var pos = 0;
-    for (var i = 0; i < refLines.length; i++) {
-      var refLine = refLines[i];
-      var refHasNL = i < refLines.length - 1;
+    var lineCount = Math.max(refLines.length, typedLines.length);
+    for (var i = 0; i < lineCount; i++) {
+      var hasRef = i < refLines.length;
+      var refLine = hasRef ? refLines[i] : '';
+      var refHasNL = hasRef && i < refLines.length - 1;
       var typedLine = i < typedLines.length ? typedLines[i] : '';
       var typedHasNL = i < typedLines.length - 1;
+      var refFull = refLine + (refHasNL ? '\n' : '');
       rows.push({
         refLine: refLine,
         typedLine: typedLine,
         refStart: pos,
-        refFull: refLine + (refHasNL ? '\n' : ''),
+        refFull: refFull,
         typedFull: typedLine + (typedHasNL ? '\n' : '')
       });
-      pos += refLine.length + (refHasNL ? 1 : 0);
+      pos += refFull.length;
     }
     return rows;
   }

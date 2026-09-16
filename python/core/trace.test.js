@@ -138,4 +138,42 @@ T.eq(Trace.alignLines('a\nbb\n', 'a\nbb\n').length, 3, '按行对齐，含末尾
   T.ok(r.marks.every(m => m.state === 'ok'), 'reset 后重新输入正确字符应为 ok');
 })();
 
+/* 裁决 R40：把 R38（行内溢出）和 R39（行间多/少行）合起来看，能提炼出一条
+   更上位的不变量——每一个打出来的字符都要么落进 marks、要么落进
+   overflow，一个不能少。只测 ±1 测不出这条：R38 之前的 alignLines 只按
+   参考行数迭代，"多 1 行"恰好能被参考最后一行（结尾换行切出的空行）当成
+   唯一一次机会吸收进 overflow，"多 2 行"起第二行开始就没有 row 可装，
+   直接被 alignLines 吞掉——marks/overflow 都不知道它存在过。这里同时覆盖
+   +1/+2/+3（多行）与 -1/-2/-3（合并 2/3/4 行少行）六档，并顺带验证
+   lineDelta 在每一档都仍然正确（同一失败家族此前两次都只验证过 ±1）。 */
+function checkCoverage(reference, typed, label) {
+  const s = Trace.create(reference);
+  const r = s.update(typed);
+  T.eq(r.marks.length + r.overflow.length, typed.length,
+    label + '：marks.length + overflow.length 必须等于 typed.length（一个字符都不能凭空消失）');
+  return r;
+}
+
+(function () {
+  let r = checkCoverage('a\nb\nc\n', 'a\nX\nb\nc\n', '多 1 行');
+  T.eq(r.stats.lineDelta, 1, '多 1 行：lineDelta 应该是 +1');
+
+  r = checkCoverage('a\nb\nc\n', 'a\nX\nY\nb\nc\n', '多 2 行');
+  T.eq(r.stats.lineDelta, 2, '多 2 行：lineDelta 应该是 +2');
+
+  r = checkCoverage('a\nb\nc\n', 'a\nX\nY\nZ\nb\nc\n', '多 3 行');
+  T.eq(r.stats.lineDelta, 3, '多 3 行：lineDelta 应该是 +3');
+})();
+
+(function () {
+  let r = checkCoverage('a\nb\nc\n', 'a\nbc\n', '少 1 行（合并 2 行）');
+  T.eq(r.stats.lineDelta, -1, '少 1 行：lineDelta 应该是 -1');
+
+  r = checkCoverage('a\nb\nc\n', 'abc\n', '少 2 行（合并 3 行）');
+  T.eq(r.stats.lineDelta, -2, '少 2 行：lineDelta 应该是 -2');
+
+  r = checkCoverage('a\nb\nc\nd\n', 'abcd\n', '少 3 行（合并 4 行）');
+  T.eq(r.stats.lineDelta, -3, '少 3 行：lineDelta 应该是 -3');
+})();
+
 T.report('trace');
