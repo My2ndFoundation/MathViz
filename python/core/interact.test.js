@@ -338,6 +338,63 @@ T.eq(PI.clearScope('all', PROGS, 'b'), null, '整项清空交给 Store.clearAll�
   T.eq(r2.value, ref + '\n', '参考已经到底：不猜缩进，只换行');
 })();
 
+/* ============ 修复轮 2：修复本身引入的两个缺陷，两侧各自钉住 ============
+   两条都是"只在某一侧才发生"的失败——留在原地 / 清当前这一题，永远看不见。 */
+
+/* ---- 新缺陷 ① 延时回调在 UI 已经拆掉之后醒来 ---- */
+(function () {
+  function fakeUi() {
+    const removed = [];
+    return {
+      removed: removed,
+      input: { classList: { remove: (c) => removed.push(c), add: () => {} } },
+      blockNote: { hidden: false }
+    };
+  }
+
+  /* 一侧：她留在原地，回调正常执行——红边撤掉、说明收起 */
+  const ui = fakeUi();
+  PI.clearFlash(ui);
+  T.eq(ui.removed, ['py-blocked'], '留在原地时：回调真的把红边撤掉了');
+  T.eq(ui.blockNote.hidden, true, '留在原地时：说明也收起来了');
+
+  /* 另一侧：1.6 秒之内她切走了模式 / 换了程序，renderStage 已经把 traceUI 置空。
+     回调此刻醒来**必须安全返回**，而不是抛一个未捕获的 TypeError。 */
+  /* 每一次调用都包在 safe() 里：守卫被拿掉时这些调用会**抛**，不包的话
+     整个文件当场崩在这里，T.report 根本跑不到——负控制看上去"红了"，
+     却一条失败标签都打不出来（第一版就是这样，改回来了）。 */
+  function safe(fn) { try { fn(); return true; } catch (e) { return false; } }
+  T.ok(safe(() => PI.clearFlash(null)), 'UI 已经拆掉（null）时回调必须安全返回');
+  T.ok(safe(() => PI.clearFlash(undefined)), 'undefined 同样安全');
+
+  /* 半拆的残壳（只剩 blockNote，input 已经没了）：既不许抛，也不许"顺手清一半" */
+  const shell = { blockNote: { hidden: false } };
+  T.ok(safe(() => PI.clearFlash(shell)), '半拆状态（没有 input）同样安全');
+  T.eq(shell.blockNote.hidden, false, '残壳上什么都不做，不是"顺手清一半"');
+})();
+
+/* ---- 新缺陷 ② 清别人的草稿，不许动她自己这一遍 ---- */
+(function () {
+  /* 一侧：清的就是当前这一题 → 该重置（草稿没了，下一遍要从零重新算） */
+  T.ok(PI.clearHitsCurrent(['b'], 'b'), '单题清空清的正是当前这一题：命中');
+  T.ok(PI.clearHitsCurrent(['a', 'b', 'c'], 'b'), '模块清空包含当前这一题：命中');
+  T.ok(PI.clearHitsCurrent(null, 'b'), '整项清空（ids 为 null）一定包含当前这一题');
+
+  /* 另一侧：清的是别人 → 不许动。这正是回归本身：她正临摹 A、顺手清掉 B，
+     若照样重置，一遍从未被打断的临摹会被标成 resumed，成绩不计。 */
+  T.ok(!PI.clearHitsCurrent(['b'], 'a'), '清的是别的程序：不命中，当前这一遍不受影响');
+  T.ok(!PI.clearHitsCurrent(['b', 'c'], 'a'), '清的是别的几个程序：同样不命中');
+  T.ok(!PI.clearHitsCurrent([], 'a'), '空 id 列表不命中');
+  T.ok(!PI.clearHitsCurrent(['a'], null), '还没有当前程序时谈不上命中');
+
+  /* 与 clearScope 串起来看：清别的程序时，run 不该被作废 */
+  const PROGS2 = [{ id: 'a' }, { id: 'b' }];
+  T.ok(!PI.clearHitsCurrent(PI.clearScope('program', PROGS2, 'b'), 'a'),
+       '「⋯ → 清空本题」点在别人身上时，当前这一遍不作废');
+  T.ok(PI.clearHitsCurrent(PI.clearScope('module', PROGS2, 'b'), 'a'),
+       '模块清空扫到了她，那就该作废');
+})();
+
 /* ---- mount 在没有 DOM 的地方必须响亮地拒绝 ---- */
 T.throws(function () { PI.mount({ programs: PROGS }); },
          'mount 没有根节点时当场抛，不静默什么都不做', /root/);

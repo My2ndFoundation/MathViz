@@ -302,6 +302,33 @@
     store.clearMany(ids);
   }
 
+  /* clearHitsCurrent(ids, currentId) → boolean
+     这一次清空**动到当前这一题了吗**？
+
+     选择器里每一项的「⋯ → 清空本题」可以清**任意**一个程序，所以"清完要不要
+     重新读草稿、要不要把当前这一遍临摹作废"不能无条件成立：她正临摹着 A、
+     顺手清掉 B 的草稿，若照样重置，下一次 traceRun() 会看到 S.typed 非空、
+     把一遍**从未被打断的**临摹标成 resumed，成绩从此不计——而"重来"又会丢掉
+     她真实的进度。`ids === null` 是整项清空（Store.clearAll 扫键前缀），
+     那一定包含当前这一题。 */
+  function clearHitsCurrent(ids, currentId) {
+    if (ids === null) { return true; }
+    if (!currentId) { return false; }
+    return (ids || []).indexOf(currentId) !== -1;
+  }
+
+  /* clearFlash(ui) —— 撤掉硬拦截的红边与说明。
+
+     单拎出来是因为它跑在一个 1600 ms 的延时回调里，而那段时间足够她切走模式
+     或换一题，`renderStage()` 会把 traceUI 置空：**回调必须在"已经没人要它"
+     的情况下安全返回**，而不是抛一个未捕获的 TypeError 进控制台。
+     （拆除那一侧还会 clearTimeout，两道保险互不依赖。） */
+  function clearFlash(ui) {
+    if (!ui || !ui.input) { return; }
+    ui.input.classList.remove('py-blocked');
+    if (ui.blockNote) { ui.blockNote.hidden = true; }
+  }
+
   /* variantsOf(programs, program) → Program[]
      同一个 `problem` 的几种写法（§2.4），按注册表顺序、含自己。
      缺 `problem` 字段的程序**只和自己一组**：naive 的 `q.problem === p.problem`
@@ -810,9 +837,10 @@
       }
       var typed = St.getDraft(p.id, 'trace');
       if (typeof typed === 'string') { S.typed = typed; }
-      /* 旧 run 属于上一份参考，必须丢掉；下一次 traceRun() 会照这份草稿
-         重建，并按"是否非空"决定这一遍算不算成绩。 */
-      S.run = null;
+      /* ⚠ 这里**不碰 S.run**。loadDrafts 是共享的，而"这一遍临摹作不作废"
+         只有真正换了题 / 真正清掉了当前这一题的草稿才成立：清别人的草稿时
+         照样重置，会把一遍从未被打断的临摹标成 resumed（成绩不计），
+         而"重来"又会丢掉她真实的进度。重置放在调用方，各自说明理由。 */
     }
     function saveBlank() { if (S.progId) { St.scheduleDraft(S.progId, 'blank', JSON.stringify(S.answers)); } }
     function saveTyped() { if (S.progId) { St.scheduleDraft(S.progId, 'trace', S.typed); } }
@@ -924,7 +952,11 @@
       if (ask && !ask.call(win, ts(key, S.lang, [n]))) { return; }
       /* 动手的次序（先 flush 再清）在 clearRecords 里，那里测得到。 */
       clearRecords(St, scope, ids);
-      loadDrafts();
+      /* 只有清到当前这一题时才重读草稿、作废当前这一遍；清别人的不动她。 */
+      if (clearHitsCurrent(ids, S.progId)) {
+        loadDrafts();
+        S.run = null;
+      }
       renderAll();
       toast(t('cleared', S.lang));
     }
@@ -1297,10 +1329,17 @@
       note.hidden = false;
       traceUI.input.classList.add('py-blocked');
       if (traceUI.blockTimer) { clearTimeout(traceUI.blockTimer); }
-      traceUI.blockTimer = setTimeout(function () {
-        traceUI.input.classList.remove('py-blocked');
-        note.hidden = true;
-      }, 1600);
+      /* 回调读的是**外层的** traceUI：1.6 秒之内她完全可能切走模式或换一题，
+         那时它已经是 null。clearFlash 自带守卫，安全返回。 */
+      traceUI.blockTimer = setTimeout(function () { clearFlash(traceUI); }, 1600);
+    }
+
+    /* 拆掉当前这一层临摹 UI：**先停掉延时回调**，再置空。只加回调里的守卫也
+       能不崩，但那样会留下一个"还会醒来、醒来却无事可做"的定时器；两件事一起
+       消灭，才不用去想它醒来时世界长什么样。 */
+    function teardownTrace() {
+      if (traceUI && traceUI.blockTimer) { clearTimeout(traceUI.blockTimer); }
+      traceUI = null;
     }
 
     function onTyped() {
@@ -1529,7 +1568,7 @@
     }
 
     function renderStage() {
-      traceUI = null;
+      teardownTrace();
       wipe(stage);
       if (!current()) { return; }
       if (S.mode === 'read') { renderRead(); }
@@ -1601,6 +1640,7 @@
       S.compareId = null;
       S.anchorLine = -1;
       loadDrafts();
+      S.run = null;   /* 旧 run 属于上一题的参考 */
       renderAll();
     }
 
@@ -1677,6 +1717,7 @@
       setLang: setLang,
       destroy: function () {
         St.flush();
+        teardownTrace();
         doc.removeEventListener('keydown', onKey);
         doc.removeEventListener('visibilitychange', onVisibility);
         if (win) { win.removeEventListener('pagehide', onHide); }
@@ -1693,6 +1734,8 @@
     hintAt: hintAt,
     clearScope: clearScope,
     clearRecords: clearRecords,
+    clearHitsCurrent: clearHitsCurrent,
+    clearFlash: clearFlash,
     variantsOf: variantsOf,
     blankFeedback: blankFeedback,
     traceStates: traceStates,
