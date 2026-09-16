@@ -57,6 +57,23 @@
 
 ---
 
+## 一条给实现者的上报纪律（波次 A 实测出来的）
+
+**「我的做法与简报不一致，而我的做法更对」本身就是一条上报项。**
+
+T5 的实现者写 property 的参考实现时本能避开了 `max`、改用 `sorted([a,b,c])[-1]`——
+理由正是「拿 `max` 去验 `max(a,b,c)` 等于拿自己验自己」——但它把这当成实现细节，
+没有回头质疑简报里那句「参考实现 `max`」。于是简报里那个**在结构上不可能失败**的
+守卫一直活到评审才被抓住。
+
+同一个家族在 T1 那边的形状是：文件头的偏离清单少算了自己一条。两次都不是「做错了」，
+而是**「做对了但没说」**——而控制方之所以能裁决 R12/R13/R14，唯一的原因就是它们被申报了；
+没被申报的那一条（`1e`）因此绕过了裁决。
+
+所以：**发现自己在偏离简报时，无论偏得对不对，都要在报告里单列一条。**
+
+---
+
 ## File Structure
 
 ```
@@ -880,8 +897,8 @@ git commit -m "fix(chess): 补上 registry_check()，契约表里那格 ❌ 转�
 |---|---|---|---|
 | 1 | `hello-name` | `input()` / `print()` / f-string | `program_run_check` 的 stdin 路径 |
 | 2 | `celsius-to-fahrenheit` | 算术、浮点、`round` | 基本 run |
-| 3 | `max-of-three-if` | 嵌套 `if/elif/else` | `variant_check`（problem `max-of-three` 之一） |
-| 4 | `max-of-three-builtin` | `max()` 内置 | `variant_check` 之二 + `algorithm_property_check`（参考实现 `max`） |
+| 3 | `max-of-three-if` | 嵌套 `if/elif/else` | `variant_check`（problem `max-of-three` 之一） + `algorithm_property_check`（参考实现 `max`）——**手写分支链拿去比内置 `max`，才是一个有可能出现否定结果的测量** |
+| 4 | `max-of-three-builtin` | `max()` 内置 | `variant_check` 之二 + `algorithm_property_check`（参考实现 **`sorted([a,b,c])[-1]`，不是 `max`**——被测的就是 `max(a,b,c)`，拿 `max` 当参照等于拿自己验自己） |
 | 5 | `swap-two-temp` | 临时变量 | `variant_check`（problem `swap-two` 之一） |
 | 6 | `swap-two-tuple` | 元组解包 | `variant_check` 之二 |
 | 7 | `count-vowels-loop` | `for` + 成员测试 + 计数 | `algorithm_property_check`（参考实现是 `sum(...)` 生成式，机制不同） |
@@ -1987,7 +2004,7 @@ tool-version/tool-engine 两个 meta 与 i18n，去掉 canvas、动画时钟与�
 
 ---
 
-### Task 14: `check.py` 与 `gates/` —— 29 道门 + 29 个负控制
+### Task 14: `check.py` 与 `gates/` —— 31 道门 + 31 个负控制
 
 **Files:**
 - Create: `python/scripts/check.py`（运行器）
@@ -2193,7 +2210,7 @@ Expected: A 组 7 道全绿（其余门尚未接入）。
 每组接进 `rc` 列表后立刻 `python3 python/scripts/check.py`，确认**全绿**再写下一组。
 不要攒到最后一起调——29 道门一起变红时，你分不清是哪一道的问题。
 
-- [ ] **Step 3: 29 个负控制，逐个见红**
+- [ ] **Step 3: 31 个负控制，逐个见红**
 
 **这是本任务的核心交付物，不是收尾动作。** 按上面四张表逐条执行，每一条都是：
 
@@ -2204,7 +2221,7 @@ Expected: A 组 7 道全绿（其余门尚未接入）。
 4. **从内存里的原字节写回**——**绝不 `git checkout`**（会抹掉别的会话未提交的工作）
 5. 再跑一次，确认恢复绿
 
-把 29 条的结果记成一张表（门名 / 破坏动作 / 看到的报错首行），贴进提交信息或
+把 31 条的结果记成一张表（门名 / 破坏动作 / 看到的报错首行），贴进提交信息或
 `docs/superpowers/prompts/python-handoff.md`。
 
 > **一道门在你把它守的东西改坏、看到它变红之前不算数。** 本仓有三个探针在同一次
