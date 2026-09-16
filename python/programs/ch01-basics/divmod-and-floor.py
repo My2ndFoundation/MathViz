@@ -3,7 +3,7 @@
 
 def split_seconds(total):
     hours, rest = divmod(total, 3600)
-# >>> BLANK id=minutes-seconds level=2 hint="对 rest 再拆一次 || 这次把两个运算符分开写，好看清上一行 divmod 一次交回来的正是这一对" hintEn="The hours are already out of the way, so the value still to be cut up is rest, not total || cut it the same way as the line above but spell the two operators out separately this time - the pair you get is exactly what divmod handed back in one go"
+# >>> BLANK id=minutes-seconds level=2 hint="小时已经拆走了，还要拆的是 rest，不是 total；这次用 // 与 % 两个运算符分开写，分钟一行在前、秒一行在后 || 按 60 来拆：// 给出分钟，% 给出剩下的秒——正是上一行 divmod 一次交回来的那一对" hintEn="The hours are already out of the way, so the value still to be cut up is rest, not total; this time use the two operators // and % on separate lines, minutes first and seconds second || Cut by 60: // gives the minutes and % gives the seconds left over - exactly the pair divmod handed back in one go on the line above"
     minutes = rest // 60
     seconds = rest % 60
 # <<< BLANK
