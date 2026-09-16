@@ -2094,6 +2094,14 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
                   en: 'line {0} indent is off: expected {1} spaces relative, you wrote {2}' },
     blankLead:   { zh: '第 1 行缩进对不上：这个空从第 {1} 格开始，你写了 {2} 格',
                   en: 'line 1 indent is off: this blank starts at column {1}, you wrote {2}' },
+    blankDiffLiteral: { zh: '第 {0} 个 token（{1}）里第 {2} 个字符起不同',
+                  en: 'token #{0} ({1}) differs from character {2}' },
+    blankWrongKind:   { zh: '第 {0} 个 token 应该是{1}，你写了 {2}',
+                  en: 'token #{0} should be {1}, you wrote {2}' },
+    blankMissingLiteral: { zh: '第 {0} 个 token 还没写：这里应该有{1}',
+                  en: 'token #{0} is missing: {1} should be here' },
+    literalString:  { zh: '一个字符串', en: 'a string' },
+    literalFstring: { zh: '一个 f-string', en: 'an f-string' },
     blankAllOk:  { zh: '全部填对了', en: 'All blanks correct' },
     given:       { zh: '（已填入标准答案，不计完成）', en: '(standard answer filled in, not counted as done)' },
     alpha:       { zh: '影子',     en: 'Shadow' },
@@ -2434,6 +2442,12 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     return i;
   }
 
+  /* literalKindName(type, lang) → 字面量类别的双语名字（'一个字符串' / '一个 f-string'）。
+     只在这一处定义；blankFeedback 的字面量分支都从这里取，不各自拼一遍。 */
+  function literalKindName(type, lang) {
+    return t(type === 'fstring' ? 'literalFstring' : 'literalString', lang);
+  }
+
   /* blankFeedback(answer, reference, lang) → { ok, kind, message, caret }
 
      逐空判定的那句话与光标位置。**不给答案**（不回整段 body），只报
@@ -2449,7 +2463,17 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
      另有 Judge 结构上看不见的一种错：**整块的绝对缩进**。Judge.normalize 比的是
      行与行之间的相对缩进，所以单行挖空体 `    x = 1` 与 `x = 1` 在它眼里完全
      相等——可 Exercise.merge 是拿她这一份原样替换回源码的，少了那四格，粘进
-     PyCharm 就是 IndentationError。所以这里先自己比一遍第一行的绝对缩进。 */
+     PyCharm 就是 IndentationError。所以这里先自己比一遍第一行的绝对缩进。
+
+     字面量例外（Task 11b，控制方裁决 T11-1，源自 Task 11 评审 C1）：PyLex 把
+     一整个字符串或 f-string 切成**一个** token，"期待的 token 原文"对字面量
+     来说就是答案本身——照其他 token 那样把 expected 印出来，等于把整行答案
+     摆在她眼前。所以期待的 token 是 string/fstring 时，消息里绝不出现它的原文：
+     kind 'different' 只说"第几个字符起不同"（下标是在 token 原文——含引号
+     与 f-string 的 `f` 前缀——里数的，1 起）；她自己写的（`cmp.got`）仍可以
+     照常复述，那是她自己的输入，不是答案。kind 'missing' 只说"这里该有一个
+     字符串/f-string"，不带任何原文。kind 'extra' 与 'indent'/'lead-indent'
+     不受影响——'extra' 没有 expected 可印，indent 系两种从不涉及字面量原文。 */
   function blankFeedback(answer, reference, lang) {
     var a = String(answer == null ? '' : answer);
     var r = String(reference == null ? '' : reference);
@@ -2483,6 +2507,54 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
 
     var L = pyLex();
     var toks = L.significant(L.tokenize(a));
+
+    /* 字面量分支：只有 'different' / 'missing' 会指向一个"期待的 token"，
+       'extra' 没有期待值可言。refTok 取参考侧同一下标的有效 token——与
+       Judge.compare 用的是同一套 PyLex.significant(PyLex.tokenize(...))，
+       下标口径一致（brief 已确认）。 */
+    var refToks = (cmp.kind === 'different' || cmp.kind === 'missing')
+      ? L.significant(L.tokenize(r)) : null;
+    var refTok = refToks ? refToks[cmp.index] : null;
+    var isLiteral = !!refTok && (refTok.type === 'string' || refTok.type === 'fstring');
+
+    if (isLiteral && cmp.kind === 'missing') {
+      return {
+        ok: false,
+        kind: cmp.kind,
+        caret: a.length,
+        message: ts('blankMissingLiteral', lang, [cmp.index + 1, literalKindName(refTok.type, lang)])
+      };
+    }
+
+    if (isLiteral && cmp.kind === 'different') {
+      var atTok = toks[cmp.index];
+      if (atTok && (atTok.type === 'string' || atTok.type === 'fstring')) {
+        /* 两边都是字面量：逐字符比 token 原文（含引号/前缀），找第一个不同的
+           下标 k——一方是另一方前缀时取较短者的长度。绝不把 rt[i] 的原文
+           （cmp.expected）放进消息，只用它来算 k。 */
+        var refText = cmp.expected, atText = cmp.got;
+        var short = Math.min(refText.length, atText.length);
+        var k = short;
+        for (var ci = 0; ci < short; ci++) {
+          if (refText.charAt(ci) !== atText.charAt(ci)) { k = ci; break; }
+        }
+        return {
+          ok: false,
+          kind: cmp.kind,
+          caret: Math.min(a.length, atTok.start + k),
+          message: ts('blankDiffLiteral', lang, [cmp.index + 1, literalKindName(refTok.type, lang), k + 1])
+        };
+      }
+      /* 她在该放字面量的位置写了别的东西：只说该放哪一类，仍可以复述她
+         自己写的（cmp.got 是答案侧原文，不是答案）。 */
+      return {
+        ok: false,
+        kind: cmp.kind,
+        caret: atTok ? atTok.start : a.length,
+        message: ts('blankWrongKind', lang, [cmp.index + 1, literalKindName(refTok.type, lang), cmp.got])
+      };
+    }
+
     var caret = (cmp.kind === 'missing' || !toks[cmp.index]) ? a.length : toks[cmp.index].start;
     var key = cmp.kind === 'missing' ? 'blankMissing'
             : cmp.kind === 'extra' ? 'blankExtra' : 'blankDiff';

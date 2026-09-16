@@ -169,6 +169,34 @@ T.eq(PI.clearScope('all', PROGS, 'b'), null, '整项清空交给 Store.clearAll�
   T.eq(lead.kind, 'lead-indent', '这种错单独一类，不混进 token 那几种');
   T.ok(require('./judge.js').compare('x = 1', '    x = 1').ok,
        '（对照）Judge 自己看不见这种错——所以上面那条不是多余的');
+
+  /* 字面量不给答案（Task 11b）：PyLex 把整段字符串 / f-string 切成一个 token，
+     把期待的 token 原文印出来就是把整行答案印出来。 */
+  const REF_F = '    return f"Hello, {name}!"';
+  const slip = PI.blankFeedback('    return f"Hello {name}!"', REF_F, 'zh');
+  T.ok(!slip.ok, 'f-string 里少一个逗号是错的');
+  T.eq(slip.kind, 'different', '错法仍是 different');
+  T.ok(slip.message.indexOf('Hello, {name}') === -1, 'f-string 打错一个字符：消息里不出现期待的字面量原文');
+  T.ok(slip.message.indexOf('f-string') !== -1, '消息说出是哪一类字面量');
+  T.ok(slip.message.indexOf('第 8 个字符') !== -1, '消息报出字面量里第几个字符起不同（f"Hello 之后那一位）');
+  T.eq(slip.caret, '    return f"Hello'.length, '光标送到字面量里第一个不同的字符');
+
+  const onlyReturn = PI.blankFeedback('    return', REF_F, 'en');
+  T.eq(onlyReturn.kind, 'missing', '只写了 return 是 missing');
+  T.ok(onlyReturn.message.indexOf('Hello') === -1, '缺一整个 f-string 时：消息里不出现它的原文');
+  T.ok(onlyReturn.message.indexOf('an f-string') !== -1, '缺字面量时只说出类别');
+
+  const wrongKind = PI.blankFeedback('    return greeting', REF_F, 'zh');
+  T.eq(wrongKind.kind, 'different', '该放字面量处写了名字：different');
+  T.ok(wrongKind.message.indexOf('Hello') === -1, '写成别的东西时：消息里不出现期待的字面量原文');
+  T.ok(wrongKind.message.indexOf('greeting') !== -1, '消息可以复述她自己写的东西');
+
+  const plain = PI.blankFeedback("x = 'abc'", "x = 'abd'", 'en');
+  T.ok(plain.message.indexOf("'abd'") === -1, '普通字符串同样不印出期待的原文');
+  T.ok(plain.message.indexOf('a string') !== -1, '普通字符串的类别名');
+
+  const nonLiteral = PI.blankFeedback('total = total - 1', 'total = total + 1', 'zh');
+  T.ok(nonLiteral.message.indexOf('+') !== -1, '（对照）非字面量 token 仍照旧说出期待的那个 token');
 })();
 
 /* ---- 临摹三层的中间层：每个字符一个状态 ---- */
