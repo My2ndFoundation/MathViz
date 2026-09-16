@@ -122,6 +122,18 @@
     elapsed:     { zh: '用时',     en: 'Time' },
     backspaces:  { zh: '退格',     en: 'Backspaces' },
     lineMore:    { zh: '你比参考多了 {0} 行', en: 'You are {0} line(s) ahead of the reference' },
+    resumed:     { zh: '接着上次的草稿打的，这一遍不计入最好成绩',
+                  en: 'Resumed from a saved draft - this run is not counted towards your best' },
+    blockedExpect:{ zh: '硬拦截：第 {0} 行第 {1} 格应该是 {2}',
+                  en: 'Blocked: line {0}, column {1} should be {2}' },
+    blockedNewline:{ zh: '硬拦截：第 {0} 行到这里就该换行了（按回车）',
+                  en: 'Blocked: line {0} ends here - press Enter' },
+    blockedLineEnd:{ zh: '硬拦截：参考的第 {0} 行只有 {1} 个字符，你已经打到第 {2} 格了——按退格删掉多出来的部分',
+                  en: 'Blocked: line {0} of the reference is only {1} characters, you are at column {2} - backspace over the extra' },
+    blockedPastEnd:{ zh: '硬拦截：参考只有 {0} 行，这一行已经超出去了——按退格回到参考里',
+                  en: 'Blocked: the reference has only {0} lines, this line is past the end - backspace back into it' },
+    blockedIndent:{ zh: '硬拦截：这一行的缩进比参考多了 {0} 格——先按 {0} 次退格',
+                  en: 'Blocked: this line is indented {0} space(s) more than the reference - backspace {0} time(s) first' },
     lineLess:    { zh: '你比参考少了 {0} 行', en: 'You are {0} line(s) short of the reference' },
     clearOne:    { zh: '清空本题', en: 'Clear this program' },
     clearModule: { zh: '清空本模块', en: 'Clear this module' },
@@ -270,6 +282,26 @@
     throw new Error('clearScope: 未知范围 ' + scope + '（只认 program / module / all）');
   }
 
+  /* clearRecords(store, scope, ids) —— 按 scope 真正动手清
+
+     收一个 store 形状的对象（不是直接抓模块）**只为一件事**：让"先 flush 再清"
+     这个次序可以在 node 下被断言。次序不是风格问题——`Store.cancelPending`
+     只被 setDraft/scheduleDraft 调用，**清空不取消排队中的那次防抖写**，
+     所以不先落盘就删，400 ms 后那次写会把草稿原样送回来，而 UI 已经说了
+     "已清空"，她不会再去看第二眼。
+
+     `ids === null` 是 `clearScope('all')` 的出口：交给 clearAll 扫键前缀。
+     单题 / 模块两级只清 draft（进度不连坐，spec §4.5）。 */
+  function clearRecords(store, scope, ids) {
+    store.flush();
+    if (ids === null) { store.clearAll(); return; }
+    if (scope === 'program') {
+      ids.forEach(function (id) { store.clearProgram(id); });
+      return;
+    }
+    store.clearMany(ids);
+  }
+
   /* variantsOf(programs, program) → Program[]
      同一个 `problem` 的几种写法（§2.4），按注册表顺序、含自己。
      缺 `problem` 字段的程序**只和自己一组**：naive 的 `q.problem === p.problem`
@@ -390,6 +422,129 @@
     return states;
   }
 
+  /* expectedCharAt(reference, text, offset) → string | null
+
+     「她打的这一格，按参考应当是哪个字符？」——硬拦截档要不要拒绝这次按键、
+     以及拒绝之后屏幕上该说什么，都由它回答。
+
+     用**文本自己的行列**去查参考，而不是全局偏移：她多打/少打一行之后，
+     全局偏移就不再指向同一个位置了（`trace.js` 按行重新对齐，同一条道理）。
+     两种"参考在这里没有内容"的情形都回 null，调用方分别说人话：
+       · 这一行整行超出了参考（line >= 参考行数）
+       · 这一列超出了本行、而本行是参考的最后一行（后面没有换行符可打了）
+     本行未到结尾时列越界则应当打换行符，所以回 '\n' 而不是 null。 */
+  function expectedCharAt(reference, text, offset) {
+    var ref = String(reference == null ? '' : reference);
+    var s = String(text == null ? '' : text);
+    var before = s.slice(0, offset);
+    var line = before.split('\n').length - 1;
+    var col = offset - (before.lastIndexOf('\n') + 1);
+    var refLines = ref.split('\n');
+    var refLine = refLines[line];
+    if (refLine === undefined) { return null; }
+    if (col < refLine.length) { return refLine.charAt(col); }
+    return (line < refLines.length - 1) ? '\n' : null;
+  }
+
+  /* charMatches(reference, text, offset) → boolean
+     text[offset] 这个字符与参考的同一行同一列一致吗？参考在那里没有内容
+     （expectedCharAt 回 null）时一律不一致——硬拦截档据此拒绝这次按键。 */
+  function charMatches(reference, text, offset) {
+    var expected = expectedCharAt(reference, text, offset);
+    return expected !== null && expected === String(text == null ? '' : text).charAt(offset);
+  }
+
+  /* blockedHint(reference, text, offset, lang) → string
+
+     硬拦截档**拒绝了一次按键**时屏幕上要说的那句话。这句话不是装饰：
+     `applyEnter` 会把上一行的缩进带到下一行，而参考的下一行可能顶格，
+     于是 col 一直落在参考行的内容之外——**她打什么都被拒**，唯一的出路是
+     猜到要连按几次退格。一次她看不见的拒绝，与一个死掉的页面无法区分。 */
+  function blockedHint(reference, text, offset, lang) {
+    var ref = String(reference == null ? '' : reference);
+    var s = String(text == null ? '' : text);
+    var before = s.slice(0, offset);
+    var line = before.split('\n').length - 1;
+    var col = offset - (before.lastIndexOf('\n') + 1);
+    var refLines = ref.split('\n');
+    var expected = expectedCharAt(ref, s, offset);
+    if (refLines[line] === undefined) {
+      return ts('blockedPastEnd', lang, [refLines.length]);
+    }
+    if (expected === null) {
+      return ts('blockedLineEnd', lang, [line + 1, refLines[line].length, col]);
+    }
+    if (expected === '\n') {
+      return ts('blockedNewline', lang, [line + 1]);
+    }
+    /* 最常见的那一种拒绝：`applyEnter` 把上一行的深缩进带了下来，而参考这一行
+       更浅。只报"第 N 格应该是 o"她仍要自己数格子；直接说多了几格、按几次退格。
+       判据：光标之前这一行全是空格（就是自动缩进那几格），且比参考的缩进深。 */
+    var lineStart = offset - col;
+    var typedIndent = s.slice(lineStart, offset);
+    var refIndent = leadSpaces(refLines[line]);
+    if (/^ *$/.test(typedIndent) && col > refIndent) {
+      return ts('blockedIndent', lang, [col - refIndent]);
+    }
+    return ts('blockedExpect', lang, [line + 1, col + 1, expected]);
+  }
+
+  /* ---- 一次临摹 run 的生命周期（三个决策，全是纯的）----
+
+     `trace.js` 只在某个下标**首次被 seen** 时把它记进 firstWrong。所以把一整段
+     文本一次喂进一个**新建**的 session，每个字符都在它最终正确的样子下被首次
+     看见——历史上的错全没了：
+
+       连续会话（打错→退格→改对）   accuracy 0.9730  errors 1  backspaces 1
+       新建 session 喂同样的终文本   accuracy 1.0000  errors 0  backspaces 0
+
+     于是两条纪律：
+       1. 一次 run 只持有**一个** session，跨模式切换存活（`reuseRun`）——
+          否则按一次 `1` 再按一次 `3` 就能刷出 100%，而 bestAcc 走 Math.max
+          且熬得过清空，那个她没打出来的成绩会**永久**留在进度里。
+       2. 从一份非空草稿上接着打的 run 标成 `resumed`，**不写 progress**
+          （`shouldSaveBest`），直到「重来」开一遍干净的。 */
+  function newRun(progId, reference, typed) {
+    var ref = String(reference == null ? '' : reference);
+    return {
+      progId: progId,
+      reference: ref,
+      session: trace().create(ref),
+      resumed: String(typed == null ? '' : typed) !== '',
+      saved: false
+    };
+  }
+
+  /* 这个 run 还能接着用吗？同一题、同一份参考才行——模式来回切时正是靠它
+     不去重建 session。 */
+  function reuseRun(run, progId, reference) {
+    return !!run && run.progId === progId &&
+           run.reference === String(reference == null ? '' : reference);
+  }
+
+  /* 这一遍的成绩该写进 progress 吗？只有"从零开始、这一遍真打完了、且还没记过"
+     才算数。 */
+  function shouldSaveBest(run, stats) {
+    if (!run || run.resumed || run.saved) { return false; }
+    if (!stats || !(stats.total > 0)) { return false; }
+    return stats.correct >= stats.total;
+  }
+
+  /* applyFollowEnter(reference, value, pos) → { value, selStart, selEnd }
+     「跟随影子」：Enter 直接跳到标准程序下一行的缩进位。默认关——缩进正是
+     最该练的那一样，帮她跳等于把练习本身拿掉了。形状与 Editor.applyTab /
+     applyEnter 一致（selEnd === selStart 恒成立，裁决 R32）。 */
+  function applyFollowEnter(reference, value, pos) {
+    var ref = String(reference == null ? '' : reference);
+    var v = String(value == null ? '' : value);
+    var before = v.slice(0, pos);
+    var lineIdx = before.split('\n').length; /* 换行之后落到的那一行（0-based） */
+    var refLines = ref.split('\n');
+    var indent = ' '.repeat(leadSpaces(refLines[lineIdx] || ''));
+    var at = pos + 1 + indent.length;
+    return { value: before + '\n' + indent + v.slice(pos), selStart: at, selEnd: at };
+  }
+
   /* ======================================================================
      DOM 层 —— 只把上面算出来的东西画出来
      ====================================================================== */
@@ -483,6 +638,14 @@
     '.py-input{right:0;bottom:0;width:100%;height:100%;overflow:auto;resize:none;',
     '  color:transparent;-webkit-text-fill-color:transparent;caret-color:var(--py-accent)}',
     '.py-input::selection{background:rgba(45,212,234,.3)}',
+    /* 硬拦截档拒绝一次按键时：输入层闪一圈红边 + 舞台底部一行说明。
+       一次她看不见的拒绝，与一个死掉的页面无法区分。 */
+    '.py-input.py-blocked{box-shadow:inset 0 0 0 2px var(--trace-rose,#fb7185);',
+    '  animation:py-blink .18s steps(1) 2}',
+    '@keyframes py-blink{50%{box-shadow:inset 0 0 0 2px transparent}}',
+    '.py-blocknote{position:absolute;left:0;right:0;bottom:0;z-index:4;padding:6px 14px;',
+    '  font-size:12px;line-height:1.5;color:#fff1f2;background:rgba(251,113,133,.24);',
+    '  border-top:1px solid rgba(251,113,133,.5)}',
     '.py-slider{width:132px;vertical-align:middle}',
     '.py-stats{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--ui-slate,#9fb0c8)}',
     '.py-stats b{color:var(--ui-bright,#e2e8f0);font-weight:600}',
@@ -569,7 +732,10 @@
       alpha: (typeof prefs.alpha === 'number') ? prefs.alpha : 1,
       strictness: (prefs.strictness === 'loose' || prefs.strictness === 'block') ? prefs.strictness : 'mark',
       followShadow: prefs.followShadow === true,
-      anchorLine: -1
+      anchorLine: -1,
+      /* 当前这一遍临摹的 run（{progId, reference, session, resumed, saved}）。
+         挂在 S 上而不是 traceUI 上，模式来回切时才不会被重建，见 traceRun()。 */
+      run: null
     };
 
     /* ---- 骨架 ---- */
@@ -644,6 +810,9 @@
       }
       var typed = St.getDraft(p.id, 'trace');
       if (typeof typed === 'string') { S.typed = typed; }
+      /* 旧 run 属于上一份参考，必须丢掉；下一次 traceRun() 会照这份草稿
+         重建，并按"是否非空"决定这一遍算不算成绩。 */
+      S.run = null;
     }
     function saveBlank() { if (S.progId) { St.scheduleDraft(S.progId, 'blank', JSON.stringify(S.answers)); } }
     function saveTyped() { if (S.progId) { St.scheduleDraft(S.progId, 'trace', S.typed); } }
@@ -753,13 +922,8 @@
       var key = scope === 'program' ? 'confirmOne' : scope === 'module' ? 'confirmModule' : 'confirmAll';
       var ask = (win && typeof win.confirm === 'function') ? win.confirm : null;
       if (ask && !ask.call(win, ts(key, S.lang, [n]))) { return; }
-      if (ids === null) {
-        St.clearAll();
-      } else if (scope === 'program') {
-        ids.forEach(function (id) { St.clearProgram(id); });
-      } else {
-        St.clearMany(ids);
-      }
+      /* 动手的次序（先 flush 再清）在 clearRecords 里，那里测得到。 */
+      clearRecords(St, scope, ids);
       loadDrafts();
       renderAll();
       toast(t('cleared', S.lang));
@@ -1018,10 +1182,37 @@
     /* ================= 影子临摹 ================= */
     var traceUI = null;
 
+    /* 一次「run」= 一个 Trace session，**跨模式切换存活**。
+
+       为什么不能在每次 renderTrace 里新建：`trace.js` 只在某个下标**首次被
+       seen** 时记进 firstWrong，而重建后的 session 是被整段 `S.typed` 一次
+       喂进去的——每个字符都在它**最终正确的样子**下被首次看见，于是
+         连续会话（打错→退格→改对）  accuracy 0.9730  errors 1
+         重建 session（同样的最终文本）accuracy 1.0000  errors 0  backspaces 0
+       按一次 `1` 再按一次 `3` 就能把一个她没打出来的 100% 经 bestAcc 的
+       Math.max **永久**写进进度（清空也删不掉）。
+
+       从一份已有草稿接着打的 run 同样洗掉了历史，所以标成 resumed：统计照显
+       （并写明"这一遍不计"），但**不写 progress**，直到「重来」开一遍干净的。 */
+    function traceRun(reference) {
+      if (reuseRun(S.run, S.progId, reference)) { return S.run; }
+      S.run = newRun(S.progId, reference, S.typed);
+      return S.run;
+    }
+
+    function restartTrace() {
+      S.typed = '';
+      saveTyped();
+      S.run = null;   /* 下一次 traceRun() 开一遍干净的：resumed 为假，成绩算数 */
+      renderStage();
+      renderBottom();
+      paintTrace();
+    }
+
     function renderTrace() {
       var p = current();
       var reference = cleanSource(p);
-      var session = trace().create(reference);
+      var run = traceRun(reference);
 
       var shadow = h('pre', 'py-layer py-shadow');
       var typedLayer = h('pre', 'py-layer py-typed');
@@ -1042,7 +1233,13 @@
       stage.appendChild(typedLayer);
       stage.appendChild(input);
 
-      traceUI = { shadow: shadow, typed: typedLayer, input: input, session: session, reference: reference };
+      /* 拒绝一次按键时说明原因的那一行；不占布局（绝对定位在舞台底部）。 */
+      var blockNote = h('div', 'py-blocknote');
+      blockNote.hidden = true;
+      stage.appendChild(blockNote);
+
+      traceUI = { shadow: shadow, typed: typedLayer, input: input,
+                  run: run, reference: reference, blockNote: blockNote, blockTimer: null };
 
       /* 同步滚动由顶层 textarea 的 scroll 驱动，另外两层用 transform：
          translate 不像 scrollTop 那样有子像素抖动，三层才不会在滚动时错开。 */
@@ -1057,11 +1254,15 @@
         if (e.inputType !== 'insertText' || e.data == null || e.data.length !== 1) { return; }
         var s = input.selectionStart, en = input.selectionEnd;
         var next = input.value.slice(0, s) + e.data + input.value.slice(en);
-        if (!charMatches(reference, next, s)) { e.preventDefault(); }
+        if (charMatches(reference, next, s)) { return; }
+        e.preventDefault();
+        /* 拒绝必须**看得见**：自动缩进会把她推进"参考这一行早就结束了"的
+           死角，那时她打什么都被拒，而屏幕上什么都没有——与页面坏掉无法区分。 */
+        showBlocked(blockedHint(reference, next, s, S.lang));
       });
 
       input.addEventListener('keydown', function (e) {
-        if (e.key === 'Backspace' || e.key === 'Delete') { session.noteBackspace(); return; }
+        if (e.key === 'Backspace' || e.key === 'Delete') { run.session.noteBackspace(); return; }
         if (e.key === 'Tab') {
           e.preventDefault();
           var r = editor().applyTab(input.value, input.selectionStart, input.selectionEnd);
@@ -1087,31 +1288,19 @@
       paintTrace();
     }
 
-    /* 「跟随影子」：Enter 直接跳到标准程序下一行的缩进位。默认关——缩进正是
-       最该练的那一样，帮她跳等于把练习本身拿掉了。 */
-    function applyFollowEnter(reference, value, pos) {
-      var before = value.slice(0, pos);
-      var lineIdx = before.split('\n').length; /* 换行之后落到的那一行（0-based） */
-      var refLines = reference.split('\n');
-      var indent = ' '.repeat(leadSpaces(refLines[lineIdx] || ''));
-      var v = before + '\n' + indent + value.slice(pos);
-      var at = pos + 1 + indent.length;
-      return { value: v, selStart: at, selEnd: at };
-    }
-
-    /* 硬拦截档要回答的问题：这个字符落在第几行第几列、参考那一格是什么。
-       用文本自己的行列而不是全局偏移——她多打/少打一行之后，全局偏移就不
-       是同一个位置了（trace.js 按行重新对齐，同一条道理）。 */
-    function charMatches(reference, next, offset) {
-      var before = next.slice(0, offset);
-      var line = before.split('\n').length - 1;
-      var col = offset - (before.lastIndexOf('\n') + 1);
-      var refLines = reference.split('\n');
-      var refLine = refLines[line];
-      if (refLine === undefined) { return false; }
-      var expected = (col < refLine.length) ? refLine.charAt(col)
-                   : (line < refLines.length - 1 ? '\n' : '');
-      return next.charAt(offset) === expected;
+    /* 拒绝反馈：文字说明 + 顶层输入框闪一下红边。文字留到下一次按键或 1.6 秒
+       后才撤，闪光只是把视线拉过去。 */
+    function showBlocked(text) {
+      if (!traceUI) { return; }
+      var note = traceUI.blockNote;
+      note.textContent = text;
+      note.hidden = false;
+      traceUI.input.classList.add('py-blocked');
+      if (traceUI.blockTimer) { clearTimeout(traceUI.blockTimer); }
+      traceUI.blockTimer = setTimeout(function () {
+        traceUI.input.classList.remove('py-blocked');
+        note.hidden = true;
+      }, 1600);
     }
 
     function onTyped() {
@@ -1131,7 +1320,7 @@
         if (statsBox) { wipe(statsBox); }
         return;
       }
-      var res = traceUI.session.update(S.typed);
+      var res = traceUI.run.session.update(S.typed);
       var states = traceStates(traceUI.reference, S.typed, res);
 
       if (S.strictness === 'loose') {
@@ -1189,10 +1378,16 @@
         var key = st.lineDelta > 0 ? 'lineMore' : 'lineLess';
         statsBox.appendChild(h('span', 'py-warn', ts(key, S.lang, [Math.abs(st.lineDelta)])));
       }
+      var run = traceUI && traceUI.run;
+      /* 这一遍是接着草稿打的：历史错误早就不在这个 session 里了，显示出来的
+         正确率必然偏高——说清楚，并且**不写进 progress**（见 traceRun 的注释）。 */
+      if (run && run.resumed) {
+        statsBox.appendChild(h('span', 'py-warn', t('resumed', S.lang)));
+      }
       /* 只在**这一遍打完**时落一次盘：每个按键都写一次 localStorage 既没必要，
          也会把一遍还没打完的中途成绩记成"最好成绩"。 */
-      if (st.total > 0 && st.correct >= st.total && S.progId && traceUI && !traceUI.saved) {
-        traceUI.saved = true;
+      if (S.progId && shouldSaveBest(run, st)) {
+        run.saved = true;
         var prev = St.getProgress(S.progId) || {};
         var old = prev.trace || {};
         /* 顶层键浅合并：trace 这个子对象整体替换，给完整的一份（R9）。 */
@@ -1270,11 +1465,7 @@
         fb.setAttribute('aria-pressed', S.followShadow ? 'true' : 'false');
         topBar.appendChild(fb);
 
-        topBar.appendChild(btn('py-btn', t('restart', S.lang), function () {
-          S.typed = '';
-          saveTyped();
-          renderStage();
-        }));
+        topBar.appendChild(btn('py-btn', t('restart', S.lang), restartTrace));
       }
 
       if (S.mode === 'blank') {
@@ -1501,8 +1692,16 @@
     requirementLine: requirementLine,
     hintAt: hintAt,
     clearScope: clearScope,
+    clearRecords: clearRecords,
     variantsOf: variantsOf,
     blankFeedback: blankFeedback,
-    traceStates: traceStates
+    traceStates: traceStates,
+    newRun: newRun,
+    reuseRun: reuseRun,
+    shouldSaveBest: shouldSaveBest,
+    expectedCharAt: expectedCharAt,
+    charMatches: charMatches,
+    blockedHint: blockedHint,
+    applyFollowEnter: applyFollowEnter
   };
 });

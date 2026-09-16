@@ -167,6 +167,177 @@ T.eq(PI.clearScope('all', PROGS, 'b'), null, '整项清空交给 Store.clearAll�
   T.eq(st2[7], 'over', '再往后的字符没有参考位置可占，是 over');
 })();
 
+/* ==================== 评审修复轮 1：①②③ 各自的断言 ==================== */
+
+/* ---- ① 一次 run 只有一个 Trace session；接着草稿打的那一遍不计成绩 ---- */
+(function () {
+  const Trace = require('./trace.js');
+  const ref = 'total = 0\nfor c in s:\n    total += 1\n';
+
+  /* 对照断言（先证明"被守着的那个坏"真的存在）：
+     连续会话记得住"她打错过一次"，而把同样的终文本一次喂进新 session 记不住。
+     这正是"模式切一圈就刷出 100%"的机制。 */
+  const live = Trace.create(ref);
+  let buf = '';
+  const type = (s) => { buf += s; return live.update(buf); };
+  type('total = 0\nfor c in s:\n    total += 2');
+  live.noteBackspace(); buf = buf.slice(0, -1);
+  const a = type('1\n').stats;
+  const fresh = Trace.create(ref).update(buf).stats;
+  T.eq(buf, ref, '（前提）两边喂的终文本逐字节相同');
+  T.eq(a.errors, 1, '（对照）连续会话记得住那一次打错');
+  T.eq(fresh.errors, 0, '（对照）新建 session 一次喂完，错误史被洗光——所以 run 必须跨模式存活');
+
+  /* 跨模式切换必须复用同一个 run */
+  const run = PI.newRun('p1', ref, '');
+  T.ok(PI.reuseRun(run, 'p1', ref), '同一题同一份参考：run 复用，不重建 session');
+  T.ok(!PI.reuseRun(run, 'p2', ref), '换了题就不能复用');
+  T.ok(!PI.reuseRun(run, 'p1', ref + '\n'), '参考变了就不能复用');
+  T.ok(!PI.reuseRun(null, 'p1', ref), '还没有 run 时当然不能复用');
+
+  /* 从草稿接着打的那一遍：标记 resumed，且不写 progress */
+  T.eq(PI.newRun('p1', ref, '').resumed, false, '从零开始的 run 不是 resumed');
+  T.eq(PI.newRun('p1', ref, 'total = 0\n').resumed, true, '带着草稿起的 run 是 resumed');
+
+  const done = { total: 10, correct: 10 };
+  T.ok(PI.shouldSaveBest(PI.newRun('p1', ref, ''), done), '干净地打完了：成绩算数');
+  T.ok(!PI.shouldSaveBest(PI.newRun('p1', ref, 'x'), done),
+       '接着草稿打完的：**不写进 progress**（bestAcc 走 Math.max 且熬得过清空）');
+  T.ok(!PI.shouldSaveBest(PI.newRun('p1', ref, ''), { total: 10, correct: 9 }), '没打完不算');
+  T.ok(!PI.shouldSaveBest(PI.newRun('p1', ref, ''), { total: 0, correct: 0 }), '空参考不算');
+  const once = PI.newRun('p1', ref, '');
+  once.saved = true;
+  T.ok(!PI.shouldSaveBest(once, done), '同一遍只记一次，不重复落盘');
+})();
+
+/* ---- ② 清空必须先 flush，否则排队中的防抖写会让草稿自己回来 ---- */
+(function () {
+  const Store = require('./store.js');
+  function fakeStorage() {
+    const m = Object.create(null);
+    return {
+      getItem: (k) => (k in m ? m[k] : null),
+      setItem: (k, v) => { m[k] = String(v); },
+      removeItem: (k) => { delete m[k]; },
+      key: (i) => Object.keys(m)[i] === undefined ? null : Object.keys(m)[i],
+      get length() { return Object.keys(m).length; }
+    };
+  }
+
+  /* 对照：Store 的 cancelPending 只被 setDraft/scheduleDraft 调用，**清空不取消
+     排队中的那次写**。这里用 flush() 代替"400ms 定时器到期"——两条路径走的是
+     同一句 writeKey，可观察的结果相同，而测试不必真睡 400 毫秒。 */
+  Store._useStorage(fakeStorage());
+  Store.scheduleDraft('p', 'trace', 'X');
+  Store.clearProgram('p');
+  T.eq(Store.getDraft('p', 'trace'), null, '清空的那一刻确实看不见了');
+  Store.flush();
+  T.eq(Store.getDraft('p', 'trace'), 'X',
+       '（对照）没先 flush 的话，排队中的那次写会把草稿送回来——UI 已经说"已清空"');
+
+  /* 正确顺序：先 flush 再清空。之后再 flush 也回不来（队列里已经没有东西了）。 */
+  Store._useStorage(fakeStorage());
+  Store.scheduleDraft('p', 'trace', 'X');
+  Store.flush();
+  Store.clearProgram('p');
+  Store.flush();
+  T.eq(Store.getDraft('p', 'trace'), null, '先 flush 再清空：草稿不会复活');
+
+  /* 次序本身也要测，不能只测"Store 有这个毛病"：clearRecords 收一个 store
+     形状的对象，正是为了在这里把调用顺序钉死。 */
+  function recorder() {
+    const calls = [];
+    return {
+      calls: calls,
+      flush: () => calls.push('flush'),
+      clearAll: () => calls.push('clearAll'),
+      clearProgram: (id) => calls.push('clearProgram:' + id),
+      clearMany: (ids) => calls.push('clearMany:' + ids.join(','))
+    };
+  }
+  let r = recorder();
+  PI.clearRecords(r, 'program', ['b']);
+  T.eq(r.calls, ['flush', 'clearProgram:b'], '单题：flush 排在清之前');
+  r = recorder();
+  PI.clearRecords(r, 'module', ['a', 'b']);
+  T.eq(r.calls, ['flush', 'clearMany:a,b'], '模块：flush 排在清之前');
+  r = recorder();
+  PI.clearRecords(r, 'all', null);
+  T.eq(r.calls, ['flush', 'clearAll'], '整项：flush 排在 clearAll 之前');
+
+  /* 真跑一遍：排着一次防抖写的时候调 clearRecords，草稿必须清掉且不复活 */
+  Store._useStorage(fakeStorage());
+  Store.scheduleDraft('p', 'trace', 'X');
+  PI.clearRecords(Store, 'program', ['p']);
+  Store.flush();
+  T.eq(Store.getDraft('p', 'trace'), null, 'clearRecords 走完，排队里的写也不会把草稿送回来');
+  Store._useStorage(null);
+})();
+
+/* ---- ③ 硬拦截的两个决策函数（原先锁在 mount 闭包里，取不到也测不到）---- */
+(function () {
+  const ref = 'for c in s:\n    total += 1\nprint(total)';
+
+  /* expectedCharAt：三条边界正是最容易写错的地方 */
+  T.eq(PI.expectedCharAt(ref, 'f', 0), 'f', '行内正常一格');
+  T.eq(PI.expectedCharAt(ref, 'for c in s:', 11 - 1), ':', '行尾最后一个字符');
+  T.eq(PI.expectedCharAt(ref, 'for c in s:X', 11), '\n', '本行打满了、后面还有行 → 期待换行符');
+  T.eq(PI.expectedCharAt(ref, ref + 'X', ref.length), null,
+       '参考最后一行之后没有换行符可打 → null，不是空串');
+  T.eq(PI.expectedCharAt(ref, 'a\nb\nc\nd', 6), null, '整行超出参考行数 → null');
+
+  T.ok(PI.charMatches(ref, 'f', 0), '打对了就放行');
+  T.ok(!PI.charMatches(ref, 'X', 0), '打错了就拦');
+  T.ok(!PI.charMatches(ref, ref + 'X', ref.length), '参考没有内容的地方一律拦');
+
+  /* ④ 的那个死角：她在第 2 行按了回车，applyEnter 把 4 格缩进带到了第 3 行，
+     而参考第 3 行顶格。从此她在第 3 行打的**每一个字符**都对不上参考的同一列，
+     硬拦截档会把它们全部拒掉，而屏幕上原本什么都不说。
+     offset 27 = 第 3 行第 1 格（她打的是那 4 个空格里的第一个）。 */
+  const short = 'for c in s:\n    total += 1\nx = 1';
+  const typed = 'for c in s:\n    total += 1\n    x = 1';  // 她多带了 4 格缩进
+  T.eq(typed.charAt(27), ' ', '（前提）第 27 格正是被自动缩进带进来的那个空格');
+  T.eq(PI.expectedCharAt(short, typed, 27), 'x', '参考那一格是顶格的 x');
+  T.ok(!PI.charMatches(short, typed, 27), '多出来的缩进让她打什么都被拦——这就是那个死角');
+  T.ok(PI.blockedHint(short, typed, 27, 'zh').length > 8, '拒绝必须有一句能读的说明，不能是空字符串');
+
+  /* 真实时序：那 4 格缩进是 applyEnter **程序化**插进去的（不经过 beforeinput），
+     所以第一次被拒的按键落在缩进之后 —— offset 31 的 'x'，col = 4。
+     这一格之前整行都是空格、且比参考深，就直接说多了几格、按几次退格，
+     而不是让她自己去数"第 1 格应该是 x"。 */
+  T.eq(typed.charAt(31), 'x', '（前提）第 31 格是她在缩进之后打的第一个字符');
+  T.ok(!PI.charMatches(short, typed, 31), '缩进之后第一个字符同样被拦');
+  T.ok(PI.blockedHint(short, typed, 31, 'zh').indexOf('多了 4 格') !== -1,
+       '缩进过深时直接说多了几格');
+  T.ok(PI.blockedHint(short, typed, 31, 'zh').indexOf('退格') !== -1, '并指出按退格这条出路');
+  /* 光标之前不全是空格时，走的是"第几行第几格应该是什么"那一支 */
+  T.ok(PI.blockedHint(ref, 'for X', 4, 'zh').indexOf('第 1 行') !== -1,
+       '行内普通打错仍然报行号与列号');
+  T.ok(PI.blockedHint(ref, 'for c in s:X', 11, 'zh').indexOf('换行') !== -1,
+       '该换行的时候要说"该换行了"');
+  T.ok(PI.blockedHint(ref, ref + 'X', ref.length, 'zh').indexOf('退格') !== -1,
+       '超出参考末尾时要告诉她按退格——否则整个键盘看上去就是不响了');
+
+  /* "整行都在参考之外"是另一条分支（refLines[line] === undefined），
+     上面那条走的是"本行打超长"。负控制抓到过这个覆盖缺口：改坏这一支时
+     上面几条断言一条都不红。 */
+  const two = 'a\nb';
+  T.eq(PI.expectedCharAt(two, 'a\nb\nc', 4), null, '第 3 行整行不在参考里 → null');
+  T.ok(PI.blockedHint(two, 'a\nb\nc', 4, 'zh').indexOf('只有 2 行') !== -1,
+       '整行超出时要说清参考一共几行');
+  T.ok(PI.blockedHint(two, 'a\nb\nc', 4, 'zh').indexOf('退格') !== -1,
+       '整行超出时同样要指出退格这条出路');
+  T.ok(PI.blockedHint(ref, 'f', 0, 'en').indexOf('line 1') !== -1, '英文档也要说得出行号');
+
+  /* applyFollowEnter：跳到参考下一行的缩进位 */
+  const r1 = PI.applyFollowEnter(ref, 'for c in s:', 11);
+  T.eq(r1.value, 'for c in s:\n    ', '跳到参考第 2 行的 4 格缩进');
+  T.eq(r1.selStart, 16, '光标落在缩进之后');
+  T.eq(r1.selEnd, r1.selStart, 'selEnd 恒等于 selStart（与 applyTab/applyEnter 同形）');
+  const r2 = PI.applyFollowEnter(ref, ref, ref.length);
+  T.eq(r2.value, ref + '\n', '参考已经到底：不猜缩进，只换行');
+})();
+
 /* ---- mount 在没有 DOM 的地方必须响亮地拒绝 ---- */
 T.throws(function () { PI.mount({ programs: PROGS }); },
          'mount 没有根节点时当场抛，不静默什么都不做', /root/);
