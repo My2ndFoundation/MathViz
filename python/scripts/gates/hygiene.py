@@ -415,7 +415,7 @@ def _str_table_span(code: str):
     """`var STR = { ... };`（i18n 键表）的对象字面量区间 [起, 止)；找不到返回 None。
 
     这个区间只是「白名单 (b) 可能生效的范围」，不是白名单本身——区间内的每处
-    `lineNotes` 出现还要另过 `_is_str_key_position()` 才算声明（见该函数与
+    `lineNotes` 出现还要另过 `_is_str_entry_declaration()` 才算声明（见该函数与
     `line_note_reader_check` 的说明）。找不到这个区间本身就是一条具名的红（不是
     静默放行）：找不到往往意味着 interact.js 换了写法，这道门的假设就该重新
     核实，而不是悄悄认为「没有 STR 表所以没什么要挡」。
@@ -426,62 +426,91 @@ def _str_table_span(code: str):
     return _brace_span(code, m.end() - 1)
 
 
-def _is_str_key_position(code: str, start: int, end: int) -> bool:
-    """`code[start:end]`（一处 `lineNotes` 的匹配）是否处于对象字面量的**键位置**。
+# 白名单 (b) 认的**唯一**形状：本仓 STR 表里那一条真实条目——整行从行首（可以有
+# 空白）起，`lineNotes` 后面（可隔空白）是 `:`，再（可隔空白）是 `{`，再（可隔
+# 空白）是 `zh:`。真实那一行 `lineNotes:   { zh: '行注',     en: 'Line notes' },`
+# 正是这个形状。
+STR_ENTRY_LINE_RE = re.compile(r'^(\s*)(lineNotes)\s*:\s*\{\s*zh\s*:')
 
-    round-2 复评员实测：原判据只看「落在 STR 的花括号区间内」，没看这个词在
-    区间里长什么样——在 STR 里新插一条 `leakKey: { zh: current().lineNotes,
-    en: current().lineNotes },`，两处 `current().lineNotes` 也落在区间内，
-    门照样绿。区间是「白名单 (b) 可能生效的范围」，不是白名单本身：真正的声明
-    形状是**紧跟一个冒号**（可以隔着空白）、**紧靠在前面的是 `{` 或 `,`**（可以
-    隔着空白）——`lineNotes:   { zh: …, en: … },` 这一条本身就是这个形状；
-    `current().lineNotes` 前面是 `.`、后面是 `,`，两条都不满足，判定为读取。
+
+def _is_str_entry_declaration(code: str, pos: int) -> bool:
+    """`pos` 处的 `lineNotes` 匹配，是不是 STR 表里那一条真实条目**行首**的那个词。
+
+    round-2 的判据只看「紧跟一个冒号、紧靠在前面的是 `{` 或 `,`」——这个文本形状
+    在 JS 里同时是**解构赋值改名**的语法：`leakKey: ({ lineNotes: window.__leak }
+    = current()),` 里，`lineNotes:` 前面恰好是 `{`、后面恰好是 `:`，round-2 判据
+    分不出这是「对象字面量的键」还是「解构模式里同名的属性」——round-3 复评员验证：
+    这一行塞进 STR 表，门照样绿、仍打印「4 处读取」，而这一行其实读取了
+    `current().lineNotes` 并把值存进 `window.__leak`。
+
+    这道门是纯文本扫描，没有 JS 语法树（单文件零依赖的约束下没法引入解析器），
+    分不清「对象字面量的键」与「文本上长得一样的解构属性」——round-3 不再试图靠
+    「相邻字符长什么样」去猜语义，改成**只认本仓这一条目唯一的真实写法**：整行
+    必须严格匹配 `STR_ENTRY_LINE_RE`（`^\\s*lineNotes\\s*:\\s*\\{\\s*zh\\s*:`），
+    且这次匹配到的 `lineNotes` 必须正是那一行锚定在行首的那个词——同一行里如果
+    还有别的地方也拼出这个词（比如藏在 `zh:` 的值里），那些出现的 `pos` 不等于
+    锚定位置，不会被这条规则放行，仍按默认判定处理。
     """
-    n = len(code)
-    j = end
-    while j < n and code[j] in ' \t\n':
-        j += 1
-    if j >= n or code[j] != ':':
+    line_start = code.rfind('\n', 0, pos) + 1
+    line_end = code.find('\n', pos)
+    if line_end < 0:
+        line_end = len(code)
+    m = STR_ENTRY_LINE_RE.match(code[line_start:line_end])
+    if not m:
         return False
-    i = start - 1
-    while i >= 0 and code[i] in ' \t\n':
-        i -= 1
-    return i >= 0 and code[i] in '{,'
+    return line_start + m.start(2) == pos
 
 
 def line_note_reader_check() -> int:
-    """core/ 里出现 `lineNotes` 这个词，只能在三处：`panelLineNotes` / `noteLineIndex`
-    两个函数体内（读取）、`STR` 的 i18n 键表内**且处于键位置**（声明该键名）、
-    `t('lineNotes', ...)` 调用**且 `t` 前不接 `.`/`$`/单词字符**（经白名单函数取值
-    再显示，不是任意对象上的同名成员方法调用）。别处出现这个词——不论是靠哪种
-    JS 语法拼出来的——都当场红。
+    """core/ 里逐字出现 `lineNotes` 这个词，只放行三种形状，别的一律当场红：
 
-    **这道门抓的是「这个词逐字出现」，不是某一种语法。** 单词级正则 `\\blineNotes\\b`
-    在剥完注释的源码上扫，不区分点读取（`p.lineNotes`）、引号/模板字面量方括号
-    （`p['lineNotes']` / `` p[`lineNotes`] ``）、解构赋值（`var { lineNotes } = p`），
-    甚至一条裸字符串（`'lineNotes'`）——只要不在三处白名单里，字面拼出这个键名
-    就是红。round-1 的旧版正则只认「点」与「引号方括号」两种写法，`var { lineNotes }
-    = p` 与 `` p[`lineNotes`] `` 两条真实存在的绕法能全绿通过——round-1 把「认语法」
-    换成了「认词」，堵的是同一类问题的所有已知形状，不是再补两条正则分支。
+      (a) 落在 `panelLineNotes` / `noteLineIndex` 两个函数体内——白名单读取点；
+      (b) 落在 STR 表（i18n 键表）里，且**整行**从行首（可以有空白）起严格是
+          本仓这一条真实条目的写法：`lineNotes` + 可选空白 + `:` + 可选空白 +
+          `{` + 可选空白 + `zh:`（`STR_ENTRY_LINE_RE`），并且这次匹配到的词
+          正是那一行行首锚定的那个——不是「落在 STR 的花括号区间里」就算，见
+          `_is_str_entry_declaration()`；
+      (c) 是 `t('lineNotes', ...)` / `t("lineNotes", ...)` 的**独立调用**——`t`
+          前面不能是 `.`、`$` 或任意单词字符，否则算成员调用（`foo.t(...)`），
+          不算这道门认的那个全局 `t(key, lang)`。
 
-    **round-2：STR 区间与 t() 调用都从「落在范围内就算」收紧成「长得像声明/调用
-    才算」**——两处都曾经是「区间宽松」的静默漏洞：
-      · **STR 键位置**：`_is_str_key_position()` 要求这个词紧跟一个冒号（可隔
-        空白），紧靠在前面的是 `{` 或 `,`（可隔空白）——`lineNotes:   { zh: …,
-        en: … },` 满足；`current().lineNotes`（哪怕整行是塞进 STR 表里新写的
-        一条 `leakKey: { zh: current().lineNotes, … }`）前面是 `.`，不满足，
-        判定为读取，当场红。只看「落在 STR 花括号区间内」不看形状，会放过任何
-        塞进 STR 表里的读取表达式——这正是 round-2 复评员验证过的真实绕法。
-      · **t() 独立调用**：`T_CALL_RE` 用 `(?<![\\w.$])` 挡住 `t` 前面是 `.`、`$`
-        或单词字符——`\\bt\\(` 会把 `.` 到 `t` 也算一次「边界」，所以任意对象上
-        一个恰好叫 `t` 的方法（`foo.t('lineNotes'`、`S.t('lineNotes'`）都能诚实
-        地写成「调用了 t()」的样子而蒙混过关；收紧后这类成员调用不再匹配
-        `T_CALL_RE`，落回默认判定，当场红。
+    **威胁模型（读这段就知道这道门保什么、不保什么）：** 这是一道纯文本扫描，
+    没有 JS 语法解析器（单文件零依赖是本仓的硬约束，不引入解析器）。它的目标是
+    抓**本仓日常写法里意外新增的一个 lineNotes 读取点**——比如有人加了一条新的
+    渲染路径去读 `p.lineNotes`、随手写了一次解构、或者换成了方括号读取。它**不
+    试图对抗蓄意的混淆**：故意在 STR 表里塞一段解构赋值改名、遮蔽全局 `t`、
+    在运行时才拼出键名、或用反射遍历属性——这些都不是这道门的战场，下面逐条
+    举例：
 
-    **这道门结构性看不见的东西**：一个在运行时才拼出来的键名（如
-    `p['line' + 'Notes']`），或反射式遍历（`Object.keys(p)` / `for...in`）——那些
-    代码里从来没有逐字出现 `lineNotes` 这个词，`\\blineNotes\\b` 天生扫不到它们。
-    这不是本门的覆盖范围，是诚实地说明「认词」这个方法的边界。
+      · **遮蔽 `t`**：`var t = function (key) { return current()[key]; };` 之后
+        再写 `t('lineNotes', 'zh')`——这确实读取了 `lineNotes`，但 `T_CALL_RE`
+        只看「有没有一个叫 `t` 的独立调用」，看不出这个 `t` 是不是被局部变量
+        遮蔽成了别的函数。这是已知盲区，不打算工程上堵——堵法是要求 `t` 全局
+        不可遮蔽，那已经不是这道门管的范围。
+      · **运行时拼键**：`p['line' + 'Notes']`——代码里从没有逐字出现
+        `lineNotes` 这个词，`\\blineNotes\\b` 天生扫不到。
+      · **反射遍历**：`Object.keys(p)` / `for...in`——同上，没有逐字拼出这个词。
+      · **STR 值内部的混淆**：`zh:` / `en:` 的值位置里如果藏进另一次不逐字拼出
+        `lineNotes` 的等价读取（比如先把 `p` 存成 `_p` 再用一层间接），这道门
+        也看不见——它认的始终是「这个词逐字出现在哪」，不是「这行代码语义上
+        做了什么」。
+
+    **认词不认语法**：单词级正则 `\\blineNotes\\b` 在剥完注释的源码上扫，不区分
+    点读取（`p.lineNotes`）、引号/模板字面量方括号（`p['lineNotes']` /
+    `` p[`lineNotes`] ``）、解构赋值（`var { lineNotes } = p`）、裸字符串
+    （`'lineNotes'`）——只要不落在上面三种放行形状里，字面拼出这个词就是红。
+    这是 round-1 定的方法：旧版正则只认「点」与「引号方括号」两种写法，两条
+    真实绕法（解构、模板字面量键）能全绿通过；round-1 把「认语法」换成「认词」，
+    堵的是这一类问题的所有已知形状，不是再补正则分支。
+
+    **(b) 为什么从「区间＋相邻字符」收紧到「整行严格匹配」**：round-2 曾经
+    只要求「这个词紧跟冒号、紧靠在前面的是 `{` 或 `,`」——这个文本形状同时是
+    JS 里**解构赋值改名**的语法：`leakKey: ({ lineNotes: window.__leak } =
+    current()),` 里 `lineNotes:` 前面恰好是 `{`、后面恰好是 `:`，round-2 判据
+    分不出这是「对象字面量的键」还是「解构模式里同名的属性」——这两种语法在
+    纯文本层面长得一模一样，只有 JS 语法树才分得出，而这道门没有语法树。
+    round-3 不再猜测「文本相邻等不等于声明」，改成只认本仓这一条目**唯一**的
+    真实写法（见 (b)）——别的写法，包括看似无害的变体，都不放行。
 
     **先剥注释再扫**（R47）：interact.js 的注释里会提到 lineNotes，剥注释后那些
     提及会变成等长空格，不会被计入。
@@ -522,8 +551,8 @@ def line_note_reader_check() -> int:
                 reads += 1
                 continue
             if (str_span is not None and str_span[0] <= pos < str_span[1]
-                    and _is_str_key_position(code, pos, m.end())):
-                continue                          # (b) STR 键表：键位置的声明，不是读取
+                    and _is_str_entry_declaration(code, pos)):
+                continue                          # (b) STR 键表：本仓真实条目形状的声明
             if any(a <= pos < b for a, b in t_call_spans):
                 continue                          # (c) t('lineNotes', ...) 独立调用
             line = code[:pos].count('\n') + 1
