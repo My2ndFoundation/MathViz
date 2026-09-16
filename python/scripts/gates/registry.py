@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
 
@@ -24,23 +25,43 @@ from . import (ACCENTS, BILINGUAL_FIELDS, ENGINE_PREFIX,
                META_VERSION_RE, MODULES, PROGRAMS_DIR, ROOT, ROOT_PAGES,
                iter_programs, load_registry, read_text, tool_pages)
 
-FALLBACK_ARRAY_RE = re.compile(r'var FALLBACK = \[(.*?)\n\];', re.DOTALL)
-FALLBACK_ID_RE = re.compile(r"id:\s*'([\w-]+)'")
-# 夹取到下一个 id: 为止，不靠「同一行」这种脆弱假设——与 cryptography / chess
-# 的同名两条同源。
-FALLBACK_ENTRY_RE = re.compile(r"id:\s*'([\w-]+)'(.*?)(?=id:\s*'|\Z)", re.DOTALL)
-FALLBACK_VERSION_RE = re.compile(r"version:\s*'([^']*)'")
+FALLBACK_REGION_RE = re.compile(
+    r'/\* >>> GENERATED:FALLBACK \*/\nvar FALLBACK = (.*?);\n/\* <<< GENERATED:FALLBACK \*/',
+    re.DOTALL)
+
+# 第 1 期设计 D5：两页 FALLBACK 各自必须**恰好**带这些字段。这是规格，故意不从
+# sync_fallback.py 导入——门若与生成器共用同一份字段表，从表里删掉一个字段时
+# 两边会一起「同意」：全绿，而页面上少了它。
+FALLBACK_FIELDS = {
+    'app.html':   ('id', 'file', 'accent', 'module', 'version', 'kicker', 'title', 'tag'),
+    'index.html': ('id', 'file', 'accent', 'module', 'version', 'kicker', 'title', 'tag',
+                   'desc'),
+}
+
 MODULE_LABELS_RE = re.compile(r'var MODULE_LABELS = \{(.*?)\n\};', re.DOTALL)
 MODULE_LABEL_ROW_RE = re.compile(
     r"^\s*(\d+):\s*\{\s*en:\s*'((?:[^'\\]|\\.)*)',\s*zh:\s*'((?:[^'\\]|\\.)*)'\s*\},?\s*$",
     re.MULTILINE)
 
 
-def _fallback_body(name: str):
-    """取出一页的 FALLBACK 数组体；取不到返回 None（由调用方各自报错）。"""
-    text = read_text(ROOT / name)
-    m = FALLBACK_ARRAY_RE.search(text)
-    return m.group(1) if m else None
+def _fallback_entries(name: str):
+    """解析一页的 GENERATED:FALLBACK 区段。返回 (条目列表, None) 或 (None, 错误文本)。
+
+    用 json.loads 而不是正则抠字段：区段由 sync_fallback.py 用 json.dumps 写出，
+    门这边用独立的解码器读回来比对——一个比字节（sync_fallback --check），
+    一个比语义（本函数的调用方），两次测量互不依赖。
+    """
+    m = FALLBACK_REGION_RE.search(read_text(ROOT / name))
+    if not m:
+        return None, (f'{name} 里找不到 GENERATED:FALLBACK 区段'
+                      f'（形如 var FALLBACK = [...]; 夹在两条标记之间）')
+    try:
+        data = json.loads(m.group(1))
+    except ValueError as exc:
+        return None, f'{name} 的 FALLBACK 区段不是合法 JSON：{exc}'
+    if not isinstance(data, list) or not all(isinstance(e, dict) for e in data):
+        return None, f'{name} 的 FALLBACK 不是对象数组'
+    return data, None
 
 
 def registry_check() -> int:
@@ -133,28 +154,56 @@ def registry_check() -> int:
 
 
 def fallback_check() -> int:
-    """两页内嵌的 FALLBACK 与注册表的 id 集合必须完全相同。
+    """两页 FALLBACK 与注册表：id 顺序相同；字段集恰为 FALLBACK_FIELDS；
+    除 version（归 fallback_version_check）外逐字段相等。
 
-    FALLBACK 是 file:// 下唯一的数据来源（fetch 会因同源限制失败）。它一旦落后
-    于注册表，本地双击打开的画廊就会少工具，而线上是全的——一个只在离线时出现
-    的差异，没有这道门就只能靠人撞见。
+    FALLBACK 是 file:// 下唯一的数据来源。第 0 期这道门只比 id 集合，于是把
+    accent 改成 orange、module 改成 7、title 改成 WRONG TITLE，34 道门全绿——
+    离线打开的侧栏会把工具归进错的模块、画错的颜色（账本 §一.1）。
     """
-    reg_ids = set(d['id'] for d in load_registry()['tools'])
+    tools = load_registry()['tools']
+    reg_ids = [t['id'] for t in tools]
+    by_id = {t['id']: t for t in tools}
     rc = 0
+    compared = 0
     for name in ROOT_PAGES:
-        body = _fallback_body(name)
-        if body is None:
-            print(f'ERROR: {name} 里找不到 FALLBACK 数组', file=sys.stderr)
+        entries, err = _fallback_entries(name)
+        if err:
+            print(f'ERROR: {err}', file=sys.stderr)
             rc = 1
             continue
-        ids = set(FALLBACK_ID_RE.findall(body))
+        ids = [e.get('id') for e in entries]
         if ids != reg_ids:
-            print(f'ERROR: {name} 的 FALLBACK 与注册表不一致\n'
-                  f'    只在 FALLBACK：{sorted(ids - reg_ids)}\n'
-                  f'    只在注册表：  {sorted(reg_ids - ids)}', file=sys.stderr)
+            print(f'ERROR: {name} 的 FALLBACK 条目与注册表不一致（顺序也算）\n'
+                  f'    FALLBACK：{ids}\n'
+                  f'    注册表：  {reg_ids}', file=sys.stderr)
             rc = 1
+            continue
+        want_fields = set(FALLBACK_FIELDS[name])
+        for e in entries:
+            tid = e['id']
+            got_fields = set(e)
+            if got_fields != want_fields:
+                print(f'ERROR: {name} 的 FALLBACK 条目 {tid} 字段集不符——'
+                      f'多出 {sorted(got_fields - want_fields)}，'
+                      f'缺少 {sorted(want_fields - got_fields)}', file=sys.stderr)
+                rc = 1
+            for field in sorted((want_fields & got_fields) - {'version'}):
+                if e[field] != by_id[tid].get(field):
+                    print(f'ERROR: {name} 的 FALLBACK 条目 {tid} 的 {field} 与注册表不同\n'
+                          f'    FALLBACK：{e[field]!r}\n'
+                          f'    注册表：  {by_id[tid].get(field)!r}\n'
+                          f'    修复：python3 python/scripts/sync_fallback.py',
+                          file=sys.stderr)
+                    rc = 1
+                else:
+                    compared += 1
+    if rc == 0 and compared == 0:
+        print('ERROR: 一个 FALLBACK 字段都没比到——这道门跑了个寂寞', file=sys.stderr)
+        return 1
     if rc == 0:
-        print(f'FALLBACK：两页各 {len(reg_ids)} 条，与注册表一致')
+        print(f'FALLBACK：两页各 {len(reg_ids)} 条，id 顺序与注册表相同，'
+              f'{compared} 个镜像字段逐一相等')
     return rc
 
 
@@ -173,12 +222,12 @@ def fallback_version_check() -> int:
     rc = 0
     checked = 0
     for name in ROOT_PAGES:
-        body = _fallback_body(name)
-        if body is None:
-            continue                     # 缺 FALLBACK 由 fallback_check 报，不重复报
-        for tid, entry in FALLBACK_ENTRY_RE.findall(body):
-            vm = FALLBACK_VERSION_RE.search(entry)
-            if not vm:
+        entries, err = _fallback_entries(name)
+        if err:
+            continue                     # 解析不了由 fallback_check 报，不重复报
+        for e in entries:
+            tid = e.get('id')
+            if 'version' not in e:
                 print(f'ERROR: {name} 的 FALLBACK 条目 {tid} 没有 version 字段——'
                       f'file:// 下卡片会渲染成 v0、地址退化成 ?v=0', file=sys.stderr)
                 rc = 1
@@ -186,12 +235,15 @@ def fallback_version_check() -> int:
             want = reg_ver.get(tid)
             if want is None:
                 continue                 # id 对不上由 fallback_check 报
-            if vm.group(1) != want:
+            if e['version'] != want:
                 print(f'ERROR: {name} 的 FALLBACK 条目 {tid} 版本是 '
-                      f'{vm.group(1)!r}，注册表是 {want!r}', file=sys.stderr)
+                      f'{e["version"]!r}，注册表是 {want!r}', file=sys.stderr)
                 rc = 1
                 continue
             checked += 1
+    if rc == 0 and checked == 0:
+        print('ERROR: 一条 FALLBACK 版本戳都没比到——这道门跑了个寂寞', file=sys.stderr)
+        return 1
     if rc == 0:
         print(f'FALLBACK 版本戳：{checked} 条内嵌条目全部带 version 且与注册表同值')
     return rc

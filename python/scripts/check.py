@@ -44,6 +44,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import build_programs                                     # noqa: E402
 import inline_core                                        # noqa: E402
+import sync_fallback                                      # noqa: E402
 from gates import hygiene, lexer, library, registry, syntax  # noqa: E402
 
 
@@ -78,6 +79,7 @@ def _guard(name, fn, *args, **kwargs) -> int:
 GATES = [
     ('生成', 'inline_core --check',    lambda: inline_core.main(check_only=True)),
     ('生成', 'build_programs --check', lambda: build_programs.main(check_only=True)),
+    ('生成', 'sync_fallback --check',  lambda: sync_fallback.main(check_only=True)),
 
     ('A', 'registry_check',         registry.registry_check),
     ('A', 'fallback_check',         registry.fallback_check),

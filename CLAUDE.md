@@ -168,13 +168,15 @@ one that breaks the most assumptions inherited from the other two:
   correctness is decided by comparing what the student typed against the source
   (`core/judge.js`), not by running it. The expected stdout is checked at build time by CPython
   instead, which is the whole reason the programs are real `.py` files.
-- **Two generator scripts, so `.py` is a second class of edit source.**
+- **Three generator scripts, and `.py` is a second class of edit source.**
   `python/scripts/inline_core.py` injects `core/**/*.js` into the seven
   `GENERATED:{PY-LEX,STORE,EXERCISE,EDITOR,JUDGE,TRACE,INTERACT}` regions — all seven are required
   on every page, there is no per-page opt-in list. `python/scripts/build_programs.py` injects
   `programs/ch*/` (a `chapter.json` plus the `.py` files it names) into `GENERATED:PROGRAMS`, and
   writes the derived `programs` / `lines` fields back into `python-tools.json`.
   **Never hand-edit either region**; edit `core/*.js` or `programs/ch*/`, then re-run.
+  `python/scripts/sync_fallback.py` writes the `GENERATED:FALLBACK` region of both navigation
+  pages from `python-tools.json` (`app.html` without `desc`, `index.html` with it).
 - **Module order does not matter here.** Unlike cryptography's `CRYPTO-CORE`-first rule, every
   python core module takes its dependency lazily (`factory(function () { return root.PyLex; })`),
   so the gate to write is "did someone grab `root.X` in the factory arguments", not an order check.
@@ -183,8 +185,8 @@ one that breaks the most assumptions inherited from the other two:
   from `python/tools/_skeleton.html` — which opts out with `GENERATED:PROGRAMS none`, the same
   "empty is the shape a slip takes" sentinel cryptography uses.
 
-Its gate is `python3 python/scripts/check.py`, run by the hook (on `^python/(core|programs|tools|scripts)/`)
-and by `registry-sync.yml`.
+Its gate is `python3 python/scripts/check.py`, run by the hook (on `python/{core,programs,tools,scripts}/`,
+`python/python-tools.json` and the two navigation pages) and by `registry-sync.yml`.
 
 ## Branding is generated too
 

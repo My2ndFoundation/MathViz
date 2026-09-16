@@ -149,7 +149,10 @@ fi
 #                          外加把 programs / lines 两个派生字段回写进 python-tools.json
 # 触发条件因此比 chess 段多一个 programs/。两个脚本都只暂存自己 --print-changed
 # 打印出来的路径——同 chess 段那条纪律：整体 glob 会把别的会话半写的文件卷进本次提交。
-if git diff --cached --name-only | grep -qE '^python/(core|programs|tools|scripts)/'; then
+# 触发条件多了注册表与两个导航页：FALLBACK 从第 1 期起由 sync_fallback.py 生成，
+# 只改 python-tools.json 的提交也必须重新生成。三个分支写成顶层交替、不套可选捕获组
+# ——导航契约段注释里记着本机 ugrep 7.8.4 在 `(…)?` 套交替时静默漏匹配（R53）。
+if git diff --cached --name-only | grep -qE '^python/(core|programs|tools|scripts)/|^python/python-tools\.json$|^python/(app|index)\.html$'; then
   PY_CORE_CHANGED=$(python3 python/scripts/inline_core.py --print-changed)
   if [ $? -ne 0 ]; then
     echo "python: inline_core.py 失败，提交中止" >&2
@@ -160,7 +163,14 @@ if git diff --cached --name-only | grep -qE '^python/(core|programs|tools|script
     echo "python: build_programs.py 失败，提交中止" >&2
     exit 1
   fi
-  for CHANGED in "$PY_CORE_CHANGED" "$PY_PROG_CHANGED"; do
+  # 排在 build_programs.py 之后：它会回写注册表的 programs / lines。FALLBACK 今天
+  # 不带这两个字段，但顺序本身不该依赖「今天不带」。
+  PY_FALLBACK_CHANGED=$(python3 python/scripts/sync_fallback.py --print-changed)
+  if [ $? -ne 0 ]; then
+    echo "python: sync_fallback.py 失败，提交中止" >&2
+    exit 1
+  fi
+  for CHANGED in "$PY_CORE_CHANGED" "$PY_PROG_CHANGED" "$PY_FALLBACK_CHANGED"; do
     [ -n "$CHANGED" ] || continue
     echo "$CHANGED" | while IFS= read -r f; do
       [ -n "$f" ] && git add "$f"
