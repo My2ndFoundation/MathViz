@@ -1,7 +1,7 @@
 """Default values, keyword arguments, and the order rules that go with them."""
 
 
-# >>> BLANK id=defaults level=2 hint="只有 name 必须给；greeting 与 punctuation 是可以省略的形参，按这个先后排；默认值写成双引号字符串 || 省略时它们各取什么值，看输出第一行就知道：问候语在逗号前，标点在名字后" hintEn="Only name has to be given; greeting and punctuation are parameters that may be left out, in that order; write the defaults as strings in double quotes || what each one is when left out can be read off the first line of the output: the greeting before the comma, the punctuation after the name"
+# >>> BLANK id=defaults level=2 hint="只有 name 必须给；greeting 与 punctuation 是可以省略的形参，按这个先后排；默认值写成双引号字符串 || 省略时 greeting 取 Hello，punctuation 取 !（一个感叹号）" hintEn="Only name has to be given; greeting and punctuation are parameters that may be left out, in that order; write the defaults as strings in double quotes || When left out, greeting is Hello and punctuation is ! (a single exclamation mark)"
 def make_greeting(name, greeting="Hello", punctuation="!"):
 # <<< BLANK
     return f"{greeting}, {name}{punctuation}"

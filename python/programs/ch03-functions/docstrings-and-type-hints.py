@@ -2,7 +2,7 @@
 
 
 def average(marks: list[int]) -> float:
-# >>> BLANK id=doc level=1 hint="函数体第一行写文档串：三个双引号包起来，一行写完，文字与输出第一行逐字相同" hintEn="The first line of the body is the docstring: wrapped in three double quotes, on one line, with exactly the words of the first line of the output"
+# >>> BLANK id=doc level=2 hint="函数体第一行写文档串：三个双引号包起来，一行写完 || 文档串的文字逐字是（含末尾的句号）：Return the mean of a non-empty list of marks." hintEn="The first line of the body is the docstring: wrapped in three double quotes, all on one line || The docstring's words, exactly, full stop included: Return the mean of a non-empty list of marks."
     """Return the mean of a non-empty list of marks."""
 # <<< BLANK
     return sum(marks) / len(marks)

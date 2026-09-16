@@ -6,7 +6,7 @@ class Book:
         self.title = title
         self.pages = pages
 
-# >>> BLANK id=str-method level=2 hint="给人看的那个：方法名前后各两个下划线，只收 self；返回一个双引号的 f-string，不用 + 拼接，花括号里直接放两个属性、不套 str() || 照输出第一行的样子拼：书名、一个空格，再把页数和那个单词一起放进圆括号" hintEn="The one meant for people: two underscores either side of the name, taking only self; return one double-quoted f-string, not + concatenation, with the two attributes placed straight into the braces and no str() around them || Shape it like the first line of the output: the title, a space, then the page count and the word after it together in round brackets"
+# >>> BLANK id=str-method level=2 hint="给人看的那个：方法名前后各两个下划线，只收 self；返回一个双引号的 f-string，不用 + 拼接，花括号里直接放两个属性、不套 str() || 依次是：书名、一个空格，再把页数和单词 pages 一起放进圆括号，页数与 pages 之间隔一个空格" hintEn="The one meant for people: two underscores either side of the name, taking only self; return one double-quoted f-string, not + concatenation, with the two attributes placed straight into the braces and no str() around them || In order: the title, a space, then the page count and the word pages together in round brackets, with one space between the count and pages"
     def __str__(self):
         return f"{self.title} ({self.pages} pages)"
 # <<< BLANK

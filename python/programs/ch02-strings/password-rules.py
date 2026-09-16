@@ -15,7 +15,7 @@ def broken_rules(password):
         elif ch.isdigit():
             has_digit = True
     failed = []
-# >>> BLANK id=length level=2 hint="第一条规则：长度不到 8 就把这条规则的说明追加进 failed；比较写成严格小于 8，说明文字和输出里的一字不差、用双引号 || 一个 if 问 password 的长度是否小于 8，下一行调用 failed 的追加方法——说明文字看输出里 short1A 那一行" hintEn="The first rule: if the length is under 8, append this rule's description to failed; write the test as strictly less than 8, and the description exactly as it appears in the output, in double quotes || An if asking whether the length of password is less than 8, then the append method of failed on the next line - the description is in the output line for short1A"
+# >>> BLANK id=length level=2 hint="第一条规则：长度不到 8 就把这条规则的说明追加进 failed；比较写成严格小于 8，说明文字放在双引号里 || 一个 if 问 password 的长度是否小于 8，下一行调用 failed 的追加方法；说明文字逐字是：at least 8 characters" hintEn="The first rule: if the length is under 8, append this rule's description to failed; write the test as strictly less than 8, with the description in double quotes || An if asking whether the length of password is less than 8, then the append method of failed on the next line; the description reads, word for word: at least 8 characters"
     if len(password) < 8:
         failed.append("at least 8 characters")
 # <<< BLANK
@@ -25,7 +25,7 @@ def broken_rules(password):
         failed.append("a lower-case letter")
     if not has_digit:
         failed.append("a digit")
-# >>> BLANK id=space level=2 hint="最后一条规则：密码里有空格就追加这条说明；用成员测试 in 来问，不用 find() 或 count()；说明文字和输出里的一字不差，双引号 || 一个 if 问一个空格字符串在不在 password 里——说明文字看输出里 ALL CAPS 123 那一行的末尾" hintEn="The last rule: if the password contains a space, append this rule's description; ask with the membership test in, not find() or count(); the description exactly as in the output, in double quotes || An if asking whether a string holding one space is in password - the description is at the end of the output line for ALL CAPS 123"
+# >>> BLANK id=space level=2 hint="最后一条规则：密码里有空格就追加这条说明；用成员测试 in 来问，不用 find() 或 count()；说明文字放在双引号里 || 一个 if 问一个空格字符串在不在 password 里；说明文字逐字是：no spaces" hintEn="The last rule: if the password contains a space, append this rule's description; ask with the membership test in, not find() or count(); the description in double quotes || An if asking whether a string holding one space is in password; the description reads, word for word: no spaces"
     if " " in password:
         failed.append("no spaces")
 # <<< BLANK

@@ -30,5 +30,5 @@ if __name__ == "__main__":
     try:
         broken()
     except UnboundLocalError as error:
-        print("UnboundLocalError:", error)
+        print(type(error).__name__)
     print(count)
