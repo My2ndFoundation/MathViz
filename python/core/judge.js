@@ -58,23 +58,29 @@
     return m[0].length;
   }
 
-  /* 每一条**非空行**相对第一条非空行的缩进差，空行整条跳过（不占数组里的一格）。
+  /* 每一条**有效行**相对第一条有效行的缩进差，无效行整条跳过（不占数组里的一格）。
      这样整体缩进（由占位块的前缀撑出）被吞掉，行间的相对缩进保留。
      relLines 与 rel 一一对应，记的是每一项在源码里的**物理行号（0 起）**——
-     跳过空行之后 rel 数组的下标就不再等于物理行号了，UI 拿 index 去放光标，
-     指错行是静默的坏（裁决 R31），所以必须把物理行号单独带出来。 */
-  function relativeIndent(src) {
+     跳过无效行之后 rel 数组的下标就不再等于物理行号了，UI 拿 index 去放光标，
+     指错行是静默的坏（裁决 R31），所以必须把物理行号单独带出来。
+
+     "有效行"的判据是 sigLines：**这一行有没有落着至少一个有效 token**（由
+     normalize() 从已经切好的 toks 反推），而不是拿一条空白正则去猜"这行
+     是不是空的"。裁决 R35(a)：一整行独立注释也没有有效 token，判据必须
+     跟 significant() 走同一件事，否则一行注释会被当成"有内容"，让两边
+     有效行条数错误地不相等——这正是评审抓到的 Critical bug①的根因
+     （旧写法只测字面空白，测不出"这行只有注释"）。 */
+  function relativeIndent(src, sigLines) {
     var lines = src.split('\n');
     var leads = [];
     var relLines = [];
     for (var i = 0; i < lines.length; i++) {
-      var line = lines[i];
-      if (/^[ \t]*$/.test(line)) { continue; } /* 空行：跳过，不计入 */
-      leads.push(leadingWidth(line));
+      if (!sigLines[i]) { continue; } /* 这一行没有有效 token：跳过，不计入 */
+      leads.push(leadingWidth(lines[i]));
       relLines.push(i);
     }
     if (leads.length === 0) { return { rel: [], relLines: [] }; }
-    var base = leads[0];
+    var base = leads[0]; /* 第一条**有效行**，不是字面第一行（裁决 R36：契约措辞有歧义，已按此订正） */
     return { rel: leads.map(function (w) { return w - base; }), relLines: relLines };
   }
 
@@ -92,7 +98,7 @@
   /* normalize(src) -> { toks: [{text, line, col}], rel: number[], relLines: number[] }
      toks     ：滤掉 ws/nl/comment 之后，每个 token 的原文切片 + 行列号（1 起行号，
                 0 起列号，对齐 CPython tokenize 的记号习惯）。
-     rel      ：见 relativeIndent——每条非空行相对第一条非空行的缩进差。
+     rel      ：见 relativeIndent——每条有效行相对第一条有效行的缩进差。
      relLines ：与 rel 一一对应的物理行号（0 起）。 */
   function normalize(src) {
     var L = pyLex();
@@ -108,7 +114,11 @@
         col: t.start - starts[lineIdx]
       };
     });
-    var ind = relativeIndent(src);
+    /* sigLines：从已经切好的 toks 反推"第几行落着有效 token"，rel 的有效行
+       判据直接问这张表，不再另起一条与 tokenize 无关的空白正则（裁决 R35a）。 */
+    var sigLines = Object.create(null);
+    for (var i = 0; i < toks.length; i++) { sigLines[toks[i].line - 1] = true; }
+    var ind = relativeIndent(src, sigLines);
     return { toks: toks, rel: ind.rel, relLines: ind.relLines };
   }
 
@@ -126,35 +136,40 @@
   /* compare(answer, reference) -> { ok, index, expected, got, kind }
      kind ∈ 'equal' | 'different' | 'missing' | 'extra' | 'indent'
 
-     顺序：先比 rel（不同 -> 'indent'）；rel 相同再逐 token 比原文，
-     短的一方先到头分类成 missing / extra。
+     顺序：先比 rel，**但只有两边有效行条数相同时**，值不同才归类 'indent'；
+     rel 相同、或有效行条数本身就不同，都落到逐 token 比原文，短的一方先到头
+     分类成 missing / extra。
+
+     裁决 R35(b)：有效行条数不同是"少写/多写了一整行"，不是"缩进不对"——
+     把它也归进 indent 正是评审抓到的 Critical bug②的根因：旧写法只要 rel
+     长度不等就无条件返回 indent，`missing`/`extra` 该管的情形被 indent
+     抢先接住，还顺带把 got/expected 逼出 null（违反 R30）。现在只有两边
+     长度相同时才会走进 indent 分支，此时 relIdx（若不是 -1）必然同时是
+     na.rel/nr.rel/na.relLines/nr.relLines 四个数组的合法下标——不再需要
+     任何 null 兜底。
 
      'indent' 分支的 expected/got/index（裁决 R30/R31）：
        expected = 参考在该处的相对缩进数值，got = 答案在该处的相对缩进数值——
-       两者都是数字，不是 null：UI 要说得出"第 N 行缩进应为 8，你写了 4"，
-       填 null 等于让调用方无话可说，这个模块存在的全部理由就是"报错报得
-       有意义"，缩进这一支不该是例外。
-       index 是**物理行号（0 起）**，不是 rel 数组的下标——rel 数组跳过了
-       空行，下标与物理行号只在挖空体内部没有空行时才碰巧重合；用下标去
-       给 UI 放光标，挖空体一旦出现空行就会指错行，而指错行是静默的坏
-       （她看到光标停在一行没问题的代码上，会开始怀疑自己）。 */
+       两者都是数字，不是 null：UI 要说得出"第 N 行缩进应为 8，你写了 4"。
+       index 是**物理行号（0 起）**，取答案自己的 relLines（长度相同时
+       na.relLines[relIdx] 与 nr.relLines[relIdx] 未必相等——两边有效行
+       物理位置可以不同，比如挖空体内部空行数量相同但位置不同——但都合法，
+       这里选答案侧，因为 UI 是在她打的文本里放光标）。 */
   function compare(answer, reference) {
     var na = normalize(answer);
     var nr = normalize(reference);
 
-    var relIdx = firstDiffIndex(na.rel, nr.rel);
-    if (relIdx !== -1) {
-      var got = relIdx < na.rel.length ? na.rel[relIdx] : null;
-      var expected = relIdx < nr.rel.length ? nr.rel[relIdx] : null;
-      /* 物理行号优先取答案自己的——UI 是在她打的文本里放光标。极端情况下
-         两边非空行数量本身就不同（relIdx 落在较短一方的末尾之外），退而
-         取参考的行号；两边都取不到（理论上不会发生，因为此时 rel 至少
-         一方非空）时退到答案最后一条非空行。 */
-      var line;
-      if (relIdx < na.relLines.length) { line = na.relLines[relIdx]; }
-      else if (relIdx < nr.relLines.length) { line = nr.relLines[relIdx]; }
-      else { line = na.relLines.length ? na.relLines[na.relLines.length - 1] : 0; }
-      return { ok: false, index: line, expected: expected, got: got, kind: 'indent' };
+    if (na.rel.length === nr.rel.length) {
+      var relIdx = firstDiffIndex(na.rel, nr.rel);
+      if (relIdx !== -1) {
+        return {
+          ok: false,
+          index: na.relLines[relIdx],
+          expected: nr.rel[relIdx],
+          got: na.rel[relIdx],
+          kind: 'indent'
+        };
+      }
     }
 
     var at = na.toks, rt = nr.toks;

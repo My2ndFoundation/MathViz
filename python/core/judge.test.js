@@ -57,6 +57,59 @@ no('for i in r:\nprint(i)', 'for i in r:\n    print(i)', '空内部的相对缩�
 ok('x = 1', 'x = 1', '完全相同判同');
 T.eq(J.compare('x = 1', 'x = 1').index, -1, '判同时 index 为 -1');
 
+/* ---- 裁决 R35：注释行/空行不计入"有效行"；有效行条数不同不是 indent ---- */
+(function () {
+  const r = J.compare('x = 1\n# note\ny = 2', 'x = 1\ny = 2');
+  T.eq(r.ok, true, '多写一行独立注释仍判同（Critical bug① 回归）');
+})();
+
+(function () {
+  const r = J.compare('a = 1', 'a = 1\nb = 2');
+  T.eq(r.kind, 'missing', '真的少写一行要分类成 missing，不是 indent（Critical bug② 回归）');
+  T.eq(r.expected, 'b', 'missing 报出缺的那个 token');
+  T.eq(r.got, null, 'missing 的 got 为 null');
+})();
+
+(function () {
+  const r = J.compare('a = 1\nb = 2', 'a = 1');
+  T.eq(r.kind, 'extra', '真的多写一行要分类成 extra，不是 indent');
+  T.eq(r.got, 'b', 'extra 报出多出来的 token');
+  T.eq(r.expected, null, 'extra 的 expected 为 null');
+})();
+
+(function () {
+  const r = J.compare('x = 1\ny = 2', 'x = 1\n# note\ny = 2');
+  T.eq(r.ok, true, '参考侧带独立注释、答案侧没有，仍判同');
+})();
+
+/* ---- 补充：单独钉住裁决 R35(a)——两侧各带一条缩进不同的独立注释。
+   两侧的"有效行条数"凑巧相等（注释都被排除在外），所以只有 (a) 本身
+   （空行判据要跟 significant() 走，不能看字面缩进）能救这一条；
+   coordinator 给的上面两条"多写/少了一行注释"的用例，在这个模块的
+   现有实现里其实要 (a)(b) 一起坏才会变红，单独回退 (a) 时会被 (b) 的
+   等长门槛挡住而仍然判同——这条不受那个"门槛"影响，因为两侧行数从
+   一开始就相等，是能单独钉住 (a) 的最小用例。 */
+(function () {
+  const r = J.compare('x = 1\n    # note\ny = 2', 'x = 1\n# note\ny = 2');
+  T.eq(r.ok, true, '独立注释自己的缩进不参与比对，哪怕两侧有效行条数凑巧相等');
+})();
+
+/* ---- 评审点名的三个边界：手工推演过不会崩，这里补成可执行的断言 ---- */
+(function () {
+  const r = J.compare('', '');
+  T.eq(r.ok, true, '空串对空串判同');
+})();
+
+(function () {
+  const r = J.compare('# a', '# b');
+  T.eq(r.ok, true, '纯注释源（内容不同）仍判同——注释整行不参与比对');
+})();
+
+(function () {
+  const r = J.compare('\n\n', '\n\n\n\n');
+  T.eq(r.ok, true, '全空行、且两侧空行条数不同，仍判同——空行不参与比对');
+})();
+
 /* ---- normalize 暴露出来供门复用 ---- */
 (function () {
   const n = J.normalize('a = 1  # c\nb = 2');
