@@ -239,7 +239,7 @@ PR-A 与 PR-B **串行**：B 改 core、重生成 `py-basics.html`、迁移提�
 
 大纲：
 
-1. 范围与路径；作者碰什么、不碰什么（注册表与 FALLBACK 由中央登记 / 脚本生成）
+1. 范围与路径；作者碰什么、不碰什么（本页注册表条目由作者自己加、FALLBACK 由脚本生成——§8.1，第 1 期地基终审改）
 2. 三种作业：新增一页（复制骨架、改 6 处、建章目录、refs 文件）· 已有页加程序 ·
    升级一页（版本三处、engine 何时升）
 3. 源码规则（§6.1）
@@ -511,9 +511,15 @@ PR-A 与 PR-B **串行**：B 改 core、重生成 `py-basics.html`、迁移提�
 ### 8.1 职责边界（每页一个构建子代理，`isolation: "worktree"`，opus）
 
 - **负责**：`programs/chNN-<slug>/`（`.py`、`chapter.json`、`_fixtures/`）、
-  `gates/refs/chNN_<slug>.py`、从骨架复制的工具页（改 6 处）。在自己的 worktree 里**按显式路径提交**。
-- **不碰**：`python-tools.json`、两个导航页、`core/`、`gates/` 的门逻辑。
-  注册表文案（`desc` / `tag` / `changelog` 中英）写进报告，由控制方集中登记并跑 `sync_fallback.py`。
+  `gates/refs/chNN_<slug>.py`、从骨架复制的工具页（改 6 处）、**`python-tools.json` 里本页那一条注册表条目**
+  （全部字段；`desc` / `tag` / `changelog` 可以是草稿）。先加条目，再跑三个生成脚本与 `check.py`，
+  **连同重新生成的两个导航页一起**在自己的 worktree 里**按显式路径提交**。
+- **不碰**：别的工具的注册表条目、`core/`、`gates/` 的门逻辑；两个导航页只通过 `sync_fallback.py` 改，不手改。
+- **控制方**在集成时审改注册表文案。堆叠分支之间 `python-tools.json` 与两页 FALLBACK 的冲突一律
+  「取 main 版本 + 补回本页条目 + 重跑生成脚本」解决，不手工合并（数组末尾追加的冲突是机械的）。
+- *第 1 期地基终审改（原分工工具链无法执行）*：原文是「不碰 `python-tools.json`、两个导航页；注册表文案写进
+  报告，由控制方集中登记」。但 `build_programs.py` 在工具页没有注册表条目时硬错误退出、`page_mirror_check` /
+  `registry_check` 也要求条目存在——构建者按原分工一道门都跑不绿。
 
 ### 8.2 简报必含条款
 
@@ -533,7 +539,7 @@ PR-A 与 PR-B **串行**：B 改 core、重生成 `py-basics.html`、迁移提�
 - 每个 P 程序实际跑过的一个变异，以及门在哪组实参上变红
 - 每个 `run.expect` 的生成命令
 - 偏离清单、简报错误、拿不准的 `boards`
-- 注册表文案草稿
+- 注册表条目已由构建者加入 `python-tools.json`（文案是草稿，控制方集成时审改；§8.1，第 1 期地基终审改）
 
 每页两轮评审：
 
@@ -567,7 +573,8 @@ PR-A 与 PR-B **串行**：B 改 core、重生成 `py-basics.html`、迁移提�
 | 波 2 | `claude/py-conditionals` → `claude/py-loops` → `claude/py-comprehensions` → `claude/py-recursion`，依次堆叠 |
 
 - 同一波的四个构建者并行；控制方按上表顺序逐个集成进堆叠分支。注册表条目按模块内顺序追加，
-  FALLBACK 由脚本重新生成，不手工解冲突。
+  FALLBACK 由脚本重新生成，不手工解冲突：`python-tools.json` 与两页 FALLBACK 冲突时取基线版本、补回本页条目、
+  重跑生成脚本（§8.1）。
 - 所有 PR 以 main 为基底，合并顺序写进 PR 描述。
 - **每个 PR 等用户在对话里说合并才动手**；合并前读 `gh pr checks`。合并后 `pull --ff-only`，
   删本地与远程分支。
@@ -641,4 +648,7 @@ for f in python/core/*.test.js; do node "$f"; done
 | §2.3 锚点 | 行注锚点可以落在挖空体内；泄题由读取点结构门防（B6） |
 | §3.1 / §3.3 面板与提示 | 面板顶部显示元数据（B7）；提示分级标记为 ` \|\| `（B1） |
 | §4.7 编辑模型 | 第三个生成脚本 `sync_fallback.py`（A1） |
-| §7.1 门表 | 新增五道门：`sync_fallback --check` · `page_mirror_check` · `blank_presence_check` · `line_note_reader_check` · `closed_set_mirror_check` |
+| §7.1 门表 | 新增六道门：`sync_fallback --check` · `page_mirror_check` · `blank_presence_check` · `line_note_reader_check` · `closed_set_mirror_check` · `js_parser_parity_check`（第 1 期地基终审 G3） |
+| §3.3 挖空反馈 | 期待的 token 是字符串 / f-string 时，反馈只报类别与第几个字符起不同，绝不印出标准答案的字面量原文（Task 11b） |
+| §2.3 / §6.1 `lines` | `lines` 不含 BLANK 指令行，也不含文件末尾换行产生的空尾巴；按 `\n` 切，不认 U+0085 / U+2028 / U+2029（Task 11c；第 1 期地基终审 G3） |
+| §9 分期交付（「中央注册」一句） | 按本文 §8.1 的分工：构建者自己在 `python-tools.json` 追加本页条目（文案可为草稿），连同重新生成的两个导航页一起提交；冲突取基线版本 + 补回条目 + 重跑生成脚本（第 1 期地基终审 G2） |

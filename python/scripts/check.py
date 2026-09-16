@@ -12,7 +12,7 @@
 | 生成   | `inline_core` / `build_programs` / `sync_fallback` | 生成物与编辑源一致 |
 | A      | `gates/registry.py` | 注册表 / FALLBACK / 版本 / 计数 / 标签 / 配色 / 页面镜像 |
 | B      | `gates/hygiene.py`  | 出站引用 / script 字面量 / 控制字节 / 惰性依赖 / 骨架 |
-| C      | `gates/syntax.py`   | node --check / core 测试 / 浏览器分支 |
+| C      | `gates/syntax.py`   | node --check / core 测试 / 浏览器分支 / 页面解析器对齐 |
 | D·库   | `gates/library.py`  | 程序库 |
 | D·词法 | `gates/lexer.py`    | 词法器 |
 
@@ -96,10 +96,13 @@ GATES = [
     ('B', 'lazy_dep_check',           hygiene.lazy_dep_check),
     ('B', 'skeleton_sentinel_check',  hygiene.skeleton_sentinel_check),
     ('B', 'skeleton_leak_check',      hygiene.skeleton_leak_check),
+    ('B', 'line_note_reader_check',   hygiene.line_note_reader_check),
 
     ('C', 'node_check',            syntax.node_check),
     ('C', 'core_tests',            syntax.core_tests),
     ('C', 'browser_branch_check',  syntax.browser_branch_check),
+    ('C', 'closed_set_mirror_check',  syntax.closed_set_mirror_check),
+    ('C', 'js_parser_parity_check',   syntax.js_parser_parity_check),
 
     ('D·库', 'program_run_check',              library.program_run_check),
     ('D·库', 'algorithm_property_check',       library.algorithm_property_check),
@@ -110,6 +113,7 @@ GATES = [
     ('D·库', 'source_ascii_check',             library.source_ascii_check),
     ('D·库', 'source_bmp_check',               library.source_bmp_check),
     ('D·库', 'source_indent_check',            library.source_indent_check),
+    ('D·库', 'blank_presence_check',           library.blank_presence_check),
     ('D·库', 'blank_directive_check',          library.blank_directive_check),
     ('D·库', 'program_meta_check',             library.program_meta_check),
     ('D·库', 'variant_check',                  library.variant_check),

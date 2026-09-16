@@ -68,6 +68,11 @@ def _fallback_entries(name: str):
     return data, None
 
 
+def _canon(value) -> str:
+    """类型也算数的比较键：`json.dumps(True) == 'true'`、`json.dumps(1) == '1'`。"""
+    return json.dumps(value, sort_keys=True, ensure_ascii=False)
+
+
 def registry_check() -> int:
     """注册表自洽 + 与磁盘双向一致。
 
@@ -116,9 +121,11 @@ def registry_check() -> int:
             print(f'ERROR: {tid} 的 file 不存在：{f}', file=sys.stderr)
             rc = 1
 
-        if d.get('module') not in MODULES:
-            print(f'ERROR: {tid} 的 module 必须是 1–8，实际 {d.get("module")!r}',
-                  file=sys.stderr)
+        # `type(...) is int`，不是 `in MODULES`：Python 里 `True == 1`、`True in {1..8}`
+        # 都成立，`"module": true` 会原样通过，而页面的 JS 按 `=== 1` 分组时它哪组都不是。
+        if type(d.get('module')) is not int or d.get('module') not in MODULES:
+            print(f'ERROR: {tid} 的 module 必须是整数 1–8，实际 {d.get("module")!r}'
+                  f'（{type(d.get("module")).__name__}）', file=sys.stderr)
             rc = 1
         if d.get('accent') not in ACCENTS:
             print(f'ERROR: {tid} 的 accent 必须是 {sorted(ACCENTS)} 之一，'
@@ -193,7 +200,9 @@ def fallback_check() -> int:
                       f'缺少 {sorted(want_fields - got_fields)}', file=sys.stderr)
                 rc = 1
             for field in sorted((want_fields & got_fields) - {'version'}):
-                if e[field] != by_id[tid].get(field):
+                # 比 JSON 文本而不是 `!=`：`True == 1`、`1.0 == 1` 在 Python 里都成立，
+                # 而页面的 JS 拿 `===` 比，类型不同就是不同。sort_keys 让双语对象的键序无关。
+                if _canon(e[field]) != _canon(by_id[tid].get(field)):
                     print(f'ERROR: {name} 的 FALLBACK 条目 {tid} 的 {field} 与注册表不同\n'
                           f'    FALLBACK：{e[field]!r}\n'
                           f'    注册表：  {by_id[tid].get(field)!r}\n'
@@ -289,14 +298,37 @@ def version_meta_check() -> int:
 def program_count_check() -> int:
     """注册表的 programs / lines 必须等于从 programs/ch*/ 现场重算的结果。
 
-    `lines` 的定义**必须与 build_programs.py 同法**：`len(src.splitlines())`，
-    **含** BLANK 指令行。两边不同法这道门就会在一处无害的差异上永远报红，
-    而一道从第一天起就误报的门，结局只有被调弱或被无视。
+    `lines` 的定义（Task 11c 追加裁决 T11-1，源自 Task 11 评审 I4）：源码**按 `\\n`
+    切**、去掉文件末尾换行产生的那个空尾巴、再去掉 BLANK 指令行（`# >>> BLANK …` 与
+    `# <<< BLANK`）之后的行数——**不含**指令行。
+
+    按 `\\n` 切、不认 U+0085 / U+2028 / U+2029 为换行，因为页面不认
+    （`Exercise.clean()` 是 `split('\\n')`；第 1 期地基终审 G3）。原来这里与
+    build_programs.py 都用 `splitlines()`：一个带 U+0085 的程序两边会一起多数一行、
+    彼此一致，门绿而数字与页面不符——两份「独立」实现共用了同一个错的切法。页面
+    自己的 `clean()` 算出来的数由 `syntax.js_parser_parity_check` 在裸 vm 里核对。
+
+    页面把 `lines` 当「程序有多长」显示（左侧列表、说明面板顶部），选择器
+    「不超过 20 / 40 / 80 行」也按它筛；每挖一个空就多算两行的旧定义
+    （`len(src.splitlines())`，含指令行）会让程序在筛选器里显得比她实际看到的
+    （`Exercise.clean()` 之后的行数，读模式/临摹模式给她看的就是这份）更长，
+    ch01 的 `int-float-str`（看得到 17 行、旧定义显示 21 行）与
+    `divmod-and-floor`（看得到 19 行、旧定义显示 21 行）都因此被「不超过 20 行」
+    的筛选漏掉。`lines` 的定义**必须与 build_programs.py 同法**，否则这道门会
+    在一处无害的差异上永远报红。
+
+    「去掉指令行」的判定复用 `library.py` 已有的 `_is_directive`——两边都在
+    校验门这一侧，是同一件事的同一个判定，不是独立测量。真正要求互相独立的是
+    构建脚本（build_programs.py）与这道门：门不导入构建脚本的函数，构建脚本
+    也不导入这里的，各自维护一份与 `core/exercise.js` 的
+    `DIRECTIVE_OPEN`/`DIRECTIVE_CLOSE` 同义的判定。
 
     与 build_programs --check 不重复：那一道只在「回写后有变化」时报红，靠的是
     同一份计算逻辑；这一道从 `.py` 文件重新数一遍行，是对同一事实的第二次独立
     测量——注册表被人手改过一个数字时，它是先响的那个。
     """
+    from . import library  # 惰性导入：与 syntax.py 的做法一致，避开模块级耦合
+
     reg = load_registry()
     by_id = {t['id']: t for t in reg['tools']}
     counts: dict = {}
@@ -304,9 +336,12 @@ def program_count_check() -> int:
         tool = data.get('tool')
         if not py_path.exists():
             continue                     # 缺文件由 chapter_manifest_check 报
-        src = read_text(py_path)
+        parts = read_text(py_path).split('\n')
+        if parts[-1] == '':
+            parts.pop()                  # 文件末尾换行之后的那个空尾巴
+        body_lines = sum(1 for line in parts if not library._is_directive(line))
         n, total = counts.get(tool, (0, 0))
-        counts[tool] = (n + 1, total + len(src.splitlines()))
+        counts[tool] = (n + 1, total + body_lines)
 
     rc = 0
     for tool, (n, total) in sorted(counts.items()):
@@ -322,7 +357,7 @@ def program_count_check() -> int:
             rc = 1
         if entry.get('lines') != total:
             print(f'ERROR: {tool} 的 lines 注册表写 {entry.get("lines")!r}，'
-                  f'重算是 {total}（定义：len(src.splitlines())，含 BLANK 指令行）',
+                  f'重算是 {total}（定义：去掉 BLANK 指令行之后的行数，不含指令行）',
                   file=sys.stderr)
             rc = 1
     if not counts:
@@ -330,7 +365,8 @@ def program_count_check() -> int:
               '不是跑了个寂寞', file=sys.stderr)
         return 1
     if rc == 0:
-        print(f'程序计数：{len(counts)} 个工具的 programs/lines 与磁盘重算一致')
+        print(f'程序计数：{len(counts)} 个工具的 programs/lines 与磁盘重算一致'
+              f'（lines 不含 BLANK 指令行）')
     return rc
 
 

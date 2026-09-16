@@ -538,44 +538,22 @@ def chapter_manifest_check() -> int:
 # 5. anchor_check
 # ══════════════════════════════════════════════════════════════════════════
 
-def _blank_body_lines(lines: list) -> set:
-    """挖空**体**的行下标（0 基），不含 `# >>> BLANK` / `# <<< BLANK` 两条指令行。
-
-    只做区间切分，不做配对校验——成对/属性齐全是 `blank_directive_check()` 的活，
-    两道门各守各的。这里对"开了没关"取宽松解释（扫到文件尾），宁可多圈几行也
-    不要漏圈：漏圈的后果是一条泄题的行注被判绿。
-    """
-    body = set()
-    open_at = -1
-    for n, line in enumerate(lines):
-        if BLANK_OPEN_RE.match(line):
-            open_at = n
-            continue
-        if BLANK_CLOSE_RE.match(line) and open_at >= 0:
-            body.update(range(open_at + 1, n))
-            open_at = -1
-    if open_at >= 0:
-        body.update(range(open_at + 1, len(lines)))
-    return body
-
-
 def anchor_check() -> int:
     """`lineNotes.at` / `chunks.from` / `chunks.to` 的整行原文在源码里存在且唯一，
-    **在 `clean()` 之后仍然存在且唯一**，且 `lineNotes.at` **不许落在挖空体内**。
+    **在 `clean()` 之后仍然存在且唯一**。
 
     锚用整行原文而不是行号（design §2.3）：行号会在编辑上方任何一行时静默错位，
     把注解挂到错的行上——而那是一种**看起来完全正常**的坏。所以「找不到」与
     「不唯一」都必须当场红：失败得响亮，好过挂错行。
 
-    另外两条判据都是最终评审抓出来的，各自补一个真实的洞：
+    **行注可以锚在挖空体内**（第 1 期设计 D7）。第 0 期这里禁止它（最终评审 I1）：
+    面板曾在挖空模式照样打印 `note.at` 的整行原文。那个泄题现在由两道防线挡：
+    `panelLineNotes` 的模式白名单（只有读模式给行注，interact.test.js 钉着），以及
+    hygiene.line_note_reader_check（全仓只有两个函数能读 lineNotes）。数据层的禁令
+    在「每程序 ≥ 1 空」之后代价太高——值得讲解的行通常正是值得挖掉的行，ch01 待补空
+    的 7 个程序里有 5 个就是这样。
 
-    ① **锚不许落在挖空体内**（I1）。`renderPanel()` 把 `note.at` 的**整行原文**
-       逐字打进面板，而 ch01 三个挖空的行注**全部**锚在挖空体里——`divmod-and-floor`
-       那条的正文还直接写着「是 rest，不是 total」，正是这个空唯一要考的判断。
-       UI 那边已经在挖空模式跳过整段行注，但**数据层面也不该这样写**：两道防线
-       独立，UI 哪天回退了，这道门仍然红。
-
-    ② **锚要在 `clean()` 之后仍然成立**（M3）。这道门验的是**原文**，而 UI 解析的
+    ① **锚要在 `clean()` 之后仍然成立**（M3）。这道门验的是**原文**，而 UI 解析的
        是 `Exercise.clean()` 之后的文本——`clean()` 剥掉两条 BLANK 指令行，所以
        clean 后的行是原文行的**子集**：「原文里存在且唯一」并**不蕴含**「clean 后
        仍存在」。一条锚在指令行上的 lineNote 会门绿、面板静默失锚（点行号没反应，
@@ -588,16 +566,15 @@ def anchor_check() -> int:
             continue
         name = _pid(chapter_dir, prog)
         lines = read_text(py_path).split('\n')
-        body = _blank_body_lines(lines)
         # 与 core/exercise.js 的 clean() 同法：只剥两条指令行，别的一律照抄。
         cleaned = [line for line in lines if not _is_directive(line)]
         targets = []
         for i, note in enumerate(prog.get('lineNotes') or []):
-            targets.append((f'lineNotes[{i}].at', note.get('at'), True))
+            targets.append((f'lineNotes[{i}].at', note.get('at')))
         for i, chunk in enumerate(prog.get('chunks') or []):
-            targets.append((f'chunks[{i}].from', chunk.get('from'), False))
-            targets.append((f'chunks[{i}].to', chunk.get('to'), False))
-        for where, text, is_note in targets:
+            targets.append((f'chunks[{i}].from', chunk.get('from')))
+            targets.append((f'chunks[{i}].to', chunk.get('to')))
+        for where, text in targets:
             if not isinstance(text, str) or not text:
                 print(f'ERROR: {name} 的 {where} 不是非空字符串：{text!r}',
                       file=sys.stderr)
@@ -620,17 +597,7 @@ def anchor_check() -> int:
                 rc = 1
                 continue
 
-            # ① 行注不许锚在挖空体里——那是把答案印在面板上。
-            if is_note and (hits[0] - 1) in body:
-                print(f'ERROR: {name} 的 {where} 锚在**挖空体内**'
-                      f'（{py_path}:{hits[0]}）——面板会把这一行的原文逐字打出来，'
-                      f'等于把答案印在屏幕右侧。\n'
-                      f'    锚：{text!r}\n'
-                      f'    行注只讲挖空**之外**的行；要讲挖空里的事，写进 '
-                      f'BLANK 的 hint/hintEn。', file=sys.stderr)
-                rc = 1
-
-            # ② clean() 之后再验一遍：指令行会整条消失，UI 就是在那份文本上解析的。
+            # clean() 之后再验一遍：指令行会整条消失，UI 就是在那份文本上解析的。
             c_hits = [n + 1 for n, line in enumerate(cleaned) if line == text]
             if len(c_hits) != 1:
                 gone = '在 clean() 后消失了（锚落在 BLANK 指令行上？指令行整条会被剥掉）' \
@@ -644,7 +611,7 @@ def anchor_check() -> int:
         return 1
     if rc == 0:
         print(f'行锚：{anchors} 条 lineNotes/chunks 锚在源码里都存在且唯一，'
-              f'clean() 之后仍然存在且唯一，且没有一条行注锚在挖空体内')
+              f'clean() 之后仍然存在且唯一')
     return rc
 
 
@@ -873,21 +840,45 @@ def source_indent_check() -> int:
 # 10. blank_directive_check
 # ══════════════════════════════════════════════════════════════════════════
 
-# core/interact.js 的 HINT_SEPS，**逐条同序**。`hintAt()` 取第一个在这条提示里
-# 真的出现过的分隔符，所以这里的顺序不是装饰——换了顺序就会数出不同的段数。
-HINT_SEPS = (' · ', '；', '; ')
+# core/interact.js 的 HINT_MARK（第 1 期设计 B1）。两边各存一份，
+# 由 syntax.closed_set_mirror_check 比对（Task 10）。
+HINT_MARK = ' || '
 
 
 def _hint_parts(raw: str) -> int:
-    """一条提示按 `hintAt()` 的规则切出几段。
+    """一条提示按 `hintAt()` 的规则切出几段：按 HINT_MARK 切。
 
-    `hintAt` 拿到的是**未转义**的正则捕获组（`hintEnM[1]` 直接用），所以这里也
-    不做反转义——两边看的必须是同一串字符。一个分隔符都没有 = 一段。
+    `hintAt` 拿到的是**未转义**的正则捕获组，所以这里也不做反转义——两边看的必须是
+    同一串字符。没有标记 = 一段。
     """
-    for sep in HINT_SEPS:
-        if sep in raw:
-            return len(raw.split(sep))
-    return 1
+    return len(raw.split(HINT_MARK))
+
+
+_WELL_FORMED_MARK_RE = re.compile(r'(?<!\s) \|\| (?!\s)')
+
+
+def _stray_marks(raw: str) -> int:
+    """出现了 `||` 却不是「两侧各恰好一个空格，且那个空格不再挨着别的空白」的形状的
+    次数——十有八九是写错的分级标记。
+
+    「恰好一个空格」不能只靠字面找 `' || '`：`'a  ||  b'`（两侧各两个空格）里
+    仍然嵌着一段逐字符相等的 `' || '` 子串（挨着标记的那个空格 + 标记 + 挨着的
+    下一个空格），`raw.count(HINT_MARK)` 会数到它，于是段数照样对得上、门却看不出
+    多出来的空白——那段空白会原样留在切出来的那一级里。`_WELL_FORMED_MARK_RE`
+    额外要求标记前后各只有那一个空格（左右各挡一次相邻空白），把这种情况从
+    「合规」里踢出来。
+
+    标记落在整条提示的最前或最后（`' || b'` / `'a || '`）也算写错：那样切出来的
+    一段是空串——正则的环视在字符串边界上会**通过**（那里没有相邻字符，谈不上
+    是不是空白），所以额外按匹配位置排除开头/结尾的命中。
+    """
+    total = raw.count('||')
+    well = 0
+    for m in _WELL_FORMED_MARK_RE.finditer(raw):
+        if m.start() == 0 or m.end() == len(raw):
+            continue
+        well += 1
+    return total - well
 
 
 _HINT_EN_RE = re.compile(r'\bhintEn="((?:[^"\\]|\\.)*)"')
@@ -896,16 +887,72 @@ _ID_RE = re.compile(r'\bid=(\S+)')
 _LEVEL_RE = re.compile(r'\blevel=(\S+)')
 
 
+def _split_attrs(attrs: str):
+    """按 `exercise.js` 的顺序摘属性：先摘 `hintEn`、再摘 `hint`，返回
+    (hintEn 匹配或 None, hint 匹配或 None, 摘干净引号文本后的裸文本)。
+
+    `_check_attrs` 与 `blank_ids` 共用这一份——「Python 侧怎么解析指令行」只写一次，
+    `syntax.js_parser_parity_check` 拿它的结论去对页面里 `Exercise.parse` 的结论。
+    """
+    hint_en_m = _HINT_EN_RE.search(attrs)
+    rest = attrs if not hint_en_m else attrs[:hint_en_m.start()] + attrs[hint_en_m.end():]
+    hint_m = _HINT_RE.search(rest)
+    bare = rest if not hint_m else rest[:hint_m.start()] + rest[hint_m.end():]
+    return hint_en_m, hint_m, bare
+
+
+def blank_ids(src: str) -> list:
+    """按本模块解析指令行的规则，列出一段源码里每个 BLANK 的 id（出现顺序；
+    缺 id 的记成 None）。只看开始行，不查配对——配对与属性是否齐全由
+    `blank_directive_check` 报。"""
+    ids = []
+    for line in src.split('\n'):
+        om = BLANK_OPEN_RE.match(line)
+        if om:
+            id_m = _ID_RE.search(_split_attrs(om.group(1))[2])
+            ids.append(id_m.group(1) if id_m else None)
+    return ids
+
+
+def blank_presence_check() -> int:
+    """每个程序至少一个 BLANK（第 1 期设计 D2），无豁免。
+
+    第 0 期 ch01 十个程序里七个一个空都没有。挖空模式对它们照常逐行渲染：没有输入框、
+    没有说明，使用者面对的是一页无事可做的代码——不报错，也没有任何东西会发现。
+    挖空是三种模式里唯一带判定的一种，所以「零个空」不是合法的内容形状。
+    """
+    rc = 0
+    scanned = 0
+    total = 0
+    for chapter_dir, _data, prog, py_path in iter_programs():
+        if not py_path.exists():
+            continue                     # 缺文件由 chapter_manifest_check 报
+        scanned += 1
+        n = sum(1 for line in read_text(py_path).split('\n') if BLANK_OPEN_RE.match(line))
+        total += n
+        if n == 0:
+            print(f'ERROR: {_pid(chapter_dir, prog)} 一个挖空都没有：{py_path}\n'
+                  f'       挖空模式下这个程序整页无事可做，而且不会有任何提示。至少挖一行'
+                  f'（规则见 .claude/skills/python-drill-tool/SKILL.md）。', file=sys.stderr)
+            rc = 1
+    if scanned == 0:
+        print('ERROR: 一个程序都没扫到——这道门跑了个寂寞', file=sys.stderr)
+        return 1
+    if rc == 0:
+        print(f'挖空下限：{scanned} 个程序每个都至少有一个空（共 {total} 个）')
+    return rc
+
+
 def blank_directive_check() -> int:
     """BLANK 指令成对；四属性齐全；id 页内唯一；`level ∈ 1..3`；挖空体非空；
     **`hint` 与 `hintEn` 切出来的段数都恰好等于 `level`**。
 
     最后那条是最终评审补的（I6）。原来这道门只查两条提示**非空**——「分级」这件
-    事在整条门链上一次都没有被观察过，而 ch01 三个空全是 `level=2`：中文用 `；`
-    切出两级，**英文一个分隔符都没有**。`hintAt()` 里 `cap = min(level, parts)`
-    于是钳到 1，按钮上却印着「Hint (L2)」——点第二下什么都不变。而这个子项目
-    **默认英文**（导航契约 C7），坏的正是她看到的那一侧。第 1 期起 34 页都从
-    ch01 抄，一条没有门的规矩会被抄 34 次。
+    事在整条门链上一次都没有被观察过，而 ch01 三个空全是 `level=2`：hint 里有
+    ` || ` 标记、切出两段，**hintEn 里一个标记都没有、是一整条**。`hintAt()` 里
+    `cap = min(level, parts)` 于是钳到 1，按钮上却印着「Hint (L2)」——点第二下
+    什么都不变。而这个子项目**默认英文**（导航契约 C7），坏的正是她看到的那一侧。
+    第 1 期起 34 页都从 ch01 抄，一条没有门的规矩会被抄 34 次。
 
     两个方向都要卡死，`hintAt` 的两条钳位各对应一个方向：
       · 段数 < level：`cap = min(level, parts)` 钳到段数，后面几级点了没反应；
@@ -973,31 +1020,24 @@ def blank_directive_check() -> int:
 
 def _check_attrs(name, py_path, line_no, attrs, seen_ids) -> int:
     rc = 0
-    hint_en_m = _HINT_EN_RE.search(attrs)
+    hint_en_m, hint_m, bare = _split_attrs(attrs)
     if not hint_en_m:
         print(f'ERROR: {name}:{line_no} 的 BLANK 指令缺 hintEn="..."：'
               f'{py_path}:{line_no}', file=sys.stderr)
         rc = 1
-        rest = attrs
-    else:
-        if not hint_en_m.group(1).strip():
-            print(f'ERROR: {name}:{line_no} 的 hintEn 是空串：{py_path}:{line_no}',
-                  file=sys.stderr)
-            rc = 1
-        rest = attrs[:hint_en_m.start()] + attrs[hint_en_m.end():]
+    elif not hint_en_m.group(1).strip():
+        print(f'ERROR: {name}:{line_no} 的 hintEn 是空串：{py_path}:{line_no}',
+              file=sys.stderr)
+        rc = 1
 
-    hint_m = _HINT_RE.search(rest)
     if not hint_m:
         print(f'ERROR: {name}:{line_no} 的 BLANK 指令缺 hint="..."：'
               f'{py_path}:{line_no}', file=sys.stderr)
         rc = 1
-        bare = rest
-    else:
-        if not hint_m.group(1).strip():
-            print(f'ERROR: {name}:{line_no} 的 hint 是空串：{py_path}:{line_no}',
-                  file=sys.stderr)
-            rc = 1
-        bare = rest[:hint_m.start()] + rest[hint_m.end():]
+    elif not hint_m.group(1).strip():
+        print(f'ERROR: {name}:{line_no} 的 hint 是空串：{py_path}:{line_no}',
+              file=sys.stderr)
+        rc = 1
 
     id_m = _ID_RE.search(bare)
     if not id_m:
@@ -1026,18 +1066,23 @@ def _check_attrs(name, py_path, line_no, attrs, seen_ids) -> int:
         for field, m in (('hint', hint_m), ('hintEn', hint_en_m)):
             if not m:
                 continue                      # 缺字段已经红过一次，不再叠一条
+            stray = _stray_marks(m.group(1))
+            if stray:
+                print(f'ERROR: {name}:{line_no} 的 {field} 里有 {stray} 处疑似写错的分级标记——'
+                      f'分级标记必须写成两侧各一个空格的 {HINT_MARK!r}：{py_path}:{line_no}\n'
+                      f'       {field}={m.group(1)!r}', file=sys.stderr)
+                rc = 1
+                continue
             parts = _hint_parts(m.group(1))
             if parts == level:
                 continue
-            seps = '、'.join(repr(x) for x in HINT_SEPS)
             why = (f'点到第 {parts + 1} 级什么都不会变'
                    if parts < level else
                    f'第 {level + 1} 段起永远读不到')
             print(f'ERROR: {name}:{line_no} 的 {field} 切出 {parts} 段，但 '
                   f'level={level}——按钮上印着「(L{level})」，而 {why}：'
                   f'{py_path}:{line_no}\n'
-                  f'       分隔符按 core/interact.js 的 HINT_SEPS 依次找，取第一个'
-                  f'出现过的：{seps}\n'
+                  f'       分级标记是 {HINT_MARK!r}（与 core/interact.js 的 HINT_MARK 同值）\n'
                   f'       {field}={m.group(1)!r}', file=sys.stderr)
             rc = 1
     return rc

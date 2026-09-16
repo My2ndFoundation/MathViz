@@ -390,11 +390,17 @@
     return out;
   }
 
+  /* 词法器可能吐出的全部 token 类型（闭集）。editor.js 把它们映射成 tok-<type> 类名；
+     interact.test.js 逐项核对每个类型都有配色或被显式列为不上色。 */
+  var TYPES = ['ws', 'nl', 'comment', 'decorator', 'number', 'string', 'fstring',
+               'keyword', 'softkw', 'builtin', 'name', 'op', 'punct'];
+
   return {
     tokenize: tokenize,
     significant: significant,
     KEYWORDS: KEYWORDS,
     SOFTKW: SOFTKW,
-    BUILTINS: BUILTINS
+    BUILTINS: BUILTINS,
+    TYPES: TYPES
   };
 });

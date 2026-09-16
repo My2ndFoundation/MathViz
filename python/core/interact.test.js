@@ -30,28 +30,33 @@ T.eq(PI.requirementLine(PROGS[2]), 'pip install numpy pandas', '依赖行按声�
   T.ok(out.indexOf('pip install') === -1, 'pip 提示绝不进剪贴板');
 })();
 
-/* 分级提示 */
+/* 分级提示：唯一的分级标记是 ' || '（第 1 期设计 B1） */
 (function () {
-  const blank = { level: 3, hint: '中一 · 中二 · 中三', hintEn: 'en1 · en2 · en3' };
+  const blank = { level: 3, hint: '中一 || 中二 || 中三', hintEn: 'en1 || en2 || en3' };
   T.ok(PI.hintAt(blank, 1, 'en').length > 0, '第一级有内容');
   T.ok(PI.hintAt(blank, 3, 'zh').indexOf('中三') !== -1, '第三级到底');
   T.eq(PI.hintAt(blank, 9, 'zh'), PI.hintAt(blank, 3, 'zh'), '超过 level 就钳到 level');
 
-  /* 上面三条**都挡不住**"任何 tier 都把整条提示端出去"这一种坏：
-     第一条只看长度、第三条两边同样退化成整条。分级的全部意义在于"第一级
-     看不到第三级"，所以下面两条才是真正守着它的。 */
+  /* 上面三条**都挡不住**"任何 tier 都把整条提示端出去"这一种坏：第一条只看长度、
+     第三条两边同样退化成整条。分级的全部意义在于"第一级看不到第三级"。 */
   T.eq(PI.hintAt(blank, 1, 'zh'), '中一', '第一级**只**给第一段');
   T.ok(PI.hintAt(blank, 2, 'zh').indexOf('中三') === -1, '第二级看不到第三级');
   T.eq(PI.hintAt(blank, 0, 'zh'), '', '一级都没点开时什么都不给');
+  T.eq(PI.hintAt(blank, 2, 'zh'), '中一 · 中二', '展开的几级用 · 连接——源码里的 || 是出题标记，不给她看');
+  T.eq(PI.HINT_MARK, ' || ', '导出的分级标记');
 
-  /* 作者没有按分隔符分级时，整条给出去，而不是给空串——她点了提示却什么都
-     看不见是更坏的一种"正确"。这是 hintAt 的**兜底**，不是允许的数据形状：
-     `blank_directive_check()` 现在要求 hint/hintEn 切出的段数都 == level，
-     所以下面这个 fixture 在真实数据里会被门当场拦掉（ch01 的三条英文提示
-     一度正是这个样子——level=2 而一个分隔符都没有，按钮印着 L2、点第二下
-     什么都不变）。 */
+  /* 旧的三分隔符链（' · ' / '；' / '; '）从此是普通标点。下面三条在旧实现下都会红：
+     旧 hintAt 会把 level=1 的提示按标点切开、只给前半句——后半句被静默截掉。 */
+  const semi = { level: 1, hint: '先拆 rest；再拆 total', hintEn: 'cut rest; then total' };
+  T.eq(PI.hintAt(semi, 1, 'zh'), '先拆 rest；再拆 total', '「；」是标点，不是分级');
+  T.eq(PI.hintAt(semi, 1, 'en'), 'cut rest; then total', '「; 」是标点，不是分级');
+  const dot = { level: 1, hint: 'a · b', hintEn: 'a · b' };
+  T.eq(PI.hintAt(dot, 1, 'en'), 'a · b', '「 · 」也不再是分级');
+
+  /* 作者没有按标记分级时，整条给出去，而不是给空串。这是 hintAt 的**兜底**，不是
+     允许的数据形状：blank_directive_check 要求段数 == level。 */
   const flat = { level: 2, hint: '只有一句话', hintEn: 'just one sentence' };
-  T.eq(PI.hintAt(flat, 1, 'zh'), '只有一句话', '没有分隔符时第一级就是整条');
+  T.eq(PI.hintAt(flat, 1, 'zh'), '只有一句话', '没有标记时第一级就是整条');
 })();
 
 /* 面板行注的模式白名单 —— 三个模式都要点到名 */
@@ -164,6 +169,34 @@ T.eq(PI.clearScope('all', PROGS, 'b'), null, '整项清空交给 Store.clearAll�
   T.eq(lead.kind, 'lead-indent', '这种错单独一类，不混进 token 那几种');
   T.ok(require('./judge.js').compare('x = 1', '    x = 1').ok,
        '（对照）Judge 自己看不见这种错——所以上面那条不是多余的');
+
+  /* 字面量不给答案（Task 11b）：PyLex 把整段字符串 / f-string 切成一个 token，
+     把期待的 token 原文印出来就是把整行答案印出来。 */
+  const REF_F = '    return f"Hello, {name}!"';
+  const slip = PI.blankFeedback('    return f"Hello {name}!"', REF_F, 'zh');
+  T.ok(!slip.ok, 'f-string 里少一个逗号是错的');
+  T.eq(slip.kind, 'different', '错法仍是 different');
+  T.ok(slip.message.indexOf('Hello, {name}') === -1, 'f-string 打错一个字符：消息里不出现期待的字面量原文');
+  T.ok(slip.message.indexOf('f-string') !== -1, '消息说出是哪一类字面量');
+  T.ok(slip.message.indexOf('第 8 个字符') !== -1, '消息报出字面量里第几个字符起不同（f"Hello 之后那一位）');
+  T.eq(slip.caret, '    return f"Hello'.length, '光标送到字面量里第一个不同的字符');
+
+  const onlyReturn = PI.blankFeedback('    return', REF_F, 'en');
+  T.eq(onlyReturn.kind, 'missing', '只写了 return 是 missing');
+  T.ok(onlyReturn.message.indexOf('Hello') === -1, '缺一整个 f-string 时：消息里不出现它的原文');
+  T.ok(onlyReturn.message.indexOf('an f-string') !== -1, '缺字面量时只说出类别');
+
+  const wrongKind = PI.blankFeedback('    return greeting', REF_F, 'zh');
+  T.eq(wrongKind.kind, 'different', '该放字面量处写了名字：different');
+  T.ok(wrongKind.message.indexOf('Hello') === -1, '写成别的东西时：消息里不出现期待的字面量原文');
+  T.ok(wrongKind.message.indexOf('greeting') !== -1, '消息可以复述她自己写的东西');
+
+  const plain = PI.blankFeedback("x = 'abc'", "x = 'abd'", 'en');
+  T.ok(plain.message.indexOf("'abd'") === -1, '普通字符串同样不印出期待的原文');
+  T.ok(plain.message.indexOf('a string') !== -1, '普通字符串的类别名');
+
+  const nonLiteral = PI.blankFeedback('total = total - 1', 'total = total + 1', 'zh');
+  T.ok(nonLiteral.message.indexOf('+') !== -1, '（对照）非字面量 token 仍照旧说出期待的那个 token');
 })();
 
 /* ---- 临摹三层的中间层：每个字符一个状态 ---- */
@@ -429,5 +462,138 @@ T.eq(PI.clearScope('all', PROGS, 'b'), null, '整项清空交给 Store.clearAll�
 /* ---- mount 在没有 DOM 的地方必须响亮地拒绝 ---- */
 T.throws(function () { PI.mount({ programs: PROGS }); },
          'mount 没有根节点时当场抛，不静默什么都不做', /root/);
+
+/* token 类型 × 配色（第 1 期设计 B2）：每个类型要么有 .tok-<type> 规则，要么在
+   显式的不上色名单里。第 0 期 decorator 这个类型是专为高亮合成的（CPython 没有它），
+   R14 整套裁决都为它服务——而它没有任何 CSS 规则，@property / @dataclass 一直是白字。 */
+(function () {
+  const PyLex = require('./py-lex.js');
+  const CORPUS = [
+    '@dataclass\nclass P:\n    x: int = 0\n',
+    '@property\ndef area(self) -> float:\n    return self.w * self.h  # note\n',
+    'm = a @ b\n',
+    's = f"{name!r:>10}" + r"\\d" + b"x" + """doc"""\n',
+    'n = 0x1f + 1_000 + 1.5j\n',
+    'match cmd:\n    case "go":\n        pass\n    case _:\n        print(len(cmd))\n',
+    'total = a \\\n    + b\n',
+    'if (y := 3):\n    z = [i for i in range(y)]\n'
+  ].join('');
+  const UNCOLORED = {
+    ws: '空白：透出底色即可',
+    nl: '换行：不可见'
+  };
+
+  T.ok(Array.isArray(PyLex.TYPES) && PyLex.TYPES.length > 0, 'PyLex.TYPES 是非空数组');
+  const types = Array.isArray(PyLex.TYPES) ? PyLex.TYPES : [];
+  const seen = {};
+  PyLex.tokenize(CORPUS).forEach(function (tk) { seen[tk.type] = true; });
+  Object.keys(seen).forEach(function (ty) {
+    T.ok(types.indexOf(ty) !== -1, '词法器吐出的类型 ' + ty + ' 登记在 PyLex.TYPES 里');
+  });
+  T.ok(seen.decorator === true, '语料里真的切出了 decorator（否则下面对它的断言无话可说）');
+
+  const styled = {};
+  /* 先剥掉 CSS 注释：字符串里若有人写 "/* 参考 .tok-name * /" 这样的说明性注释，
+     裸扫会把它当成一条真的规则数进 styled——剥注释关掉这个假阳性口子。 */
+  const cssNoComments = String(PI.STYLE_CSS || '').replace(/\/\*[\s\S]*?\*\//g, '');
+  cssNoComments.replace(/\.tok-([a-z]+)/g, function (m, ty) { styled[ty] = true; return m; });
+  types.forEach(function (ty) {
+    T.ok(styled[ty] === true || Object.prototype.hasOwnProperty.call(UNCOLORED, ty),
+         'token 类型 ' + ty + ' 要么有 .tok-' + ty + ' 配色，要么在不上色名单里');
+  });
+  Object.keys(UNCOLORED).forEach(function (ty) {
+    T.ok(types.indexOf(ty) !== -1, '不上色名单里的 ' + ty + ' 必须是真实类型（名单不许过期）');
+  });
+})();
+
+/* 说明面板顶部的元数据（第 1 期设计 B7） */
+(function () {
+  T.ok(typeof PI.panelMeta === 'function', 'panelMeta 已导出');
+  if (typeof PI.panelMeta !== 'function') { return; }
+  const prog = { id: 'm', level: 2, kind: 'pattern', lines: 23, boards: ['AQA', 'OCR'],
+                 tags: ['selection', 'if-elif-else'], runtime: 'cpython' };
+  const zh = PI.panelMeta(prog, 'zh', 2);
+  T.eq(zh.map(function (r) { return r.key; }), ['summary', 'boards', 'tags'], 'cpython 不显示运行环境行');
+  T.eq(zh[0].items, ['难度 L2 · 惯用模式 · 23 行 · 2 个空'], '中文摘要行');
+  T.eq(PI.panelMeta(prog, 'en', 2)[0].items, ['Level 2 · Pattern · 23 lines · 2 blank(s)'], '英文摘要行');
+  T.eq(zh[1].label, '考试局', '考试局行的标签');
+  T.eq(zh[1].items, ['AQA', 'OCR'], '考试局按声明顺序原样给');
+  T.ok(!zh[1].placeholder, '有真实考试局时不是占位符');
+  T.eq(zh[2].items, ['selection', 'if-elif-else'], '标签原样给（英文标识符，不翻译）');
+  const emptyBoardsRow = PI.panelMeta(Object.assign({}, prog, { boards: [] }), 'zh', 2)[1];
+  T.eq(emptyBoardsRow.items, ['未标注'],
+       '考试局为空时显式写未标注（program_meta_check 要求非空，这是 UI 兜底）');
+  T.eq(emptyBoardsRow.placeholder, true,
+       '占位符带 placeholder:true——渲染层靠这个布尔判断，不拿翻译后的字符串去比「未标注」');
+  T.eq(PI.panelMeta(Object.assign({}, prog, { tags: [] }), 'zh', 2).map(function (r) { return r.key; }),
+       ['summary', 'boards'], '没有标签就不出标签行');
+  T.eq(PI.panelMeta(prog, 'zh', null)[0].items, ['难度 L2 · 惯用模式 · 23 行'], '空数算不出来时不编一个');
+  const pico = Object.assign({}, prog, { runtime: 'micropython-pico' });
+  const picoRows = PI.panelMeta(pico, 'en', 1);
+  T.eq(picoRows.map(function (r) { return r.key; }), ['summary', 'boards', 'tags', 'runtime'], '非 cpython 才显示运行环境');
+  T.eq(picoRows[3].items, ['MicroPython · Pico'], '运行环境用标签而不是枚举值');
+  T.eq(PI.panelMeta(null, 'zh', 0), [], '没有当前程序：空数组');
+
+  T.eq(PI.KINDS, ['syntax', 'pattern', 'algorithm', 'project', 'embedded'], 'KINDS 导出且有序');
+
+  /* 标签表完整性：直接查表，不经过 kindLabel/runtimeLabel 的兜底——R1 修复轮加了
+     语言兜底之后，kindLabel(k,'zh') 即使 zh 缺了也会退到 en、仍然是非空且不等
+     于原始键，从函数这一侧根本看不出翻译丢了哪一条。只有直接查
+     KIND_LABELS[k].zh / RUNTIME_LABELS[rt].en 这种表级完整性检查，才抓得住
+     "少写一个键"这种作者失误。 */
+  PI.KINDS.forEach(function (k) {
+    var e = PI.KIND_LABELS[k];
+    T.ok(!!e, 'KIND_LABELS 有 ' + k + ' 这一项');
+    T.ok(typeof (e && e.zh) === 'string' && e.zh.length > 0, 'KIND_LABELS.' + k + '.zh 是非空字符串');
+    T.ok(typeof (e && e.en) === 'string' && e.en.length > 0, 'KIND_LABELS.' + k + '.en 是非空字符串');
+  });
+  PI.RUNTIMES.forEach(function (rt) {
+    var e = PI.RUNTIME_LABELS[rt];
+    T.ok(!!e, 'RUNTIME_LABELS 有 ' + rt + ' 这一项');
+    T.ok(typeof (e && e.zh) === 'string' && e.zh.length > 0, 'RUNTIME_LABELS.' + rt + '.zh 是非空字符串');
+    T.ok(typeof (e && e.en) === 'string' && e.en.length > 0, 'RUNTIME_LABELS.' + rt + '.en 是非空字符串');
+  });
+
+  /* kindLabel/runtimeLabel 的完整性循环：两个闭集、两种语言都过一遍——第 0 版
+     只测了 KINDS，RUNTIMES 只在别处测了 micropython-pico 一个值（R1 修复轮的
+     Minor #1）。kind 额外要求标签不等于原始键（真有翻译，不是原样吐回去）；
+     runtime 不作这条要求——CPython 的中英标签本来就都写成 'CPython'，是合法的
+     产品名，不是漏翻译。 */
+  ['zh', 'en'].forEach(function (lang) {
+    PI.KINDS.forEach(function (k) {
+      var label = PI.kindLabel(k, lang);
+      T.ok(typeof label === 'string' && label.length > 0,
+           'kindLabel(' + k + ',' + lang + ') 是非空字符串');
+      T.ok(label !== k, 'kindLabel(' + k + ',' + lang + ') 不等于原始键（真有翻译）');
+    });
+    PI.RUNTIMES.forEach(function (rt) {
+      var label = PI.runtimeLabel(rt, lang);
+      T.ok(typeof label === 'string' && label.length > 0,
+           'runtimeLabel(' + rt + ',' + lang + ') 是非空字符串');
+    });
+  });
+  T.eq(PI.kindLabel('quiz', 'zh'), 'quiz', '未知 kind 原样给出，不给空串');
+  T.eq(PI.runtimeLabel('esp32', 'en'), 'esp32', '未知 runtime 原样给出，不给空串（对称于上一条）');
+
+  /* kindLabel/runtimeLabel 的语言兜底本身：真表里两种语言永远齐全（上面两段已经
+     守住），所以要看到兜底真的生效，只能就地摘掉一种语言、调一次、立刻补回去——
+     摘掉的是 kindLabel/runtimeLabel 实际闭包住的那个对象（PI.KIND_LABELS /
+     PI.RUNTIME_LABELS 和内部变量是同一个引用），不是造一份自己的假表。 */
+  (function () {
+    var savedZh = PI.KIND_LABELS.project.zh;
+    delete PI.KIND_LABELS.project.zh;
+    T.eq(PI.kindLabel('project', 'zh'), 'Project', '中文标签缺失时退到英文，不给 undefined');
+    PI.KIND_LABELS.project.zh = savedZh;
+    T.eq(PI.kindLabel('project', 'zh'), '项目', '补回中文键后标签恢复原样（确认复原到位）');
+
+    var savedEn = PI.RUNTIME_LABELS['micropython-pico'].en;
+    delete PI.RUNTIME_LABELS['micropython-pico'].en;
+    T.eq(PI.runtimeLabel('micropython-pico', 'en'), 'MicroPython · Pico',
+         '英文标签缺失时退到中文，不给 undefined');
+    PI.RUNTIME_LABELS['micropython-pico'].en = savedEn;
+    T.eq(PI.runtimeLabel('micropython-pico', 'en'), 'MicroPython · Pico',
+         '补回英文键后标签恢复原样（确认复原到位）');
+  })();
+})();
 
 T.report('interact');
