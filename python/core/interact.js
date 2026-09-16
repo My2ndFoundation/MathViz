@@ -9,7 +9,7 @@
    而不是靠谁记得在浏览器里点一遍。
 
    导出的纯函数：filterPrograms / copyPayload / requirementLine / hintAt /
-   clearScope / variantsOf / blankFeedback / traceStates。
+   panelLineNotes / clearScope / variantsOf / blankFeedback / traceStates。
    唯一带 DOM 的导出是 mount()，它在没有根节点时当场抛（node 下测得到这一条）。
 
    ── 剪贴板里只有纯源码 ──────────────────────────────────────────────
@@ -265,6 +265,29 @@
     var n = Math.min((typeof tier === 'number') ? tier : 0, cap);
     if (n < 1) { return ''; }
     return parts.slice(0, n).join(sep === null ? '' : sep);
+  }
+
+  /* panelLineNotes(program, mode) → 要渲染的行注数组
+
+     **只有读模式给行注**（spec §1.1 的模式表）。这不是排版偏好，是防泄题：
+     面板把 `note.at` 的**整行原文**逐字打进一个 `<code>`，而锚可以落在挖空体
+     里——挖空模式下那等于把答案印在屏幕右侧。ch01 实测三个挖空的行注全被泄，
+     其中一条的正文还直接说破了那个空唯一要考的判断（原文不在这里复述：这段
+     注释是随页面一起发出去的字节）。
+
+     **临摹模式一并挡掉**，理由同样具体：临摹有 `alphaBlind` 档（`S.alpha = 0`，
+     影子层全透明，她凭记忆敲）。那一档下右侧面板照样印着整行原文——泄的是同
+     一件事，只换了个模式。
+
+     所以判据写成 `=== 'read'`（**白名单**）而不是 `!== 'blank'`（黑名单）：
+     黑名单在加第四个模式时会默认放行，而「默认放行」正是这个洞的形状。
+
+     两道防线各守一半，缺一不可：
+       · 这里：非读模式面板里根本没有行注段；
+       · `anchor_check()`：锚一开始就不许落在挖空体内。 */
+  function panelLineNotes(program, mode) {
+    if (mode !== 'read') { return []; }
+    return (program && program.lineNotes) ? program.lineNotes : [];
   }
 
   /* clearScope(scope, programs, currentId) → string[] | null
@@ -1550,16 +1573,9 @@
         notes.forEach(function (para) { panel.appendChild(h('p', 'py-note', String(para))); });
       }
 
-      /* 行注只挂在**读模式**（spec §1.1 的模式表）。挖空模式下必须整段跳过：
-         下面那行 `h('code', 'py-note-at', note.at)` 把锚的**整行原文**逐字打进
-         面板，而锚完全可以落在挖空体里——ch01 实测三个挖空全被泄，其中
-         divmod-and-floor 那条注的正文还直接说破了这个空唯一要考的那个判断
-         （原文不在这里复述：这段注释是随页面一起发出去的字节）。
-         两道防线各守一半，缺一不可：
-           · 这里：切到挖空模式时面板里不再有行注段；
-           · anchor_check()：锚一开始就不许落在挖空体内。
-         临摹模式保留行注——那边参考源码本来就垫在下面，不存在泄漏。 */
-      var ln = (S.mode === 'blank') ? [] : (p.lineNotes || []);
+      /* 取哪些行注是一条**决策**，所以它住在模块级、可以被测（见 panelLineNotes）。
+         规矩一句话：只有读模式给行注。 */
+      var ln = panelLineNotes(p, S.mode);
       if (ln.length) {
         panel.appendChild(h('h4', null, t('lineNotes', S.lang)));
         var lines = cleanSource(p).split('\n');
@@ -1744,6 +1760,7 @@
     copyPayload: copyPayload,
     requirementLine: requirementLine,
     hintAt: hintAt,
+    panelLineNotes: panelLineNotes,
     clearScope: clearScope,
     clearRecords: clearRecords,
     clearHitsCurrent: clearHitsCurrent,
