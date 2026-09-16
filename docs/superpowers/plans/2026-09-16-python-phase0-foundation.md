@@ -195,7 +195,10 @@ Exercise.DIRECTIVE_CLOSE = /^\s*#\s*<<<\s*BLANK\s*$/
 // ── Judge（T7）────────────────────────────────────────────────
 Judge.normalize(src) -> { toks: [ { text, line, col } ], rel: number[], relLines: number[] }
 //   toks     = 去掉 ws/nl/comment 后各 token 的**原文切片**
-//   rel      = 每一条**非空行**相对第一行的缩进差（参与比对）
+//   rel      = 每一条**含有效 token 的行**相对第一条这样的行的缩进差（参与比对）。
+//              「空行」的判据是**该行没有任何有效 token**——注释行也算空。用纯空白正则
+//              判会让一行独立注释进入 rel，于是「她多写一行注释」被误判成缩进错误，
+//              而注释本来就是归一化要吞掉的东西（裁决 R35）。
 //   relLines = 与 rel 一一对应的**物理行号**（0-based）。必须有它：rel 跳过了空行，
 //              所以 rel 的下标在有空行时指不到正确的行，而 UI 要拿行号去放光标。
 Judge.compare(answer, reference) -> {
@@ -205,6 +208,9 @@ Judge.compare(answer, reference) -> {
   got: string|null,
   kind: 'equal' | 'different' | 'missing' | 'extra' | 'indent'
 }
+//   **`rel` 长度不等时不走 indent 分支**——落到 token 级比较，由它给出 missing / extra /
+//   different。长度不等意味着行数不同，那是「少写/多写」不是「缩进不对」；而且只有两边
+//   等长才走得到 indent 分支，`expected`/`got` 也就永远不会是 null（裁决 R35）。
 //   kind === 'indent' 时的两条额外语义：
 //     index    是**物理行号**（取自 relLines），不是 rel 的下标——rel 跳过了空行，
 //              下标在有空行时指不到正确的行，而 UI 拿它去放光标。
@@ -1349,13 +1355,18 @@ const REF = 'a = 1\nb = 2\n';
 
 T.eq(Trace.alignLines('a\nbb\n', 'a\nbb\n').length, 3, '按行对齐，含末尾空行');
 
-/* 统计 */
+/* 统计。**必须逐键模拟**，不能把 12 个字符塞进一次 update：
+   真实用法里 update 是 input 事件驱动的，每次约一个字符，delta 就是击键间隔。
+   把一大批字符塞进一次 update，会让这个用例与下面的空闲用例裸 delta 都是 60000
+   却要求相反的处理——那是用例自相矛盾，不是规则有问题（裁决 R34）。 */
 (function () {
-  const s = Trace.create(REF);
-  NOW = 0;  s.update('a');
-  NOW = 60000; const r = s.update('a = 1\nb = 2\n');
+  const s = Trace.create(REF);          // REF 共 12 个字符
+  NOW = 0;
+  for (let i = 1; i <= REF.length; i++) { s.update(REF.slice(0, i)); NOW += 5000; }
+  const r = s.update(REF);              // NOW = 60000，无新增字符
   T.eq(r.stats.accuracy, 1, '全对时正确率为 1');
-  T.eq(r.stats.cpm, 12, '60 秒打完 12 个字符 = 12 cpm');
+  T.eq(r.stats.correct, 12, '12 个字符全部正确');
+  T.eq(r.stats.cpm, 12, '每 5 秒一个键、总计 60 秒打完 12 个字符 = 12 cpm');
   T.eq(r.stats.errors, 0, '没有错字');
 })();
 
@@ -1409,6 +1420,10 @@ T.report('trace');
   5. 某一行首次全对时记下 `now` 作为该行完成时刻，`lineTimes[i]` 是与上一行完成时刻之差。
 - `accuracy = (total - firstWrong.size) / total`；`cpm = correct / (activeMs/60000)`，
   `activeMs` 为 0 时返回 0（不要产出 `Infinity`）。
+- **空闲剔除是定长规则**：`delta > IDLE_PAUSE_MS` 就只记 `IDLE_PAUSE_MS`，**不按本次新增
+  字符数缩放**。缩放看似能让「一次塞进一大批字符」的用例通过，代价是粘贴 50 个字符
+  就把 500 秒的空闲全算成有效时间——而这个模块的统计值是要给使用者看的。
+  用例该逐键模拟，规则不该迁就用例（裁决 R34）。
 
 - [ ] **Step 4: 跑，确认全绿**
 
