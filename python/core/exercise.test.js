@@ -34,6 +34,8 @@ T.eq(p.blanks[0].indent, '        ', '缩进取挖空体第一行的前导空白
    （已用 node 实测校验），是 brief 的笔误，这里按实测的真值改成 4。 */
 T.eq(p.blanks[1].body.split('\n').length, 4, '多行挖空体保留全部四行');
 T.eq(p.blanks[1].indent, '        ', '多行空的缩进取第一行');
+T.eq(p.blanks[0].line, 3, 'blanks[0].line 是它在 stripped 里的行号');
+T.eq(p.blanks[1].line, 6, 'blanks[1].line 是它在 stripped 里的行号');
 
 /* 占位版：指令行消失，挖空体塌成一行 `<indent>___` */
 const lines = p.stripped.split('\n');
@@ -64,6 +66,53 @@ T.ok(partial.indexOf('elif items[mid] < target:') !== -1, '没给的空用原文
   const q = Ex.parse(plain);
   T.eq(q.blanks.length, 0, '没有指令就没有空');
   T.eq(q.stripped, plain, 'stripped 逐字节等于原文');
+})();
+
+/* ---- DIRECTIVE_OPEN / DIRECTIVE_CLOSE 是导出的公开成员，且扫描逻辑真的
+   走它们（不是一份跟实际行为脱节的假文档）---- */
+T.ok(typeof Ex.DIRECTIVE_OPEN.test === 'function', 'DIRECTIVE_OPEN 导出为正则');
+T.ok(typeof Ex.DIRECTIVE_CLOSE.test === 'function', 'DIRECTIVE_CLOSE 导出为正则');
+T.ok(Ex.DIRECTIVE_OPEN.test('# >>> BLANK id=a level=1 hint="x" hintEn="y"'), 'DIRECTIVE_OPEN 匹配标准开标记');
+T.ok(Ex.DIRECTIVE_CLOSE.test('# <<< BLANK'), 'DIRECTIVE_CLOSE 匹配标准闭标记');
+
+(function () {
+  /* #、>>>、BLANK 之间塞进多余空白——只有当 scanBlocks 真的调用
+     DIRECTIVE_OPEN/CLOSE（而不是内部另一份要求恰好一个空格的字符串前缀
+     判断）时，这种写法才会被识别成一个挖空块。 */
+  const loose = [
+    'x = 1',
+    '#   >>>   BLANK   id=z level=1 hint="h" hintEn="e"',
+    'y = 2',
+    '#  <<<   BLANK',
+    'z = 3',
+    ''
+  ].join('\n');
+  const pl = Ex.parse(loose);
+  T.eq(pl.blanks.length, 1, '扫描逻辑真的用 DIRECTIVE_OPEN/CLOSE 的宽松空白识别指令行');
+  T.eq(pl.blanks[0].id, 'z', '宽松空白指令行仍能正确解出 id');
+})();
+
+/* ---- 裸值正则不能被引号文本里的假属性咬到（R11 裁决：id/level 必须
+   先把 hint/hintEn 的引号段摘掉，再在剩余文本上取裸值）---- */
+(function () {
+  const eaten = Ex.parse(
+    '# >>> BLANK hint="see id=5 example" id=real level=2 hintEn="y"\nbody\n# <<< BLANK\n'
+  );
+  T.eq(eaten.blanks[0].id, 'real', 'hint 引号文本里的假 id= 不会被裸值正则咬到');
+  T.eq(eaten.blanks[0].level, 2, '同一构造下 level 也不受干扰');
+})();
+
+/* ---- clean()：剥掉两种指令行，挖空体原文原样保留，读模式/临摹模式用 ---- */
+(function () {
+  const cleaned = Ex.clean(SRC);
+  T.ok(cleaned.indexOf('BLANK') === -1, 'clean 的结果里没有指令行');
+  T.ok(cleaned.indexOf('        mid = (lo + hi) // 2') !== -1, 'clean 保留第一个挖空体原文');
+  T.ok(cleaned.indexOf('            hi = mid - 1') !== -1, 'clean 保留第二个挖空体最后一行原文');
+  // SRC 里恰好 4 条指令行（两个 >>> + 两个 <<<），clean 只删这 4 行，别的原样保留。
+  T.eq(cleaned.split('\n').length, SRC.split('\n').length - 4, 'clean 的行数 = 原文行数 - 4 条指令行');
+
+  const plain = 'x = 1\ny = 2\n';
+  T.eq(Ex.clean(plain), plain, '没有指令的源码：clean 逐字节等于原文');
 })();
 
 /* ---- 错误形状必须抛，不能悄悄放过 ---- */
