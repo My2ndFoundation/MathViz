@@ -2136,6 +2136,7 @@ if __name__ == '__main__':
 | `control_byte_check` | `core/` `programs/` `tools/` 无 BOM、无 CRLF、无杂散 C0 控制字符 | 给某个 `.py` 加 BOM → 红 |
 | `lazy_dep_check` | **没有任何 core 模块在 UMD 工厂参数里直接抓 `root.X`**。⚠️ **必须先剥掉注释再扫，不能写成裸 grep**（裁决 R47）：实测 `editor.js:16` 与 `judge.js:31` 的注释里都把 `factory(root.PyLex)` 当**反面教材**引用了，裸 grep 会在完全正确的代码上报两处红。一道从第一天起就误报的门，结局只有被调弱或被无视 | 把 `editor.js` 的**真实工厂调用**改成 `factory(root.PyLex)` → 红；**同时验证：只在注释里出现那句话时必须仍绿** |
 | `skeleton_sentinel_check` | `_skeleton.html` 的 `GENERATED:PROGRAMS` 标记行必须是 `none`；非模板页**不许**用 `none` | 把骨架的 `none` 去掉 → 红 |
+| **`skeleton_leak_check`** | 已注册的 `tools/*.html` **不许**携带骨架的 `description` meta 原文，也**不许**保留 `none` 哨兵（裁决 R51）。前者：`description` 是逐页字段却不在骨架的复制清单里，照清单抄的人会原样带走骨架的描述；后者：**忘删 `none` 且忘写 `chapter.json` 的 `tool` 字段，今天在任何地方都不报错**——`render_page` 走弃权分支、没有章节冲突、注册表也不被触碰 | 把某个真页面的 `description` 改回骨架原文 → 红；给某个真页面加回 `none` → 红 |
 
 #### C 组 · `gates/syntax.py`
 
