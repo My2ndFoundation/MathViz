@@ -50,7 +50,8 @@ description: >-
   页里有带 `check.property` 的程序 → 变异其中一个的被测函数，`algorithm_property_check` 应红；
   页里没有 → 改一个程序 `run.expect` 里的一个字符，`program_run_check` 应红。
 - 浏览器：见「浏览器验收」。
-- 复制内容真跑：每页用 `random.Random(<固定种子>).sample` 抽 3 个程序，取读 / 挖空（每空填标准答案）/ 临摹三种模式的复制内容，
+- 复制内容真跑（`_fixtures/` 要像 `program_run_check` 一样整个 `copytree` 成临时目录里的 `_fixtures/`，平铺到根目录会全红——
+  而且这项测量与门一样拷了 fixture，**观察不到**「粘进 PyCharm 缺数据文件」，那一项只能靠人）：每页用 `random.Random(<固定种子>).sample` 抽 3 个程序，取读 / 挖空（每空填标准答案）/ 临摹三种模式的复制内容，
   断言三者相同且不含 `# >>> BLANK`，在全新临时目录按 `run.expect` 的条件用 python3 跑，stdout 逐字节比对。
 
 **5. 终审（整波一次）**
@@ -98,7 +99,10 @@ for f in python/core/*.test.js; do node "$f"; done
   && TOOL.id === 'py-<页>'
 ```
 不成立就作废这次测量。每次调用都传显式 `tabId`。核对：中英 × 读 / 挖空 / 临摹；面板顶部元数据；每个程序挖空模式都有输入框；
-每页挑一个空打错一处，确认反馈不印出字符串字面量；临摹三层在 `document.body.style.zoom` = 0.9 / 1 / 1.25 下对齐（量坐标，不凭截图说对齐）。
+每页挑一个空打错一处，确认反馈不印出字符串字面量；临摹三层在 `document.body.style.zoom` = 0.9 / 1 / 1.25 下对齐（量坐标，不凭截图说对齐）：往输入层打入影子的前几行，
+用 `Range` 量**同一个字符**在 `.py-typed` 与 `.py-shadow` 里的矩形，dx = dy = 0；只比层外框宽度会得到假差异（`pre` 随内容收缩）。
+负控制：给 `.py-typed` 加一点 `padding-left`，dx 必须变成非零。探针脚本放在集成 worktree 的 `.superpowers/`（预览服务器能取到），
+每次导航后 `eval(await (await fetch(...)).text())` 重新注入；localStorage 复原后按**排序后的键**比较（键序会变）。
 模式按钮文字带快捷键数字（「挖空 2」/「Fill in 2」），按 `startsWith` 找。不点同意横幅。改过的 localStorage 先记后还。
 
 `file://` 双击验收与「复制粘进 PyCharm 真跑」只能由用户做——PR 里列为未勾选项，不代为声称。
@@ -108,11 +112,13 @@ for f in python/core/*.test.js; do node "$f"; done
 | 情形 | 后果 | 做法 |
 |---|---|---|
 | 在主工作区 checkout / rebase / pull | 改掉用户或别的会话的分支与未提交工作 | 一切 git 操作在集成 worktree 里，`git -C $W` |
-| `core.hooksPath` 是共享 git 配置里的绝对路径，指向主工作区的 `.githooks` | worktree 里提交跑的是主工作区当前分支那份钩子，可能是旧的 | 不依赖钩子代跑生成脚本；提交前自己跑三个生成脚本与 `check.py`，提交后读 `git status --short` |
+| `core.hooksPath` 是共享 git 配置里的绝对路径，指向主工作区的 `.githooks` | worktree 里提交跑的是主工作区当前分支那份钩子**脚本**（可能是旧的），但它操作的是提交所在 worktree 的文件 | 不依赖钩子代跑生成脚本；提交前自己跑三个生成脚本与 `check.py`，提交后读 `git status --short` |
 | 写文件工具把反斜杠-u 转义解码成真实字符 | 不可见的 U+2028 进了源码或提示；`js_parser_parity_check` 会红，文档里则悄悄变假 | 代码里用 `chr(0x2028)`；写完扫一遍 U+2028 / U+2029 / U+0085 / U+FEFF |
 | 并行跑负控制 | 同时改同一批文件，互相污染基线 | 串行 |
 | 本机 `grep` 是 ugrep | `(…)?` 套交替时静默漏匹配 | 写钩子或门的正则时用顶层交替，并与 `/usr/bin/grep` 对比 |
 | worktree 的基线不一定是派发时的 HEAD | 评审包 diff 里出现假删除 | 构建者第一步 `merge --ff-only` 并报告实测 merge-base；打包一律 `git merge-base` 实测 |
+| 集成后删构建者分支用 `git branch -d` | 主工作区的 `main` 不 pull，`-d` 按它判「未合并」而拒删 | 先 `merge-base --is-ancestor <分支> origin/main` 确认，再 `-D` |
+| 在不带引号的 heredoc 里写含反引号的 PR 文案 | 反引号被当命令替换执行，文案被吃掉 | heredoc 一律 `<<'EOF'`，路径走环境变量 |
 | 评审员或实现者自己又派子代理 | 重复一个评审席位 | 简报里写明不许派子代理 |
 
 ## 红旗——停下来重看本 skill
