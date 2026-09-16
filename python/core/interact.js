@@ -238,33 +238,31 @@
 
   /* hintAt(blank, tier, lang) → string
 
-     一个空的提示是**一条字符串里按分隔符分好的若干级**，点一次展开一级：
+     一个空的提示是一条字符串里用 HINT_MARK（' || '）分好的若干级，点一次展开一级：
      tier=1 只给第一段，tier=2 给前两段，超过 level（或超过实际段数）就钳住。
+     展开的几级之间用 HINT_JOIN（' · '）连接——' || ' 是写在 .py 指令行里的出题标记，
+     不是给她看的标点。
 
-     分隔符按一条链找，取第一个在这条提示里真的出现过的：
-       ' · '（U+00B7，设计文档里的写法）
-       '；' （U+FF1B，ch01 的作者实际写出来的那个）
-       '; ' （英文提示里的分号）
-     一个都没有就是"这条提示只有一级"——**整条给出去**，而不是给空串：
-     作者没分级不等于她点了提示却什么都看不到。 */
-  var HINT_SEPS = [' · ', '；', '; '];
+     为什么是一个显式标记而不是标点（第 1 期设计 B1）：第 0 期按 ' · ' / '；' / '; '
+     三者中第一个出现的切分，于是正文里不能随手用分号——level=1 的提示里只要出现
+     一个「；」，后半句就被静默截掉。Python 没有 || 运算符，正文几乎不会写到它。
+
+     没有标记就是"这条提示只有一级"——**整条给出去**，而不是给空串：作者没分级
+     不等于她点了提示却什么都看不到。 */
+  var HINT_MARK = ' || ';
+  var HINT_JOIN = ' · ';
 
   function hintAt(blank, tier, lang) {
     var b = blank || {};
     var raw = (lang === 'en') ? b.hintEn : b.hint;
     if (typeof raw !== 'string' || raw === '') { return ''; }
 
-    var sep = null;
-    for (var i = 0; i < HINT_SEPS.length; i++) {
-      if (raw.indexOf(HINT_SEPS[i]) !== -1) { sep = HINT_SEPS[i]; break; }
-    }
-    var parts = sep === null ? [raw] : raw.split(sep);
-
+    var parts = raw.split(HINT_MARK);
     var level = (typeof b.level === 'number' && b.level > 0) ? b.level : parts.length;
     var cap = Math.min(level, parts.length);
     var n = Math.min((typeof tier === 'number') ? tier : 0, cap);
     if (n < 1) { return ''; }
-    return parts.slice(0, n).join(sep === null ? '' : sep);
+    return parts.slice(0, n).join(HINT_JOIN);
   }
 
   /* panelLineNotes(program, mode) → 要渲染的行注数组
@@ -1760,6 +1758,7 @@
     copyPayload: copyPayload,
     requirementLine: requirementLine,
     hintAt: hintAt,
+    HINT_MARK: HINT_MARK,
     panelLineNotes: panelLineNotes,
     clearScope: clearScope,
     clearRecords: clearRecords,

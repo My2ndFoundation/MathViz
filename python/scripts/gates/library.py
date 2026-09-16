@@ -873,21 +873,23 @@ def source_indent_check() -> int:
 # 10. blank_directive_check
 # ══════════════════════════════════════════════════════════════════════════
 
-# core/interact.js 的 HINT_SEPS，**逐条同序**。`hintAt()` 取第一个在这条提示里
-# 真的出现过的分隔符，所以这里的顺序不是装饰——换了顺序就会数出不同的段数。
-HINT_SEPS = (' · ', '；', '; ')
+# core/interact.js 的 HINT_MARK（第 1 期设计 B1）。两边各存一份，
+# 由 syntax.closed_set_mirror_check 比对（Task 10）。
+HINT_MARK = ' || '
 
 
 def _hint_parts(raw: str) -> int:
-    """一条提示按 `hintAt()` 的规则切出几段。
+    """一条提示按 `hintAt()` 的规则切出几段：按 HINT_MARK 切。
 
-    `hintAt` 拿到的是**未转义**的正则捕获组（`hintEnM[1]` 直接用），所以这里也
-    不做反转义——两边看的必须是同一串字符。一个分隔符都没有 = 一段。
+    `hintAt` 拿到的是**未转义**的正则捕获组，所以这里也不做反转义——两边看的必须是
+    同一串字符。没有标记 = 一段。
     """
-    for sep in HINT_SEPS:
-        if sep in raw:
-            return len(raw.split(sep))
-    return 1
+    return len(raw.split(HINT_MARK))
+
+
+def _stray_marks(raw: str) -> int:
+    """出现了 `||` 却不是「两侧各一个空格」的形状的次数——十有八九是写错的分级标记。"""
+    return raw.count('||') - raw.count(HINT_MARK)
 
 
 _HINT_EN_RE = re.compile(r'\bhintEn="((?:[^"\\]|\\.)*)"')
@@ -901,11 +903,11 @@ def blank_directive_check() -> int:
     **`hint` 与 `hintEn` 切出来的段数都恰好等于 `level`**。
 
     最后那条是最终评审补的（I6）。原来这道门只查两条提示**非空**——「分级」这件
-    事在整条门链上一次都没有被观察过，而 ch01 三个空全是 `level=2`：中文用 `；`
-    切出两级，**英文一个分隔符都没有**。`hintAt()` 里 `cap = min(level, parts)`
-    于是钳到 1，按钮上却印着「Hint (L2)」——点第二下什么都不变。而这个子项目
-    **默认英文**（导航契约 C7），坏的正是她看到的那一侧。第 1 期起 34 页都从
-    ch01 抄，一条没有门的规矩会被抄 34 次。
+    事在整条门链上一次都没有被观察过，而 ch01 三个空全是 `level=2`：hint 里有
+    ` || ` 标记、切出两段，**hintEn 里一个标记都没有、是一整条**。`hintAt()` 里
+    `cap = min(level, parts)` 于是钳到 1，按钮上却印着「Hint (L2)」——点第二下
+    什么都不变。而这个子项目**默认英文**（导航契约 C7），坏的正是她看到的那一侧。
+    第 1 期起 34 页都从 ch01 抄，一条没有门的规矩会被抄 34 次。
 
     两个方向都要卡死，`hintAt` 的两条钳位各对应一个方向：
       · 段数 < level：`cap = min(level, parts)` 钳到段数，后面几级点了没反应；
@@ -1026,18 +1028,23 @@ def _check_attrs(name, py_path, line_no, attrs, seen_ids) -> int:
         for field, m in (('hint', hint_m), ('hintEn', hint_en_m)):
             if not m:
                 continue                      # 缺字段已经红过一次，不再叠一条
+            stray = _stray_marks(m.group(1))
+            if stray:
+                print(f'ERROR: {name}:{line_no} 的 {field} 里有 {stray} 处疑似写错的分级标记——'
+                      f'分级标记必须写成两侧各一个空格的 {HINT_MARK!r}：{py_path}:{line_no}\n'
+                      f'       {field}={m.group(1)!r}', file=sys.stderr)
+                rc = 1
+                continue
             parts = _hint_parts(m.group(1))
             if parts == level:
                 continue
-            seps = '、'.join(repr(x) for x in HINT_SEPS)
             why = (f'点到第 {parts + 1} 级什么都不会变'
                    if parts < level else
                    f'第 {level + 1} 段起永远读不到')
             print(f'ERROR: {name}:{line_no} 的 {field} 切出 {parts} 段，但 '
                   f'level={level}——按钮上印着「(L{level})」，而 {why}：'
                   f'{py_path}:{line_no}\n'
-                  f'       分隔符按 core/interact.js 的 HINT_SEPS 依次找，取第一个'
-                  f'出现过的：{seps}\n'
+                  f'       分级标记是 {HINT_MARK!r}（与 core/interact.js 的 HINT_MARK 同值）\n'
                   f'       {field}={m.group(1)!r}', file=sys.stderr)
             rc = 1
     return rc

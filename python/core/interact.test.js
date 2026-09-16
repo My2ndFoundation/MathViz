@@ -30,28 +30,33 @@ T.eq(PI.requirementLine(PROGS[2]), 'pip install numpy pandas', '依赖行按声�
   T.ok(out.indexOf('pip install') === -1, 'pip 提示绝不进剪贴板');
 })();
 
-/* 分级提示 */
+/* 分级提示：唯一的分级标记是 ' || '（第 1 期设计 B1） */
 (function () {
-  const blank = { level: 3, hint: '中一 · 中二 · 中三', hintEn: 'en1 · en2 · en3' };
+  const blank = { level: 3, hint: '中一 || 中二 || 中三', hintEn: 'en1 || en2 || en3' };
   T.ok(PI.hintAt(blank, 1, 'en').length > 0, '第一级有内容');
   T.ok(PI.hintAt(blank, 3, 'zh').indexOf('中三') !== -1, '第三级到底');
   T.eq(PI.hintAt(blank, 9, 'zh'), PI.hintAt(blank, 3, 'zh'), '超过 level 就钳到 level');
 
-  /* 上面三条**都挡不住**"任何 tier 都把整条提示端出去"这一种坏：
-     第一条只看长度、第三条两边同样退化成整条。分级的全部意义在于"第一级
-     看不到第三级"，所以下面两条才是真正守着它的。 */
+  /* 上面三条**都挡不住**"任何 tier 都把整条提示端出去"这一种坏：第一条只看长度、
+     第三条两边同样退化成整条。分级的全部意义在于"第一级看不到第三级"。 */
   T.eq(PI.hintAt(blank, 1, 'zh'), '中一', '第一级**只**给第一段');
   T.ok(PI.hintAt(blank, 2, 'zh').indexOf('中三') === -1, '第二级看不到第三级');
   T.eq(PI.hintAt(blank, 0, 'zh'), '', '一级都没点开时什么都不给');
+  T.eq(PI.hintAt(blank, 2, 'zh'), '中一 · 中二', '展开的几级用 · 连接——源码里的 || 是出题标记，不给她看');
+  T.eq(PI.HINT_MARK, ' || ', '导出的分级标记');
 
-  /* 作者没有按分隔符分级时，整条给出去，而不是给空串——她点了提示却什么都
-     看不见是更坏的一种"正确"。这是 hintAt 的**兜底**，不是允许的数据形状：
-     `blank_directive_check()` 现在要求 hint/hintEn 切出的段数都 == level，
-     所以下面这个 fixture 在真实数据里会被门当场拦掉（ch01 的三条英文提示
-     一度正是这个样子——level=2 而一个分隔符都没有，按钮印着 L2、点第二下
-     什么都不变）。 */
+  /* 旧的三分隔符链（' · ' / '；' / '; '）从此是普通标点。下面三条在旧实现下都会红：
+     旧 hintAt 会把 level=1 的提示按标点切开、只给前半句——后半句被静默截掉。 */
+  const semi = { level: 1, hint: '先拆 rest；再拆 total', hintEn: 'cut rest; then total' };
+  T.eq(PI.hintAt(semi, 1, 'zh'), '先拆 rest；再拆 total', '「；」是标点，不是分级');
+  T.eq(PI.hintAt(semi, 1, 'en'), 'cut rest; then total', '「; 」是标点，不是分级');
+  const dot = { level: 1, hint: 'a · b', hintEn: 'a · b' };
+  T.eq(PI.hintAt(dot, 1, 'en'), 'a · b', '「 · 」也不再是分级');
+
+  /* 作者没有按标记分级时，整条给出去，而不是给空串。这是 hintAt 的**兜底**，不是
+     允许的数据形状：blank_directive_check 要求段数 == level。 */
   const flat = { level: 2, hint: '只有一句话', hintEn: 'just one sentence' };
-  T.eq(PI.hintAt(flat, 1, 'zh'), '只有一句话', '没有分隔符时第一级就是整条');
+  T.eq(PI.hintAt(flat, 1, 'zh'), '只有一句话', '没有标记时第一级就是整条');
 })();
 
 /* 面板行注的模式白名单 —— 三个模式都要点到名 */
