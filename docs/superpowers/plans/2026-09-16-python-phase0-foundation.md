@@ -166,7 +166,10 @@ Editor.highlight(src) -> Fragment[]
 Editor.lineStarts(src) -> number[]              // 每行起始偏移，含第 0 行
 Editor.indentOf(line) -> number                 // 前导空格数
 Editor.applyTab(value, selStart, selEnd) -> { value, selStart, selEnd }
-Editor.applyEnter(value, selStart) -> { value, selStart }
+Editor.applyEnter(value, selStart) -> { value, selStart, selEnd }
+//   与 applyTab **同形**（selEnd === selStart，Enter 之后选区必然塌陷）。
+//   统一形状是为了让 T12 两种按键都能直接 setSelectionRange(r.selStart, r.selEnd)，
+//   不必分支。裁决 R32。
 //   applyEnter：沿用上一行缩进；上一行 rstrip 后以 ':' 结尾则 +4
 
 // ── Exercise（T3）─────────────────────────────────────────────
@@ -190,9 +193,11 @@ Exercise.DIRECTIVE_OPEN  = /^\s*#\s*>>>\s*BLANK\s+(.*)$/
 Exercise.DIRECTIVE_CLOSE = /^\s*#\s*<<<\s*BLANK\s*$/
 
 // ── Judge（T7）────────────────────────────────────────────────
-Judge.normalize(src) -> { toks: [ { text, line, col } ], rel: number[] }
-//   toks = 去掉 ws/nl/comment 后各 token 的**原文切片**
-//   rel  = 每一行相对第一行的缩进差（参与比对）
+Judge.normalize(src) -> { toks: [ { text, line, col } ], rel: number[], relLines: number[] }
+//   toks     = 去掉 ws/nl/comment 后各 token 的**原文切片**
+//   rel      = 每一条**非空行**相对第一行的缩进差（参与比对）
+//   relLines = 与 rel 一一对应的**物理行号**（0-based）。必须有它：rel 跳过了空行，
+//              所以 rel 的下标在有空行时指不到正确的行，而 UI 要拿行号去放光标。
 Judge.compare(answer, reference) -> {
   ok: boolean,
   index: number,        // 第一处不同的 token 序号；ok 时为 -1
@@ -200,6 +205,11 @@ Judge.compare(answer, reference) -> {
   got: string|null,
   kind: 'equal' | 'different' | 'missing' | 'extra' | 'indent'
 }
+//   kind === 'indent' 时的两条额外语义：
+//     index    是**物理行号**（取自 relLines），不是 rel 的下标——rel 跳过了空行，
+//              下标在有空行时指不到正确的行，而 UI 拿它去放光标。
+//     expected / got 是该行的**相对缩进数值**。填 null 等于让调用方无话可说，
+//              而这个模块存在的理由就是「报错报得有意义」。
 
 // ── Trace（T8）────────────────────────────────────────────────
 Trace.create(reference) -> session
@@ -1153,7 +1163,12 @@ Run: `node python/core/editor.test.js` → FAIL
 1. 把 `text` 改成 `String(t.type === 'number' ? Number(src.slice(t.start, t.end)) : src.slice(...))`
    → `数字片段保留原文写法 1e10` 与往返断言一起变红。
 2. 把 `applyEnter` 的冒号判断换成 `/:\s*$/.test(line)`
-   → `字符串里的冒号不算` 变红。
+   → **`注释在后也算冒号结尾` 变红**（不是「字符串里的冒号不算」——
+   实测 `/:\s*$/` 对 `'    if x:  # note'` 与 `'x = "a:"'` **都**返回 false，
+   所以它只在前者上与正确实现分岔）。
+   两条断言各自防着不同的错误实现：`/:\s*$/` 被 c 案例抓，
+   而「行内任意位置有冒号」（`/:/`）那种写法会被 d 案例抓（它对两者都为 true）。
+   **两条都要留。**
 
 两次都从内存改回来。
 
