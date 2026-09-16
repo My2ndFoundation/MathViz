@@ -44,11 +44,17 @@ jobs:
       # 直接 `node --check /dev/stdin` 在较新的 Node 上会因为无法从无后缀的管道
       # 推断模块类型而整体失败（本地 v25 能过、CI 全挂就是这么来的）。
       # 也不要吞掉 stderr，否则真正的报错会被藏起来。
-      - name: 内联脚本语法门（app.html / index.html / 全部工具）
+      # python/ 的三类页面也在这个循环里：chess / cryptography 的页面由它们各自的
+      # check.py 自带语法门，python 的 check.py 同样有——但根目录这一道扫的是**页面
+      # 清单**而不是子项目内部，把 python 的两个导航页与工具页加进来，等于多一层
+      # 与子项目脚本无关的兜底。加的是三个 glob，不是「python 的全部 html」：
+      # python/ 下将来还会有别的东西，写死这三类才不会在某天悄悄少扫一页。
+      - name: 内联脚本语法门（app.html / index.html / 全部工具 / python 导航页与工具页）
         run: |
           fail=0
           tmp="$(mktemp -d)"
-          for f in app.html index.html outputs/*.html; do
+          for f in app.html index.html outputs/*.html \
+                   python/app.html python/index.html python/tools/*.html; do
             out="$tmp/$(echo "$f" | tr '/' '_').js"
             awk '/<script>/{f=1;next}/<\/script>/{f=0}f' "$f" > "$out"
             if ! node --check "$out"; then
@@ -58,7 +64,8 @@ jobs:
           done
           rm -rf "$tmp"
           if [ "$fail" -eq 0 ]; then
-            echo "语法门通过：$(ls outputs/*.html | wc -l | tr -d ' ') 个工具 + app.html + index.html"
+            echo "语法门通过：$(ls outputs/*.html | wc -l | tr -d ' ') 个工具 + app.html + index.html" \
+                 "+ python 导航页 2 个 + python 工具页 $(ls python/tools/*.html | wc -l | tr -d ' ') 个"
           fi
           exit $fail
 
@@ -73,3 +80,21 @@ jobs:
       - name: cryptography subproject gates
         run: |
           python3 cryptography/scripts/check.py
+
+      # 导航契约（C1 / C3 / C4 / C5 / C6 / C7 / C8）。六个导航页之间没有一行共享
+      # 代码——三个壳各自独立，所以「同一个行为落在全部子项目上」只能靠跨页比对。
+      # 契约文档 docs/superpowers/subproject-nav-contract.md 里 C4–C8 五条曾经整整
+      # 一份文档都写着「无机械门」，这一步就是那笔债。
+      #
+      # ⚠ 它**排在 python 那一步之前**，这是有意的。GitHub Actions 的 step 失败即中止
+      #   整个 job：这道门原本排在后面，于是只要 python/scripts/check.py 缺席或报红，
+      #   这道门在 CI 上就一次都跑不到——一道**不可达**的门和一道不存在的门没有区别，
+      #   而它看起来是配好的。它不依赖任何子项目脚本，所以没有理由排在它们后面。
+      - name: 导航契约（六个导航页）
+        run: |
+          python3 scripts/check_nav_contract.py
+
+      # 同上那条警告：这一步随 python 子项目一起加进来，比它更早切出的分支不会跑到。
+      - name: python subproject gates
+        run: |
+          python3 python/scripts/check.py

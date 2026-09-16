@@ -680,8 +680,14 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 
 ### 8.2 还一笔债：根级 `scripts/check_nav_contract.py`
 
-契约文档第 2 节那张表，**C4–C8 五条全是 ❌「无机械门」**，理由写着「它们是行为，
-不是能用正则数出来的字段」。加第三个子项目正是这笔债变贵的时刻：
+> **状态：已还清（契约 v2.0 / Task 15）。** 下面这段写于计划期，用的是当时的现在时。
+> 保留原文是为了留下「这笔债当时长什么样」，但**它描述的已经不再是现状**——
+> C4–C8 现在都有门，见 `docs/superpowers/subproject-nav-contract.md` §2。
+> 一段用现在时断言「无机械门」的规划文本放着不管，正是契约文档 §4 记的那个形状：
+> documented, believed, and false。
+
+契约文档第 2 节那张表，**C4–C8 五条全是 ❌「无机械门」**（写计划时的状态），
+理由写着「它们是行为，不是能用正则数出来的字段」。加第三个子项目正是这笔债变贵的时刻：
 `wireParentLink()` 从四份变六份，`ACCENTS` 从四份变六份。
 
 实测下来，C4–C8 里至少四条是能静态扫出来的：
@@ -692,7 +698,7 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 | C4 | 父链接那个 `<a>` 上有没有 `target="_top"` |
 | C5 | `.wrap` 的 `max-width` 是不是 `min(2600px,96vw)` |
 | C7 | `resolveLang` / `t` 的兜底字面量是不是 `'en'`；存储键前缀 |
-| C8 | 有没有 `contentWindow.location.replace`；**有没有出现禁用形状 `frame.src =`** |
+| C8 | 有没有 `contentWindow.location.replace`；**`frame.src =` 出现在哪里**（实施时订正：不是「有没有出现」——四个壳里各有恰好一处，都是 `setFrame()` 里 `contentWindow` 为假值时的设计内退路；门查的是「全页恰好一次且在 `setFrame()` 体内、排在 `location.replace` 之后」） |
 
 再加一条：根 `index.html` 的三张子项目卡片齐全且都带 `target="_top"`。
 
