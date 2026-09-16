@@ -3,7 +3,7 @@
 
 def split_seconds(total):
     hours, rest = divmod(total, 3600)
-# >>> BLANK id=minutes-seconds level=2 hint="// keeps the whole part, % keeps what is left over" hintEn="// keeps the whole part, % keeps what is left over"
+# >>> BLANK id=minutes-seconds level=2 hint="对 rest 再做一次同样的事：// 取走整的部分，% 留下剩的部分" hintEn="// keeps the whole part, % keeps what is left over"
     minutes = rest // 60
     seconds = rest % 60
 # <<< BLANK

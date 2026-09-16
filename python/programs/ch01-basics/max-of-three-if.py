@@ -4,7 +4,7 @@
 def max_of_three(a, b, c):
     if a >= b and a >= c:
         largest = a
-# >>> BLANK id=three-way level=2 hint="a has already lost here, so each branch only has to beat what is left" hintEn="a has already lost here, so each branch only has to beat what is left"
+# >>> BLANK id=three-way level=2 hint="能走到这里，a 已经输了；只剩两个候选，一次比较就够，不必再提 a" hintEn="a has already lost here, so each branch only has to beat what is left"
     elif b >= c:
         largest = b
     else:
