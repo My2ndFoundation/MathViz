@@ -92,8 +92,8 @@ CI 的 Python 版本升级、或任何一条在新版本上漂了。修法是改
 4. **`core/py-lex.js:8`、`:19` 的「构造性」**——`end ≤ src.length` 靠 `:221` 的守卫与钳位两行，不是结构保证。（第 0 期 §四）
 5. **`scripts/build_programs.py:32` docstring**——本应写反斜杠-u-003c 的转义文字，被写文件工具吞成了 `<`，句子变成「把 `<` 换成 `<`」。
    该 docstring 不是 raw string，修时要写成两个反斜杠。
-6. **`docs/superpowers/subproject-nav-contract.md`**：`:72` 与第 2 节表格仍说 `fallback_check()` 只比 id 集合（PR-A 起逐字段比较），
-   `:215` 仍写「34 道门全绿」（现 40），`:221` 仍写「两页各 1 条」（现 9）。
+6. **`docs/superpowers/subproject-nav-contract.md`**（行号按 v2.1，即 #180 合并之后）：`:78` 与第 2 节表格 `:203` 仍说 `fallback_check()` 只比 id 集合
+   （PR-A 起逐字段比较），`:234` 仍写「34 道门全绿」（现 40），`:243` 仍写「两页各 1 条」（现 9）。
 7. **`python-drill-tool` 的冲突处理步骤**（`SKILL.md:255-263`）只重跑 `build_programs` / `sync_fallback` / `check`，没有 `inline_core`，
    也没提 engine 同步——engine 不一致时 `page_mirror_check` 会红。`python-content-wave` 已写了 `inline_core`，同样没提 engine。
 
