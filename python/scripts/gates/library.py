@@ -20,6 +20,7 @@ ASCII 可解码**。本模块每一处读 `.py` 都显式 `encoding='utf-8'`；
 """
 from __future__ import annotations
 
+import copy
 import io
 import json
 import os
@@ -294,12 +295,17 @@ def algorithm_property_check() -> int:
         for _ in range(properties.SAMPLES):
             args = cases(rng)
             cases_total += 1
+            # 被测与参照**各拿一份深拷贝**。原先两者拿的是同一批对象：被测函数若就地改了
+            # 实参（原地排序写坏、清空字典……），参照看到的已是改过的对象，于是「错的输出」
+            # 与「对改过的输入算出的正确答案」相等，门比不出来。实测：把 invert() 改成
+            # `mapping.clear(); return {}`，修之前这道门是绿的。`args` 本身不交给任何一方，
+            # 留给报错时打印原始实参。
             try:
-                got = fn(*args)
+                got = fn(*copy.deepcopy(args))
             except Exception as exc:                         # noqa: BLE001
                 bad = (args, f'抛错 {type(exc).__name__}: {exc}', None)
                 break
-            want = ref(*args)
+            want = ref(*copy.deepcopy(args))
             if got != want or type(got) is not type(want):
                 bad = (args, got, want)
                 break

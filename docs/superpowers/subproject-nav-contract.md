@@ -1,6 +1,6 @@
 # Subproject Navigation Contract
 
-## MathViz · 子项目导航契约 v2.0
+## MathViz · 子项目导航契约 v2.1
 
 `chess/`、`cryptography/` 与 `python/` **不共享任何代码文件**——这是「整个子目录可以被搬走后
 独立运行」的前提，也是三边各有一份 `wireParentLink()`、一份 `ACCENTS`、一份 i18n 的原因。
@@ -20,6 +20,11 @@
 
 **v2.0 的变化**：第三个子项目 `python/` 加入；C4–C8 从「无机械门」变成有门
 （`scripts/check_nav_contract.py`）；第 2 节那张表按实测重写。
+
+**v2.1 的变化**：新增 C9——三个子项目的画廊有了与根画廊同一份背景荧光屏，由生成器铺设、
+`--check` 守着。触发它的是一次用户报告：子项目的画廊「应该跟数学的画廊一样有几条动态曲线」，
+查下去发现它们从来没有过（git 史里 `<canvas id="bg">` 只出现在根画廊）——一条导航页的视觉约定
+只落在一个页面里，正是本文为之存在的那种失败。
 
 ---
 
@@ -165,6 +170,22 @@ function safeAccent(a) { return ACCENTS.hasOwnProperty(a) ? a : 'unpaired'; }
 > 把这条写成「页面里不许出现 `frame.src =`」会当场把现有的正确代码全判红——
 > 门查的是「全页恰好一次，且那一次在 `setFrame()` 体内、排在 `location.replace` 之后」。
 
+### C9 · 画廊背景荧光屏四页同源
+
+根画廊与三个子项目的画廊（四个 `index.html`）在 `<body>` 之后都带同一个
+`GENERATED:GALLERY-BG` 区段：一块铺满视口的 `<canvas id="bg">`、让内容层 `.wrap` 叠在它上面的
+`z-index`、以及画几条缓慢流动的示波器轨迹的脚本。壳（`app.html`）的首页就是画廊，所以四个壳
+打开时看到的背景一致。
+
+- **唯一的编辑源**是 `scripts/gallery-bg.fragment`，由 `scripts/apply_gallery_bg.py`
+  原样写进四页。**不要在任何一页里直接改这个区段。**
+- 脚本是自包含的 IIFE：画廊页自己的脚本里已有 `g` 之类的名字，顶层 `const` 会撞。
+- 取不到 2d 上下文或没有 `requestAnimationFrame` 时安静退出。这不是客气：
+  `check_nav_contract.py` 在 node `vm` 里用桩 DOM 求值页面脚本，桩的 `getContext` 返回 `null`；
+  去掉那一行守卫，C2 的「求值后三个绑定非空」会当场红（负控制实测过）。
+- 这是**生成的副本**，与 C3/C6「三块代码逐字节相同、各抄一份」不同：子项目仍然零依赖、
+  可整体搬走（区段是内联的，不引用任何外部文件）；只是副本由脚本写、不由人抄。
+
 ---
 
 ## 2. 谁在守每一条
@@ -189,6 +210,7 @@ function safeAccent(a) { return ACCENTS.hasOwnProperty(a) ? a : 'unpaired'; }
 | **C5 `.wrap` 撑满舞台** | `scripts/check_nav_contract.py: wrap_width_check()` | ✅ | ✅ | ✅ |
 | **C7 兜底语言与存储键前缀** | `scripts/check_nav_contract.py: lang_check()` | ✅ | ✅ | ✅ |
 | **C8 `setFrame()` 形状** | `scripts/check_nav_contract.py: frame_nav_check()` | ✅ | ✅ | ✅ |
+| **C9 画廊背景四页同源** | `scripts/apply_gallery_bg.py --check`（CI `registry-sync.yml`；钩子在编辑源或脚本改动时重铺） | ✅ | ✅ | ✅ |
 | **根 `index.html` 三张子项目卡片** | `scripts/check_nav_contract.py: card_check()` | ✅（一张表三格共用） | ✅ | ✅ |
 
 加粗的九行是 v2.0 新增的门。加它们之前，C4–C8 五条整整一份文档都写着「❌ 无机械门」。

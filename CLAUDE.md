@@ -70,11 +70,11 @@ change `core/`, then re-run the script. Each subproject also owns its i18n keys
 `python-lang` / `python-nav`) and defaults to **English**, unlike the maths tools' Chinese default.
 
 **The three shells share no code, so they share a contract instead:
-`docs/superpowers/subproject-nav-contract.md` (v2.0).** Eight clauses the six navigation pages
+`docs/superpowers/subproject-nav-contract.md` (v2.1).** Nine clauses the six navigation pages
 (each subproject's `app.html` + `index.html`) must satisfy — the `?v=` cache key on every
 outbound URL, `version` on every FALLBACK entry, the single self-healing `PARENT_HOME`,
 `target="_top"` on the return link, the gallery filling the stage, the closed accent set,
-i18n semantics, and iframe history. Read it **before touching any shell, and before
+i18n semantics, iframe history, and the shared gallery background. Read it **before touching any shell, and before
 adding a fourth subproject** — it doubles as that subproject's acceptance list.
 
 Nine of those rows now have a mechanical gate: **`scripts/check_nav_contract.py`** scans all six
@@ -240,6 +240,17 @@ without `from __future__ import annotations` the module cannot even import when 
 The gate runs in `.githooks/pre-commit` (on changes to the logo or the script) and in
 `registry-sync.yml` on every push/PR — the CI one scans *all* of `git ls-files '*.html'`, so a newly
 added page that never got branded fails there rather than showing a blank tab icon in production.
+
+## The gallery background is generated too
+
+All four galleries — root `index.html` and each subproject's `index.html` — carry the same animated
+oscilloscope background in a `GENERATED:GALLERY-BG` region right after `<body>`. Its single edit source
+is `scripts/gallery-bg.fragment`; `scripts/apply_gallery_bg.py` writes it, `--check` (in CI and the
+hook) verifies each region is byte-identical, that no stray `id="bg"` survives outside it, and that no
+other page carries it. The script is a self-contained IIFE that exits quietly without a 2d context —
+`check_nav_contract.py` evaluates page scripts against a stub DOM whose `getContext` returns `null`, and
+without that guard the nav-contract gate goes red. Until 2026-09 only the root gallery had it: a visual
+convention living in one page is the same failure mode the nav contract exists for (contract clause C9).
 
 ## Commands
 
