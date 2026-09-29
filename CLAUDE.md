@@ -185,6 +185,15 @@ one that breaks the most assumptions inherited from the other two:
   `index.html`), accents the same closed cyan / rose / violet / emerald / orange, new tools copied
   from `python/tools/_skeleton.html` — which opts out with `GENERATED:PROGRAMS none`, the same
   "empty is the shape a slip takes" sentinel cryptography uses.
+- **Authoring rules nobody guesses.** Three have gates: every program has at least one
+  blank (`blank_presence_check`). Hint tiers are split by the explicit marker ` || ` (a space on each
+  side), and the number of tiers must equal the blank's `level` — semicolons are ordinary punctuation
+  again (under the old separator chain a `；` inside a level-1 hint cut it short). A `lineNotes`
+  anchor **may** sit inside a blank body: line notes only render in read mode, and the leak guard is
+  `line_note_reader_check`, which pins the places in `core/` that read `lineNotes` — not the anchor's
+  position. And one rule no gate can see: **the page never shows a program's output** (`run.expect` is
+  for the gates only), so a string literal in a blanked line that can only be learned from the output
+  must be given in the last hint tier.
 
 Its gate is `python3 python/scripts/check.py`, run by the hook (on `python/{core,programs,tools,scripts}/`,
 `python/python-tools.json` and the two navigation pages) and by `registry-sync.yml`.
