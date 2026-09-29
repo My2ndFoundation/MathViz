@@ -41,7 +41,7 @@
 
 读数据文件的 4 个程序（ch05 missing-file-lbyl / missing-file-eafp / read-csv-split / read-csv-module）复制出去后，
 CSV 两个会 `FileNotFoundError`，missing-file 两个会走默认分支、输出与讲解对不上。讲解末段手抄了 `_fixtures/` 的内容，
-**今天逐项一致，但没有门**——门只负责把 fixture 拷进临时目录（`library.py:144-146`）。
+**今天逐项一致，但没有门**——门只负责把 fixture 拷进临时目录（`library.py:145-147`）。
 **什么时候必须修**：M5 `py-text-data`（CSV / JSON 读写）落地前。两条路：加一道「讲解必须逐字包含 fixture 内容」的门；
 或复制按钮在有 fixture 的程序上一并给出建文件的代码。
 
@@ -74,7 +74,7 @@ CI 的 Python 版本升级、或任何一条在新版本上漂了。修法是改
 | 条件 | 会变成什么 | 出处 |
 |---|---|---|
 | **第一次 bump `SCHEMA_VERSION`** | `store.js:123-127` 迁移分支里版本键回写失败后，`notify('migrated')` 被 `notified` 标志吞掉（`:93`）——横幅说错原因。今天 `SCHEMA_VERSION = 1`，不可达 | 第 0 期 §二，仍成立 |
-| **第一个带 `chunks` 的程序** | 全库仍是 **0 条 chunks**，`anchor_check` 的 chunks 分支（`library.py:574-576`）从未被真实数据执行过。（原账本说的「锚不得落在挖空体内只覆盖 lineNotes」那条不对称已随 D7 删除，不再成立） | 第 0 期 §二，部分成立 |
+| **第一个带 `chunks` 的程序** | 全库仍是 **0 条 chunks**，`anchor_check` 的 chunks 分支（`library.py:580-582`）从未被真实数据执行过。（原账本说的「锚不得落在挖空体内只覆盖 lineNotes」那条不对称已随 D7 删除，不再成立） | 第 0 期 §二，部分成立 |
 | **一个程序要验两个函数** | property 门一个程序只有一个 `entry`。今天只验一半的：dict-and-set-comprehensions（未覆盖 `word_lengths`、`first_letters`）、flatten-and-transpose（`flatten`）、sorted-min-max-with-key（`by_score_desc_then_name`）、if-placement-in-comprehension（`drop_negatives`）——都靠 `program_run_check` 守 | 波 2 R17 + 终审 M9 |
 | **学生在手机或窄窗口上用** | `interact.js:870` 在 ≤ 880px（`max-width:880px`）隐藏整个说明面板，元数据、讲解、行注一起看不见 | 第 0 期行为，B7 之后更显眼 |
 | **第一个用到 Tab 的粘贴** | `editor.js:71-75` 的 `indentOf` 只数空格，粘贴进来的带 Tab 行报缩进 0（题库侧有门，唯一入口是使用者粘贴） | 第 0 期 §四，仍成立 |
@@ -85,8 +85,8 @@ CI 的 Python 版本升级、或任何一条在新版本上漂了。修法是改
 
 代码是对的，注释或文档承诺的东西不成立。危险在于下一个人会照着那句承诺去推理。
 
-1. **`gates/library.py:569` 的「与 `clean()` 同法」**——门剥每一条匹配指令正则的行；`exercise.js:328-351` 的 `clean()` 只剥
-   `scanBlocks` 配成对的 open/close。良构数据下同值。（第 0 期 §三.2，行号从 :556 挪到 :569）
+1. **`gates/library.py:575` 的「与 `clean()` 同法」**——门剥每一条匹配指令正则的行；`exercise.js:328-351` 的 `clean()` 只剥
+   `scanBlocks` 配成对的 open/close。良构数据下同值。（第 0 期 §三.2，行号从 :556 挪到 :575）
 2. **`gates/properties.py:39-41` 的「475 / 412」**——已补上「复评员复现出 475 / 414」的说明，但 412 仍写在那里、生成协议仍没写。
    写协议，别写期望值。（第 0 期 §三.3，部分修）
 3. **`core/judge.js:13`** 描述的是没落地的设计（「左侧缩进由占位块撑出、不算她打的」），而实际是 `b.indent` 放进 textarea 初值、
@@ -120,7 +120,7 @@ CI 的 Python 版本升级、或任何一条在新版本上漂了。修法是改
 - `sync_fallback.py:126`、`inline_core.py:129`、`build_programs.py:380`：`'--check' in sys.argv`——拼错成 `--chek` / `--chk` 时**静默改写文件、rc=0**（三个都实测过）。改用 argparse。
 - `inline_core.py:104-118`：`--check` 与 `--print-changed` 同给时 check 分支先返回，路径列表不打印。
 - `build_programs.py:294` 等：畸形注册表抛裸 traceback；删掉一个 `id`，python 侧 5 道门同时打印 traceback（汇总行仍是红，但看不出是哪个文件的哪条）。chess / cryptography 同样（`KeyError: 'id'`）。建议三处一起改成「点名文件的干净 ERROR」。
-- `gates/refs/__init__.py:63-84`：不检查 `REFERENCES` 的键是否为字符串；**一个**非字符串键就在 `library.py:211` 抛 TypeError，经 `_guard` 变 traceback 红。
+- `gates/refs/__init__.py:63-84`：不检查 `REFERENCES` 的键是否为字符串；**一个**非字符串键就在 `library.py:212` 抛 TypeError，经 `_guard` 变 traceback 红。
 - `gates/registry.py:293-295`：`version_meta_check` 在 `checked == 0` 时仍报绿（`fallback_version_check` 已于 PR-A 修掉同一问题）。
 - `gates/__init__.py:28` / `syntax.py:67-100`：`node_check()` 只认裸 `<script>`，`<script type="module">` 被静默跳过，块数只打印不断言。
 - `check.py:59-67`：`_guard` 把无参 `SystemExit()` 当绿。
@@ -153,8 +153,8 @@ CI 的 Python 版本升级、或任何一条在新版本上漂了。修法是改
 4. **控制方自己的七次失误**（裁决 §五）分三类：**无效的红**——#1 复制工具平铺 fixture（断言红，原因在工具）、#2 `zsh` 不分词（崩溃红）、
    #7 两个探针首版的毛病；**假绿**——#3 `| tail` 之后 `echo $?` 把一次崩溃显示成 rc=0，一段没跑的检查看起来像跑过；
    **文书与推理错误**——#4 heredoc 吃掉反引号、#5 台账数错变体组、#6 同源的 datetime 参照提议。
-   收尾期间又出现过两次同形的假绿（一次验收循环因 zsh 不分词全部 rc=127 却照样提交、一次 branding 门红了照样提交），
-   都在推送前发现。**验收循环必须在第一处红时停下，而不是只打印。**
+   收尾期间又出现过两次「红了却没停下」（一次验收循环因 zsh 不分词全部 rc=127、一次 branding 门报红——红都显示出来了，
+   提交却照样做了），都在推送前发现。**验收循环必须在第一处红时停下，而不是只打印。**
 
 ---
 
@@ -182,6 +182,6 @@ CI 的 Python 版本升级、或任何一条在新版本上漂了。修法是改
 3. 「`typeof p.source` 守卫重复 3 处」——是 4 处。
 4. 「inheritance-and-super 第 1 级没点名 super()」——指错了空：`parent-init` 已点名，没点名的是 `extend-describe`。
 5. 第 0 期 §二 chunks 条目里的「挖空体内」判据已随 D7 删除。
-6. 「refs 加载器接受非字符串键 → sorted 陈旧键时崩」——一个非字符串键就在更早的 `library.py:211` 崩。
+6. 「refs 加载器接受非字符串键 → sorted 陈旧键时崩」——一个非字符串键就在更早的 `library.py:212` 崩。
 7. 「判定器宽松」原描述低估了范围：会改变语义的缩进也判对（§一.3）。
 8. 已修、不再带过去：`accent_module_check` 的 TypeError（`7416ee0`）、导航页「py-basics.html 还不存在」的过期注释（`a39a368`）。

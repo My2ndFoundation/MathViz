@@ -234,7 +234,7 @@ MathViz 仓库里的**第三个子项目**，与 `chess/` 和 `cryptography/` �
 
 讲解面板**顶部显示程序元数据**：难度、类型、行数与空数、考试局、标签（非 cpython 的
 `runtime` 也显示），类型标签双语、逐语言兜底；闭集由 `closed_set_mirror_check` 与门的规格常量对齐。
-窄屏（< 880px）下讲解面板整体隐藏，元数据随之不可见（第 0 期的规则，未改）。
+窄屏（≤ 880px，`max-width:880px`）下讲解面板整体隐藏，元数据随之不可见（第 0 期的规则，未改）。
 *（第 1 期设计 D8 / B7 回写）*
 
 新增 token `--font-code`（`ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`），
@@ -647,7 +647,7 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 | 门 | 守什么 |
 |---|---|
 | **`program_run_check()`** | 全新临时目录里 `python3 <file>`，`PYTHONHASHSEED=0`，喂 `stdin`，5 秒超时，**比对 stdout 与 `expect`**；`_fixtures/` 先拷进去 |
-| **`algorithm_property_check()`** | 把程序当模块导入，取 `entry` 函数，200 组随机实参，与 `gates/refs/chNN_*.py` 里按程序 id 登记、**机制不同**的参照逐个比对（值相等且类型相同） |
+| ★ **`algorithm_property_check()`** | 把程序当模块导入，取 `entry` 函数，200 组随机实参，与 `gates/refs/chNN_*.py` 里按程序 id 登记、**机制不同**的参照逐个比对（值相等且类型相同）；被测与参照**各拿一份实参的深拷贝**——被测函数就地改了实参时，参照不再看到改过的对象（#181，第 2 期起草时发现） |
 | `program_embed_roundtrip_check()` | HTML 里的 `source` 解码后与磁盘 `.py` 逐字节相同（§5.3） |
 | `chapter_manifest_check()` | 磁盘 `.py` 与 `chapter.json` 双向存在 |
 | `anchor_check()` | `lineNotes` / `chunks` 的行文本锚在源码里存在且唯一，`clean()` 之后仍唯一；★ 锚点可以落在挖空体内（§2.3） |
