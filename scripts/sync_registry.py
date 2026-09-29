@@ -173,18 +173,34 @@ def sync_index_versions(tools: list, write: bool) -> bool:
 
 
 def check_index(tools: list) -> bool:
-    """index.html 的 TOOLS 只做结构校验：id 集合与 file / cat / accent 是否一致。"""
+    """index.html 的 TOOLS 只做结构校验：id 集合与 file / cat / accent 是否一致。
+
+    只在 TOOLS 数组的区间内找条目（与 rewrite_index_versions 同一个 index_tools_span）。
+    原先对整份文件做正则：ctrl-lqr-kalman-3d 的条目被追加进了背景动画的 `traces`
+    数组（5c4a9f0），画廊里那张卡片从此消失，而这道检查照样报「已同步（62 个工具）」
+    ——它数到的是落在错误数组里的那一条。
+    """
     src = INDEX_HTML.read_text(encoding="utf-8")
+    try:
+        start, end = index_tools_span(src)
+    except LookupError as exc:
+        print("error: {}".format(exc), file=sys.stderr)
+        return False
+    body = src[start:end]
     entries = {}
+    stray = [m.group(1) for m in re.finditer(r"\{\s*id:\s*'([^']+)',\s*file:\s*'", src[:start] + src[end:])]
+    if stray:
+        print("index.html: TOOLS 数组之外出现工具条目 -> {}（追加到了错误的数组里？）".format(", ".join(stray)),
+              file=sys.stderr)
     for m in re.finditer(
         r"\{\s*id:\s*'([^']+)',\s*file:\s*'([^']+)',\s*accent:\s*'([^']+)',\s*cat:\s*'([^']+)'",
-        src,
+        body,
     ):
         entries[m.group(1)] = {"file": m.group(2), "accent": m.group(3), "cat": m.group(4)}
 
     want = {t["id"]: {"file": t["file"], "accent": t["accent"], "cat": t["category"]} for t in tools}
 
-    ok = True
+    ok = not stray
     missing = sorted(set(want) - set(entries))
     extra = sorted(set(entries) - set(want))
     if missing:
