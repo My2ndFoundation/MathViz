@@ -13,7 +13,7 @@ def edit_distance(a, b):
         dist[0][j] = j
     for i in range(1, rows):
         for j in range(1, cols):
-# >>> BLANK id=cost level=2 hint="替换这一步要不要花一次：一个条件表达式赋给 cost——两个字符相同时是 0，否则是 1；0 写在前面 || 这一格对应 a 的下标 i - 1 与 b 的下标 j - 1，写 a 的那一边在 == 左边" hintEn="Does replacing cost anything here: assign a conditional expression to cost - 0 when the two characters are the same, otherwise 1; write the 0 first || This cell stands for index i - 1 of a and index j - 1 of b, with the a side on the left of =="
+# >>> BLANK id=cost level=2 hint="替换这一步要不要花一次：一个条件表达式赋给 cost——两个字符相同时是 0，否则是 1；0 写在前面，用 == 比较、a 的那个字符写在左边 || 这一格对应 a 的下标 i - 1 与 b 的下标 j - 1" hintEn="Does replacing cost anything here: assign a conditional expression to cost - 0 when the two characters are the same, otherwise 1; write the 0 first, and compare with == with the character from a on the left || This cell stands for index i - 1 of a and index j - 1 of b"
             cost = 0 if a[i - 1] == b[j - 1] else 1
 # <<< BLANK
             delete = dist[i - 1][j] + 1
