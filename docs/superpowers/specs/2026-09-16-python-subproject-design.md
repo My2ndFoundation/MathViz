@@ -171,19 +171,30 @@ MathViz 仓库里的**第三个子项目**，与 `chess/` 和 `cryptography/` �
 - `boards ⊆ { AQA, OCR, Edexcel, CIE }`
 - `runtime ∈ { cpython, micropython-microbit, micropython-pico }`
 - `requires` 取自白名单 `{ numpy, pandas, matplotlib, scipy, pygame }`
-- `check.property` 取自一个**登记在 `python/scripts/properties.py` 里的闭集**，
-  首批为 `{ sort, search, structure, pure }`。新增一个 property 必须**同时写出它的参考实现**
-  （用 Python 标准库或一段显然正确的朴素实现），否则这道门就退化成「拿自己验自己」。
+- `check.property` 是一个族名，取自闭集 `{ sort, search, structure, pure }`（第 1 期全部是 `pure`）。
+  **参考实现按程序 `id` 逐条登记在 `python/scripts/gates/refs/chNN_<slug>.py`**（每章一个文件，
+  `gates/properties.py` 只负责汇总）——同一族名下两个机制不同的程序，参照也必须不同。
+  新增一个 property 必须**同时写出它的参考实现**（用 Python 标准库或一段显然正确的朴素实现），
+  而且**机制要与被测程序不同**，否则这道门就退化成「拿自己验自己」；标准库函数不自动算「不同」，
+  要看源码（第 1 期 `calendar.isleap` 与被测的一表达式闰年逐字同源）。
+  *（第 1 期设计 A4 回写）*
   `entry` 指名要被调用的那个函数；没有 `check` 的程序只受 `program_run_check` 约束。
 
 派生字段**一律不手写**：`lines` 由脚本从 `.py` 数出来，注册表的 `programs` / `lines`
-同理（§6.1）。手写的派生字段必然漂移——根 `CLAUDE.md` 已经为此付过一次学费
+同理（§6.1）。`lines` **不含 BLANK 指令行**，也不含文件末尾换行产生的空尾巴——页面显示的行数与
+「不超过 N 行」筛选都要与学生看到的程序一致；按 `\n` 切，不认 U+0085 / U+2028 / U+2029。
+*（第 1 期设计 Task 11c、地基终审 G3 回写）*手写的派生字段必然漂移——根 `CLAUDE.md` 已经为此付过一次学费
 （62 条里 48 条静默漂了）。
 
 `notes` 是**段落数组**而不是带 `\n` 的长字符串：JSON 里写中文散文只有这样才读得下去。
 
 `lineNotes` 与 `chunks` **用整行原文当锚，不用行号**。行号会在编辑上方任何一行时
 静默错位；行文本找不到或不唯一时，构建**当场失败**——失败得响亮，好过把注解挂到错的行上。
+
+**行注锚点可以落在挖空体内。** 泄题的防线不在锚点位置，而在读取点：`lineNotes` 只在读模式显示，
+结构门 `line_note_reader_check` 限定 core 里读 `lineNotes` 的位置只有三种形状。第 0 期「锚不得落在
+挖空体内」的判据被拆掉，是因为「每程序 ≥ 1 空」之后，最该挖的那一行往往正是最该讲的那一行。
+*（第 1 期设计 D7 / B6 回写）*
 
 ### 2.4 变体：同一问题的多种写法
 
@@ -221,6 +232,11 @@ MathViz 仓库里的**第三个子项目**，与 `chess/` 和 `cryptography/` �
           底栏：[读] [挖空] [临摹]      pip install numpy      [复制]
 ```
 
+讲解面板**顶部显示程序元数据**：难度、类型、行数与空数、考试局、标签（非 cpython 的
+`runtime` 也显示），类型标签双语、逐语言兜底；闭集由 `closed_set_mirror_check` 与门的规格常量对齐。
+窄屏（< 880px）下讲解面板整体隐藏，元数据随之不可见（第 0 期的规则，未改）。
+*（第 1 期设计 D8 / B7 回写）*
+
 新增 token `--font-code`（`ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`），
 是 python 子项目自己的 token，不从数学设计系统借 `--font-math`。三层必须共用它。
 
@@ -245,8 +261,15 @@ MathViz 仓库里的**第三个子项目**，与 `chess/` 和 `cryptography/` �
 
 - **逐空判定**，不是整篇判定。错了只报「第几个 token 起开始不同：期待 X，你写了 Y」
   并把光标送过去，**不给答案**。
-- **分级提示**：每个空自带 `level`（1 给形状 / 2 给思路 / 3 只给一句路标），点一次展开一级，
-  用了几级记进统计。
+- **每个程序至少一个空**（门 `blank_presence_check`，无豁免）。*（第 1 期设计 D2 回写）*
+- **分级提示**：每个空自带 `level`（1–3），点一次展开一级，用了几级记进统计。
+  `hint` / `hintEn` 用**唯一的显式标记 ` || `**（两侧各一个空格）切成若干段，段数必须等于 `level`；
+  分号、句点等回归普通标点。逐级更具体，任何一级都不给出答案原文。
+  **页面不显示程序的输出**，所以挖空行里的字面量文字若只能从输出得知，就在最后一级提示里给出。
+  *（第 1 期设计 D3 / B1 回写；最后一句出自第 1 期波 1 终审）*
+- **挖空反馈不印字面量原文**：期待的 token 是字符串 / f-string 时，反馈只报它的类别（一个字符串 /
+  一个 f-string）与第几个字符起不同，绝不印出标准答案的字面量文本——否则一个 f-string 空点一次
+  「检查」就能看到整行答案。*（第 1 期设计 Task 11b 回写）*
 - **「填进去」**：放弃某个空，标准答案灰着填入，不计完成。
 - Tab 在空与空之间跳；`Cmd/Ctrl+Enter` = Check 当前空。
 - 完成后「复制我的完整程序」——把她填的合回整篇。
@@ -412,12 +435,14 @@ python-progress:<progId>        { blank:{done,hintsUsed,at}, trace:{bestAcc,best
 
 ### 4.7 编辑模型与内联
 
-`python/core/**` 与 `python/programs/**` 是唯二编辑源。两个生成脚本写工具页的不同标记族：
+`python/core/**`、`python/programs/**` 与 `python/python-tools.json` 是编辑源。三个生成脚本写不同的标记族
+*（第三个 `sync_fallback.py` 出自第 1 期设计 A1）*：
 
 | 脚本 | 写的区段 |
 |---|---|
 | `python/scripts/inline_core.py` | `GENERATED:PY-LEX` `EDITOR` `EXERCISE` `JUDGE` `TRACE` `STORE` `INTERACT` |
-| `python/scripts/build_programs.py` | `GENERATED:PROGRAMS`（只注入本页那一章） |
+| `python/scripts/build_programs.py` | `GENERATED:PROGRAMS`（只注入本页那一章），并把 `programs` / `lines` 写回注册表 |
+| `python/scripts/sync_fallback.py` | 两个导航页的 `GENERATED:FALLBACK`（`app.html` 不带 `desc`，`index.html` 带） |
 | `scripts/apply_branding.py`（根） | `GENERATED:FAVICON`，以及导航页的 `GENERATED:BRAND-LOGO` |
 
 **绝不手改 GENERATED 区段。** `python/tools/_skeleton.html` 参与内联，
@@ -570,17 +595,30 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 
 ### 7.1 `python/scripts/check.py`
 
+门按组登记在 `check.py` 的 `GATES` 表里，汇总行按组自数（`生成 3 · A 8 · …`）。**这里不写总数**——
+写死的门数必然漂（第 1 期设计 A6）。标 ★ 的是第 1 期新增或改了判据的门。
+*（本节于第 1 期收尾回写，与 `GATES` 逐条对齐）*
+
+**生成 · 三个生成脚本的 `--check`**
+
+| 门 | 守什么 |
+|---|---|
+| `inline_core --check` | 工具页的七个 core 区段与 `core/**/*.js` 逐字节一致 |
+| `build_programs --check` | 工具页的 `GENERATED:PROGRAMS` 与章目录一致，注册表的 `programs` / `lines` 与真数一致 |
+| ★ `sync_fallback --check` | 两个导航页的 `GENERATED:FALLBACK` 与注册表逐字节一致（第 1 期设计 A1） |
+
 **A · 注册表与镜像**
 
 | 门 | 守什么 |
 |---|---|
 | `registry_check()` | `schemaVersion`、字段齐全、semver 形状、`module ∈ 1..8`、`accent` 在五色闭集、id 唯一、**注册表与磁盘双向存在**（`_skeleton.html` 除外） |
-| `fallback_check()` | 两个导航页的 FALLBACK id 集合 == 注册表 |
+| ★ `fallback_check()` | 两页 FALLBACK 与注册表：id 顺序相同、字段集恰为 `FALLBACK_FIELDS`、除 `version` 外逐字段相等（值与类型）——与 `sync_fallback --check` 的逐字节比对互为独立测量（第 1 期设计 A1） |
 | `fallback_version_check()` | 每条 FALLBACK 都带 `version` 且与注册表一致 |
 | `version_meta_check()` | 注册表 `version` == 页面 `tool-version` meta |
 | `program_count_check()` | 注册表的 `programs` / `lines` == 从 `programs/ch-*/` 真数出来的 |
 | `module_label_check()` | `MODULE_LABELS` 两页逐字节相同，且 1..8 一个不缺 |
-| `accent_module_check()` | 同模块同色、相邻模块异色 |
+| ★ `accent_module_check()` | 注册表每条的 accent 等于 §6.1 的模块配色表；表本身覆盖 1–8、取值在闭集、相邻异色（第 1 期设计 A2） |
+| ★ `page_mirror_check()` | 每个工具页的 `TOOL.id` / `accent` / `title` 与 `tool-engine` meta 等于注册表；全部工具 engine 相同且等于骨架（第 1 期设计 A3） |
 
 **B · 可搬迁与卫生**
 
@@ -589,8 +627,10 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 | `outbound_ref_check()` | `core/` `programs/` `tools/` 里零个父目录相对路径；两个导航页各恰好一处 `PARENT_HOME` |
 | `script_literal_check()` | `.js` 里不许出现 `<` + `script` + `>` 字面序列（包括注释里）——`awk` 抽取会静默吞行 |
 | `control_byte_check()` | 无 BOM、无 CRLF、无杂散控制字节 |
-| `inline_check()` | `GENERATED:*` 区段与编辑源逐字节一致 |
 | `lazy_dep_check()` | 没有任何模块在 UMD 工厂参数里直接抓 `root.X`（§4.6） |
+| `skeleton_sentinel_check()` | `_skeleton.html` 的 `GENERATED:PROGRAMS` 标记必须写 `none`；非模板页不许写 |
+| `skeleton_leak_check()` | 已注册的工具页不许带着骨架的 description 原文或 `none` 哨兵 |
+| ★ `line_note_reader_check()` | core 里读 `lineNotes` 的位置只放行三种形状——行注锚点解禁后，泄题的防线在读取点（第 1 期设计 B6） |
 
 **C · 语法与执行**
 
@@ -599,25 +639,35 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 | `node_check()` | 每个 `tools/*.html` 抽出内联脚本过 `node --check`。`run_node()` **走 stdin**，并在 argv 过大时当场响亮拒绝——把 `MAX_ARG_STRLEN` 那个坑提前拦在本机 |
 | `core_tests()` | 跑 `core/*.test.js` |
 | `browser_branch_check()` | 用 `vm` + 裸 context 跑 UMD 的**浏览器分支**。`node -e` 和 stdin 都会定义 `module`/`require`，UMD 会走 node 分支——那样的门是在检查浏览器里根本不执行的代码 |
+| ★ `closed_set_mirror_check()` | `interact.js` 导出的 `LEVELS` / `KINDS` / `BOARDS` / `RUNTIMES` / `HINT_MARK` 与门的规格常量逐项相同（第 1 期设计 B7） |
+| ★ `js_parser_parity_check()` | 在 `vm` 裸 context 里用页面自己的 `Exercise.parse` / `clean` 跑每个真实程序——提示里一个 U+2028 曾让三种模式全部崩溃而其余门全绿（第 1 期地基终审） |
 
-**D · Python 程序库（本子项目独有，价值最高）**
+**D·库 · Python 程序库（本子项目独有，价值最高）**
 
 | 门 | 守什么 |
 |---|---|
 | **`program_run_check()`** | 全新临时目录里 `python3 <file>`，`PYTHONHASHSEED=0`，喂 `stdin`，5 秒超时，**比对 stdout 与 `expect`**；`_fixtures/` 先拷进去 |
-| **`algorithm_property_check()`** | 把程序当模块导入，取 `entry` 函数，200 组随机输入，与 **Python 自己的 `sorted`/`bisect`/`heapq`** 对照 |
-| **`lex_vs_cpython_check()`** | `py-lex.js` 的切词结果与 **CPython `tokenize` 模块**比对关键类别（NAME/NUMBER/STRING/COMMENT/OP）的起止位置 |
-| `lex_roundtrip_check()` | `highlight(src).map(f=>f.text).join('') === src`，跑遍全库 + 一个畸形语料（未闭合三引号、孤立反斜杠、孤立引号、嵌套 f-string、BOM） |
+| **`algorithm_property_check()`** | 把程序当模块导入，取 `entry` 函数，200 组随机实参，与 `gates/refs/chNN_*.py` 里按程序 id 登记、**机制不同**的参照逐个比对（值相等且类型相同） |
 | `program_embed_roundtrip_check()` | HTML 里的 `source` 解码后与磁盘 `.py` 逐字节相同（§5.3） |
 | `chapter_manifest_check()` | 磁盘 `.py` 与 `chapter.json` 双向存在 |
-| `anchor_check()` | `lineNotes` / `chunks` 的行文本锚在源码里**存在且唯一** |
+| `anchor_check()` | `lineNotes` / `chunks` 的行文本锚在源码里存在且唯一，`clean()` 之后仍唯一；★ 锚点可以落在挖空体内（§2.3） |
 | `exemption_check()` | **例外豁免**（普通 cpython 程序却标 `compile-only`）必须带 `why`，每页 ≤ 2，且每次运行逐条打印；**结构性豁免**（`runtime != cpython` 或依赖 pygame）自动放行（§5.4） |
 | `source_ascii_check()` | 源码纯 ASCII（§2.5 规矩 2） |
+| `source_bmp_check()` | `.py` 里不许出现非 BMP 字符（含指令行）——CPython 给字符偏移、JS 给 UTF-16 码元偏移 |
 | `source_indent_check()` | 无制表符、缩进是 4 的倍数、行尾无多余空白、LF 结尾（§2.5 规矩 3） |
-| `blank_directive_check()` | BLANK 指令成对、`id/level/hint/hintEn` 齐全、id 页内唯一、`level ∈ 1..3`、挖空体非空 |
+| ★ `blank_presence_check()` | 每个程序至少一个空，无豁免（第 1 期设计 D2） |
+| `blank_directive_check()` | BLANK 指令成对、`id/level/hint/hintEn` 齐全、id 页内唯一、`level ∈ 1..3`、挖空体非空；★ 提示按 ` \|\| ` 切出的段数等于 `level`（第 1 期设计 B1） |
 | `program_meta_check()` | id 全库唯一；`kind`/`level`/`boards`/`runtime` 在闭集；双语字段齐全；`requires` 在白名单 |
 | `variant_check()` | 同一个 `problem` 的变体 ≥ 2 且标题互不相同 |
+
+**D·词法**
+
+| 门 | 守什么 |
+|---|---|
+| **`lex_vs_cpython_check()`** | `py-lex.js` 的切词结果与 **CPython `tokenize` 模块**比对关键类别（NAME/NUMBER/STRING/COMMENT/OP）的起止位置 |
+| `lex_roundtrip_check()` | `highlight(src).map(f=>f.text).join('') === src`，跑遍全库 + 一个畸形语料（未闭合三引号、孤立反斜杠、孤立引号、嵌套 f-string、BOM） |
 | `judge_strictness_check()` | 判定器正负样例：换空白/换注释 → 判同；换引号风格、换数字写法、改相对缩进 → 判异 |
+| `lex_never_throws_check()` | 畸形语料全部平安通过 `PyLex.tokenize`，不抛错 |
 
 ### 7.2 两道「拿 CPython 当独立裁判」的门
 
@@ -718,7 +768,7 @@ chess 现在要到运行时才暴露一个写错的路径。
 | 期 | 内容 | 页 | 程序 |
 |---|---|---|---|
 | **第 0 期 · 地基** | `python/` 骨架、七个 core 模块 + 测试、三个脚本、全部门 + 全部负控制、根级 `check_nav_contract.py`、补给 chess 的 `registry_check()`、根 `index.html` 第三张卡、根 `CLAUDE.md`、契约文档 v2.0、`apply_branding.py` 跑一遍；外加**一个真页面 `py-basics`** 当活体验收 | 1 | ~10 |
-| 第 1 期 | M1 剩余 + M2 | 8 | ~95 |
+| 第 1 期 | M1 剩余 + M2 | 8 | ~95（实交 96；全库 106）|
 | 第 2 期 | M3 + M4 | 10 | ~120 |
 | 第 3 期 | M5 综合运用 | 4 | ~40 |
 | 第 4 期 | M6 科学计算与数理统计 | 5 | ~45 |
@@ -731,12 +781,18 @@ chess 现在要到运行时才暴露一个写错的路径。
 **第 0 期是唯一不能拆的一期**——门和负控制必须在第一个内容页之前就位，
 否则后面每一页都是在没有网的高空作业。
 
-每一页是一个 PR、由一个带独立 worktree 的子代理来建（`isolation: "worktree"`），中央注册。
+内容按**波**交付：一波（通常一个模块的几页）每页一个带独立 worktree 的构建子代理
+（`isolation: "worktree"`），**构建者自己在 `python-tools.json` 追加本页条目**（文案可为草稿），
+连同重新生成的两个导航页一起提交；控制方把各页逐个合进一条集成分支——注册表与 FALLBACK 的冲突
+一律「取集成分支版本 + 补回本页条目 + 重跑生成脚本」，不手工合并——亲验之后**整波终审一次、
+修复一轮、一波一个 PR**。完整做法见 `.claude/skills/python-content-wave/SKILL.md`。
+*（第 1 期设计 §8.1 / §9、地基终审 G2 回写；原文是「每一页是一个 PR……中央注册」）*
+
 并发纪律照根 `CLAUDE.md`「Parallel work discipline」五条执行，其中两条在这里特别相关：
 
 - **不要 `git add -A`**，显式列路径。
-- **`.githooks/pre-commit` 会重跑 `build_programs.py` 和 `inline_core.py`，它们从磁盘读
-  `.py` 与 `.js`**——别的会话未提交的改动会被卷进你的提交。hook 跑完后要读一遍
+- **`.githooks/pre-commit` 会重跑三个生成脚本（`inline_core.py`、`build_programs.py`、
+  `sync_fallback.py`），它们从磁盘读 `.js`、`.py` 与注册表**——别的会话未提交的改动会被卷进你的提交。hook 跑完后要读一遍
   `git status --short` 的**每一行**，不是只在跑之前读。
 
 ### 9.1 每一期的验收
@@ -748,14 +804,19 @@ chess 现在要到运行时才暴露一个写错的路径。
 4. `file://` 直接双击打开每一个新页面：三种模式都能用，`localStorage` 三级清空都生效
 5. 随机抽三段程序，**点复制、粘进 PyCharm、真的跑一遍**——这是整套东西存在的理由，
    不能只靠门代劳
-6. 临摹模式在三种缩放下三层不错位（这条没有机械门，靠看）
+6. 临摹模式在三种缩放下三层不错位。仍没有机械门，但不再「靠看」：第 1 期起控制方在
+   `document.body.style.zoom` = 0.9 / 1 / 1.25 下用 `Range` 量同一字符在影子层与输入层的矩形，
+   要求 dx = dy = 0，并用一次负控制（给一层加 `padding-left`）证明这个测量看得见错位。
 
 ### 9.2 配套文档与 skill
 
-- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）
-- `docs/superpowers/prompts/python-handoff.md` —— 交接文档：API 签名、易踩的坑、
+- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。**至第 1 期收尾仍未写**，见第 1 期账本
+- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（**至第 1 期收尾仍未写**，见第 1 期账本）：API 签名、易踩的坑、
   每一次实测发现的错误
-- `.claude/skills/python-drill-tool/SKILL.md` —— 新增一页 / 新增一个程序 / 升级一页的作业流程
+- `.claude/skills/python-drill-tool/SKILL.md` —— 作者须知：新增一页 / 新增一个程序 / 升级一页的作业流程，
+  每条硬约束注明由哪道门守（第 1 期设计 B5）
+- `.claude/skills/python-content-wave/SKILL.md` —— 控制方的波次作业：程序清单、并行构建、集成、
+  终审、一波一个 PR（第 1 期）
 - `python/tools/_skeleton.html` —— 模板，参与内联，空 `PROGRAMS` 列表是硬错误
 
 ---
