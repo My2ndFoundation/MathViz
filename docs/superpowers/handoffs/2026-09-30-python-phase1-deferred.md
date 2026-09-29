@@ -4,8 +4,10 @@
 > 40 道门。PR：#172 · #173 · #174 · #175 · #176 · #177 · #178。
 > 这份文件是**账本**，不是待办列表——每一条都记着**为什么当时没修**，以及**什么时候它会变成必须修**。
 >
-> **每一条都在收尾当天（2026-09-30，`83e7a2d`）逐条实测核对过**：44 条里仍成立 34、已修 2、与原描述不符 8。
-> 与原描述不符的，下文写的是核对后的版本；原描述错在哪，列在 §七。
+> **每一条都在收尾当天（2026-09-30）逐条实测核对过**（核对基线 `83e7a2d`）。**文中的 file:line 一律按本收尾分支合并 #179–#181 之后的 HEAD**
+> ——那三个 PR 在前面插了行，`registry-sync.yml`、`.githooks/pre-commit` 与契约文档的行号都因此挪过。
+> 核对结果：44 条里仍成立 34、已修 2、与原描述不符 8。
+> 与原描述不符的，下文写的是核对后的版本；§七 列的是原描述错在哪、以及不再带过去的已修项（部分成立的 A4 / `judge.js` `.line` / `version_meta_check` 三条直接写在 §三、§四 的正文里）。
 >
 > 规格：`docs/superpowers/specs/2026-09-16-python-subproject-design.md`（第 1 期规则已于收尾回写）
 > 本期设计：`docs/superpowers/specs/2026-09-16-python-phase1-design.md`
@@ -18,7 +20,7 @@
 
 它们会被第 2 期的十页照抄。第 2 期（M3 / M4）已在并行起草清单，这五条已写进它们的简报，但**已上线的 9 页里仍有存量**。
 
-### 1. 讲解里有约 25 处指向「页面上看不到的输出」
+### 1. 讲解里有 27 处（25 个程序）指向「页面上看不到的输出」
 
 页面不显示程序输出（`run.expect` 只给门用）。这条规则是在波 1 终审才发现的，写回作者须知是 #176；之前写好的讲解没有回头扫。
 收尾实测，**直接指向输出**的讲解与提示：
@@ -45,7 +47,7 @@ CSV 两个会 `FileNotFoundError`，missing-file 两个会走默认分支、输�
 
 ### 3. 判定器在行数不同时完全不比缩进——连改变语义的缩进也判对
 
-`judge.js:161-172` 只在两边行数相同时比相对缩进。原账本记的是「单行 `if x > h: return h` 被判等于两行参考」；
+`judge.js:162-172` 只在两边行数相同时比相对缩进。原账本记的是「单行 `if x > h: return h` 被判等于两行参考」；
 收尾实测**更宽**：`compare('if a:\n    if b: c()\nd()', 'if a:\n    if b:\n        c()\n    d()')` → `equal`，
 走 UI 路径 `blankFeedback` 同样显示 Correct——`d()` 被移出了外层 `if`，程序的意思已经变了。
 `judge_strictness_check` 的 14 条样例没有覆盖这个形状。**什么时候必须修**：第一个多行挖空里有嵌套块的程序——
@@ -74,7 +76,7 @@ CI 的 Python 版本升级、或任何一条在新版本上漂了。修法是改
 | **第一次 bump `SCHEMA_VERSION`** | `store.js:123-127` 迁移分支里版本键回写失败后，`notify('migrated')` 被 `notified` 标志吞掉（`:93`）——横幅说错原因。今天 `SCHEMA_VERSION = 1`，不可达 | 第 0 期 §二，仍成立 |
 | **第一个带 `chunks` 的程序** | 全库仍是 **0 条 chunks**，`anchor_check` 的 chunks 分支（`library.py:574-576`）从未被真实数据执行过。（原账本说的「锚不得落在挖空体内只覆盖 lineNotes」那条不对称已随 D7 删除，不再成立） | 第 0 期 §二，部分成立 |
 | **一个程序要验两个函数** | property 门一个程序只有一个 `entry`。今天只验一半的：dict-and-set-comprehensions（未覆盖 `word_lengths`、`first_letters`）、flatten-and-transpose（`flatten`）、sorted-min-max-with-key（`by_score_desc_then_name`）、if-placement-in-comprehension（`drop_negatives`）——都靠 `program_run_check` 守 | 波 2 R17 + 终审 M9 |
-| **学生在手机或窄窗口上用** | `interact.js:870` 在 < 880px 隐藏整个说明面板，元数据、讲解、行注一起看不见 | 第 0 期行为，B7 之后更显眼 |
+| **学生在手机或窄窗口上用** | `interact.js:870` 在 ≤ 880px（`max-width:880px`）隐藏整个说明面板，元数据、讲解、行注一起看不见 | 第 0 期行为，B7 之后更显眼 |
 | **第一个用到 Tab 的粘贴** | `editor.js:71-75` 的 `indentOf` 只数空格，粘贴进来的带 Tab 行报缩进 0（题库侧有门，唯一入口是使用者粘贴） | 第 0 期 §四，仍成立 |
 
 ---
@@ -133,9 +135,9 @@ CI 的 Python 版本升级、或任何一条在新版本上漂了。修法是改
 - ch01 celsius-to-fahrenheit `notes.en[2]` 用散文写出了 `round-to-int` 那一空的关键事实。
 
 **钩子与仓级**
-- `.githooks/pre-commit:156-229`：手跑 `sync_fallback.py` 后只暂存注册表，会提交一份注册表带改动、导航页不带的提交（clone 里实测复现；CI 会抓）。机制：两页先被记成「跑之前就脏」，`--print-changed` 因磁盘已是最新而为空，`check.py` 读磁盘所以是绿的。
+- `.githooks/pre-commit` 的 python 段（`# ---- python 子项目 ----`，`:168-252`）：手跑 `sync_fallback.py` 后只暂存注册表，会提交一份注册表带改动、导航页不带的提交（clone 里实测复现；CI 会抓）。机制：两页先被记成「跑之前就脏」，`--print-changed` 因磁盘已是最新而为空，`check.py` 读磁盘所以是绿的。
 - `chess/scripts/check.py:1-8`：门数三处同值靠一句注释，不是一道门（今天 13 == 13）。
-- `.github/workflows/registry-sync.yml`：导航契约那一步（`:101`）仍排在 chess（`:80`）与 cryptography（`:88`）之后，全文没有 `if: always()`。
+- `.github/workflows/registry-sync.yml`：导航契约那一步（`:108`）仍排在 chess（`:87`）与 cryptography（`:95`）之后，全文没有 `if: always()`。
 - `core.hooksPath` 是共享配置里指向主工作区 `.githooks` 的绝对路径：从 worktree 提交时跑的是主工作区当前分支那份钩子**脚本**（它操作的是 worktree 的文件）。是否改成相对路径——**等用户决定**。
 
 ---
@@ -148,8 +150,11 @@ CI 的 Python 版本升级、或任何一条在新版本上漂了。修法是改
 2. **设计 §9.2 列了两份文档，第 1 期结束时仍未写**：`docs/superpowers/python.md`（架构）与 `docs/superpowers/prompts/python-handoff.md`（交接）。
    两期的坑散在两个 skill、两份账本、两份裁决里；第 2 期的构建者读得到 skill，读不到「为什么」。建议在第 2 期收尾时写。
 3. **用户验收仍未做**：新 8 页的 `file://` 双击打开、复制程序粘进 PyCharm 真跑（`match-case-commands` 需要 3.10+；读 CSV 的程序要先建 `_fixtures/scores.csv`）。
-4. **控制方的「红得没有理由」**：本期出现过七次（`zsh` 不分词、`| tail` 吞退出码、不带引号的 heredoc 吃反引号、复制工具平铺 fixture 等），
-   都记在裁决 §五。其中两次让一段没跑的验收看起来像跑过——**验收循环必须在第一处红时停下，而不是只打印**。
+4. **控制方自己的七次失误**（裁决 §五）分三类：**无效的红**——#1 复制工具平铺 fixture（断言红，原因在工具）、#2 `zsh` 不分词（崩溃红）、
+   #7 两个探针首版的毛病；**假绿**——#3 `| tail` 之后 `echo $?` 把一次崩溃显示成 rc=0，一段没跑的检查看起来像跑过；
+   **文书与推理错误**——#4 heredoc 吃掉反引号、#5 台账数错变体组、#6 同源的 datetime 参照提议。
+   收尾期间又出现过两次同形的假绿（一次验收循环因 zsh 不分词全部 rc=127 却照样提交、一次 branding 门红了照样提交），
+   都在推送前发现。**验收循环必须在第一处红时停下，而不是只打印。**
 
 ---
 
@@ -158,8 +163,11 @@ CI 的 Python 版本升级、或任何一条在新版本上漂了。修法是改
 收尾实测（`83e7a2d`）：9 页合计 **2,545,092 B**（gzip -9 后 850,469 B），平均约 283 KB/页（cryptography 均 221 KB）；
 七个 core 模块合计 **180,939 B**，每页一份、完全相同；py-basics 从第 0 期的 242 KB 涨到 266 KB。
 
-仓库增速（`git count-objects -vH`，同一方法量）：波 1 前 6387 对象 · 128.32 MiB → 波 1 后 6569 · 130.46 MiB；
-波 2 前 6580 · 130.52 MiB → 波 2 后 6765 · 132.67 MiB；**size-pack 始终 25.04 MiB**（增量都还是松散对象，未打包）。
+仓库增速（`git count-objects -vH` 的 `count` · `size` · `size-pack` 三个字段；波前量在当波的集成 worktree 里、波后量在主工作区，
+同一个 `.git`；原始输出记在控制方会话里、草稿区已清空，数字照会话记录抄录，无法再复现）：
+波 1 前 6387 · 128.32 MiB · 25.04 MiB → 波 1 后 6569 · 130.46 MiB · 25.04 MiB；
+波 2 前 6580 · 130.52 MiB · 25.04 MiB → 波 2 后 6765 · 132.67 MiB · 25.04 MiB——两波期间增量都是松散对象，pack 没变。
+收尾当天（#179–#181 合并后）量到 size-pack **26.47 MiB**：其间发生过一次打包，松散对象并进了 pack。
 第 0 期账本 §五 担心的「core 改一行 = 每页重写」本期没有发生——两波都没改 core。**第 2 期若改 core（§一.1 的输出块、§一.3 的判定器），
 那一次会重写全部 19 页**；到时量一次。
 

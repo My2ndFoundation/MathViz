@@ -264,7 +264,7 @@ MathViz 仓库里的**第三个子项目**，与 `chess/` 和 `cryptography/` �
 - **每个程序至少一个空**（门 `blank_presence_check`，无豁免）。*（第 1 期设计 D2 回写）*
 - **分级提示**：每个空自带 `level`（1–3），点一次展开一级，用了几级记进统计。
   `hint` / `hintEn` 用**唯一的显式标记 ` || `**（两侧各一个空格）切成若干段，段数必须等于 `level`；
-  分号、句点等回归普通标点。逐级更具体，任何一级都不给出答案原文。
+  分号、句点等回归普通标点。逐级更具体，任何一级都不拼出整行答案。
   **页面不显示程序的输出**，所以挖空行里的字面量文字若只能从输出得知，就在最后一级提示里给出。
   *（第 1 期设计 D3 / B1 回写；最后一句出自第 1 期波 1 终审）*
 - **挖空反馈不印字面量原文**：期待的 token 是字符串 / f-string 时，反馈只报它的类别（一个字符串 /
@@ -597,7 +597,7 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 
 门按组登记在 `check.py` 的 `GATES` 表里，汇总行按组自数（`生成 3 · A 8 · …`）。**这里不写总数**——
 写死的门数必然漂（第 1 期设计 A6）。标 ★ 的是第 1 期新增或改了判据的门。
-*（本节于第 1 期收尾回写，与 `GATES` 逐条对齐）*
+*（本节于第 1 期收尾回写，与 `GATES` 的门名与分组一一对应；组内顺序不一定相同）*
 
 **生成 · 三个生成脚本的 `--check`**
 
@@ -656,7 +656,7 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 | `source_bmp_check()` | `.py` 里不许出现非 BMP 字符（含指令行）——CPython 给字符偏移、JS 给 UTF-16 码元偏移 |
 | `source_indent_check()` | 无制表符、缩进是 4 的倍数、行尾无多余空白、LF 结尾（§2.5 规矩 3） |
 | ★ `blank_presence_check()` | 每个程序至少一个空，无豁免（第 1 期设计 D2） |
-| `blank_directive_check()` | BLANK 指令成对、`id/level/hint/hintEn` 齐全、id 页内唯一、`level ∈ 1..3`、挖空体非空；★ 提示按 ` \|\| ` 切出的段数等于 `level`（第 1 期设计 B1） |
+| `blank_directive_check()` | BLANK 指令成对、`id/level/hint/hintEn` 齐全、id 页内唯一、`level ∈ 1..3`、挖空体非空；提示切出的段数等于 `level`（第 0 期起就有）；★ 分隔符改为唯一的 ` \|\| ` 并检查它的形状（第 1 期设计 B1） |
 | `program_meta_check()` | id 全库唯一；`kind`/`level`/`boards`/`runtime` 在闭集；双语字段齐全；`requires` 在白名单 |
 | `variant_check()` | 同一个 `problem` 的变体 ≥ 2 且标题互不相同 |
 
@@ -718,7 +718,7 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
    ⚠️ `sync_registry.py` **不管这三张卡片**（根注册表里没有它们的 id），今天没有门——
    所以纳入 §8.2 的新门。
 2. **根 `CLAUDE.md`** 的「Subprojects」一节从两个子项目改成三个，写清 python 的特殊之处
-   （无 canvas、无运行时、`.py` 是第二类编辑源、两个生成脚本）。
+   （无 canvas、无运行时、`.py` 是第二类编辑源、三个生成脚本）。
 3. **`.githooks/pre-commit`** 与 **`.github/workflows/registry-sync.yml`** 各加
    `python3 python/scripts/check.py`。
 4. **`scripts/apply_branding.py`**：它扫的是 `git ls-files '*.html'`——
