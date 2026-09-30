@@ -6,9 +6,12 @@
 
 本章的生成器写在本文件里，不动 `_gen.py`（那个文件逐字符冻结，理由见它的文件头）。
 
-所有生成器只产出 ASCII：`\\d` 与 `str.isdigit()` 在非 ASCII 数字上意见不一
+生成器基本只产出 ASCII：`\\d` 与 `str.isdigit()` 在非 ASCII 数字上意见不一
 （'²'.isdigit() 为真，却不是 `\\d`），`\\w` 也认 Unicode 字母——被测程序讲的是
-ASCII 文本，参照按 ASCII 写，生成器就不去碰那块两边本来就不打算一致的地方。
+ASCII 文本，参照按 ASCII 写。**两处例外是故意的，别「修正」掉**：`_date_cases` 的上标
+分支与 tokenise cases 里的 chr(178)（'²'）。date-format-manual 与 tokenise-loop 用
+`isdecimal()` 而不是 `isdigit()`，正是这两支让门分得清二者——复审实测：去掉它们，
+把被测改回 isdigit，门仍全绿。
 
 两个变体组的共同约定（组内两版一致）：
 · date-format-check：`check_date(text)` 交回三种字符串之一——"wrong format"（不是

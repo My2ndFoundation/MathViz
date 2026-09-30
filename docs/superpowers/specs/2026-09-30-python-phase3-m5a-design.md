@@ -56,8 +56,8 @@ refs 文件：`python/scripts/gates/refs/ch20_text_data.py`、`ch23_systems.py`�
 | `clean-text-normalise` | | 文本清洗：`lower()`、`str.maketrans('', '', string.punctuation)` + `translate` 去标点、`split()` + `' '.join` 压空白；为什么「先清洗再比较」 | 逐字符循环：保留 `isalnum()` 与空白、其余丢掉，再 `split` / `join`（不用 `translate`） |
 | `word-frequency-file` | | 读 `_fixtures/passage.txt`，清洗、停用词集合过滤、字典计数，按「次数降序、同次数按字母」取前 n；与 ch11 `word-count-*` 不同在：读文件、清洗、停用词、并列的排序规则 | `sorted(set(words), key=lambda w: (-words.count(w), w))[:n]`（入口 `top_words(text, n, stopwords)`，收字符串而非文件） |
 | `regex-find-numbers` | | 正则入门：`re.findall`、`\d+`、`-?`、字符类 `[...]`、量词 `+ * ?`；原始字符串 `r"..."` 为什么必要；从一行乱七八糟的文字里取出所有整数 | 逐字符扫描、手工拼数字（含负号规则） |
-| `date-format-regex` | date-format-check | `re.fullmatch(r"\d{2}/\d{2}/\d{4}", s)` 判格式，再转 `int` 判日月范围；`fullmatch` 与 `match` / `search` 之别 | refs 里的手工版（`split("/")` + `len` + `isdigit`） |
-| `date-format-manual` | date-format-check | 同一问题不用正则：`split("/")`、三段长度、`isdigit()`、范围 | refs 里的正则版 |
+| `date-format-regex` | date-format-check | `re.fullmatch(r"\d{2}/\d{2}/\d{4}", s)` 判格式，再转 `int` 判日月范围；`fullmatch` 与 `match` / `search` 之别 | refs 里的手工版（`split("/")` + `len` + `isdecimal`） |
+| `date-format-manual` | date-format-check | 同一问题不用正则：`split("/")`、三段长度、`isdecimal()`（不是 `isdigit()`：`'²'` 过得了后者却让 `int()` 抛错）、范围 | refs 里的正则版 |
 | `name-swap-regex-sub` | | 分组 `( )`、`re.sub` 里的 `\2 \1` 反向引用：把 `"Surname, Forename"` 改成 `"Forename Surname"`；不匹配的行原样保留 | `str.partition(", ")` 手工换位 |
 | `json-round-trip` | | `json.dumps(indent=2, sort_keys=True)` / `json.loads`；写进当前目录的文件再读回；类型对照：元组变列表、键变字符串、`None`↔`null`、`True`↔`true`；`json.dump` 与 `dumps` 之别 | |
 | `json-load-fixture` | | 读 `_fixtures/students.json`（嵌套的字典与列表），按键与下标一路取到底；`KeyError` 与 `get` 的取舍；汇总出每人平均分 | `students_average(json_text)` 的参照：不用 `json` 模块——用 `ast.literal_eval` 解析（fixture 只含 JSON 与 Python 字面量共有的写法：无 `true`/`false`/`null`） |
@@ -146,3 +146,5 @@ refs 文件：`python/scripts/gates/refs/ch20_text_data.py`、`ch23_systems.py`�
 | M5A-D4 | §6 fixture | 批准：四个 fixture ≤ 8 行、无空行；students.json 每行一个对象、不含 true/false/null；讲解照 `fixture_notes_check`「一段一行、连续、按序、写出文件名」抄 |
 | M5A-D5 | §7 boards | 照现行规则四家全写，拿不准的汇总上报 |
 | M5A-D6 | 组名 | date-format-check、tokenise-expression、money-arithmetic 与 m5b（pi-estimate、game-of-life、shuffle、ttt-winner、merge-row-2048）及全库不重 |
+| M5A-D7 | 终审 I1：date-format-manual 的 `isdigit()` | 改 `isdecimal()`（`'²²/12/2024'` 在手工版抛 ValueError、正则版返回 'wrong format'，两版不一致；与 py-systems 教的相反）——对上面 §2.1 清单写法的纠正 |
+| M5A-D8 | 修复波超范围：tokenise-loop 的 `isdigit()` | 同因同改（`'1+²'` 两版不一致），接受；refs 的 cases 混入上标数字，门分得清二者 |
