@@ -1,6 +1,6 @@
 # Python 子项目 · 第 4 期 · 波 m6b：py-pandas、py-matplotlib 程序清单
 
-> 状态：**草稿，待审**（Python编程 审完之前不派构建者）。
+> 状态：**已批准**（2026-09-30，Python编程 受用户委托审定；裁决见 §10）。
 > 日期：2026-09-30
 >
 > 上游：主规格 `2026-09-16-python-subproject-design.md` §2.2（`py-pandas` — Series/DataFrame、读 CSV、筛选、分组聚合、缺失值、合并、排序；
@@ -142,3 +142,20 @@ tick 标签、保存的文件名是否存在）→ `plt.close(fig)`。讲解按�
 | hist-counts | 0 | 丢掉右端点 | 154 |
 
 `pandas` 的 FutureWarning 在原型里当错误处理，一条都没触发。库版本 2.3.1 / 2.3.0 / 3.10.3。
+
+---
+
+## 10. 裁决（2026-09-30，Python编程 审定，批准 294f810）
+
+| # | 问题 | 决定 |
+|---|---|---|
+| 页名 | | 「pandas 数据表」/ "pandas DataFrames"、「matplotlib 画图」/ "Plotting with matplotlib" |
+| 组名 | | filter-rows / group-average / line-plot 与 m6a（mean-variance / linear-system / pearson-r / line-of-best-fit）、与全库都不撞 |
+| B1 B3 B6 | | 确认 |
+| B2 | 直方图 vs 分布 | 确认不重：m6a 的 sampling-distribution-of-mean 讲均值的抽样分布、不画图；`histogram-bins` 只讲分箱与边界规则 |
+| B4 | `grade-bands-cut` | **不做** |
+| B5 | numpy 标量 repr | 确认：m6a 有 numpy-scalar-repr 专讲；`series-and-dataframe` 那句讲解写「详见「NumPy 基础」页」（页名以 m6a 合并后注册表 title 为准） |
+| §4 §5 | 随机、浮点 / 打印 | 同意 |
+| 新增 | 返回值里的 NaN | **入口返回值不许含 NaN**（nan != nan，门会红得与程序无关）。会产生缺失的入口（`merge-left-join`、`missing-fill-mean` 的中间结果等）把 NaN 转成 `None` 再返回，参照同样用 `None`；讲解点一句为什么 |
+| §7 | 门只比顶层类型 | 属实，由 Python编程 修（单独小 PR：list / tuple / dict 递归，叶子比 type 与值；bool 与 int 也会被分开），先跑全库带 property 的存量程序。门合并后构建者不必另跑逐层比对；原型数据留在台账 |
+| 时序 | | 构建者等两件事进 main 再派：门 PR、第 3 期收尾 PR。合并后 merge origin/main、从 $W 重读 skill 与模板再派 |
