@@ -179,7 +179,7 @@ m5a 终审 I1 之后，作者规矩改成「判『全是数字』用 `isdecimal`
 - `competition-ranking`：新名次支 `place = position` 改成 `len(rows) + 1`——rows 每轮恰好多一行，两者恒等（m5a 控制方第一次负控制选了它、门绿，是选错不是门瞎；改选密集排名后断言红）。
 - `shuffle-fisher-yates`：`range(len(items) - 1, 0, -1)` 的终点 `0` 改成 `-1`——**只对 property 门等价，对程序不等价**。多走一次 i = 0，`randrange(1)` 只能取 0、自换；
   property 门每次调用用新种子、多取的那一位在全部交换之后，所以 `algorithm_property_check` 绿。但 `randrange(1)` 也消耗随机状态，演示块用同一个 `rng` 连洗 6000 次，
-  之后的输出全变了——`program_run_check` 断言红（stdout 与 `run.expect` 不符，无 Traceback；收尾评审与本修复各在导出副本上实测一次，复原后两门复绿）。
+  之后的输出全变了——`program_run_check` 断言红（stdout 与 `run.expect` 不符，无 Traceback；收尾评审在克隆副本、本修复在导出副本上各实测一次，复原后两门复绿）。
   所以构建者原先那句「门能守住」对整个 `check.py` 其实成立，它后来改成的「门是绿的，但那是等价程序」反而不准。
   - **待改**：`python/scripts/gates/refs/ch21_simulation.py:256-257`（「range 的终点写成 -1……门是绿的，但那是等价程序：…不影响结果」）应改成「property 门看不见（新种子、多取的一位在最后），`program_run_check` 看得见」。
     收尾 PR 只改文档，不动 refs；**什么时候改**：下一个动 ch21（或这份 refs）的 PR 顺手改。
@@ -259,7 +259,7 @@ m5a 控制方加了反向规则（今天 `.gitignore:55` `!python/programs/*/_fi
 8. **设计 §9.2 的两份文档仍未写**：`docs/superpowers/python.md` 与 `docs/superpowers/prompts/python-handoff.md`（今天 `ls` 都不存在）。第 2 期账本说「第 3 期派出第一个构建者之前」必须写，没写；
    第 3 期的 fixture 问题靠 #187 的门与简报解决了，构建者读得到规则。**什么时候必须修**：第 4 期（M6 scipy-stack，`program_run_check` 第一次要装第三方库）开工前——那一层的运行策略只写在主规格 §5.4。
    收尾期间合并的 #191（`4b13c49`）已给这一层补了开工前提：CI 装钉版本的 `numpy==2.3.1 pandas==2.3.0 matplotlib==3.10.3`、`PYTHON_GATES_REQUIRE_SCIPY=1` 下缺库即红、`algorithm_property_check` 可覆盖 scipy-stack 程序（主规格 §5.4 三条补充）。
-   **M6 的 numpy 随机数已裁决**（控制方，收尾当天）：只许 `rng = np.random.default_rng(<固定种子>)` 实例或把 `rng` 当实参传入，不许 `np.random.seed` / 模块级 `np.random.*` / `RandomState`；
+   **M6 的 numpy 随机数已裁决**（控制方，收尾当天）：numpy 的只许 `rng = np.random.default_rng(<固定种子>)` 实例或把 `rng` 当实参传入，不许 `np.random.seed` / 模块级 `np.random.*` / `RandomState`；标准库 `random` 若用，照 stdlib 层只许 `random.Random(<固定种子>)`；
    流不变靠钉住的库版本保证；两解释器比对不适用于 scipy-stack（`/usr/bin/python3` 3.9.6 没有 numpy）。第 3 期的「只许 `random.Random`」因此限定到 stdlib 层（`runtime: cpython` 且 `requires` 为空）——已写进 `python-drill-tool` 与 `python-content-wave` 的模板。
 9. **用户验收仍未做**：4 个新页面的 `file://` 双击打开、复制程序粘进 PyCharm 真跑（含**照讲解手工建 `_fixtures/`**）——#189、#190 都列为未勾选项；前 19 页同样未做。
 10. **等用户的决定**：三个照旧——`boards` 语义、页面是否显示 `run.expect`、`core.hooksPath` 是否改成相对路径（本期都照现行规则、没有停下，简报 §2）；

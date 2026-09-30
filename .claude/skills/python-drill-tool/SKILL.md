@@ -67,7 +67,7 @@ description: >-
 | `"tier": "compile-only"`（普通 cpython 程序的例外豁免）必须带非空 `why`，每页至多 2 个 | `exemption_check` | `没有非空的 why` / `有 N 条例外豁免，上限是 2` |
 | 源码里写了 `_fixtures/<名>` 的程序：`notes` 中英两边都写出文件名，并把文件的**每一行各自写成一段、连续、按原顺序**（比较时去掉每行首尾空白）；源码提到 `_fixtures` 却没写全 `_fixtures/<名>`（如 `Path("_fixtures") / "x"`）也算错 | `fixture_notes_check`（#187） | `没有提到文件名` / `没有把 _fixtures/<名> 逐行抄出来……缺这几行` / `不是按原顺序连在一起` / `却没有一处写成 _fixtures/<文件名>` |
 | 带 `check.property` 的程序在 `gates/refs/` 里**同章文件**有参照 | `algorithm_property_check` | `没有它的参考实现` / `参照却登记在` |
-| 参照与被测函数对 200 组随机实参给出同值同类型 | `algorithm_property_check` | `与参考实现不符`，附反例实参 |
+| 参照与被测函数对 200 组随机实参给出同值同类型（**逐层**：list / tuple 按位置、dict 按键含键类型、set 比元素类型、叶子比 type，#192） | `algorithm_property_check` | `与参考实现不符`，附反例实参与 `首个差异：…` |
 | 同一 `problem` 的变体标题互不相同 | `variant_check` | 点名组 |
 | `chapter.json` 与目录里的 `.py` 双向一致 | `chapter_manifest_check` | 点名文件 |
 | 工具页 `TOOL.id` / `accent` / `title` 与 `tool-engine` 等于注册表 | `page_mirror_check` | `TOOL.<字段> 与注册表不同` |
@@ -84,7 +84,7 @@ description: >-
   换一行挖。第 2 期 M4 终审抓到 3 处（`hash-search-linear-probing` 的探测两行在同程序的查找函数里原样出现、`lcs-length` 的比较行在回溯函数里原样出现），
   修复时扫描又找出 2 处。**只由关键字和标点组成的行（`else:`、`finally:`、`try:`）不算照抄空**——这种行在任何程序里都长一个样，挖它考的是结构位置，不是抄写；
   其余的行，哪怕短如 `ops.append(token)`，也算。**近照抄也算**：从某一没挖的行上**剥掉一两层外壳**就得到答案——外壳指成对括号包住答案的部分：外层调用（`transpose(…)`、`round(…)`，开头、结尾各算一段）或切片（`[::-1]`）；
-  删掉的每一段都带括号、合起来括号配平、至多四段，**而且答案占那一行记号的一半以上**。第 3 期 `board-move-2048` 的 right / up 两空
+  删掉的每一段要么是外层调用头（`name(`）、要么只由闭括号组成、要么是完整的下标 / 切片（`[…]`），合起来括号配平、至多四段，**而且答案占那一行记号的一半以上**。第 3 期 `board-move-2048` 的 right / up 两空
   都能从未挖的 down 行剥掉 `transpose(…)` 或 `[::-1]` 得到，裁定为照抄空一类，改成挖 right 与 down、up 留作范例。
   删掉的是参数、运算项、`as e` 一类，或答案只是长行里的一小截，都**不算**：`return node` 之于 `return [node.value] + preorder(node.left) + …`、`node = node.left` 之于 `node.left = insert(node.left, value)` 不是抄。
   挖空模式下所有空同时隐藏，两个空之间互相抄不到，只看没挖的行。
@@ -128,9 +128,10 @@ description: >-
   **不用模块级的 `random.random()` / `random.choice()` 等**。`random.Random(20260930)` 的 `random / randint / randrange / choice / shuffle / sample / uniform / gauss / choices`
   在 CPython 3.9.6 与 3.12.9 上实测逐项相同，但这不是保证——**每个用到随机的 stdlib 层程序都在 `/usr/bin/python3`（3.9.6）与 3.12.x 上各跑一次、stdout 逐字节比对**，
   并同时跑一个版本相关的程序（`import sys; print(sys.version_info[:2])`）确认两边真是两个解释器（两次跑的若是同一个解释器，比对永远相同、什么也没测）。
-  **scipy-stack 层（M6，`requires` 含 numpy）另有裁决**（第 4 期开工前，控制方定）：只许 `rng = np.random.default_rng(<固定种子>)` 这个实例，或把 `rng` 当实参传进函数；
+  **scipy-stack 层（M6，`requires` 含 numpy）另有裁决**（第 4 期开工前，控制方定）：**numpy 的**随机数只许 `rng = np.random.default_rng(<固定种子>)` 这个实例，或把 `rng` 当实参传进函数；
   **不许 `np.random.seed`、模块级 `np.random.*`（`np.random.rand()` 之类）、`RandomState`**。流不变靠钉住的库版本保证（#191，主规格 §5.4 第 1 条：`numpy==2.3.1` 等，升版 = 单独 PR、全层 `run.expect` 重生成）；
   两解释器比对**不适用**——`/usr/bin/python3`（3.9.6）没有 numpy，`run.expect` 在钉住的那组版本上生成、由 CI（`PYTHON_GATES_REQUIRE_SCIPY=1`）核。
+  同一层的程序若也用标准库 `random`，照 stdlib 层只许 `random.Random(<固定种子>)`（它的流只随 CPython 版本，上面已实测 3.9.6 / 3.12.9 一致）。
   讲解里说出的随机结果（估出的 π、频率、平均等待）写明「这个种子下」，并说明换种子会变。
 - **交互程序**（井字棋、猜数、菜单）用 `run.stdin` 喂一串输入；`input()` 的提示语写进 stdout、不换行——讲解与提示照「页面不显示输出」写。
 - **判「全是数字」用 `isdecimal()`，不用 `isdigit()`**：`'²'.isdigit()` 为真，`int('²')` 却抛 `ValueError`（第 3 期 m5a 终审 I1：`date-format-manual` 用 `isdigit` 在 `'²²/12/2024'` 上崩，而同模块的 py-systems 教的是 `isdecimal`）。
@@ -268,7 +269,7 @@ EOF
 - **参照的机制必须与被测程序不同。** 不能拿 `max` 当 `return max(a, b, c)` 的参照——那是拿自己验自己，被测程序错的地方参照会跟着错。
 - **清单里写好的参照也要自己核对机制。** 标准库函数不等于「机制不同」：第 1 期波 2 的 `calendar.isleap` 在 3.12 的源码
   与被测的一表达式闰年**逐字相同**（`inspect.getsource` 一看便知），终审改成 400 年周期余数集合。参照与被测同源就上报。
-- 比较是严格的：值相等**且类型相同**。
+- 比较是严格的：值相等**且类型相同，逐层**（#192）：`[3.0]` 对 `[3]`、`(True,)` 对 `(1,)`、列表里装着 `np.int64` 都是红。numpy 结果用 `.tolist()` 或逐元素转成内置类型——只在顶层 `list(arr)` 不够。
 - **`entry` 不改实参。** 需要就地改的（排序、放哨兵、改网格），入口里先复制；原地算法另配一个 3 行包装（`result = list(items)` → 调原地函数 → `return result`）当 `entry`。
   #181 之后门给被测与参照各一份 `copy.deepcopy` 的实参，已经看得见「改了实参」这类错，但这条约定照旧：它让 `entry` 与参照可以并排比，
   也顺带讲清 `list.sort()` 与 `sorted()` 的约定（第 2 期 M4 排序页就这样写）。

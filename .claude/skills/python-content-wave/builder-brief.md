@@ -57,11 +57,11 @@
 - 不推送、不开 PR、不合并、不改 git 配置、不 checkout 主工作区（`/Users/nickma/Develop/My2ndBrain/MathViz`）。
 - **页面不显示程序输出**：挖空行里的字面量文字若只能从输出得知，就在最后一级提示里给出；讲解与提示都不写「看输出第 N 行」「和打印出来的一样」「第一行是……」；演示块算出的关键数字要在讲解里用文字说出来。
 - 下面几条 `python-drill-tool` 里都有，第 2 期的构建者与终审反复在这里栽过，逐条对一遍：property 的 `entry` 不改实参；`cases` 走到每个返回分支；参照与被测机制不同（`inspect.getsource` 看标准库源码）；
-  不挖跨嵌套块的多行空；挖空答案不许原样出现在同一程序没挖的行上（「照抄空」；从没挖的某一行删几个记号就能得到的也算——第 3 期 m5b 终审 I1）；讲解指别的程序写标题、指别的页写「页名」（用「」，不用星号）；用到递归的程序「用，不重讲」、`tags` 带 `recursion`。
+  不挖跨嵌套块的多行空；挖空答案不许原样出现在同一程序没挖的行上（「照抄空」；从没挖的某一行剥掉一两层括号外壳（外层调用、切片）就能得到、且答案占那行一半以上的也算，判据见 `python-drill-tool`——第 3 期 m5b 终审 I1）；讲解指别的程序写标题、指别的页写「页名」（用「」，不用星号）；用到递归的程序「用，不重讲」、`tags` 带 `recursion`。
 - 读 `_fixtures/` 的程序：复制出去不带数据文件，讲解要把文件逐行抄出来——`fixture_notes_check` 要求中英两边都写出文件名、文件的**每一行各自成一段、连续、按原顺序**（所以 fixture 要短、不要空行）；
   源码里路径写全 `_fixtures/<名>`。提交后 `git ls-files` 对一遍磁盘上的 `_fixtures/`：根 `.gitignore` 的规则（第 3 期的 `*.log`）可能静默挡掉它，门读磁盘看不见。
 - **随机数**：stdlib 层（`runtime: cpython` 且 `requires` 为空）**只许 `random.Random(<固定种子>)` 实例**（或把 `rng` / `seed` 当实参传进函数），不用模块级 `random.*`、不读时间；
-  scipy-stack 层（`requires` 含 numpy）**只许 `np.random.default_rng(<固定种子>)` 实例**（或把 `rng` 当实参传入），不用 `np.random.seed`、模块级 `np.random.*`、`RandomState`（#191、主规格 §5.4：流不变靠钉住的库版本）。
+  scipy-stack 层（`requires` 含 numpy）**numpy 的随机数只许 `np.random.default_rng(<固定种子>)` 实例**（或把 `rng` 当实参传入），不用 `np.random.seed`、模块级 `np.random.*`、`RandomState`（#191、主规格 §5.4：流不变靠钉住的库版本）；标准库 `random` 若用，照 stdlib 层只许 `random.Random(<固定种子>)`。
   property 只挂在纯核心函数上，随机序列当实参传进去。
   每个用到随机的 **stdlib 层**程序，在 `/usr/bin/python3`（3.9.6）与 `python3`（3.12.x）上各跑一次（照 `python-drill-tool`「生成 `run.expect`」的条件；读 `_fixtures/` 的照门的方式把它 `copytree` 进临时 cwd），stdout 逐字节比对，写进报告；
   同时跑一个版本相关的程序（`import sys; print(sys.version_info[:2])`）证明两边真是两个解释器。不一致就上报，不要只取一边。scipy-stack 层不做两解释器比对（`/usr/bin/python3` 没有 numpy），`run.expect` 在钉住的版本上生成。

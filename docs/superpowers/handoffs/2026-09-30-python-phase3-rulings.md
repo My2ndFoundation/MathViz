@@ -107,7 +107,7 @@ B4 贪吃蛇 / Pong / 打砖块归 M7；B5 不讲积分法则；B6 多个类协�
 负控制由 m5a 控制方在临时仓库里做（旧规则 `git add` 跳过 `probe.log`，新规则暂存它、别处的 `stray.log` 仍忽略）。
 
 **P22 · m5b 终审 I1（`board-move-2048` 的两个空可从未挖的一行删几个记号得到）属「照抄空」一类，要修。**
-— 理由：缺（台账只记决定）。 — 代价：缺。本收尾把「近照抄（删几个记号可得）也算」写进了 `python-drill-tool` 与终审简报。
+— 理由：缺（台账只记决定）。 — 代价：缺。本收尾把「近照抄（剥掉一两层括号外壳可得）也算」写进了 `python-drill-tool` 与终审简报。
 
 **P23 · 恢复 `inventory-stock` 的 property**（#188 合入 m5a 之后，由 m5a 修复实现者做）。 — 理由：清单要求它带 P，缺的原因是门缺陷、不是程序。 — 代价：缺。
 
@@ -127,7 +127,8 @@ B4 贪吃蛇 / Pong / 打砖块归 M7；B5 不讲积分法则；B6 多个类协�
 
 ### 收尾当天
 
-**P27 · scipy-stack 层（M6）的随机数：只许 `rng = np.random.default_rng(<固定种子>)` 实例或把 `rng` 当实参传入；不许 `np.random.seed`、模块级 `np.random.*`、`RandomState`。**
+**P27 · scipy-stack 层（M6）的随机数：numpy 的只许 `rng = np.random.default_rng(<固定种子>)` 实例或把 `rng` 当实参传入；不许 `np.random.seed`、模块级 `np.random.*`、`RandomState`；标准库 `random` 若用，照 P1 只许 `random.Random(<固定种子>)`。**
+— 出处：控制方 Python编程 的第 4 期派发简报（主工作区 `.superpowers/python-phase4/phase4-brief.md` §2.2，gitignored），已批准的 m6a 清单 §4 同口径。
 — 理由：流不变靠钉住的库版本保证（#191，`4b13c49`：CI 装 `numpy==2.3.1 pandas==2.3.0 matplotlib==3.10.3`，主规格 §5.4 第 1 条「升版本 = 单独 PR、全层 `run.expect` 重生成」）；
 P1 的两解释器比对对这一层跑不起来（`/usr/bin/python3` 3.9.6 没有 numpy），所以不适用。主规格的 M6 页清单点名要讲「随机数生成器」（`py-numpy-linalg`）与「分布抽样」（`py-statistics`），照 P1 字面执行就与清单矛盾。
 — 代价：缺。本收尾已把 P1 限定到 stdlib 层、把这条写进 `python-drill-tool` 与 `python-content-wave` 的模板。
