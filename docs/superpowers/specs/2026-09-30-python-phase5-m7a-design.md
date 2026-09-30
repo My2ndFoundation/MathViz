@@ -1,6 +1,6 @@
 # Python 子项目 · 第 5 期 · 波 m7a（M7「图形与游戏」上半）程序清单
 
-> 状态：**草稿，待审**（清单、§3 边界、§4 随机、§5 资源、§6 递归、§7 boards 需要裁决）。
+> 状态：**已批准**（2026-09-30，Python编程 审，受用户委托；批准时的清单提交 e9a1011）。裁决见 §8。
 > 日期：2026-09-30
 >
 > 上游：
@@ -128,3 +128,19 @@ refs 文件：`python/scripts/gates/refs/ch29_pygame_basics.py`、`ch30_pygame_s
 | pygame 本身 | 全波 | 不在任何考纲；游戏循环、事件驱动、坐标系是 CS 考纲可能提到的概念（事件驱动编程：OCR / AQA？） |
 | 状态机 | `screen-states` | AQA 含有限状态机（理论部分）；其余不确定 |
 | 碰撞检测 | `rect-collision-*`、`circle-collision` | 不在考纲，属项目（NEA）常见需求 |
+
+---
+
+## 8. 裁决记录
+
+| # | 问题 | 决定 |
+|---|---|---|
+| M7A-D1 | 页名 | 「pygame 入门 / Pygame Basics」「精灵与碰撞 / Sprites & Collisions」 |
+| M7A-D2 | 组名 | `frame-independent-motion`、`rect-overlap` 全库无撞；与 m7b 的交叉核由 Python编程 做 |
+| M7A-D3 | §3.1–§3.3 | 同意 |
+| M7A-D4 | §3.4 事件 | 同意：KEYDOWN / get_pressed / 鼠标事件归 basics；motion 页「键鼠输入」只讲「输入 → 速度 / 加速度」映射，讲解指回「pygame 入门」页（Python编程 转告 m7b） |
+| M7A-D5 | 低命中的两条 P | `keyboard-move-clamped`（14/200）、`mouse-click-buttons`（21/200）贴边 cases ≥ 1/3 的要求保留；构建者报告写出调后的命中数 |
+| M7A-D6 | `group-collide-kill` 参照 | 顺序结算是 pygame 的语义，不是抄它的实现，参照照此写；refs 文件头写明「同时结算的写法在 2/200 组上错，这是本程序的讲点」，免得后人「修正」参照 |
+| M7A-D7 | 起草时实测的 pygame 行为 | §0 列的五条（lerp 舍入、center / topleft、collidepoint 不含右下、零宽高不碰、move 截断）写进 refs 文件头与对应讲解 |
+| M7A-D8 | 不挂 P 的两个 | `mask-pixel-collision`、`move-per-frame` 不挂 P：接受，由 compile 与活体跑帧守，报告里写明 |
+| M7A-D9 | §7 boards | 照现行规则四家全写，表进台账 |
