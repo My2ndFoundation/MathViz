@@ -62,6 +62,7 @@ description: >-
 | 无 BOM、无 CRLF、无杂散 C0 控制字节（`.py` / `chapter.json`、`core/`、`tools/`、两个导航页、注册表）——`source_indent_check` 读文件走通用换行，**看不见 CRLF**，这一条归它 | `control_byte_check`（B 组） | `以 UTF-8 BOM 开头` / `含 CR（CRLF 行尾）` / `含 C0 控制字符` |
 | `.py` 里不许出现 U+2028 / U+2029 / U+0085（Python 与页面的 JS 对它们是不是换行意见不一）；页面自己的 `Exercise.parse` / `clean` 吃得下每个程序，挖空 id 与门的解析一致，`clean()` 行数与 `lines` 一致 | `js_parser_parity_check`（C 组） | `有 U+2028 …` / `Exercise.parse() 抛错` / `挖空 id 两边解析得不一样` / `嵌入页面的 lines=…` |
 | `lineNotes.at` / `chunks.from/to` 是**整行原文**、存在且唯一、`clean()` 之后仍唯一 | `anchor_check` | `找不到` / `出现 N 次` / `在 clean() 后消失了` |
+| `chunks`（声明了才查）：至少 2 段、`title` 双语非空；段按源码顺序、互不重叠；**首尾相接**——第一段 `from` 之前、段与段之间、最后一段 `to` 之后只许空行；工具页裸 `vm` 里的 `PyInteract.chunkSegments` 与门逐段一致、拼回去等于 `clean()` | `chunks_check`（#198） | `chunks 只有 N 段` / `chunks[k+1] 的 from … 不在 chunks[k] 的 to … 之后` / `…之间有非空行` / `页面切出的段与门算的不一致` |
 | `kind` / `level` / `boards` / `runtime` 在闭集；`title` `blurb` 双语；`notes` 是段落数组；`problem` `entry` 非空；不手写 `lines` / `source` | `program_meta_check` | 点名字段 |
 | `requires` 是白名单 `numpy` / `pandas` / `matplotlib` / `scipy` / `pygame` 的子集（可以是空数组） | `program_meta_check` | `requires=… 必须是 … 的子集` |
 | `"tier": "compile-only"`（普通 cpython 程序的例外豁免）必须带非空 `why`，每页至多 2 个 | `exemption_check` | `没有非空的 why` / `有 N 条例外豁免，上限是 2` |
@@ -99,11 +100,12 @@ description: >-
 - **不挖跨嵌套块的多行空。** 判定器在答案与标准答案**行数不同**时完全不比缩进（`python/core/judge.js:162`，只在 `na.rel.length === nr.rel.length` 时比相对缩进），
   连改变语义的缩进也判对：三行的 `if a:` / `    if b: c()` / `d()` 被判等于 `d()` 缩进在外层 `if` 里的那四行。多行空只挖**同一层**的两三行，并用第 1 级提示钉住写法。
   （第 1 期账本 §一.3；判定器没改，第 2 期是靠这条规矩避开的——M3 26 个、M4 6 个多行空都在同一层。）
-  **唯一的例外是「复合语句头（`if` / `for` / `while` / `except`）+ 一行体」这种两行空**：体写错缩进时行数不变、判定器照比（实测判 `indent`）。
+  **唯一的例外是「复合语句头（`if` / `elif` / `for` / `while` / `except`）+ 一行体」这种两行空**：体写错缩进时行数不变、判定器照比（实测判 `indent`）。
   token 相同而行数不同的写法只有两种：写成一行 `if X: body`（语义与两行相同，判对是对的）；或在体里本来就有的括号里断行——后者若把体写到外层，
   判定器照样判对、CPython 报 `IndentationError`（`judge.js:162` 的同一个洞，罕见，接受）。
   第 3 期 ch21 有 6 个这样的空（5 个 `if` 头、1 个 `for` 头：`traffic-light-fsm`），终审接受；第 4 期 ch24 `broadcasting-table` 的 `except ValueError as e:` + `print(type(e).__name__)`
-  同样（m6a 终审实测：体缩进错判 `indent`、写成一行判对、`as err` 与写死字符串由第 1 级钉住），ch25 `eigen-2x2`、ch26 `merge-left-join` 是 `if` 头。三行以上、或体不止一行的，仍按上面的规矩。
+  同样（m6a 终审实测：体缩进错判 `indent`、写成一行判对、`as err` 与写死字符串由第 1 级钉住），ch25 `eigen-2x2`、ch26 `merge-left-join` 是 `if` 头。第 5 期 ch29–ch32 的 95 个空里 23 个两行空：16 个是这种头 + 一行体（13 个 `if`、1 个 `for`、2 个 **`elif`**——`keyboard-move-clamped` 的 keydown、`screen-states` 的 keymap），7 个是同一层的两行；
+  `elif` 头第 5 期收尾实测（裸 vm、页面内联 core、`b.indent + 写法`）：标准答案判对，体少缩进或多缩进一层判 `indent`，写成一行判对——与 `if` 头相同。三行以上、或体不止一行的，仍按上面的规矩。
 - 被挖的行里若有学生无从推断的文字（`input()` 的提示语、任意取的格式宽度），提示必须给出它，否则别挖。
 - **挖空错误反馈从不打印字符串/f-string 字面量的原文**（Task 11b）：期待的 token 是一个字符串或
   f-string 时，她只会看到它的类别（一个字符串 / 一个 f-string）与自己写的原文从第几个字符起开始
@@ -116,7 +118,8 @@ description: >-
   也别让**未挖的字符串**（表头、标题）改个大小写就是答案（波 2 de-morgan）。
 - 讲解里指别的程序**写标题**，不写「下一个 / 上一个 / 本页最后一个程序」——页面可以筛选，顺序不可靠；提示里也一样，不用函数名指代别的程序
   （本程序里没有那个函数）。指别的**页**：中文写注册表里的页名、用「」括起来（「递归的机制见「递归」一页」）；英文写 `the <注册表英文页名> page`，不加引号、不夹「」（`see the Recursion page`）——第 4 期收尾的控制方裁决（第 4 期裁决 P28）。存量里 ch20 11 段、ch23 10 段、ch26 9 段、ch27 6 段英文用「」、ch02 三处写成 `the Files and Errors page`（注册表是 Files & Exceptions），留账（第 4 期账本 §三.6），下次动那几页时改。
-  英文里指别的**程序**（变体标题）怎么写，照派发简报里的本波共有约定表。**不用 `*星号*`**——`notes` 按纯文本渲染，
+  英文里指别的**程序**（变体标题）怎么写，照派发简报里的本波共有约定表；**标题以冠词开头（A / An / The）时不再加 the**——写 `see An AI Paddle That Can Be Beaten`，
+  不写 `the An AI Paddle…`（第 5 期 m7b 终审 M5 的裁决；收尾扫全库，ch29–ch32 修复后 0 处，存量 0 处——扫描在修复前的 `8a97b28` 上报出 2 处，是正对照）。**不用 `*星号*`**——`notes` 按纯文本渲染，
   星号会原样显示（第 2 期 M4 有 8 处）。
   也不写「捕获到的输出」「看输出第几行」「第一行是……」——她看不到输出；演示块算出的关键数字（计数、距离、路径）用文字在讲解里说出来。
   **notes 里也别举一个这道程序的挖空判定会判错的写法**当例子——「两种写法都对」的note配一个判定
@@ -157,9 +160,25 @@ description: >-
   推论：fixture 要短（取向 ≤ 8 行、每行不长），**不要空行**，行首缩进会被去掉——JSON 写成每行一个完整对象（或一行外框）的紧凑形式，抄出来仍能拼回原文件。源码里路径写全 `_fixtures/<名>`，不拼路径。
   **fixture 要被 git 跟踪，门看不见这一点**（门读磁盘）：根 `.gitignore` 的 `*.log` 曾静默挡掉 `_fixtures/access.log`——本地全绿、CI 会缺文件（第 3 期 m5a）。
   今天根 `.gitignore` 有反向规则 `!python/programs/*/_fixtures/**`（并继续忽略其下的 `.DS_Store`、`._*`）；提交后仍要 `git ls-files 'python/programs/<章>/_fixtures/*'` 对一遍磁盘上的文件。
-- 整个程序约 10–40 行（不含 BLANK 指令行；是取向，不是门）。M5「综合运用」起放宽到**约 60 行**（第 3 期裁决）；超过的写进报告。选择器按 20 / 40 / 80 行分档，超过 80 行的会被「不超过 80 行」筛掉（第 3 期 `library-loans` 86 行）。
+- 整个程序约 10–40 行（不含 BLANK 指令行；是取向，不是门）。M5「综合运用」起放宽到**约 60 行**（第 3 期裁决）；M7 pygame 取向 40–70 行，完整游戏可到约 120 行、**必须声明 `chunks`**（第 5 期裁决；实交 basics / sprites / motion 39–70 行，games 页 60–97 行）；超过的写进报告。选择器按 20 / 40 / 80 行分档，超过 80 行的会被「不超过 80 行」筛掉（第 3 期 `library-loans` 86 行，第 5 期四个完整游戏 94–97 行）。
 - 一般 2–3 个空（门只要求至少 1 个），**挖整行**。
-- 本期**不用 `chunks`**。
+- **分段临摹 `chunks`**（#198 起页面真的读它；此前 core 里一行都没有，第 3、4 期因此不用）。长程序（取向：超过约 80 行）在 `chapter.json` 里声明 `chunks`，临摹模式按段推进、逐段结算：
+  ```json
+  "chunks": [
+    { "title": { "en": "Constants and ball_step", "zh": "常量与 ball_step" }, "from": "\"\"\"Pong: two paddles and a ball; …\"\"\"", "to": "    return ((float(vx), float(vy)), \"play\")" },
+    { "title": { "en": "Paddle limits, serving and drawing", "zh": "拍子限位、发球与绘制" }, "from": "def clamp_paddle(y):", "to": "    pygame.display.flip()" },
+    { "title": { "en": "main: the game loop", "zh": "main：游戏循环" }, "from": "def main():", "to": "    main()" }
+  ]
+  ```
+  （`ch32-pygame-games/pong-full`，省略号处是原文。）写法：
+  - **第一段的 `from` 是程序的第一个非空行**——通常是 docstring 那一行（import 也归第一段）；**最后一段的 `to` 是最后一个非空行**（通常是守卫里的 `    main()`）。
+    门不许任何非空行落在段外（首段之前、段缝里、末段之后都只许空行），落在外面的行她永远临摹不到。
+  - **段到下一段的 `from` 为止**（`to` 只作校验）：段与段之间的空行归前一段，所以各段拼回去逐字节等于 `clean()`；前一段的参考因此以几个换行结尾——影子层不画它们，
+    页面在她打完最后一个可见行、按下 Enter 时自动补齐（`chunkTailFill`，#198 评审 I1）。`from` / `to` 是**整行原文**（带缩进），在 `clean()` 之后唯一（`anchor_check`）。
+  - 按自然边界切：「常量与数据 / 逻辑函数 / 绘制 / main 循环」之类；**每段 20–40 行是取向**（门只要求 ≥ 2 段；第 5 期两个 main 段 44 / 45 行，拆开会把一个函数切成两段，没拆）。
+  - `title` 中英都写，是段条上显示的段名；写这一段**有什么**（「常量、异常与两个小类」），别写得比内容窄（#198 评审 M5：段 1 标题写「数据类」，其实还有 `LoanError`）。
+  - 守门：`chunks_check`（见上表）。浏览器验收要**逐键**打至少一个段尾带空行的段（`python-content-wave` 的 `probe.js` `keys` 选项）——整段粘贴测不到 I1 那一类问题。
+  - 已知限制：分段草稿存成 JSON，不分段的读取路径只认纯字符串——以后给一个程序**去掉** `chunks`，旧草稿会原样出现在输入框里（设计 `2026-09-30-python-phase5-chunks-design.md` §7）。
 - **每页至少一个变体组**（同一 `problem` 两个以上写法）——`variant_check` 只要求**全库**至少一个，管不到每页。
 - **新造 `tags` 之前先 grep 全库已有写法**（`python/programs/*/chapter.json`），跟已有的走；并照简报里的本波共有约定表写（同波的构建者互相看不见）。
   tag 显示在三种模式的说明面板上——分裂了，她看到的就是自相矛盾的元数据（同一模块三页，偏偏「NumPy 基础」那页没有 `numpy`：第 4 期 m6a 终审 I2）。
@@ -202,7 +221,9 @@ if __name__ == "__main__":
 | `if value >= high:` | 错 | 用严格的大于号 / with a strict greater-than |
 | `return min(value, high)` | 错 | 同样是一个 if、下一行单独一个 return / again an if with its own return on the next line |
 
-写示例时先把这张表列出来、逐条拿 `PyInteract.blankFeedback(写法, 标准答案)` 跑一遍：判错的每一条，
+写示例时先把这张表列出来、逐条拿 `PyInteract.blankFeedback(写法, 标准答案)` 跑一遍——**每种写法前面拼上这个空的缩进**（`b.indent + 写法`，`b` 取自 `Exercise.parse(source).blanks`），
+并**先断言标准答案本身判对**：不拼缩进时判定器一律报第 1 行缩进对不上（`lead-indent`），看上去像「钉法漏了」，其实与写法无关（第 5 期 m7b 控制方头一轮这样误判过）。
+判定器在 node 的**裸 `vm` context** 里加载工具页内联的 core 调，不用 `require`（`require` 走 UMD 的 node 分支，见根 `CLAUDE.md`；第 5 期 m7a 终审员用了 `require`）。判错的每一条，
 第 1 级提示里都得有一句话钉住它；钉不住又不想念出整行，就换一行挖。**判对的就不用钉**——比如
 `if value > high: return high` 写成一行，判定认它与两行写法相同，提示里再去禁止它只会误导。
 
@@ -280,6 +301,9 @@ EOF
 
 程序里读数据文件时写相对路径 `_fixtures/scores.csv`。
 
+**pygame 与 MicroPython 程序不写 `run` 字段**（第 5 期定论）：门对它们只过 `compile()`（`library.py` 的 `_tier`：`requires` 含 `pygame`、或 `runtime` 不是 `cpython`，都是 compile-only 层），没有可比的 stdout；
+写了也没人读，还会让人以为它被验过。它们的正确性靠逻辑函数上的 property 与控制方的活体跑帧（`python-content-wave/live-frames.py`，只有 pygame）。
+
 ## property 检查
 
 - 只在参照来得自然的地方加（纯函数、返回值可比），不强求。
@@ -306,6 +330,9 @@ EOF
   做法：每个 `return` 分支各做一次变异、确认门红（或统计一次种子下各分支命中数写进报告），抽不到的分支按一定概率专门构造。
   第 2 期 M4 的实例：`search-comparison-counts` 的原 `entry` 根本走不到「找到」那一支；修成每次都命中的 `binary_found_total` 之后，
   「找不到」那一支又只剩 `run.expect` 守——**一个程序只有一个 `entry`**，两支不能都进 property（第 1 期账本 §二「一个程序要验两个函数」同一件事）。走不到的支写进报告。
+- **被测里用了会取整 / 舍入的库函数时**（`pygame.Color.lerp`、`Rect` 的属性赋值——四舍五入、半数远离零，与构造和 `move` 的截断不同、与 Python `round` 的半数取偶也不同：第 5 期收尾在 pygame 2.6.1 上对 `r.x = k/8`、k ∈ [−4000, 4000] 共 8001 个值复测，0 处不符，换成 `round` 不符 500、换成截断不符 4000；`round`……），`cases` 要有一部分造在**舍入边界**上，
+  并做一次「参照换成另一种舍入 → 门红」的负控制。第 5 期 `colour-lerp`：清单写的公式在实数上与 pygame 相等、浮点上在「恰为 .5」处差 1；t 随机取值时新旧参照都绿，
+  专门造「真实值恰为 .5」的分支之后门同种子 200 组旧式错 22、新式 0（m7a 终审 I1）。写进讲解或 refs 头的「实测行为」标注测了多少组、怎么取的。
 - 注释里说明「它守得住什么变异」时，**举的变异必须先真跑一遍、看到门红**。`gates/properties.py` 文件头的 ⚠ 段记着一次反例：解释里举的两个变异，门一个都测不出来。
 
 ## 三种作业
@@ -343,6 +370,9 @@ python3 $R/.claude/skills/python-content-wave/resolve-registry-conflict.py --rep
 
 **C. 升级一页**：升级改的是已有条目，与别的分支合并时，只要改动在 `--from` 一侧、而 `--take` 一侧的这一条与它不同，配方脚本就以退出码 3 点名这一条、什么都不动——这一条手工处理并写明理由（这是「注册表冲突不手工改」的唯一例外），其余照配方。
 版本三处同步——注册表 `version` + `changelog`（最新的放最前）、页面 `tool-version` meta、页面头部版本记录注释（右上角徽章读 meta，不用改）。改了 `core/` 时 engine 升一次，**所有工具与 `_skeleton.html` 一起升**（`page_mirror_check` 要求全库唯一）。版本号是缓存键：不升，线上用户会一直看到旧页面。
+**engine 升了、页面行为不变时，不升那些页的 `tool-version`**（第 5 期 #198 的裁决）：前提是 core 的改动对没有启用新功能的页**逐字节无行为差**（#198 的新代码全在 `if (S.chunk)` 分支里、草稿格式与 progress schema 不变），
+并且评审核过这一点；有可见变化的页（#198 里声明了 `chunks` 的 py-systems）照常升版、写 changelog。代价：浏览器缓存里的旧页读不到新 core——而它们的行为本来就一样。
+改 `core/` 与重跑 `inline_core.py` 放进**同一个提交**：#198 的 `eb824e2` 只含 core 与门、29 个页面的内联在下一个提交才更新，单独检出它时 `inline_core --check` 是红的——合并时没有 squash，`git bisect` 落在它上面会看到一个与要找的问题无关的红。
 
 ## 上报与负控制
 
