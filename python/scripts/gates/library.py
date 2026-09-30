@@ -20,6 +20,7 @@ ASCII 可解码**。本模块每一处读 `.py` 都显式 `encoding='utf-8'`；
 """
 from __future__ import annotations
 
+import ast
 import copy
 import io
 import json
@@ -288,15 +289,31 @@ class _PropertyTimeout(Exception):
     pass
 
 
-def _call_with_timeout(func, args):
-    """在 PROPERTY_CALL_TIMEOUT 秒内调用 func(*args)；超时抛 _PropertyTimeout。
+# 导入被测程序的时限（秒）。导入 pygame / pandas 本身约零点几秒；超过这个数只可能是模块顶层在跑东西。
+IMPORT_TIMEOUT = 10.0
+
+
+def _is_pygame(prog: dict) -> bool:
+    """结构性豁免里的 pygame 程序（cpython 运行时、requires 含 pygame）。MicroPython 不算。"""
+    return prog.get('runtime', 'cpython') == 'cpython' and 'pygame' in prog.get('requires', [])
+
+
+def _headless_sdl() -> None:
+    """在 import pygame 之前把 SDL 设成无头：不开窗、不出声、不打印欢迎语。CI 的 step env 也设了同样三项。"""
+    os.environ.setdefault('SDL_VIDEODRIVER', 'dummy')
+    os.environ.setdefault('SDL_AUDIODRIVER', 'dummy')
+    os.environ.setdefault('PYGAME_HIDE_SUPPORT_PROMPT', '1')
+
+
+def _call_with_timeout(func, args, limit: float = None):
+    """在 limit（缺省 PROPERTY_CALL_TIMEOUT）秒内调用 func(*args)；超时抛 _PropertyTimeout。
 
     只能在主线程用（signal 的限制）；check.py 与 CI 都是在主线程里跑门的。
     """
     def _on_alarm(_signum, _frame):
         raise _PropertyTimeout()
     previous = signal.signal(signal.SIGALRM, _on_alarm)
-    signal.setitimer(signal.ITIMER_REAL, PROPERTY_CALL_TIMEOUT)
+    signal.setitimer(signal.ITIMER_REAL, PROPERTY_CALL_TIMEOUT if limit is None else limit)
     try:
         return func(*args)
     finally:
@@ -338,14 +355,18 @@ def algorithm_property_check() -> int:
             rc = 1
             continue
         tier = _tier(prog)
-        if tier == 'compile-only':
+        pygame_prog = _is_pygame(prog)
+        if tier == 'compile-only' and not pygame_prog:
             print(f'ERROR: {name} 标了 check.property 却在 compile-only 层'
                   f'——它没法被导入求值', file=sys.stderr)
             rc = 1
             continue
-        if tier == 'scipy-stack':
+        if tier == 'scipy-stack' or pygame_prog:
             # 第 4 期（M6）起 scipy-stack 层也可以挂 property：numpy 写的纯函数最该有一个
-            # 纯 Python 的独立参照。缺库时照 program_run_check 的约定：本地跳过、CI 红。
+            # 纯 Python 的独立参照。第 5 期（M7）起 pygame 程序也可以：它整段跑不了（主循环不终止），
+            # 但主循环在 `if __name__ == "__main__":` 里（pygame_main_guard_check 守着），导入只定义函数，
+            # 纯逻辑函数（碰撞、前进一步、反弹）照样可以对参照（主规格 §5.4 末段的设想）。
+            # 缺库时照 program_run_check 的约定：本地跳过、CI 红。
             missing = [m for m in prog.get('requires', []) if not _importable(m)]
             if missing:
                 if _scipy_strict():
@@ -354,8 +375,10 @@ def algorithm_property_check() -> int:
                     rc = 1
                 else:
                     prop_skipped += 1
-                    print(f'  跳过 {name} 的 property：缺库 {missing}（scipy-stack 层）')
+                    print(f'  跳过 {name} 的 property：缺库 {missing}（{"pygame" if pygame_prog else "scipy-stack"} 层）')
                 continue
+            if pygame_prog:
+                _headless_sdl()
         ref_entry = properties.REFERENCES.get(prog['id'])
         if ref_entry is None:
             print(f'ERROR: {name} 有 check.property={prop!r}，但 gates/refs/ 里没有它的参考实现'
@@ -376,7 +399,15 @@ def algorithm_property_check() -> int:
             # dont_inherit=True：本模块有 `from __future__ import annotations`，compile 默认会把它继承给被测程序，
             # 注解全变成字符串；加上 ns 的 __name__ 不在 sys.modules，@dataclass 在导入时崩（AttributeError）。
             # 第 3 期 m5a 的 inventory-stock 因此挂不上 property，构建者发现、控制方复现。
-            exec(compile(src, str(py_path), 'exec', dont_inherit=True), ns)     # noqa: S102
+            # 导入也限时：主循环若没放进 `if __name__ == "__main__":`，exec 会永远不返回（逐次调用的
+            # 2 秒闹钟管不到导入）。pygame_main_guard_check 从结构上拦这类写法，这里是兜底。
+            _call_with_timeout(exec, (compile(src, str(py_path), 'exec', dont_inherit=True), ns),   # noqa: S102
+                               IMPORT_TIMEOUT)
+        except _PropertyTimeout:
+            print(f'ERROR: {name} 导入超过 {IMPORT_TIMEOUT:g} 秒没有返回——主循环是不是没放进 '
+                  f'`if __name__ == "__main__":`？（{py_path}）', file=sys.stderr)
+            rc = 1
+            continue
         except Exception:                                    # noqa: BLE001
             print(f'ERROR: {name} 导入时抛错（{py_path}）：', file=sys.stderr)
             traceback.print_exc()
@@ -1370,6 +1401,89 @@ def variant_check() -> int:
 # ══════════════════════════════════════════════════════════════════════════
 
 FIXTURE_REF_RE = re.compile(r'_fixtures/([A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)*)')
+
+
+# pygame 程序顶层允许的调用：纯值类型的构造，没有副作用
+_PYGAME_VALUE_CALLS = {'pygame.Color', 'pygame.Rect', 'pygame.Vector2', 'pygame.math.Vector2'}
+
+
+def _dotted(node) -> str:
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return '.'.join(reversed(parts))
+    return ''
+
+
+def _is_main_guard(node) -> bool:
+    if not isinstance(node, ast.If) or node.orelse:
+        return False
+    t = node.test
+    return (isinstance(t, ast.Compare) and len(t.ops) == 1 and isinstance(t.ops[0], ast.Eq)
+            and isinstance(t.left, ast.Name) and t.left.id == '__name__'
+            and len(t.comparators) == 1 and isinstance(t.comparators[0], ast.Constant)
+            and t.comparators[0].value == '__main__')
+
+
+def _pygame_top_level_problems(src: str) -> list:
+    """纯函数，负控制直接喂源码。返回 [(行号, 说明)]；空列表 = 合规。"""
+    tree = ast.parse(src)
+    out = []
+    guards = 0
+    for i, node in enumerate(tree.body):
+        if isinstance(node, (ast.Import, ast.ImportFrom, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        if i == 0 and isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) \
+                and isinstance(node.value.value, str):
+            continue                                  # 模块 docstring
+        if _is_main_guard(node):
+            guards += 1
+            continue
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            value = node.value
+            bad = [c for c in ast.walk(value) if isinstance(c, ast.Call)
+                   and _dotted(c.func) not in _PYGAME_VALUE_CALLS] if value is not None else []
+            if bad:
+                out.append((node.lineno, f'顶层赋值里调用了 {_dotted(bad[0].func) or "表达式"}(…)——'
+                                         f'只许常量与 {sorted(_PYGAME_VALUE_CALLS)}；窗口、时钟、init 放进 main()'))
+            continue
+        out.append((node.lineno, f'顶层有 {type(node).__name__} 语句——导入时就会执行；'
+                                 f'放进函数或 `if __name__ == "__main__":`'))
+    if guards != 1:
+        out.append((len(src.splitlines()), f'`if __name__ == "__main__":` 有 {guards} 个，应恰好 1 个'))
+    return out
+
+
+def pygame_main_guard_check() -> int:
+    """pygame 程序导入时只定义、不执行：顶层只许 import / def / class / 常量赋值 / 恰好一个 main 守卫。
+
+    为什么：pygame 程序整段跑不了（要显示器，主循环不终止），门对它的全部约束是 compile 加上纯逻辑函数的
+    property——而 property 要先**导入**它。顶层若有 `pygame.init()`、`set_mode(...)` 或 `while True:`，
+    导入就开窗或永不返回（IMPORT_TIMEOUT 是兜底，这道门是结构上的拦截）。这也是更好的教学结构（主规格 §5.4 末段）。
+    """
+    rc = 0
+    count = 0
+    for chapter_dir, _data, prog, py_path in iter_programs():
+        if not _is_pygame(prog) or not py_path.exists():
+            continue
+        count += 1
+        name = _pid(chapter_dir, prog)
+        try:
+            problems = _pygame_top_level_problems(read_text(py_path))
+        except SyntaxError:
+            continue                                  # program_run_check 的 compile 会具名报它
+        for line, msg in problems:
+            print(f'ERROR: {name}（{py_path}:{line}）{msg}', file=sys.stderr)
+            rc = 1
+    if rc == 0:
+        if count:
+            print(f'pygame 顶层：{count} 个 pygame 程序导入时只定义、不执行，各有恰好一个 main 守卫')
+        else:
+            print('pygame 顶层：今天 0 个 pygame 程序——这道门只在负控制里被执行过')
+    return rc
 
 
 def _fixture_run(paras: list, lines: list) -> bool:
