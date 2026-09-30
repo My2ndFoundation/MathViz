@@ -66,6 +66,9 @@
   每个用到随机的 **stdlib 层**程序，在 `/usr/bin/python3`（3.9.6）与 `python3`（3.12.x）上各跑一次（照 `python-drill-tool`「生成 `run.expect`」的条件；读 `_fixtures/` 的照门的方式把它 `copytree` 进临时 cwd），stdout 逐字节比对，写进报告；
   同时跑一个版本相关的程序（`import sys; print(sys.version_info[:2])`）证明两边真是两个解释器。不一致就上报，不要只取一边。scipy-stack 层不做两解释器比对（`/usr/bin/python3` 没有 numpy），`run.expect` 在钉住的版本上生成。
 - 判「全是数字」用 `isdecimal()`，不用 `isdigit()`（`'²'` 过得了 `isdigit`，`int()` 却会抛错）。新造 `tags` 之前先 grep 全库已有写法，跟已有的走。
+- **本波共有约定**（控制方定，同波并行的构建者照同一张表写——你们互相看不见，第 4 期 m6a 一页漏了全波共有的 `numpy` tag）：
+  {{REQUIRED 本波共有约定表：全波共有的 tag 与拼法（库名、模块主题词）；英文讲解里指别的程序（变体标题）的写法}}
+  指别的**页**不在表里，是定论：中文「页名」，英文 `the <注册表英文页名> page`（不加引号、不夹「」）。
 - 长度取向约 {{REQUIRED 本期的行数取向，如 40 或 60}} 行（不含 BLANK 指令行，是取向不是门），超过的写进报告；{{REQUIRED 本期用不用 `chunks`，如「不用 `chunks`」}}。
 - 你自己不派子代理（不派帮手，更不派评审）。评审由控制方安排。
 
