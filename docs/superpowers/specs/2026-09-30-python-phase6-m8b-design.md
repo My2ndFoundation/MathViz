@@ -179,4 +179,13 @@ ring-buffer-isr-handoff 是 ISR → 主循环交接、m8a `pin-irq-counter` 是�
 | `two-leds-blocking`、`two-leds-nonblocking` | `[]` | embedded-loop（新组） | 非阻塞主循环 / 调度四家未点名（同 pygame 游戏循环的判法） |
 | `uart-line-assembler` | `[]` | embedded-io（新组） | 串口分帧未点名；字节拼接只是用到（R1） |
 
-对照文件附录表的 11 行由控制方在集成时补进 `docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md`（「新程序照 R1–R6 判，把一行加进附录表」），构建者照本表写 `boards`、不改对照文件。
+**回到四家官方原文核过**（Python编程 提供的全文文本：AQA 7517、OCR H446 v3.0、Pearson IAL YCP01、CIE 9618 2027–29；grep 买的是「新概念有没有被点名」）：
+
+| 概念 | AQA | OCR | Edexcel IAL | CIE | 对本波的影响 |
+|---|---|---|---|---|---|
+| 中断 / ISR | 4.7.3.6 | 1.2.1(c) | 11.2.1(e) | 3.1 后「purpose of interrupts … Interrupt Service handling Routine」 | `ring-buffer-isr-handoff` 的核心是循环队列（已四家），中断只是用——不改 |
+| 缓冲（硬件 / I/O） | —（只有 memory buffer register） | — | 11.2.1(c) Role of buffering | 3.1「use of buffers」 | 都是理论层的「为什么要缓冲」。`uart-line-assembler` 的核心是按分隔符分帧 → R1 / R5 仍 `[]`（**拿不准**，列进对照文件「拿不准」） |
+| 传感器 / 监控系统 | 4.5.6.3（ADC 与模拟传感器） | 1.2.1(e) 只点名 embedded OS | 11.1.5 Embedded systems（传感器、执行器、ADC） | 3.1 monitoring and control systems（sensors、actuators、**importance of feedback**） | `hysteresis-thermostat`：C 另有 3.1 控制系统 / 反馈佐证（已写 C）；E 11.1.5 讲部件不讲控制逻辑 → 不写 E（R5）。滤波三个：四家都只点名传感器 / ADC 本身，不点名滤波算法 → `[]` |
+| 去抖、非阻塞主循环、滑动平均、中值滤波、定点 EMA、串口分帧 | — | — | — | — | 均未找到 |
+
+对照文件附录表的 11 行由控制方在集成时补进 `docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md`（「新程序照 R1–R6 判，把一行加进附录表」），构建者照本表写 `boards`、不改对照文件；新概念（上表）的考纲条目也由控制方补进对照文件四家各自的一节，终审核附录行与 chapter.json 一致（Python编程 2026-09-30）。
