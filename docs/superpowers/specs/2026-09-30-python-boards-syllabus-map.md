@@ -688,24 +688,24 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | ch32 | `invaders-full` | AQA OCR Edexcel CIE | `[]` **改** | pygame-game | 完整小游戏 Space Invaders：pygame / 游戏循环 / 事件驱动四家都未点名 |
 | ch32 | `bullet-cooldown` | AQA OCR Edexcel CIE | `[]` **改** | pygame-game | 开火冷却计时：pygame / 游戏循环 / 事件驱动四家都未点名 |
 | ch32 | `lives-and-invulnerability` | AQA OCR Edexcel CIE | `[]` **改** | pygame-game | 生命与无敌时间：pygame / 游戏循环 / 事件驱动四家都未点名 |
-| ch33 | `led-image-string` | （第 6 期新增） | `[]` | microbit-io | 5×5 亮度表拼成 Image 字符串，核心是字符串格式（R1）；四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
-| ch33 | `scroll-and-show` | （第 6 期新增） | `[]` | microbit-io | 点阵滚动与显示、sleep 毫秒：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
-| ch33 | `button-press-edges` | （第 6 期新增） | `[]` | microbit-io | 按钮上升沿计数（is_pressed / was_pressed）：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
-| ch33 | `accelerometer-tilt` | （第 6 期新增） | `[]` | microbit-io | 加速度计倾斜判定：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
-| ch33 | `spirit-level-column` | （第 6 期新增） | `[]` | microbit-io | 读数映射到点阵列：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
-| ch33 | `compass-point` | （第 6 期新增） | `[]` | microbit-io | 航向换八方位：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
-| ch33 | `radio-packet-csv` | （第 6 期新增） | `[]` | radio-text | 无线电文本报文 split 解析：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具）；字符串解析未单独点名 |
-| ch33 | `radio-packet-bytes` | （第 6 期新增） | AQA OCR Edexcel CIE | twos-complement | 有符号温度按一字节收发、>127 减 256 即 8 位补码：A 4.5.4.3 · O 1.4.1(c) · E 2.1.3 · C 1.1 |
-| ch33 | `music-note-frequency` | （第 6 期新增） | `[]` | microbit-io | 十二平均律算音符频率：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
-| ch34 | `blink-gpio-pin` | （第 6 期新增） | `[]` | pico-io | GPIO 输出闪灯：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
-| ch34 | `pwm-duty-percent` | （第 6 期新增） | `[]` | pico-io | 百分比换 duty_u16：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
-| ch34 | `pwm-servo-angle` | （第 6 期新增） | `[]` | pico-io | 角度换舵机脉宽：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
-| ch34 | `adc-temperature` | （第 6 期新增） | `[]` | pico-io | ADC 读数换摄氏度：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
-| ch34 | `pin-irq-counter` | （第 6 期新增） | AQA OCR Edexcel CIE | interrupts | 硬件中断与短小的中断处理函数：A 4.7.3.6 · O 1.2.1(c) · E 11.2.1(e)、1.2.2(c) · C 4.1 |
-| ch34 | `timer-periodic-callback` | （第 6 期新增） | `[]` | pico-io | 硬件定时器回调：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
-| ch34 | `elapsed-naive-subtract` | （第 6 期新增） | `[]` | ticks-wrap | 计数器回绕时直接相减出错：四家点名补码的表示换算与 MOD 运算符，读不出覆盖「回绕差值」（R5） |
-| ch34 | `elapsed-ticks-diff` | （第 6 期新增） | `[]` | ticks-wrap | ticks_diff 的环形算术：同上（R5） |
-| ch34 | `gpio-bitmask` | （第 6 期新增） | AQA OCR Edexcel CIE | bitwise | 掩码置位 / 清零 / 翻转：A 4.7.3.5 · O 1.4.1(i) · E 2.2.2、7.1.3(d) · C 4.3（点名「用位掩码控制设备」） |
+| ch33 | `led-image-string` | — | `[]` | microbit-io | 5×5 亮度表拼成 Image 字符串，核心是字符串格式（R1）；四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch33 | `scroll-and-show` | — | `[]` | microbit-io | 点阵滚动与显示、sleep 毫秒：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch33 | `button-press-edges` | — | `[]` | microbit-io | 按钮上升沿计数（is_pressed / was_pressed）：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch33 | `accelerometer-tilt` | — | `[]` | microbit-io | 加速度计倾斜判定：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch33 | `spirit-level-column` | — | `[]` | microbit-io | 读数映射到点阵列：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch33 | `compass-point` | — | `[]` | microbit-io | 航向换八方位：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch33 | `radio-packet-csv` | — | `[]` | radio-text | 无线电文本报文 split 解析：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具）；字符串解析未单独点名 |
+| ch33 | `radio-packet-bytes` | — | AQA OCR Edexcel CIE | twos-complement | 有符号温度按一字节收发、>127 减 256 即 8 位补码：A 4.5.4.3 · O 1.4.1(c) · E 2.1.3 · C 1.1 |
+| ch33 | `music-note-frequency` | — | `[]` | microbit-io | 十二平均律算音符频率：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch34 | `blink-gpio-pin` | — | `[]` | pico-io | GPIO 输出闪灯：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch34 | `pwm-duty-percent` | — | `[]` | pico-io | 百分比换 duty_u16：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch34 | `pwm-servo-angle` | — | `[]` | pico-io | 角度换舵机脉宽：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch34 | `adc-temperature` | — | `[]` | pico-io | ADC 读数换摄氏度：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch34 | `pin-irq-counter` | — | AQA OCR Edexcel CIE | interrupts | 硬件中断与短小的中断处理函数：A 4.7.3.6 · O 1.2.1(c) · E 11.2.1(e)、1.2.2(c) · C 4.1 |
+| ch34 | `timer-periodic-callback` | — | `[]` | pico-io | 硬件定时器回调：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch34 | `elapsed-naive-subtract` | — | `[]` | ticks-wrap | 计数器回绕时直接相减出错：四家点名补码的表示换算与 MOD 运算符，读不出覆盖「回绕差值」（R5） |
+| ch34 | `elapsed-ticks-diff` | — | `[]` | ticks-wrap | ticks_diff 的环形算术：同上（R5） |
+| ch34 | `gpio-bitmask` | — | AQA OCR Edexcel CIE | bitwise | 掩码置位 / 清零 / 翻转：A 4.7.3.5 · O 1.4.1(i) · E 2.2.2、7.1.3(d) · C 4.3（点名「用位掩码控制设备」） |
 
 ## 待办
 
