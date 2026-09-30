@@ -8,7 +8,7 @@
 >   `py-pico` GPIO、PWM、ADC、中断、定时器）、§5.4 末段（MicroPython 层，PR #201）、§7.1（`micropython_main_guard_check`）、§9
 > - 第 6 期派发简报（主工作区 `.superpowers/python-phase6/phase6-brief.md`，Python编程 定）§2：纯逻辑函数 + `main()` + 恰好一个 main 守卫；
 >   `requires: []`、没有 `run` 字段；正确性靠 property（每页至少一半）；逻辑函数里的时间是 `now_ms` 实参；ticks 回绕专门一个程序；
->   boards 新规则（不在考纲就不写、按概念判、写依据、拿不准就不写）；本波共有 tag `micropython` / `microbit` / `pico` / `gpio` / `debounce` / `ring-buffer` / `fsm`
+>   boards 新规则（不在考纲就不写、按概念判、写依据、拿不准就不写）；本波共有 tag `micropython` / `microbit` / `pico` / `gpio` / `debounce` / `ring-buffer` / `state-machine`（简报原写 `fsm`，Python编程 更正：全库已有 `state-machine`，不新造 `fsm`）
 > - 作者须知与控制方作业：`.claude/skills/python-drill-tool/SKILL.md`、`python-content-wave/`
 > - 格式范本：第 5 期 `2026-09-30-python-phase5-m7a-design.md`
 >
@@ -55,7 +55,7 @@ ticks 回绕（`elapsed-ticks-diff`）在 200 组里一半专造「正好在回�
 3. **时间**：逻辑函数里的时间是毫秒整数实参（`now_ms`）；`sleep` / `ticks_ms` 只在 `main()` 里调用。micro:bit 的 `sleep(ms)` 收毫秒，Pico 的 `utime.sleep(s)` 收秒、`sleep_ms(ms)` 收毫秒——讲解写清楚。
 4. **不带外部文件**、不用 `_fixtures/`；随机只许 `random.Random(<种子>)`（本波没有随机程序）。
 5. **`problem`**：变体组 2 个——`radio-packet`（ch33 文本 CSV vs 字节）、`elapsed-time`（ch34 直接相减 vs `ticks_diff`）；已对全库 346 个程序、275 个 problem 名查过无重名。单个程序 `problem` = `id`。
-6. **tags**：本波共有 `micropython`（每个程序都带，第一位）、`microbit` / `pico`（按页）、`gpio`；`debounce` / `ring-buffer` / `fsm` 归 m8b，本波不用。已有可复用的：`modulo`、`timer`、`state-machine`。
+6. **tags**：本波共有 `micropython`（每个程序都带，第一位）、`microbit` / `pico`（按页）、`gpio`；`debounce` / `ring-buffer` / `state-machine` 归 m8b，本波不用（**不新造 `fsm`**）。已有可复用的：`modulo`、`timer`。
 7. **长度**取向 40–70 行；不用 `chunks`。
 8. 讲解按「页面不显示输出」写，而且**板子上看到什么**（点阵亮哪几格、LED 亮度、舵机转到哪）用文字说清楚。
 
@@ -151,3 +151,4 @@ ticks 回绕（`elapsed-ticks-diff`）在 200 组里一半专造「正好在回�
 | M8A-D7 | compass 等价变异 | `round(h / 45)` 在整数航向上与正确写法等价——写进 refs 文件头，不得当负控制 |
 | M8A-D8 | §5 boards | 默认 `[]`；五个候选拿到 boards PR 的考纲对照文件后逐条核，核不实留 `[]`，依据写到考纲条目编号 |
 | M8A-D9 | §6 递归 | 无 |
+| M8A-D10 | tag 约定更正 | 共有 tag 里的 `fsm` 作废，只用全库已有的 `state-machine`（两波同）；m8b 已批准，组名 `blink-two-rates`、`debounce`、`sensor-smoothing`，与本波 18 个程序逐个对过无同题 |
