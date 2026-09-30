@@ -15,7 +15,8 @@ description: >-
 写程序的规则不在这里：**REQUIRED BACKGROUND:** 读 `.claude/skills/python-drill-tool/SKILL.md`——构建者照它写，
 终审照它查。本 skill 管的是从「要做这几页」到「PR 合并」之间控制方要做的每一件事。
 
-下面写的每一处取值都来自第 0–4 期真实付过的代价；照抄，不要凭记忆重推。
+下面写的每一处取值都来自第 0–5 期真实付过的代价；照抄，不要凭记忆重推。
+同目录的标准件：`probe.js`（浏览器验收）、`live-frames.py`（pygame 活体跑帧）、`copyrun.py`（复制内容真跑）、`fill-template.py`（填简报与 PR 模板）、`resolve-registry-conflict.py`（注册表合并配方）。**用这里的，不要从上一波台账复制一份再改**——第 3 期修的探针第 4 期又坏了一次，就是因为各波各拷各改。
 
 ## 运行（按顺序；⏸ = 停下等用户）
 
@@ -23,12 +24,10 @@ description: >-
 - 开**集成 worktree**（`M=/Users/nickma/Develop/My2ndBrain/MathViz`，`W=$M/.claude/worktrees/python-wave-<名>`）：
   `git -C $M fetch origin && git -C $M worktree add -b claude/python-wave-<名> $W origin/main`。
   **主工作区（`/Users/nickma/Develop/My2ndBrain/MathViz`）从头到尾不 checkout、不 rebase、不 pull**——它属于用户和别的会话。
-- **开完集成 worktree，先用 Read（不用 Skill 工具）从 `$W/.claude/skills/python-content-wave/SKILL.md` 重读本 skill**（连同同目录的模板与 `$W/.claude/skills/python-drill-tool/SKILL.md`），以后一律照 `$W` 里的版本做。
-  Skill 工具加载的是**主工作区**里的 skill，而主工作区不 pull，它永远停在旧提交上（第 3 期整期停在 `533c813`，m5b 控制方第 0 步读到的是缺 `checkout -B` 等修正的 #186 之前的版本）。
-  **这一条对用 Skill 工具加载本 skill 的读者无效**——主工作区前进之前，他们读到的正是没有这一条的旧版（`533c813` 那份里「重读」「checkout -B」都是 0 处）。
-  所以它还必须写在读者一定会读到的地方：**给控制方的派发简报（期级简报、派模块控制方的简报）第一句**写「开完集成 worktree 后，用 Read 读 `$W/.claude/skills/` 下的 `python-content-wave` 与 `python-drill-tool`，不用 Skill 工具」。
-  主工作区要不要前进、或在用户级记忆里放一句指路，是用户的决定（第 3 期裁决文件与账本 §四.10）。
-  给子代理的简报也用 `$W` 里的模板填，并在简报里让它们用 Read 读自己 worktree 里的 skill 文件、不用 Skill 工具。
+- **主工作区跟 main 同步**（第 5 期末用户裁决：期控制方每次合并之后、主工作区干净时快进它），所以 Skill 工具加载的 skill 就是 main 上的版本。
+  例外：**本波（或并行的收尾 PR）改过 skill 时**，新版本只在集成 worktree 里——这时用 Read 从 `$W/.claude/skills/` 读本 skill、同目录的模板与 `python-drill-tool`，给子代理的简报也用 `$W` 里的模板填。
+  构建者照旧用 Read 读它自己 worktree 里的文件（`checkout -B` 之后就是集成分支的版本）。
+  （第 3、4 期主工作区停在 `533c813`，Skill 工具整期读到旧版，靠派发简报第一句「用 Read 读 `$W`」绕过去；用户裁决之后这条问题关闭。）
 - 在集成 worktree 上跑全量验收（见「验收命令」），全绿才继续；把输出末行抄进台账。
 - 台账目录：`$W/.superpowers/python-waves/<名>/`（gitignored）。`progress.md` 第一行写本波页面与基线 SHA，以后每一步、每一条裁决都追加进去。
   **本波一切要活过会话的东西都放这里**——构建者报告（构建者写在它自己的 worktree 里，控制方收到回复就拷来，见第 2、3 步）、终审 / 修复 / 复审报告、集成与验收脚本、中断实现者的 patch。**不放草稿区**：
@@ -49,7 +48,9 @@ description: >-
   第 3 期 m5b 清单给 2048 举的 `[2, 2, 2, 2]` 触不到 stack 写法的「刚合并」标志（删掉标志照样得到 `4, 4`），构建者换成 `4, 0, 4, 8` 才看得出差别。
 - **起草期原型：每个拟带 P 的程序写「正确实现 / 错误实现 / 纯 Python 参照 / cases」四件套**，用门自己的种子、组数与逐层比较跑一遍，结果写进清单。
   第 4 期两波都做了：m6b 的原型在清单阶段就发现门只比顶层类型（→ #192），m6a 的原型报出两个只抓到 36/200、61/200 的错误实现。
-  要的结果：正确 == 参照 200/200；每个错误实现报出**命中数**（错误 ≠ 参照的组数）——低于约 50/200 的，清单里写明、要求构建者调 cases（把逼出边界的输入按一定概率专门造）。
+  要的结果：正确 == 参照 200/200；每个错误实现报出**命中数**（错误 ≠ 参照的组数）——低于约 50/200 的，清单里写明、要求构建者调 cases（把逼出边界的输入按一定概率专门造），
+  **调整后的 cases 构造原样写进构建者简报**（`builder-brief.md` 的「低命中与 cases 构造」槽），构建者报告写出它自己生成器上的最终命中数。
+  第 5 期 m7b 的原型在清单阶段抓出四处：invaders「判边漏了外星人宽度」0/200（cases 从没走到右墙）、snake「把尾巴算作撞」2、pong「记分方向接反」1、lives「恰为 0 仍当无敌」27——都是改 cases 之后才过 50。
   原型放台账（`draft-proto.py`），它只证明「这个 P 能写、参照机制不同、cases 触得到错」，**不是给构建者抄的实现**。骨架（`sys.argv[1]` 给集成 worktree 路径）：
   ```python
   import random, sys
@@ -77,18 +78,32 @@ description: >-
       return (xs, rng.choice(xs) if xs and rng.random() < 0.5 else rng.randint(-3, 3))
   ```
   骨架自己的负控制：把 `ok` 的 `.tolist()` 换成 `list(…)`（列表里装着 numpy 标量），正确 == 参照掉到 44/200。一个错误实现不够时，每个 `return` 分支各写一个。
+- **被测里用到的库函数有取整 / 舍入时**（`pygame.Color.lerp`、`Rect` 的属性赋值、`round`、`int()` 截断……），原型的 cases 必须有一部分造在**舍入边界**上（真实值恰为 .5 的那一类），
+  并加一个错误实现：**参照换成另一种舍入**（`a + (b − a)·t` 与 `a·(1 − t) + b·t` 这种实数上相等、浮点上不等的写法；四舍五入对银行家舍入），它必须被抓到——抓不到，就是 cases 没踩到边界。
+  第 5 期的反例：清单写 `Color.lerp` 是 `int(a + (b − a)·t + 0.5)`，实为 `int(a·(1 − t) + b·t + 0.5)`（a = 205、b = 255、t = 0.29：pygame 219、清单式 220）；
+  起草原型 200/200，是因为 t 只取了 0 / 0.25 / 0.5 / 0.75 这类「好看」的值；构建者实测发现，控制方复核 5 万组 t = k/100：清单式错 66 组、实测式 0 组。
+  修复时只把 t 放开成随机，新旧两个参照照样都绿（m7a 终审 I1，评审实测）——要专门造「恰为 .5」：t = k/100、k 取 75 个能产生半数的值、(a, b) 满足 (100a + (b − a)k) % 100 == 50，门同种子 200 组旧式错 22、新式 0。
+- **清单里写「实测行为」要标注测了多少组、怎么取的**（穷举哪一段 / 随机几组、种子），例如「`Rect.center` 赋值后 topleft = (cx − w // 2, cy − h // 2)：w、h ∈ 1..40 穷举」。
+  第 5 期 m7a 清单 §0 的五条实测里只有 lerp 那条错了，而它恰是只在几个点上测过的那条。
   pygame 层（M7）的原型把 `import numpy` 换成 `import pygame`，并在导入前设无头环境：`SDL_VIDEODRIVER=dummy`、`SDL_AUDIODRIVER=dummy`、`PYGAME_HIDE_SUPPORT_PROMPT=1`（与 CI 相同，主规格 §5.4 末段）。
 - **清单里写到第三方库参数的语义，起草时核一句出处**：`inspect.getsource(…)`、`help(…)` / `__doc__`，或官方文档；核不到就不写进清单。
   第 4 期 m6b 清单两处都凭印象写错、都是构建者纠正的：多列 `sort_values` 走 `lexsort_indexer`、根本不读 `kind`（`inspect.getsource(pd.DataFrame.sort_values)` 一看便知）；
   「`.mean()` 返回 numpy 标量、打印前 `float()`」只对单个值成立，迭代 Series 交回的已是 Python 数。
 - `problem` 命名：不在变体组里的程序，`problem` 一律等于程序 id（id 全库唯一有门守）；变体组名由控制方对全库现有 `problem` 名**和**并行的另一个模块的组名交叉核一遍——
   `variant_check` 按全库分组，重名会被静默并成一个跨页变体组，门不会红（第 2 期两个模块并行，靠这条零撞组）。
+- **两波并行时，查重包括对方已批准的清单，逐个程序对，不只对组名。** 起草的一方把自己的每个程序与对方清单的每个程序对一遍「是不是同一道题」（同样的画面 / 状态表 / 答案行），
+  期控制方**批准第二份清单时同样逐条对**。第 5 期 m7b 的 `game-state-screens` 与已批准、已合并的 m7a `screen-states` 是同一道题（四画面、同一张转移表、`lookup` 空的答案行逐字相同），
+  两边的查重都只核了全库已合并的程序与组名，一直漏到整波终审（C1），只好删掉重写一个程序。
+- **期控制方批准清单时，把跨波的「概念 → 页」对照发给两波**（哪个概念在哪一页讲：「速度 × dt → pygame 入门」「碰撞 → 精灵与碰撞」……），填进两波构建者简报的「跨波概念对照」槽。
+  构建者看不见另一波：第 5 期 motion 构建者不知道「速度 × dt」在哪一页，讲解只好不指，修复轮才补上。
 
 **2. 派构建者**
 - 每页一个子代理，**同一条消息里并行派出**，`isolation: "worktree"`，`model: opus`。
-- 派发前先 `git -C $M fetch origin`；若 origin/main 已前进，先把它合进集成分支、跑一次 `check.py`。然后实测两个值填进简报：集成分支 HEAD（`git -C $W rev-parse HEAD`）与
+- 派发前先 `git -C $M fetch origin`；若 origin/main 已前进，先把它合进集成分支（照第 6 步：`--no-commit` 停下、跑配方脚本）、跑一次 `check.py`。
+  构建者派出之后 main 又升了 engine（有人改了 `core/`），它们交回来的页就是旧 engine——第 3 步用脚本的 `--engine-from take` 对齐（第 5 期 m7a 两个构建者都是这样）。然后实测两个值填进简报：集成分支 HEAD（`git -C $W rev-parse HEAD`）与
   `git -C $W merge-base HEAD origin/main`——后者是**派发前实测**的，不是集成分支切出时的 SHA（合过 main 之后两者不同，照切出时的填，构建者会在第一步全部停下）。
-- 简报用 `builder-brief.md` 填，**每个 REQUIRED 槽都要填**。
+- 简报用 `builder-brief.md` 填，**每个 REQUIRED 槽都要填**——用 `fill-template.py`：`--list` 列出键 → 用写文件工具写一个 JSON（不经过 shell）→ `--values <json> --out <简报>`；
+  它拒绝漏填、拼错的键与 `{{…}}` 残留。不要在 heredoc 里拼简报：第 5 期 m7b 控制方用不带引号的 heredoc 填，反引号被当命令执行，约定表里一行被吃掉。
   构建者的 isolation worktree 是从 origin/main 切出来的，不是从集成分支：简报让它 `checkout -B <构建者分支> <集成分支>`（新 worktree 没有自己的提交，安全），
   **不要**写「`merge --ff-only <集成分支>`，不是就停下」——worktree 基线不是集成分支的祖先时 ff-only 会失败。第 2 期就是这样：#179 / #180 落在集成分支切出（`83e7a2d`）之后、
   派发之前，构建者 worktree 建在 `601d487`，两波十个构建者全部在这一步失败（M3 五人由控制方叫回来 `reset --hard`，M4 五人各自偏离简报、自行落到正确基线）。
@@ -108,17 +123,22 @@ description: >-
 
 **3. 集成**（在集成 worktree 里，按模块内页序逐页）
 - 收到构建者回复就把它的报告从回复里给的实际路径拷进 `$W/.superpowers/python-waves/<名>/`，最迟在合这一页之前（构建者 worktree 第 7 步就删了；落在 scratchpad 的，会话一重启就没了）。
-- `git -C $W merge --no-ff <构建者分支>`。`python-tools.json`、`python/app.html`、`python/index.html`、工具页 `GENERATED:PROGRAMS` 冲突时**不手工合并**，跑配方脚本：
+- `git -C $W merge --no-commit --no-ff <构建者分支>`——**一律 `--no-commit`**，然后**一律**跑配方脚本（没有文本冲突也跑）。`python-tools.json`、`python/app.html`、`python/index.html`、工具页 `GENERATED:PROGRAMS` **不手工合并**：
   ```bash
   python3 $W/.claude/skills/python-content-wave/resolve-registry-conflict.py --repo $W --take HEAD --from MERGE_HEAD && git -C $W commit --no-edit
   （它自己的 `--check-timeout` 默认 600 秒：**调用它的那一层（例如 Bash 工具）的超时要更长**，或把 `--check-timeout` 调到更短——
   外层先超时发 SIGKILL 的话谁也接不住，脚本来不及杀它起的门进程组。）
   ```
   脚本路径用集成 worktree 里的绝对路径（`$W/…`）；**必须用 `&&` 接提交**——脚本红了之后冲突在索引里已标为解决，分成两行写的 `git commit` 会照样成功，提交里的注册表缺条目（没有钩子时实测如此）。
+  为什么没有冲突也要停下来跑：文本干净的合并照样可能是红的。**engine 不一致**就是这一类——一侧改过 `core/`、升了 engine，另一侧的新页还是旧 engine，
+  `page_mirror_check` 要求全库唯一。第 5 期两次：m7a 两个构建者基于 py-1.1.x、集成分支已合 #198（py-1.2.0）；m7b 合 #198 时文本没有冲突、git 自动提交了一个门红的合并（`19a0209`，事后修成 `5133c85`）。
+  脚本这时以**退出码 4** 停下、什么都不动；确认是这种情形后加 `--engine-from take` 重跑：追加的条目与它们的工具页 `tool-engine` meta 改成 `--take` 一侧的 engine，core 区段由 `inline_core.py` 重写，不升这些页的 version。
+  第 5 期收尾拿真实合并回放过（草稿区的克隆里）：m7a 集成 basics（`a853573` + `92d4ecf`，文本干净）、sprites（`9e58ac9` + `dd686b2`，有冲突）、m7b 合 #198（`437ac7d` + `6e6f1d7`，文本干净）加 `--engine-from take`，
+  暂存结果与当时手工做成的 `9e58ac9`、`4503804`、`5133c85` **逐字节相同**；第 4 期 m6b 合 m6a（engine 一致、不给选项）与 `9a9101c` 逐字节相同（回归）；旧脚本在第一例上 rc=1（`page_mirror_check` 断言红），新脚本不给选项 rc=4、索引与工作区都没动。
   它做的就是配方的每一步：取集成分支版本 → 把构建者分支多出的注册表条目追加回 `tools` 末尾 → `build_programs.py`、`inline_core.py`、`sync_fallback.py`、`check.py`
   → 只 `git add` 显式路径。脚本在收尾时拿两次真实合并回放过：M3 `b06736d`（集成 py-stack-queue）与
   M4 `3196e7e`（M4 合 main），暂存结果与当时手工按配方做出的提交**逐字节相同**。
-- 退出码：`0` 已暂存；`1` 生成脚本或 `check.py` 红（或超时）——**照它打印的恢复命令做**，不要直接 `git merge --abort`：`--take MERGE_HEAD` 时索引已 ≠ HEAD、
+- 退出码：`0` 已暂存；`4` 要追加的条目 engine 与 `--take` 一侧不同、没给 `--engine-from take`，什么都没动（见上）；`1` 生成脚本或 `check.py` 红（或超时）——**照它打印的恢复命令做**，不要直接 `git merge --abort`：`--take MERGE_HEAD` 时索引已 ≠ HEAD、
   生成脚本又改过工作区，直接 abort 会 rc=128 `not uptodate`；只把注册表和两个导航页 `checkout HEAD` 再 abort，abort 会成功，但生成脚本改到的别的页会留在工作区。
   打印的命令先把这两类都复原（`checkout HEAD -- <注册表、两个导航页、冲突的页>`，再 `checkout -- <生成脚本改过的其余文件>`），最后 `merge --abort`；`2` 冲突落在这几类文件之外、什么都没动；`3` 同一个已有条目在 `--from` 一侧改过、又与 `--take` 一侧不同，什么都没动。
 - **退出码 3 是升级波的事**：本波若要改已有工具的注册表条目（升级已有页、改 `desc` / `tag`），合并时这几条取哪一侧都会丢掉另一侧的改动，脚本不替你选。
@@ -146,15 +166,28 @@ description: >-
 - **`.gitignore` 这类要 `git add` / `git rm` 才测得到的负控制，在 scratchpad 的临时仓库里做**（`git init` 一个、拷进要测的 `.gitignore` 与几份样例文件）：在集成 worktree 里跑 `git add` / `git rm` 的组合会被权限拒，
   而且会碰共享索引；临时仓库里测到的忽略规则与这里等价（第 3 期 m5a 就这样做的：旧规则 `git add` 静默跳过 `probe.log`，新规则暂存它，别处的 `stray.log` 仍被忽略）。
 - 浏览器：见「浏览器验收」。
-- 复制内容真跑（`_fixtures/` 要像 `program_run_check` 一样整个 `copytree` 成临时目录里的 `_fixtures/`，平铺到根目录会全红——
-  而且这项测量与门一样拷了 fixture，**观察不到**「粘进 PyCharm 缺数据文件」，那一项只能靠人）：每页用 `random.Random(<固定种子>).sample` 抽 3 个程序，取读 / 挖空（每空填标准答案）/ 临摹三种模式的复制内容，
-  断言三者相同且不含 BLANK 指令，在全新临时目录按 `run.expect` 的条件用 python3 跑，stdout 逐字节比对。
-  **复制内容用页面自己的代码取**：node 裸 `vm` context 里加载页面内联的 core，调 `Exercise.clean` / `PyInteract.copyPayload`（走浏览器分支，见根 `CLAUDE.md` 的 `node -e` 陷阱），
+- **复制内容真跑：用标准件 `copyrun.py`**（第 5 期 m7a 的 pygame 版推广到三层）：
+  ```bash
+  python3 $W/.claude/skills/python-content-wave/copyrun.py --repo $W --chapters <本波的章目录…> --seed 20260930 --k 3
+  ```
+  每章按固定种子抽 3 个程序；复制内容用**页面自己内联的** `Exercise`（工具页 `GENERATED:EXERCISE` 区段，node 裸 `vm` context，走浏览器分支——见根 `CLAUDE.md` 的 `node -e` 陷阱）取，
+  断言不含 BLANK 指令、读 == 挖空（每空填标准答案）；然后按层：有 `run.expect` 的在全新临时目录照 `program_run_check` 的条件跑（`_fixtures/` 整个 `copytree`），stdout 逐字节比；
+  pygame 程序走 `live-frames.py` 的跑帧；带 `check.property` 的，**从复制内容里导入 entry**（MicroPython 装门的硬件桩），用门的参照、种子、组数与逐层比较比 200 组。
+  内建负控制：第一个空填 `pass` 的复制内容，各道测量分别报「抓到 / 做了」。第 5 期 m7a 实测：pygame 跑帧对错答案的判别力弱（1/6——空多在只有事件或碰撞才走到的分支里），
+  property 那一道抓到 5/6；所以 pygame / MicroPython 页的「整段对不对」主要靠第二道。收尾在 7 章 21 个程序上跑过（run 9/9、跑帧 4/12、property 16/16 被抓）；
+  MicroPython 分支在合成章节上跑过（导入 `microbit` 靠门的硬件桩，本机没有这个模块），参照左右对调 → 66/200、rc=1。
   不要自己写正则剥指令——第 2 期 M3 控制方的正则只认 `# >>> BLANK`，被一行 `# >>>BLANK`（少一个空格，解析器与门都接受）骗过一次，报成页面与本地不一致。
-  负控制：挖空填一个错答案，stdout 必须对不上。
+  这项测量与门一样拷了 fixture，观察不到「粘进 PyCharm 缺数据文件」——人工验收由用户在线上做（第 5 期末用户裁决）。
+- **pygame 程序的活体跑帧：用标准件 `live-frames.py`**。门对 pygame 程序只 compile、property 只验逻辑函数，**`main()` 的主循环在任何门里都没跑过**——这是「整段能跑」唯一的测量：
+  ```bash
+  python3 $W/.claude/skills/python-content-wave/live-frames.py --self-test          # 三道对照：正常 OK、不看 QUIT 的主循环 HANG、第一帧抛错 ERROR
+  python3 $W/.claude/skills/python-content-wave/live-frames.py --repo $W --chapters <本波的 pygame 章…> --frames 30
+  ```
+  无头 SDL 下导入程序、把 `pygame.event.get` 打桩成第 N 次调用时追加 QUIT、调 `main()`；每个程序一个子进程（进程组 + 超时）。`--self-test` 三道对照都如期，这个测量才分得清三种结局。
+  路径在交给子进程之前一律 resolve（子进程的 cwd 是临时目录；m7a 初版传相对路径时报成 ERROR）。
 
 **5. 终审（整波一次）**
-- `git -C $W merge-base origin/main HEAD` 实测基线，打包整波 diff，用 `final-review-brief.md` 派 opus 评审。不写「不要报 X」一类预判。
+- `git -C $W merge-base origin/main HEAD` 实测基线，打包整波 diff，用 `final-review-brief.md`（`fill-template.py` 填）派 opus 评审。不写「不要报 X」一类预判。
   评审必须逐个空查四件事：被判错的等价写法第 1 级提示有没有钉住；提示有没有哪一级说出整行；`notes` / `blurb` 有没有逐字写出挖空行或示范判定器会判错的写法；中英是否等义。
 - 有发现：**一次**修复派发（全部发现一起给一个实现者）→ **一次**范围复审 → 残留问题带裁决记进台账。不做逐页评审循环。
   修复实现者直接在集成 worktree 里改（不另开 worktree）；它回报之前，控制方不在 `$W` 里做任何写操作。
@@ -166,13 +199,17 @@ description: >-
   草稿区在仓库目录树外：留在那里的东西不挡 `git worktree remove`，也不会被第 7 步的 `cp -R` 拷进台账。它成立的理由是「不必删」，不是「删得掉」——第 4 期收尾在草稿区里 `rm -rf` 同样被拒过。
 - **范围复审报出的 Important 若只动提示 / 讲解文字**（不动程序体、refs、门、注册表以外的东西），控制方可以照复审给的文字直接落地，不开第二轮修复：
   落地后对改过的每个空用判定器（`PyInteract.blankFeedback`）跑标准答案与复审列出的写法，把判对 / 判错表连同钉住每个判错写法的那一级写进台账，再跑 `check.py`（第 4 期 m6a V8、m6b 裁决 10 都这样做）。
+  判定器在 node 裸 `vm` context 里加载页面内联的 core 调（不用 `require`）；**每种写法前拼上这个空的缩进（`b.indent + 写法`），先断言标准答案判对**——
+  不拼缩进时一律判「第 1 行缩进对不上」（`lead-indent`），与写法无关（第 5 期 m7b 控制方落地 n2 时头一轮就这样误判成「钉法漏了」）。
   动到程序体、refs 或 `run.expect` 的，仍走修复实现者 + 复审。
 - 修复实现者中途中断（会话重启、磁盘满）：先 `git -C $W diff > $W/.superpowers/python-waves/<名>/fix-partial.patch` 备份，再派新实现者，
   让它**先逐条判定**上一个人的改动「已完成 / 部分 / 未做」、写进报告，在上面续做，最后全量验证（第 2 期两波都这样接手，M4 的接手者据此查出前任半截的 refs 让门是红的）。
 
 **6. PR**
-- 推送前再合一次 origin/main（冲突照第 3 步，脚本用 `--take MERGE_HEAD --from HEAD`：以 main 为准、本波各页追加在后；退出码 1 / 3 的处理同第 3 步），全量验收重跑。
-- 推送集成分支，`gh pr create`，描述用 `pr-body.md` 填（验证怎么做的就怎么写；PyCharm 那一项不打勾）。
+- 推送前再合一次 origin/main：`git -C $W merge --no-commit --no-ff origin/main`，**不论有没有冲突**都跑配方脚本 `--take MERGE_HEAD --from HEAD`（以 main 为准、本波各页追加在后；退出码 1 / 3 / 4 的处理同第 3 步），全量验收重跑。
+  main 若改过 `core/`（`git -C $W diff --stat <上次合 main 的基线> origin/main -- python/core` 非空），合完先 `inline_core.py`（脚本会跑）、再核注册表 engine 全库唯一——
+  第 5 期 m7b 合 #198 时文本干净、git 自动提交了一个门红的合并，motion 条目还是 py-1.1.0（复盘 6）；照上面 `--no-commit` + 脚本做，它以退出码 4 停下，加 `--engine-from take`。
+- 推送集成分支，`gh pr create`，描述用 `pr-body.md` 经 `fill-template.py` 填（验证怎么做的就怎么写；本波不适用的可选行给 `null`）。
 - 读 CI：`gh pr checks <n> --watch`，再从日志里核对 `Successfully set up CPython (3.12.x)`、钉版本那一步打印的 `scipy-stack 2.3.1 2.3.0 3.10.3`（有 pygame 程序时还有 `pygame 2.6.1 dummy`）、python 门的「0 段因缺库跳过」与 `N 道门全绿`。红了读完整日志修，修复作为新提交。
 - **⏸ 汇报 PR 链接、CI、负控制与裁决清单，等用户说合并。**
 
@@ -238,17 +275,23 @@ await PYPROBE({ page: 'py-<页>', marker: '/.claude/worktrees/python-wave-<名>/
 - **临摹对齐**：往输入层打入第一个程序的前 4 行，从末尾往前找**可见字符**（量到换行符时矩形退化，dx = 0 可能是假阴），用 `Range` 量它在 `.py-typed` 与 `.py-shadow` 里的矩形，
   `document.body.style.zoom` = 0.9 / 1 / 1.25 三档 dx = dy = 0；每档报这个字符的宽度，**宽度必须随缩放严格变大**（第 4 期实测 7.063 / 7.844 / 9.797）才证明缩放真的生效；
   负控制：把 `.py-typed` 的 `padding-left` 设成「原值 + 3px」（原值 16px），dx 必须是 +3（实测 +3；第 4 期两波与收尾初版是**设成** 3px，净减 13px，所以记的是 −13）。只比层外框宽度会得到假差异（`pre` 随内容收缩）。
+- 第一个程序声明了 `chunks` 时，对齐前先切回第 1 段（影子层只显示当前段；页面记着上次停在哪一段）。
 - 给了 `copyIds`：读与挖空（每空填标准答案）的复制内容相同、不含 BLANK 指令；负控制：改一个空的答案，挖空的复制内容必须变得不同。
   **临摹不比**：`copyPayload('trace', …)` 按定义交回的就是她打的字（`state.typed` 本身），拿读的内容当 typed 传进去再比，恒真、什么也观察不到（收尾初版就这样比过，第 4 期收尾评审 I3）。
   复制内容**真跑**见第 4 步（node 裸 vm 取、python3 跑）。
 - 收尾：zoom 复原、临摹输入清空、localStorage **只在本页的键上按差分复原**（`python-draft:` / `python-progress:` 后接本页程序 id 的键，加 `python-prefs` / `python-store-v` / `python-lang`）——
   8777 是几个会话共用的同源，`clear()` 再整份写回会抹掉、改回别的标签页这几秒里写的键。语言走 `ctl.setLang`（不改地址栏）；不点同意横幅。
-回报里贴它返回的对象（至少 `literalChecks` / `literalMode` / `allBlanks` / `align` / `alignNegative` / `localStorageRestored`），不写「通过」两个字了事。
+- **给了 `keys: { prog, seg }`：逐键临摹一段**（本波有声明 `chunks` 的程序时必做，至少一个段尾带空行的段）。整段粘贴测不到「只有逐键打才会碰到」的问题——#198 评审 I1（段尾空行在影子层看不见，逐键打的人永远到不了「段完成」）
+  就是实现者与控制方都用整段粘贴验收、都没看见的。探针先点页面的「重来」开一遍干净的 run，再照人打：只打影子层看得见的部分，换行派发 keydown Enter 由**页面自己的**处理（自动缩进），
+  缩进差用 Backspace / 空格补，其余字符一个一个（keydown → beforeinput → 插入 → input），打完最后一个可见行再按一下 Enter，段尾空行靠页面的 `chunkTailFill` 补。
+  内建负控制：「最后一个按键之前」必须是未完成。收尾实测：py-pygame-games 的 pong-full 段 1 共 984 个事件、段 ✓、「下一段」、正确率 98%（与 m7b 控制方手工驱动的 984 相同）；
+  在拿掉 `chunkTailFill` 的页面副本上同一段停在「你比参考少了 2 行」、探针报红——**第一版驱动逐行照参考打、把段尾空行也按了 Enter，在这个副本上照样「完成」**，它模拟的不是人，改成只打看得见的部分之后才测得到 I1。
+回报里贴它返回的对象（至少 `literalChecks` / `literalMode` / `allBlanks` / `align` / `alignNegative` / `localStorageRestored`，有 `keys` 时加 `keysDrive`），不写「通过」两个字了事。
 探针本身改了（页面 DOM 变了、要量新东西），改的是 skill 里这一份，并在真页面上做负控制，**两层分开做**：
 把 `PyInteract.blankFeedback` 临时包成「消息里拼上标准答案」只控制判定层——页面内部调的是闭包里的 `blankFeedback`，包装到不了它（实测包了之后 `literalDom` 照样不泄漏）；
 页面层要在 DOM 上注入，例如定时往 `.py-msg` 的文字后面接上标准答案，`literalDom.leaks` 必须变成 true。
 
-`file://` 双击验收与「复制粘进 PyCharm 真跑」只能由用户做——PR 里列为未勾选项，不代为声称。
+`file://` 双击验收与「复制粘进 PyCharm 真跑」由用户在线上做（第 5 期末用户裁决：人工验收关闭为流程项，有 bug 用户会提）——PR 里不再列未勾选项，也不代为声称做过。
 
 ## 已知的坑
 
@@ -258,15 +301,18 @@ await PYPROBE({ page: 'py-<页>', marker: '/.claude/worktrees/python-wave-<名>/
 | `core.hooksPath` 是共享 git 配置里的绝对路径，指向主工作区的 `.githooks` | worktree 里提交跑的是主工作区当前分支那份钩子**脚本**（可能是旧的），但它操作的是提交所在 worktree 的文件 | 不依赖钩子代跑生成脚本；提交前自己跑三个生成脚本与 `check.py`，提交后读 `git status --short` |
 | 写文件工具把反斜杠-u 转义解码成真实字符 | 不可见的 U+2028 进了源码或提示；`js_parser_parity_check` 会红，文档里则悄悄变假 | 代码里用 `chr(0x2028)`；写完扫一遍 U+2028 / U+2029 / U+0085 / U+FEFF |
 | 并行跑负控制 | 同时改同一批文件，互相污染基线 | 串行 |
-| 本机 `grep` 是 ugrep | `(…)?` 套交替时静默漏匹配 | 写钩子或门的正则时用顶层交替，并与 `/usr/bin/grep` 对比 |
+| 本机 `grep` 是 ugrep | `(…)?` 套交替时静默漏匹配；很长的 Unicode 交替（几十个中文词 `a\|b\|…`）直接报 regex complexity 错、什么都没扫 | 写钩子或门的正则时用顶层交替，并与 `/usr/bin/grep` 对比；扫中文词表、跨文件核「某机制在不在」一律写 Python |
+| 工具命令失败（grep 报错、脚本抛异常）之后先下结论、再补核 | 第 5 期 m7b 控制方一次 grep 因 ugrep 复杂度限制失败，差点据此断言「m7a 没有命数机制」 | 命令失败 = 没测；先换一种方法测到，再下结论 |
+| 没有文本冲突的合并直接被 git 自动提交 | engine 不一致（一侧升过 core）的合并文本常常是干净的，自动提交的合并本身是红的（第 5 期 m7b `19a0209`） | 一律 `git merge --no-commit --no-ff`，再跑配方脚本（退出码 4 → `--engine-from take`） |
 | 构建者的 worktree 从 origin/main 切出，不是从集成分支 | 集成分支合进了 origin/main 之后 origin/main 又前进（第 2 期 #179 / #180 落在切出之后、派发之前），worktree 基线就不是集成分支的祖先，`merge --ff-only <集成分支>` 失败（照第 2 步派发前先合 main 时它会成功，但时序不可靠）；落错基线时评审包 diff 里出现假删除 | 简报让它 `checkout -B <构建者分支> <集成分支>` 并报告实测 HEAD 与 merge-base；打包一律 `git merge-base` 实测 |
 | 报告、脚本、patch 放草稿区 | 会话重启时草稿区清空，第 2 期丢过构建者报告、终审报告、集成脚本 | 一律放 `$W/.superpowers/python-waves/<名>/`，第 7 步整体拷走 |
+| 自写的一次性浏览器探针在 `restore()` 里先 `localStorage.clear()` 再从页面内存里的快照写回 | 刷新之后快照没了，清空已经发生——第 5 期 chunks PR 的探针让 8777 上 3 个不知内容的键永久丢失 | 用标准件 `probe.js`；非写不可的一次性探针也只在本页的键上按差分复原，快照先验再动 |
 | 负控制做了可能不终止的变异（删 `visited.add` 之类） | 门挂住而不是变红；第 2 期一次跑满 600 秒、swap 约 21 GB、同机会话一起 ENOSPC | 只做保证终止的变异；子进程用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时或被打断时（`except BaseException`；SIGTERM 先用 `signal.signal` 转成异常）`os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组（本机没有 `timeout` 命令，写了只会 rc=127） |
 | 集成后删构建者分支用 `git branch -d` | 主工作区的 `main` 不 pull，`-d` 按它判「未合并」而拒删 | 先 `merge-base --is-ancestor <分支> origin/main` 确认，再 `-D` |
-| 在不带引号的 heredoc 里写含反引号的 PR 文案 | 反引号被当命令替换执行，文案被吃掉 | heredoc 一律 `<<'EOF'`，路径走环境变量 |
+| 在不带引号的 heredoc 里写含反引号的 PR 文案或简报 | 反引号被当命令替换执行，文案被吃掉（第 5 期 m7b 填构建者简报时又发生一次，约定表一行没了） | heredoc 一律 `<<'EOF'`，路径走环境变量；简报与 PR 描述用 `fill-template.py` 填，值写进 JSON 文件、不经过 shell |
 | 命令后接 `\| tail` / `\| head` 再 `echo rc=$?` | 打印的是管道末端的退出码，崩溃显示 `rc=0` | 要看退出码就不接管道，或先存 `rc` |
 | 评审员或实现者自己又派子代理 | 重复一个评审席位 | 简报里写明不许派子代理 |
-| 用 Skill 工具加载本 skill 或 `python-drill-tool` | 读到的是主工作区（不 pull、停在旧提交）的版本；第 3 期 m5b 读到的是 #186 之前的版本。旧版里没有「重读」这一条，所以写在本 skill 里的提醒到不了用 Skill 工具的读者 | 给控制方的派发简报第一句写「开完集成 worktree 后用 Read 读 `$W/.claude/skills/`，不用 Skill 工具」；第 0 步照做；简报让子代理用 Read 读自己 worktree 里的文件 |
+| 本波改过 skill，却用 Skill 工具加载 | 主工作区跟 main 同步（第 5 期末起），但本波的改动要等合并才到 main；Skill 工具读到的是改之前的版本 | 本波（或并行的收尾 PR）改过 skill 时，用 Read 读 `$W/.claude/skills/`；简报让子代理用 Read 读自己 worktree 里的文件 |
 | 构建者把报告写进集成 worktree | isolation worktree 拒写主工作区目录树里、它自己 worktree 以外的路径——集成 worktree 在 `$M/.claude/worktrees/` 下（第 3 期 4 个里 3 个被拒、1 个写成，不稳定） | 报告写构建者自己 worktree 的 `.superpowers/`，写不进就写 scratchpad、回复里给实际路径；控制方第 3 步集成前拷进台账 |
 | 在 worktree 里跑 `git add` / `git rm` 组合、或 `rm -rf` 一个目录（`.superpowers/` 下、草稿区里都遇到过） | 被权限拒，且同一个动作这一次拒、下一次放行（第 4 期 m6a 控制方删掉了评审的临时子目录，m6b 四方全被拒）；留在集成 worktree 里的东西会让 worktree 删不掉——删它等于绕过拒绝 | 子代理的临时文件放草稿区、不必删、不试着删、不换命令绕；`.gitignore` 类负控制在草稿区的临时仓库里做 |
 | fixture 的文件名撞上根 `.gitignore` 的规则（`*.log` 之类） | `git add` 静默跳过它，本地门全绿、CI 缺文件；门读磁盘看不见 | 根 `.gitignore` 已有反向规则 `!python/programs/*/_fixtures/**`；提交前 `git ls-files` 对一遍磁盘上的 `_fixtures/` |
@@ -281,7 +327,11 @@ await PYPROBE({ page: 'py-<页>', marker: '/.claude/worktrees/python-wave-<名>/
 - 没等用户说合并就 `gh pr merge`
 - 删集成 worktree 之前没把台账拷到主工作区 `.superpowers/python-phase<期>/`
 - 简报里写着 `merge --ff-only <集成分支>`，或构建者的报告路径指向集成 worktree（应指它自己的 worktree）
-- 照 Skill 工具加载出来的版本派发，没有先用 Read 从 `$W/.claude/skills/` 重读；或给控制方的派发简报第一句没写这一条
+- 本波改过 skill，却照 Skill 工具加载出来的版本派发（没有用 Read 从 `$W/.claude/skills/` 读）
+- 两波并行，批准或起草第二份清单时只核了组名、没逐个程序对另一波已批准的清单
+- 在 heredoc 里拼简报或 PR 描述，没用 `fill-template.py`
+- `git merge` 构建者分支或 origin/main 时没加 `--no-commit`，或没有冲突就没跑配方脚本
+- 本波有声明 `chunks` 的程序，浏览器验收却只做了整段粘贴、没有逐键
 - 负控制变异后门绿，就断定「门瞎了」而没先问变异是不是等价
 - 打算跑一个删掉 `visited.add` / 循环更新的负控制，或写 `timeout 120 …`
 - 探针报「0 处泄漏」而没报检查了几次；或用的不是 skill 里的 `probe.js`，或它返回了 `VOID` 还照样记结论

@@ -687,6 +687,7 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 | `program_embed_roundtrip_check()` | HTML 里的 `source` 解码后与磁盘 `.py` 逐字节相同（§5.3） |
 | `chapter_manifest_check()` | 磁盘 `.py` 与 `chapter.json` 双向存在 |
 | `anchor_check()` | `lineNotes` / `chunks` 的行文本锚在源码里存在且唯一，`clean()` 之后仍唯一；★ 锚点可以落在挖空体内（§2.3） |
+| `chunks_check()` | 声明了 `chunks` 的程序：≥ 2 段、`title` 双语非空；段按源码顺序、互不重叠、**首尾相接**（第一段 `from` 之前、段缝里、最后一段 `to` 之后只许空行——落在外面的非空行她永远临摹不到）；并在工具页的裸 `vm` 里调页面内联的 `PyInteract.chunkSegments`，与门用 Python 算出的段逐个比、拼回去等于 `clean()` *（第 5 期 #198；本表此前漏了这一行，第 5 期收尾补）* |
 | `exemption_check()` | **例外豁免**（普通 cpython 程序却标 `compile-only`）必须带 `why`，每页 ≤ 2，且每次运行逐条打印；**结构性豁免**（`runtime != cpython` 或依赖 pygame）自动放行（§5.4） |
 | `source_ascii_check()` | 源码纯 ASCII（§2.5 规矩 2） |
 | `source_bmp_check()` | `.py` 里不许出现非 BMP 字符（含指令行）——CPython 给字符偏移、JS 给 UTF-16 码元偏移 |
@@ -811,7 +812,7 @@ chess 现在要到运行时才暴露一个写错的路径。
 | 第 2 期 | M3 + M4 | 10 | ~120（实交 111；全库 217）|
 | 第 3 期 | M5 综合运用 | 4 | ~40（实交 47；全库 264）|
 | 第 4 期 | M6 科学计算与数理统计 | 5 | ~45（实交 46；全库 310）|
-| 第 5 期 | M7 pygame | 4 | ~35 |
+| 第 5 期 | M7 pygame | 4 | ~35（实交 36；全库 346）|
 | 第 6 期 | M8 嵌入式 Python | 3 | ~30 |
 
 程序数是**目标区间不是配额**：宁可一页 6 个真正经典的，也不凑到 12 个。
@@ -843,15 +844,21 @@ chess 现在要到运行时才暴露一个写错的路径。
 4. `file://` 直接双击打开每一个新页面：三种模式都能用，`localStorage` 三级清空都生效
 5. 随机抽三段程序，**点复制、粘进 PyCharm、真的跑一遍**——这是整套东西存在的理由，
    不能只靠门代劳
+
+   第 4、5 两条由用户做：第 5 期末用户裁决，人工验收由用户在线上做、有问题会提，不再作为每个 PR 的未勾选项
+   （第 1–4 期每个内容 PR 都列着它、没有一次勾上）。控制方这一侧的替代测量是 `python-content-wave` 第 4 步的
+   `copyrun.py`（页面自己的 `Exercise` 取复制内容，按层真跑或比 property）与 `live-frames.py`（pygame 活体跑帧）——
+   它们与门一样拷了 fixture、装了无头 SDL，**观察不到**「粘进 PyCharm 缺数据文件」「本机没装库」这一类，那一类只有人看得见。
 6. 临摹模式在三种缩放下三层不错位。仍没有机械门，但不再「靠看」：第 1 期起控制方在
    `document.body.style.zoom` = 0.9 / 1 / 1.25 下用 `Range` 量同一字符在影子层与输入层的矩形，
    要求 dx = dy = 0，并用一次负控制（给一层加 `padding-left`）证明这个测量看得见错位。
 
 ### 9.2 配套文档与 skill
 
-- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。**至第 4 期收尾仍未写**（第 3 期账本定的「第 4 期开工前」没做到），见第 4 期账本 §五.8
-- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（**至第 4 期收尾仍未写**，见第 4 期账本 §五.8）：API 签名、易踩的坑、
-  每一次实测发现的错误
+- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。**至第 5 期收尾仍未写**（第 3 期账本定的「第 4 期开工前」、第 4 期账本定的「第 5 期派构建者之前」都没做到），
+  见第 4 期账本 §五.8、第 5 期账本 §五.7。**第 6 期已派 MDev-02 单独一个 PR 起草**（先交大纲、控制方批准后写全文、一次评审；控制方的第 6 期派发简报）
+- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（**至第 5 期收尾仍未写**，同上；第 6 期与 `python.md` 同一个 PR）：API 签名、易踩的坑、
+  门与负控制、每一次实测发现的错误、各期裁决的入口
 - `.claude/skills/python-drill-tool/SKILL.md` —— 作者须知：新增一页 / 新增一个程序 / 升级一页的作业流程，
   每条硬约束注明由哪道门守（第 1 期设计 B5）
 - `.claude/skills/python-content-wave/SKILL.md` —— 控制方的波次作业：程序清单、并行构建、集成、

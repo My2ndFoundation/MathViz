@@ -3,7 +3,7 @@
 全部页集成、控制方亲验之后派发。`model: "opus"`，前台运行。评审包：
 `git -C $W merge-base origin/main HEAD` 实测基线，用 superpowers:subagent-driven-development 的 `scripts/review-package` 或
 `git log --oneline` + `git diff --stat` + `git diff -U10` 写进**一个**文件，把路径给评审员。
-填好每个 `{{…}}`；**不要**加入「不要报 X」「最多算 Minor」之类预判结论的话。用集成 worktree 里的这份模板填（Skill 工具加载的是主工作区的旧版）。
+用同目录的 `fill-template.py` 填每个 `{{…}}`（不在 shell heredoc 里拼）；**不要**加入「不要报 X」「最多算 Minor」之类预判结论的话。用集成 worktree 里的这份模板（本波改过 skill 时只有那里是新的）。
 同一份「只读」一节也给范围复审员用；修复实现者的简报照抄其中临时文件那一句。
 
 ---
@@ -17,8 +17,8 @@
 - 构建者报告：{{REQUIRED 报告路径列表}}
 
 ## 评审包
-**Base:** {{REQUIRED}}  **Head:** {{REQUIRED}}
-**Diff 文件:** {{REQUIRED}}
+**Base:** {{REQUIRED Base}}  **Head:** {{REQUIRED Head}}
+**Diff 文件:** {{REQUIRED Diff 文件}}
 其中工具页的 `GENERATED:*` 区段与导航页 FALLBACK 是生成物：用 `python3 python/scripts/build_programs.py --check`、`inline_core.py --check`、`sync_fallback.py --check` 各跑一次验证，不逐行读。
 .py、chapter.json、refs、注册表条目逐个读。
 
@@ -30,7 +30,9 @@
 ## 要查的
 **规格**：清单逐条对上（id、变体组、教什么、P 参照）；每程序 ≥ 1 空；每页 ≥ 1 个变体组；页面边界；元数据闭集与 `boards` 是否可信；注册表条目字段、accent 按模块表、version / engine 一致。
 
-**内容（逐个空）**——用 node `require` `python/core/*.js`，对标准答案与每一种你想得到的「同样好的写法」调用 `PyInteract.blankFeedback(answer, reference, lang)`：
+**内容（逐个空）**——在 node 的**裸 `vm` context** 里加载工具页内联的 core（`GENERATED:PY-LEX` … `GENERATED:INTERACT` 各区段，按页面里的顺序），对标准答案与每一种你想得到的「同样好的写法」调用 `PyInteract.blankFeedback(answer, reference, lang)`。
+**不要 `require` `python/core/*.js`**：`require` 与 `node -e` 都定义了 `module`，UMD 外壳走 node 分支，测的不是浏览器跑的那一支（根 `CLAUDE.md`；第 5 期 m7a 终审员用了 `require`，修复者改用裸 vm 重验）。先断言 context 里 `typeof module === 'undefined'`。
+每种写法前面**拼上这个空的缩进**（`b.indent + 写法`，`b` 取自 `Exercise.parse(source).blanks`），并**先断言标准答案本身判对**——这就是这项测量的负控制：不拼缩进时判定器报第 1 行缩进对不上（`lead-indent`），看上去像「钉法漏了」，其实与写法无关（第 5 期 m7b 控制方头一轮这样误判过）：
 - 被判错的等价写法，第 1 级提示有没有钉住？没钉住就是问题。
 - 提示是否逐级更具体，有没有哪一级说出了整行？
 - `notes` / `blurb`（三种模式都显示）有没有逐字写出挖空的行，或示范一个判定器会判错的写法？
@@ -53,6 +55,11 @@
 **随机与 fixture**（本波有才查）：用到随机的 stdlib 层程序是否只构造 `random.Random(<种子>)`、没有模块级 `random.*` 调用、不读时间，构造 `Random` 的程序与清单标的一一对上；
 scipy-stack 层 numpy 的随机数是否只用 `np.random.default_rng(<种子>)`、没有 `np.random.seed` / 模块级 `np.random.*` / `RandomState`（同层若用标准库 `random`，照上一条 stdlib 层查）；讲解里说出的随机结果是否写明「这个种子下」。
 读 `_fixtures/` 的程序：fixture 文件是否都被 git 跟踪（`git ls-files` 对磁盘，门看不见这一项）；讲解逐行抄出的内容拼回去是否与文件逐字节相同。
+
+**逐键**（本波有声明 `chunks` 的程序才做）：每个分段程序至少一段、段尾带空行的段优先，在裸 vm 里照人打的方式逐键驱动——一次一个字符喂 `Trace.create(段参考).update(缓冲)`；
+换行走 `Editor.applyEnter`，与参考下一行的缩进差用退格 / 空格补齐；只打影子层**看得见**的部分（段参考去掉结尾换行），打完最后一个可见行再按一次 Enter，
+之后与页面的 onTyped 一样只在插入时调 `PyInteract.chunkTailFill`。要的结果：`correct === total`、缓冲 === 段参考；负控制：不调 `chunkTailFill` 时段尾带空行的段必须到不了完成。
+整段粘贴测不到这一类问题——第 5 期 #198 评审 I1（段尾空行看不见、逐键打的人永远到不了「段完成」）就是实现者与控制方都用整段粘贴验收、都没看见的。
 
 **门与测量**：每个 P 参照的机制是否与被测程序不同（清单里写好的参照也查，看源码）；构建者报告的变异是否真能让门变红（抽一个自己跑）；`cases` 生成器是否真能走到被测函数的每个返回分支（改掉一个分支的返回值，门必须红）。
 你的变异让门保持绿时，先判断它是不是等价程序（在 `cases` 的定义域里改不了任何答案），再下「门看不见」的结论——构建者报成「门盲点」的，也按这个口径复核。
