@@ -1,6 +1,6 @@
 """Count each word with collections.Counter."""
 
-# >>>BLANK id=import-counter level=1 hint="从 collections 模块里只导入 Counter 这一个名字，之后直接写 Counter，不写 collections.Counter" hintEn="Import just the one name Counter from the collections module, so that afterwards you write Counter rather than collections.Counter"
+# >>> BLANK id=import-counter level=1 hint="从 collections 模块里只导入 Counter 这一个名字，之后直接写 Counter，不写 collections.Counter" hintEn="Import just the one name Counter from the collections module, so that afterwards you write Counter rather than collections.Counter"
 from collections import Counter
 # <<< BLANK
 

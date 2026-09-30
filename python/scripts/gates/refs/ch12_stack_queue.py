@@ -62,12 +62,14 @@ def _bracket_text(rng):
     return (''.join(rng.choice(_OPEN + _CLOSE) for _ in range(rng.randint(0, 10))),)
 
 
-def _expr_tree(rng, depth=0):
-    # 随机表达式树：叶子是 0..20 的整数，内部节点是 (运算符, 左, 右)，只用 + - *。
+def _expr_tree(rng, depth=0, ops='+-*'):
+    # 随机表达式树：叶子是 0..20 的整数，内部节点是 (运算符, 左, 右)，运算符取自 ops。
+    # 缺省只用 + - *：rpn-evaluate 要真的求值，不带 / 就碰不到除以零与小数。
+    # infix-to-rpn 只搬文字、不求值，传 '+-*/'，让 / 的优先级与左结合也被测到。
     # 深度 <= 4（至多 15 个运算符）：参照是递归的，深度远离递归上限。
     if depth >= 4 or rng.random() < (0.15 if depth == 0 else 0.4):
         return rng.randint(0, 20)
-    return (rng.choice('+-*'), _expr_tree(rng, depth + 1), _expr_tree(rng, depth + 1))
+    return (rng.choice(ops), _expr_tree(rng, depth + 1, ops), _expr_tree(rng, depth + 1, ops))
 
 
 def _postorder(node):
@@ -105,7 +107,7 @@ def _rpn_text(rng):
 
 
 def _infix_text(rng):
-    return (_infix(_expr_tree(rng), rng)[0],)
+    return (_infix(_expr_tree(rng, ops='+-*/'), rng)[0],)
 
 
 def _potato_args(rng):

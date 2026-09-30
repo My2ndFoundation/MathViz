@@ -31,7 +31,7 @@ def reverse(head):
         next_node = current.next
         current.next = prev
 # <<< BLANK
-# >>> BLANK id=step level=2 hint="两行，三个指针一起往前挪一格：先让 prev 挪到 current，再让 current 挪到刚才存下的那个节点 || 第二行等号右边是上面存下后继的那个变量" hintEn="Two lines, moving the pointers one place along together: first prev moves to current, then current moves to the node saved a moment ago || The right-hand side of the second line is the variable that saved the successor above"
+# >>> BLANK id=step level=2 hint="两行，两个指针一起往前挪一格：先让 prev 挪到 current，再让 current 挪到刚才存下的那个节点 || 第二行等号右边是上面存下后继的那个变量" hintEn="Two lines, moving the two pointers one place along together: first prev moves to current, then current moves to the node saved a moment ago || The right-hand side of the second line is the variable that saved the successor above"
         prev = current
         current = next_node
 # <<< BLANK
