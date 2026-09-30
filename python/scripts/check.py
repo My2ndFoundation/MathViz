@@ -109,6 +109,7 @@ GATES = [
     ('D·库', 'program_embed_roundtrip_check',  library.program_embed_roundtrip_check),
     ('D·库', 'chapter_manifest_check',         library.chapter_manifest_check),
     ('D·库', 'anchor_check',                   library.anchor_check),
+    ('D·库', 'chunks_check',                   library.chunks_check),
     ('D·库', 'exemption_check',                library.exemption_check),
     ('D·库', 'source_ascii_check',             library.source_ascii_check),
     ('D·库', 'source_bmp_check',               library.source_bmp_check),
