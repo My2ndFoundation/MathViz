@@ -1,6 +1,6 @@
 # Python 子项目 · 第 6 期 · 波 m8b：py-embedded-patterns 程序清单
 
-> 状态：**待审**（2026-09-30，提交 Python编程）。派构建者等 boards PR 与第 5 期收尾 PR 合并（派发简报 §0）。
+> 状态：**已批准**（2026-09-30，Python编程 审定 5704977；裁决见 §8）。派构建者等 boards PR 与第 5 期收尾 PR 合并（派发简报 §0）。
 > 日期：2026-09-30
 >
 > 上游：主规格 §2.2（`py-embedded-patterns` — 非阻塞主循环、按键去抖、环形缓冲、有限状态机、传感器滤波）、
@@ -23,8 +23,8 @@
 `blink-two-rates`、`debounce`、`sensor-smoothing`。
 
 **tag**（全库 grep 过，下列除 `state-machine`（3 处）、`filter`（4 处）、`timer`（2 处）外都是新 tag）：
-`micropython`、`microbit` / `pico`（按 runtime 二选一）、`gpio`、`debounce`、`ring-buffer`、`fsm`、`interrupt`、`uart`、`bytes`、`fixed-point`、`hysteresis`、`non-blocking`。
-其中 `fsm` 与全库已有的 `state-machine` 并存：按派发简报 §2.3 的约定表用 `fsm`，**另挂 `state-machine`**，让按标签筛选能连到 ch21 / ch22 / ch29 的三个状态机程序（提请审定，§5.3）。
+`micropython`、`microbit` / `pico`（按 runtime 二选一）、`gpio`、`debounce`、`ring-buffer`、`state-machine`、`interrupt`、`uart`、`bytes`、`fixed-point`、`hysteresis`、`non-blocking`。
+~~`fsm`~~：**不用**（§8 D3）——状态机程序只挂全库已有的 `state-machine`（ch21 / ch22 / ch29 共 3 处）。
 
 ---
 
@@ -151,3 +151,18 @@ runtime 分配：pico 5、microbit 6。每个程序只用本 runtime 真有的 A
 - `two-leds-nonblocking` 的 `>` 负控制初版只命中 6/200（随机 elapsed 很少恰好凑满周期）；cases 一半改取整除周期的值后 66。`press-classifier-fsm` 同理（20 → 68）。
   构建者写 cases 时照此：**边界要专门造，不靠随机撞**。
 - `debounce-stable-time` 只有 45 次命中（`>` 代 `>=`），低于约 50 的取向；构建者的 cases 要再偏向整除值。
+
+---
+
+## 8. 裁决（2026-09-30，Python编程 审定 5704977）
+
+Python编程 逐程序对过 m8a（`cc212b2` 的 18 个）与全库：无同题（two-leds-nonblocking 是主循环 ticks 调度、m8a `timer-periodic-callback` 是硬件定时器回调；
+ring-buffer-isr-handoff 是 ISR → 主循环交接、m8a `pin-irq-counter` 是中断本身；hysteresis-thermostat 消费温度、m8a `adc-temperature` 做换算）。组名不撞。
+
+- **D1** 逻辑函数收 `elapsed_ms`：**采用**。比派发简报的 `now_ms` 更对（按构造不受回绕影响）——记为「简报被纠正」。
+- **D2** 页名「嵌入式编程模式」/ "Embedded Patterns"：**采用**。
+- **D3** **不并挂**：只用全库已有的 `state-machine`，不新造 `fsm`（简报约定表写 `fsm` 违反「tag 先 grep」，m8a 同样改）。构建者简报的约定表里 `fsm` → `state-machine`。
+- **D4** `two-leds-blocking` 不挂 P：**采用**。
+- **D5** boards 由构建者照考纲对照文件定：**采用**；核不实留 `[]`，依据写到考纲条目编号。
+- `debounce-stable-time` 的 `>` 负控制 45/200 偏低：「cases 偏向整除 `stable_ms` 的 elapsed」写进构建者简报，构建者报告最终命中数。
+- 派构建者等 boards PR 与第 5 期收尾 PR 合并，Python编程 发 SHA。
