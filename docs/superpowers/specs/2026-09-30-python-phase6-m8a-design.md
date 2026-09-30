@@ -121,16 +121,27 @@ ticks 回绕（`elapsed-ticks-diff`）在 200 组里一半专造「正好在回�
 
 ## 5. boards（新规则：不在考纲就不写、按概念判、写依据、拿不准就不写）
 
-考纲对照文件 `docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md` 还没进 main——**本表是待核的候选，默认一律 `[]`**，拿到对照文件后逐条核，核不实就留 `[]`：
+**已核**（2026-09-30，对照 `docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md` 的判定原则 R1–R6，并逐条读了四家官方文件——对照文件的考纲表只收全库已用到的概念，
+位运算、补码、中断三条它还没有，所以回到它列出的官方来源核）：
 
-| 程序 | 候选概念 | 可能点名的考纲（待对照文件核实） |
+| 概念 | AQA 7517 | OCR H446 | Edexcel IAL YCP01 | CIE 9618（2027–29） |
+|---|---|---|---|---|
+| 位运算 / 掩码 | 4.7.3.5 "logical bitwise operators (AND, OR, NOT, XOR), logical shift right, shift left" | 1.4.1(i) "Bitwise manipulation and masks: shifts, combining with AND, OR, and XOR" † | 2.2.2 Bitwise manipulation (logical / arithmetic shift, bit masks AND OR XOR)；7.1.3(d) Bitwise operators | 4.3 Bit manipulation："how bit manipulation can be used to monitor/control a device … Test and set a bit (using bit masking)" |
+| 补码 | 4.5.4.3 "signed binary … two's complement" | 1.4.1(c) "sign and magnitude and two's complement to represent negative numbers" † | 2.1.3 Two's complement representation of signed numbers | 1.1 Data Representation "one's and two's complement representation" |
+| 中断 | 4.7.3.6 "role of interrupts and interrupt service routines (ISRs)" | 1.2.1(c) "Interrupts, the role of interrupts and Interrupt Service Routines (ISR)" † | 11.2.1(e) Interrupt handling in device management；1.2.2(c) | 4.1 CPU Architecture "purpose of interrupts … use of an Interrupt Service handling Routine (ISR)" |
+
+† OCR 三条取自 *Subject content clarification guide* v2（2020）的「规格」栏；对照文件要求 OCR 编号以 **H446 v3.0** 为准，而 v3.0 全文 PDF 超过抓取上限、本会话没读到——**请 Python编程 用 v3.0 核这三条**，核不实就去掉 OCR。
+
+逐程序判定（R1：核心教学点被点名才写）：
+
+| 程序 | 判定 | 依据 |
 |---|---|---|
-| `gpio-bitmask` | 位运算：掩码、移位、与 / 或 / 异或 | AQA / OCR / CIE 的位运算条目 |
-| `radio-packet-bytes` | 有符号整数的补码表示 | AQA / OCR / CIE / Edexcel 的二进制补码条目 |
-| `elapsed-ticks-diff` | 模运算、补码范围 | 同上（补码）；模运算本身不一定点名 |
-| `pin-irq-counter` | 中断的概念 | AQA / OCR / CIE 的中断条目 |
-| `led-image-string` | 二维数组 | 四家都含数组，但本程序的核心是字符串拼接——倾向 `[]` |
-| 其余 13 个 | micro:bit / Pico 硬件 API | 不在任何考纲 → `[]` |
+| `gpio-bitmask` | AQA OCR† Edexcel CIE | 核心就是用掩码置位 / 清零 / 翻转：A 4.7.3.5 · O 1.4.1(i) · E 2.2.2、7.1.3(d) · C 4.3（点名「用位掩码控制设备」，与本程序同义） |
+| `radio-packet-bytes` | AQA OCR† Edexcel CIE | 核心是把有符号温度按一个字节收发、`> 127` 减 256 还原——即 8 位补码：A 4.5.4.3 · O 1.4.1(c) · E 2.1.3 · C 1.1 |
+| `pin-irq-counter` | AQA OCR† Edexcel CIE | 核心是硬件中断与短小的中断处理函数：A 4.7.3.6 · O 1.2.1(c) · E 11.2.1(e) · C 4.1 |
+| `elapsed-ticks-diff` | `[]` | 核心是计数器回绕的环形算术。四家点名的是补码的**表示与换算**、MOD 的**运算符**；读不出它们覆盖「回绕差值」——R5 拿不准不写 |
+| `led-image-string` | `[]` | 核心是把 5×5 亮度表拼成 Image 字符串，教的是字符串格式，不是二维数组本身（R1） |
+| 其余 13 个 | `[]` | micro:bit / Pico 硬件 API、PWM、ADC、舵机、音符频率、倾斜 / 罗盘判定：四家都不点名（R3：库是工具） |
 
 ## 6. 递归
 
