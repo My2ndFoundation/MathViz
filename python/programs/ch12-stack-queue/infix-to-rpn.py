@@ -16,7 +16,7 @@ def to_rpn(expression):
         elif token == "(":
             ops.append(token)
         elif token == ")":
-# >>> BLANK id=until-open level=2 hint="一个 while 的头：只要运算符栈顶还不是左括号就继续。不写 ops and 判空——括号配对的表达式里，左括号一定还在栈里；比较用 !=，字符串照本程序的写法用双引号 || 比较号左边是栈顶那一项（负下标），右边是左括号" hintEn="The head of a while: keep going as long as the top of the operator stack is not an opening bracket. Do not write an ops and emptiness test - in an expression whose brackets match, the opening bracket is certainly still on the stack; compare with !=, and write the string in double quotes like the rest of this program || The left of the comparison is the top item (a negative index), the right is the opening bracket"
+# >>> BLANK id=until-open level=2 hint="一个 while 的头：只要运算符栈顶还不是左括号就继续。不写 ops and 判空——括号配对的表达式里，左括号一定还在栈里；比较用 !=，栈顶那一项写在比较号左边、用负下标取，字符串照本程序的写法用双引号 || 负下标取的是列表的最后一项；比较号右边是只含一个左括号的字符串" hintEn="The head of a while: keep going as long as the top of the operator stack is not an opening bracket. Do not write an ops and emptiness test - in an expression whose brackets match, the opening bracket is certainly still on the stack; compare with !=, with the top item on the left of the comparison taken with a negative index, and write the string in double quotes like the rest of this program || A negative index takes the last item of the list; the right of the comparison is a string holding just an opening bracket"
             while ops[-1] != "(":
 # <<< BLANK
                 output.append(ops.pop())
