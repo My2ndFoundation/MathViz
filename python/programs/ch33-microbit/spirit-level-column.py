@@ -16,7 +16,7 @@ def column(reading):
         reading = HIGH
 # <<< BLANK
     # Cut the 2048 readings into 5 equal strips with whole-number division.
-# >>> BLANK id=strip level=3 hint="一行 return：先算 reading 离 LOW 有多远（括号里 reading 减 LOW），乘以 COLUMNS，再用整除 // 除以 SPAN——按这个顺序写，不用 round()、不用 int() || 先乘后除：先除的话几乎总是 0 || LOW 处得到列 0，HIGH 处得到列 4" hintEn="One return line: first how far reading is from LOW (reading minus LOW, in brackets), times COLUMNS, then whole-number division // by SPAN - written in that order, no round(), no int() || Multiply before you divide: dividing first nearly always gives 0 || At LOW this gives column 0, at HIGH column 4"
+# >>> BLANK id=strip level=3 hint="一行 return：先算 reading 离 LOW 有多远（括号里 reading 减 LOW），乘以 COLUMNS，再用整除 // 除以 SPAN——按这个顺序写，只有这一对括号，不用 round()、不用 int() || 先乘后除：先除的话几乎总是 0 || LOW 处得到列 0，HIGH 处得到列 4" hintEn="One return line: first how far reading is from LOW (reading minus LOW, in brackets), times COLUMNS, then whole-number division // by SPAN - written in that order, with no brackets but that one pair, no round(), no int() || Multiply before you divide: dividing first nearly always gives 0 || At LOW this gives column 0, at HIGH column 4"
     return (reading - LOW) * COLUMNS // SPAN
 # <<< BLANK
 
@@ -26,7 +26,7 @@ def main():
         col = column(accelerometer.get_x())
         display.clear()
         for y in range(5):
-# >>> BLANK id=bar level=1 hint="一行 display.set_pixel：列是 col、行是 y，亮度取最亮" hintEn="One display.set_pixel line: column col, row y, brightness the brightest"
+# >>> BLANK id=bar level=1 hint="一行 display.set_pixel：列是 col、行是 y，亮度取最亮；三个实参都按位置写" hintEn="One display.set_pixel line: column col, row y, brightness the brightest; all three arguments by position"
             display.set_pixel(col, y, 9)
 # <<< BLANK
         sleep(50)

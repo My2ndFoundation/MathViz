@@ -23,6 +23,11 @@ def decode(packet):
     return (packet[0], temp, packet[2])
 
 
+def roundtrip(device, temp, light):
+    # Send and receive in one go: what comes back should be what went out.
+    return decode(encode(device, temp, light))
+
+
 def main():
     radio.on()
     radio.config(group=GROUP)

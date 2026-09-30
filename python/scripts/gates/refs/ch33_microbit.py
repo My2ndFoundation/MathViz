@@ -11,7 +11,7 @@
 （microbit-micropython v2-docs accelerometer.html；文档**没有**写哪个方向的倾斜让 x / y 为正）；
 罗盘 `compass.heading()` 返回「0 到 360 的整数，北为 0、顺时针」（compass.html 原文是 "from 0 to 360"，
 清单写的 0..359——两者都在 `_compass_cases` 的定义域里，360 也当成北）；`radio.receive()` 没有报文时交回 None
-（radio.html）；`music` 的音名以 A4 = 440 Hz 为准（music.html）。这些只影响讲解，不影响参照：参照比的是纯函数。
+（radio.html；`receive_bytes()` 同样）；`music` 的音名以 A4 = 440 Hz 为准（music.html）。这些只影响讲解，不影响参照：参照比的是纯函数。
 
 **entry 不改实参。** 本章 entry 收的是数、字符串、bytes（不可变）与 list（`image_string` 的 5×5 表、
 `count_presses` 的布尔列表）；两者只读不写（`[False] + samples` 是新列表）。构建时逐个用 `copy.deepcopy`
@@ -28,7 +28,12 @@
   **不得当负控制**（裁决 M8A-D7）；截断 `heading // 45` 才是会被抓住的错；
 - `_csv_cases`：三成的组字段数不对（0、1、2、4、5 个字段，含空串；4、5 个各占三份）——`!= 3` 写成 `< 3` / `>= 3` 只在这里露馅；
   参照另会把非整数字段当 None，而被测会抛错：生成器只产出整数字段，所以两者在这条流上一致（守不住「字段不是整数」）；
-- `_bytes_cases`：温度常取 -1、-128、127、0（以及 128 附近）——`> 127` 写成 `>= 127` / `> 128` 在这里露馅；
+- `_roundtrip_cases`：温度常取 -1、-128、127、0、-127、126——decode 的 `> 127` 写成 `>= 127` / `> 128`、
+  encode 的 `% 256` 写成 `% 255` 都在这里露馅（m8a 修复轮实测，见修复报告）。
+  **radio-packet-bytes 的 entry 是往返包装 `roundtrip`**（m8a 终审 I2）：原先 entry 是 `decode`、cases 自己造字节包，
+  encode 那一空除 compile 外无门守（`% 255` 变异门绿）。参照是**恒等**——在定义域（设备号、光线 0..255，
+  温度 -128..127）上「发出去再收回来」就该原样拿回，与被测的取余 / 减 256 毫无共同机制。
+  守不住的：encode 与 decode **同时**错且恰好互相抵消（两个空都写错），以及定义域外的输入（被测本来就不接）；
 - `_note_cases`：七个音名 × 八度 0..8 全定义域均匀抽（63 个组合，全定义域穷举见构建报告）。
 """
 import math
@@ -99,9 +104,9 @@ def _csv_cases(rng):
     return (",".join([str(rng.randint(0, 255)), str(rng.randint(-10, 40)), str(rng.randint(0, 255))]),)
 
 
-def _bytes_cases(rng):
+def _roundtrip_cases(rng):
     temp = rng.choice([rng.randint(-128, 127), -1, -128, 127, 0, -127, 126])
-    return (bytes([rng.randint(0, 255), temp % 256, rng.randint(0, 255)]),)
+    return (rng.randint(0, 255), temp, rng.randint(0, 255))
 
 
 def _note_cases(rng):
@@ -163,11 +168,9 @@ def _parse(message):
         return None
 
 
-def _decode(packet):
-    # 被测：> 127 减 256；参照：int.from_bytes(..., signed=True) 逐字节
-    return (int.from_bytes(packet[0:1], "big"),
-            int.from_bytes(packet[1:2], "big", signed=True),
-            int.from_bytes(packet[2:3], "big"))
+def _roundtrip(device, temp, light):
+    # 被测：decode(encode(...))，% 256 出、> 127 减 256 回；参照：定义域上的恒等——原样交回
+    return (device, temp, light)
 
 
 _A4_OCTAVE = {"C": 261.6256, "D": 293.6648, "E": 329.6276, "F": 349.2282,
@@ -186,6 +189,6 @@ REFERENCES = {
     'spirit-level-column': {'ref': _column, 'cases': _column_cases},
     'compass-point': {'ref': _point, 'cases': _compass_cases},
     'radio-packet-csv': {'ref': _parse, 'cases': _csv_cases},
-    'radio-packet-bytes': {'ref': _decode, 'cases': _bytes_cases},
+    'radio-packet-bytes': {'ref': _roundtrip, 'cases': _roundtrip_cases},
     'music-note-frequency': {'ref': _frequency, 'cases': _note_cases},
 }

@@ -82,8 +82,9 @@ def _ticks_diff(new, old, period):
 
 
 def _apply(mask, ops):
-    # 被测：| & ~ ^ 位运算。参照：拆成 8 个 0/1 的列表逐位改，再按权相加拼回。
-    bits = [(mask >> i) & 1 for i in range(8)]
+    # 被测：| & ~ ^ 位运算。参照：用整除与取余拆成 8 个 0/1 的列表逐位改，再按权相加拼回——
+    # 全程不用位运算（讲解 notes[4] 说「从不用位运算」，m8a 终审 I3 之前拆位用的是 >> 与 &）。
+    bits = [mask // 2 ** i % 2 for i in range(8)]
     for op, bit in ops:
         if op == 'set':
             bits[bit] = 1

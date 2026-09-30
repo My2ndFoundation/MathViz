@@ -1,4 +1,4 @@
-"""Blink the LED from a hardware timer while the main loop does other work."""
+"""Blink the LED from a timer callback while the main loop does other work."""
 from machine import Pin, Timer
 import utime
 

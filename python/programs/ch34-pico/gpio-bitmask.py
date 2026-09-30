@@ -19,7 +19,7 @@ def apply(mask, ops):
         elif op == "toggle":
             mask ^= 1 << bit
         elif op == "invert":
-# >>> BLANK id=invert level=2 hint="一行普通赋值 mask = …：先对 mask 取反（~ 写在 mask 前），再与 0xFF 相与截回一个字节；0xFF 写在右边、用十六进制，不用 ^= 0xFF，不用 255 - mask || Python 的整数没有固定位数，~5 是 -6；和 0xFF 相与才只留下最低的 8 位" hintEn="One plain assignment mask = ...: first take the NOT of mask (~ in front of mask), then AND it with 0xFF to cut it back to one byte; 0xFF on the right, in hex, not ^= 0xFF and not 255 - mask || Python integers have no fixed width, so ~5 is -6; ANDing with 0xFF keeps only the lowest 8 bits"
+# >>> BLANK id=invert level=2 hint="一行普通赋值 mask = …：先对 mask 取反（~ 直接写在 mask 前，~mask 不加括号，整个右边也不加括号），再与 0xFF 相与截回一个字节；0xFF 写在右边、用十六进制，不用 ^= 0xFF，不用 255 - mask || Python 的整数没有固定位数，~5 是 -6；和 0xFF 相与才只留下最低的 8 位" hintEn="One plain assignment mask = ...: first take the NOT of mask (~ straight in front of mask, no brackets round ~mask or round the whole right-hand side), then AND it with 0xFF to cut it back to one byte; 0xFF on the right, in hex, not ^= 0xFF and not 255 - mask || Python integers have no fixed width, so ~5 is -6; ANDing with 0xFF keeps only the lowest 8 bits"
             mask = ~mask & 0xFF
 # <<< BLANK
     return mask
