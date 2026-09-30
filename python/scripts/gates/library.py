@@ -1920,6 +1920,81 @@ def micropython_main_guard_check() -> int:
     return rc
 
 
+# boards 的依据表（用户 2026-09-30 裁决「不在考纲就不写」的数据源，#203 起）。它在仓库根的 docs/ 里，不在 python/ 里：
+# 表是给人核的考纲依据，`chapter.json` 的 boards 是给页面用的值——两份数据，靠这道门保证不漂。
+BOARDS_MAP = PROGRAMS_DIR.parent.parent / 'docs' / 'superpowers' / 'specs' / '2026-09-30-python-boards-syllabus-map.md'
+_MAP_ROW_RE = re.compile(r'^\|\s*(ch\d+)\s*\|\s*`([^`]+)`\s*\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|\s*$')
+
+
+def _map_rows(text: str):
+    """解析附录表：返回 ({id: (章, boards 集合, 概念组, 依据)}, [重复的 id])。纯函数，负控制直接喂文本。"""
+    rows, dupes = {}, []
+    in_appendix = False
+    for line in text.splitlines():
+        if line.startswith('## '):
+            in_appendix = line.startswith('## 附录')
+            continue
+        if not in_appendix:
+            continue
+        m = _MAP_ROW_RE.match(line)
+        if not m:
+            continue
+        chapter, pid, _old, new, group, basis = m.groups()
+        cell = new.replace('**改**', '').replace('`', '').strip()
+        boards = set() if cell in ('[]', '') else set(cell.split())
+        if pid in rows:
+            dupes.append(pid)
+        rows[pid] = (chapter, boards, group.strip(), basis.strip())
+    return rows, dupes
+
+
+def boards_map_check() -> int:
+    """考纲依据表（附录逐程序判定表）与各 chapter.json 的 boards 逐行一致。
+
+    #203 把 boards 改成「按考纲逐个判、附依据」，依据表与 chapter.json 从此是两份数据；复审 S-1 指出没有东西防它们漂：
+    新程序只改 chapter.json、表里不加行，或者改了一边忘了另一边，门都是绿的。这道门要求：id 集合双向相同、
+    章对得上、boards 集合相同（顺序不论）、概念组与依据两栏不为空、没有重复行。
+    """
+    rc = 0
+    if not BOARDS_MAP.is_file():
+        print(f'ERROR: 找不到 boards 依据表 {BOARDS_MAP}——python/ 的 boards 以它为准（#203）', file=sys.stderr)
+        return 1
+    rows, dupes = _map_rows(BOARDS_MAP.read_text(encoding='utf-8'))
+    for pid in sorted(set(dupes)):
+        print(f'ERROR: 依据表里 `{pid}` 出现不止一行', file=sys.stderr)
+        rc = 1
+    seen = set()
+    total = 0
+    for chapter_dir, _data, prog, _py in iter_programs():
+        total += 1
+        pid = prog.get('id')
+        seen.add(pid)
+        name = _pid(chapter_dir, prog)
+        row = rows.get(pid)
+        if row is None:
+            print(f'ERROR: {name} 在依据表附录里没有行——新程序要在 {BOARDS_MAP.name} 附录加一行（boards、概念组、依据）',
+                  file=sys.stderr)
+            rc = 1
+            continue
+        chapter, boards, group, basis = row
+        if not chapter_dir.name.startswith(chapter + '-'):
+            print(f'ERROR: {name} 在依据表里写的章是 {chapter}', file=sys.stderr)
+            rc = 1
+        own = set(prog.get('boards') or [])
+        if own != boards:
+            print(f'ERROR: {name} 的 boards {sorted(own)} ≠ 依据表的 {sorted(boards)}——两边必须一起改', file=sys.stderr)
+            rc = 1
+        if not group or not basis:
+            print(f'ERROR: {name} 在依据表里的概念组或依据是空的', file=sys.stderr)
+            rc = 1
+    for pid in sorted(set(rows) - seen):
+        print(f'ERROR: 依据表里有 `{pid}`，程序库里没有这个程序', file=sys.stderr)
+        rc = 1
+    if rc == 0:
+        print(f'boards 依据：{total} 个程序与 {BOARDS_MAP.name} 附录逐行一致（boards、章、概念组、依据）')
+    return rc
+
+
 def _fixture_run(paras: list, lines: list) -> bool:
     """`lines` 是否作为**连续的若干段、按原顺序、逐段与该行相等**出现在 `paras` 里。"""
     n = len(lines)

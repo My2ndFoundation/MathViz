@@ -709,4 +709,4 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 
 ## 待办
 
-- **加门**：附录表与各 `chapter.json` 的 `boards` 目前靠人同步，没有门守防漂移（复审 S-1，控制方记账，本 PR 不做）。
+- ~~**加门**~~ **已做**：`boards_map_check`（`python/scripts/gates/library.py`，D·库）要求本附录表与各 `chapter.json` 的 `boards` 逐行一致——id 集合双向相同、章对得上、boards 集合相同、概念组与依据不为空、无重复行。**新程序必须在本附录加一行**，否则门红。（复审 S-1。）
