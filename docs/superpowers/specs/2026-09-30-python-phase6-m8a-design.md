@@ -1,6 +1,6 @@
 # Python 子项目 · 第 6 期 · 波 m8a（M8「嵌入式 Python」上半）程序清单
 
-> 状态：**草稿，待审**（清单、§3 边界、§4 时间与回绕、§5 boards、§6 递归需要裁决）。
+> 状态：**已批准**（2026-09-30，Python编程 审，受用户委托；批准时的清单提交 cc212b2）。裁决见 §7。
 > 日期：2026-09-30
 >
 > 上游：
@@ -135,3 +135,19 @@ ticks 回绕（`elapsed-ticks-diff`）在 200 组里一半专造「正好在回�
 ## 6. 递归
 
 无（⟳ 无）。
+
+---
+
+## 7. 裁决记录
+
+| # | 问题 | 决定 |
+|---|---|---|
+| M8A-D1 | 页名 | 「micro:bit」/ micro:bit、「树莓派 Pico」/ Raspberry Pi Pico |
+| M8A-D2 | 组名 | `radio-packet`、`elapsed-time` 全库无撞；与 m8b 的逐程序对照由 Python编程 做 |
+| M8A-D3 | §3.1 分工 | 同意。**边沿检测归本波**：`button-press-edges` 讲上升沿计数与 `is_pressed` / `was_pressed`（不去抖）；m8b 的去抖从「抖动」讲起，讲解指回「micro:bit」页的边沿（Python编程 转告 m8b）。`timer-periodic-callback` 只讲硬件定时器回调、`pin-irq-counter` 只讲中断本身，数据交接归 m8b 环形缓冲 |
+| M8A-D4 | §3.2 位运算 | `gpio-bitmask` 讲（全库首次）；tag 用 `bitwise`（先 grep） |
+| M8A-D5 | §3.3、§3.4 | 同意 |
+| M8A-D6 | §4 时间 | 同意。`ticks_diff`、`duty_u16`、milli-g、航向范围等**据官方文档、本机无法实测**的行为，在 refs 文件头与讲解里标明「据文档、未实测」并给文档出处 |
+| M8A-D7 | compass 等价变异 | `round(h / 45)` 在整数航向上与正确写法等价——写进 refs 文件头，不得当负控制 |
+| M8A-D8 | §5 boards | 默认 `[]`；五个候选拿到 boards PR 的考纲对照文件后逐条核，核不实留 `[]`，依据写到考纲条目编号 |
+| M8A-D9 | §6 递归 | 无 |
