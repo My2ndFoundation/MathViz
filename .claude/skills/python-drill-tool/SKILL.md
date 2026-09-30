@@ -67,6 +67,7 @@ description: >-
 | `requires` 是白名单 `numpy` / `pandas` / `matplotlib` / `scipy` / `pygame` 的子集（可以是空数组） | `program_meta_check` | `requires=… 必须是 … 的子集` |
 | `"tier": "compile-only"`（普通 cpython 程序的例外豁免）必须带非空 `why`，每页至多 2 个 | `exemption_check` | `没有非空的 why` / `有 N 条例外豁免，上限是 2` |
 | 源码里写了 `_fixtures/<名>` 的程序：`notes` 中英两边都写出文件名，并把文件的**每一行各自写成一段、连续、按原顺序**（比较时去掉每行首尾空白）；源码提到 `_fixtures` 却没写全 `_fixtures/<名>`（如 `Path("_fixtures") / "x"`）也算错 | `fixture_notes_check`（#187） | `没有提到文件名` / `没有把 _fixtures/<名> 逐行抄出来……缺这几行` / `不是按原顺序连在一起` / `却没有一处写成 _fixtures/<文件名>` |
+| 每个程序在考纲依据表 `docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md` 的**附录**里有一行（章、`id`、boards、概念组、依据），boards 与 `chapter.json` 相同——**加程序就加行，改 boards 就两边一起改** | `boards_map_check` | `在依据表附录里没有行` / `≠ 依据表的` / `概念组或依据是空的` / `出现不止一行` |
 | MicroPython 程序（`runtime` 以 `micropython` 开头）的模块顶层同样只有 import / def / class / docstring / 常量赋值（调用只许 `const(...)` / `Image(...)`）和恰好一个 `if __name__ == "__main__":`；引脚、显示、无线电、主循环放进 `main()`；property 入口不许碰硬件（门装硬件桩，调用即 `HardwareStubCalled`） | `micropython_main_guard_check`（第 6 期开工前） | `顶层有 … 语句` / `顶层赋值里调用了 …` / `抛错 HardwareStubCalled` |
 | pygame 程序（`requires` 含 `pygame`）的模块顶层只有 import / def / class / docstring / 常量赋值（调用只许 `pygame.Color` / `Rect` / `Vector2`）和恰好一个 `if __name__ == "__main__":`；`pygame.init()`、`set_mode`、时钟、主循环都放进 `main()` | `pygame_main_guard_check`（第 5 期开工前） | `顶层有 … 语句` / `顶层赋值里调用了 …` / `` `if __name__ == "__main__":` 有 N 个，应恰好 1 个`` |
 | 带 `check.property` 的程序在 `gates/refs/` 里**同章文件**有参照 | `algorithm_property_check` | `没有它的参考实现` / `参照却登记在` |

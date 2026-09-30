@@ -70,6 +70,9 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | 数据可视化 | — | — | **未找到**（4.11 Big Data 不含画图） |
 | 事件驱动 / 游戏循环 | — | — | **未找到** |
 | 第三方库（NumPy / pandas / matplotlib / pygame） | — | — | **未找到** |
+| 中断 / ISR | 4.7.3.6 | "Describe the role of interrupts and interrupt service routines (ISRs)" | 点名（第 6 期 m8b 补；`ring-buffer-isr-handoff` 按循环队列判，中断只是用） |
+| 传感器 / ADC | 4.5.6.3 | "Know that ADCs are used with analogue sensors." | 点名传感器与 ADC 本身；**滤波算法未点名**（第 6 期 m8b 补） |
+| 去抖、非阻塞主循环、滑动平均 / 中值 / 定点 EMA 滤波、串口分帧、滞回 | — | — | **未找到**（第 6 期 m8b 补） |
 
 ## 二、OCR H446（Version 3.0，2026-04）
 
@@ -100,6 +103,8 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | 异常处理 | — | — | **未找到**（v3.0 全文检索，只有附录里一处 "with the exception of"） |
 | 有限状态机、正则、逆波兰、集合运算 | — | — | **未找到** |
 | 统计、矩阵运算、向量、数据可视化、事件驱动、第三方库 | — | — | **未找到** |
+| 中断 / ISR | 1.2.1(c) | "Interrupts, the role of interrupts and Interrupt Service Routines (ISR)" | 点名（第 6 期 m8a 核；m8b 按循环队列判，中断只是用） |
+| 缓冲、传感器、去抖、非阻塞主循环、滤波、串口分帧、滞回 | — | — | **未找到**（1.2.1(e) 只点名 embedded OS；第 6 期 m8b 补） |
 
 ## 三、Edexcel / Pearson — International A Level Computer Science（YCP01）
 
@@ -133,6 +138,9 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | RLE | 21.2.2 | "Run-length encoding compression algorithm" | 点名 |
 | SQLite | 8.3 | "Methods to retrieve data from an SQLite database" | 点名 |
 | 有限状态机、逆波兰、词法分析、JSON、向量点积、统计（除集中趋势）、事件驱动、pygame | — | — | **未找到** |
+| 嵌入式系统部件（传感器、执行器、ADC） | 11.1.5 | "Embedded systems: Hardware components … Sensors … Actuators … Analogue-digital converter" | 点名部件本身；**控制逻辑、滤波算法未点名**（第 6 期 m8b 补） |
+| 缓冲、I/O 中断 | 11.2.1(c)(e) | "Role of buffering"；"Interrupt handling in device management" | 理论层（为什么要缓冲）；`uart-line-assembler` 的核心是按分隔符分帧，按 R1 / R5 不写（第 6 期 m8b 补，列入「拿不准」） |
+| 去抖、非阻塞主循环、滑动平均 / 中值 / 定点 EMA 滤波、串口分帧、滞回 | — | — | **未找到**（第 6 期 m8b 补） |
 | 规格没附的东西 | — | Unit 2 / 4 的 *Programming Language Subset (PLS)* 文档 | IAL 版 PLS **未找到**（只找到 GCSE 1CP2 的） |
 
 ## 四、CIE 9618（2027–2029）
@@ -160,6 +168,10 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | 回归 | 18.1 | "back propagation of errors and regression methods in machine learning" | 点名（**AI / 机器学习语境**下；最小二乘直线按此写 CIE） |
 | 优先队列、堆、双端队列、向量、矩阵运算、正则、JSON、其余统计、数据可视化、事件驱动、第三方库 | — | — | **未找到**（11.1 "library routines" 只是泛称） |
 | 作用域（局部 / 全局） | — | — | **未找到**（11.3 只有 procedure / function / parameter / by value / by reference） |
+| 中断 / ISR | 3.1 后「interrupts」 | "Show understanding of the purpose of interrupts … use of an Interrupt Service handling Routine" | 点名（第 6 期 m8b 补；按循环队列判，中断只是用） |
+| 缓冲 | 3.1 | "Show understanding of the use of buffers" | 理论层；`uart-line-assembler` 按 R1 / R5 不写（第 6 期 m8b 补，列入「拿不准」） |
+| 监控与控制系统 | 3.1 | "monitoring and control systems … use of sensors … actuators … importance of feedback" | 点名；佐证 `hysteresis-thermostat` 的 C（它已因 12.2 状态转移写 C）（第 6 期 m8b 补） |
+| 去抖、非阻塞主循环、滑动平均 / 中值 / 定点 EMA 滤波、串口分帧 | — | — | **未找到**（第 6 期 m8b 补） |
 
 ## 判定原则
 
@@ -200,6 +212,7 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 13. **`money-in-pence` 与 `money-decimal`** 核心相同（二进制浮点不精确），同判 AEC。
 14. **`strings-are-immutable` 判 `[]`**：Edexcel 20.1.2(d) "Immutable variable" 与 AQA 4.11 的 immutable data structures 都在函数式编程语境下，说的不是字符串不可变，按 R5 不写（控制方裁决）。
 15. **`return-several-values` 写 AOE**：AQA 4.1.1.12 标题 "Returning a value/values from a subroutine" 明写多个返回值；`swap-two-tuple` 教的是元组本身，只写 OE。
+16. **`uart-line-assembler` 判 `[]`**（第 6 期 m8b）：Edexcel IAL 11.2.1(c) "Role of buffering"、CIE 3.1 "use of buffers" 点名的是缓冲的作用（理论），程序的核心是按分隔符把字节流切成行；按 R1 / R5 不写。若认为缓冲拼行就是缓冲，改成 Edexcel CIE。
 
 ## 计数
 
@@ -662,7 +675,18 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | ch32 | `invaders-full` | AQA OCR Edexcel CIE | `[]` **改** | pygame-game | 完整小游戏 Space Invaders：pygame / 游戏循环 / 事件驱动四家都未点名 |
 | ch32 | `bullet-cooldown` | AQA OCR Edexcel CIE | `[]` **改** | pygame-game | 开火冷却计时：pygame / 游戏循环 / 事件驱动四家都未点名 |
 | ch32 | `lives-and-invulnerability` | AQA OCR Edexcel CIE | `[]` **改** | pygame-game | 生命与无敌时间：pygame / 游戏循环 / 事件驱动四家都未点名 |
+| ch35 | `two-leds-blocking` | — | `[]` | embedded-loop | 阻塞主循环（sleep 拖住另一盏灯）：主循环 / 调度四家都未点名 |
+| ch35 | `two-leds-nonblocking` | — | `[]` | embedded-loop | 非阻塞主循环、累加器调度：四家都未点名（同 pygame 游戏循环的判法） |
+| ch35 | `debounce-counter` | — | `[]` | debounce | 按连续样本数去抖：四家都未点名 |
+| ch35 | `debounce-stable-time` | — | `[]` | debounce | 按保持时长去抖：四家都未点名 |
+| ch35 | `ring-buffer-isr-handoff` | — | AQA OCR Edexcel CIE | queue | 循环队列（R4 按 ADT 判；满时覆盖最旧）：A 4.2.2.1 circular · O 1.4.2(c) using arrays · E 14.1.5、18.2.1 · C 10.4 queue implemented using arrays；中断（A 4.7.3.6 · O 1.2.1(c) · E 11.2.1(e) · C 3.1）只是用 |
+| ch35 | `uart-line-assembler` | — | `[]` | embedded-io | 串口字节流按分隔符分帧：四家未点名；E 11.2.1(c)、C 3.1 的缓冲是理论层，按 R1 / R5 不写（见「拿不准」16） |
+| ch35 | `moving-average-window` | — | `[]` | sensor-smoothing | 滑动窗口均值滤波：四家未点名（传感器 / ADC 本身 A 4.5.6.3、E 11.1.5 点名，滤波算法未点名；E 18.1.4(b) 集中趋势在数据科学语境，按 R5 不套用） |
+| ch35 | `median-filter-spikes` | — | `[]` | sensor-smoothing | 三点中值去尖峰：四家未点名（理由同上） |
+| ch35 | `ema-fixed-point` | — | `[]` | sensor-smoothing | 定点指数滑动平均（`>>` 只是用，R1）：四家未点名 |
+| ch35 | `press-classifier-fsm` | — | AQA CIE | fsm | 短按 / 长按 / 双击的状态转移：A 4.4.2.1 FSM · C 12.2 state-transition diagrams；OCR、Edexcel 未点名 |
+| ch35 | `hysteresis-thermostat` | — | AQA CIE | fsm | 两态 + 越界事件的状态转移：A 4.4.2.1 FSM · C 12.2（另有 C 3.1 monitoring and control systems / feedback 佐证）；OCR、Edexcel 未点名，E 11.1.5 只点名部件 |
 
 ## 待办
 
-- **加门**：附录表与各 `chapter.json` 的 `boards` 目前靠人同步，没有门守防漂移（复审 S-1，控制方记账，本 PR 不做）。
+- ~~**加门**~~ **已做**：`boards_map_check`（`python/scripts/gates/library.py`，D·库）要求本附录表与各 `chapter.json` 的 `boards` 逐行一致——id 集合双向相同、章对得上、boards 集合相同、概念组与依据不为空、无重复行。**新程序必须在本附录加一行**，否则门红。（复审 S-1。）
