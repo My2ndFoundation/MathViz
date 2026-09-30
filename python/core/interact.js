@@ -11,7 +11,7 @@
    导出的纯函数：filterPrograms / copyPayload / requirementLine / hintAt /
    panelLineNotes / clearScope / variantsOf / blankFeedback / traceStates，以及分段临摹的
    chunkSegments / encodeChunkDraft / decodeChunkDraft / chunkDoneFlags / chunkTotals /
-   shouldSaveChunked。
+   shouldSaveChunked / chunkTailFill / chunkResumedAny。
    唯一带 DOM 的导出是 mount()，它在没有根节点时当场抛（node 下测得到这一条）。
 
    ── 剪贴板里只有纯源码 ──────────────────────────────────────────────
@@ -906,6 +906,48 @@
     };
   }
 
+  /* chunkTailFill(reference, typed) → string | null
+
+     段尾空行自动补齐（评审 I1，控制方裁决）。「段间空行归前一段」（C1）让第 1、2 段的参考
+     以 `\n\n\n` 结尾——影子层在最后一个可见行之后什么都不画，逐键打的人**看不见也打不到**
+     那两个空行（Enter 的自动缩进还会在空行里留下几个空格，又是一处首次错误），于是 ✓、
+     「下一段」、全程成绩全都挂在一个她做不到的条件上。
+
+     判据：她打的内容以「参考去掉尾部换行」（body）开头，余下的部分由**至少一个**换行与自动
+     缩进留下的空格组成，且换行数不超过参考尾部的换行数——即她打完了本段最后一个非空行**并按了
+     Enter**。此时返回**完整的段参考**，调用方用它替换缓冲；否则 null。
+     为什么非要那一下 Enter（不在「刚好等于 body」时就补）：打完一行之后按 Enter 是手的惯性；
+     若先补齐，她那一下 Enter 就会多出一行（「你比参考多了 1 行」、复制出去多一个空行）。
+     不分段时整段程序的结尾换行同样要她自己按，口径一致。空行不是她的练习，
+     补进去之后各段拼回去仍逐字节等于 clean。trace.js 不改：补齐后的缓冲照常 update。
+     调用方只在**插入**（缓冲变长）时调它：删除时也补，退格就删不掉那几个空行了。 */
+  function chunkTailFill(reference, typed) {
+    var ref = String(reference == null ? '' : reference);
+    var s = String(typed == null ? '' : typed);
+    var body = ref.replace(/\n+$/, '');
+    if (body === ref || body === '') { return null; }
+    if (s.length < body.length || s.slice(0, body.length) !== body) { return null; }
+    var rest = s.slice(body.length);
+    if (!/^(\n *)+$/.test(rest)) { return null; }
+    var nl = rest.split('\n').length - 1;
+    if (nl > ref.length - body.length) { return null; }
+    return ref;
+  }
+
+  /* chunkResumedAny(runs, typed) → boolean
+     全程成绩为什么不记，要**说出来**（评审 I2）：某段的 run 是 resumed，**或者**某段缓冲
+     非空却还没有 run（刷新后从草稿恢复、还没切过去——那段的历史已经不在任何 session 里，
+     shouldSaveChunked 也因为它没有 run 而不写）。任一成立，全程就不计，页面要写明。 */
+  function chunkResumedAny(runs, typed) {
+    var r = runs || [], ty = typed || [];
+    var n = Math.max(r.length, ty.length);
+    for (var i = 0; i < n; i++) {
+      if (r[i] && r[i].resumed) { return true; }
+      if (!r[i] && typeof ty[i] === 'string' && ty[i] !== '') { return true; }
+    }
+    return false;
+  }
+
   /* shouldSaveChunked(runs, stats, n) → boolean
      全程成绩该写进 progress 吗？**N 段都在干净的 run 里打完**才算：
        · 每一段都有 run，且没有一段 resumed（某段的 run 创建时缓冲非空）——与不分段时
@@ -1051,12 +1093,12 @@
     '.tok-builtin{color:#67e8f9}.tok-softkw{color:#a5b4fc}.tok-name{color:#e2e8f0}',
     '.tok-decorator{color:#bef264}',
     /* ---- 分段临摹的段条：永不换行（设计 §6.2）。窄屏不靠调常量，而是让标题**可以缩**：
-       按钮与说明文字 min-width:0 + 省略号，上一段 / 下一段两个按钮 flex:0 0 auto 不缩。
+       按钮与说明文字 min-width:0 + 省略号，上一段 / 下一段两个按钮 flex:0 0 auto 不缩、排在最前。
        它是顶栏下面独立的一行，所以挤不掉顶栏里现有的按钮。 ---- */
     '.py-chunkbar{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;overflow:hidden;',
     '  padding:5px 12px;border-bottom:1px solid var(--panel-line,rgba(148,163,184,.16))}',
-    '.py-chunk-label{flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-    '.py-chunk-seg{flex:0 1 auto;min-width:2.5em;max-width:16em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+    '.py-chunk-label{flex:0 1000 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+    '.py-chunk-seg{flex:0 1 auto;min-width:0;max-width:16em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
     '.py-chunk-nav{flex:0 0 auto;white-space:nowrap}',
     '.py-chunk-go{color:#05070d;background:var(--py-accent);border-color:var(--py-accent)}',
     '@media (max-width:880px){.py-picker{flex-basis:170px}.py-panel{display:none}}'
@@ -1656,7 +1698,12 @@
     /* 切到第 k 段。缓冲在 S.chunk.typed 里，切走不丢、切回来原样还在；段号跟着草稿
        落盘，刷新后回到同一段（设计 §6.3）。 */
     function setChunk(k) {
-      if (!S.chunk || k < 0 || k >= S.chunk.segs.length || k === S.chunk.seg) { return; }
+      if (!S.chunk || k < 0 || k >= S.chunk.segs.length || k === S.chunk.seg) {
+        /* 点的是当前段：焦点也要还给输入层——留在按钮上的话，她接着打 1 / 2 / 3 / [ / ]
+           会切模式、换题（评审 m2）。 */
+        if (traceUI && traceUI.input.focus) { traceUI.input.focus(); }
+        return;
+      }
       S.chunk.typed[S.chunk.seg] = S.typed;
       S.chunk.seg = k;
       S.typed = S.chunk.typed[k];
@@ -1797,8 +1844,18 @@
 
     function onTyped() {
       if (!traceUI) { return; }
+      var before = S.typed;
       S.typed = traceUI.input.value;
       if (S.chunk) {
+        /* 段尾空行自动补齐（见 chunkTailFill）：只在插入时。 */
+        if (S.typed.length > before.length) {
+          var filled = chunkTailFill(traceUI.reference, S.typed);
+          if (filled !== null && filled !== S.typed) {
+            traceUI.input.value = filled;
+            traceUI.input.setSelectionRange(filled.length, filled.length);
+            S.typed = filled;
+          }
+        }
         S.chunk.typed[S.chunk.seg] = S.typed;
         S.chunk.legacy = false;   /* 她打下了第一个字：从此按分段草稿存 */
       }
@@ -1814,7 +1871,11 @@
       if (S.typed === '') {
         wipe(traceUI.typed);
         if (statsBox) { wipe(statsBox); }
-        if (S.chunk) { renderChunkWhole(); }
+        if (S.chunk) {
+          /* 这一段被删空了：它的 stats 不再成立（评审 m1），✓ 与「全程 k / N」跟着撤。 */
+          S.chunk.stats[S.chunk.seg] = null;
+          if (renderChunkWhole().join(',') !== S.chunk.flagSig) { renderChunkBar(); }
+        }
         return;
       }
       var res = traceUI.run.session.update(S.typed);
@@ -1908,7 +1969,7 @@
       var run = C.runs[k];
       if (run && run.resumed) {
         statsBox.appendChild(h('span', 'py-warn', t('resumed', S.lang)));
-      } else if (C.runs.some(function (r) { return r && r.resumed; })) {
+      } else if (chunkResumedAny(C.runs, C.typed)) {
         statsBox.appendChild(h('span', 'py-warn', t('chunkAnyResumed', S.lang)));
       }
       var flags = renderChunkWhole();
@@ -1974,11 +2035,17 @@
       var label = h('span', 'py-pip py-chunk-label',
         ts('chunkLabel', S.lang, [C.seg + 1, C.segs.length, curTitle, cur.fromLine, cur.toLine]));
       label.title = label.textContent;
-      chunkBar.appendChild(label);
 
+      /* 上一段 / 下一段排在**最前**（评审 m4）：段条放不下时 overflow:hidden 裁的是行尾，
+         行尾放的是可以被裁的东西（逐段按钮与「下一段」的功能重复），导航按钮永远看得见。
+         收缩次序由 flex-shrink 决定：说明文字先缩，逐段按钮再缩，导航按钮不缩。 */
       var prevB = btn('py-btn py-chunk-nav', t('chunkPrev', S.lang), function () { setChunk(C.seg - 1); });
       if (C.seg === 0) { prevB.disabled = true; }
       chunkBar.appendChild(prevB);
+      var nextB = btn('py-btn py-chunk-nav', t('chunkNext', S.lang), function () { setChunk(C.seg + 1); });
+      if (C.seg === C.segs.length - 1) { nextB.disabled = true; }
+      chunkBar.appendChild(nextB);
+      chunkBar.appendChild(label);
       C.segs.forEach(function (sg, i) {
         var title = pick(sg.title, S.lang);
         var b = btn('py-btn py-chunk-seg', (flags[i] ? '✓ ' : '') + (i + 1) + ' ' + title,
@@ -1987,9 +2054,6 @@
         b.setAttribute('aria-pressed', i === C.seg ? 'true' : 'false');
         chunkBar.appendChild(b);
       });
-      var nextB = btn('py-btn py-chunk-nav', t('chunkNext', S.lang), function () { setChunk(C.seg + 1); });
-      if (C.seg === C.segs.length - 1) { nextB.disabled = true; }
-      chunkBar.appendChild(nextB);
     }
 
     /* ================= 顶栏 / 底栏 / 讲解面板 ================= */
@@ -2342,6 +2406,8 @@
     chunkDoneFlags: chunkDoneFlags,
     chunkTotals: chunkTotals,
     shouldSaveChunked: shouldSaveChunked,
+    chunkTailFill: chunkTailFill,
+    chunkResumedAny: chunkResumedAny,
     STYLE_CSS: CSS,
     LEVELS: LEVELS,
     KINDS: KINDS,

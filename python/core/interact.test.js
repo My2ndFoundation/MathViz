@@ -691,17 +691,20 @@ const CH3 = [
   T.eq(segs && segs.map(function (g) { return g.text; }).join(''), clean, '拼接等于 clean 而不是原文');
 })();
 
-/* 组 4 · 负控制（设计 §3）：把段间空行改成「不属于任何段」——闭区间 from…to——
-   拼接断言必须能看见它。这里不改 chunkSegments，只就地算一份闭区间的切法，
-   用 wouldPass 证明「拼接 === clean」这条断言对它是红的。 */
+/* 组 4 · 首尾相接（设计 §3 的负控制，评审 m6 改成调真函数）：每段 end === 下一段 start、
+   首段 start === 0、末段 end === 全长——段间空行必须属于某一段。把 chunkSegments 改成
+   闭区间（丢段间空行）时，这里直接变红。 */
 (function () {
-  const lines = CLEAN3.split('\n');
-  const closed = CH3.map(function (c) {
-    const f = lines.indexOf(c.from), to = lines.indexOf(c.to);
-    return lines.slice(f, to + 1).join('\n') + '\n';
-  }).join('');
-  T.ok(!T.wouldPass(closed, CLEAN3), '闭区间切法丢掉段间空行：拼接断言对它是红的');
-  T.ok(closed.length < CLEAN3.length, '闭区间确实少了字符（丢的正是那几个空行）');
+  [[CLEAN3, CH3], [CLEAN3, [CH3[0], CH3[2]]]].forEach(function (pair, n) {
+    const segs = PI.chunkSegments(pair[0], pair[1]);
+    T.ok(Array.isArray(segs), '首尾相接 #' + n + '：解析出来');
+    if (!segs) { return; }
+    T.eq(segs[0].start, 0, '首尾相接 #' + n + '：首段从 0 起');
+    T.eq(segs[segs.length - 1].end, pair[0].length, '首尾相接 #' + n + '：末段到全长');
+    for (let i = 0; i + 1 < segs.length; i++) {
+      T.eq(segs[i].end, segs[i + 1].start, '首尾相接 #' + n + '：第 ' + (i + 1) + ' 段的 end === 下一段的 start');
+    }
+  });
 })();
 
 /* 组 5 · 分段草稿的编解码 */
@@ -764,6 +767,136 @@ const CH3 = [
        '分段复制：各段缓冲按段序拼接，她只打了前两段就只有前两段');
   T.eq(PI.copyPayload('trace', prog, { typedChunks: segs.map(function (g) { return g.text; }) }), CLEAN3,
        '全部段打完，复制出来逐字节等于 clean 文本');
+})();
+
+/* ======================================================================
+   评审修复轮（I1 / I2 / m7）
+   ====================================================================== */
+const TR = require('./trace.js');
+const ED = require('./editor.js');
+const fs = require('fs');
+const path = require('path');
+
+/* 逐键的「人手」驱动：一次只改一个字符，每次改完都 update；Enter 走 Editor.applyEnter
+   （自动缩进），自动缩进比参考多就逐个退格、少就补空格——就是影子层前面一个人会做的事。
+   段尾的空行影子层看不见，所以她**不打**；打完最后一个非空行按一下 Enter。
+   opts.fill 模拟 onTyped 里的段尾补齐（只在插入时）。 */
+function humanTrace(ref, opts) {
+  const sess = TR.create(ref);
+  let value = '';
+  let res = sess.update('');
+  function commit(next) {
+    const before = value;
+    value = next;
+    if (opts.fill && value.length > before.length) {
+      const f = PI.chunkTailFill(ref, value);
+      if (f !== null) { value = f; }
+    }
+    res = sess.update(value);
+  }
+  ref.replace(/\n+$/, '').split('\n').forEach(function (line, i) {
+    if (i > 0) { commit(ED.applyEnter(value, value.length).value); }
+    const want = line.length - line.replace(/^ +/, '').length;
+    let have = value.length - (value.lastIndexOf('\n') + 1);
+    while (have > want) { sess.noteBackspace(); commit(value.slice(0, -1)); have--; }
+    for (const ch of line.slice(have)) { commit(value + ch); }
+  });
+  if (opts.finalEnter !== false) { commit(ED.applyEnter(value, value.length).value); }
+  return { value: value, stats: res.stats };
+}
+
+/* 组 8 · 段尾空行自动补齐（I1） */
+(function () {
+  T.eq(PI.chunkTailFill('a\n\n\n', 'a'), null, '还没按 Enter：不补（补了她那一下 Enter 就会多出一行）');
+  T.eq(PI.chunkTailFill('a\n\n\n', 'a\n'), 'a\n\n\n', '打完最后一行按了 Enter：补齐尾部空行');
+  T.eq(PI.chunkTailFill('    a\n\n\n', '    a\n    '), '    a\n\n\n', '自动缩进留下的空格一并换掉');
+  T.eq(PI.chunkTailFill('a\n\n\n', 'a\n\n'), 'a\n\n\n', '自己打了一个空行：补齐剩下的');
+  T.eq(PI.chunkTailFill('a\n\n\n', 'a\n\n\n'), 'a\n\n\n', '已经齐了：返回同一份');
+  T.eq(PI.chunkTailFill('a\n\n\n', 'a\n\n\n\n'), null, '换行比参考多：不补（那是她多打的）');
+  T.eq(PI.chunkTailFill('a\n\n\n', 'b\n'), null, '最后一行不对：不补');
+  T.eq(PI.chunkTailFill('a\nb\n\n', 'a\n'), null, '还没打到最后一个非空行：不补');
+  T.eq(PI.chunkTailFill('a\n\n\n', 'a\n  x'), null, '空行里打了别的东西：不补');
+  T.eq(PI.chunkTailFill('a', 'a\n'), null, '参考不以换行结尾：无可补');
+  T.eq(PI.chunkTailFill('print(x)\n', 'print(x)\n        '), 'print(x)\n', '末段只差结尾换行（自动缩进留了 8 格）：同样补');
+
+  /* 逐键打真实的 library-loans 三段（从磁盘读 .py 与 chapter.json，经 Exercise.clean 与
+     chunkSegments，跟页面同一条路）。 */
+  const dir = path.join(__dirname, '..', 'programs', 'ch23-systems');
+  const chapter = JSON.parse(fs.readFileSync(path.join(dir, 'chapter.json'), 'utf8'));
+  const prog = chapter.programs.filter(function (x) { return x.id === 'library-loans'; })[0];
+  const clean = EX.clean(fs.readFileSync(path.join(dir, 'library-loans.py'), 'utf8'));
+  const segs = PI.chunkSegments(clean, prog && prog.chunks);
+  T.ok(Array.isArray(segs) && segs.length === 3, 'library-loans 声明了 3 段且解析得出');
+  if (!segs) { return; }
+  T.ok(/\n\n\n$/.test(segs[0].text) && /\n\n\n$/.test(segs[1].text),
+       '前提：第 1、2 段的参考以两个空行收尾（没有这一条，下面的断言测不到 I1）');
+
+  const without = humanTrace(segs[0].text, { fill: false });
+  T.ok(without.stats.correct < without.stats.total,
+       '对照：不补齐时逐键打完第 1 段，段不算完成（就是评审 I1 的症状——驱动看得见它）');
+
+  const typed = [];
+  segs.forEach(function (sg, i) {
+    const r = humanTrace(sg.text, { fill: true });
+    typed.push(r.value);
+    T.ok(r.stats.total > 0 && r.stats.correct === r.stats.total,
+         '逐键打完第 ' + (i + 1) + ' 段并按 Enter：段完成（correct === total）');
+    T.eq(r.value, sg.text, '第 ' + (i + 1) + ' 段的缓冲补齐后逐字节等于段参考');
+    T.eq(r.stats.lineDelta, 0, '第 ' + (i + 1) + ' 段不多不少一行');
+  });
+  T.eq(PI.copyPayload('trace', { source: '' }, { typedChunks: typed }), clean,
+       '三段逐键打完，拼回去逐字节等于 clean（空行不是她的练习，但也没丢）');
+
+  const noEnter = humanTrace(segs[0].text, { fill: true, finalEnter: false });
+  T.ok(noEnter.stats.correct < noEnter.stats.total, '最后一行打完还没按 Enter：还不算完成');
+})();
+
+/* 组 9 · 全程为什么不记，要说出来（I2） */
+(function () {
+  const ref = 'x\n';
+  const fresh = function () { return PI.newRun('p', ref, ''); };
+  T.eq(PI.chunkResumedAny([fresh(), fresh()], ['x\n', 'x\n']), false, '每段都有干净的 run：不提示');
+  T.eq(PI.chunkResumedAny([fresh(), PI.newRun('p', ref, 'x')], ['x\n', 'x\n']), true, '有一段 run 是 resumed：提示');
+  T.eq(PI.chunkResumedAny([fresh()], ['x\n', 'x\n']), true,
+       '刷新后有缓冲、还没有 run 的段：提示（shouldSaveChunked 因它不写，页面要说）');
+  T.eq(PI.chunkResumedAny([fresh(), undefined], ['x\n', 'x\n']), true, '稀疏数组里的空位同样算没有 run');
+  T.eq(PI.chunkResumedAny([fresh()], ['x\n', '']), false, '没有 run 但缓冲是空的段：不是 resumed');
+  T.eq(PI.chunkResumedAny([], ['', '', '']), false, '什么都还没打：不提示');
+  /* 与 shouldSaveChunked 同向：提示的情形下全程一定不写 */
+  const done = { total: 2, correct: 2 };
+  T.ok(!PI.shouldSaveChunked([fresh()], [done], 2) && PI.chunkResumedAny([fresh()], ['x\n', 'x\n']),
+       '不写成绩的那一种情形，提示条件也成立');
+})();
+
+/* 组 10 · chunkTotals 吃真的 Trace stats（m7）：trace.js 若给 stats 字段改名，这里会红，
+   而不是页面上的 cpm 静默变成 0。假时钟每次 update 前进 100 ms（远小于空闲剔除阈值）。 */
+(function () {
+  let now = 1000;
+  TR._useClock(function () { return now; });
+  try {
+    const feed = function (ref, steps) {
+      const s = TR.create(ref);
+      let st = null;
+      steps.forEach(function (v) {
+        if (v === null) { s.noteBackspace(); return; }
+        st = s.update(v).stats;
+        now += 100;
+      });
+      return st;
+    };
+    /* 段 A 'ab\n'：3 次 update，活跃 200 ms，0 错；段 B 'c\n'：先错打 x、退格、再打对，
+       4 次 update（'x' / '' / 'c' / 'c\n'），活跃 300 ms，1 错。
+       手算：accuracy = (3 − 0 + 2 − 1) / 5 = 0.8；cpm = 5 / (500 / 60000) = 600。 */
+    const A = feed('ab\n', ['a', 'ab', 'ab\n']);
+    const B = feed('c\n', ['x', null, '', 'c', 'c\n']);
+    T.eq([A.correct, A.total, A.errors, A.elapsedMs], [3, 3, 0, 200], '真 stats：段 A 的字段与手算一致');
+    T.eq([B.correct, B.total, B.errors, B.elapsedMs], [2, 2, 1, 300], '真 stats：段 B 的字段与手算一致');
+    const sum = PI.chunkTotals([A, B]);
+    T.eq(sum.accuracy, 0.8, '真 stats 汇总：accuracy = 0.8');
+    T.eq(sum.cpm, 600, '真 stats 汇总：cpm = 600');
+  } finally {
+    TR._useClock(function () { return Date.now(); });
+  }
 })();
 
 T.report('interact');
