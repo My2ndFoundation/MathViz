@@ -76,7 +76,7 @@
   第 5 期清单写的 `Color.lerp` 公式错了，起草原型 200/200 是因为 t 只取了 0 / 0.25 / 0.5 这类「好看」的值；只放开 t 的随机，新旧两个参照都绿（m7a 终审 I1）。
   简报或清单里写的「实测行为」你也要在边界上复测一次；与你实测不符就上报（第 5 期 m7a 的 basics 构建者就是这样抓到控制方的公式错）。
 - **pygame 与 MicroPython 程序不写 `run` 字段**（门对它们只 compile，没有可比的 stdout）。pygame 程序交付前在你的 worktree 上跑活体跑帧：
-  `python3 .claude/skills/python-content-wave/live-frames.py --self-test`（三道对照都如期才算数），再 `… live-frames.py --repo <你的 worktree 绝对路径> --chapters {{chNN-slug}}`，末行写进报告。
+  `python3 .claude/skills/python-content-wave/live-frames.py --self-test`（四道对照都如期才算数：OK / SHORT / HANG / ERROR），再 `… live-frames.py --repo <你的 worktree 绝对路径> --chapters {{chNN-slug}}`，末行写进报告。
 - 用判定器（`PyInteract.blankFeedback`）试写法时，**每种写法前面都拼上这个空的缩进**（`b.indent + 写法`，`b` 是 `Exercise.parse` 交回的空），并先断言标准答案本身判对——
   不拼缩进时判定器报第 1 行缩进对不上（`lead-indent`），与写法无关（第 5 期 m7b 控制方头一轮把这当成了「钉法漏了」）。判定器在 node 的**裸 `vm` context** 里加载页面内联的 core 调，不用 `require`（`require` 走 node 分支）。
 - 判「全是数字」用 `isdecimal()`，不用 `isdigit()`（`'²'` 过得了 `isdigit`，`int()` 却会抛错）。新造 `tags` 之前先 grep 全库已有写法，跟已有的走。

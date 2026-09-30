@@ -14,7 +14,9 @@ node 裸 vm context——走浏览器分支，不走 node 分支，见根 CLAUDE
 负控制（内建，每个程序都做）：第一个空填成 `pass` 的复制内容。第 1 道对它的判别力按层不同——
 m7a 实测 pygame 跑帧只抓到 1/6（空多在只有事件或碰撞才走到的分支里），第 2 道抓到 5/6；所以两道的命中数分开报。
 
-用法（只读仓库；临时文件都在系统临时目录）：
+跑帧用 live-frames.py 的同一个 run()：不到 N 帧就返回判 SHORT，不算通过（第 5 期收尾评审 I3）。
+
+用法（只读仓库；临时文件都在系统临时目录，正常结束与 node 取内容失败时都会删掉；被 SIGKILL 时可能留下一个 copyrun-exercise-*.js，无害）：
   python3 copyrun.py --repo <worktree 绝对路径> --chapters ch29-pygame-basics ch30-pygame-sprites [--seed 20260930] [--k 3]
 退出码：0 = 所有复制内容都过（0、1、2 三项）且负控制至少被抓到一次；1 = 否则。
 """
@@ -68,7 +70,8 @@ def page_exercise(repo: pathlib.Path, tool: str, library) -> pathlib.Path:
 def payload(js_file: pathlib.Path, src: str, mode: str) -> str:
     p = subprocess.run(['node', '-e', JS, str(js_file), mode], input=src, capture_output=True, text=True, timeout=60)
     if p.returncode != 0:
-        sys.exit(f'ERROR: node 取复制内容失败（{mode}）：{p.stderr.strip()[-400:]}')
+        # 抛异常而不是 sys.exit：调用方的 finally 要删掉临时的 Exercise 文件（第 5 期收尾评审 m5）
+        raise RuntimeError(f'node 取复制内容失败（{mode}）：{p.stderr.strip()[-400:]}')
     return p.stdout
 
 
@@ -186,6 +189,9 @@ def main() -> int:
     caught = sum(v[0] for v in neg.values())
     print('负控制（首空填 pass 的复制内容被抓到 / 做了）：' +
           '，'.join(f'{k} {v[0]}/{v[1]}' for k, v in neg.items() if v[1]))
+    for k, (got, done) in neg.items():                               # 按层报：合计抓到 ≥ 1 会掩盖某一层 0 / n（第 5 期收尾评审 m4）
+        if done and got == 0:
+            print(f'WARN: {k} 这一层的负控制 0/{done}——这一层对错答案没有判别力，它的「通过」不说明什么')
     if caught == 0:
         print('负控制一个都没抓到——这次测量没有判别力，别据此下结论')
     print(f'{len(rows) - fails}/{len(rows)} 个程序的复制内容全部通过' if not fails else f'{fails}/{len(rows)} 个程序不通过')

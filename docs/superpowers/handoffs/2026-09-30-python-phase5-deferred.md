@@ -9,6 +9,8 @@
 > 这份文件是**账本**，不是待办列表——每一条都记着**为什么当时没修**，以及**什么时候它会变成必须修**。
 >
 > **核对基线 `e342ba2`**（#201 合并后的 main），收尾当天（2026-09-30）逐条实测；文中 file:line 都按它。
+> 收尾评审期间 main 又合了两个 PR，本 PR 已把它们合进来：**#202**（`2cc8f5e`，python.md 与 python-handoff.md，§五.5）、**#203**（`08d3935`，boards 按考纲重判、engine py-1.3.0、29 页 patch 升版）。
+> 合完之后复核过：`judge.js:162`、`library.py:538 / :541 / :562` 行号不变；D 项扫描结果不变；页面体积与 boards 分布按基线记，#203 之后的不在本账本里。
 > 来源：期控制方的派发简报与台账（主工作区 `.superpowers/python-phase5/phase5-brief.md`、`controller-log.md`）、复盘条目 `retro-items.md`（1–27）、
 > 三份台账（`m7a-ledger/`、`m7b-ledger/`、`chunks-ledger/`）——都 gitignored，**不在仓库里**，要留下来的这里都抄全了；以及三份清单 / 设计规格与六个 PR 的描述。
 >
@@ -41,7 +43,7 @@ ch23 只有 `chapter.json` +26 行（#198 给 `library-loans` 加的 `chunks`，
   `elif` 头是例外条款里没列过的一种；本收尾实测（裸 vm、页面内联 core、`b.indent + 写法`，负控制「不拼缩进」判 `lead-indent`）：标准答案判对，体少 / 多缩进一层判 `indent`，写成一行判对——与 `if` 头相同，已写进作者须知的例外条款。
 
 ### 4. `boards` 的语义——**用户已裁决：不在考纲就不写；由 boards PR 落地**
-- 今天全库 346 / 346 仍是四家；本期 36 个照当时的规则写。这里不再列拿不准的表。
+- 基线 `e342ba2` 上全库 346 / 346 是四家，本期 36 个照当时的规则写。#203（`08d3935`）已落地：合进来之后全库 boards 分布是 4 家 152、3 家 33、2 家 32、1 家 59、`[]` 70。这里不再列拿不准的表。
 
 ### 5. 程序打印内置 / 操作系统的异常消息——存量仍开，新内容 0
 - ch29–ch32 没有一个 `except` 块。存量 5 条路径没动。
@@ -77,10 +79,10 @@ ch23 只有 `chapter.json` +26 行（#198 给 `library-loans` 加的 `chunks`，
 | §五.2 构建者报告写自己 worktree | 生效 | 4 个构建者 0 个 BLOCKED |
 | §五.3 临时文件放草稿区 | 生效 | 三份台账里只有报告与脚本；评审 / 复审 / 修复者的导出副本都在草稿区 |
 | §五.4 `probe.js` 标准件 | 生效；本期**又出一次自写探针事故** | chunks PR 的一次性探针丢了 3 个 localStorage 键（§三.3）；标准件加了逐键选项（§四.5） |
-| §五.5 期控制方合并核验进台账 | 6 个里 5 个 | #197 缺（裁决 P20） |
+| §五.5 期控制方合并核验进台账 | 6 / 6（其中 #197 记在第 4 期台账） | #197 的在 `.superpowers/python-phase4/controller-log.md:26`，只有 CI 事实、本地全量没记（裁决 P20） |
 | §五.6 起草期原型 | 生效，本期在清单阶段抓到 6 处低命中（m7a keyboard 14、mouse 21；m7b invaders 0、snake 2、pong 1、lives 27，/200） | 但没抓到 lerp 公式错（§七.1）——t 取值不在舍入边界上 |
 | §五.7 遗留 worktree / 分支 | 本期清理干净；存量不变 | §五.4 |
-| §五.8 设计 §9.2 两份文档 | **仍未写，已派第 6 期** | §五.5 |
+| §五.8 设计 §9.2 两份文档 | **#202 已补齐**（`2cc8f5e`，2026-09-30 21:53 UTC，第 6 期文档 PR） | §五.5 |
 | §五.9 用户验收 | **关闭（U4）** | — |
 | §五.10 等用户的决定 | 五件里四件已裁（U1–U4） | 剩 `core.hooksPath`（§六） |
 | §五.11 `git-size-before.txt` 时点 | **又发生一次** | m7a 第三次没记；§七 |
@@ -124,7 +126,8 @@ R6 写「同一个族名下的两个程序……参照也就必须不同，不�
 
 ### 1. pygame 的 `main()` 只被「跑帧」测过，而跑帧只喂一个 QUIT
 `live-frames.py` 把 `pygame.event.get` 打桩成第 N 次调用时追加 QUIT——除此之外没有任何输入事件，**`main()` 里处理按键、鼠标、碰撞后果的分支一次都没走到**。
-所以跑帧对错答案的判别力弱：m7a 控制方实测首空填 `pass` 只抓到 1/6，本收尾在 12 个 pygame 程序上 4/12；同一批的 property 那一道 16/16（含 stdlib / scipy）。
+所以跑帧对错答案的判别力弱：m7a 控制方实测首空填 `pass` 只抓到 1/6；本收尾 `copyrun.py --repo $W --chapters ch29-pygame-basics ch30-pygame-sprites ch31-pygame-motion ch32-pygame-games ch26-pandas ch05-files-errors ch21-simulation --seed 20260930 --k 3`，12 个 pygame 程序上 4/12，同一批的 property 那一道 16/16（含 stdlib / scipy）；只抽 ch31 时跑帧 0/3（`copyrun.py` 现在对这种层打 WARN）。
+跑帧能测到的是「抛错」「挂住」与（收尾评审 I3 之后）「不到 N 帧就退出」；初版连最后这一种也看不见——一个第一帧就退出的程序报 `OK FRAMES 1` 还印「跑满 30 帧」。修复后 36 个 pygame 程序重跑，全部 `FRAMES 30`。
 窗口画出来的样子在任何地方都没有人看过（dummy 驱动不出图），讲解里「窗口里看到什么」只由评审对着代码读。
 - **什么时候必须修**：若要测 `main()` 里的分支，驱动要按脚本注入 KEYDOWN / MOUSEBUTTONDOWN 事件——那是另一个测量，写之前先定它要排除什么。
 
@@ -143,11 +146,13 @@ R6 写「同一个族名下的两个程序……参照也就必须不同，不�
 - **`probe.js` 的 `keys`**：只模拟「照影子打、打完最后一个可见行按一下 Enter」这一种人；自动缩进留在空行里的空格被它退格删掉了（真人可能不删），所以它报的正确率偏高。
   **第一版照参考逐行打、连段尾空行也按了 Enter，在拿掉 `chunkTailFill` 的页面副本上照样「完成」——测不到 #198 I1**；改成只打看得见的部分之后，副本上段 1 停在「你比参考少了 2 行」、探针报红，真页面上 984 个事件完成（与 m7b 控制方手工驱动的 984 相同）。
   副本放在本 worktree 的 `.superpowers/p5close-negctl/`（gitignored、浏览器取得到；草稿区不在 8777 的根下）。
+  修复轮合进 #203 之后（页面 engine py-1.3.0）重跑：真页面同一段 984 个事件完成、`doneBeforeLast` 为假、localStorage 前后相同；负控制页从新页面重新生成，照样停在「你比参考少了 2 行」、探针报红。
   同一轮还修了一个探针旧 bug：第一个程序声明了 `chunks`、页面停在别的段时，对齐项量到的是别的段（「different chars」）——现在先切回第 1 段。
-- **`copyrun.py`**：MicroPython 分支只在合成章节上跑过（本机没有 `microbit` 模块、导入靠门的硬件桩；参照左右对调 → 66/200、rc=1）；第一次负控制选了 `x > 300` → `x >= 300`，
+- **`copyrun.py`**：收尾的样本是 `copyrun.py --repo $W --chapters ch29-pygame-basics ch30-pygame-sprites ch31-pygame-motion ch32-pygame-games ch26-pandas ch05-files-errors ch21-simulation --seed 20260930 --k 3`（21/21；负控制 run 9/9、跑帧 4/12、property 16/16）。各层分别报，某层 0/n 打 WARN（实测只抽 ch31：「frames 0/3」WARN）；node 取内容失败时抛异常、`finally` 删掉临时的 Exercise 文件（实测把页面的 EXERCISE 区段改坏：rc 1、系统临时目录里没有新留下的 `copyrun-exercise-*.js`）。
+  MicroPython 分支只在合成章节上跑过（本机没有 `microbit` 模块、导入靠门的硬件桩；参照左右对调 → 66/200、rc=1）；第一次负控制选了 `x > 300` → `x >= 300`，
   在 randint(−1000, 1000) 的 200 组上一次都没取到 300——**等价于 cases 的定义域**、门照绿，换成左右对调才红。第 6 期第一次真用时再做一次负控制。
-- **`live-frames.py`**：`--self-test` 三道对照（OK / HANG / ERROR）如期；路径先 resolve——旧版传相对路径实测报 ERROR（`FileNotFoundError`，子进程 cwd 是临时目录）。
-- **`fill-template.py`**：漏键、拼错的键、值里带着没填的槽、REQUIRED 给空串、模板本身不成对，五种都 rc=1 且不写文件；反引号与 `$(…)` 原样进简报。
+- **`live-frames.py`**：`--self-test` 四道对照（OK / SHORT / HANG / ERROR）如期——SHORT 与对照 `exits-early` 是收尾评审 I3 之后加的：初版只看 rc 与末行是否以 FRAMES 开头，评审的负控制（第一帧就 `running = False`）报成 `OK FRAMES 1`；现在报 `SHORT FRAMES 1（应跑满 10 帧）`。路径先 resolve——旧版传相对路径实测报 ERROR（`FileNotFoundError`，子进程 cwd 是临时目录）。
+- **`fill-template.py`**：漏键、拼错的键、值里带着没填的槽、REQUIRED 给空串、**REQUIRED 给 null**（收尾评审 m1 之后；初版 rc 0 并静默删掉整行）、模板本身不成对，六种都 rc=1 且不写文件；非 REQUIRED 的可选行给 null 照旧整行去掉；反引号与 `$(…)` 原样进简报。
 
 ### 6. 配方脚本的 engine 选项（本收尾）
 在草稿区的独立克隆里回放四次真实合并：m7a 集成 basics（`a853573` + `92d4ecf`）与 sprites（`9e58ac9` + `dd686b2`）、m7b 合 #198（`437ac7d` + `6e6f1d7`）加 `--engine-from take`，
@@ -161,13 +166,16 @@ R6 写「同一个族名下的两个程序……参照也就必须不同，不�
 
 1. **Skill 工具读旧版——关闭（U3）。** 主工作区跟 main；本波改过 skill 时才用 Read 从 `$W` 读。
 2. **构建者报告写自己 worktree——生效。** 4 个构建者 0 个 BLOCKED，报告都拷进了台账。**不改**。
-3. **期控制方的合并核验——6 个里 5 个进了台账。** #197（第 4 期收尾，文档 PR）只有「→ 9a68732」一句；本收尾用 `gh run view` 补核了它的 CI（run 36727089504 在 `90a9023` 上 success，42 道门、导航 130），本地全量缺记录。
+3. **期控制方的合并核验——6 / 6 都有记录，其中 #197 记在第 4 期台账。** #197 是第 4 期的收尾 PR，它的核验在 `.superpowers/python-phase4/controller-log.md:26`（CI run 36727089504、head `90a9023`、310 段 0 跳过、203 P、42 门、导航 130），只有 CI 事实、本地全量没记；第 5 期台账只有「→ 9a68732」一句。
+   本收尾初稿只读了第 5 期台账，把它写成「6 个里 5 个、#197 缺」——**起草者漏读**，收尾评审 I1 指出（裁决 §五「起草者的失误」）。本收尾用 `gh run view` 补核的 CI 与第 26 行逐项一致。
 4. **遗留的 worktree 与分支。** 三份台账记下的都删了（m7a：集成 + 2 个构建者 worktree、5 个分支、origin 集成分支；m7b：同上 5 个分支；chunks：worktree、本地与 origin 分支）。
    收尾当天 22:19（BST）实测：主仓库仍是 **46 个** `worktree-agent-*` 分支、**16 个** `.claude/worktrees/agent-*` 目录——与第 2、3、4 期账本记的数相同，都不是本期的。
-   正在用的：`claude/python-boards`、`claude/python-docs`、`claude/python-phase5-close`（本 PR）、`claude/python-wave-m8a` / `-m8b`（第 6 期）。`claude/python-subproject-design`（`77a4f35`，第 0 期计划）仍在，归属不明，不删。
-5. **设计 §9.2 的两份文档仍未写，已派出。** `docs/superpowers/python.md` 与 `docs/superpowers/prompts/python-handoff.md`（`ls` 都不存在）。第 3 期账本说「第 4 期开工前」、第 4 期账本说「第 5 期派构建者之前」，都没做到。
-   第 6 期派发简报把它派给 MDev-02 单独一个 PR（先交大纲、控制方批准后写全文、一次评审）。主规格 §9.2 已改成这个状态。
-   第 5 期的写法（pygame 层、chunks、标准件）今天写在 `python-drill-tool`、`python-content-wave` 与主规格 §5.4 / §7.1 里，两份文档要从这些地方收。
+   22:19 时正在用的：`claude/python-boards`、`claude/python-docs`、`claude/python-phase5-close`（本 PR）、`claude/python-wave-m8a` / `-m8b`（第 6 期）。`claude/python-subproject-design`（`77a4f35`，第 0 期计划）仍在，归属不明，不删。
+   （23:06 BST 复查：`claude/python-docs` 已随 #202 合并，本地分支与 worktree 都已不在；其余四个仍在用。）
+5. **设计 §9.2 的两份文档——#202 已补齐**（`2cc8f5e`，2026-09-30 21:53 UTC 合并；`docs/superpowers/python.md` 与 `docs/superpowers/prompts/python-handoff.md`）。
+   此前拖欠三次：第 3 期账本说「第 4 期开工前」、第 4 期账本说「第 5 期派构建者之前」，都没做到；第 5 期收尾初稿（基于 `e342ba2`）时两份文件还不存在，第 6 期派发简报把它派给 MDev-02 单独一个 PR，收尾评审期间合并。
+   主规格 §9.2 取 main 一侧（#202 写的「第 6 期文档 PR 补齐」），本 PR 只在后面补一句指向这里。
+   本收尾新增的标准件（`live-frames.py`、`copyrun.py`、`fill-template.py`、配方脚本的 `--engine-from take`、`probe.js` 的 `keys`）是在 #202 之后才进 main 的——两份文档若要列标准件，下一次动它们时补。
 6. **人工验收——关闭为流程项（U4）。** PR 模板删了未勾选项；主规格 §9.1 加了注。
 7. **`git-size-before.txt` 又没记时点**（第三次）：m7a 的 `progress.md` 第 0 步没有这一行；m7b 的按台账顺序推得是合 #196 之后的 `4fc58e2`，也没明写。收尾照录（§八）。
 8. **中途 `git gc`**：你在主工作区跑了一次 `git gc`（期控制方台账「收尾前」一条），之后的 `count` 从两千多降到两位数、pack 从 26.47 MiB 变成 28.44 MiB——**前后无法直接比增量**（复盘 27），§八 照录。

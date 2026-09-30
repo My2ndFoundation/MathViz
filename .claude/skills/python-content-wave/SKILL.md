@@ -23,7 +23,7 @@ description: >-
 **0. 开工准备**
 - 开**集成 worktree**（`M=/Users/nickma/Develop/My2ndBrain/MathViz`，`W=$M/.claude/worktrees/python-wave-<名>`）：
   `git -C $M fetch origin && git -C $M worktree add -b claude/python-wave-<名> $W origin/main`。
-  **主工作区（`/Users/nickma/Develop/My2ndBrain/MathViz`）从头到尾不 checkout、不 rebase、不 pull**——它属于用户和别的会话。
+  **模块控制方与子代理不 checkout、不 rebase、不 pull 主工作区（`/Users/nickma/Develop/My2ndBrain/MathViz`）**——它属于用户和别的会话；**只有期控制方在合并之后、主工作区干净时快进它**（第 7 步，U3）。
 - **主工作区跟 main 同步**（第 5 期末用户裁决：期控制方每次合并之后、主工作区干净时快进它），所以 Skill 工具加载的 skill 就是 main 上的版本。
   例外：**本波（或并行的收尾 PR）改过 skill 时**，新版本只在集成 worktree 里——这时用 Read 从 `$W/.claude/skills/` 读本 skill、同目录的模板与 `python-drill-tool`，给子代理的简报也用 `$W` 里的模板填。
   构建者照旧用 Read 读它自己 worktree 里的文件（`checkout -B` 之后就是集成分支的版本）。
@@ -174,16 +174,17 @@ description: >-
   断言不含 BLANK 指令、读 == 挖空（每空填标准答案）；然后按层：有 `run.expect` 的在全新临时目录照 `program_run_check` 的条件跑（`_fixtures/` 整个 `copytree`），stdout 逐字节比；
   pygame 程序走 `live-frames.py` 的跑帧；带 `check.property` 的，**从复制内容里导入 entry**（MicroPython 装门的硬件桩），用门的参照、种子、组数与逐层比较比 200 组。
   内建负控制：第一个空填 `pass` 的复制内容，各道测量分别报「抓到 / 做了」。第 5 期 m7a 实测：pygame 跑帧对错答案的判别力弱（1/6——空多在只有事件或碰撞才走到的分支里），
-  property 那一道抓到 5/6；所以 pygame / MicroPython 页的「整段对不对」主要靠第二道。收尾在 7 章 21 个程序上跑过（run 9/9、跑帧 4/12、property 16/16 被抓）；
+  property 那一道抓到 5/6；所以 pygame / MicroPython 页的「整段对不对」主要靠第二道。各层**分别**报；某一层 0/n 时打印 WARN（合计抓到 ≥ 1 会掩盖它——例如只抽 ch31 时跑帧 0/3）。收尾跑的是 `copyrun.py --repo $W --chapters ch29-pygame-basics ch30-pygame-sprites ch31-pygame-motion ch32-pygame-games ch26-pandas ch05-files-errors ch21-simulation --seed 20260930 --k 3`：21/21 通过，负控制 run 9/9、跑帧 4/12、property 16/16（写协议不写数：换一组章，数就不同）；
   MicroPython 分支在合成章节上跑过（导入 `microbit` 靠门的硬件桩，本机没有这个模块），参照左右对调 → 66/200、rc=1。
   不要自己写正则剥指令——第 2 期 M3 控制方的正则只认 `# >>> BLANK`，被一行 `# >>>BLANK`（少一个空格，解析器与门都接受）骗过一次，报成页面与本地不一致。
   这项测量与门一样拷了 fixture，观察不到「粘进 PyCharm 缺数据文件」——人工验收由用户在线上做（第 5 期末用户裁决）。
 - **pygame 程序的活体跑帧：用标准件 `live-frames.py`**。门对 pygame 程序只 compile、property 只验逻辑函数，**`main()` 的主循环在任何门里都没跑过**——这是「整段能跑」唯一的测量：
   ```bash
-  python3 $W/.claude/skills/python-content-wave/live-frames.py --self-test          # 三道对照：正常 OK、不看 QUIT 的主循环 HANG、第一帧抛错 ERROR
+  python3 $W/.claude/skills/python-content-wave/live-frames.py --self-test          # 四道对照：正常 OK、第一帧就退出 SHORT、不看 QUIT 的主循环 HANG、第一帧抛错 ERROR
   python3 $W/.claude/skills/python-content-wave/live-frames.py --repo $W --chapters <本波的 pygame 章…> --frames 30
   ```
-  无头 SDL 下导入程序、把 `pygame.event.get` 打桩成第 N 次调用时追加 QUIT、调 `main()`；每个程序一个子进程（进程组 + 超时）。`--self-test` 三道对照都如期，这个测量才分得清三种结局。
+  无头 SDL 下导入程序、把 `pygame.event.get` 打桩成第 N 次调用时追加 QUIT、调 `main()`；每个程序一个子进程（进程组 + 超时）。跑满 N 帧才判 OK，**不到 N 帧就正常返回判 SHORT**（主循环提前退出——`running` 条件写反、`return` 进了循环；初版不核帧数，一个第一帧就退出的程序也报 OK，收尾评审 I3）。
+  `--self-test` 四道对照都如期，这个测量才分得清四种结局。收尾在 ch29–ch32 全部 36 个 pygame 程序上重跑：36 个都是 `FRAMES 30`，没有提前退出的。
   路径在交给子进程之前一律 resolve（子进程的 cwd 是临时目录；m7a 初版传相对路径时报成 ERROR）。
 
 **5. 终审（整波一次）**
@@ -219,6 +220,8 @@ description: >-
   核验的事实（CI run、head、diff 范围、本地全量、自选负控制与结果）**写进台账**——期控制方写它自己的台账文件：第 3 期 #189 的核验只留在会话里，收尾时差点记成「缺记录」；第 4 期的期控制方台账做到了。
 - **两波并行、由一个控制方集中合并时**：先合的那个 PR 一落地，后一个就必然与 main 的注册表 / FALLBACK 冲突。通知后一波的控制方：合 origin/main、
   用配方脚本（`--take MERGE_HEAD --from HEAD`）解、全量验收、push；它回报新的 head 之后，照上一条核 head 与 CI 再合。
+- **期控制方：合并之后快进主工作区**（第 5 期末用户裁决 U3）：`git -C $M fetch origin`，`git -C $M status --short` **为空**时 `git -C $M merge --ff-only origin/main`；
+  不为空（用户或别的会话有未提交的东西）就不动，在期控制方台账里记一行「未快进：<status 的内容>」，等它干净了再做。模块控制方与子代理不做这一步。
 - 合并之后、拷走台账之前：`git -C $M count-objects -vH`（只读，整个仓库共用一个 `.git`，在主工作区跑安全）存成台账目录的 `git-size-after.txt`，与第 0 步的 `git-size-before.txt` 对称
   （第 2 期两波的波后量只报在回报里、没进台账文件，收尾账本只能从回报转抄）。
 - 拷台账之前看一眼台账目录：里面应该只有报告与脚本。导出副本、克隆按第 5 步在草稿区，不在这里——若有人放进来了，拷贝时排除它（`rsync --exclude`，`diff -rq -x` 同样排除），别为它去删东西。
@@ -297,7 +300,7 @@ await PYPROBE({ page: 'py-<页>', marker: '/.claude/worktrees/python-wave-<名>/
 
 | 情形 | 后果 | 做法 |
 |---|---|---|
-| 在主工作区 checkout / rebase / pull | 改掉用户或别的会话的分支与未提交工作 | 一切 git 操作在集成 worktree 里，`git -C $W` |
+| 在主工作区 checkout / rebase / pull | 改掉用户或别的会话的分支与未提交工作 | 一切 git 操作在集成 worktree 里，`git -C $W`；唯一的例外是期控制方合并后、`status` 干净时的 `merge --ff-only`（第 7 步） |
 | `core.hooksPath` 是共享 git 配置里的绝对路径，指向主工作区的 `.githooks` | worktree 里提交跑的是主工作区当前分支那份钩子**脚本**（可能是旧的），但它操作的是提交所在 worktree 的文件 | 不依赖钩子代跑生成脚本；提交前自己跑三个生成脚本与 `check.py`，提交后读 `git status --short` |
 | 写文件工具把反斜杠-u 转义解码成真实字符 | 不可见的 U+2028 进了源码或提示；`js_parser_parity_check` 会红，文档里则悄悄变假 | 代码里用 `chr(0x2028)`；写完扫一遍 U+2028 / U+2029 / U+0085 / U+FEFF |
 | 并行跑负控制 | 同时改同一批文件，互相污染基线 | 串行 |
@@ -308,7 +311,7 @@ await PYPROBE({ page: 'py-<页>', marker: '/.claude/worktrees/python-wave-<名>/
 | 报告、脚本、patch 放草稿区 | 会话重启时草稿区清空，第 2 期丢过构建者报告、终审报告、集成脚本 | 一律放 `$W/.superpowers/python-waves/<名>/`，第 7 步整体拷走 |
 | 自写的一次性浏览器探针在 `restore()` 里先 `localStorage.clear()` 再从页面内存里的快照写回 | 刷新之后快照没了，清空已经发生——第 5 期 chunks PR 的探针让 8777 上 3 个不知内容的键永久丢失 | 用标准件 `probe.js`；非写不可的一次性探针也只在本页的键上按差分复原，快照先验再动 |
 | 负控制做了可能不终止的变异（删 `visited.add` 之类） | 门挂住而不是变红；第 2 期一次跑满 600 秒、swap 约 21 GB、同机会话一起 ENOSPC | 只做保证终止的变异；子进程用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时或被打断时（`except BaseException`；SIGTERM 先用 `signal.signal` 转成异常）`os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组（本机没有 `timeout` 命令，写了只会 rc=127） |
-| 集成后删构建者分支用 `git branch -d` | 主工作区的 `main` 不 pull，`-d` 按它判「未合并」而拒删 | 先 `merge-base --is-ancestor <分支> origin/main` 确认，再 `-D` |
+| 集成后删构建者分支用 `git branch -d` | 主工作区的 `main` 只在期控制方合并之后才前进（U3），删分支的那一刻它未必已经前进，`-d` 按它判「未合并」而拒删 | 先 `merge-base --is-ancestor <分支> origin/main` 确认，再 `-D` |
 | 在不带引号的 heredoc 里写含反引号的 PR 文案或简报 | 反引号被当命令替换执行，文案被吃掉（第 5 期 m7b 填构建者简报时又发生一次，约定表一行没了） | heredoc 一律 `<<'EOF'`，路径走环境变量；简报与 PR 描述用 `fill-template.py` 填，值写进 JSON 文件、不经过 shell |
 | 命令后接 `\| tail` / `\| head` 再 `echo rc=$?` | 打印的是管道末端的退出码，崩溃显示 `rc=0` | 要看退出码就不接管道，或先存 `rc` |
 | 评审员或实现者自己又派子代理 | 重复一个评审席位 | 简报里写明不许派子代理 |

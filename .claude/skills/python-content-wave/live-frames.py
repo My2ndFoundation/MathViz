@@ -3,19 +3,22 @@
 
 门对 pygame 程序只过 compile()（没有 run.expect），property 只验纯逻辑函数——main() 的主循环在任何门里都没有跑过。
 这里在无头 SDL 下导入程序（run_name 不是 __main__，守卫不触发），把 pygame.event.get 打桩成第 N 次调用时
-追加一个 QUIT，再调 main()：正常返回 = OK；超时 = HANG；抛错 / 非零退出 = ERROR。每个程序一个子进程（进程组 + 超时）。
+追加一个 QUIT，再调 main()：跑满 N 帧后正常返回 = OK；**不到 N 帧就正常返回 = SHORT**（主循环提前退出：`running` 条件写反、
+`return` 放进了循环……）；超时 = HANG；抛错 / 非零退出 = ERROR。每个程序一个子进程（进程组 + 超时）。
+（第 5 期收尾评审 I3：初版只看「rc 0 且末行以 FRAMES 开头」，一个第一帧就退出的程序报 `OK FRAMES 1`、还印「跑满 30 帧」——
+测量报了一句它没有核过的话。现在比 FRAMES 与 N。）
 
 用法：
   python3 live-frames.py --repo <worktree 绝对路径> --chapters ch29-pygame-basics ch30-pygame-sprites [--frames 30]
   python3 live-frames.py <.py 路径> …                 # 直接给文件（相对路径也行，下面会先 resolve）
-  python3 live-frames.py --self-test                  # 三道对照：正常 OK、不看 QUIT 的主循环 HANG、第一帧抛错 ERROR
-每次在新的一批程序上用之前先跑一次 --self-test：它证明这个测量分得清三种结局（m7a 的做法）。
+  python3 live-frames.py --self-test                  # 四道对照：正常 OK、第一帧就退出 SHORT、不看 QUIT 的主循环 HANG、第一帧抛错 ERROR
+每次在新的一批程序上用之前先跑一次 --self-test：它证明这个测量分得清四种结局（m7a 的三道对照 + 收尾评审加的 exits-early）。
 
 子进程的 cwd 是一个临时目录（程序写文件——image-save-and-load 写 ship.png——落在那里，跑完即删），
 所以**路径在交给子进程之前一律 resolve 成绝对路径**。m7a 初版没有这一步，传相对路径时子进程找不到文件，
 报成 ERROR（m7a 修复者发现）；这里结构上免掉，不再靠「记得传绝对路径」。
 
-只读仓库；退出码：0 = 全部 OK（且 --self-test 三道对照都如期）；1 = 有程序不是 OK，或对照不如期。
+只读仓库；退出码：0 = 全部 OK（且 --self-test 四道对照都如期）；1 = 有程序不是 OK（SHORT / HANG / ERROR），或对照不如期。
 """
 from __future__ import annotations
 
@@ -70,6 +73,9 @@ def run(path, frames: int = 30, timeout: float = 30.0):
             raise
     last = (out.strip().splitlines() or [''])[-1]
     if p.returncode == 0 and last.startswith('FRAMES'):
+        n = int(last.split()[1])
+        if n < frames:                                   # 正常返回了，但主循环没跑到第 N 帧的 QUIT 就退了
+            return 'SHORT', f'{last}（应跑满 {frames} 帧）'
         return 'OK', last
     return 'ERROR', (err.strip().splitlines() or [f'rc={p.returncode}'])[-1]
 
@@ -83,6 +89,20 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+        screen.fill((0, 0, 0)); pygame.display.flip(); clock.tick(600)
+    pygame.quit()
+if __name__ == "__main__":
+    main()
+'''),
+    'exits-early': ('SHORT', '''
+import pygame
+def main():
+    pygame.init(); screen = pygame.display.set_mode((64, 48)); clock = pygame.time.Clock(); running = True
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+        running = False
         screen.fill((0, 0, 0)); pygame.display.flip(); clock.tick(600)
     pygame.quit()
 if __name__ == "__main__":
@@ -121,7 +141,7 @@ def self_test() -> int:
             ok = got == want
             bad += not ok
             print(f'{"ok " if ok else "BAD"} 对照 {name:20s} 期望 {want:5s} 实得 {got:5s} {info}')
-    print('三道对照都如期：这个测量分得清 OK / HANG / ERROR' if not bad else f'{bad} 道对照不如期——测量不可信，别用它下结论')
+    print(f'{len(SELF_TEST)} 道对照都如期：这个测量分得清 OK / SHORT / HANG / ERROR' if not bad else f'{bad} 道对照不如期——测量不可信，别用它下结论')
     return 1 if bad else 0
 
 

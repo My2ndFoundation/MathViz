@@ -9,7 +9,7 @@
 `--list` 列出模板的全部键（带 REQUIRED 标记与出现次数），照它写 JSON。
 
 值：字符串照原样替换（多行也行）；`null` 表示「这一项本次不适用」——删掉含这个槽的**整行**
-（PR 模板里「本波有用到随机的 stdlib 层程序才写」那类可选行就这样去掉）。
+（PR 模板里「本波有用到随机的 stdlib 层程序才写」那类可选行就这样去掉）。REQUIRED 槽给 null 或空串都是 rc 1。
 
 只输出模板里第一行 `---` 之后的正文（之前是写给控制方的填写说明，不进简报）。
 
@@ -77,14 +77,15 @@ def main() -> int:
     keys = {k for _, k, _ in slots}
     missing = sorted(keys - set(values))
     unknown = sorted(set(values) - keys)
-    blank_req = sorted({k for _, k, req in slots if req and isinstance(values.get(k), str) and not values[k].strip()})
+    # REQUIRED 槽不许空：空串与 null 都算（null 会整行删掉——对可选行是用处，对 REQUIRED 槽是手滑；第 5 期收尾评审 m1）
+    blank_req = sorted({k for _, k, req in slots if req and k in values and (values[k] is None or (isinstance(values[k], str) and not values[k].strip()))})
     if missing or unknown or blank_req:
         if missing:
             print(f'ERROR: 这些槽没有给值：{missing}', file=sys.stderr)
         if unknown:
             print(f'ERROR: 这些键模板里没有（拼错了？）：{unknown}', file=sys.stderr)
         if blank_req:
-            print(f'ERROR: 这些 REQUIRED 槽给的是空串：{blank_req}', file=sys.stderr)
+            print(f'ERROR: 这些 REQUIRED 槽给的是空串或 null：{blank_req}', file=sys.stderr)
         return 1
     bad = [k for k in keys if values[k] is not None and not isinstance(values[k], str)]
     if bad:
