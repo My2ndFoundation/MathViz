@@ -130,6 +130,11 @@ def program_run_check() -> int:
         if tier == 'scipy-stack':
             missing = [m for m in prog.get('requires', []) if not _importable(m)]
             if missing:
+                if _scipy_strict():
+                    print(f'ERROR: {name} 缺库 {missing}，而 PYTHON_GATES_REQUIRE_SCIPY=1（CI）——'
+                          f'scipy-stack 层在 CI 上一段都不许跳过', file=sys.stderr)
+                    rc = 1
+                    continue
                 skipped += 1
                 print(f'  跳过 {name}：缺库 {missing}（scipy-stack 层）')
                 continue
@@ -185,6 +190,15 @@ def program_run_check() -> int:
         print(f'程序真跑：{ran} 段 stdout 与 run.expect 逐字节相符，'
               f'{compiled} 段只过 compile，{skipped} 段因缺库跳过（共 {total} 段）')
     return rc
+
+
+def _scipy_strict() -> bool:
+    """CI 设 PYTHON_GATES_REQUIRE_SCIPY=1：scipy-stack 层缺库不再「跳过」而是红。
+
+    本地缺库跳过是 design §5.4 的约定（不必人人装 numpy）；但 CI 若也缺库，这些程序就在
+    **任何地方都没跑过**，而门照样全绿——跳过只打印一行，没人看。所以 CI 必须装齐并要求一个都不跳。
+    """
+    return os.environ.get('PYTHON_GATES_REQUIRE_SCIPY') == '1'
 
 
 def _importable(module: str) -> bool:
@@ -264,6 +278,7 @@ def algorithm_property_check() -> int:
     """
     rc = 0
     checked = 0
+    prop_skipped = 0
     cases_total = 0
     with_property = set()
     prog_chapter = {}
@@ -280,11 +295,25 @@ def algorithm_property_check() -> int:
                   f'{sorted(PROPERTIES)} 内', file=sys.stderr)
             rc = 1
             continue
-        if _tier(prog) != 'stdlib':
-            print(f'ERROR: {name} 标了 check.property 却不在 stdlib 层'
-                  f'（tier={_tier(prog)}）——它没法被导入求值', file=sys.stderr)
+        tier = _tier(prog)
+        if tier == 'compile-only':
+            print(f'ERROR: {name} 标了 check.property 却在 compile-only 层'
+                  f'——它没法被导入求值', file=sys.stderr)
             rc = 1
             continue
+        if tier == 'scipy-stack':
+            # 第 4 期（M6）起 scipy-stack 层也可以挂 property：numpy 写的纯函数最该有一个
+            # 纯 Python 的独立参照。缺库时照 program_run_check 的约定：本地跳过、CI 红。
+            missing = [m for m in prog.get('requires', []) if not _importable(m)]
+            if missing:
+                if _scipy_strict():
+                    print(f'ERROR: {name} 的 property 缺库 {missing}，而 PYTHON_GATES_REQUIRE_SCIPY=1（CI）',
+                          file=sys.stderr)
+                    rc = 1
+                else:
+                    prop_skipped += 1
+                    print(f'  跳过 {name} 的 property：缺库 {missing}（scipy-stack 层）')
+                continue
         ref_entry = properties.REFERENCES.get(prog['id'])
         if ref_entry is None:
             print(f'ERROR: {name} 有 check.property={prop!r}，但 gates/refs/ 里没有它的参考实现'
@@ -390,7 +419,8 @@ def algorithm_property_check() -> int:
         return 1
     if rc == 0:
         print(f'性质比对：{checked} 个程序 × {properties.SAMPLES} 组实参 = '
-              f'{cases_total} 次调用，与独立参考实现全部一致（种子 {properties.SEED}）')
+              f'{cases_total} 次调用，与独立参考实现全部一致（种子 {properties.SEED}）'
+              + (f'；{prop_skipped} 个 scipy-stack 程序因缺库跳过（CI 上不许）' if prop_skipped else ''))
     return rc
 
 
