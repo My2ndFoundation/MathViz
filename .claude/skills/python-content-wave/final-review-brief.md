@@ -28,7 +28,7 @@
 子进程一律带超时，而**本机（macOS）没有 `timeout` 命令**：用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时或被打断时（`except BaseException`；SIGTERM 先用 `signal.signal` 转成异常）`os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组。遇到 ENOSPC 就停下回报，不删任何不是你写的文件。
 
 ## 要查的
-**规格**：清单逐条对上（id、变体组、教什么、P 参照）；每程序 ≥ 1 空；每页 ≥ 1 个变体组；页面边界；元数据闭集与 `boards` 是否可信；注册表条目字段、accent 按模块表、version / engine 一致。
+**规格**：清单逐条对上（id、变体组、教什么、P 参照）；每程序 ≥ 1 空；每页 ≥ 1 个变体组；页面边界；元数据闭集；`boards` 逐个对照 `docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md` 的判定原则与条目（只写考纲点名了核心教学点的考试局，考纲外写 `[]`）；注册表条目字段、accent 按模块表、version / engine 一致。
 
 **内容（逐个空）**——在 node 的**裸 `vm` context** 里加载工具页内联的 core（`GENERATED:PY-LEX` … `GENERATED:INTERACT` 各区段，按页面里的顺序），对标准答案与每一种你想得到的「同样好的写法」调用 `PyInteract.blankFeedback(answer, reference, lang)`。
 **不要 `require` `python/core/*.js`**：`require` 与 `node -e` 都定义了 `module`，UMD 外壳走 node 分支，测的不是浏览器跑的那一支（根 `CLAUDE.md`；第 5 期 m7a 终审员用了 `require`，修复者改用裸 vm 重验）。先断言 context 里 `typeof module === 'undefined'`。
