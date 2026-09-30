@@ -849,8 +849,8 @@ chess 现在要到运行时才暴露一个写错的路径。
 
 ### 9.2 配套文档与 skill
 
-- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。**至第 4 期收尾仍未写**（第 3 期账本定的「第 4 期开工前」没做到），见第 4 期账本 §五.8
-- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（**至第 4 期收尾仍未写**，见第 4 期账本 §五.8）：API 签名、易踩的坑、
+- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。第 6 期文档 PR 补齐（此前拖欠：第 3 期账本定的「第 4 期开工前」没做到，见第 4 期账本 §五.8）
+- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（第 6 期文档 PR 补齐）：API 签名、易踩的坑、
   每一次实测发现的错误
 - `.claude/skills/python-drill-tool/SKILL.md` —— 作者须知：新增一页 / 新增一个程序 / 升级一页的作业流程，
   每条硬约束注明由哪道门守（第 1 期设计 B5）
