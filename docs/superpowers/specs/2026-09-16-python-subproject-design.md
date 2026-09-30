@@ -522,7 +522,7 @@ python/tools/py-sorting.html
    否则 CI 必红（这是有意的——本机也没有 scipy，构建者生成不了 `run.expect`）。
 3. **property 也覆盖这一层**：`algorithm_property_check` 原先对非 stdlib 层一律报红；现在 scipy-stack 程序
    可以挂 `check.property`（缺库时同上：本地跳过、CI 红）。参照必须是**纯 Python** 的独立实现，
-   而且门比「值相等**且类型相同**」——numpy 函数返回 `np.int64` / `np.float64` / `ndarray` 时，
+   而且门比「值相等**且类型相同**」（逐层，§7.1）——numpy 函数返回 `np.int64` / `np.float64` / `ndarray` 时，
    入口函数要自己转成 `int` / `float` / `list` 再返回，否则类型不同即红。
 
 运行时的沙箱纪律：全新临时目录当 cwd（`_fixtures/` 先拷进去）、`PYTHONHASHSEED=0`、
@@ -661,7 +661,7 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 | 门 | 守什么 |
 |---|---|
 | **`program_run_check()`** | 全新临时目录里 `python3 <file>`，`PYTHONHASHSEED=0`，喂 `stdin`，5 秒超时，**比对 stdout 与 `expect`**；`_fixtures/` 先拷进去 |
-| ★ **`algorithm_property_check()`** | 把程序当模块导入，取 `entry` 函数，200 组随机实参，与 `gates/refs/chNN_*.py` 里按程序 id 登记、**机制不同**的参照逐个比对（值相等且类型相同）；被测与参照**各拿一份实参的深拷贝**——被测函数就地改了实参时，参照不再看到改过的对象（#181，第 2 期起草时发现）；scipy-stack 层可挂，缺库时本地跳过、CI（`PYTHON_GATES_REQUIRE_SCIPY=1`）红（§5.4） |
+| ★ **`algorithm_property_check()`** | 把程序当模块导入，取 `entry` 函数，200 组随机实参，与 `gates/refs/chNN_*.py` 里按程序 id 登记、**机制不同**的参照逐个比对（值相等且类型相同，**逐层**：list / tuple 按位置、dict 按键、set 比元素类型，叶子比 type——`[np.int64(3)]` 对 `[3]`、`[3.0]` 对 `[3]`、`(True,)` 对 `(1,)` 都是红；第 4 期 m6b 起草时发现原先只比顶层）；被测与参照**各拿一份实参的深拷贝**——被测函数就地改了实参时，参照不再看到改过的对象（#181，第 2 期起草时发现）；scipy-stack 层可挂，缺库时本地跳过、CI（`PYTHON_GATES_REQUIRE_SCIPY=1`）红（§5.4） |
 | `program_embed_roundtrip_check()` | HTML 里的 `source` 解码后与磁盘 `.py` 逐字节相同（§5.3） |
 | `chapter_manifest_check()` | 磁盘 `.py` 与 `chapter.json` 双向存在 |
 | `anchor_check()` | `lineNotes` / `chunks` 的行文本锚在源码里存在且唯一，`clean()` 之后仍唯一；★ 锚点可以落在挖空体内（§2.3） |
@@ -673,6 +673,7 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 | `blank_directive_check()` | BLANK 指令成对、`id/level/hint/hintEn` 齐全、id 页内唯一、`level ∈ 1..3`、挖空体非空；提示切出的段数等于 `level`（第 0 期起就有）；★ 分隔符改为唯一的 ` \|\| ` 并检查它的形状（第 1 期设计 B1） |
 | `program_meta_check()` | id 全库唯一；`kind`/`level`/`boards`/`runtime` 在闭集；双语字段齐全；`requires` 在白名单 |
 | `variant_check()` | 同一个 `problem` 的变体 ≥ 2 且标题互不相同 |
+| `fixture_notes_check()` | 源码里写了 `_fixtures/<名>` 的程序，`notes` 中英两边都写出文件名，并把文件的每一行各自写成一段、连续、按原顺序（复制按钮不带数据文件，这份手抄是学生唯一的来源）；源码提到 `_fixtures` 却没写全路径也报红 *（第 3 期 #187）* |
 
 **D·词法**
 
@@ -784,7 +785,7 @@ chess 现在要到运行时才暴露一个写错的路径。
 | **第 0 期 · 地基** | `python/` 骨架、七个 core 模块 + 测试、三个脚本、全部门 + 全部负控制、根级 `check_nav_contract.py`、补给 chess 的 `registry_check()`、根 `index.html` 第三张卡、根 `CLAUDE.md`、契约文档 v2.0、`apply_branding.py` 跑一遍；外加**一个真页面 `py-basics`** 当活体验收 | 1 | ~10 |
 | 第 1 期 | M1 剩余 + M2 | 8 | ~95（实交 96；全库 106）|
 | 第 2 期 | M3 + M4 | 10 | ~120（实交 111；全库 217）|
-| 第 3 期 | M5 综合运用 | 4 | ~40 |
+| 第 3 期 | M5 综合运用 | 4 | ~40（实交 47；全库 264）|
 | 第 4 期 | M6 科学计算与数理统计 | 5 | ~45 |
 | 第 5 期 | M7 pygame | 4 | ~35 |
 | 第 6 期 | M8 嵌入式 Python | 3 | ~30 |
@@ -824,8 +825,8 @@ chess 现在要到运行时才暴露一个写错的路径。
 
 ### 9.2 配套文档与 skill
 
-- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。**至第 2 期收尾仍未写**，见第 2 期账本
-- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（**至第 2 期收尾仍未写**，见第 2 期账本）：API 签名、易踩的坑、
+- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。**至第 3 期收尾仍未写**，见第 3 期账本 §四.8
+- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（**至第 3 期收尾仍未写**，见第 3 期账本 §四.8）：API 签名、易踩的坑、
   每一次实测发现的错误
 - `.claude/skills/python-drill-tool/SKILL.md` —— 作者须知：新增一页 / 新增一个程序 / 升级一页的作业流程，
   每条硬约束注明由哪道门守（第 1 期设计 B5）

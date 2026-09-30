@@ -15,7 +15,7 @@ description: >-
 写程序的规则不在这里：**REQUIRED BACKGROUND:** 读 `.claude/skills/python-drill-tool/SKILL.md`——构建者照它写，
 终审照它查。本 skill 管的是从「要做这几页」到「PR 合并」之间控制方要做的每一件事。
 
-下面写的每一处取值都来自第 0–2 期真实付过的代价；照抄，不要凭记忆重推。
+下面写的每一处取值都来自第 0–3 期真实付过的代价；照抄，不要凭记忆重推。
 
 ## 运行（按顺序；⏸ = 停下等用户）
 
@@ -23,9 +23,15 @@ description: >-
 - 开**集成 worktree**（`M=/Users/nickma/Develop/My2ndBrain/MathViz`，`W=$M/.claude/worktrees/python-wave-<名>`）：
   `git -C $M fetch origin && git -C $M worktree add -b claude/python-wave-<名> $W origin/main`。
   **主工作区（`/Users/nickma/Develop/My2ndBrain/MathViz`）从头到尾不 checkout、不 rebase、不 pull**——它属于用户和别的会话。
+- **开完集成 worktree，先用 Read（不用 Skill 工具）从 `$W/.claude/skills/python-content-wave/SKILL.md` 重读本 skill**（连同同目录的模板与 `$W/.claude/skills/python-drill-tool/SKILL.md`），以后一律照 `$W` 里的版本做。
+  Skill 工具加载的是**主工作区**里的 skill，而主工作区不 pull，它永远停在旧提交上（第 3 期整期停在 `533c813`，m5b 控制方第 0 步读到的是缺 `checkout -B` 等修正的 #186 之前的版本）。
+  **这一条对用 Skill 工具加载本 skill 的读者无效**——主工作区前进之前，他们读到的正是没有这一条的旧版（`533c813` 那份里「重读」「checkout -B」都是 0 处）。
+  所以它还必须写在读者一定会读到的地方：**给控制方的派发简报（期级简报、派模块控制方的简报）第一句**写「开完集成 worktree 后，用 Read 读 `$W/.claude/skills/` 下的 `python-content-wave` 与 `python-drill-tool`，不用 Skill 工具」。
+  主工作区要不要前进、或在用户级记忆里放一句指路，是用户的决定（第 3 期裁决文件与账本 §四.10）。
+  给子代理的简报也用 `$W` 里的模板填，并在简报里让它们用 Read 读自己 worktree 里的 skill 文件、不用 Skill 工具。
 - 在集成 worktree 上跑全量验收（见「验收命令」），全绿才继续；把输出末行抄进台账。
 - 台账目录：`$W/.superpowers/python-waves/<名>/`（gitignored）。`progress.md` 第一行写本波页面与基线 SHA，以后每一步、每一条裁决都追加进去。
-  **本波一切要活过会话的东西都放这里**——构建者报告、终审 / 修复 / 复审报告、集成与验收脚本、中断实现者的 patch。**不放草稿区**：
+  **本波一切要活过会话的东西都放这里**——构建者报告（构建者写在它自己的 worktree 里，控制方收到回复就拷来，见第 2、3 步）、终审 / 修复 / 复审报告、集成与验收脚本、中断实现者的 patch。**不放草稿区**：
   草稿区随会话重启清空，第 2 期三次重启丢过构建者报告、终审报告和 M3 的集成脚本，台账是因为放在这里才活下来的。
 - `git -C $W count-objects -vH` 存进台账目录的 `git-size-before.txt`（`count` · `size` · `in-pack` · `size-pack` 四个字段，收尾账本要用）。
 - 若本期规格里还写着「每页一个 PR」「每页两轮评审」，以本 skill 为准，并在本波 PR 里把规格那几句改掉（台账记一条裁决）。
@@ -34,7 +40,11 @@ description: >-
 - 有审过的清单（某期规格里逐页列好的表）→ 直接用，台账记下出处。
 - 没有 → 起草：逐页列 `id | 变体组 | 教什么 | P 参照`，依据主规格 §2.2 的页清单、`python-drill-tool` 的内容标准与页面边界；
   查重：全库程序 id（`python/programs/*/chapter.json`）、已有页讲过的问题、同波相邻页的主题。写进本期规格。**⏸ 用户审完清单才派构建。**
-- 起草时对**每个程序**问一句「它用不用递归」，用的标 ⟳、归进「用，不重讲」的裁决（第 2 期 M4 的 `merge-vs-insertion-counts` 用了递归而清单没标，构建者自己加了 tag）。
+- 起草时对**每个程序**问三句：用不用递归（⟳，归进「用，不重讲」的裁决——第 2 期 M4 的 `merge-vs-insertion-counts` 用了递归而清单没标，构建者自己加了 tag）；
+  用不用随机、用哪个生成器（🎲；stdlib 层只许 `random.Random(<固定种子>)`，scipy-stack 层 numpy 的随机数只许 `np.random.default_rng(<固定种子>)`、标准库 `random` 照 stdlib 层，见 `python-drill-tool` 内容标准）；读不读 stdin（⌨）。三类各在清单里单列一节，交审。
+- **每页的页名（注册表 `title`，中英）在清单里就定下来**，并与全部模块的页名（含还没做的，如 M7「图形与游戏」）比一遍会不会混。第 3 期 py-games 的「游戏」到终审才被指出与 M7 相混，改成「控制台游戏」只能另开一个提交。
+- **清单里举的例子要真能触发它声称要测的东西。** 给 `cases` 的边界例、讲解里「没有 X 就会出错」的例子，起草时拿一个**故意去掉 X 的错误实现**跑一遍，确认输出真的不同。
+  第 3 期 m5b 清单给 2048 举的 `[2, 2, 2, 2]` 触不到 stack 写法的「刚合并」标志（删掉标志照样得到 `4, 4`），构建者换成 `4, 0, 4, 8` 才看得出差别。
 - `problem` 命名：不在变体组里的程序，`problem` 一律等于程序 id（id 全库唯一有门守）；变体组名由控制方对全库现有 `problem` 名**和**并行的另一个模块的组名交叉核一遍——
   `variant_check` 按全库分组，重名会被静默并成一个跨页变体组，门不会红（第 2 期两个模块并行，靠这条零撞组）。
 
@@ -51,8 +61,12 @@ description: >-
   `checkout -B` 之后原分支还在、isolation worktree 目录也还在，**每个**构建者都会留一套，不只是自建 worktree 的那几个（第 2 期因此有 46 个 `worktree-agent-*` 分支分不清归属）。控制方把它们逐个记进台账，第 7 步按台账清理。
 - 构建者回报 BLOCKED 后续做时，它的 agent worktree 可能已被自动清理；它会按简报先 `git worktree prune`、再在 `$M/.claude/worktrees/<名>-<页>` 自建一个。自建目录同样记进台账。
 - 构建者自己加注册表条目、连同重新生成的两个导航页一起提交（设计 §8.1）。
+- **构建者的报告写在它自己 worktree 的 `.superpowers/python-waves/<名>/<页>-report.md`**，不写集成 worktree：isolation worktree 拒写**主工作区目录树里、它自己 worktree 以外**的路径——
+  集成 worktree 就在 `$M/.claude/worktrees/` 下，所以被拒（提示原话「Edit the worktree copy of this file instead of the shared-checkout path」）；scratchpad 不在主工作区树里，写得进（py-simulation 的报告就写在那里）。第 3 期 4 个构建者照 #186 的模板写集成 worktree，3 个被拒、1 个写成——行为不稳定，不能赌。
+  自己 worktree 也写不进就写 scratchpad，并在回复里给**实际路径**。终审员、修复实现者、复审员不是 isolation worktree，报告照旧写 `$W/.superpowers/python-waves/<名>/`。
 
 **3. 集成**（在集成 worktree 里，按模块内页序逐页）
+- 收到构建者回复就把它的报告从回复里给的实际路径拷进 `$W/.superpowers/python-waves/<名>/`，最迟在合这一页之前（构建者 worktree 第 7 步就删了；落在 scratchpad 的，会话一重启就没了）。
 - `git -C $W merge --no-ff <构建者分支>`。`python-tools.json`、`python/app.html`、`python/index.html`、工具页 `GENERATED:PROGRAMS` 冲突时**不手工合并**，跑配方脚本：
   ```bash
   python3 $W/.claude/skills/python-content-wave/resolve-registry-conflict.py --repo $W --take HEAD --from MERGE_HEAD && git -C $W commit --no-edit
@@ -77,6 +91,18 @@ description: >-
   子进程一律用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时或被打断时（`except BaseException`；SIGTERM 先用 `signal.signal` 转成异常）`os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组，以此兜底（`subprocess.run(timeout=…)` 超时只杀直接子进程，`check.py` 起的 node / python 孙进程会留下；配方脚本的 `run_grouped()` 就是这个写法；**本机没有 `timeout` 命令**——第 2 期两个会话都写过 `timeout 120`，一个验收循环因此全部 rc=127 却没停下）：
   页里有带 `check.property` 的程序 → 变异其中一个的被测函数，`algorithm_property_check` 应红；
   页里没有 → 改一个程序 `run.expect` 里的一个字符，`program_run_check` 应红。
+  **变异之后门是绿的：先问这个变异在语义上是不是等价**，是就换一个，不是再怀疑门。第 3 期 m5a 第一次选了 `competition-ranking` 的 `place = len(rows) + 1`——rows 每轮恰好多一行，它恒等于 `position`，门绿是对的；
+  改选密集排名才断言红。已知的等价变异记在各期账本「门与测量看不见的」一节。
+- **用到随机的 stdlib 层程序，控制方独立再跑一次两解释器比对**（构建者报告里有一次，不算）：`/usr/bin/python3`（3.9.6）与 3.12.x 各跑**本波全部 stdlib 层程序**
+  （`runtime: cpython` 且 `requires` 为空；每个程序在全新临时目录当 cwd 里跑，`_fixtures/` 照门的方式整个 `copytree` 进去——读 fixture 的波不拷就全红），stdout 逐字节相同且等于 `run.expect`。
+  scipy-stack 层不做这一项（`/usr/bin/python3` 没有 numpy；那一层的随机数靠钉住的库版本，见 `python-drill-tool` 内容标准）。两道负控制都要有：
+  ① 一个版本相关的程序（如 `import sys; print(sys.version_info[:2])`）两边**必须不同**——否则可能两次跑的是同一个解释器；
+  ② 扫模块级 `random.<函数>(` 调用与读时间的正则，先断言它对 `random.choice(xs)` 命中、对 `rng.choice(xs)` 与 `random.Random(1)` 不命中。
+  再数一遍构造 `random.Random(` 的文件，与清单的 🎲 逐一对上（按正则数，不按子串 `random` 数——第 3 期的记录里「11」就是子串计数，多数了一个文档串写着 randomness 的程序）。
+- **读 `_fixtures/` 的页**：`git -C $W ls-files 'python/programs/*/_fixtures/*'` 与磁盘上的 `_fixtures/` 文件逐一对上——门读磁盘，看不见「文件没被 git 跟踪」（第 3 期 `access.log` 被根 `.gitignore` 的 `*.log` 静默挡过，本地全绿、CI 会缺文件）。
+  并做一次 `fixture_notes_check` 负控制：改 fixture 一个字符 → 断言红（中英各一条点名缺的那一行），从内存原字节复原（第 3 期 m5a 控制方做过，m5a 台账第 4 步）。
+- **`.gitignore` 这类要 `git add` / `git rm` 才测得到的负控制，在 scratchpad 的临时仓库里做**（`git init` 一个、拷进要测的 `.gitignore` 与几份样例文件）：在集成 worktree 里跑 `git add` / `git rm` 的组合会被权限拒，
+  而且会碰共享索引；临时仓库里测到的忽略规则与这里等价（第 3 期 m5a 就这样做的：旧规则 `git add` 静默跳过 `probe.log`，新规则暂存它，别处的 `stray.log` 仍被忽略）。
 - 浏览器：见「浏览器验收」。
 - 复制内容真跑（`_fixtures/` 要像 `program_run_check` 一样整个 `copytree` 成临时目录里的 `_fixtures/`，平铺到根目录会全红——
   而且这项测量与门一样拷了 fixture，**观察不到**「粘进 PyCharm 缺数据文件」，那一项只能靠人）：每页用 `random.Random(<固定种子>).sample` 抽 3 个程序，取读 / 挖空（每空填标准答案）/ 临摹三种模式的复制内容，
@@ -91,6 +117,8 @@ description: >-
 - 有发现：**一次**修复派发（全部发现一起给一个实现者）→ **一次**范围复审 → 残留问题带裁决记进台账。不做逐页评审循环。
   修复实现者直接在集成 worktree 里改（不另开 worktree）；它回报之前，控制方不在 `$W` 里做任何写操作。
   修复简报里写明：遇到 ENOSPC / 磁盘满就停下回报，**不删任何不是自己写的文件**（第 2 期 M3 的修复实现者这样做了，磁盘满的真因在别的会话）；负控制只做保证终止的变异、带超时。
+- 评审员、修复实现者、复审员的临时文件与导出副本一律放 `$W/.superpowers/python-waves/<名>/review-tmp/` 这一个子目录；删不掉（权限拒）就别换命令绕，列在报告末尾，
+  控制方读完报告后统一删这个子目录（第 3 期 m5a 的终审员与复审员在 `.superpowers/` 下删自己的导出副本都被拒，一份留在了原处）。
 - 修复实现者中途中断（会话重启、磁盘满）：先 `git -C $W diff > $W/.superpowers/python-waves/<名>/fix-partial.patch` 备份，再派新实现者，
   让它**先逐条判定**上一个人的改动「已完成 / 部分 / 未做」、写进报告，在上面续做，最后全量验证（第 2 期两波都这样接手，M4 的接手者据此查出前任半截的 refs 让门是红的）。
 
@@ -107,7 +135,10 @@ description: >-
   用配方脚本（`--take MERGE_HEAD --from HEAD`）解、全量验收、push；它回报新的 head 之后，照上一条核 head 与 CI 再合。
 - 合并之后、拷走台账之前：`git -C $M count-objects -vH`（只读，整个仓库共用一个 `.git`，在主工作区跑安全）存成台账目录的 `git-size-after.txt`，与第 0 步的 `git-size-before.txt` 对称
   （第 2 期两波的波后量只报在回报里、没进台账文件，收尾账本只能从回报转抄）。
-- 删集成 worktree 之前，把整个台账目录拷到主工作区的 `.superpowers/python-phase<期>/<名>-ledger/`（gitignored；worktree 一删台账就没了），
+- 拷台账之前，先确认 `$W/.superpowers/python-waves/<名>/review-tmp/` 与评审 / 复审的导出副本（`git archive` 出来的 `python/` 全量）都已删掉——下面的 `cp -R` 拷的是整个目录，
+  不删就会把整份导出副本一起拷进主工作区的台账（第 5 步让子代理把它们放在这里、删不掉就留给控制方，所以每一波都必然留下一份）。
+- 删集成 worktree 之前，把**整个**台账目录拷到主工作区的 `.superpowers/python-phase<期>/<名>-ledger/`（gitignored；worktree 一删台账就没了），连脚本与探针一起、并核对：
+  `mkdir -p <目标> && cp -R $W/.superpowers/python-waves/<名>/. <目标>/ && diff -rq $W/.superpowers/python-waves/<名> <目标>`（`diff` 无输出才算拷全；第 2 期 M4 只拷了 `*.md`，`m4-probe.js` 没保住，m5b 只好重写）。
   然后**先删 worktree、再删分支**（分支还检出在某个 worktree 里时 `git branch -D` 会报 used by worktree、rc=1）：
   先 `git worktree remove` 集成 worktree 与**台账里记下的**每个构建者的 isolation worktree 与自建 worktree，
   再删集成分支、各构建者分支与它们的原分支（`worktree-agent-*`）（本地 + origin），最后 `git -C $M worktree prune`。只删台账里有的——主仓库里别的 `worktree-agent-*` 可能属于别的会话。
@@ -148,6 +179,8 @@ for f in python/core/*.test.js; do node "$f"; done
 （第 2 期 M3 两页、M4 几乎全波没有带字面量的空）。0 次时改做：该页**全部空各改一个字符**、中英各跑一遍，确认 0 次判对、0 次印出标准答案行、0 条空消息，
 另加一个合成字面量对照（例如 `x = "abcd"` 答成 `"abcQ"`，反馈只说第几个字符起不同、不印 `abcd`）；临摹三层在 `document.body.style.zoom` = 0.9 / 1 / 1.25 下对齐（量坐标，不凭截图说对齐）：往输入层打入影子的前几行，
 用 `Range` 量**同一个字符**在 `.py-typed` 与 `.py-shadow` 里的矩形，dx = dy = 0；只比层外框宽度会得到假差异（`pre` 随内容收缩）。
+量的必须是**可见字符**：从打入内容的末尾往前找第一个非空白字符再量——量到换行符时矩形退化，dx = 0 可能是假阴（第 3 期 py-simulation 第一次就量到了 `\n`）。
+每一档缩放都报出这个字符的宽度，宽度随缩放变（例如 7.05 / 7.83 / 9.80）才证明缩放真的生效了。
 负控制：给 `.py-typed` 加一点 `padding-left`，dx 必须变成非零。探针脚本放在集成 worktree 的 `.superpowers/`（预览服务器能取到），
 每次导航后 `eval(await (await fetch(...)).text())` 重新注入；localStorage 复原后按**排序后的键**比较（键序会变）。
 模式按钮文字带快捷键数字（「挖空 2」/「Fill in 2」），按 `startsWith` 找。不点同意横幅。改过的 localStorage 先记后还。
@@ -170,6 +203,10 @@ for f in python/core/*.test.js; do node "$f"; done
 | 在不带引号的 heredoc 里写含反引号的 PR 文案 | 反引号被当命令替换执行，文案被吃掉 | heredoc 一律 `<<'EOF'`，路径走环境变量 |
 | 命令后接 `\| tail` / `\| head` 再 `echo rc=$?` | 打印的是管道末端的退出码，崩溃显示 `rc=0` | 要看退出码就不接管道，或先存 `rc` |
 | 评审员或实现者自己又派子代理 | 重复一个评审席位 | 简报里写明不许派子代理 |
+| 用 Skill 工具加载本 skill 或 `python-drill-tool` | 读到的是主工作区（不 pull、停在旧提交）的版本；第 3 期 m5b 读到的是 #186 之前的版本。旧版里没有「重读」这一条，所以写在本 skill 里的提醒到不了用 Skill 工具的读者 | 给控制方的派发简报第一句写「开完集成 worktree 后用 Read 读 `$W/.claude/skills/`，不用 Skill 工具」；第 0 步照做；简报让子代理用 Read 读自己 worktree 里的文件 |
+| 构建者把报告写进集成 worktree | isolation worktree 拒写主工作区目录树里、它自己 worktree 以外的路径——集成 worktree 在 `$M/.claude/worktrees/` 下（第 3 期 4 个里 3 个被拒、1 个写成，不稳定） | 报告写构建者自己 worktree 的 `.superpowers/`，写不进就写 scratchpad、回复里给实际路径；控制方第 3 步集成前拷进台账 |
+| 在 worktree 里跑 `git add` / `git rm` 组合、或在 `.superpowers/` 下 `rm` | 被权限拒 | `.gitignore` 类负控制在 scratchpad 的临时仓库里做；子代理的临时文件放 `review-tmp/`，控制方统一删 |
+| fixture 的文件名撞上根 `.gitignore` 的规则（`*.log` 之类） | `git add` 静默跳过它，本地门全绿、CI 缺文件；门读磁盘看不见 | 根 `.gitignore` 已有反向规则 `!python/programs/*/_fixtures/**`；提交前 `git ls-files` 对一遍磁盘上的 `_fixtures/` |
 
 ## 红旗——停下来重看本 skill
 
@@ -180,6 +217,8 @@ for f in python/core/*.test.js; do node "$f"; done
 - 简报里写「注册表由控制方登记」「不要碰 python-tools.json」
 - 没等用户说合并就 `gh pr merge`
 - 删集成 worktree 之前没把台账拷到主工作区 `.superpowers/python-phase<期>/`
-- 简报里写着 `merge --ff-only <集成分支>`，或报告路径指向草稿区
+- 简报里写着 `merge --ff-only <集成分支>`，或构建者的报告路径指向集成 worktree（应指它自己的 worktree）
+- 照 Skill 工具加载出来的版本派发，没有先用 Read 从 `$W/.claude/skills/` 重读；或给控制方的派发简报第一句没写这一条
+- 负控制变异后门绿，就断定「门瞎了」而没先问变异是不是等价
 - 打算跑一个删掉 `visited.add` / 循环更新的负控制，或写 `timeout 120 …`
 - 探针报「0 处泄漏」而没报检查了几次
