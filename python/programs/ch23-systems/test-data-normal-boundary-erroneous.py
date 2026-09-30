@@ -8,7 +8,7 @@ def buggy_is_valid_age(text):
 
 def is_valid_age(text):
     """An age is a whole number of years from 0 to 120, typed as digits only."""
-# >>> BLANK id=valid-age level=2 hint="一行 return：先用字符串方法 isdecimal() 判全是数字，再用 and 接上「换成整数后不超过 120」——int(text) 写在比较号左边，不写下界 || 120 岁本身是合法的；负号、小数点、空串都过不了第一个判断，所以下界用不着" hintEn="One return line: first the string method isdecimal() to test for digits only, then and, then that the whole number is at most 120 - int(text) on the left of the comparison, and no lower bound || 120 itself is a valid age; a minus sign, a decimal point or an empty string all fail the first test, so a lower bound is not needed"
+# >>> BLANK id=valid-age level=2 hint="这是修 bug 的练习：写出 buggy_is_valid_age 修掉那个差一错误之后的样子。一行 return：先用字符串方法 isdecimal() 判全是数字，再用 and 接上「换成整数后不超过 120」——int(text) 写在比较号左边，另一边仍是 120，不写下界 || 120 岁本身是合法的；负号、小数点、空串都过不了第一个判断，所以下界用不着" hintEn="This is a bug-fixing exercise: write buggy_is_valid_age as it should be once its off-by-one mistake is fixed. One return line: first the string method isdecimal() to test for digits only, then and, then that the whole number is at most 120 - int(text) on the left of the comparison, 120 still on the other side, and no lower bound || 120 itself is a valid age; a minus sign, a decimal point or an empty string all fail the first test, so a lower bound is not needed"
     return text.isdecimal() and int(text) <= 120
 # <<< BLANK
 

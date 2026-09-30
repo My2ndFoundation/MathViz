@@ -77,14 +77,10 @@ def _ranking_ref(scores):
     return sorted(rows)
 
 
-# ── inventory-stock（暂不登记）─────────────────────────────────────────────
-# 清单要它带 P，参照与生成器已写好，但**暂不登记进 REFERENCES**：
-# library.algorithm_property_check 用 compile(src, …, 'exec') 导入被测程序，没传
-# dont_inherit=True，于是继承了 library.py 顶上的 `from __future__ import annotations`——
-# 被测模块的注解全成了字符串；@dataclass 看见字符串注解要去 sys.modules[cls.__module__]
-# 里查 KW_ONLY，而门给的 __name__ 是 '__pygate__'、不在 sys.modules 里，导入当场
-# AttributeError。登记了门就红，却不是这个程序的错。门修好（compile 加 dont_inherit=True）
-# 之后，把下面 REFERENCES 里注释掉的那一行放开、chapter.json 里补回 check.property。
+# ── inventory-stock ─────────────────────────────────────────────────────
+# 构建时暂不登记过：门的 compile 没传 dont_inherit=True，被测程序继承了 library.py 的
+# `from __future__ import annotations`，@dataclass 导入即崩。#188 给门的两处 compile 加上了
+# dont_inherit=True，这里随之登记、chapter.json 补回 check.property。
 
 _SKUS = ['PEN', 'INK', 'PAD']
 
@@ -285,7 +281,7 @@ def _library_ref(ops):
 REFERENCES = {
     'gradebook-classes': {'ref': _gradebook_ref, 'cases': _gradebook_ops},
     'competition-ranking': {'ref': _ranking_ref, 'cases': _scores},
-    # 'inventory-stock': {'ref': _inventory_ref, 'cases': _inventory_ops},   # 暂不登记，见上
+    'inventory-stock': {'ref': _inventory_ref, 'cases': _inventory_ops},
     'bank-transfer-atomic': {'ref': _bank_ref, 'cases': _bank_ops},
     'money-in-pence': {'ref': _interest_decimal, 'cases': _money_args},
     'money-decimal': {'ref': _interest_divmod, 'cases': _money_args},

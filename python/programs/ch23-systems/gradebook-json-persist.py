@@ -10,7 +10,7 @@ class Student:
         self.marks = list(marks)
 
     def to_dict(self):
-# >>> BLANK id=to-dict level=2 hint="交回一个字典字面量，两个键依次是 name 和 marks（双引号），值取自这个对象自己的两个属性 || 键名与 from_dict 里读的那两个键一模一样" hintEn="Return a dictionary literal with two keys, name then marks (double quotes), whose values are this object's own two attributes || The keys are exactly the two keys that from_dict reads"
+# >>> BLANK id=to-dict level=2 hint="交回一个字典字面量，两个键依次是 name 和 marks（双引号），值取自这个对象自己的两个属性 || 每个键的值就是 self 上与它同名的那个属性；以后按这两个键就能把值取回来" hintEn="Return a dictionary literal with two keys, name then marks (double quotes), whose values are this object's own two attributes || Each key's value is the attribute of self with the same name; later the values can be looked up again by these two keys"
         return {"name": self.name, "marks": self.marks}
 # <<< BLANK
 

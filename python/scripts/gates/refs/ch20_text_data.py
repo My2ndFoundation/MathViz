@@ -103,11 +103,12 @@ def _numbers_cases(rng):
 # ── date-format-check（两版互为参照）───────────────────────────────────────
 
 def _date_manual(text):
-    # 给 date-format-regex 当参照：split + len + isdigit（ASCII 生成器下与 \d 一致）。
+    # 给 date-format-regex 当参照：split + len + isdecimal。isdecimal 与 str 模式里的 \d 认的
+    # 都是 Unicode Nd 类，所以哪怕遇到非 ASCII 的数字两者也一致（全码位逐个替换实测过）。
     parts = text.split('/')
     if len(parts) != 3 or [len(p) for p in parts] != [2, 2, 4]:
         return 'wrong format'
-    if not all(p.isdigit() for p in parts):
+    if not all(p.isdecimal() for p in parts):
         return 'wrong format'
     day, month = int(parts[0]), int(parts[1])
     if day < 1 or day > 31 or month < 1 or month > 12:
@@ -119,7 +120,9 @@ _DATE = re.compile(r'([0-9][0-9])/([0-9][0-9])/[0-9][0-9][0-9][0-9]')
 
 
 def _date_regex(text):
-    # 给 date-format-manual 当参照：正则判格式，再用集合判范围。
+    # 给 date-format-manual 当参照：正则判格式，再用集合判范围。这里写的是 [0-9]（只认 ASCII），
+    # 所以 cases 只混进 isdigit 认、isdecimal 不认的上标（No 类），不混进非 ASCII 的 Nd 数字——
+    # 后者被测（isdecimal）会放行，这个参照却不放行。
     m = _DATE.fullmatch(text)
     if m is None:
         return 'wrong format'
@@ -150,6 +153,12 @@ def _date_cases(rng):
         if how == 2:
             return (good[:i] + rng.choice('-. x') + good[i + 1:],)
         return (good + rng.choice('x0/ '),)
+    if r < 0.9:
+        # 某一位换成上标数字（chr(185)/chr(178)/chr(179)）：isdigit 认、int() 不认。被测若用
+        # isdigit 就会在 int() 那一步抛 ValueError——区分 isdecimal 与 isdigit 的正是这一支。
+        good = f'{rng.randint(1, 31):02d}/{rng.randint(1, 12):02d}/{rng.randint(1000, 9999)}'
+        i = rng.choice([k for k, ch in enumerate(good) if ch != '/'])
+        return (good[:i] + chr(rng.choice([185, 178, 179])) + good[i + 1:],)
     return (''.join(rng.choice('0123456789/ -') for _ in range(rng.randint(0, 12))),)
 
 
@@ -325,7 +334,8 @@ def _tokenise_cases(rng):
     out += rng.choice(['', ' ', '\n'])
     if rng.random() < 0.25:
         i = rng.randint(0, len(out))
-        out = out[:i] + rng.choice('x^%.=a!') + out[i:]
+        # 末尾那个是上标 ²（chr(178)）：isdigit 认、isdecimal 与 \d 都不认，守的是 tokenise-loop 的 isdecimal。
+        out = out[:i] + rng.choice('x^%.=a!' + chr(178)) + out[i:]
     return (out,)
 
 

@@ -33,7 +33,7 @@ class Bank:
 # <<< BLANK
             raise TransferError("insufficient funds")
         # ... then change both sides together.
-# >>> BLANK id=move-money level=2 hint="两行，同一层：先从付款方扣、再给收款方加，都用增强赋值（-= 与 +=）；收款方的账户用方括号从 self.accounts 里按 target 取 || 付款方已经存在 payer 里了" hintEn="Two lines at the same depth: take from the payer first, then add to the payee, both with augmented assignment (-= and +=); get the payee's account out of self.accounts with square brackets and target || The payer is already held in payer"
+# >>> BLANK id=move-money level=2 hint="两行，同一层：先从付款方扣、再给收款方加，都用增强赋值（-= 与 +=）；付款方就用上面已经取好的 payer，收款方的账户用方括号从 self.accounts 里按 target 取 || 两行改的都是账户的 balance 属性，改动的数目是 amount" hintEn="Two lines at the same depth: take from the payer first, then add to the payee, both with augmented assignment (-= and +=); for the payer use payer, already fetched above, and get the payee's account out of self.accounts with square brackets and target || Both lines change an account's balance attribute, and the size of the change is amount"
         payer.balance -= amount
         self.accounts[target].balance += amount
 # <<< BLANK

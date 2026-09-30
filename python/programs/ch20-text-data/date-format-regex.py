@@ -4,7 +4,7 @@ import re
 
 
 def check_date(text):
-# >>> BLANK id=fullmatch level=2 hint="text 整个不符合格式时进入这个 if：用 not 加 re 模块里那个要求整串都匹配的函数（不是 match，也不是 search 加锚点）；模式是双引号的原始字符串，每一位数字都用简写的数字类（反斜杠加 d），每一段的位数用花括号里的次数写死（不连写两个数字类），text 是第二个实参 || 模式依次是：两位数字、斜杠、两位数字、斜杠、四位数字" hintEn="Enter this if when text as a whole does not fit the format: not, then the function in the re module that must match the entire string (not match, and not search with anchors); the pattern is a raw string in double quotes, every digit is the shorthand digit class (backslash d), and each group's length is fixed with a count in braces (rather than writing the digit class twice); text is the second argument || The pattern is, in order: two digits, a slash, two digits, a slash, four digits"
+# >>> BLANK id=fullmatch level=2 hint="text 整个不符合格式时进入这个 if：用 not 加 re 模块里那个要求整串都匹配的函数（不是 match，也不是 search 加锚点）；模式是双引号的原始字符串，每一位数字都用简写的数字类（反斜杠加 d），每一段的位数用花括号里的次数写死（不连写两个数字类），两个斜杠原样写、前面不加反斜杠，text 是第二个实参 || 模式依次是：两位数字、斜杠、两位数字、斜杠、四位数字" hintEn="Enter this if when text as a whole does not fit the format: not, then the function in the re module that must match the entire string (not match, and not search with anchors); the pattern is a raw string in double quotes, every digit is the shorthand digit class (backslash d), and each group's length is fixed with a count in braces (rather than writing the digit class twice); the two slashes are written as they are, with no backslash before them; text is the second argument || The pattern is, in order: two digits, a slash, two digits, a slash, four digits"
     if not re.fullmatch(r"\d{2}/\d{2}/\d{4}", text):
 # <<< BLANK
         return "wrong format"

@@ -2,7 +2,7 @@
 
 import re
 
-# >>> BLANK id=pattern level=3 hint="用 re 模块的 compile 把模式编译好存进 TOKEN；模式是双引号的原始字符串，由竖线分成两个选项，数字那一项在前：一个或多个数字，用简写的数字类（反斜杠加 d）和加号（不用方括号范围，不用花括号次数） || 第二项：一个方括号字符类，列出四个运算符与两个括号 || 字符类里的顺序是 加、减、乘、除、左括号、右括号，减号前加一个反斜杠转义" hintEn="Compile the pattern with compile from the re module and keep it in TOKEN; the pattern is a raw string in double quotes, split into two alternatives by a vertical bar, numbers first: one or more digits, with the shorthand digit class (backslash d) and a plus (not a range in square brackets, not a count in braces) || Second alternative: a character class in square brackets listing the four operators and the two brackets || Inside the class the order is plus, minus, times, divide, open bracket, close bracket, with a backslash before the minus to escape it"
+# >>> BLANK id=pattern level=3 hint="用 re 模块的 compile 把模式编译好存进 TOKEN；模式是双引号的原始字符串，由竖线分成两个选项，数字那一项在前：一个或多个数字，用简写的数字类（反斜杠加 d）和加号（不用方括号范围，不用花括号次数）；运算符那一项里只有减号前加反斜杠转义，其余符号原样写 || 第二项：一个方括号字符类，列出四个运算符与两个括号 || 字符类里的顺序是 加、减、乘、除、左括号、右括号" hintEn="Compile the pattern with compile from the re module and keep it in TOKEN; the pattern is a raw string in double quotes, split into two alternatives by a vertical bar, numbers first: one or more digits, with the shorthand digit class (backslash d) and a plus (not a range in square brackets, not a count in braces); in the operators alternative only the minus gets a backslash, every other symbol is written as it is || Second alternative: a character class in square brackets listing the four operators and the two brackets || Inside the class the order is plus, minus, times, divide, open bracket, close bracket"
 TOKEN = re.compile(r"\d+|[+\-*/()]")
 # <<< BLANK
 

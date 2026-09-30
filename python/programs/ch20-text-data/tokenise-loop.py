@@ -7,7 +7,7 @@ def tokenise(text):
     tokens = []
     number = ""
     for ch in text:
-        if ch.isdigit():
+        if ch.isdecimal():
 # >>> BLANK id=grow-number level=1 hint="这个数字字符接到正在拼的数字后面：用增强赋值（不写 number = number + …）" hintEn="Add this digit character to the end of the number being built: use augmented assignment (not number = number + ...)"
             number += ch
 # <<< BLANK

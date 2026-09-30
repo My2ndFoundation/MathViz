@@ -15,7 +15,7 @@ def add_interest(balance, rate_percent, months):
         interest = (pounds * rate_percent / 100).quantize(PENNY, rounding=ROUND_HALF_UP)
 # <<< BLANK
         pounds += interest
-# >>> BLANK id=back-to-pence level=2 hint="交回整数便士：pounds 乘以 100（pounds 在前），再用 int() 变成整数 || 结果与另一个写法一样是 int，不是 Decimal——pounds 始终只有两位小数，所以乘以 100 之后是精确的整数" hintEn="Return whole pence: pounds times 100 (pounds first), turned into a whole number with int() || The result is an int, just like the other version, not a Decimal - pounds only ever has two decimal places, so times 100 it is an exact whole number"
+# >>> BLANK id=back-to-pence level=2 hint="交回整数便士：pounds 乘以 100（pounds 在前），再用 int() 变成整数 || 结果与「钱用整数便士存」一样是 int，不是 Decimal——pounds 始终只有两位小数，所以乘以 100 之后是精确的整数" hintEn="Return whole pence: pounds times 100 (pounds first), turned into a whole number with int() || The result is an int, just like in Money in Whole Pence, not a Decimal - pounds only ever has two decimal places, so times 100 it is an exact whole number"
     return int(pounds * 100)
 # <<< BLANK
 
