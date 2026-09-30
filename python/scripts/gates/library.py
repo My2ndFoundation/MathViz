@@ -242,6 +242,48 @@ def _ref_chapter_mismatches(prog_chapter: dict, ref_sources: dict) -> list:
 PROPERTY_CALL_TIMEOUT = 2.0
 
 
+def _deep_mismatch(got, want, path: str = '返回值'):
+    """逐层比「值相等且类型相同」；相同返回 None，否则返回第一个差异的位置与原因。
+
+    原先只比顶层：`got != want or type(got) is not type(want)`。容器的 `==` 逐元素用 `==`，而
+    `np.int64(3) == 3`、`3.0 == 3`、`True == 1` 都成立——于是 `[np.int64(3)]` 对 `[3]`、`[3.0]` 对 `[3]`、
+    `(True,)` 对 `(1,)` 全判相同。第 4 期 m6b 起草时发现（M6 最常见的错正是入口忘了 `.tolist()`，
+    列表里装着 numpy 标量）。list / tuple 按位置、dict 按键递归，set 比元素类型集合；叶子比 type 与值。
+    """
+    if type(got) is not type(want):
+        return f'{path}：类型 {type(got).__module__}.{type(got).__qualname__} ≠ 参照的 {type(want).__module__}.{type(want).__qualname__}'
+    if isinstance(want, (list, tuple)):
+        if len(got) != len(want):
+            return f'{path}：长度 {len(got)} ≠ 参照的 {len(want)}'
+        for i, (g, w) in enumerate(zip(got, want)):
+            m = _deep_mismatch(g, w, f'{path}[{i}]')
+            if m is not None:
+                return m
+        return None
+    if isinstance(want, dict):
+        if set(got) != set(want):
+            return f'{path}：键集合不同（多 {sorted(map(repr, set(got) - set(want)))}，缺 {sorted(map(repr, set(want) - set(got)))}）'
+        wkeys = {k: k for k in want}
+        for k in got:
+            if type(k) is not type(wkeys[k]):
+                return f'{path}：键 {k!r} 的类型 {type(k).__qualname__} ≠ 参照的 {type(wkeys[k]).__qualname__}'
+            m = _deep_mismatch(got[k], want[k], f'{path}[{k!r}]')
+            if m is not None:
+                return m
+        return None
+    if isinstance(want, (set, frozenset)):
+        if got != want:
+            return f'{path}：集合不等'
+        gt = sorted(type(x).__qualname__ for x in got)
+        wt = sorted(type(x).__qualname__ for x in want)
+        if gt != wt:
+            return f'{path}：元素类型 {gt} ≠ 参照的 {wt}'
+        return None
+    if got != want:
+        return f'{path}：值不等'
+    return None
+
+
 class _PropertyTimeout(Exception):
     pass
 
@@ -376,17 +418,20 @@ def algorithm_property_check() -> int:
                 rc = 1
                 bad = None
                 break
-            if got != want or type(got) is not type(want):
-                bad = (args, got, want)
+            where = _deep_mismatch(got, want)
+            if where is not None:
+                bad = (args, got, want, where)
                 break
         if bad is not None:
-            args, got, want = bad
+            args, got, want, *rest = bad
+            where = rest[0] if rest else None
             print(f'ERROR: {name} 的 {entry_name}() 与参考实现不符（property={prop}，'
                   f'种子 {properties.SEED}）\n'
                   f'    反例实参：{args!r}\n'
                   f'    被测返回：{got!r}\n'
                   f'    参照返回：{want!r}\n'
-                  f'    源码：{py_path}', file=sys.stderr)
+                  + (f'    首个差异：{where}\n' if where else '')
+                  + f'    源码：{py_path}', file=sys.stderr)
             rc = 1
             continue
         checked += 1
