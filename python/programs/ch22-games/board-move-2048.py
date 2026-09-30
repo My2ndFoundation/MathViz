@@ -25,14 +25,14 @@ def move(board, direction):
     if direction == "left":
         return [merge_left(row) for row in board]
     if direction == "right":
-# >>> BLANK id=right level=2 hint="向右 = 把每一行反过来、向左合并、再反回去：仿照上面向左那一行，写成一个列表推导式，循环变量同样叫 row || 反转一行用步长为 -1 的切片，合并前反一次、合并后对结果再反一次" hintEn="Right is: reverse each row, merge it to the left, and reverse it back - a list comprehension shaped like the left one above, with the loop variable again called row || Reverse a row with a slice whose step is -1, once before merging and once more on the result"
+# >>> BLANK id=right level=2 hint="向右 = 把每一行反过来、向左合并、再反回去：仿照上面向左那一行写成一个列表推导式，循环变量同样叫 row；反转一行用步长为 -1 的切片（不用 reversed），也不调用 move 自己 || 合并前对 row 反转一次，合并后对 merge_left 交回的结果再反转一次" hintEn="Right is: reverse each row, merge it to the left, and reverse it back - a list comprehension shaped like the left one above, with the loop variable again called row; reverse a row with a slice whose step is -1 (not reversed), and do not call move itself || Reverse row once before merging, and reverse what merge_left hands back once more"
         return [merge_left(row[::-1])[::-1] for row in board]
 # <<< BLANK
     if direction == "up":
-# >>> BLANK id=up level=2 hint="向上 = 转置、每行向左合并、再转置回来：外层调用 transpose，里面是和向左那一行一样的推导式，只是作用在转置后的棋盘上，循环变量同样叫 row || 列表推导式里的 for 取的是 transpose(board) 的每一行" hintEn="Up is: transpose, merge every row to the left, transpose back - an outer transpose call around the same comprehension as for left, applied to the transposed board, with the loop variable again called row || The comprehension's for takes each row of transpose(board)"
         return transpose([merge_left(row) for row in transpose(board)])
-# <<< BLANK
+# >>> BLANK id=down level=2 hint="向下 = 转置之后向右、再转置回来：和上面向上那一行一样，外层调用 transpose、里面一个列表推导式，循环变量同样叫 row、同样取 transpose(board) 的每一行；推导式里对每一行的处理换成向右时那一套。反转一行同样用步长为 -1 的切片（不用 reversed），也不调用 move 自己 || 向上那一行里的 merge_left(row)，在这里要变成：先反转 row、合并、再反转结果" hintEn="Down is: transpose, move right, transpose back - like the up line above, an outer transpose call around a list comprehension whose loop variable, again called row, again takes each row of transpose(board) - but each row gets the treatment it gets when moving right. Reverse a row with a slice whose step is -1 here too (not reversed), and do not call move itself || The merge_left(row) of the up line becomes: reverse row, merge, then reverse the result"
     return transpose([merge_left(row[::-1])[::-1] for row in transpose(board)])
+# <<< BLANK
 
 
 def show(board):

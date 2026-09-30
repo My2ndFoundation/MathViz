@@ -8,7 +8,7 @@ def live_neighbours(grid, row, col):
             if dr == 0 and dc == 0:
                 continue
             r, c = row + dr, col + dc
-# >>> BLANK id=on-board level=2 hint="两行：一个 if 加一次 +=。写法先定下：行、列两个范围各用一个连写比较（不拆成四个单独的比较），用 and 连起来，行在前、列在后；+= 加的是那一格的值 grid[r][c] 本身（0 或 1） || 每个连写比较写成 0 <= 下标 < 长度：行数是 len(grid)，列数是 len(grid[0])" hintEn="Two lines: an if and a +=. Fix the form first: each of the two ranges, row and column, is one chained comparison (not four separate comparisons), joined by and, row first and column second; the += adds that cell's value grid[r][c] itself (0 or 1) || Each chained comparison is 0 <= index < length: the number of rows is len(grid) and the number of columns len(grid[0])"
+# >>> BLANK id=on-board level=2 hint="两行：一个 if 加一次 +=。写法先定下：行、列两个范围各用一个连写比较（不拆成四个单独的比较），用 and 连起来，行在前、列在后；列数用第 0 行的长度 len(grid[0])；+= 加的是那一格的值 grid[r][c] 本身（0 或 1） || 每个连写比较写成 0 <= 下标 < 长度：行数是 len(grid)" hintEn="Two lines: an if and a +=. Fix the form first: each of the two ranges, row and column, is one chained comparison (not four separate comparisons), joined by and, row first and column second; the number of columns is the length of row 0, len(grid[0]); the += adds that cell's value grid[r][c] itself (0 or 1) || Each chained comparison is 0 <= index < length: the number of rows is len(grid)"
             if 0 <= r < len(grid) and 0 <= c < len(grid[0]):
                 count += grid[r][c]
 # <<< BLANK

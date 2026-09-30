@@ -3,7 +3,7 @@ import random
 
 
 def tally(rolls):
-# >>> BLANK id=counts-list level=2 hint="用列表乘法造一张全是 0 的计数表，存进 counts || 下标就是两颗骰子的点数和；最大的和是 12，所以要 13 格（0 号与 1 号两格永远是 0，只是为了让下标等于点数和）" hintEn="Build a table of counts that is all zeros using list multiplication, and store it in counts || The index is the total of the two dice; the biggest total is 12, so it needs 13 slots (slots 0 and 1 always stay 0 - they are there so that the index equals the total)"
+# >>> BLANK id=counts-list level=2 hint="用列表乘法造一张全是 0 的计数表，存进 counts；列表写在乘号左边、格数写在右边 || 下标就是两颗骰子的点数和；最大的和是 12，所以要 13 格（0 号与 1 号两格永远是 0，只是为了让下标等于点数和）" hintEn="Build a table of counts that is all zeros using list multiplication, and store it in counts; the list goes on the left of the times sign and the number of slots on the right || The index is the total of the two dice; the biggest total is 12, so it needs 13 slots (slots 0 and 1 always stay 0 - they are there so that the index equals the total)"
     counts = [0] * 13
 # <<< BLANK
     for a, b in rolls:

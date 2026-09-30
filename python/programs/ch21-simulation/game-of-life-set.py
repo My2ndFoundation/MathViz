@@ -14,7 +14,7 @@ def step(live):
 # <<< BLANK
     new = set()
     for cell, n in counts.items():
-# >>> BLANK id=rule level=3 hint="两行：一个 if 加一次 add。写法先定下：条件是 or 连起来的两部分，先写正好 3 票的那一部分；后一部分加括号，括号里用 and，先比票数、再看原来活不活 || 下一代活着的只有两种：正好 3 票的（原来活不活都行），以及正好 2 票而且原来就活着的 || 票数比较写成 n == 数字，原来就活着写成 cell in live，加进新集合用 new.add(cell)" hintEn="Two lines: an if and an add. Fix the form first: the condition is two parts joined by or, the exactly-3-votes part first; the second part in brackets, using and inside, with the vote test before the was-it-alive test || Only two kinds of cell are alive next time: those with exactly 3 votes (alive before or not), and those with exactly 2 votes that were already alive || Write each vote test as n == number, already alive as cell in live, and add to the new set with new.add(cell)"
+# >>> BLANK id=rule level=3 hint="两行：一个 if 加一次 add。写法先定下：条件是 or 连起来的两部分，先写正好 3 票的那一部分；后一部分加括号，括号里用 and，先比票数、再看原来活不活 || 下一代活着的只有两种：正好 3 票的（原来活不活都行），以及正好 2 票而且原来就活着的 || 票数比较写成 n == 数字，原来就活着写成 cell in live" hintEn="Two lines: an if and an add. Fix the form first: the condition is two parts joined by or, the exactly-3-votes part first; the second part in brackets, using and inside, with the vote test before the was-it-alive test || Only two kinds of cell are alive next time: those with exactly 3 votes (alive before or not), and those with exactly 2 votes that were already alive || Write each vote test as n == number, and already alive as cell in live"
         if n == 3 or (n == 2 and cell in live):
             new.add(cell)
 # <<< BLANK
