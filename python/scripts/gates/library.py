@@ -1285,3 +1285,99 @@ def variant_check() -> int:
         print(f'变体：{len(groups)} 个 problem 组，其中 {len(multi)} 个多变体'
               f'（{detail}），组内 title.en 互不相同')
     return rc
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# fixture_notes_check
+# ══════════════════════════════════════════════════════════════════════════
+
+FIXTURE_REF_RE = re.compile(r'_fixtures/([A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)*)')
+
+
+def _fixture_run(paras: list, lines: list) -> bool:
+    """`lines` 是否作为**连续的若干段、按原顺序、逐段与该行相等**出现在 `paras` 里。"""
+    n = len(lines)
+    if n == 0:
+        return True
+    for i in range(len(paras) - n + 1):
+        if [str(p).strip() for p in paras[i:i + n]] == lines:
+            return True
+    return False
+
+
+def fixture_notes_check() -> int:
+    """读 `_fixtures/<名>` 的程序，讲解（中英两边）必须把那份文件**逐行**抄出来。
+
+    复制按钮只复制 `.py`（第 1 期账本 §一.2）：她把程序粘进 PyCharm 时没有数据文件，
+    唯一的来源是讲解末段手抄的那份内容。手抄与 `_fixtures/` 里的真文件之间原本没有门，
+    改 fixture 的人不会想到去改讲解——跑出来的结果与页面讲的就对不上了，而且没有任何东西报红。
+
+    判据（每个被引用的文件、中英各一遍）：
+      1. 讲解某一段里出现文件名 `<名>`（她得知道文件叫什么、放在哪）；
+      2. 文件的每一行（去掉行尾换行、再去首尾空白）**各自成为一段**，这些段在 `notes`
+         里**连续且按原顺序**出现。
+
+    为什么要「各自成段」而不只是「某段里包含这行文字」：讲解段落渲染成 `<p>`，没有
+    `white-space: pre`，段内的换行会塌成空格。第 1 期 ch05 写的是
+    「name,maths,physics,cs / Ada,91,78,95 / …（每个 / 处换行）」——子串判据对它是绿的，
+    可她拿到的是一行要自己拆的文字。只有一段一行，页面上才真是一行一行。
+
+    引用的识别：源码（含 BLANK 指令行）里所有 `_fixtures/<名>`。源码提到 `_fixtures`
+    却一处 `_fixtures/<名>` 都没有（例如 `Path("_fixtures") / "x.csv"` 拼路径），门就看不见
+    它读哪个文件——这种写法本身报红，要求把路径写全。
+    """
+    rc = 0
+    scanned = 0
+    checked = []
+    for chapter_dir, _data, prog, py_path in iter_programs():
+        if not py_path.exists():
+            continue                     # 缺文件由 chapter_manifest_check 报
+        scanned += 1
+        src = read_text(py_path)
+        if '_fixtures' not in src:
+            continue
+        pid = _pid(chapter_dir, prog)
+        names = sorted(set(FIXTURE_REF_RE.findall(src)))
+        if not names:
+            print(f'ERROR: {pid} 的源码提到 _fixtures，却没有一处写成 `_fixtures/<文件名>`：'
+                  f'{py_path}\n'
+                  f'       这道门靠这个写法认出程序读哪份数据文件、再核对讲解有没有逐行抄出它。'
+                  f'把路径写全（例如 "_fixtures/scores.csv"）。', file=sys.stderr)
+            rc = 1
+            continue
+        for name in names:
+            fx = chapter_dir / '_fixtures' / name
+            if not fx.is_file():
+                print(f'ERROR: {pid} 读 _fixtures/{name}，但 {fx} 不存在', file=sys.stderr)
+                rc = 1
+                continue
+            lines = [ln.strip() for ln in fx.read_text(encoding='utf-8').splitlines()]
+            base = name.rsplit('/', 1)[-1]
+            for lang in ('zh', 'en'):
+                paras = list(((prog.get('notes') or {}).get(lang)) or [])
+                if not any(base in str(p) for p in paras):
+                    print(f'ERROR: {pid} 的 notes.{lang} 没有提到文件名 {base!r}——'
+                          f'她粘进 PyCharm 时不知道要建哪个文件（_fixtures/{name}）',
+                          file=sys.stderr)
+                    rc = 1
+                if not _fixture_run(paras, lines):
+                    missing = [ln for ln in lines if ln not in [str(p).strip() for p in paras]]
+                    why = (f'缺这几行：{missing!r}' if missing else
+                           '每一行都各有一段，但不是按原顺序连在一起')
+                    print(f'ERROR: {pid} 的 notes.{lang} 没有把 _fixtures/{name} 逐行抄出来'
+                          f'（每行单独一段、连续、按文件里的顺序；共 {len(lines)} 行）。{why}\n'
+                          f'       复制按钮不带数据文件，讲解里的这份手抄是她唯一的来源。',
+                          file=sys.stderr)
+                    rc = 1
+            checked.append(f'{pid}→{name}')
+    if scanned == 0:
+        print('ERROR: 一个程序都没扫到——这道门跑了个寂寞', file=sys.stderr)
+        return 1
+    if not checked and rc == 0:
+        print('ERROR: 全库没有一个程序读 _fixtures/——这道门的正文一次都没执行过',
+              file=sys.stderr)
+        return 1
+    if rc == 0:
+        print(f'fixture 手抄：{len(checked)} 处引用（{"、".join(checked)}），'
+              f'讲解中英两边都逐行、按序抄出了文件内容并写出文件名')
+    return rc
