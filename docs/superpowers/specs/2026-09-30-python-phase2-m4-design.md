@@ -250,7 +250,7 @@ A*（`a-star-grid`）、最小生成树（`mst-prim` / `mst-kruskal`）、拓扑
 | B4 B5 B8 B9 B10 | | 确认。B9 与 M3 一致：M3 只点出「pop(0) 要挪动」「每次扫一遍」，插桩、倍增归 py-complexity |
 | B6 | Huffman | 不建树、不打印码字 |
 | B7 | 稳定性 | 不算重复；讲解写那道题的**标题**指回去 |
-| §4 | 递归 | 用，不重讲；讲解写「递归的机制见 *递归* 一页」这类页名指代；`tags` 带 `recursion` |
+| §4 | 递归 | 用，不重讲；讲解写「递归的机制见 「递归」 一页」这类页名指代；`tags` 带 `recursion` |
 | §6 | boards | 照现行规则写全四个；拿不准的汇总进第 3 次回报；本波不去掉任何一家 |
 | — | `growth-rate-table` / `doubling-experiment` | 两个都留（公式 vs 实测） |
 | — | 组名 | 与 M3 的 11 个组名、全库现有 problem 名都不重（Python编程 实测） |
