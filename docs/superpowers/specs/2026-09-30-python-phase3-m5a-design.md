@@ -1,6 +1,6 @@
 # Python 子项目 · 第 3 期 · 波 m5a（M5「综合运用」上半）程序清单
 
-> 状态：**草稿，待审**（清单、§3 边界、§4 随机、§5 递归、§6 fixture 需要裁决）。
+> 状态：**已批准**（2026-09-30，Python编程 审，受用户委托）。裁决见 §8。
 > 日期：2026-09-30
 >
 > 上游：
@@ -133,3 +133,16 @@ refs 文件：`python/scripts/gates/refs/ch20_text_data.py`、`ch23_systems.py`�
 | `decimal` 模块 | `money-decimal` | 考纲只谈浮点误差，不点名 `decimal` |
 | 测试数据三类 | `test-data-normal-boundary-erroneous` | 四家都考「正常 / 边界 / 错误数据」，应当四家全写——列出只为让评审核一下 |
 | 词法分析 | `tokenise-*` | AQA / CIE 讲编译阶段（词法分析），OCR / Edexcel 不确定 |
+
+---
+
+## 8. 裁决记录
+
+| # | 问题 | 决定 |
+|---|---|---|
+| M5A-D1 | §3 边界 3.1–3.8 | 全部按草案；3.8 测试数据放 py-systems（A-level 系统开发与测试同一章），只用 `assert`、不引 unittest |
+| M5A-D2 | `test-data-normal-boundary-erroneous` | 程序里**最终交出的校验函数必须是对的**；「故意留的边界 bug」用单独命名的 `buggy_...` 版本演示——测试表在它上面失败、在正确版本上全过；失败用 try/except 捕获后打印自己的话，程序正常退出；挖空不挖在 buggy 版本上；若带 P，只挂在正确版本上 |
+| M5A-D3 | §4 随机 | 本波无；构建者要加须上报，并在 3.9.6 / 3.12 各跑一次比对 |
+| M5A-D4 | §6 fixture | 批准：四个 fixture ≤ 8 行、无空行；students.json 每行一个对象、不含 true/false/null；讲解照 `fixture_notes_check`「一段一行、连续、按序、写出文件名」抄 |
+| M5A-D5 | §7 boards | 照现行规则四家全写，拿不准的汇总上报 |
+| M5A-D6 | 组名 | date-format-check、tokenise-expression、money-arithmetic 与 m5b（pi-estimate、game-of-life、shuffle、ttt-winner、merge-row-2048）及全库不重 |
