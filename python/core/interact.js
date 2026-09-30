@@ -165,7 +165,7 @@
     blanksCount: { zh: '{0} 个空',  en: '{0} blank(s)' },
     tags:        { zh: '标签',      en: 'Tags' },
     runtime:     { zh: '运行环境',  en: 'Runtime' },
-    notTagged:   { zh: '未标注',    en: 'Not tagged' },
+    notOnSyllabus: { zh: '不在考纲', en: 'Not on the syllabus' },
     needsPip:    { zh: '需要先装：', en: 'Install first: ' },
     /* ---- 分段临摹（第 5 期 chunks）---- */
     chunkLabel:  { zh: '段 {0} / {1} · {2}（第 {3}–{4} 行）',
@@ -254,9 +254,11 @@
      说明面板顶部那几行元数据（第 1 期设计 B7）。决定显示什么的逻辑放在这里、可测；
      renderPanel 只负责画。三种模式都显示——元数据不泄题。
        summary  难度 · 类型 · 行数 · 空数（blankCount 不是数字时省略，不编）
-       boards   考试局；空时显式写「未标注」，并带 placeholder:true——渲染层靠这个
-                布尔判断是不是占位符，而不是拿翻译后的字符串去比「未标注」/'Not tagged'
-                （R1 修复轮：字符串比较在换语言、改文案时会悄悄失效）
+       boards   考试局；空时显式写「不在考纲」，并带 placeholder:true——渲染层靠这个
+                布尔判断是不是占位符，而不是拿翻译后的字符串去比「不在考纲」/'Not on the syllabus'
+                （R1 修复轮：字符串比较在换语言、改文案时会悄悄失效）。
+                空的语义（用户裁决 2026-09-30）：boards 只写考纲点名了这个程序核心教学点的
+                考试局，一家都没点名就是 []——所以空不是「漏标」，是「四家考纲都不含」
        tags     标签；空时整行不出
        runtime  只在非 cpython 时出 */
   function panelMeta(program, lang, blankCount) {
@@ -268,7 +270,7 @@
 
     var boards = asList(program.boards);
     var boardsRow = { key: 'boards', label: t('boards', lang),
-                       items: boards.length ? boards.slice() : [t('notTagged', lang)] };
+                       items: boards.length ? boards.slice() : [t('notOnSyllabus', lang)] };
     if (!boards.length) { boardsRow.placeholder = true; }
     rows.push(boardsRow);
 
@@ -2175,7 +2177,7 @@
         metaRows.forEach(function (row) {
           var r = h('div', 'py-meta-row');
           if (row.label) { r.appendChild(h('span', 'py-meta-k', row.label)); }
-          /* 占位符（考试局为空时的「未标注」）用普通值样式，不套 py-board 药丸——
+          /* 占位符（考试局为空时的「不在考纲」）用普通值样式，不套 py-board 药丸——
              靠 row.placeholder 这个布尔判断，不拿翻译后的字符串去比对
              （R1 修复轮：字符串比较换语言就失效，布尔标记不会）。 */
           var cls = row.key === 'tags' ? 'py-tag' :

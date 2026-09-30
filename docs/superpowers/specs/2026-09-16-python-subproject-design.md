@@ -168,7 +168,9 @@ MathViz 仓库里的**第三个子项目**，与 `chess/` 和 `cryptography/` �
 
 - `kind ∈ { syntax, pattern, algorithm, project, embedded }`
 - `level ∈ 1..5`
-- `boards ⊆ { AQA, OCR, Edexcel, CIE }`
+- `boards ⊆ { AQA, OCR, Edexcel, CIE }`，列表、不重复、**可以为空**。语义（用户裁决 2026-09-30）：一个考试局只在它的
+  A-level 考纲点名了这个程序的核心教学点时才写；四家都不含就写 `[]`——面板显示「不在考纲」，按考试局筛选时不出现。
+  依据与逐程序判定表：`docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md`（取代原先的「拿不准就四家全写 / 确知不含才去掉」）。
 - `runtime ∈ { cpython, micropython-microbit, micropython-pico }`
 - `requires` 取自白名单 `{ numpy, pandas, matplotlib, scipy, pygame }`
 - `check.property` 是一个族名，取自闭集 `{ sort, search, structure, pure }`（第 1 期全部是 `pure`）。

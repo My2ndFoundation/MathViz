@@ -17,6 +17,14 @@ T.eq(PI.filterPrograms(PROGS, { level: [1,3] }).map(p => p.id), ['a','b'], '同�
 T.eq(PI.filterPrograms(PROGS, { level: [3,5], kind: ['pattern'], boards: ['CIE'] }).map(p => p.id),
      ['c'], '多个维度是与');
 T.eq(PI.filterPrograms(PROGS, { maxLines: 40 }).map(p => p.id), ['a','b'], '长度上限含等号');
+(function () {
+  /* boards: [] 合法（用户裁决 2026-09-30：考纲外的程序一家都不写）——
+     不按考试局筛时照常出现；按任何一家筛时都不出现，这正是这个语义要的效果。 */
+  const withOff = PROGS.concat([{ id: 'z', level: 1, kind: 'syntax', boards: [], lines: 10, requires: [] }]);
+  T.eq(PI.filterPrograms(withOff, {}).map(p => p.id), ['a','b','c','z'], 'boards 为空的程序在不筛考试局时出现');
+  T.eq(PI.filterPrograms(withOff, { boards: ['AQA','OCR','Edexcel','CIE'] }).map(p => p.id), ['a','b','c'],
+       'boards 为空的程序按任何考试局筛都不出现');
+})();
 
 T.eq(PI.requirementLine(PROGS[0]), null, '无依赖不显示 pip 行');
 T.eq(PI.requirementLine(PROGS[2]), 'pip install numpy pandas', '依赖行按声明顺序');
@@ -521,10 +529,12 @@ T.throws(function () { PI.mount({ programs: PROGS }); },
   T.ok(!zh[1].placeholder, '有真实考试局时不是占位符');
   T.eq(zh[2].items, ['selection', 'if-elif-else'], '标签原样给（英文标识符，不翻译）');
   const emptyBoardsRow = PI.panelMeta(Object.assign({}, prog, { boards: [] }), 'zh', 2)[1];
-  T.eq(emptyBoardsRow.items, ['未标注'],
-       '考试局为空时显式写未标注（program_meta_check 要求非空，这是 UI 兜底）');
+  T.eq(emptyBoardsRow.items, ['不在考纲'],
+       '考试局为空时显式写不在考纲（boards: [] 合法：四家考纲都不含这个程序的核心教学点）');
+  T.eq(PI.panelMeta(Object.assign({}, prog, { boards: [] }), 'en', 2)[1].items, ['Not on the syllabus'],
+       '英文占位同样走 t()：Not on the syllabus');
   T.eq(emptyBoardsRow.placeholder, true,
-       '占位符带 placeholder:true——渲染层靠这个布尔判断，不拿翻译后的字符串去比「未标注」');
+       '占位符带 placeholder:true——渲染层靠这个布尔判断，不拿翻译后的字符串去比「不在考纲」');
   T.eq(PI.panelMeta(Object.assign({}, prog, { tags: [] }), 'zh', 2).map(function (r) { return r.key; }),
        ['summary', 'boards'], '没有标签就不出标签行');
   T.eq(PI.panelMeta(prog, 'zh', null)[0].items, ['难度 L2 · 惯用模式 · 23 行'], '空数算不出来时不编一个');

@@ -28,7 +28,7 @@
 子进程一律带超时，而**本机（macOS）没有 `timeout` 命令**：用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时或被打断时（`except BaseException`；SIGTERM 先用 `signal.signal` 转成异常）`os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组。遇到 ENOSPC 就停下回报，不删任何不是你写的文件。
 
 ## 要查的
-**规格**：清单逐条对上（id、变体组、教什么、P 参照）；每程序 ≥ 1 空；每页 ≥ 1 个变体组；页面边界；元数据闭集与 `boards` 是否可信；注册表条目字段、accent 按模块表、version / engine 一致。
+**规格**：清单逐条对上（id、变体组、教什么、P 参照）；每程序 ≥ 1 空；每页 ≥ 1 个变体组；页面边界；元数据闭集；`boards` 逐个对照 `docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md` 的判定原则与条目（只写考纲点名了核心教学点的考试局，考纲外写 `[]`）；注册表条目字段、accent 按模块表、version / engine 一致。
 
 **内容（逐个空）**——用 node `require` `python/core/*.js`，对标准答案与每一种你想得到的「同样好的写法」调用 `PyInteract.blankFeedback(answer, reference, lang)`：
 - 被判错的等价写法，第 1 级提示有没有钉住？没钉住就是问题。
