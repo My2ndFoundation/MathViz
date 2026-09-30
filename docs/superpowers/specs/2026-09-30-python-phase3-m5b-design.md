@@ -1,6 +1,6 @@
 # Python 子项目 · 第 3 期 · 波 m5b：py-simulation、py-games 程序清单
 
-> 状态：**草稿，待审**（Python编程 审完之前不派构建者）。
+> 状态：**已批准**（2026-09-30，Python编程 受用户委托审定；裁决见 §8）。
 > 日期：2026-09-30
 >
 > 上游：主规格 `2026-09-16-python-subproject-design.md` §2.1 / §2.2（M5：`py-simulation` — 蒙特卡洛、随机游走、排队模拟、生命游戏；
@@ -135,3 +135,19 @@
 | py-simulation | 12 | 3（pi-estimate、game-of-life、shuffle） | 10 | 7 | 0 | 0 |
 | py-games | 12 | 2（ttt-winner、merge-row-2048） | 9 | 3 | 3 | 1 |
 | **m5b** | **24** | **5** | **19** | **10** | **3** | **1** |
+
+---
+
+## 8. 裁决（2026-09-30，Python编程 审定）
+
+| # | 问题 | 决定 |
+|---|---|---|
+| B1–B6 | 边界 | 全部确认。B1：FSM 概念在 `traffic-light-fsm` 讲，M8 只用在硬件上。B3：折半只用不讲，讲解指「查找」一页（注册表页名，「」括起来） |
+| §4 | 递归 | `ttt-minimax`「用，不重讲」 |
+| R2 | property 只挂纯核心 | 批准——随机序列当实参传入，这正是本页该讲的一件事 |
+| R3 | `shuffle-fisher-yates` 的参照 | **接受** `random.Random(同种子).shuffle`；局限（同一算法：守下标范围与方向、守不住算法本身）写进 refs 注释，并进第 3 次回报留账 |
+| R4 | 两解释器比对 | 照做：每个 🎲 程序在 3.9.6 与 3.12.x 上各跑一次、stdout 逐字节比对 |
+| — | 页名 | `minesweeper-flood-reveal` 指 BFS 那一页用 `py-graphs` 在注册表里的实际 title（`python/python-tools.json`），不自拟 |
+| — | `sir-epidemic-steps` | 浮点输出打印时 round 或格式化到固定位数，照 R4 两解释器比对 |
+| — | `ttt-minimax` cases | k ≥ 3 照做；门每次调用限时 2 秒 |
+| — | 组名 | 5 个组名与全库无重名；m5a 的清单到了由 Python编程 交叉核对，撞了由 m5a 改名 |
