@@ -35,7 +35,7 @@ import tempfile
 import tokenize
 import traceback
 
-from . import (PROGRAMS_DIR, iter_programs, load_chapters, load_registry,
+from . import (PROGRAMS_DIR, TOOLS_DIR, iter_programs, load_chapters, load_registry,
                read_text, run_node, tool_pages)
 from . import properties
 from . import refs
@@ -767,6 +767,289 @@ def anchor_check() -> int:
     if rc == 0:
         print(f'行锚：{anchors} 条 lineNotes/chunks 锚在源码里都存在且唯一，'
               f'clean() 之后仍然存在且唯一')
+    return rc
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 5b. chunks_check（第 5 期 · 分段临摹）
+# ══════════════════════════════════════════════════════════════════════════
+
+# 工具页里内联 core 的七个区段（与 inline_core.py 同一组标记）。
+CORE_REGION_TAGS = ('PY-LEX', 'STORE', 'EXERCISE', 'EDITOR', 'JUDGE', 'TRACE', 'INTERACT')
+
+
+def _region_body(text: str, tag: str):
+    m = re.search(r'/\* >>> GENERATED:' + re.escape(tag) + r'(?: [^*]*)? \*/\n(.*?)'
+                  r'/\* <<< GENERATED:' + re.escape(tag) + r' \*/', text, re.DOTALL)
+    return m.group(1) if m else None
+
+
+def _nonempty_str(v) -> bool:
+    return isinstance(v, str) and v != ''
+
+
+def chunks_check() -> int:
+    """声明了 `chunks` 的程序：段的形状、顺序、相接，以及**页面上的 JS 与门切得一样**。
+
+    段的定义（第 5 期 chunks 设计 §1，裁决 C1）：**段 = clean 文本里从本段 `from` 那一行
+    起、到下一段 `from` 之前为止的全部行**；第一段从偏移 0 起，最后一段到文本末尾（含结尾
+    换行）。`to` 是本段最后一个非空行，只用来让作者写清「到哪为止」、让这道门核对「段与段
+    之间只有空行」。于是各段首尾相接、覆盖全文，拼回去逐字节等于 clean 文本。
+
+    逐条，任何一条不满足都红：
+      1. 形状：`chunks` 是数组、**至少 2 段**；每段 `title.en` / `title.zh` 是非空字符串，
+         `from` / `to` 是非空字符串（锚本身的存在与唯一归 `anchor_check`；这里锚在 clean
+         文本里定位不了就报一句「见 anchor_check」并跳过这个程序的后几条）。
+      2. 顺序：clean 文本里 `from_k` 行号 ≤ `to_k` 行号 < `from_{k+1}` 行号。
+      3. 相接：`to_k` 与 `from_{k+1}` 之间只有空行；第一段 `from` 之前、最后一段 `to` 之后
+         也只有空行——第一段 `from` 就是 clean 文本的第一个非空行（设计 §6.1：docstring /
+         import 属于第 1 段，不许有「第一段之前」的代码被丢掉）。
+      4. **JS 与门一致**：在 node 的**裸 `vm` context**（浏览器分支——`node -e` / stdin 会
+         定义 module 与 require，走的是 node 分支）里装载**工具页内联的**七块 core 与
+         `GENERATED:PROGRAMS`，对页面上的那份程序调 `Exercise.clean` 与
+         `PyInteract.chunkSegments(clean, chunks)`，断言：clean 与门算的逐字相同；段数、
+         每段 start / end / fromLine / toLine 与门用 Python 独立算出的一致；各段 `text`
+         拼接 === clean。第 0 期 `anchor_check` ① 付过「门验的与 UI 用的不是同一个解析」的
+         代价，所以这一条比的是页面自己的那个函数，不是门里的一份复刻。
+
+    每段的行数（简报说 games 每段 20–40 行）**只是取向，不进门**——一个 45 行的 `main()`
+    硬拆成两段更糟（设计 C8）。
+
+    0 个程序声明 `chunks` 时这道门是绿的，但会**说出来**：绿只是因为无事可查，1–4 条没有被
+    任何真实数据走过。
+    """
+    rc = 0
+    declared = []          # 通过了 1–3 条、要进第 4 条的程序
+    n_declared = 0
+    for chapter_dir, data, prog, py_path in iter_programs():
+        if 'chunks' not in prog:
+            continue
+        n_declared += 1
+        name = _pid(chapter_dir, prog)
+        chunks = prog.get('chunks')
+
+        # ── 1. 形状 ──
+        bad = []
+        if not isinstance(chunks, list):
+            bad.append(f'chunks 不是数组：{type(chunks).__name__}')
+        elif len(chunks) < 2:
+            bad.append(f'chunks 只有 {len(chunks)} 段——分段至少 2 段；不分段就别写 chunks')
+        else:
+            for i, ch in enumerate(chunks):
+                if not isinstance(ch, dict):
+                    bad.append(f'chunks[{i}] 不是对象')
+                    continue
+                title = ch.get('title')
+                if not isinstance(title, dict):
+                    bad.append(f'chunks[{i}].title 不是 {{en, zh}} 对象')
+                else:
+                    for lang in ('en', 'zh'):
+                        if not _nonempty_str(title.get(lang)):
+                            bad.append(f'chunks[{i}].title.{lang} 不是非空字符串：'
+                                       f'{title.get(lang)!r}')
+                for key in ('from', 'to'):
+                    if not _nonempty_str(ch.get(key)):
+                        bad.append(f'chunks[{i}].{key} 不是非空字符串：{ch.get(key)!r}')
+        if bad:
+            for b in bad:
+                print(f'ERROR: {name} 的 {b}', file=sys.stderr)
+            rc = 1
+            continue
+        if not py_path.exists():
+            continue                     # 缺文件由 chapter_manifest_check 报
+
+        # 与 core/exercise.js 的 clean() 同法（anchor_check 同一行）：只剥两条指令行。
+        clean_lines = [ln for ln in read_text(py_path).split('\n') if not _is_directive(ln)]
+        clean = '\n'.join(clean_lines)
+
+        def locate(anchor):
+            hits = [n for n, ln in enumerate(clean_lines) if ln == anchor]
+            return hits[0] if len(hits) == 1 else None
+
+        froms = [locate(ch['from']) for ch in chunks]
+        tos = [locate(ch['to']) for ch in chunks]
+        lost = [f'chunks[{i}].{key}' for i in range(len(chunks))
+                for key, at in (('from', froms[i]), ('to', tos[i])) if at is None]
+        if lost:
+            print(f'ERROR: {name} 的 {", ".join(lost)} 在 clean() 文本里定位不到唯一的一行'
+                  f'（原因见 anchor_check）——段无从切起', file=sys.stderr)
+            rc = 1
+            continue
+
+        # ── 2. 顺序 ──
+        order_bad = False
+        for k in range(len(chunks)):
+            if not froms[k] <= tos[k]:
+                print(f'ERROR: {name} 的 chunks[{k}] 的 to（第 {tos[k] + 1} 行）在 from'
+                      f'（第 {froms[k] + 1} 行）之前', file=sys.stderr)
+                order_bad = True
+            if k + 1 < len(chunks) and not tos[k] < froms[k + 1]:
+                print(f'ERROR: {name} 的 chunks[{k + 1}] 的 from（第 {froms[k + 1] + 1} 行）'
+                      f'不在 chunks[{k}] 的 to（第 {tos[k] + 1} 行）之后——段要按源码顺序、'
+                      f'互不重叠', file=sys.stderr)
+                order_bad = True
+        if order_bad:
+            rc = 1
+            continue
+
+        # ── 3. 相接：缝里只许有空行 ──
+        gaps = [('第一段 from 之前', 0, froms[0])]
+        for k in range(len(chunks) - 1):
+            gaps.append((f'chunks[{k}] 的 to 与 chunks[{k + 1}] 的 from 之间',
+                         tos[k] + 1, froms[k + 1]))
+        gaps.append(('最后一段 to 之后', tos[-1] + 1, len(clean_lines)))
+        seam_bad = False
+        for where, lo, hi in gaps:
+            code = [n + 1 for n in range(lo, hi) if clean_lines[n].strip() != '']
+            if code:
+                print(f'ERROR: {name} 的 {where}有非空行（clean() 后第 {code} 行）——段必须'
+                      f'首尾相接，缝里只许有空行；这些行会落进前一段却不在它的 from…to 里，'
+                      f'或者（在第一段之前）被默认归给第一段', file=sys.stderr)
+                seam_bad = True
+        if seam_bad:
+            rc = 1
+            continue
+
+        starts = []
+        pos = 0
+        for ln in clean_lines:
+            starts.append(pos)
+            pos += len(ln) + 1
+        expected = []
+        for k in range(len(chunks)):
+            expected.append({
+                'start': 0 if k == 0 else starts[froms[k]],
+                'end': len(clean) if k == len(chunks) - 1 else starts[froms[k + 1]],
+                'fromLine': froms[k] + 1,
+                'toLine': tos[k] + 1,
+            })
+        declared.append({'name': name, 'tool': data.get('tool'), 'id': prog.get('id'),
+                         'clean': clean, 'expected': expected})
+
+    if n_declared == 0:
+        print('分段：0 个程序声明 chunks——这道门是绿的，但 1–4 条没有被任何真实数据走过'
+              '（绿只是因为无事可查）')
+        return rc
+    if not declared:
+        return rc or 1
+
+    # ── 4. 页面上的 JS 与门一致（裸 vm） ──
+    by_tool: dict = {}
+    for d in declared:
+        by_tool.setdefault(d['tool'], []).append(d)
+    pages_ok = 0
+    for tool, items in sorted(by_tool.items(), key=lambda kv: str(kv[0])):
+        page = TOOLS_DIR / f'{tool}.html'
+        if not tool or not page.is_file():
+            print(f'ERROR: {items[0]["name"]} 所在章点名的工具页 {tool!r} 不存在，'
+                  f'第 4 条无从核对', file=sys.stderr)
+            rc = 1
+            continue
+        text = read_text(page)
+        with tempfile.TemporaryDirectory() as td:
+            files = []
+            missing = []
+            for tag in CORE_REGION_TAGS + ('PROGRAMS',):
+                body = _region_body(text, tag)
+                if body is None:
+                    missing.append(tag)
+                    continue
+                f = os.path.join(td, tag + '.js')
+                with open(f, 'w', encoding='utf-8') as fh:
+                    fh.write(body)
+                files.append(f)
+            if missing:
+                print(f'ERROR: {page.name} 缺 GENERATED 区段 {missing}，第 4 条无从核对',
+                      file=sys.stderr)
+                rc = 1
+                continue
+            script = r'''
+const vm = require('vm'), fs = require('fs');
+const files = %s;
+const ids = %s;
+const sandbox = {};
+sandbox.self = sandbox;
+vm.createContext(sandbox);
+if (typeof sandbox.module !== 'undefined' || typeof sandbox.require !== 'undefined') {
+  console.error('FAIL 沙箱不干净：module/require 泄漏进来了，测的还是 node 分支');
+  process.exit(1);
+}
+for (const f of files) { vm.runInContext(fs.readFileSync(f, 'utf8'), sandbox, { filename: f }); }
+if (typeof sandbox.module !== 'undefined' || typeof sandbox.require !== 'undefined') {
+  console.error('FAIL 装载之后沙箱里出现了 module/require'); process.exit(1);
+}
+const PI = sandbox.PyInteract, E = sandbox.Exercise, P = sandbox.PyPrograms;
+if (!PI || typeof PI.chunkSegments !== 'function') {
+  console.error('FAIL 页面内联的 PyInteract 没有 chunkSegments'); process.exit(1);
+}
+if (!E || typeof E.clean !== 'function' || !P || !Array.isArray(P.programs)) {
+  console.error('FAIL 页面内联的 Exercise.clean / PyPrograms.programs 不可用'); process.exit(1);
+}
+const out = {};
+for (const id of ids) {
+  const prog = P.programs.filter(function (x) { return x.id === id; })[0];
+  if (!prog) { out[id] = { error: '页面的 PyPrograms 里没有这个程序' }; continue; }
+  try {
+    const clean = E.clean(prog.source);
+    const segs = PI.chunkSegments(clean, prog.chunks);
+    out[id] = { clean: clean, segs: segs === null ? null : segs.map(function (g) {
+      return { start: g.start, end: g.end, fromLine: g.fromLine, toLine: g.toLine, text: g.text };
+    }) };
+  } catch (e) { out[id] = { error: '抛错：' + String(e && e.message) }; }
+}
+process.stdout.write(JSON.stringify(out));
+''' % (json.dumps(files), json.dumps([d['id'] for d in items]))
+            proc = run_node(script)
+        if proc.returncode != 0:
+            print(f'ERROR: {page.name} 的内联 core 在裸 vm 里装载 / 调用失败：\n'
+                  f'{_indent((proc.stderr or proc.stdout).strip())}', file=sys.stderr)
+            rc = 1
+            continue
+        got = json.loads(proc.stdout)
+        page_bad = False
+        for d in items:
+            g = got.get(d['id']) or {'error': '没有输出'}
+            name = d['name']
+            if 'error' in g:
+                print(f'ERROR: {name}：{g["error"]}', file=sys.stderr)
+                page_bad = True
+                continue
+            if g['clean'] != d['clean']:
+                print(f'ERROR: {name} 页面 Exercise.clean 的结果与门剥指令行的结果不同'
+                      f'——两边切的不是同一份文本', file=sys.stderr)
+                page_bad = True
+                continue
+            segs = g['segs']
+            if segs is None:
+                print(f'ERROR: {name} 页面的 PyInteract.chunkSegments 返回 null——页面会退回'
+                      f'不分段，而门认为这份 chunks 是合法的', file=sys.stderr)
+                page_bad = True
+                continue
+            mine = [{k: s[k] for k in ('start', 'end', 'fromLine', 'toLine')} for s in segs]
+            if mine != d['expected']:
+                print(f'ERROR: {name} 页面切出的段与门算的不一致\n'
+                      f'    页面：{mine}\n    门：  {d["expected"]}', file=sys.stderr)
+                page_bad = True
+                continue
+            joined = ''.join(s['text'] for s in segs)
+            if joined != d['clean']:
+                print(f'ERROR: {name} 页面各段 text 拼起来不等于 clean() 文本'
+                      f'（{len(joined)} vs {len(d["clean"])} 个字符）——段间的行丢了或重了',
+                      file=sys.stderr)
+                page_bad = True
+                continue
+            spans = ' · '.join(f'{e["fromLine"]}–{e["toLine"]}' for e in d['expected'])
+            print(f'分段：{name}  {len(d["expected"])} 段（from–to 行：{spans}）')
+        if page_bad:
+            rc = 1
+        else:
+            pages_ok += 1
+
+    if rc == 0:
+        n_segs = sum(len(d['expected']) for d in declared)
+        print(f'分段：{len(declared)} 个程序声明了 chunks（共 {n_segs} 段），形状 / 顺序 / 相接都对；'
+              f'在 {pages_ok} 个工具页的裸 vm 里，页面自己的 PyInteract.chunkSegments 与门逐段一致，'
+              f'各段拼回去等于 clean()')
     return rc
 
 
