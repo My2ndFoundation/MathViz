@@ -198,13 +198,15 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
     若用户认为最小二乘直线不属于 ML 语境的回归，这两个改回 `[]`。
 12. **JSON 不写 OCR**：OCR 的依据只是指南澄清里的例子，原话 "won't be specifically asked"，比 AQA 4.9.4.10 弱，按 R5 / R6 不写。
 13. **`money-in-pence` 与 `money-decimal`** 核心相同（二进制浮点不精确），同判 AEC。
+14. **`strings-are-immutable` 判 `[]`**：Edexcel 20.1.2(d) "Immutable variable" 与 AQA 4.11 的 immutable data structures 都在函数式编程语境下，说的不是字符串不可变，按 R5 不写（控制方裁决）。
+15. **`return-several-values` 写 AOE**：AQA 4.1.1.12 标题 "Returning a value/values from a subroutine" 明写多个返回值；`swap-two-tuple` 教的是元组本身，只写 OE。
 
 ## 计数
 
 | | AQA | OCR | Edexcel | CIE | `[]` |
 |---|---|---|---|---|---|
 | 改前（main，346 个程序） | 346 | 346 | 346 | 346 | 0 |
-| 改后 | 215 | 183 | 253 | 179 | 69 |
+| 改后 | 216 | 183 | 252 | 179 | 70 |
 
 相对 main，194 个程序的 `boards` 变了，分布在 29 页（每页 patch 升版一次并写 changelog）。
 
@@ -298,12 +300,12 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | stats | 7 | []：`population-vs-sample-sd`、`pearson-by-formula`、`pearson-corrcoef`、`sampling-distribution-of-mean`、`normal-probabilities`、`z-test-one-sample`、`t-statistic-by-hand` | （组内一致） |
 | string-format | 1 | Edexcel：`number-formatting` | （组内一致） |
 | strings | 10 | AQA OCR Edexcel CIE：`index-and-slice`、`string-method-tour`、`split-and-join`、`reverse-string-slice`、`reverse-string-loop`、`palindrome-cleaned`、`password-rules`、`clean-text-normalise`、`date-format-manual`、`hangman-state` | （组内一致） |
-| strings-python | 2 | Edexcel：`strings-are-immutable`；[]：`escapes-and-raw-strings` | strings-are-immutable 因 E 20.1.2(d) 点名不可变写 E；转义 / 原始字符串无人点名 |
+| strings-python | 2 | []：`strings-are-immutable`、`escapes-and-raw-strings` | （组内一致） |
 | testing | 1 | AQA OCR Edexcel CIE：`test-data-normal-boundary-erroneous` | （组内一致） |
 | text-files | 2 | AQA OCR Edexcel CIE：`word-frequency-file`、`config-parser` | （组内一致） |
 | tree | 1 | AQA OCR Edexcel CIE：`binary-tree-nodes` | （组内一致） |
 | tree-traversal | 2 | AQA OCR Edexcel：`traversals-recursive`、`traversals-iterative` | （组内一致） |
-| tuple-pack | 2 | OCR Edexcel：`swap-two-tuple`、`return-several-values` | （组内一致） |
+| tuple-pack | 2 | OCR Edexcel：`swap-two-tuple`；AQA OCR Edexcel：`return-several-values` | swap-two-tuple 教的是元组打包 / 解包本身，只有 O、E 点名元组；return-several-values 教的是从子程序返回多个值，AQA 4.1.1.12 明写 "value/values"，所以多一个 A |
 | types | 2 | AQA OCR Edexcel CIE：`int-float-str`、`digit-sum-string` | （组内一致） |
 | validation | 3 | AQA OCR Edexcel CIE：`input-validation-loop`、`ttt-game-loop`、`menu-driven-cli` | （组内一致） |
 | vectors | 6 | AQA Edexcel：`dot-product-angle`；AQA：`colour-lerp`、`diagonal-unnormalised`、`diagonal-normalised`、`mouse-steer-toward`、`thrust-max-speed` | 向量运算只有 AQA 4.2.8.1 点名；dot-product-angle 另因 NumPy 写 E |
@@ -325,7 +327,7 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | ch01 | `divmod-and-floor` | AQA OCR Edexcel CIE | AQA OCR Edexcel CIE | arithmetic | 整除与余数：A 4.1.1.3 integer division (including remainders) · O 5d MOD / DIV · E 7.1.3(a) · C 11.1 arithmetic operators |
 | ch01 | `number-formatting` | AQA OCR Edexcel CIE | Edexcel **改** | string-format | 格式说明符：E 8.2.2(c) Formatting；AQA、OCR、CIE 未点名输出格式化 |
 | ch02 | `index-and-slice` | AQA OCR Edexcel CIE | AQA OCR Edexcel CIE | strings | 下标与子串：A 4.1.1.7 · O 1.2.4(b)、5d String Handling（指南澄清：string handling）· E 8.2.2 · C 11.1 string manipulation functions |
-| ch02 | `strings-are-immutable` | AQA OCR Edexcel CIE | Edexcel **改** | strings-python | 字符串不可变：E 8.2.2(e) manipulating、20.1.2(d) immutable variable；其余三家未点名不可变性 |
+| ch02 | `strings-are-immutable` | AQA OCR Edexcel CIE | `[]` **改** | strings-python | 字符串不可变四家都未点名：E 20.1.2(d) 与 AQA 4.11 的 immutable 都在函数式编程语境下，不是字符串不可变，按 R5 不写 |
 | ch02 | `string-method-tour` | AQA OCR Edexcel CIE | AQA OCR Edexcel CIE | strings | 字符串方法：A 4.1.1.7 · O 1.2.4(b)、5d String Handling（指南澄清：string handling）· E 8.2.2 · C 11.1 string manipulation functions |
 | ch02 | `split-and-join` | AQA OCR Edexcel CIE | AQA OCR Edexcel CIE | strings | 切分与拼接：A 4.1.1.7 · O 1.2.4(b)、5d String Handling（指南澄清：string handling）· E 8.2.2 · C 11.1 string manipulation functions |
 | ch02 | `escapes-and-raw-strings` | AQA OCR Edexcel CIE | `[]` **改** | strings-python | 转义序列 / 原始字符串 / repr 四家都未点名 |
@@ -341,7 +343,7 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | ch03 | `mutable-default-trap` | AQA OCR Edexcel CIE | `[]` **改** | python-params | 默认值在 def 时只求值一次，Python 特性，四家都未点名 |
 | ch03 | `mutable-default-none` | AQA OCR Edexcel CIE | `[]` **改** | python-params | None 哨兵修默认值，Python 惯用写法，四家都未点名 |
 | ch03 | `args-and-kwargs` | AQA OCR Edexcel CIE | `[]` **改** | python-params | 可变个数参数 *args / **kwargs 四家都未点名；点名的只是参数 / 实参本身 |
-| ch03 | `return-several-values` | AQA OCR Edexcel CIE | OCR Edexcel **改** | tuple-pack | 以元组返回多个值：O 1.4.2(a) tuples、2.2.1(d) · E 8.1.2(e)、7.1.4；AQA、CIE 只点名单个返回值 |
+| ch03 | `return-several-values` | AQA OCR Edexcel CIE | AQA OCR Edexcel **改** | tuple-pack | 从子程序返回多个值：A 4.1.1.12 "Returning a value/values from a subroutine" · O 1.4.2(a) tuples、2.2.1(d) · E 8.1.2(e)、7.1.4；CIE 11.3 只点名单个返回值 |
 | ch03 | `local-and-global-scope` | AQA OCR Edexcel CIE | AQA OCR Edexcel **改** | scope | A 4.1.1.13–4.1.1.14 · O 2.2.1(c)、5d global · E 9.1.2(d) scope isolation；CIE 11.3 未点名作用域 |
 | ch03 | `functions-as-values` | AQA OCR Edexcel CIE | AQA Edexcel **改** | functional-hof | A 4.12.1.2 first-class object · E 20.1.2(b)(g)；OCR、CIE 未点名 |
 | ch03 | `docstrings-and-type-hints` | AQA OCR Edexcel CIE | Edexcel **改** | docs | E 9.2.2(b)、19.2.2(b) informative comment；AQA 只在 NEA 编码风格表（示例，R6 不算）；OCR、CIE 未点名 |
@@ -660,3 +662,7 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | ch32 | `invaders-full` | AQA OCR Edexcel CIE | `[]` **改** | pygame-game | 完整小游戏 Space Invaders：pygame / 游戏循环 / 事件驱动四家都未点名 |
 | ch32 | `bullet-cooldown` | AQA OCR Edexcel CIE | `[]` **改** | pygame-game | 开火冷却计时：pygame / 游戏循环 / 事件驱动四家都未点名 |
 | ch32 | `lives-and-invulnerability` | AQA OCR Edexcel CIE | `[]` **改** | pygame-game | 生命与无敌时间：pygame / 游戏循环 / 事件驱动四家都未点名 |
+
+## 待办
+
+- **加门**：附录表与各 `chapter.json` 的 `boards` 目前靠人同步，没有门守防漂移（复审 S-1，控制方记账，本 PR 不做）。

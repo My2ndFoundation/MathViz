@@ -175,7 +175,7 @@ core 的七个区段**全部必需**，没有逐页选装清单：`inline_core.p
 | `problem` | 是 | 变体分组键：同一问题的不同写法共用它 | `program_meta_check`、`variant_check` |
 | `kind` | 是 | `syntax / pattern / algorithm / project / embedded` | `program_meta_check`、`closed_set_mirror_check` |
 | `level` | 是 | 程序难度 1–5（与 BLANK 的 `level` 1–3 不是一回事） | 同上 |
-| `boards` | 是 | `AQA / OCR / Edexcel / CIE` 的子集，见 §4.5 | `program_meta_check` |
+| `boards` | 是 | `AQA / OCR / Edexcel / CIE` 的子集，不重复，**可以为空**（考纲外），见 §4.5 | `program_meta_check` |
 | `tags` | 是（实践上） | 自由标签 | 无门 |
 | `requires` | 是 | 白名单 `numpy / pandas / matplotlib / scipy / pygame` 的子集，可以为空 | `program_meta_check` |
 | `runtime` | 否（缺省 `cpython`；全库实践上都写） | `cpython / micropython-microbit / micropython-pico` | `program_meta_check` |
@@ -253,14 +253,15 @@ core 的七个区段**全部必需**，没有逐页选装清单：`inline_core.p
 property 的入口一律交回**内置类型**：`np.int64` / `ndarray` 要 `int()` / `.tolist()`，`pygame.Rect` / `Vector2` 要转 `tuple`，
 因为门逐层比「值相等且类型相同」（§11.2）。
 
-### 4.5 `boards`：现状与已定的新规则
+### 4.5 `boards`：只写考纲点名了的考试局
 
-**现状（至 e342ba2）**：`program_meta_check` 要求 `boards` 是四家考试局的**非空**子集；全库每条都写满四家（交接文档 §1.1）。
-boards PR 合并后会变（门允许空列表、全库按新规则审计，engine 预计升级）。
+**规则（用户裁决 2026-09-30，boards PR 落地）**：一个考试局只在它的 A-level 考纲**点名了这个程序的核心教学点**时才写；
+**不在考纲就不写，四家都不含就写 `[]`（合法）**。`[]` 的程序在说明面板上显示「不在考纲 / Not on the syllabus」，
+按任何考试局筛选时都不出现。`program_meta_check` 只要求 `boards` 是列表、元素在四家闭集内、不重复——**允许空**。
 
-**用户已定的新规则**：「不在考纲里就不写」——按概念判、附依据，**空列表合法**。
-门与全库数据的改动、以及考纲对照文件 `docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md`
-由单独的 boards PR 引入；该文件在 e342ba2 尚未进 `main`，本文不转述其内容。boards PR 合并后，本节与 §4.1 字段表的 `boards` 一行照它改写，交接文档 §1.1 的数字重算。
+判定依据、判定原则 R1–R6、全库逐程序的判定表与按概念组的一致性自查，都在
+`docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md`；新程序照它判，依据写进构建报告。
+全库的计数随内容变化，只在交接文档 §1.1 的快照表里出现（本文不写数字）。
 
 ---
 
@@ -529,7 +530,7 @@ python-progress:<progId>     { blank: {…}, trace: { bestAcc, bestCpm, at } }
 
 **版本三处同步**：注册表 `version` + `changelog`、页面 `tool-version` meta、页面头部版本记录注释。版本号同时是缓存键——不升，线上用户会一直看到旧页面。
 **engine 全库唯一**：改了 `core/` 就把所有工具与 `_skeleton.html` 的 `engine` 一起升（`page_mirror_check`）；
-至 e342ba2 两次：`py-1.1.0`（#173，第 1 期规则）、`py-1.2.0`（#198，分段临摹）；boards PR 合并后会变（engine 预计升级）。
+三次：`py-1.1.0`（#173，第 1 期规则）、`py-1.2.0`（#198，分段临摹）、`py-1.3.0`（boards PR：空考试局的占位改为「不在考纲」）。
 
 ### 10.2 模块闭集与配色
 
@@ -756,7 +757,7 @@ e342ba2 尚未进 `main`。每期的摘要与「最值得记住的一条」在�
 | 为「复制进 PyCharm 缺 `_fixtures/`」做结构方案 | 第 1 期裁决 | 改为在讲解末段手抄文件名与内容，由 `fixture_notes_check` 守（#187） |
 | 堆排序 | 第 2 期裁决 P11 B1 | 第 2 期定为不做，M3、M4 都不加；此后各期没有重开（至 e342ba2 全库没有堆排序程序） |
 | t 分布的 p 值 | 第 4 期规格 / 裁决 | 检验入门的 p 值只用 `statistics.NormalDist`（z 检验）；t 检验只算统计量并与给定临界值比 |
-| `boards` 写满「凑数」 | 用户裁决（boards PR 落地中） | 不在考纲就不写、空列表合法（§4.5） |
+| `boards` 写满「凑数」 | 用户裁决（boards PR 落地） | 不在考纲就不写、空列表合法（§4.5） |
 | 分段的每段行数进门 | 第 5 期 chunks 设计 C8 | 只是取向；硬拆一个完整的 `main()` 更糟 |
 | 为「照抄空」写门 | `python-drill-tool` | 至 e342ba2 靠作者自扫与终审；做成门的建议记在第 2 期账本 |
 
