@@ -166,3 +166,17 @@ ring-buffer-isr-handoff 是 ISR → 主循环交接、m8a `pin-irq-counter` 是�
 - **D5** boards 由构建者照考纲对照文件定：**采用**；核不实留 `[]`，依据写到考纲条目编号。
 - `debounce-stable-time` 的 `>` 负控制 45/200 偏低：「cases 偏向整除 `stable_ms` 的 elapsed」写进构建者简报，构建者报告最终命中数。
 - 派构建者等 boards PR 与第 5 期收尾 PR 合并，Python编程 发 SHA。
+
+### 8.1 boards（按考纲对照文件 R1–R6 与概念组判，2026-09-30，#203 合并后）
+
+| 程序 | boards | 概念组 | 依据 |
+|---|---|---|---|
+| `press-classifier-fsm` | AQA CIE | fsm | A 4.4.2.1 FSM · C 12.2 state-transition diagrams；OCR、Edexcel 未点名（与 `traffic-light-fsm`、`screen-states` 同组一致） |
+| `hysteresis-thermostat` | AQA CIE | fsm | 同上：两态 + 越界事件的状态转移；滞回本身未点名 |
+| `ring-buffer-isr-handoff` | AQA OCR Edexcel CIE | queue | 循环队列（R4 按 ADT 判）：A 4.2.2.1 circular · O 1.4.2(c) · E 14.1.5、18.2.1 · C 10.4（与 `circular-queue-array` 同组一致）；中断只是用 |
+| `moving-average-window`、`median-filter-spikes`、`ema-fixed-point` | `[]` | sensor-smoothing（新组） | 滑动窗口滤波四家未点名；`central-tendency` 组的 E 18.1.4(b) 在数据科学 / pandas 语境下，按 R5 不套用；`>>` 只是用到（R1） |
+| `debounce-counter`、`debounce-stable-time` | `[]` | debounce（新组） | 去抖、硬件输入四家未点名 |
+| `two-leds-blocking`、`two-leds-nonblocking` | `[]` | embedded-loop（新组） | 非阻塞主循环 / 调度四家未点名（同 pygame 游戏循环的判法） |
+| `uart-line-assembler` | `[]` | embedded-io（新组） | 串口分帧未点名；字节拼接只是用到（R1） |
+
+对照文件附录表的 11 行由控制方在集成时补进 `docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md`（「新程序照 R1–R6 判，把一行加进附录表」），构建者照本表写 `boards`、不改对照文件。
