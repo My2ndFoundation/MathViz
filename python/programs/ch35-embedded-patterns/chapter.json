@@ -1,0 +1,646 @@
+{
+  "module": 8,
+  "tool": "py-embedded-patterns",
+  "programs": [
+    {
+      "id": "two-leds-blocking",
+      "file": "two-leds-blocking.py",
+      "problem": "blink-two-rates",
+      "kind": "embedded",
+      "level": 2,
+      "boards": [],
+      "tags": [
+        "micropython",
+        "pico",
+        "gpio"
+      ],
+      "requires": [],
+      "runtime": "micropython-pico",
+      "entry": "main",
+      "title": {
+        "en": "Two Blink Rates, Blocking",
+        "zh": "两种闪烁频率：阻塞写法"
+      },
+      "blurb": {
+        "en": "Blink a red LED every 300 ms and a green one every 500 ms with utime.sleep_ms. It looks right and runs wrong: each sleep stops the whole board, so both LEDs end up on the same slow beat and a button waits its turn.",
+        "zh": "用 utime.sleep_ms 让红灯每 300 毫秒、绿灯每 500 毫秒翻转一次。看上去对，跑起来不对：每次睡眠都让整块板子停下，两盏灯落到同一个慢节拍上，按钮也只能排队等着被读。"
+      },
+      "notes": {
+        "en": [
+          "On the board: a Raspberry Pi Pico with a red LED on GP14, a green LED on GP15 and an alert LED on GP16 (each through a resistor to ground), and a push button between GP17 and ground. The plan is that red flips every 300 ms, green every 500 ms, and the alert LED lights while the button is held.",
+          "What really happens: one pass of the loop is a 300 ms sleep plus a 500 ms sleep, 800 ms in all, and each LED flips exactly once per pass. So both LEDs flip every 800 ms - on for 0.8 s, off for 0.8 s, a full blink every 1.6 s instead of every 0.6 s and 1 s. The button is read once per pass too, so after a press the alert LED can take up to about 0.8 s to respond, and a quick tap that starts and ends inside one sleep is never seen at all.",
+          "This is blocking: while sleep_ms waits, the program can do nothing else. With one job that is fine; with two jobs at different rates the sleeps add up and every job runs at the pace of all of them together. The fix is the Two Blink Rates, Non-blocking program.",
+          "Units matter on these boards. On the Pico, utime.sleep_ms takes milliseconds and utime.sleep takes seconds. On the micro:bit, microbit.sleep takes milliseconds but utime.sleep takes seconds, so sleep(500) and utime.sleep(500) differ by a factor of a thousand. The Pico firmware also accepts import time (its quick reference is written that way); the pages in this module all use utime, matching the micro:bit documentation.",
+          "Everything here happens in main, so there is no logic function for the page to check against a reference; the program is only compiled."
+        ],
+        "zh": [
+          "板子上：一块树莓派 Pico，红灯接 GP14、绿灯接 GP15、提示灯接 GP16（各串一个电阻接地），一个按钮接在 GP17 与地之间。本意是红灯每 300 毫秒翻转、绿灯每 500 毫秒翻转、按住按钮时提示灯亮。",
+          "实际上：循环走一圈是 300 毫秒的睡眠加 500 毫秒的睡眠，一共 800 毫秒，每盏灯每圈正好翻转一次。所以两盏灯都是每 800 毫秒翻一次——亮 0.8 秒、灭 0.8 秒，完整闪一下要 1.6 秒，而不是 0.6 秒和 1 秒。按钮也是每圈才读一次，按下之后提示灯最多要等约 0.8 秒才有反应；一次在某段睡眠里开始又结束的轻点根本看不见。",
+          "这就是阻塞：sleep_ms 等着的时候，程序什么别的也做不了。只有一件事时没关系；两件事节奏不同时，睡眠一段段相加，每件事都被拖到所有睡眠加起来的节奏上。改法见「两种闪烁频率：非阻塞写法」。",
+          "这两块板子上单位要看清。Pico 上 utime.sleep_ms 收毫秒、utime.sleep 收秒。micro:bit 上 microbit.sleep 收毫秒，utime.sleep 却收秒，所以 sleep(500) 与 utime.sleep(500) 差了一千倍。Pico 的固件也认 import time（它的快速参考就这样写）；本模块的几页统一用 utime，与 micro:bit 的文档一致。",
+          "这个程序的一切都在 main 里，没有可以拿来对照参考实现的逻辑函数，页面只检查它能编译。"
+        ]
+      },
+      "lineNotes": [
+        {
+          "at": "        red.toggle()",
+          "en": "toggle flips an output pin from 0 to 1 or from 1 to 0 (machine.Pin on the rp2 port).",
+          "zh": "toggle 把输出引脚从 0 翻到 1、或从 1 翻到 0（rp2 版的 machine.Pin）。"
+        },
+        {
+          "at": "        utime.sleep_ms(RED_MS)",
+          "en": "The whole board waits here for 300 ms: nothing else in the loop runs meanwhile.",
+          "zh": "整块板子在这里停 300 毫秒：这期间循环里别的事一件也不做。"
+        }
+      ]
+    },
+    {
+      "id": "two-leds-nonblocking",
+      "file": "two-leds-nonblocking.py",
+      "problem": "blink-two-rates",
+      "kind": "embedded",
+      "level": 3,
+      "boards": [],
+      "tags": [
+        "micropython",
+        "pico",
+        "gpio",
+        "non-blocking",
+        "timer",
+        "accumulator"
+      ],
+      "requires": [],
+      "runtime": "micropython-pico",
+      "entry": "toggles",
+      "title": {
+        "en": "Two Blink Rates, Non-blocking",
+        "zh": "两种闪烁频率：非阻塞写法"
+      },
+      "blurb": {
+        "en": "The same two LEDs, now from a loop that never sleeps. Each LED keeps its own accumulator of elapsed milliseconds and flips when a period has built up - taking one period off rather than resetting, so it never drifts.",
+        "zh": "同样两盏灯，这回主循环从不睡眠。每盏灯有自己的累加器记着经过的毫秒数，攒满一个周期就翻转——减掉一个周期而不是清零，所以长时间也不漂移。"
+      },
+      "notes": {
+        "en": [
+          "Same wiring as Two Blink Rates, Blocking: red LED on GP14, green on GP15, alert LED on GP16, button between GP17 and ground. This time red really flips every 300 ms and green every 500 ms, and the alert LED follows the button at once, because the loop goes round thousands of times a second and never waits.",
+          "Each pass of the loop works out elapsed, the milliseconds since the previous pass, and hands it to step for each LED. step adds it to that LED's accumulator and says whether a period has built up. The logic never sees a timestamp, only elapsed, so it cannot be upset when the millisecond counter wraps round; why ticks_diff is needed for that subtraction is covered on the Raspberry Pi Pico page. The same idea done by a Timer that calls a function on a schedule is also on that page; here the scheduling is done by the loop itself.",
+          "Why take one period off instead of resetting to 0: the loop rarely lands exactly on the period. Say every pass takes 70 ms and the period is 300 ms. The accumulator reaches 350 on the fifth pass; taking 300 off keeps the extra 50 ms, so the next flip comes after four passes, and on average the LED flips every 300 ms. Resetting to 0 would throw that 50 ms away every time, and the LED would flip every 350 ms - a drift of one part in six.",
+          "Two edge cases are decided on purpose. Reaching the period exactly counts as due. And if one pass is very slow and elapsed covers two whole periods, the LED flips only once on that pass; the leftover stays in the accumulator and it catches up over the next passes.",
+          "The page checks toggles, which feeds a list of elapsed values through step and returns the numbers of the passes on which the LED flips, against a version with no accumulator at all: it keeps the absolute time and the next due time, moving the due time on by one period at each flip."
+        ],
+        "zh": [
+          "接线与「两种闪烁频率：阻塞写法」相同：红灯 GP14、绿灯 GP15、提示灯 GP16，按钮接在 GP17 与地之间。这一回红灯真的每 300 毫秒翻转、绿灯每 500 毫秒翻转，提示灯随按钮立刻亮灭——循环每秒转几千圈，从不停下来等。",
+          "循环每走一圈算出 elapsed——距上一圈过了多少毫秒——交给每盏灯的 step。step 把它加进这盏灯的累加器，并告诉你是不是攒满了一个周期。逻辑里从来只见 elapsed、不见时间戳，所以毫秒计数器回绕时它不会乱；那一步相减为什么要用 ticks_diff，在「树莓派 Pico」页讲。用定时器按时调用函数的写法也在那一页；这里的调度由循环自己完成。",
+          "为什么减掉一个周期而不是清零：循环很少恰好落在周期上。设每圈 70 毫秒、周期 300 毫秒。累加器第五圈到 350；减掉 300 留下多出的 50 毫秒，下一次四圈就到，平均下来正好每 300 毫秒翻一次。清零会每次都把这 50 毫秒扔掉，灯就变成每 350 毫秒翻一次——慢了六分之一。",
+          "两个边界是有意定下的：累加恰好等于周期就算到期。某一圈特别慢、elapsed 盖过两个整周期时，这一圈也只翻转一次；余下的留在累加器里，接下来几圈慢慢追上。",
+          "页面检查 toggles：它把一串 elapsed 逐个喂给 step，交回灯在第几圈翻转。对照的版本根本没有累加器——它记着绝对时刻和下一次到期的时刻，每翻转一次就把到期时刻往后推一个周期。"
+        ]
+      },
+      "lineNotes": [
+        {
+          "at": "    last = utime.ticks_ms()",
+          "en": "ticks_ms is a millisecond counter from an arbitrary starting point; only differences between two readings mean anything.",
+          "zh": "ticks_ms 是一个起点任意的毫秒计数器；只有两次读数之差才有意义。"
+        },
+        {
+          "at": "        red_acc, flip = step(red_acc, elapsed, RED_MS)",
+          "en": "Each LED has its own accumulator, but both are fed the same elapsed from this pass.",
+          "zh": "每盏灯有自己的累加器，但喂的是同一圈的同一个 elapsed。"
+        }
+      ],
+      "check": {
+        "property": "pure"
+      }
+    },
+    {
+      "id": "debounce-counter",
+      "file": "debounce-counter.py",
+      "problem": "debounce",
+      "kind": "embedded",
+      "level": 3,
+      "boards": [],
+      "tags": [
+        "micropython",
+        "microbit",
+        "gpio",
+        "debounce",
+        "counting",
+        "tuple"
+      ],
+      "requires": [],
+      "runtime": "micropython-microbit",
+      "entry": "debounce",
+      "title": {
+        "en": "Debounce by Counting Samples",
+        "zh": "去抖：数样本"
+      },
+      "blurb": {
+        "en": "A mechanical switch bounces: for a few milliseconds after it moves, its contacts flicker between 0 and 1. Sample it every 5 ms and accept a new level only after 4 samples in a row agree on it.",
+        "zh": "机械开关会抖：动了之后的几毫秒里，触点在 0 和 1 之间乱跳。每 5 毫秒采一次样，连续 4 个样本都是新电平才承认它。"
+      },
+      "notes": {
+        "en": [
+          "On the board: a micro:bit with a switch between pin 0 and 3V. read_digital returns 1 when the pin is high and 0 when it is low, and for a digital read the pin gets a pull-down, so an open switch reads 0 and a closed one 1. Each time the switch is pressed, the number of presses so far (its last digit) appears on the display.",
+          "Without debouncing, one press of a real switch can look like several: 0 1 0 1 1 1 1 has three rising edges in it. update keeps a stable level and a count of samples in a row that disagree with it. A disagreeing sample adds one to the count; once the count reaches n the new level is accepted and the count starts again. An agreeing sample sets the count back to 0, which is what makes it samples in a row. On 0 1 0 1 1 1 1 with n = 4 the level becomes 1 exactly once, on the seventh sample.",
+          "With NEEDED = 4 and SAMPLE_MS = 5, a new level has to hold for about 20 ms before it counts - longer than a typical bounce, shorter than anyone notices. With n = 1 the filter does nothing: every change is accepted at once. main counts a press where the stable level goes from 0 to 1; detecting that edge is covered on the micro:bit page.",
+          "The page checks debounce, which runs update over a list of samples and returns the stable level after each, against a version that keeps no count: at each sample it looks back at the last n samples and accepts a new level only if all of them disagree with the stable level and all come after the last change."
+        ],
+        "zh": [
+          "板子上：一块 micro:bit，开关接在 pin 0 与 3V 之间。read_digital 在引脚为高时交回 1、为低时交回 0；做数字读取时引脚自动下拉，所以开关断开读到 0、闭合读到 1。每按一次，屏幕上显示到目前为止的按下次数（个位）。",
+          "不去抖的话，真实开关按一下可能看起来像按了好几下：0 1 0 1 1 1 1 里有三个上升沿。update 记着一个稳定电平，以及连续与它不一致的样本数。不一致的样本让计数加一；计数到 n 就承认新电平、计数从头开始。一致的样本把计数清回 0——「连续」就靠这一点。n = 4 时，0 1 0 1 1 1 1 只在第七个样本上变成 1，而且只变一次。",
+          "NEEDED = 4、SAMPLE_MS = 5 时，新电平要保持约 20 毫秒才算数——比一般的抖动长，又短到没人察觉。n = 1 时这个滤波什么也不做：每次变化都立刻承认。main 在稳定电平从 0 变成 1 时记一次按下；这个边沿的检测在「micro:bit」页讲。",
+          "页面检查 debounce：它让 update 走一遍样本列表，交回每个样本之后的稳定电平。对照的版本不数数：每到一个样本，就回头看最近 n 个样本——它们全都与稳定电平不同、且全都在上一次改变之后，才承认新电平。"
+        ]
+      },
+      "lineNotes": [
+        {
+          "at": "        raw = pin0.read_digital()",
+          "en": "The raw sample: 1 while the switch is closed, 0 while it is open, bounces included.",
+          "zh": "原始样本：开关闭合时为 1、断开时为 0，抖动也原样读进来。"
+        },
+        {
+          "at": "        sleep(SAMPLE_MS)",
+          "en": "microbit.sleep takes milliseconds, so the switch is sampled about every 5 ms.",
+          "zh": "microbit.sleep 收的是毫秒，所以大约每 5 毫秒采一次样。"
+        }
+      ],
+      "check": {
+        "property": "pure"
+      }
+    },
+    {
+      "id": "debounce-stable-time",
+      "file": "debounce-stable-time.py",
+      "problem": "debounce",
+      "kind": "embedded",
+      "level": 3,
+      "boards": [],
+      "tags": [
+        "micropython",
+        "microbit",
+        "gpio",
+        "debounce",
+        "timer",
+        "tuple"
+      ],
+      "requires": [],
+      "runtime": "micropython-microbit",
+      "entry": "debounce_ms",
+      "title": {
+        "en": "Debounce by Holding Time",
+        "zh": "去抖：看保持时长"
+      },
+      "blurb": {
+        "en": "The same switch, debounced by time instead of by counting: every change restarts a clock, and a new level counts once it has held for 20 ms. The loop no longer needs a fixed sampling rate.",
+        "zh": "同一个开关，按时间而不是按个数去抖：电平每变一次计时就重来，新电平保持满 20 毫秒才算数。循环不再需要固定的采样间隔。"
+      },
+      "notes": {
+        "en": [
+          "Same wiring as Debounce by Counting Samples: a switch between pin 0 and 3V, the press count on the display. The difference is that main does not sleep between samples. Each pass works out elapsed with ticks_diff, and update adds it up; how many samples that takes no longer matters, only how long the level has lasted.",
+          "update remembers three things: stable, the level currently accepted; last, the raw level seen on the previous sample; and since, how long last has lasted. When the raw level changes, last takes the new value and since restarts at 0 - the elapsed time of that sample itself is not counted. When it stays the same, since grows by elapsed. Once since reaches stable_ms and last differs from stable, last is accepted.",
+          "With STABLE_MS = 20, a level that holds for exactly 20 ms counts. Compare Fire Cooldown on the Graphical Games page: a cooldown asks whether enough time has passed since the last shot and never restarts its clock because of noise. A debouncer restarts its clock at every change, so a burst of bounces keeps putting the decision off until the switch has settled.",
+          "The logic sees only elapsed, never a timestamp, so it is safe when the millisecond counter wraps; ticks_diff is covered on the Raspberry Pi Pico page, and detecting the 0 to 1 edge in main on the micro:bit page.",
+          "The page checks debounce_ms, which takes (elapsed, raw) pairs, against a version that first turns the elapsed values into absolute times and then, at each sample, finds where the current run of equal raw levels began and measures the time since then."
+        ],
+        "zh": [
+          "接线与「去抖：数样本」相同：开关接在 pin 0 与 3V 之间，按下次数显示在屏幕上。不同在于 main 采样之间不睡眠。每一圈用 ticks_diff 算出 elapsed，update 把它累加；用了多少个样本不再重要，重要的是电平保持了多久。",
+          "update 记着三样东西：stable 是目前承认的电平；last 是上一个样本看到的原始电平；since 是 last 已经保持了多久。原始电平一变，last 换成新值、since 从 0 重来——变化那一拍自己的 elapsed 不计入。电平不变，since 就加上 elapsed。since 到了 stable_ms、而且 last 与 stable 不同，就承认 last。",
+          "STABLE_MS = 20 时，正好保持 20 毫秒的电平也算数。对照「图形游戏」一页里的开火冷却：冷却问的是距上一次开火是否已经够久，不会因为干扰而重新计时；去抖却在每次变化时都把时钟清零，一阵抖动会把判定一直往后推，直到开关稳定下来。",
+          "逻辑里只有 elapsed、没有时间戳，所以毫秒计数器回绕时照样安全；ticks_diff 在「树莓派 Pico」页讲，main 里检测 0 到 1 的边沿在「micro:bit」页讲。",
+          "页面检查 debounce_ms（收 (elapsed, raw) 对），对照的版本先把 elapsed 累加成绝对时刻，再在每个样本上找出当前这一段相同电平从哪里开始，量出从那时起过了多久。"
+        ]
+      },
+      "lineNotes": [
+        {
+          "at": "        elapsed = utime.ticks_diff(now, previous)",
+          "en": "ticks_diff(new, old) gives the milliseconds between two ticks_ms readings, even across the counter wrapping round.",
+          "zh": "ticks_diff(新, 旧) 给出两次 ticks_ms 读数相隔的毫秒数，计数器回绕也不怕。"
+        },
+        {
+          "at": "    if raw != last:",
+          "en": "A change of raw level restarts the clock: this is the heart of the time-based method.",
+          "zh": "原始电平一变就重新计时：这是按时间去抖的核心。"
+        }
+      ],
+      "check": {
+        "property": "pure"
+      }
+    },
+    {
+      "id": "ring-buffer-isr-handoff",
+      "file": "ring-buffer-isr-handoff.py",
+      "problem": "ring-buffer-isr-handoff",
+      "kind": "embedded",
+      "level": 4,
+      "boards": [
+        "AQA",
+        "OCR",
+        "Edexcel",
+        "CIE"
+      ],
+      "tags": [
+        "micropython",
+        "pico",
+        "gpio",
+        "interrupt",
+        "ring-buffer",
+        "queue",
+        "class",
+        "modulo",
+        "overflow"
+      ],
+      "requires": [],
+      "runtime": "micropython-pico",
+      "entry": "run",
+      "title": {
+        "en": "Interrupt to Main Loop via a Ring Buffer",
+        "zh": "中断交给主循环：环形缓冲"
+      },
+      "blurb": {
+        "en": "An interrupt handler should be short and should not allocate memory, so no growing lists. Here it only puts a timestamp into a ring buffer allocated in advance; the main loop takes values out when it has time. When the buffer is full, the oldest value is overwritten and an overrun is counted.",
+        "zh": "中断处理函数要短，最好不分配内存、不让列表变长。这里它只把一个时间戳放进事先分配好的环形缓冲；主循环有空时再取出来。缓冲满了就覆盖最旧的值，并记一次溢出。"
+      },
+      "notes": {
+        "en": [
+          "On the board: a Pico with a sensor or button pulling GP16 to ground. Each falling edge on GP16 runs on_edge, which puts the current ticks_ms into the ring. The main loop takes out at most one value every 100 ms and prints it with the overrun count, so edges arriving faster than ten a second soon fill the 8 slots. How Pin.irq is set up and what an interrupt is are covered on the Raspberry Pi Pico page; this program is about handing the data over.",
+          "Why not just append to a list in the handler: MicroPython's rules for interrupt handlers say a hard interrupt handler cannot allocate memory, so it cannot append to a list. This handler is registered without hard=True, so on the Pico it runs as a soft interrupt, where allocating is allowed; it is still written to allocate nothing, which keeps its timing predictable and means nothing needs changing if it is ever made hard. And a list that grows whenever edges come faster than the loop drains them would grow without limit anyway. The ring is a list of CAPACITY slots made once in advance; put and get only write and read slots and change a few small integers.",
+          "head is the slot holding the oldest value and count is how many values are held, so the next free slot is count places after head, wrapping round with %. When the ring is full, put writes over the oldest value and moves head on by one, and adds one to overruns. When it is empty, get returns None. The circular queue on the Stacks & Queues page refuses to add when full; here the newest data matters more, so the oldest is dropped - and counted.",
+          "The main loop switches interrupts off around get and back on straight after. get changes head and count in separate steps; an interrupt landing between them would see a half-updated ring. disable_irq returns the previous state, and enable_irq(state) restores exactly that. alloc_emergency_exception_buf(100) sets aside memory so that an error inside the handler can still be reported.",
+          "The page checks run, which plays a list of (\"put\", value) and (\"get\",) operations on a fresh ring and returns the values got and the overrun count, against a plain Python list that appends at the end, cuts the front off when it is too long, and pops from the front."
+        ],
+        "zh": [
+          "板子上：一块 Pico，一个传感器或按钮把 GP16 拉到地。GP16 上每出现一个下降沿就运行 on_edge，它把当前的 ticks_ms 放进环里。主循环每 100 毫秒最多取出一个值，连同溢出次数打印出来，所以边沿来得比每秒十个快时，8 个格子很快就满。Pin.irq 怎么设置、中断是什么，在「树莓派 Pico」页讲；这个程序讲的是数据怎么交接。",
+          "为什么不在处理函数里直接往列表 append：MicroPython 关于中断处理函数的规则说，硬中断处理函数不能分配内存，所以不能 append。这里注册时没写 hard=True，在 Pico 上它按软中断运行，分配内存是允许的；它照样写成一点内存也不分配——耗时可预测，将来改成硬中断也不用改。而且边沿来得比循环取得快时，一个会增长的列表会无限长下去。环是一个事先建好、有 CAPACITY 个格子的列表；put 与 get 只读写格子、改几个小整数。",
+          "head 是存着最旧值的那一格，count 是存了几个值，所以下一个空位在 head 往后 count 格，用 % 绕回开头。环满时 put 覆盖最旧的值、把 head 往后挪一格，并给 overruns 加一；环空时 get 交回 None。「栈与队列」页里的循环队列满时拒绝入队；这里最新的数据更要紧，所以丢掉最旧的——并且记下来。",
+          "主循环在 get 前后先关中断、马上再开。get 分几步改 head 与 count，中断若恰好落在两步之间，看到的就是改了一半的环。disable_irq 交回关之前的状态，enable_irq(state) 恰好恢复它。alloc_emergency_exception_buf(100) 预留一块内存，让处理函数里出错时仍能报出来。",
+          "页面检查 run：它在一个新环上依次执行 (\"put\", 值) 与 (\"get\",) 操作，交回取到的值与溢出次数。对照的是一个普通 Python 列表：尾部追加，太长就把最前面砍掉，取的时候从最前面弹出。"
+        ]
+      },
+      "lineNotes": [
+        {
+          "at": "        self.slots = [0] * capacity",
+          "en": "All the memory the ring will ever use is made here, once, before any interrupt can arrive.",
+          "zh": "环要用的内存全在这里一次建好，早在任何中断到来之前。"
+        },
+        {
+          "at": "    sensor.irq(trigger=Pin.IRQ_FALLING, handler=on_edge)",
+          "en": "From here on, every falling edge on the pin calls on_edge with the pin as its one argument.",
+          "zh": "从这里起，引脚上每个下降沿都会调用 on_edge，唯一的实参是这个引脚。"
+        }
+      ],
+      "check": {
+        "property": "pure"
+      }
+    },
+    {
+      "id": "uart-line-assembler",
+      "file": "uart-line-assembler.py",
+      "problem": "uart-line-assembler",
+      "kind": "embedded",
+      "level": 4,
+      "boards": [],
+      "tags": [
+        "micropython",
+        "pico",
+        "uart",
+        "bytes",
+        "class",
+        "flag"
+      ],
+      "requires": [],
+      "runtime": "micropython-pico",
+      "entry": "assemble",
+      "title": {
+        "en": "Assembling Lines from UART Chunks",
+        "zh": "把串口字节块拼成行"
+      },
+      "blurb": {
+        "en": "uart.read() hands over whatever bytes have arrived, with no respect for line ends. Gather bytes until a newline, then hand the line over; a line longer than the limit is skipped as a whole and counted.",
+        "zh": "uart.read() 交出的是已经到的字节，不管行在哪里结束。字节攒到换行才交出一行；超过上限的行整行跳过并计数。"
+      },
+      "notes": {
+        "en": [
+          "On the board: a Pico whose UART 1 uses GP4 to send and GP5 to receive, at 9600 baud, wired to another device that sends text lines such as sensor readings. Every complete line that arrives is sent back with got in front. uart.any() says how many bytes can be read without waiting, and uart.read() returns a bytes object, or None on timeout - hence the check before feeding it on.",
+          "The bytes of one line can come split across reads. If the chunks are TEM, then P=21 followed by a newline and HU, then M=40 and a newline, feed returns nothing for the first, the line TEMP=21 for the second and HUM=40 for the third. Looping over a bytes object gives integers, so the newline is compared as its code 10, named NEWLINE with const.",
+          "The limit protects memory. A line of exactly max_len bytes is kept; the first byte beyond that sets skipping, empties the buffer, and every byte up to the next newline is ignored. The dropped line is counted when its newline arrives, so an over-long line still unfinished at the end is not counted yet. With MAX_LEN = 32 the buffer never holds more than 32 bytes, whatever the other device sends.",
+          "The page checks assemble, which feeds a list of chunks through one LineAssembler and returns the complete lines and the dropped count, against a version that never looks at single bytes: it joins all the chunks together, splits at newlines, throws away the last piece (it has no newline yet), keeps the pieces no longer than max_len and counts the longer ones."
+        ],
+        "zh": [
+          "板子上：一块 Pico，UART 1 用 GP4 发、GP5 收，波特率 9600，接着另一台发送文本行（比如传感器读数）的设备。每收到完整的一行，就在前面加上 got 发回去。uart.any() 说有多少字节不用等就能读，uart.read() 交回一个字节串，超时则交回 None——所以喂进去之前先判一下。",
+          "一行的字节可能分几次才读全。若三块依次是 TEM、P=21 加一个换行再加 HU、M=40 加一个换行，feed 对第一块什么也不交，对第二块交出 TEMP=21，对第三块交出 HUM=40。遍历字节串得到的是整数，所以换行按它的编码 10 来比，用 const 起名叫 NEWLINE。",
+          "上限保护内存。正好 max_len 个字节的行照样保留；多出的第一个字节让 skipping 为真、清空缓冲，之后到下一个换行为止的字节都不理。被丢的行在它的换行到达时才计数，所以结尾还没收完的超长行暂时不算。MAX_LEN = 32 时，无论对方发什么，缓冲里都不会超过 32 个字节。",
+          "页面检查 assemble：它把一串字节块依次喂给同一个 LineAssembler，交回完整的行与丢弃数。对照的版本从不逐字节看：它把所有块拼起来、按换行切开、扔掉最后一段（还没有换行），不超过 max_len 的段保留、更长的只计数。"
+        ]
+      },
+      "lineNotes": [
+        {
+          "at": "NEWLINE = const(10)",
+          "en": "const marks a number fixed at compile time in MicroPython; 10 is the byte code of a newline.",
+          "zh": "const 在 MicroPython 里标记一个编译期就定下的数；10 是换行的字节编码。"
+        },
+        {
+          "at": "    uart = UART(1, baudrate=9600, tx=Pin(4), rx=Pin(5))",
+          "en": "UART 1 on GP4 (transmit) and GP5 (receive); both ends must agree on 9600 baud.",
+          "zh": "UART 1 用 GP4 发送、GP5 接收；两头的波特率都得是 9600。"
+        }
+      ],
+      "check": {
+        "property": "pure"
+      }
+    },
+    {
+      "id": "moving-average-window",
+      "file": "moving-average-window.py",
+      "problem": "sensor-smoothing",
+      "kind": "embedded",
+      "level": 3,
+      "boards": [],
+      "tags": [
+        "micropython",
+        "microbit",
+        "filter",
+        "mean",
+        "class",
+        "modulo",
+        "floor-division"
+      ],
+      "requires": [],
+      "runtime": "micropython-microbit",
+      "entry": "smooth",
+      "title": {
+        "en": "Moving Average over a Window",
+        "zh": "滑动窗口平均"
+      },
+      "blurb": {
+        "en": "Smooth a jittery accelerometer reading with the average of the last 8 samples, kept up to date in constant time: add the new sample, take off the one it replaces. Integer division rounds down, even for negative averages.",
+        "zh": "用最近 8 个样本的平均值把抖动的加速度计读数抹平，而且每拍只花常数时间：加上新样本，减去它顶替的那个。整数除法向下取整，负的平均值也一样。"
+      },
+      "notes": {
+        "en": [
+          "On the board: a micro:bit tilted left and right. accelerometer.get_x() gives the acceleration along x in milli-g, positive or negative; column turns -1024 to 1024 into a display column from 0 to 4. The top row shows a dim dot for the raw reading, which jitters, and the bottom row a bright dot for the smoothed one, which moves steadily. A sample every 20 ms with a window of 8 covers the last 160 ms.",
+          "Adding up all 8 samples every time would work, but the window can be kept as a running total instead: the new sample goes in, the sample it replaces comes out. The window is a list used as a ring, with i moving round it with %, so each sample costs the same small amount of work however big the window is.",
+          "Two details decide the numbers. While the window is still filling, the average is taken over the samples so far, so 100 then 200 give 100 and then 150, not 12 and 37. And // rounds down: an average of -3.5 becomes -4, whereas int(-7 / 2) would give -3, because int cuts towards zero. For a tilt reading either is fine; what matters is choosing one and knowing which.",
+          "The page checks smooth, which runs a fresh MovingAverage over a list of samples, against a version that keeps no running total: at each sample it slices out the last n samples (or all so far), adds them up and divides with divmod."
+        ],
+        "zh": [
+          "板子上：一块左右倾斜的 micro:bit。accelerometer.get_x() 给出 x 方向的加速度，单位是毫 g，可正可负；column 把 -1024 到 1024 换成 0 到 4 的屏幕列。最上一行一个暗点表示原始读数，会抖；最下一行一个亮点表示平滑后的读数，走得稳。每 20 毫秒一个样本、窗口 8 个，覆盖最近 160 毫秒。",
+          "每次把 8 个样本全加一遍也行，但窗口可以只维护一个累计和：新样本进来，被它顶替的旧样本出去。窗口是一个当环用的列表，i 用 % 在里面转圈，所以不管窗口多大，每个样本的工作量都一样小。",
+          "有两处细节决定结果。窗口还没满时，只对已有的样本求平均，所以先 100 后 200 得到 100 和 150，而不是 12 和 37。另外 // 向下取整：平均值 -3.5 得 -4，而 int(-7 / 2) 得 -3，因为 int 向零截断。对倾斜读数来说哪种都行；要紧的是选定一种，并且知道选的是哪种。",
+          "页面检查 smooth：它让一个新的 MovingAverage 走一遍样本列表。对照的版本不维护累计和：每到一个样本，就切出最近 n 个（不足 n 个就全要），加起来用 divmod 相除。"
+        ]
+      },
+      "lineNotes": [
+        {
+          "at": "        self.i = (self.i + 1) % len(self.window)",
+          "en": "i moves to the next slot and wraps back to 0 after the last one.",
+          "zh": "i 挪到下一格，过了最后一格就绕回 0。"
+        },
+        {
+          "at": "        raw = accelerometer.get_x()",
+          "en": "Acceleration along x in milli-g: about -1024 to 1024 when the board is tilted fully one way or the other.",
+          "zh": "x 方向的加速度，单位毫 g：板子完全倒向一侧或另一侧时约为 -1024 到 1024。"
+        }
+      ],
+      "check": {
+        "property": "pure"
+      }
+    },
+    {
+      "id": "median-filter-spikes",
+      "file": "median-filter-spikes.py",
+      "problem": "sensor-smoothing",
+      "kind": "embedded",
+      "level": 3,
+      "boards": [],
+      "tags": [
+        "micropython",
+        "pico",
+        "filter",
+        "median",
+        "class",
+        "min",
+        "max"
+      ],
+      "requires": [],
+      "runtime": "micropython-pico",
+      "entry": "median3",
+      "title": {
+        "en": "Three-point Median Filter",
+        "zh": "三点中值滤波"
+      },
+      "blurb": {
+        "en": "An analogue reading that is steady apart from the odd wild spike: take the median of each sample and the two before it. A single spike never becomes the middle value, so it vanishes - an average would be dragged far off by it.",
+        "zh": "一个模拟读数大体平稳，只是偶尔冒出一个离谱的尖峰：取每个样本与它前两个的中值。单个尖峰永远当不了中间那个，于是消失了——换成平均值，会被它拖出很远。"
+      },
+      "notes": {
+        "en": [
+          "On the board: a Pico reading an analogue voltage on GP26, one of its ADC pins. read_u16 returns 0 to 65535 across 0 to 3.3 V. Every 50 ms the program prints the raw reading and the filtered one side by side on the USB serial console.",
+          "Why a median: take 510, 512, and then a spike of 65535. Their mean is about 22185, nowhere near the true level; their median is 512. One spike can only ever be the largest (or smallest) of three, never the middle, so it never comes out of the filter. Two spikes in a row would get through; that is the price of a window of three.",
+          "The middle of three numbers without sorting: nested min and max calls pick it out in four comparisons. The idea is to clamp the third sample between the first two (the line note on that line in read mode spells it out). Median3 keeps just the two previous samples in a and b, shifting them along each time; the first two samples come out unchanged because there is no window of three yet.",
+          "The page checks median3, which runs a fresh Median3 over a list of samples, against a version that simply sorts each window of three and takes the middle element."
+        ],
+        "zh": [
+          "板子上：一块 Pico 在 GP26（它的 ADC 引脚之一）上读模拟电压。read_u16 在 0 到 3.3 伏之间交回 0 到 65535。程序每 50 毫秒在 USB 串口控制台上并排打印原始读数与滤波后的读数。",
+          "为什么用中值：取 510、512，再来一个 65535 的尖峰。三者的平均约 22185，离真实水平差得远；中值是 512。单个尖峰在三个数里只可能最大（或最小），永远不是中间那个，所以它永远出不了滤波器。连续两个尖峰就会漏过去；这是窗口只有三的代价。",
+          "不排序也能求三个数的中间值：嵌套几次 min 和 max，四次比较就把它挑出来。思路是把第三个样本夹在前两个之间（详见读模式里这一行的行注）。Median3 只在 a、b 里存前两个样本，每次整体往前挪一格；前两个样本原样输出，因为还凑不齐三个。",
+          "页面检查 median3：它让一个新的 Median3 走一遍样本列表。对照的版本直接把每个三元窗口排序、取中间那个元素。"
+        ]
+      },
+      "lineNotes": [
+        {
+          "at": "    adc = ADC(Pin(ADC_PIN))",
+          "en": "The Pico's ADC pins are GP26 to GP29; GP26 is ADC input 0.",
+          "zh": "Pico 的 ADC 引脚是 GP26 到 GP29；GP26 是第 0 路 ADC 输入。"
+        },
+        {
+          "at": "        a, b = self.a, self.b",
+          "en": "Copy the two old samples out before they are overwritten on the next line.",
+          "zh": "先把两个旧样本取出来，下一行就要覆盖它们了。"
+        },
+        {
+          "at": "        return max(min(a, b), min(max(a, b), c))",
+          "en": "This line clamps c between a and b. min(max(a, b), c): if c is above the larger of a and b, it is replaced by that larger one. Then the max with the smaller of a and b: if the result is below the smaller one, it is replaced by that. So when c lies between a and b the median is c; when c is above both it is the larger; when c is below both it is the smaller - in all three cases exactly the middle number.",
+          "zh": "这一行把 c 夹在 a、b 之间。min(max(a, b), c)：c 比 a、b 里较大的还大，就换成较大的。外面再与 a、b 里较小的取大：结果比较小的还小，就换成较小的。所以 c 落在 a、b 之间时中值就是 c；c 比两者都大时是较大的那个；比两者都小时是较小的那个——三种情况都正好是中间那个数。"
+        }
+      ],
+      "check": {
+        "property": "pure"
+      }
+    },
+    {
+      "id": "ema-fixed-point",
+      "file": "ema-fixed-point.py",
+      "problem": "sensor-smoothing",
+      "kind": "embedded",
+      "level": 4,
+      "boards": [],
+      "tags": [
+        "micropython",
+        "microbit",
+        "filter",
+        "fixed-point",
+        "class",
+        "mean"
+      ],
+      "requires": [],
+      "runtime": "micropython-microbit",
+      "entry": "ema",
+      "title": {
+        "en": "Fixed-point Exponential Average",
+        "zh": "定点指数平均"
+      },
+      "blurb": {
+        "en": "An exponential moving average moves the average a fixed fraction of the way towards each new sample. With the fraction 1/8 it can be done entirely in integers: keep the average scaled up by 8, and use shifts for the multiplying and dividing.",
+        "zh": "指数滑动平均让平均值每次朝新样本挪一个固定比例。比例取 1/8 时，整件事都能用整数做：把平均值放大 8 倍存着，乘除都用移位。"
+      },
+      "notes": {
+        "en": [
+          "On the board: the same display as Moving Average over a Window - tilt the micro:bit, the raw x reading is a dim dot on the top row and the smoothed one a bright dot on the bottom row. The difference is memory: this filter keeps one number however long it runs, where the window kept eight.",
+          "The rule is new average = average + (sample - average) / 8. acc holds the average times 8 (2 to the power k, with k = SHIFT = 3), so adding the sample and taking one average off is exactly that rule scaled up; acc >> 3 is acc divided by 8, rounded down, which is the average itself. For example, after a first sample of 800, acc is 6400; a sample of 0 then makes acc 5600, and the average 700 - one eighth of the way from 800 towards 0.",
+          "The first sample is taken as the average straight away (x << k is x times 2 to the power k), so the filter does not have to climb up from 0. And >> rounds down for negative numbers too: -7 >> 1 is -4, whereas int(-7 / 2) is -3. Shifts on the micro:bit are fast integer operations and avoid floating point, which is slow on small boards; how shifts work bit by bit is covered on the Raspberry Pi Pico page.",
+          "The page checks ema, which runs a fresh Ema over a list of samples, against a version that uses no shifts at all: it keeps the exact average as a Fraction, applies the rule with the average rounded down by math.floor, and rounds the result down the same way."
+        ],
+        "zh": [
+          "板子上：显示与「滑动窗口平均」相同——倾斜 micro:bit，原始 x 读数是最上一行的暗点，平滑后的是最下一行的亮点。区别在内存：窗口要存 8 个数，这个滤波无论跑多久都只存一个。",
+          "规则是：新平均 = 平均 + (样本 − 平均) / 8。acc 存的是平均值乘以 8（2 的 k 次方，k = SHIFT = 3），所以「加上样本、减掉一个平均值」正是把这条规则整体放大；acc >> 3 就是 acc 除以 8 向下取整，也就是平均值本身。例如第一个样本是 800 时 acc 为 6400；接着来一个 0，acc 变成 5600，平均值是 700——从 800 朝 0 走了八分之一。",
+          "第一个样本直接当作平均值（x << k 就是 x 乘以 2 的 k 次方），滤波不用从 0 慢慢爬上来。另外 >> 对负数也向下取整：-7 >> 1 是 -4，而 int(-7 / 2) 是 -3。移位在 micro:bit 上是很快的整数运算，避开了在小板子上很慢的浮点；移位按位怎么运作，在「树莓派 Pico」页讲。",
+          "页面检查 ema：它让一个新的 Ema 走一遍样本列表。对照的版本完全不用移位：它用 Fraction 存精确的平均值，按规则更新（其中的平均值用 math.floor 向下取整），结果也同样向下取整。"
+        ]
+      },
+      "lineNotes": [
+        {
+          "at": "        return self.acc >> self.k",
+          "en": "Shifting right by k places divides by 2 to the power k and rounds down: the scaled-up acc back to an ordinary average.",
+          "zh": "右移 k 位就是除以 2 的 k 次方并向下取整：把放大过的 acc 还原成普通的平均值。"
+        },
+        {
+          "at": "SHIFT = 3",
+          "en": "k = 3: each sample moves the average one eighth of the way towards it.",
+          "zh": "k = 3：每个样本把平均值朝自己拉近八分之一。"
+        }
+      ],
+      "check": {
+        "property": "pure"
+      }
+    },
+    {
+      "id": "press-classifier-fsm",
+      "file": "press-classifier-fsm.py",
+      "problem": "press-classifier-fsm",
+      "kind": "embedded",
+      "level": 4,
+      "boards": [
+        "AQA",
+        "CIE"
+      ],
+      "tags": [
+        "micropython",
+        "microbit",
+        "state-machine",
+        "event",
+        "timer",
+        "tuple",
+        "dict"
+      ],
+      "requires": [],
+      "runtime": "micropython-microbit",
+      "entry": "classify",
+      "title": {
+        "en": "Short, Long or Double Press",
+        "zh": "短按、长按还是双击"
+      },
+      "blurb": {
+        "en": "One button, three meanings. A state machine fed with the button level and the elapsed time tells a short press, a long press (reported as soon as it has been held long enough) and a double press apart, and shows S, L or D.",
+        "zh": "一个按键，三种意思。一个状态机吃进按键电平与经过的时间，分辨短按、长按（按够时长就立刻报）与双击，屏幕上显示 S、L 或 D。"
+      },
+      "notes": {
+        "en": [
+          "On the board: a micro:bit, using button A. Hold it for half a second and L appears at once, without waiting for you to let go. Press and release, then wait: a quarter of a second later S appears. Press twice quickly: D appears on the second press. is_pressed reports whether the button is down right now; detecting presses with was_pressed is on the micro:bit page - here the timing is the point.",
+          "Four states. IDLE: waiting for a press. DOWN: held, timing how long; reaching LONG_MS (500 ms) reports long and goes to LOCKED; a release goes to WAIT. WAIT: released, timing the gap; a new press within GAP_MS (250 ms) reports double and goes to LOCKED; reaching GAP_MS reports short and goes back to IDLE. LOCKED: ignore everything until the button is released, so a long press does not also become a short one, and the second press of a double does not start a new press.",
+          "The thresholds count exactly: held for exactly 500 ms is long, a gap of exactly 250 ms is short. The timer starts at 0 on the tick where the state is entered, and that tick's own elapsed is not counted. A press still held, or a gap still running, when the input ends is not reported - it has not been decided yet. The traffic light in the Simulation page changes state on a timetable; this machine is driven by events, with timeouts as extra events.",
+          "The page checks classify, which runs step over (elapsed, pressed) pairs and returns (tick, event) pairs, against a version with no state machine: it works out the absolute time of every tick and the stretches during which the button is down, then judges each stretch - long if it lasts long enough, otherwise short or double depending on when the next press comes."
+        ],
+        "zh": [
+          "板子上：一块 micro:bit，用按键 A。按住半秒，L 立刻出现，不必等松开。按一下松开再等着：四分之一秒后出现 S。快速按两下：第二次按下时出现 D。is_pressed 报告按键此刻是否按着；用 was_pressed 检测按下在「micro:bit」页讲——这里的重点是时间。",
+          "四个状态。IDLE：等按下。DOWN：按着，计时；到 LONG_MS（500 毫秒）报长按、进 LOCKED；松开则进 WAIT。WAIT：已松开，计间隔；GAP_MS（250 毫秒）之内又按下就报双击、进 LOCKED；等满 GAP_MS 报短按、回 IDLE。LOCKED：什么都不理，直到松开——这样长按不会顺带再算成一次短按，双击的第二下也不会开始一次新的按下。",
+          "阈值恰好达到就算：按住正好 500 毫秒是长按，间隔正好 250 毫秒是短按。进入一个状态的那一拍把计时设为 0，那一拍自己的 elapsed 不计入。输入结束时还按着、或还在等间隔的，都不报——它还没判定。「模拟」页的红绿灯按时刻表切换状态；这个状态机由事件驱动，超时也算一种事件。",
+          "页面检查 classify：它让 step 走一遍 (elapsed, pressed) 对，交回 (第几拍, 事件) 对。对照的版本没有状态机：它先求出每一拍的绝对时刻和每段按下的区间，再逐段判——够长就是长按，否则看下一次按下来得早晚，判短按或双击。"
+        ]
+      },
+      "lineNotes": [
+        {
+          "at": "IDLE, DOWN, WAIT, LOCKED = \"idle\", \"down\", \"wait\", \"locked\"",
+          "en": "The states are plain strings with names, so the code reads like the diagram.",
+          "zh": "状态就是起了名字的普通字符串，代码读起来像状态图。"
+        },
+        {
+          "at": "            display.show(SYMBOLS[event])",
+          "en": "One letter per event: S for short, L for long, D for double.",
+          "zh": "每种事件一个字母：短按 S、长按 L、双击 D。"
+        }
+      ],
+      "check": {
+        "property": "pure"
+      }
+    },
+    {
+      "id": "hysteresis-thermostat",
+      "file": "hysteresis-thermostat.py",
+      "problem": "hysteresis-thermostat",
+      "kind": "embedded",
+      "level": 2,
+      "boards": [
+        "AQA",
+        "CIE"
+      ],
+      "tags": [
+        "micropython",
+        "microbit",
+        "hysteresis",
+        "state-machine",
+        "bool",
+        "gpio"
+      ],
+      "requires": [],
+      "runtime": "micropython-microbit",
+      "entry": "heater",
+      "title": {
+        "en": "Thermostat with Hysteresis",
+        "zh": "带滞回的恒温器"
+      },
+      "blurb": {
+        "en": "A heater controlled by one threshold switches on and off every time the temperature wobbles across it. Two thresholds fix that: on at 19 degrees or below, off at 22 or above, and in between keep doing whatever it was doing.",
+        "zh": "只有一个阈值的加热器，温度每在阈值附近晃一下就开关一次。两个阈值治好它：19 度及以下开，22 度及以上关，中间保持原来的样子。"
+      },
+      "notes": {
+        "en": [
+          "On the board: a micro:bit driving a heater relay from pin 1, reading the temperature once a second. temperature() gives the temperature of the micro:bit's chip as a whole number of degrees Celsius. The display shows a tick while the heater is on and a cross while it is off.",
+          "Why two thresholds: with a single rule of on below 20, readings of 20, 19, 20, 19 give off, on, off, on - three switches of the relay in four seconds, and it would go on like that for as long as the room sat near 20, wearing the relay out. With LOW = 19 and HIGH = 22, the readings 20, 19, 20, 21, 22, 21 give off, on, on, on, off, off: it switches on at 19, stays on while the room warms through 20 and 21, switches off at 22, and stays off at 21. The gap between the thresholds is the hysteresis.",
+          "The heater has a memory: in the middle band the answer depends on the previous state, which is why heater_step takes on as well as the reading. That makes it a two-state machine whose transitions are fired by crossing a threshold; reaching a threshold exactly counts, and the heater starts off.",
+          "The page checks heater, which runs heater_step over a list of readings, against a version with no running state: for each reading it looks back through the readings so far for the most recent one at or beyond a threshold, and if there is none the heater is off."
+        ],
+        "zh": [
+          "板子上：一块 micro:bit，从 pin 1 驱动加热器的继电器，每秒读一次温度。temperature() 以整数摄氏度给出 micro:bit 芯片的温度。加热器开着时屏幕显示一个勾，关着时显示一个叉。",
+          "为什么要两个阈值：只有「低于 20 就开」这一条规则时，读数 20、19、20、19 给出 关、开、关、开——四秒里继电器切换三次；房间温度只要一直在 20 附近，就这样一直切下去，很快把继电器磨坏。LOW = 19、HIGH = 22 时，读数 20、19、20、21、22、21 给出 关、开、开、开、关、关：到 19 开，房间升温经过 20、21 时一直开着，到 22 关，回到 21 仍然关着。两个阈值之间的这段空隙就是滞回。",
+          "加热器有记忆：落在中间那一段时，答案取决于之前的状态，所以 heater_step 除了读数还要收 on。这就是一个两状态的状态机，越过阈值就触发转移；恰好到达阈值也算，开始时是关着的。",
+          "页面检查 heater：它让 heater_step 走一遍读数列表。对照的版本不带状态往下走：对每个读数，它往回找到目前为止最近一次到达或越过阈值的读数，一次都没有就是关着。"
+        ]
+      },
+      "lineNotes": [
+        {
+          "at": "        pin1.write_digital(1 if on else 0)",
+          "en": "write_digital sets the pin high for 1 and low for 0; here it switches the relay.",
+          "zh": "write_digital 写 1 把引脚置高、写 0 置低；这里用它开关继电器。"
+        },
+        {
+          "at": "        on = heater_step(on, temperature(), LOW, HIGH)",
+          "en": "The new state depends on the old one: on goes in and comes back out.",
+          "zh": "新状态取决于旧状态：on 传进去、又被交回来。"
+        }
+      ],
+      "check": {
+        "property": "pure"
+      }
+    }
+  ]
+}

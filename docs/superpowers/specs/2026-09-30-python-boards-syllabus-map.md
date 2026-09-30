@@ -4,7 +4,7 @@
 学生按考纲过滤时看不到考纲外的程序；`boards: []` 合法。取代旧规则「拿不准就四家全写 / 确知不含才去掉」。
 
 这份文件是这条裁决的依据：先逐家列出与本库相关的考纲条目（只认官方来源），再给出判定原则，
-附录是全库 346 个程序**逐个**的判定表（每行写这个程序自己的依据与所属概念组），以及按概念组的一致性自查。
+附录是全库 375 个程序**逐个**的判定表（每行写这个程序自己的依据与所属概念组），以及按概念组的一致性自查。
 改 `boards` 之前先查这里；新程序照「判定原则」写，依据写进构建报告。
 
 ## 来源（只认官方）
@@ -72,7 +72,9 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | 第三方库（NumPy / pandas / matplotlib / pygame） | — | — | **未找到** |
 | 位运算 / 掩码（第 6 期 m8a 补） | 4.7.3.5 | "logical bitwise operators (AND, OR, NOT, XOR), logical shift right, shift left"（机器码操作；R2：Python 的 `& \| ^ ~ << >>` 实现的是同一概念） | 点名 |
 | 补码（第 6 期 m8a 补） | 4.5.4.3 | "signed binary can be used to represent negative integers and … one possible coding scheme is two's complement" | 点名 |
-| 中断（第 6 期 m8a 补） | 4.7.3.6 | "Describe the role of interrupts and interrupt service routines (ISRs)" | 点名 |
+| 中断 / ISR | 4.7.3.6 | "Describe the role of interrupts and interrupt service routines (ISRs)" | 点名（第 6 期 m8b 补；`ring-buffer-isr-handoff` 按循环队列判，中断只是用） |
+| 传感器 / ADC | 4.5.6.3 | "Know that ADCs are used with analogue sensors." | 点名传感器与 ADC 本身；**滤波算法未点名**（第 6 期 m8b 补） |
+| 去抖、非阻塞主循环、滑动平均 / 中值 / 定点 EMA 滤波、串口分帧、滞回 | — | — | **未找到**（第 6 期 m8b 补） |
 
 ## 二、OCR H446（Version 3.0，2026-04）
 
@@ -103,9 +105,10 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | 异常处理 | — | — | **未找到**（v3.0 全文检索，只有附录里一处 "with the exception of"） |
 | 有限状态机、正则、逆波兰、集合运算 | — | — | **未找到** |
 | 统计、矩阵运算、向量、数据可视化、事件驱动、第三方库 | — | — | **未找到** |
-| 中断（第 6 期 m8a 补） | 1.2.1(c) | "Interrupts, the role of interrupts and Interrupt Service Routines (ISR), role within the Fetch-Decode-Execute Cycle." | 点名（v3.0 全文核实） |
 | 补码（第 6 期 m8a 补） | 1.4.1(c) | "Use of sign and magnitude and two's complement to represent negative numbers in binary." | 点名（v3.0 全文核实） |
 | 位运算 / 掩码（第 6 期 m8a 补） | 1.4.1(i) | "Bitwise manipulation and masks: shifts, combining with AND, OR, and XOR." | 点名（v3.0 全文核实） |
+| 中断 / ISR | 1.2.1(c) | "Interrupts, the role of interrupts and Interrupt Service Routines (ISR)" | 点名（第 6 期 m8a 核；m8b 按循环队列判，中断只是用） |
+| 缓冲、传感器、去抖、非阻塞主循环、滤波、串口分帧、滞回 | — | — | **未找到**（1.2.1(e) 只点名 embedded OS；第 6 期 m8b 补） |
 
 ## 三、Edexcel / Pearson — International A Level Computer Science（YCP01）
 
@@ -139,10 +142,13 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | RLE | 21.2.2 | "Run-length encoding compression algorithm" | 点名 |
 | SQLite | 8.3 | "Methods to retrieve data from an SQLite database" | 点名 |
 | 有限状态机、逆波兰、词法分析、JSON、向量点积、统计（除集中趋势）、事件驱动、pygame | — | — | **未找到** |
+| 嵌入式系统部件（传感器、执行器、ADC） | 11.1.5 | "Embedded systems: Hardware components … Sensors … Actuators … Analogue-digital converter" | 点名部件本身；**控制逻辑、滤波算法未点名**（第 6 期 m8b 补） |
+| 缓冲、I/O 中断 | 11.2.1(c)(e) | "Role of buffering"；"Interrupt handling in device management" | 理论层（为什么要缓冲）；`uart-line-assembler` 的核心是按分隔符分帧，按 R1 / R5 不写（第 6 期 m8b 补，列入「拿不准」） |
+| 去抖、非阻塞主循环、滑动平均 / 中值 / 定点 EMA 滤波、串口分帧、滞回 | — | — | **未找到**（第 6 期 m8b 补） |
 | 规格没附的东西 | — | Unit 2 / 4 的 *Programming Language Subset (PLS)* 文档 | IAL 版 PLS **未找到**（只找到 GCSE 1CP2 的） |
 | 补码（第 6 期 m8a 补） | 2.1.3 | "Two's complement representation of signed numbers" | 点名 |
 | 位运算 / 掩码（第 6 期 m8a 补） | 2.2.2、7.1.3(d) | "Bitwise manipulation: Logical shift, Arithmetic shift, Bit masks: AND, OR, XOR"；Operators "(d) Bitwise" | 点名 |
-| 中断（第 6 期 m8a 补） | 11.2.1(e)、1.2.2(c) | "Interrupt handling in device management"；"Interrupt handling in multitasking" | 点名 |
+| 中断 / ISR（第 6 期 m8a 补；上面 m8b 那行以缓冲为主、判「理论层」，这里单列中断本身） | 11.2.1(e)、1.2.2(c) | "Interrupt handling in device management"；"Interrupt handling in multitasking" | 点名 |
 
 ## 四、CIE 9618（2027–2029）
 
@@ -170,8 +176,11 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | 优先队列、堆、双端队列、向量、矩阵运算、正则、JSON、其余统计、数据可视化、事件驱动、第三方库 | — | — | **未找到**（11.1 "library routines" 只是泛称） |
 | 作用域（局部 / 全局） | — | — | **未找到**（11.3 只有 procedure / function / parameter / by value / by reference） |
 | 补码（第 6 期 m8a 补） | 1.1 | "one's and two's complement representation for binary numbers" | 点名 |
-| 中断（第 6 期 m8a 补） | 4.1 | "Show understanding of the purpose of interrupts … use of an Interrupt Service handling Routine (ISR)" | 点名 |
 | 位运算 / 掩码（第 6 期 m8a 补） | 4.3 | "Show understanding of how bit manipulation can be used to monitor/control a device … Test and set a bit (using bit masking)" | 点名 |
+| 中断 / ISR | 4.1 | "Show understanding of the purpose of interrupts … use of an Interrupt Service handling Routine" | 点名（第 6 期 m8b 补；按循环队列判，中断只是用） |
+| 缓冲 | 3.1 | "Show understanding of the use of buffers" | 理论层；`uart-line-assembler` 按 R1 / R5 不写（第 6 期 m8b 补，列入「拿不准」） |
+| 监控与控制系统 | 3.1 | "monitoring and control systems … use of sensors … actuators … importance of feedback" | 点名；佐证 `hysteresis-thermostat` 的 C（它已因 12.2 状态转移写 C）（第 6 期 m8b 补） |
+| 去抖、非阻塞主循环、滑动平均 / 中值 / 定点 EMA 滤波、串口分帧 | — | — | **未找到**（第 6 期 m8b 补） |
 
 ## 判定原则
 
@@ -212,6 +221,7 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 13. **`money-in-pence` 与 `money-decimal`** 核心相同（二进制浮点不精确），同判 AEC。
 14. **`strings-are-immutable` 判 `[]`**：Edexcel 20.1.2(d) "Immutable variable" 与 AQA 4.11 的 immutable data structures 都在函数式编程语境下，说的不是字符串不可变，按 R5 不写（控制方裁决）。
 15. **`return-several-values` 写 AOE**：AQA 4.1.1.12 标题 "Returning a value/values from a subroutine" 明写多个返回值；`swap-two-tuple` 教的是元组本身，只写 OE。
+16. **`uart-line-assembler` 判 `[]`**（第 6 期 m8b）：Edexcel IAL 11.2.1(c) "Role of buffering"、CIE 3.1 "use of buffers" 点名的是缓冲的作用（理论），程序的核心是按分隔符把字节流切成行；按 R1 / R5 不写。若认为缓冲拼行就是缓冲，改成 Edexcel CIE。
 
 ## 计数
 
@@ -220,9 +230,12 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | 改前（main，346 个程序） | 346 | 346 | 346 | 346 | 0 |
 | 改后 | 216 | 183 | 252 | 179 | 70 |
 
-第 6 期 m8a 新增 18 个程序（ch33、ch34）：AQA +3 · OCR +3 · Edexcel +3 · CIE +3 · `[]` +15。
-
 相对 main，194 个程序的 `boards` 变了，分布在 29 页（每页 patch 升版一次并写 changelog）。
+
+「改前」「改后」两行是那次整库改判的口径，不动；之后每波新程序在这里各记一句**增量**（不写累计数——两波并行时累计数取决于合并顺序，增量不会）。算法：数附录表该波各行「新 boards」一栏，每写一家该家 +1，`[]` 计入最后一栏（一个程序可以同时计入几家）。
+
+- 第 6 期 m8b（ch35，新增 11 个程序）：AQA +3、OCR +1、Edexcel +1、CIE +3、`[]` +8。
+- 第 6 期 m8a（ch33、ch34，新增 18 个程序）：AQA +3、OCR +3、Edexcel +3、CIE +3、`[]` +15。
 
 ## 一致性自查（按概念组）
 
@@ -246,6 +259,7 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | complexity | 14 | AQA OCR Edexcel CIE：`pair-sum-nested-loops`、`pair-sum-two-pointers`、`loop-shape-counts`、`growth-rate-table`、`search-comparison-counts`、`insertion-shift-counts`、`merge-vs-insertion-counts`、`doubling-experiment`、`has-duplicates-nested`、`has-duplicates-sorted`、`has-duplicates-set`、`max-subarray-quadratic`、`max-subarray-divide-conquer`、`max-subarray-kadane` | （组内一致） |
 | comprehension | 6 | AQA Edexcel：`squares-comprehension`、`evens-comprehension`、`dict-and-set-comprehensions`、`flatten-and-transpose`、`if-placement-in-comprehension`、`comprehension-or-loop` | （组内一致） |
 | dataviz | 9 | Edexcel：`line-plot-pyplot`、`line-plot-axes`、`scatter-sizes-colours`、`bar-chart-labels`、`histogram-bins`、`subplots-grid`、`annotate-and-style`、`savefig-size-dpi`、`plot-from-dataframe` | （组内一致） |
+| debounce | 2 | []：`debounce-counter`、`debounce-stable-time` | （组内一致） |
 | decomposition | 1 | AQA OCR Edexcel CIE：`readings-report` | （组内一致） |
 | deque | 1 | []：`deque-both-ends` | （组内一致） |
 | dictionary | 10 | AQA OCR Edexcel CIE：`dict-crud`、`word-count-if-in`、`word-count-get`、`word-count-counter`、`group-by-setdefault`、`group-by-defaultdict`、`roman-to-int-lookup`、`dedupe-dict-fromkeys`、`tuple-keys-sparse-grid`、`anagram-check-counts` | （组内一致） |
@@ -253,11 +267,13 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | docs | 1 | Edexcel：`docstrings-and-type-hints` | （组内一致） |
 | dp | 6 | []：`grid-paths-table`、`knapsack-01-table`、`knapsack-01-1d`、`lcs-length`、`edit-distance`、`coin-change-dp` | （组内一致） |
 | efficiency | 1 | AQA OCR Edexcel CIE：`is-prime-trial-division` | （组内一致） |
+| embedded-io | 1 | []：`uart-line-assembler` | （组内一致） |
+| embedded-loop | 2 | []：`two-leds-blocking`、`two-leds-nonblocking` | （组内一致） |
 | exceptions | 5 | AQA Edexcel CIE：`try-except-else-finally`、`multiple-except-clauses`、`raise-for-invalid-input`、`custom-exception-class`、`missing-file-eafp` | （组内一致） |
 | expression | 3 | AQA CIE：`rpn-evaluate`；AQA：`infix-to-rpn`；AQA OCR Edexcel CIE：`expression-tree` | RPN 求值：A、C；中缀→RPN 转换：只有 A；表达式树（由 RPN 建树、后序求值）：A 4.3.2.1、O 后序遍历、E 遍历、C RPN 求值 → 四家 |
 | files | 6 | AQA OCR Edexcel CIE：`write-and-read-text`、`read-csv-split`、`read-csv-module`、`write-csv-dictwriter`、`missing-file-lbyl`、`inventory-csv-restock` | （组内一致） |
 | float-precision | 2 | AQA Edexcel CIE：`money-in-pence`、`money-decimal` | （组内一致） |
-| fsm | 2 | AQA CIE：`traffic-light-fsm`、`screen-states` | （组内一致） |
+| fsm | 4 | AQA CIE：`traffic-light-fsm`、`screen-states`、`press-classifier-fsm`、`hysteresis-thermostat` | （组内一致） |
 | functional-hof | 5 | AQA Edexcel：`functions-as-values`、`evens-filter`、`map-split-input`、`sorted-min-max-with-key`；Edexcel：`enumerate-and-zip` | map / filter / lambda / 一等函数：A 4.12、E 20.1.2；enumerate-and-zip 只有 E 点名 zip |
 | functions | 1 | AQA OCR Edexcel CIE：`define-call-return` | （组内一致） |
 | game-tree | 1 | Edexcel：`ttt-minimax` | （组内一致） |
@@ -295,7 +311,7 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | python-list | 1 | []：`slice-assignment` | （组内一致） |
 | python-params | 4 | []：`positional-keyword-default`、`mutable-default-trap`、`mutable-default-none`、`args-and-kwargs` | （组内一致） |
 | python-protocol | 2 | []：`str-and-repr`；AQA：`operator-overloading-vector` | 协议本身未点名；协议作用在点名概念上时按那个概念判（向量 → A），作用在普通类上就是 [] |
-| queue | 5 | AQA OCR Edexcel CIE：`hot-potato-list`、`hot-potato-deque`、`circular-queue-array`、`queue-from-two-stacks`、`queue-single-server` | （组内一致） |
+| queue | 6 | AQA OCR Edexcel CIE：`hot-potato-list`、`hot-potato-deque`、`circular-queue-array`、`queue-from-two-stacks`、`queue-single-server`、`ring-buffer-isr-handoff` | （组内一致） |
 | random | 8 | AQA Edexcel：`monte-carlo-pi-random`、`dice-sum-frequencies`、`random-walk-1d`、`gamblers-ruin`、`shuffle-fisher-yates`、`shuffle-naive-biased`、`pig-dice-two-players`、`rng-generator-basics` | （组内一致） |
 | records | 3 | AQA OCR Edexcel CIE：`point-plain-class`、`point-dataclass`、`inventory-stock` | （组内一致） |
 | recursion | 10 | AQA OCR Edexcel CIE：`factorial-recursive`、`factorial-iterative`、`fibonacci-naive`、`fibonacci-iterative`、`call-stack-unwinding`、`power-linear`、`power-by-squaring`、`towers-of-hanoi`、`permutations-recursive`、`flatten-nested` | （组内一致） |
@@ -304,6 +320,7 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | regression | 2 | CIE：`regression-by-formula`、`regression-polyfit` | （组内一致） |
 | scope | 1 | AQA OCR Edexcel：`local-and-global-scope` | （组内一致） |
 | selection | 8 | AQA OCR Edexcel CIE：`max-of-three-if`、`grade-boundaries-descending`、`grade-boundaries-ranges`、`leap-year-nested`、`ticket-price-nested`、`triangle-classifier`、`match-case-commands`、`fizzbuzz` | （组内一致） |
+| sensor-smoothing | 3 | []：`moving-average-window`、`median-filter-spikes`、`ema-fixed-point` | （组内一致） |
 | sets | 3 | AQA Edexcel CIE：`set-operations`、`dedupe-seen-set`、`game-of-life-set` | （组内一致） |
 | sort-bubble | 2 | AQA OCR Edexcel CIE：`bubble-sort-basic`、`bubble-sort-early-exit` | （组内一致） |
 | sort-insertion | 1 | OCR Edexcel CIE：`insertion-sort` | （组内一致） |
@@ -706,6 +723,17 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | ch34 | `elapsed-naive-subtract` | — | `[]` | ticks-wrap | 计数器回绕时直接相减出错：四家点名补码的表示换算与 MOD 运算符，读不出覆盖「回绕差值」（R5） |
 | ch34 | `elapsed-ticks-diff` | — | `[]` | ticks-wrap | ticks_diff 的环形算术：同上（R5） |
 | ch34 | `gpio-bitmask` | — | AQA OCR Edexcel CIE | bitwise | 掩码置位 / 清零 / 翻转：A 4.7.3.5 · O 1.4.1(i) · E 2.2.2、7.1.3(d) · C 4.3（点名「用位掩码控制设备」） |
+| ch35 | `two-leds-blocking` | — | `[]` | embedded-loop | 阻塞主循环（sleep 拖住另一盏灯）：主循环 / 调度四家都未点名 |
+| ch35 | `two-leds-nonblocking` | — | `[]` | embedded-loop | 非阻塞主循环、累加器调度：四家都未点名（同 pygame 游戏循环的判法） |
+| ch35 | `debounce-counter` | — | `[]` | debounce | 按连续样本数去抖：四家都未点名 |
+| ch35 | `debounce-stable-time` | — | `[]` | debounce | 按保持时长去抖：四家都未点名 |
+| ch35 | `ring-buffer-isr-handoff` | — | AQA OCR Edexcel CIE | queue | 循环队列（R4 按 ADT 判；满时覆盖最旧）：A 4.2.2.1 circular · O 1.4.2(c) using arrays · E 14.1.5、18.2.1 · C 10.4 queue implemented using arrays；中断（A 4.7.3.6 · O 1.2.1(c) · E 11.2.1(e) · C 4.1）只是用 |
+| ch35 | `uart-line-assembler` | — | `[]` | embedded-io | 串口字节流按分隔符分帧：四家未点名；E 11.2.1(c)、C 3.1 的缓冲是理论层，按 R1 / R5 不写（见「拿不准」16） |
+| ch35 | `moving-average-window` | — | `[]` | sensor-smoothing | 滑动窗口均值滤波：四家未点名（传感器 / ADC 本身 A 4.5.6.3、E 11.1.5 点名，滤波算法未点名；E 18.1.4(b) 集中趋势在数据科学语境，按 R5 不套用） |
+| ch35 | `median-filter-spikes` | — | `[]` | sensor-smoothing | 三点中值去尖峰：四家未点名（理由同上） |
+| ch35 | `ema-fixed-point` | — | `[]` | sensor-smoothing | 定点指数滑动平均（`>>` 只是用，R1）：四家未点名 |
+| ch35 | `press-classifier-fsm` | — | AQA CIE | fsm | 短按 / 长按 / 双击的状态转移：A 4.4.2.1 FSM · C 12.2 state-transition diagrams；OCR、Edexcel 未点名 |
+| ch35 | `hysteresis-thermostat` | — | AQA CIE | fsm | 两态 + 越界事件的状态转移：A 4.4.2.1 FSM · C 12.2（另有 C 3.1 monitoring and control systems / feedback 佐证）；OCR、Edexcel 未点名，E 11.1.5 只点名部件 |
 
 ## 待办
 
