@@ -34,7 +34,7 @@
 | 事件本身（KEYDOWN / `get_pressed` / 鼠标） | m7a `py-pygame-basics` | motion 只讲「输入 → 速度 / 加速度」的映射，讲解指回「pygame 入门」页 |
 | 碰撞（矩形、圆、组、像素） | m7a `py-pygame-sprites` | 反弹、打砖块、Pong 用到的碰撞判定「用，不重讲」，指回「精灵与碰撞」页 |
 | 「速度 × dt」一次积分（`frame-independent-motion` 组） | m7a | motion **不再做**逐帧 vs 按秒移动的对照；从加速度、重力、摩擦讲起 |
-| M5「控制台游戏」（井字棋、2048、扫雷……） | ch22 | 本页四个游戏与它不重；游戏循环写成状态机的**概念**已在 ch22 `ttt-game-loop` 与 ch21 `traffic-light-fsm` 讲过，本页 `game-state-screens` 只用在画面切换上 |
+| M5「控制台游戏」（井字棋、2048、扫雷……） | ch22 | 本页四个游戏与它不重；游戏循环写成状态机的**概念**已在 ch22 `ttt-game-loop` 与 ch21 `traffic-light-fsm` 讲过（本页原拟的 `game-state-screens` 终审后删除，见 §9.1） |
 | 队列 / `deque` | ch12 | `snake-move-deque` 只用，指回「栈与队列」页 |
 
 ---
@@ -86,7 +86,7 @@
 | B1 | 输入事件 | motion 只讲映射；事件本身归 m7a「pygame 入门」 | 确认 |
 | B2 | 碰撞 | 用 `colliderect` / `collidelist`，不重讲；指回「精灵与碰撞」 | 确认 |
 | B3 | 帧率无关 | m7a 已讲 `速度 × dt`；motion 的 `friction-per-frame` / `friction-dt` 是**衰减**的帧率无关，不是位移的 | 确认不算重复 |
-| B4 | 状态机 | 概念在 M5 讲过；`game-state-screens` 只用在画面切换 | 确认 |
+| B4 | 状态机 | 概念在 M5 讲过；~~`game-state-screens` 只用在画面切换~~（终审 C1：与 m7a `screen-states` 同题，已换成 `lives-and-invulnerability`，见 §9.1） | 确认 |
 | B5 | Sprite / Group | 四个游戏都**不用** `Sprite` 类（用 `Rect` + 列表），免得本页变成第二个 sprites 页 | 确认，或允许 invaders 用 Group |
 
 ## 4. 随机
@@ -126,9 +126,9 @@
 | pong-ai-paddle | 0 | 瞬移、无速度上限 | 195 |
 | breakout-brick-hit | 0 | 没撞到交回 −1 | 95 |
 | invaders-fleet-step | 0 | 判边时漏了外星人宽度 | 24（首版 **0**——cases 里的外星人从没走到右墙；改成可以贴近右墙） |
-| game-state-screens | 0 | 未知事件回标题 | 106 |
+| game-state-screens（终审后删除，见 §9.1） | 0 | 未知事件回标题 | 106 |
 
-`bullet-cooldown` 与 `game-state-screens` 同类（纯逻辑、离散），构建者照同一协议补原型。三处「首版命中太少」就是简报 §2.4 要原型的原因：写进构建者简报，cases 必须带这些专门构造的分支。
+`bullet-cooldown` 与 `game-state-screens` 同类（纯逻辑、离散），构建者照同一协议补原型（`game-state-screens` 终审后换成 `lives-and-invulnerability`，其原型见 §9.1）。三处「首版命中太少」就是简报 §2.4 要原型的原因：写进构建者简报，cases 必须带这些专门构造的分支。
 
 ---
 
