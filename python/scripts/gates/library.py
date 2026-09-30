@@ -337,7 +337,7 @@ def algorithm_property_check() -> int:
     """
     rc = 0
     checked = 0
-    prop_skipped = 0
+    prop_skipped = {}                    # 层 → 因缺库跳过的程序数（scipy-stack / pygame 分开数）
     cases_total = 0
     with_property = set()
     prog_chapter = {}
@@ -374,8 +374,9 @@ def algorithm_property_check() -> int:
                           file=sys.stderr)
                     rc = 1
                 else:
-                    prop_skipped += 1
-                    print(f'  跳过 {name} 的 property：缺库 {missing}（{"pygame" if pygame_prog else "scipy-stack"} 层）')
+                    layer = 'pygame' if pygame_prog else 'scipy-stack'
+                    prop_skipped[layer] = prop_skipped.get(layer, 0) + 1
+                    print(f'  跳过 {name} 的 property：缺库 {missing}（{layer} 层）')
                 continue
             if pygame_prog:
                 _headless_sdl()
@@ -496,7 +497,8 @@ def algorithm_property_check() -> int:
     if rc == 0:
         print(f'性质比对：{checked} 个程序 × {properties.SAMPLES} 组实参 = '
               f'{cases_total} 次调用，与独立参考实现全部一致（种子 {properties.SEED}）'
-              + (f'；{prop_skipped} 个 scipy-stack 程序因缺库跳过（CI 上不许）' if prop_skipped else ''))
+              + ('；因缺库跳过 ' + '、'.join(f'{layer} 层 {n} 个' for layer, n in sorted(prop_skipped.items()))
+                 + '（CI 上不许）' if prop_skipped else ''))
     return rc
 
 

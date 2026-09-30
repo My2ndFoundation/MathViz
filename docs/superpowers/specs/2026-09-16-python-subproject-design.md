@@ -507,11 +507,11 @@ python/tools/py-sorting.html
 
 | 层 | 覆盖 | 怎么处理 |
 |---|---|---|
-| **stdlib** | M1–M5，约 265 段 | 每次都真跑，本地与 CI 都跑 |
-| **scipy-stack** | M6，约 45 段 | CI 里 `pip install` **钉版本**的 numpy / pandas / matplotlib，`MPLBACKEND=Agg`，并设 `PYTHON_GATES_REQUIRE_SCIPY=1`——CI 上缺库是**红**；本地缺库则跳过，并**打印跳过了几段** |
+| **stdlib** | `requires` 为空的 cpython 程序：M1–M5 全部，加 M6 页上只用标准库的程序（第 4 期收尾时 267 段，其中 M6 页上 3 段） | 每次都真跑，本地与 CI 都跑 |
+| **scipy-stack** | `requires` 含 numpy / pandas / matplotlib 的程序：M6 其余（第 4 期收尾时 43 段） | CI 里 `pip install` **钉版本**的 numpy / pandas / matplotlib，`MPLBACKEND=Agg`，并设 `PYTHON_GATES_REQUIRE_SCIPY=1`——CI 上缺库是**红**；本地缺库则跳过，并**打印跳过了几段** |
 | **不可运行** | M7 pygame（要显示器 + 主循环不终止）、M8 MicroPython（要硬件），约 65 段 | 只过 `compile()` |
 
-**scipy-stack 层的三条补充（第 4 期开工前，PR 见提交）。**
+**scipy-stack 层的三条补充（第 4 期开工前，#191；第 3 条的「逐层」是 #192）。** 分层看 `requires`，不看模块（`library.py` 的 `_tier`）。
 
 1. **版本钉死**：`numpy==2.3.1 pandas==2.3.0 matplotlib==3.10.3`（写在 `registry-sync.yml`）。numpy / pandas 的
    打印格式（数组换行宽度、DataFrame 列对齐、浮点位数）随版本变，`run.expect` 是在这组版本上生成的；
@@ -801,7 +801,7 @@ chess 现在要到运行时才暴露一个写错的路径。
 | 第 1 期 | M1 剩余 + M2 | 8 | ~95（实交 96；全库 106）|
 | 第 2 期 | M3 + M4 | 10 | ~120（实交 111；全库 217）|
 | 第 3 期 | M5 综合运用 | 4 | ~40（实交 47；全库 264）|
-| 第 4 期 | M6 科学计算与数理统计 | 5 | ~45 |
+| 第 4 期 | M6 科学计算与数理统计 | 5 | ~45（实交 46；全库 310）|
 | 第 5 期 | M7 pygame | 4 | ~35 |
 | 第 6 期 | M8 嵌入式 Python | 3 | ~30 |
 
@@ -840,8 +840,8 @@ chess 现在要到运行时才暴露一个写错的路径。
 
 ### 9.2 配套文档与 skill
 
-- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。**至第 3 期收尾仍未写**，见第 3 期账本 §四.8
-- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（**至第 3 期收尾仍未写**，见第 3 期账本 §四.8）：API 签名、易踩的坑、
+- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。**至第 4 期收尾仍未写**（第 3 期账本定的「第 4 期开工前」没做到），见第 4 期账本 §五.8
+- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（**至第 4 期收尾仍未写**，见第 4 期账本 §五.8）：API 签名、易踩的坑、
   每一次实测发现的错误
 - `.claude/skills/python-drill-tool/SKILL.md` —— 作者须知：新增一页 / 新增一个程序 / 升级一页的作业流程，
   每条硬约束注明由哪道门守（第 1 期设计 B5）

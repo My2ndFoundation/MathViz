@@ -194,6 +194,18 @@ one that breaks the most assumptions inherited from the other two:
   position. And one rule no gate can see: **the page never shows a program's output** (`run.expect` is
   for the gates only), so a string literal in a blanked line that can only be learned from the output
   must be given in the last hint tier.
+- **The scipy-stack tier (M6) is only as real as the machine it runs on.** A program whose `requires`
+  names numpy / pandas / matplotlib is run against `run.expect` like any other — the tier is read from
+  `requires`, not from the module. CI installs **pinned** versions (`numpy==2.3.1 pandas==2.3.0
+  matplotlib==3.10.3`, in `registry-sync.yml`; printed formats drift between releases, and `run.expect`
+  was generated on exactly these) and sets `PYTHON_GATES_REQUIRE_SCIPY=1`, so a missing library is red
+  there (despite its name, since #196 the variable covers pygame too). **Locally a missing library is skipped with a one-line count and the gate stays green** — run
+  with the variable set. Without it, two lines carry the skips: "程序真跑 … N 段因缺库跳过" counts only the
+  scipy-stack tier (pygame programs are compile-only there and never appear in it), and a pygame skip
+  shows up only at the end of the "性质比对" line. `scipy` is allowed in `requires` but CI does
+  not install it: using it means adding it to the pinned install step in the same PR. And the property
+  gate compares value **and type at every level** (#192) — `[np.int64(3)]` against `[3]` is red, so
+  entry functions hand back built-ins via `.tolist()` / `int()` / `float()`.
 
 Its gate is `python3 python/scripts/check.py`, run by the hook (on `python/{core,programs,tools,scripts}/`,
 `python/python-tools.json` and the two navigation pages) and by `registry-sync.yml`.
