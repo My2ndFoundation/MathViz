@@ -281,7 +281,7 @@ PR-A 与 PR-B **串行**：B 改 core、重生成 `py-basics.html`、迁移提�
 
 - **字段**：难度（标作「难度 L2」，与提示分级区分）、类型、行数、空数、考试局、标签；
   `runtime` 仅在非 `cpython` 时显示；`pip install` 仍只在底栏。
-  - 考试局为空显式写「未标注 / Not tagged」，不留空行。
+  - 考试局为空显式写「未标注 / Not tagged」，不留空行。（2026-09-30 起：`boards: []` 表示四家考纲都不含，占位改为「不在考纲 / Not on the syllabus」，见 `2026-09-30-python-boards-syllabus-map.md`。）
   - 标签是英文标识符，等宽字体原样显示。
   - 空数由 `Exercise.parse` 数出，不另存。
 - **三种模式都显示**：元数据不泄题。
@@ -297,7 +297,7 @@ PR-A 与 PR-B **串行**：B 改 core、重生成 `py-basics.html`、迁移提�
 |---|---|
 | 只在 `library.py` 的 `KINDS` 里加一个值 | 门红 |
 | 删掉 `project` 的中文标签 | `interact.test.js` 红 |
-| `panelMeta` 收到 `boards: []` | 测试断言显示「未标注」而不是空值 |
+| `panelMeta` 收到 `boards: []` | 测试断言显示「未标注」而不是空值（2026-09-30 起为「不在考纲」） |
 
 目测验收：`file://` 打开 py-basics，中英 × 三种模式 × 窄屏各截图。
 

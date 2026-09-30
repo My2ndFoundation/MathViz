@@ -1569,10 +1569,21 @@ def program_meta_check() -> int:
             print(f'ERROR: {name} 的 level={prog.get("level")!r} 不在 1–5 内',
                   file=sys.stderr)
             rc = 1
+        # boards 的语义（用户裁决，2026-09-30）：一个考试局只在这个程序的核心教学点被它的
+        # 考纲点名时才写；不在任何一家考纲里就写空列表——空列表合法，学生按考纲筛时它不出现。
+        # 仍然要求：是列表、元素都在闭集、不重复（重复的考试局在面板上会显示两遍）。
+        # 判定依据：docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md
         boards = prog.get('boards')
-        if not isinstance(boards, list) or not boards or not set(boards) <= BOARDS:
-            print(f'ERROR: {name} 的 boards={boards!r} 必须是 {sorted(BOARDS)} 的'
-                  f'非空子集', file=sys.stderr)
+        if not isinstance(boards, list):
+            print(f'ERROR: {name} 的 boards={boards!r} 必须是列表（考纲外的程序写 []）',
+                  file=sys.stderr)
+            rc = 1
+        elif not all(isinstance(b, str) for b in boards) or not set(boards) <= BOARDS:
+            print(f'ERROR: {name} 的 boards={boards!r} 里有闭集 {sorted(BOARDS)} 之外的值',
+                  file=sys.stderr)
+            rc = 1
+        elif len(set(boards)) != len(boards):
+            print(f'ERROR: {name} 的 boards={boards!r} 有重复的考试局', file=sys.stderr)
             rc = 1
         if prog.get('runtime', 'cpython') not in RUNTIMES:
             print(f'ERROR: {name} 的 runtime={prog.get("runtime")!r} 不在闭集 '
@@ -1627,7 +1638,8 @@ def program_meta_check() -> int:
         print('ERROR: 一条程序元数据都没扫到——这道门跑了个寂寞', file=sys.stderr)
         return 1
     if rc == 0:
-        print(f'程序元数据：{total} 条 id 全库唯一，kind/level/boards/runtime 在闭集，'
+        print(f'程序元数据：{total} 条 id 全库唯一，kind/level/boards/runtime 在闭集'
+              f'（boards 可为空、不重复），'
               f'双语齐全，requires 在白名单，没有手写的派生字段')
     return rc
 
