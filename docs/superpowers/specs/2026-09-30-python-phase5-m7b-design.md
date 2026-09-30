@@ -62,7 +62,7 @@
 
 ### 2.2 py-pygame-games · `ch32-pygame-games` · M7 · 9
 
-四个完整游戏（⧉，约 90–120 行，每段 20–40 行）+ 五个聚焦单一机制的短程序（40–70 行）。一个游戏只做**机制完整的最小版本**（派发简报 §2.3）。
+四个完整游戏（⧉，约 90–120 行，每段 20–40 行）+ 五个聚焦单一机制的短程序（40–70 行）。一个游戏只做**机制完整的最小版本**（派发简报 §2.3）。打砖块做成三行 × 十块（控制方收尾前批准，见 §9）。
 完整游戏的 property 挂在它最核心的那一个逻辑函数上；聚焦短程序把同一机制拆出来单独练。
 
 | id | 组 | ⧉ | 教什么 | P 入口 · 参照 |
@@ -75,7 +75,7 @@
 | `breakout-full` | | ⧉ | 一排砖、一拍、一球：`Rect.collidelist` 找撞到的第一块砖、删掉它、反弹 | `brick_hit(ball, bricks)` → 下标或 `None` · 参照逐块坐标判相交 |
 | `invaders-full` | | ⧉ | 一队外星人左右行进、碰边整体下移并掉头；一炮、一发子弹 | `fleet_step(aliens, direction, step, width, drop)` → `(aliens, direction)` · 参照先走一步再判越界 |
 | `bullet-cooldown` | | | 按住空格也不能连发：冷却计时器 `remaining -= dt`，到 0 才能再开火 | `try_fire(remaining, fire_held, cooldown, dt)` → `(remaining, fired)` · 参照另写的计时 |
-| `game-state-screens` | | | 标题 / 游戏中 / 暂停 / 结束四个画面：转移表（字典）驱动；状态机概念指回「模拟」页的交通灯 | `next_state(state, event)` · 参照 if 链 |
+| `lives-and-invulnerability` | | | 被击中掉一条命、之后 2 秒无敌（闪烁）、命数到 0 结束：**先倒计时（夹到 0），无敌计时恰为 0 时不无敌**——到期那一帧被击中照样算 | `take_hit(lives, invuln, hit, dt)` → `(lives, invuln, game_over)` · 参照另写的计时（先算剩余、再判是否可被击中） |
 
 ---
 
@@ -144,3 +144,14 @@
 | 随机 / 资源 / 递归 / chunks | | 同意 |
 | 英文跨页写法 | 第 4 期收尾的新裁决 | 英文讲解写 `the <英文页名> page`（不加引号、不夹「」），中文写「页名」 |
 | 时序 | | motion 的构建者也等第 4 期收尾 PR 合并、main SHA 到了再派（本期两波同一版模板）；games 另等 chunks PR |
+
+### 9.1 终审后的裁决（2026-09-30）
+
+| # | 问题 | 决定 |
+|---|---|---|
+| 打砖块 | 派发简报写「一排砖」 | **三行 × 十块**（Python编程 批准：多几行只是循环次数、不增机制） |
+| C1 | `game-state-screens` 与 m7a 已批准、已合并的 ch29 `screen-states` 同一道题（四画面、同一张转移表、`lookup` 空的答案行逐字相同） | **换成 `lives-and-invulnerability`**（problem = id）。根因：本清单 §1 查重只核了全库已合并的程序，漏了并行波的已批准清单；Python编程 批准时也只交叉核了组名 |
+| C1 边界 | 无敌计时恰为 0 时算不算无敌 | **不算**（能被击中）；先倒计时、后判定 |
+| C1 原型 | `draft-proto-lives.py`，门的种子与逐层比较 | 正确 == 参照 200/200；错误实现命中：不看无敌 52、先判后倒计时（到期那一帧被击中被忽略）73、恰为 0 仍当无敌 63、少一条命就结束 74（/200）。首版 cases「恰为 0」只命中 27——把「到期那一帧且同时被击中」提到 cases 的四成才过 50 |
+| 英文跨程序 | 标题以冠词开头时 | 不再加 the（写 see An AI Paddle That Can Be Beaten，不写 the An AI Paddle…） |
+| 速度 × dt | 在哪一页 | 「pygame 入门」页（ch29，组 `frame-independent-motion`）；motion 讲解明说「位移 = 速度 × dt 见「pygame 入门」页」 |
