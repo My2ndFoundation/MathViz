@@ -702,7 +702,7 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | ch34 | `pwm-servo-angle` | — | `[]` | pico-io | 角度换舵机脉宽：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
 | ch34 | `adc-temperature` | — | `[]` | pico-io | ADC 读数换摄氏度：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
 | ch34 | `pin-irq-counter` | — | AQA OCR Edexcel CIE | interrupts | 硬件中断与短小的中断处理函数：A 4.7.3.6 · O 1.2.1(c) · E 11.2.1(e)、1.2.2(c) · C 4.1 |
-| ch34 | `timer-periodic-callback` | — | `[]` | pico-io | 硬件定时器回调：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch34 | `timer-periodic-callback` | — | `[]` | pico-io | 定时器回调：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
 | ch34 | `elapsed-naive-subtract` | — | `[]` | ticks-wrap | 计数器回绕时直接相减出错：四家点名补码的表示换算与 MOD 运算符，读不出覆盖「回绕差值」（R5） |
 | ch34 | `elapsed-ticks-diff` | — | `[]` | ticks-wrap | ticks_diff 的环形算术：同上（R5） |
 | ch34 | `gpio-bitmask` | — | AQA OCR Edexcel CIE | bitwise | 掩码置位 / 清零 / 翻转：A 4.7.3.5 · O 1.4.1(i) · E 2.2.2、7.1.3(d) · C 4.3（点名「用位掩码控制设备」） |
