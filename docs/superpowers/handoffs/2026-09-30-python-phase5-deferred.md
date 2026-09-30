@@ -10,7 +10,7 @@
 >
 > **核对基线 `e342ba2`**（#201 合并后的 main），收尾当天（2026-09-30）逐条实测；文中 file:line 都按它。
 > 收尾评审期间 main 又合了两个 PR，本 PR 已把它们合进来：**#202**（`2cc8f5e`，python.md 与 python-handoff.md，§五.5）、**#203**（`08d3935`，boards 按考纲重判、engine py-1.3.0、29 页 patch 升版）。
-> 合完之后复核过：`judge.js:162`、`library.py:538 / :541 / :562` 行号不变；D 项扫描结果不变；页面体积与 boards 分布按基线记，#203 之后的不在本账本里。
+> 合完之后复核过：`judge.js:162`、`library.py:538 / :541 / :562` 行号不变；D 项扫描结果不变；页面体积按基线记；boards 分布两个都记（基线 346 / 346 四家，#203 之后的分布见 §一.4）。
 > 来源：期控制方的派发简报与台账（主工作区 `.superpowers/python-phase5/phase5-brief.md`、`controller-log.md`）、复盘条目 `retro-items.md`（1–27）、
 > 三份台账（`m7a-ledger/`、`m7b-ledger/`、`chunks-ledger/`）——都 gitignored，**不在仓库里**，要留下来的这里都抄全了；以及三份清单 / 设计规格与六个 PR 的描述。
 >

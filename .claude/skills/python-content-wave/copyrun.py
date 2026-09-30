@@ -71,7 +71,7 @@ def payload(js_file: pathlib.Path, src: str, mode: str) -> str:
     p = subprocess.run(['node', '-e', JS, str(js_file), mode], input=src, capture_output=True, text=True, timeout=60)
     if p.returncode != 0:
         # 抛异常而不是 sys.exit：调用方的 finally 要删掉临时的 Exercise 文件（第 5 期收尾评审 m5）
-        raise RuntimeError(f'node 取复制内容失败（{mode}）：{p.stderr.strip()[-400:]}')
+        raise RuntimeError(f'node 取复制内容失败（{mode}）：{p.stderr.strip()[:600]}')   # 原因在 stderr 开头，不在结尾
     return p.stdout
 
 
