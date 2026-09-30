@@ -14,7 +14,7 @@ def update(stable, count, raw, n):
             return raw, 0
 # <<< BLANK
         return stable, count
-# >>> BLANK id=agree level=2 hint="函数最后一行：走到这里说明 raw 与 stable 一致；return 交回两个值、逗号隔开不加括号——稳定值不变，计数怎么办由你想 || 一个一致的样本说明刚才那几个不一致的只是毛刺，计数要清零——「连续」二字靠的就是这一行" hintEn="The function's last line: reaching it means raw agrees with stable; the return hands back two values separated by a comma, no brackets - the stable level unchanged, and you decide what happens to the count || One agreeing sample shows the disagreeing ones before it were only a glitch, so the count goes back to zero - the words in a row depend on this line"
+# >>> BLANK id=agree level=2 hint="函数最后一行：走到这里说明 raw 与 stable 一致；return 交回两个值、逗号隔开不加括号——第一个值写 stable、不写 raw：这里两者恰好相等，但这一行要说的是「稳定值不变」，写 stable 才说得出这个意思；计数怎么办由你想 || 一个一致的样本说明刚才那几个不一致的只是毛刺，计数要清零——「连续」二字靠的就是这一行" hintEn="The function's last line: reaching it means raw agrees with stable; the return hands back two values separated by a comma, no brackets - write stable as the first value, not raw: the two happen to be equal here, but what this line says is that the stable level is unchanged, and only stable says that; you decide what happens to the count || One agreeing sample shows the disagreeing ones before it were only a glitch, so the count goes back to zero - the words in a row depend on this line"
     return stable, 0
 # <<< BLANK
 

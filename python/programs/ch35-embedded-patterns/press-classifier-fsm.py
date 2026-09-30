@@ -29,7 +29,7 @@ def step(state, timer, pressed, elapsed, long_ms, gap_ms):
         timer += elapsed
         if timer >= gap_ms:
             return IDLE, 0, "short"
-# >>> BLANK id=release level=3 hint="一个 elif 头加一行 return：这里剩下的只有锁定状态，所以条件里不写 state，只用 not 看按键 || return 交回三个值、逗号隔开不加括号 || 松开了就回到空闲状态，计时清零，不报事件（None）" hintEn="An elif header plus one return line: the only state left here is the locked one, so the condition leaves state out and looks only at the button, using not || The return hands back three values separated by commas, no brackets || Once released it goes back to the idle state, the timer reset to zero, with no event (None)"
+# >>> BLANK id=release level=3 hint="一个 elif 头加一行 return：这里剩下的只有锁定状态，所以条件里不写 state，只用 not 看按键；return 交回三个值、逗号隔开不加括号 || 松开了就回到空闲状态，计时清零 || 松开不算事件，所以第三个值是 None" hintEn="An elif header plus one return line: the only state left here is the locked one, so the condition leaves state out and looks only at the button, using not; the return hands back three values separated by commas, no brackets || Once released it goes back to the idle state, with the timer reset to zero || A release is not an event, so the third value is None"
     elif not pressed:
         return IDLE, 0, None
 # <<< BLANK

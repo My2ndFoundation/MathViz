@@ -183,7 +183,7 @@ ring-buffer-isr-handoff 是 ISR → 主循环交接、m8a `pin-irq-counter` 是�
 
 | 概念 | AQA | OCR | Edexcel IAL | CIE | 对本波的影响 |
 |---|---|---|---|---|---|
-| 中断 / ISR | 4.7.3.6 | 1.2.1(c) | 11.2.1(e) | 3.1 后「purpose of interrupts … Interrupt Service handling Routine」 | `ring-buffer-isr-handoff` 的核心是循环队列（已四家），中断只是用——不改 |
+| 中断 / ISR | 4.7.3.6 | 1.2.1(c) | 11.2.1(e) | 4.1（CPU Architecture 之下）「purpose of interrupts … Interrupt Service handling Routine」 | `ring-buffer-isr-handoff` 的核心是循环队列（已四家），中断只是用——不改 |
 | 缓冲（硬件 / I/O） | —（只有 memory buffer register） | — | 11.2.1(c) Role of buffering | 3.1「use of buffers」 | 都是理论层的「为什么要缓冲」。`uart-line-assembler` 的核心是按分隔符分帧 → R1 / R5 仍 `[]`（**拿不准**，列进对照文件「拿不准」） |
 | 传感器 / 监控系统 | 4.5.6.3（ADC 与模拟传感器） | 1.2.1(e) 只点名 embedded OS | 11.1.5 Embedded systems（传感器、执行器、ADC） | 3.1 monitoring and control systems（sensors、actuators、**importance of feedback**） | `hysteresis-thermostat`：C 另有 3.1 控制系统 / 反馈佐证（已写 C）；E 11.1.5 讲部件不讲控制逻辑 → 不写 E（R5）。滤波三个：四家都只点名传感器 / ADC 本身，不点名滤波算法 → `[]` |
 | 去抖、非阻塞主循环、滑动平均、中值滤波、定点 EMA、串口分帧 | — | — | — | — | 均未找到 |

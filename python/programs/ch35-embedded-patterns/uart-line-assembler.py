@@ -1,7 +1,7 @@
 """Rebuild whole lines from the arbitrary chunks a UART hands over."""
 from machine import Pin, UART
 from micropython import const
-import time
+import utime
 
 NEWLINE = const(10)
 MAX_LEN = 32
@@ -58,7 +58,7 @@ def main():
             if chunk:
                 for line in assembler.feed(chunk):
                     uart.write(b"got " + line + b"\n")
-        time.sleep_ms(10)
+        utime.sleep_ms(10)
 
 
 if __name__ == "__main__":

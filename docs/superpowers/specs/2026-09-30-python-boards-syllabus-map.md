@@ -168,7 +168,7 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | 回归 | 18.1 | "back propagation of errors and regression methods in machine learning" | 点名（**AI / 机器学习语境**下；最小二乘直线按此写 CIE） |
 | 优先队列、堆、双端队列、向量、矩阵运算、正则、JSON、其余统计、数据可视化、事件驱动、第三方库 | — | — | **未找到**（11.1 "library routines" 只是泛称） |
 | 作用域（局部 / 全局） | — | — | **未找到**（11.3 只有 procedure / function / parameter / by value / by reference） |
-| 中断 / ISR | 3.1 后「interrupts」 | "Show understanding of the purpose of interrupts … use of an Interrupt Service handling Routine" | 点名（第 6 期 m8b 补；按循环队列判，中断只是用） |
+| 中断 / ISR | 4.1 | "Show understanding of the purpose of interrupts … use of an Interrupt Service handling Routine" | 点名（第 6 期 m8b 补；按循环队列判，中断只是用） |
 | 缓冲 | 3.1 | "Show understanding of the use of buffers" | 理论层；`uart-line-assembler` 按 R1 / R5 不写（第 6 期 m8b 补，列入「拿不准」） |
 | 监控与控制系统 | 3.1 | "monitoring and control systems … use of sensors … actuators … importance of feedback" | 点名；佐证 `hysteresis-thermostat` 的 C（它已因 12.2 状态转移写 C）（第 6 期 m8b 补） |
 | 去抖、非阻塞主循环、滑动平均 / 中值 / 定点 EMA 滤波、串口分帧 | — | — | **未找到**（第 6 期 m8b 补） |
@@ -223,6 +223,10 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 
 相对 main，194 个程序的 `boards` 变了，分布在 29 页（每页 patch 升版一次并写 changelog）。
 
+「改前」「改后」两行是那次整库改判的口径，不动；之后每波新程序在这里各记一句**增量**（不写累计数——两波并行时累计数取决于合并顺序，增量不会）。算法：数附录表该波各行「新 boards」一栏，每写一家该家 +1，`[]` 计入最后一栏（一个程序可以同时计入几家）。
+
+- 第 6 期 m8b（ch35，新增 11 个程序）：AQA +3、OCR +1、Edexcel +1、CIE +3、`[]` +8。
+
 ## 一致性自查（按概念组）
 
 每个程序在附录表里标了概念组。同组 boards 不同的，右栏写理由；判定脚本在「组内不同且没写理由」时报错。
@@ -245,6 +249,7 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | complexity | 14 | AQA OCR Edexcel CIE：`pair-sum-nested-loops`、`pair-sum-two-pointers`、`loop-shape-counts`、`growth-rate-table`、`search-comparison-counts`、`insertion-shift-counts`、`merge-vs-insertion-counts`、`doubling-experiment`、`has-duplicates-nested`、`has-duplicates-sorted`、`has-duplicates-set`、`max-subarray-quadratic`、`max-subarray-divide-conquer`、`max-subarray-kadane` | （组内一致） |
 | comprehension | 6 | AQA Edexcel：`squares-comprehension`、`evens-comprehension`、`dict-and-set-comprehensions`、`flatten-and-transpose`、`if-placement-in-comprehension`、`comprehension-or-loop` | （组内一致） |
 | dataviz | 9 | Edexcel：`line-plot-pyplot`、`line-plot-axes`、`scatter-sizes-colours`、`bar-chart-labels`、`histogram-bins`、`subplots-grid`、`annotate-and-style`、`savefig-size-dpi`、`plot-from-dataframe` | （组内一致） |
+| debounce | 2 | []：`debounce-counter`、`debounce-stable-time` | （组内一致） |
 | decomposition | 1 | AQA OCR Edexcel CIE：`readings-report` | （组内一致） |
 | deque | 1 | []：`deque-both-ends` | （组内一致） |
 | dictionary | 10 | AQA OCR Edexcel CIE：`dict-crud`、`word-count-if-in`、`word-count-get`、`word-count-counter`、`group-by-setdefault`、`group-by-defaultdict`、`roman-to-int-lookup`、`dedupe-dict-fromkeys`、`tuple-keys-sparse-grid`、`anagram-check-counts` | （组内一致） |
@@ -252,11 +257,13 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | docs | 1 | Edexcel：`docstrings-and-type-hints` | （组内一致） |
 | dp | 6 | []：`grid-paths-table`、`knapsack-01-table`、`knapsack-01-1d`、`lcs-length`、`edit-distance`、`coin-change-dp` | （组内一致） |
 | efficiency | 1 | AQA OCR Edexcel CIE：`is-prime-trial-division` | （组内一致） |
+| embedded-io | 1 | []：`uart-line-assembler` | （组内一致） |
+| embedded-loop | 2 | []：`two-leds-blocking`、`two-leds-nonblocking` | （组内一致） |
 | exceptions | 5 | AQA Edexcel CIE：`try-except-else-finally`、`multiple-except-clauses`、`raise-for-invalid-input`、`custom-exception-class`、`missing-file-eafp` | （组内一致） |
 | expression | 3 | AQA CIE：`rpn-evaluate`；AQA：`infix-to-rpn`；AQA OCR Edexcel CIE：`expression-tree` | RPN 求值：A、C；中缀→RPN 转换：只有 A；表达式树（由 RPN 建树、后序求值）：A 4.3.2.1、O 后序遍历、E 遍历、C RPN 求值 → 四家 |
 | files | 6 | AQA OCR Edexcel CIE：`write-and-read-text`、`read-csv-split`、`read-csv-module`、`write-csv-dictwriter`、`missing-file-lbyl`、`inventory-csv-restock` | （组内一致） |
 | float-precision | 2 | AQA Edexcel CIE：`money-in-pence`、`money-decimal` | （组内一致） |
-| fsm | 2 | AQA CIE：`traffic-light-fsm`、`screen-states` | （组内一致） |
+| fsm | 4 | AQA CIE：`traffic-light-fsm`、`screen-states`、`press-classifier-fsm`、`hysteresis-thermostat` | （组内一致） |
 | functional-hof | 5 | AQA Edexcel：`functions-as-values`、`evens-filter`、`map-split-input`、`sorted-min-max-with-key`；Edexcel：`enumerate-and-zip` | map / filter / lambda / 一等函数：A 4.12、E 20.1.2；enumerate-and-zip 只有 E 点名 zip |
 | functions | 1 | AQA OCR Edexcel CIE：`define-call-return` | （组内一致） |
 | game-tree | 1 | Edexcel：`ttt-minimax` | （组内一致） |
@@ -294,7 +301,7 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | python-list | 1 | []：`slice-assignment` | （组内一致） |
 | python-params | 4 | []：`positional-keyword-default`、`mutable-default-trap`、`mutable-default-none`、`args-and-kwargs` | （组内一致） |
 | python-protocol | 2 | []：`str-and-repr`；AQA：`operator-overloading-vector` | 协议本身未点名；协议作用在点名概念上时按那个概念判（向量 → A），作用在普通类上就是 [] |
-| queue | 5 | AQA OCR Edexcel CIE：`hot-potato-list`、`hot-potato-deque`、`circular-queue-array`、`queue-from-two-stacks`、`queue-single-server` | （组内一致） |
+| queue | 6 | AQA OCR Edexcel CIE：`hot-potato-list`、`hot-potato-deque`、`circular-queue-array`、`queue-from-two-stacks`、`queue-single-server`、`ring-buffer-isr-handoff` | （组内一致） |
 | random | 8 | AQA Edexcel：`monte-carlo-pi-random`、`dice-sum-frequencies`、`random-walk-1d`、`gamblers-ruin`、`shuffle-fisher-yates`、`shuffle-naive-biased`、`pig-dice-two-players`、`rng-generator-basics` | （组内一致） |
 | records | 3 | AQA OCR Edexcel CIE：`point-plain-class`、`point-dataclass`、`inventory-stock` | （组内一致） |
 | recursion | 10 | AQA OCR Edexcel CIE：`factorial-recursive`、`factorial-iterative`、`fibonacci-naive`、`fibonacci-iterative`、`call-stack-unwinding`、`power-linear`、`power-by-squaring`、`towers-of-hanoi`、`permutations-recursive`、`flatten-nested` | （组内一致） |
@@ -303,6 +310,7 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | regression | 2 | CIE：`regression-by-formula`、`regression-polyfit` | （组内一致） |
 | scope | 1 | AQA OCR Edexcel：`local-and-global-scope` | （组内一致） |
 | selection | 8 | AQA OCR Edexcel CIE：`max-of-three-if`、`grade-boundaries-descending`、`grade-boundaries-ranges`、`leap-year-nested`、`ticket-price-nested`、`triangle-classifier`、`match-case-commands`、`fizzbuzz` | （组内一致） |
+| sensor-smoothing | 3 | []：`moving-average-window`、`median-filter-spikes`、`ema-fixed-point` | （组内一致） |
 | sets | 3 | AQA Edexcel CIE：`set-operations`、`dedupe-seen-set`、`game-of-life-set` | （组内一致） |
 | sort-bubble | 2 | AQA OCR Edexcel CIE：`bubble-sort-basic`、`bubble-sort-early-exit` | （组内一致） |
 | sort-insertion | 1 | OCR Edexcel CIE：`insertion-sort` | （组内一致） |
@@ -679,7 +687,7 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | ch35 | `two-leds-nonblocking` | — | `[]` | embedded-loop | 非阻塞主循环、累加器调度：四家都未点名（同 pygame 游戏循环的判法） |
 | ch35 | `debounce-counter` | — | `[]` | debounce | 按连续样本数去抖：四家都未点名 |
 | ch35 | `debounce-stable-time` | — | `[]` | debounce | 按保持时长去抖：四家都未点名 |
-| ch35 | `ring-buffer-isr-handoff` | — | AQA OCR Edexcel CIE | queue | 循环队列（R4 按 ADT 判；满时覆盖最旧）：A 4.2.2.1 circular · O 1.4.2(c) using arrays · E 14.1.5、18.2.1 · C 10.4 queue implemented using arrays；中断（A 4.7.3.6 · O 1.2.1(c) · E 11.2.1(e) · C 3.1）只是用 |
+| ch35 | `ring-buffer-isr-handoff` | — | AQA OCR Edexcel CIE | queue | 循环队列（R4 按 ADT 判；满时覆盖最旧）：A 4.2.2.1 circular · O 1.4.2(c) using arrays · E 14.1.5、18.2.1 · C 10.4 queue implemented using arrays；中断（A 4.7.3.6 · O 1.2.1(c) · E 11.2.1(e) · C 4.1）只是用 |
 | ch35 | `uart-line-assembler` | — | `[]` | embedded-io | 串口字节流按分隔符分帧：四家未点名；E 11.2.1(c)、C 3.1 的缓冲是理论层，按 R1 / R5 不写（见「拿不准」16） |
 | ch35 | `moving-average-window` | — | `[]` | sensor-smoothing | 滑动窗口均值滤波：四家未点名（传感器 / ADC 本身 A 4.5.6.3、E 11.1.5 点名，滤波算法未点名；E 18.1.4(b) 集中趋势在数据科学语境，按 R5 不套用） |
 | ch35 | `median-filter-spikes` | — | `[]` | sensor-smoothing | 三点中值去尖峰：四家未点名（理由同上） |

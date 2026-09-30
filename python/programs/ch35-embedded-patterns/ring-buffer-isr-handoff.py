@@ -1,7 +1,7 @@
 """Hand values from an interrupt to the main loop through a ring buffer."""
 from machine import Pin, disable_irq, enable_irq
 import micropython
-import time
+import utime
 
 CAPACITY = 8
 SENSOR_PIN = 16
@@ -54,7 +54,7 @@ def main():
     sensor = Pin(SENSOR_PIN, Pin.IN, Pin.PULL_UP)
 
     def on_edge(pin):
-        ring.put(time.ticks_ms())
+        ring.put(utime.ticks_ms())
 
     sensor.irq(trigger=Pin.IRQ_FALLING, handler=on_edge)
     while True:
@@ -65,7 +65,7 @@ def main():
         enable_irq(state)
         if stamp is not None:
             print("edge at", stamp, "ms; overruns:", ring.overruns)
-        time.sleep_ms(100)
+        utime.sleep_ms(100)
 
 
 if __name__ == "__main__":

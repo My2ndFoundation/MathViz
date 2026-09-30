@@ -1,6 +1,6 @@
 """Two LEDs at two rates with sleep_ms - and every sleep holds up everything else."""
 from machine import Pin
-import time
+import utime
 
 RED_MS = 300
 GREEN_MS = 500
@@ -19,10 +19,10 @@ def main():
 # <<< BLANK
     while True:
         red.toggle()
-        time.sleep_ms(RED_MS)
+        utime.sleep_ms(RED_MS)
         green.toggle()
-# >>> BLANK id=green-wait level=1 hint="和红灯那两行对称：绿灯翻转之后，用 time 模块的毫秒睡眠等上绿灯自己的周期常量" hintEn="The mirror image of the red LED's two lines: after the green LED flips, sleep with the time module's millisecond sleep for the green LED's own period constant"
-        time.sleep_ms(GREEN_MS)
+# >>> BLANK id=green-wait level=1 hint="和红灯那两行对称：绿灯翻转之后，用 utime 模块的毫秒睡眠等上绿灯自己的周期常量" hintEn="The mirror image of the red LED's two lines: after the green LED flips, sleep with the utime module's millisecond sleep for the green LED's own period constant"
+        utime.sleep_ms(GREEN_MS)
 # <<< BLANK
 # >>> BLANK id=alert level=2 hint="一行：用 alert 的 value 方法写入 1 减去 button 读到的值（button.value()）；不写 if，不用 not || 按下时 button 读到 0，所以 1 减去它就是 1、提示灯亮；没按时读到 1，减出来是 0、灯灭" hintEn="One line: write 1 minus the value read from button (button.value()) with alert's value method; no if, no not || Pressed, button reads 0, so 1 minus it is 1 and the alert LED lights; unpressed it reads 1, the result is 0 and the LED goes off"
         alert.value(1 - button.value())

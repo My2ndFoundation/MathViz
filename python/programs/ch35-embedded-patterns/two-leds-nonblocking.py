@@ -1,6 +1,6 @@
 """Two LEDs at two rates from one loop that never sleeps."""
 from machine import Pin
-import time
+import utime
 
 RED_MS = 300
 GREEN_MS = 500
@@ -38,11 +38,11 @@ def main():
     button = Pin(BUTTON_PIN, Pin.IN, Pin.PULL_UP)
     red_acc = 0
     green_acc = 0
-    last = time.ticks_ms()
+    last = utime.ticks_ms()
     while True:
-        now = time.ticks_ms()
-# >>> BLANK id=elapsed level=2 hint="一行，存进 elapsed：用 time 模块里专门算两个 ticks 之差的函数，不直接相减；较新的 now 写在第一个实参，较早的 last 写在第二个 || 它的名字是 ticks_diff；直接写 now - last 在计数器回绕时会得到一个巨大的负数" hintEn="One line, stored in elapsed: use the time module's function made for the difference of two ticks values, not a plain subtraction; the newer now is the first argument and the older last the second || It is called ticks_diff; writing now - last gives a huge negative number when the counter wraps around"
-        elapsed = time.ticks_diff(now, last)
+        now = utime.ticks_ms()
+# >>> BLANK id=elapsed level=2 hint="一行，存进 elapsed：用 utime 模块里专门算两个 ticks 之差的函数，不直接相减；较新的 now 写在第一个实参，较早的 last 写在第二个 || 它的名字是 ticks_diff；直接写 now - last 在计数器回绕时会得到一个巨大的负数" hintEn="One line, stored in elapsed: use the utime module's function made for the difference of two ticks values, not a plain subtraction; the newer now is the first argument and the older last the second || It is called ticks_diff; writing now - last gives a huge negative number when the counter wraps around"
+        elapsed = utime.ticks_diff(now, last)
 # <<< BLANK
         last = now
         red_acc, flip = step(red_acc, elapsed, RED_MS)

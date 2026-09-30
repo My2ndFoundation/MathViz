@@ -1,6 +1,6 @@
 """Knock out single-sample spikes with a three-point median filter."""
 from machine import ADC, Pin
-import time
+import utime
 
 ADC_PIN = 26
 SAMPLE_MS = 50
@@ -36,7 +36,7 @@ def main():
     while True:
         raw = adc.read_u16()
         print(raw, f.add(raw))
-        time.sleep_ms(SAMPLE_MS)
+        utime.sleep_ms(SAMPLE_MS)
 
 
 if __name__ == "__main__":
