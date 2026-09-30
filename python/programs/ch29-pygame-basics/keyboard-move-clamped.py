@@ -29,7 +29,7 @@ def step(pos, keys, pixels):
     if "down" in keys:
         dy += pixels
     box = pygame.Rect(pos[0] + dx, pos[1] + dy, SIZE, SIZE)
-# >>> BLANK id=clamp level=2 hint="一行，给 box 重新赋值：Rect 有一个方法，交回一个挪进另一个矩形里面的新矩形（原来的不变，所以要接住它）；实参是整个窗口那个常量矩形 || box 换成 box.clamp(…)，括号里是 SCREEN" hintEn="One line reassigning box: a Rect has a method that returns a new rectangle moved inside another one (the original is unchanged, so catch the result); the argument is the constant rectangle for the whole window || box becomes box.clamp(…) with SCREEN in the brackets"
+# >>> BLANK id=clamp level=2 hint="一行，给 box 重新赋值：Rect 有一个方法，交回一个挪进另一个矩形里面的新矩形（原来的不变，所以要接住它）；实参是整个窗口那个常量矩形 || 那个方法叫 clamp，接住的结果仍然叫 box" hintEn="One line reassigning box: a Rect has a method that returns a new rectangle moved inside another one (the original is unchanged, so catch the result); the argument is the constant rectangle for the whole window || The method is called clamp, and the result it hands back is still called box"
     box = box.clamp(SCREEN)
 # <<< BLANK
 # >>> BLANK id=corner level=1 hint="一行 return：交回 box 左上角的 (x, y)——Rect 有一个属性直接就是这个元组，写这一个属性名（不写 (box.x, box.y)）" hintEn="One return: hand back the (x, y) of box's top-left corner - a Rect has one attribute that is exactly this tuple, so write that one attribute name (not (box.x, box.y))"
