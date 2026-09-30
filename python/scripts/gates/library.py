@@ -298,6 +298,94 @@ def _is_pygame(prog: dict) -> bool:
     return prog.get('runtime', 'cpython') == 'cpython' and 'pygame' in prog.get('requires', [])
 
 
+def _is_micropython(prog: dict) -> bool:
+    """runtime 是 MicroPython（micro:bit / Pico）的程序：整段跑不了（要硬件），但纯逻辑函数可以导入求值。"""
+    return prog.get('runtime', 'cpython').startswith('micropython')
+
+
+# MicroPython 程序导入时装进 sys.modules 的桩模块名。`from microbit import *` 对空模块什么也不导入（`import *`
+# 不走模块 __getattr__），`from machine import Pin` 取到桩类；桩被**调用**就抛具名错——逻辑函数不许碰硬件。
+MICROPYTHON_STUB_MODULES = ('microbit', 'machine', 'utime', 'micropython', 'neopixel', 'radio', 'music',
+                            'speech', 'rp2', 'uasyncio', 'ustruct', 'ubinascii')
+
+
+class HardwareStubCalled(RuntimeError):
+    pass
+
+
+class _HardwareStub:
+    """硬件名的替身：取属性得到另一个替身（`Pin.OUT`、`Image.HEART` 在顶层常量里合法），调用即抛错。"""
+
+    def __init__(self, path):
+        self._path = path
+
+    def __getattr__(self, attr):
+        if attr.startswith('__'):
+            raise AttributeError(attr)
+        return _HardwareStub(f'{self._path}.{attr}')
+
+    def __call__(self, *args, **kwargs):
+        if self._path in _STUB_VALUE_CALLS:              # Image("09090:…") 这类纯值构造在顶层常量里合法
+            return _HardwareStub(f'{self._path}(…)')
+        raise HardwareStubCalled(f'调用了硬件 {self._path}(…)——property 的入口只许是纯逻辑函数，硬件调用放进 main()')
+
+    def __repr__(self):
+        return f'<硬件桩 {self._path}>'
+
+
+# 桩模块上**真有**的名字：`from microbit import *` 只导入模块里真有的非下划线名（不走 __getattr__），
+# 所以常用名要事先放上去，否则 `Image.HEART` 这种顶层常量在导入时就 NameError。
+_STUB_NAMES = {
+    'microbit': ('display', 'button_a', 'button_b', 'Image', 'accelerometer', 'compass', 'pin0', 'pin1', 'pin2',
+                 'pin_logo', 'sleep', 'running_time', 'temperature', 'audio', 'speaker', 'microphone', 'Sound',
+                 'SoundEvent', 'set_volume'),
+    'machine': ('Pin', 'PWM', 'ADC', 'Timer', 'I2C', 'SPI', 'UART', 'freq', 'reset'),
+    'utime': ('sleep', 'sleep_ms', 'sleep_us', 'ticks_ms', 'ticks_us', 'ticks_diff', 'ticks_add', 'time'),
+    'radio': ('on', 'off', 'config', 'send', 'receive'),
+    'music': ('play', 'pitch', 'stop', 'set_tempo'),
+}
+_STUB_VALUE_CALLS = {'microbit.Image'}
+
+
+def _stub_const(value):
+    """MicroPython 的 `const()` 是编译期常量标记，不是硬件；在 CPython 里就是恒等函数。"""
+    return value
+
+
+def _stub_getattr(mod_name):
+    def __getattr__(attr):
+        if attr.startswith('__'):
+            raise AttributeError(attr)
+        return _HardwareStub(f'{mod_name}.{attr}')
+    return __getattr__
+
+
+def _micropython_stubs():
+    """返回 (装桩, 卸桩) 两个函数；卸桩把 sys.modules 恢复原样（门在同一进程里跑全库，桩不许漏到别的程序）。"""
+    import types
+    saved = {}
+
+    def install():
+        for mod_name in MICROPYTHON_STUB_MODULES:
+            saved[mod_name] = sys.modules.get(mod_name)
+            mod = types.ModuleType(mod_name)
+            mod.__getattr__ = _stub_getattr(mod_name)            # PEP 562：`from machine import Pin` 走这里
+            for attr in _STUB_NAMES.get(mod_name, ()):
+                setattr(mod, attr, _HardwareStub(f'{mod_name}.{attr}'))
+            if mod_name == 'micropython':
+                mod.const = _stub_const
+            sys.modules[mod_name] = mod
+
+    def uninstall():
+        for mod_name, old in saved.items():
+            if old is None:
+                sys.modules.pop(mod_name, None)
+            else:
+                sys.modules[mod_name] = old
+        saved.clear()
+    return install, uninstall
+
+
 def _headless_sdl() -> None:
     """在 import pygame 之前把 SDL 设成无头：不开窗、不出声、不打印欢迎语。CI 的 step env 也设了同样三项。"""
     os.environ.setdefault('SDL_VIDEODRIVER', 'dummy')
@@ -341,7 +429,11 @@ def algorithm_property_check() -> int:
     cases_total = 0
     with_property = set()
     prog_chapter = {}
+    pending_uninstall = None
     for chapter_dir, _data, prog, py_path in iter_programs():
+        if pending_uninstall is not None:        # 上一个 MicroPython 程序的硬件桩：无论它从哪个分支 continue 出来，都在这里卸
+            pending_uninstall()
+            pending_uninstall = None
         check = prog.get('check') or {}
         prop = check.get('property')
         if not prop:
@@ -356,7 +448,8 @@ def algorithm_property_check() -> int:
             continue
         tier = _tier(prog)
         pygame_prog = _is_pygame(prog)
-        if tier == 'compile-only' and not pygame_prog:
+        micro_prog = _is_micropython(prog)
+        if tier == 'compile-only' and not (pygame_prog or micro_prog):
             print(f'ERROR: {name} 标了 check.property 却在 compile-only 层'
                   f'——它没法被导入求值', file=sys.stderr)
             rc = 1
@@ -396,6 +489,11 @@ def algorithm_property_check() -> int:
 
         src = read_text(py_path)
         ns: dict = {'__name__': '__pygate__'}   # 不是 __main__：别触发主程序
+        # 第 6 期（M8）起 MicroPython 程序也可以挂 property：导入前装硬件桩（micropython_main_guard_check
+        # 保证顶层不调用硬件），这个程序比完再卸掉。
+        if micro_prog:
+            stub_install, pending_uninstall = _micropython_stubs()
+            stub_install()
         try:
             # dont_inherit=True：本模块有 `from __future__ import annotations`，compile 默认会把它继承给被测程序，
             # 注解全变成字符串；加上 ns 的 __name__ 不在 sys.modules，@dataclass 在导入时崩（AttributeError）。
@@ -467,6 +565,8 @@ def algorithm_property_check() -> int:
             rc = 1
             continue
         checked += 1
+    if pending_uninstall is not None:
+        pending_uninstall()
 
     # 反方向：REFERENCES 里登记了、库里却没有这个程序。一条这样的参照什么都不验，
     # 但会让 `REFERENCES` 看上去比实际覆盖更宽——同一类「广告了并不具备的覆盖」。
@@ -1725,8 +1825,13 @@ def _is_main_guard(node) -> bool:
             and t.comparators[0].value == '__main__')
 
 
-def _pygame_top_level_problems(src: str) -> list:
-    """纯函数，负控制直接喂源码。返回 [(行号, 说明)]；空列表 = 合规。"""
+# MicroPython 程序顶层允许的调用：`const(...)`（MicroPython 的编译期常量）与点阵图像构造
+_MICROPYTHON_VALUE_CALLS = {'const', 'micropython.const', 'Image', 'microbit.Image'}
+
+
+def _pygame_top_level_problems(src: str, allowed: set = None, advice: str = '窗口、时钟、init 放进 main()') -> list:
+    """纯函数，负控制直接喂源码。返回 [(行号, 说明)]；空列表 = 合规。allowed 缺省是 pygame 的纯值构造。"""
+    allowed = _PYGAME_VALUE_CALLS if allowed is None else allowed
     tree = ast.parse(src)
     out = []
     guards = 0
@@ -1742,10 +1847,10 @@ def _pygame_top_level_problems(src: str) -> list:
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             value = node.value
             bad = [c for c in ast.walk(value) if isinstance(c, ast.Call)
-                   and _dotted(c.func) not in _PYGAME_VALUE_CALLS] if value is not None else []
+                   and _dotted(c.func) not in allowed] if value is not None else []
             if bad:
                 out.append((node.lineno, f'顶层赋值里调用了 {_dotted(bad[0].func) or "表达式"}(…)——'
-                                         f'只许常量与 {sorted(_PYGAME_VALUE_CALLS)}；窗口、时钟、init 放进 main()'))
+                                         f'只许常量与 {sorted(allowed)}；{advice}'))
             continue
         out.append((node.lineno, f'顶层有 {type(node).__name__} 语句——导入时就会执行；'
                                  f'放进函数或 `if __name__ == "__main__":`'))
@@ -1780,6 +1885,38 @@ def pygame_main_guard_check() -> int:
             print(f'pygame 顶层：{count} 个 pygame 程序导入时只定义、不执行，各有恰好一个 main 守卫')
         else:
             print('pygame 顶层：今天 0 个 pygame 程序——这道门只在负控制里被执行过')
+    return rc
+
+
+def micropython_main_guard_check() -> int:
+    """MicroPython 程序（micro:bit / Pico）导入时只定义、不执行——与 pygame_main_guard_check 同一套结构规则，
+    顶层调用只许 `const(...)` 与 `Image(...)`。
+
+    为什么：M8 的程序整段跑不了（要硬件），门对它的约束是 compile 加纯逻辑函数（去抖、环形缓冲、滤波、状态机）的
+    property；property 要先在装了硬件桩的环境里**导入**它。顶层的 `Pin(25, Pin.OUT)`、`display.show(...)`、
+    `while True:` 会在导入时撞上桩或永不返回——这道门从结构上拦（第 6 期开工前）。
+    `if __name__ == "__main__":` 在 MicroPython 里同样成立（板上的 main.py 就是 `__main__`）。
+    """
+    rc = 0
+    count = 0
+    for chapter_dir, _data, prog, py_path in iter_programs():
+        if not _is_micropython(prog) or not py_path.exists():
+            continue
+        count += 1
+        name = _pid(chapter_dir, prog)
+        try:
+            problems = _pygame_top_level_problems(read_text(py_path), _MICROPYTHON_VALUE_CALLS,
+                                                  '引脚、显示、无线电、主循环放进 main()')
+        except SyntaxError:
+            continue
+        for line, msg in problems:
+            print(f'ERROR: {name}（{py_path}:{line}）{msg}', file=sys.stderr)
+            rc = 1
+    if rc == 0:
+        if count:
+            print(f'MicroPython 顶层：{count} 个程序导入时只定义、不执行，各有恰好一个 main 守卫')
+        else:
+            print('MicroPython 顶层：今天 0 个 MicroPython 程序——这道门只在负控制里被执行过')
     return rc
 
 

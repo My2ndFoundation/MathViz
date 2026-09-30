@@ -120,6 +120,7 @@ GATES = [
     ('D·库', 'variant_check',                  library.variant_check),
     ('D·库', 'fixture_notes_check',            library.fixture_notes_check),
     ('D·库', 'pygame_main_guard_check',        library.pygame_main_guard_check),
+    ('D·库', 'micropython_main_guard_check',   library.micropython_main_guard_check),
 
     ('D·词法', 'lex_roundtrip_check',    lexer.lex_roundtrip_check),
     ('D·词法', 'lex_vs_cpython_check',   lexer.lex_vs_cpython_check),
