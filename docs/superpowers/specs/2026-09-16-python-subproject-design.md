@@ -544,6 +544,20 @@ pygame 那一层还能再往前一步：程序按「逻辑函数 + `if __name__ 
 再对纯逻辑函数（碰撞检测、贪吃蛇前进一步）做 property 检查。
 这同时也是更好的教学代码结构。
 
+**第 5 期开工前落地了这一步**（PR 见提交）：
+
+1. CI 在钉版本的安装步骤里加 `pygame==2.6.1`，门那一步设 `SDL_VIDEODRIVER=dummy`、`SDL_AUDIODRIVER=dummy`、`PYGAME_HIDE_SUPPORT_PROMPT=1`；
+   `PYTHON_GATES_REQUIRE_SCIPY=1` 也管 pygame（名字是历史原因）——缺 `requires` 里任何一个库都红。本地缺 pygame 则跳过并计数。
+2. `algorithm_property_check` 允许 pygame 程序（`runtime: cpython` 且 `requires` 含 `pygame`）挂 `check.property`；
+   MicroPython（`runtime != cpython`）仍然不许。**导入也限时**（`IMPORT_TIMEOUT` 10 秒）：主循环漏在模块顶层时，导入报具名红而不是挂死。
+3. 新门 `pygame_main_guard_check`：pygame 程序的模块顶层只许 `import` / `def` / `class` / docstring / 常量赋值（调用只许
+   `pygame.Color` / `pygame.Rect` / `pygame.Vector2` 这类纯值构造）与**恰好一个** `if __name__ == "__main__":`。
+   为什么要结构门而不只靠导入限时：顶层的 `pygame.init()`、`set_mode(...)` 在无头 SDL 下导入照样成功、property 照样绿——
+   只有结构门看得见（负控制实测）。
+4. property 入口照 M6 的规矩返回内置类型：`pygame.Rect` / `Vector2` 要转成 `tuple`（门逐层比类型）。
+
+`program_run_check` 对 pygame 程序仍然只过 `compile()`：主循环不终止，整段真跑没有意义。
+
 ### 5.5 `compile` 而从不 `import`（第三方库不必安装）
 
 `compile(src, id, 'exec')` 不执行 import 语句，所以 `import numpy` /
@@ -674,6 +688,7 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 | `program_meta_check()` | id 全库唯一；`kind`/`level`/`boards`/`runtime` 在闭集；双语字段齐全；`requires` 在白名单 |
 | `variant_check()` | 同一个 `problem` 的变体 ≥ 2 且标题互不相同 |
 | `fixture_notes_check()` | 源码里写了 `_fixtures/<名>` 的程序，`notes` 中英两边都写出文件名，并把文件的每一行各自写成一段、连续、按原顺序（复制按钮不带数据文件，这份手抄是学生唯一的来源）；源码提到 `_fixtures` 却没写全路径也报红 *（第 3 期 #187）* |
+| `pygame_main_guard_check()` | pygame 程序（`runtime: cpython` 且 `requires` 含 `pygame`）的模块顶层只许 import / def / class / docstring / 常量赋值（调用只许 `pygame.Color` / `Rect` / `Vector2`）与恰好一个 `if __name__ == "__main__":`——导入即开窗或主循环在顶层时，property 无法导入，而无头 SDL 下顶层 `pygame.init()` 导入照样成功、只有这道门看得见 *（第 5 期开工前）* |
 
 **D·词法**
 
