@@ -35,7 +35,7 @@ property 在装了硬件桩（#201）的环境里导入后跑——入口若碰�
 | `pwm-duty-percent` | 百分比 0..100（101 个） | 0 | 50（截断代替四舍五入） |
 | `pwm-servo-angle` | 角度 0..180（181 个） | 0 | 89（截断） |
 | `adc-temperature` | 原始读数 0..65535（65 536 个） | 0 | 65 536（取整到个位）；另核：整数读数下 1 位小数**恰为 .x5 的平局 0 个**，浮点与精确分数的舍入不会分歧 |
-| `compass-point` | 航向 0..359（360 个） | 0 | 176（截断）；**`round(h / 45)`（银行家舍入）在整数航向上与正确写法等价**——h/45 从不恰为 .5——不能当错误实现（原型第一版用了它，命中 0/200） |
+| `compass-point` | 航向 0..360（361 个；清单原写 0..359，构建者查 micro:bit 文档 "from 0 to 360" 更正） | 0 | 176（截断）；**`round(h / 45)`（银行家舍入）在整数航向上与正确写法等价**——h/45 从不恰为 .5——不能当错误实现（原型第一版用了它，命中 0/200） |
 | `spirit-level-column` | 读数 −2100..2100（4 201 个） | 0 | 2 100（四舍五入代替整除） |
 | `music-note-frequency` | 7 个音名 × 八度 0..8（63 个） | 0 | 34（截断代替 round） |
 
@@ -43,7 +43,7 @@ ticks 回绕（`elapsed-ticks-diff`）在 200 组里一半专造「正好在回�
 
 实测行为的出处（照第 5 期复盘，写明测了多少、怎么测）：`ticks_diff` 的语义取自 MicroPython 官方文档 `docs/library/time.rst`
 （返回有符号值、范围 [−TICKS_PERIOD/2, TICKS_PERIOD/2 − 1]、TICKS_PERIOD 是 2 的幂、各 port 不同）——**本机没有 MicroPython，无法实测**，
-所以程序把 `period` 当实参，不写死任何 port 的值。`duty_u16` 取 0..65535（官方 `machine.PWM` 文档）；micro:bit 加速度计单位 milli-g、罗盘航向 0..359 整数（micro:bit MicroPython 文档）——同样未实测，讲解按文档写。
+所以程序把 `period` 当实参，不写死任何 port 的值。`duty_u16` 取 0..65535（官方 `machine.PWM` 文档）；micro:bit 加速度计单位 milli-g、罗盘航向 0..360 整数（micro:bit MicroPython 文档原文 "from 0 to 360"；清单起草时误写 0..359，构建者更正）——同样未实测，讲解按文档写。
 
 ---
 
@@ -74,7 +74,7 @@ ticks 回绕（`elapsed-ticks-diff`）在 200 组里一半专造「正好在回�
 | `button-press-edges` | | `button_a.is_pressed()`（此刻按着没有）vs `was_pressed()`（上次问过之后按过没有）；入口 `count_presses(samples)` 从一串「按着 / 没按」采样里数按下的次数（上升沿） | 逐个样本记住上一个状态 | [] |
 | `accelerometer-tilt` | | `accelerometer.get_x() / get_y()`（milli-g）判断板子往哪边倾：阈值以内是平放，否则取绝对值大的那一轴；入口 `tilt(x, y, threshold)` | 两个候选按「绝对值降序、x 优先」排序取第一 | [] |
 | `spirit-level-column` | | 水平仪：把 −1024..1023 的读数映射到 0..4 列、越界夹住；整除映射 vs 四舍五入映射的区别；入口 `column(reading)` | `Fraction` 逐个比较分界 | [] |
-| `compass-point` | | `compass.heading()`（0..359）换成八方位 N / NE / … / NW：先加半格再整除；入口 `point(heading)` | `Fraction(h) + 45/2` 整除 45 | [] |
+| `compass-point` | | `compass.heading()`（0..360，文档原文 "from 0 to 360"）换成八方位 N / NE / … / NW：先加半格再整除；入口 `point(heading)` | `Fraction(h) + 45/2` 整除 45 | [] |
 | `radio-packet-csv` | radio-packet | 无线电只传字符串：`radio.send("12,21,180")`、`radio.receive()`；收到的报文 `split(",")` 解析成三个整数，格式不对交回 `None`；入口 `parse(msg)` | 元组解包 + `ValueError` | [] |
 | `radio-packet-bytes` | radio-packet | 同一问题用字节：`radio.send_bytes(bytes([...]))`；温度可能为负，按有符号字节解码（`> 127` 减 256）；入口 `decode(packet)` | `int.from_bytes(…, signed=True)` 逐字节 | 待定（二进制补码？见 §5） |
 | `music-note-frequency` | | `music.play` 的音名字符串；十二平均律：以 A4 = 440 Hz 为基准，每半音乘 2 的 12 次根；入口 `frequency(name, octave)` 取整到 Hz | 查 C4–B4 的频率表再按八度乘 2 的幂 | [] |
@@ -158,7 +158,7 @@ OCR 三条先从 *Subject content clarification guide* v2 读出，再由 Python
 | M8A-D3 | §3.1 分工 | 同意。**边沿检测归本波**：`button-press-edges` 讲上升沿计数与 `is_pressed` / `was_pressed`（不去抖）；m8b 的去抖从「抖动」讲起，讲解指回「micro:bit」页的边沿（Python编程 转告 m8b）。`timer-periodic-callback` 只讲硬件定时器回调、`pin-irq-counter` 只讲中断本身，数据交接归 m8b 环形缓冲 |
 | M8A-D4 | §3.2 位运算 | `gpio-bitmask` 讲（全库首次）；tag 用 `bitwise`（先 grep） |
 | M8A-D5 | §3.3、§3.4 | 同意 |
-| M8A-D6 | §4 时间 | 同意。`ticks_diff`、`duty_u16`、milli-g、航向范围等**据官方文档、本机无法实测**的行为，在 refs 文件头与讲解里标明「据文档、未实测」并给文档出处 |
+| M8A-D6 | §4 时间 | 同意。`ticks_diff`、`duty_u16`、milli-g、航向范围（0..360）等**据官方文档、本机无法实测**的行为，在 refs 文件头与讲解里标明「据文档、未实测」并给文档出处 |
 | M8A-D7 | compass 等价变异 | `round(h / 45)` 在整数航向上与正确写法等价——写进 refs 文件头，不得当负控制 |
 | M8A-D8 | §5 boards | 默认 `[]`；五个候选拿到 boards PR 的考纲对照文件后逐条核，核不实留 `[]`，依据写到考纲条目编号 |
 | M8A-D9 | §6 递归 | 无 |
