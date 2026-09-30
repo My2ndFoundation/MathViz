@@ -855,10 +855,9 @@ chess 现在要到运行时才暴露一个写错的路径。
 
 ### 9.2 配套文档与 skill
 
-- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。**至第 5 期收尾仍未写**（第 3 期账本定的「第 4 期开工前」、第 4 期账本定的「第 5 期派构建者之前」都没做到），
-  见第 4 期账本 §五.8、第 5 期账本 §五.7。**第 6 期已派 MDev-02 单独一个 PR 起草**（先交大纲、控制方批准后写全文、一次评审；控制方的第 6 期派发简报）
-- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（**至第 5 期收尾仍未写**，同上；第 6 期与 `python.md` 同一个 PR）：API 签名、易踩的坑、
-  门与负控制、每一次实测发现的错误、各期裁决的入口
+- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。第 6 期文档 PR 补齐（此前拖欠：第 3 期账本定的「第 4 期开工前」没做到，见第 4 期账本 §五.8；第 3–5 期三次拖欠的经过见第 5 期账本 §五.5）
+- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（第 6 期文档 PR 补齐）：API 签名、易踩的坑、
+  每一次实测发现的错误
 - `.claude/skills/python-drill-tool/SKILL.md` —— 作者须知：新增一页 / 新增一个程序 / 升级一页的作业流程，
   每条硬约束注明由哪道门守（第 1 期设计 B5）
 - `.claude/skills/python-content-wave/SKILL.md` —— 控制方的波次作业：程序清单、并行构建、集成、
