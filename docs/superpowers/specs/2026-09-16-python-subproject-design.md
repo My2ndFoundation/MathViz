@@ -711,6 +711,7 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 | `fixture_notes_check()` | 源码里写了 `_fixtures/<名>` 的程序，`notes` 中英两边都写出文件名，并把文件的每一行各自写成一段、连续、按原顺序（复制按钮不带数据文件，这份手抄是学生唯一的来源）；源码提到 `_fixtures` 却没写全路径也报红 *（第 3 期 #187）* |
 | `pygame_main_guard_check()` | pygame 程序（`runtime: cpython` 且 `requires` 含 `pygame`）的模块顶层只许 import / def / class / docstring / 常量赋值（调用只许 `pygame.Color` / `Rect` / `Vector2`）与恰好一个 `if __name__ == "__main__":`——导入即开窗或主循环在顶层时，property 无法导入，而无头 SDL 下顶层 `pygame.init()` 导入照样成功、只有这道门看得见 *（第 5 期开工前）* |
 | `micropython_main_guard_check()` | MicroPython 程序（`runtime` 以 `micropython` 开头）的顶层规则同上，调用只许 `const(...)` / `Image(...)`——顶层的 `Pin(...)`、`display.show(...)`、`while True:` 在装了硬件桩的导入里会撞桩或挂死 *（第 6 期开工前）* |
+| `boards_map_check()` | `docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md` 附录逐程序判定表与各 `chapter.json` 的 `boards` 逐行一致：id 集合双向相同、章对得上、boards 集合相同（顺序不论）、概念组与依据不为空、无重复行——依据表是「不在考纲就不写」的数据源（#203），两份数据靠这道门不漂 |
 
 **D·词法**
 
