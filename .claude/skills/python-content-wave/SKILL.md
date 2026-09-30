@@ -40,28 +40,39 @@ description: >-
 
 **2. 派构建者**
 - 每页一个子代理，**同一条消息里并行派出**，`isolation: "worktree"`，`model: opus`。
-- 简报用 `builder-brief.md` 填，**每个 REQUIRED 槽都要填**；集成分支名、它的 HEAD 与 merge-base 填进去。
+- 派发前若 origin/main 已前进，先把它合进集成分支、跑一次 `check.py`。然后实测两个值填进简报：集成分支 HEAD（`git -C $W rev-parse HEAD`）与
+  `git -C $W merge-base HEAD origin/main`——后者是**派发前实测**的，不是集成分支切出时的 SHA（合过 main 之后两者不同，照切出时的填，构建者会在第一步全部停下）。
+- 简报用 `builder-brief.md` 填，**每个 REQUIRED 槽都要填**。
   构建者的 isolation worktree 是从 origin/main 切出来的，不是从集成分支：简报让它 `checkout -B <构建者分支> <集成分支>`（新 worktree 没有自己的提交，安全），
-  **不要**写「`merge --ff-only <集成分支>`，不是就停下」——第 2 期两波十个构建者全部在这一步失败：M3 五人由控制方叫回来 `reset --hard`，M4 五人各自偏离简报、自行落到正确基线。
-  派发前若 origin/main 已前进，先把它合进集成分支、跑一次 `check.py`，再把新的 HEAD 填进简报。
-- 构建者回报 BLOCKED 后续做时，它的 agent worktree 可能已被自动清理；它会按简报在 `$M/.claude/worktrees/<名>-<页>` 自建一个。台账里记下每个自建目录，第 7 步一起清理。
+  **不要**写「`merge --ff-only <集成分支>`，不是就停下」——worktree 基线不是集成分支的祖先时 ff-only 会失败。第 2 期就是这样：#179 / #180 落在集成分支切出（`83e7a2d`）之后、
+  派发之前，构建者 worktree 建在 `601d487`，两波十个构建者全部在这一步失败（M3 五人由控制方叫回来 `reset --hard`，M4 五人各自偏离简报、自行落到正确基线）。
+  照上一条先合 main 之后 ff-only 会成功，但 `checkout -B` 两种情况都对，不依赖时序。
+- 构建者报告第一行先报它**原来**的分支名（`checkout -B` 之前的 `git rev-parse --abbrev-ref HEAD`，通常是 `worktree-agent-*`）与 worktree 路径——
+  `checkout -B` 之后原分支还在、isolation worktree 目录也还在，**每个**构建者都会留一套，不只是自建 worktree 的那几个（第 2 期因此有 46 个 `worktree-agent-*` 分支分不清归属）。控制方把它们逐个记进台账，第 7 步按台账清理。
+- 构建者回报 BLOCKED 后续做时，它的 agent worktree 可能已被自动清理；它会按简报先 `git worktree prune`、再在 `$M/.claude/worktrees/<名>-<页>` 自建一个。自建目录同样记进台账。
 - 构建者自己加注册表条目、连同重新生成的两个导航页一起提交（设计 §8.1）。
 
 **3. 集成**（在集成 worktree 里，按模块内页序逐页）
 - `git -C $W merge --no-ff <构建者分支>`。`python-tools.json`、`python/app.html`、`python/index.html`、工具页 `GENERATED:PROGRAMS` 冲突时**不手工合并**，跑配方脚本：
   ```bash
-  python3 .claude/skills/python-content-wave/resolve-registry-conflict.py --repo $W --take HEAD --from MERGE_HEAD
-  git -C $W commit --no-edit
+  python3 $W/.claude/skills/python-content-wave/resolve-registry-conflict.py --repo $W --take HEAD --from MERGE_HEAD && git -C $W commit --no-edit
   ```
+  脚本路径用集成 worktree 里的绝对路径（`$W/…`）；**必须用 `&&` 接提交**——脚本红了之后冲突在索引里已标为解决，分成两行写的 `git commit` 会照样成功，提交里的注册表缺条目（没有钩子时实测如此）。
   它做的就是配方的每一步：取集成分支版本 → 把构建者分支多出的注册表条目追加回 `tools` 末尾 → `build_programs.py`、`inline_core.py`、`sync_fallback.py`、`check.py`
-  → 只 `git add` 显式路径；冲突落在这几类文件之外就什么都不动、退出码 2。脚本在收尾时拿两次真实合并回放过：M3 `b06736d`（集成 py-stack-queue）与
-  M4 `3196e7e`（M4 合 main），暂存结果与当时手工按配方做出的提交**逐字节相同**；把 `--from` 指成不含本页条目的一侧，它在 `build_programs.py` 上红、不 `git add` 生成结果。
+  → 只 `git add` 显式路径。脚本在收尾时拿两次真实合并回放过：M3 `b06736d`（集成 py-stack-queue）与
+  M4 `3196e7e`（M4 合 main），暂存结果与当时手工按配方做出的提交**逐字节相同**。
+- 退出码：`0` 已暂存；`1` 生成脚本或 `check.py` 红（或超时）——**照它打印的恢复命令做**，不要直接 `git merge --abort`：`--take MERGE_HEAD` 时索引已 ≠ HEAD、
+  生成脚本又改过工作区，直接 abort 会 rc=128 `not uptodate`；只把注册表和两个导航页 `checkout HEAD` 再 abort，abort 会成功，但生成脚本改到的别的页会留在工作区。
+  打印的命令先把这两类都复原（`checkout HEAD -- <注册表、两个导航页、冲突的页>`，再 `checkout -- <生成脚本改过的其余文件>`），最后 `merge --abort`；`2` 冲突落在这几类文件之外、什么都没动；`3` 同一个已有条目在 `--from` 一侧改过、又与 `--take` 一侧不同，什么都没动。
+- **退出码 3 是升级波的事**：本波若要改已有工具的注册表条目（升级已有页、改 `desc` / `tag`），合并时这几条取哪一侧都会丢掉另一侧的改动，脚本不替你选。
+  这几条手工处理、在台账里写明理由——这是下面红旗「注册表冲突不手工改」的**唯一例外**；其余条目、导航页与生成区段仍然跑配方。
+  只有 `--take` 一侧改过的条目（例如合 main 时 main 升级了一页、本波没碰）照常取 `--take` 一侧，不算冲突。
 - 每合一页跑一次 `check.py`，全绿再合下一页。构建者报告里的偏离、简报错误、拿不准的 `boards` 抄进台账。
 
 **4. 控制方亲验**（全部页集成之后、终审之前）
 - 全量验收命令。
 - 每页一个亲手负控制（先确认基线绿 → 变异 → 看门因断言失败而红、不是崩溃 → 从内存原字节复原 → 复绿），**串行**跑，**只做保证终止的变异**，
-  子进程一律用 Python `subprocess.run(…, timeout=…)` 兜底（**本机没有 `timeout` 命令**——第 2 期两个会话都写过 `timeout 120`，一个验收循环因此全部 rc=127 却没停下）：
+  子进程一律用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时 `os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组，以此兜底（`subprocess.run(timeout=…)` 超时只杀直接子进程，`check.py` 起的 node / python 孙进程会留下；配方脚本的 `run_grouped()` 就是这个写法；**本机没有 `timeout` 命令**——第 2 期两个会话都写过 `timeout 120`，一个验收循环因此全部 rc=127 却没停下）：
   页里有带 `check.property` 的程序 → 变异其中一个的被测函数，`algorithm_property_check` 应红；
   页里没有 → 改一个程序 `run.expect` 里的一个字符，`program_run_check` 应红。
 - 浏览器：见「浏览器验收」。
@@ -82,7 +93,7 @@ description: >-
   让它**先逐条判定**上一个人的改动「已完成 / 部分 / 未做」、写进报告，在上面续做，最后全量验证（第 2 期两波都这样接手，M4 的接手者据此查出前任半截的 refs 让门是红的）。
 
 **6. PR**
-- 推送前再合一次 origin/main（冲突照第 3 步，脚本用 `--take MERGE_HEAD --from HEAD`：以 main 为准、本波各页追加在后），全量验收重跑。
+- 推送前再合一次 origin/main（冲突照第 3 步，脚本用 `--take MERGE_HEAD --from HEAD`：以 main 为准、本波各页追加在后；退出码 1 / 3 的处理同第 3 步），全量验收重跑。
 - 推送集成分支，`gh pr create`，描述用 `pr-body.md` 填（验证怎么做的就怎么写；PyCharm 那一项不打勾）。
 - 读 CI：`gh pr checks <n> --watch`，再从日志里核对 `Successfully set up CPython (3.12.x)` 与 `N 道门全绿` 两行。红了读完整日志修，修复作为新提交。
 - **⏸ 汇报 PR 链接、CI、负控制与裁决清单，等用户说合并。**
@@ -92,10 +103,13 @@ description: >-
   外加**一个自己挑的负控制**——不是 PR 作者做过的那几个（第 2 期集中合并的控制方对 #184、#185 各做了一次）。然后 `gh pr merge <n> --merge`。
 - **两波并行、由一个控制方集中合并时**：先合的那个 PR 一落地，后一个就必然与 main 的注册表 / FALLBACK 冲突。通知后一波的控制方：合 origin/main、
   用配方脚本（`--take MERGE_HEAD --from HEAD`）解、全量验收、push；它回报新的 head 之后，照上一条核 head 与 CI 再合。
+- 合并之后、拷走台账之前：`git -C $M count-objects -vH`（只读，整个仓库共用一个 `.git`，在主工作区跑安全）存成台账目录的 `git-size-after.txt`，与第 0 步的 `git-size-before.txt` 对称
+  （第 2 期两波的波后量只报在回报里、没进台账文件，收尾账本只能从回报转抄）。
 - 删集成 worktree 之前，把整个台账目录拷到主工作区的 `.superpowers/python-phase<期>/<名>-ledger/`（gitignored；worktree 一删台账就没了），
-  再删集成 worktree、集成分支与各构建者分支（本地 + origin），以及第 2 步记下的构建者自建 worktree 和它们留下的 `worktree-agent-*` 分支。
+  再删集成 worktree、集成分支与各构建者分支（本地 + origin），以及**台账里记下的**每个构建者的原分支（`worktree-agent-*`）、isolation worktree 与自建 worktree，
+  最后 `git -C $M worktree prune`。只删台账里有的——主仓库里别的 `worktree-agent-*` 可能属于别的会话。
 - 复盘：构建者与评审员指出的简报错误 → 改本 skill 的模板或 `python-drill-tool`（单独一个小 PR）；
-  再跑 `git -C $M count-objects -vH`（只读，整个仓库共用一个 `.git`，在主工作区跑安全）与开工前的记录对比，记进下一期账本。
+  `git-size-before.txt` 与 `git-size-after.txt` 的对比记进下一期账本。
 
 ## 验收命令
 
@@ -105,6 +119,7 @@ python3 scripts/check_nav_contract.py
 python3 scripts/sync_registry.py --check
 python3 scripts/apply_branding.py --check
 python3 scripts/apply_footer.py --check
+python3 scripts/apply_gallery_bg.py --check
 python3 chess/scripts/check.py
 python3 cryptography/scripts/check.py
 python3 python/scripts/inline_core.py --check
@@ -145,9 +160,9 @@ for f in python/core/*.test.js; do node "$f"; done
 | 写文件工具把反斜杠-u 转义解码成真实字符 | 不可见的 U+2028 进了源码或提示；`js_parser_parity_check` 会红，文档里则悄悄变假 | 代码里用 `chr(0x2028)`；写完扫一遍 U+2028 / U+2029 / U+0085 / U+FEFF |
 | 并行跑负控制 | 同时改同一批文件，互相污染基线 | 串行 |
 | 本机 `grep` 是 ugrep | `(…)?` 套交替时静默漏匹配 | 写钩子或门的正则时用顶层交替，并与 `/usr/bin/grep` 对比 |
-| 构建者的 worktree 从 origin/main 切出，不是从集成分支 | `merge --ff-only <集成分支>` 必然失败；落错基线时评审包 diff 里出现假删除 | 简报让它 `checkout -B <构建者分支> <集成分支>` 并报告实测 HEAD 与 merge-base；打包一律 `git merge-base` 实测 |
+| 构建者的 worktree 从 origin/main 切出，不是从集成分支 | 集成分支切出后 origin/main 只要前进过（第 2 期 #179 / #180），worktree 基线就不是集成分支的祖先，`merge --ff-only <集成分支>` 失败；落错基线时评审包 diff 里出现假删除 | 简报让它 `checkout -B <构建者分支> <集成分支>` 并报告实测 HEAD 与 merge-base；打包一律 `git merge-base` 实测 |
 | 报告、脚本、patch 放草稿区 | 会话重启时草稿区清空，第 2 期丢过构建者报告、终审报告、集成脚本 | 一律放 `$W/.superpowers/python-waves/<名>/`，第 7 步整体拷走 |
-| 负控制做了可能不终止的变异（删 `visited.add` 之类） | 门挂住而不是变红；第 2 期一次跑满 600 秒、swap 约 21 GB、同机会话一起 ENOSPC | 只做保证终止的变异；子进程用 Python `subprocess.run(timeout=…)`（本机没有 `timeout` 命令，写了只会 rc=127） |
+| 负控制做了可能不终止的变异（删 `visited.add` 之类） | 门挂住而不是变红；第 2 期一次跑满 600 秒、swap 约 21 GB、同机会话一起 ENOSPC | 只做保证终止的变异；子进程用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时 `os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组（本机没有 `timeout` 命令，写了只会 rc=127） |
 | 集成后删构建者分支用 `git branch -d` | 主工作区的 `main` 不 pull，`-d` 按它判「未合并」而拒删 | 先 `merge-base --is-ancestor <分支> origin/main` 确认，再 `-D` |
 | 在不带引号的 heredoc 里写含反引号的 PR 文案 | 反引号被当命令替换执行，文案被吃掉 | heredoc 一律 `<<'EOF'`，路径走环境变量 |
 | 命令后接 `\| tail` / `\| head` 再 `echo rc=$?` | 打印的是管道末端的退出码，崩溃显示 `rc=0` | 要看退出码就不接管道，或先存 `rc` |
@@ -158,7 +173,7 @@ for f in python/core/*.test.js; do node "$f"; done
 - 打算每页开一个 PR，或每页做一轮评审
 - 打算用 `file://` 打开页面，或预览没先确认 worktree 标记
 - 打算在主工作区里 `git checkout` 任何东西
-- 注册表或 FALLBACK 冲突打算手工改
+- 注册表或 FALLBACK 冲突打算手工改（唯一例外：配方脚本退出码 3，见第 3 步）
 - 简报里写「注册表由控制方登记」「不要碰 python-tools.json」
 - 没等用户说合并就 `gh pr merge`
 - 删集成 worktree 之前没把台账拷到主工作区 `.superpowers/python-phase<期>/`

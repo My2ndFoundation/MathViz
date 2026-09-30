@@ -81,7 +81,9 @@ description: >-
 - **提示逐级更具体，任何一级都不许给出答案原文。**
 - **挖空答案不许原样出现在同一程序没挖的行上（「照抄空」）。** 把答案行去掉缩进，在同一个 `.py` 的其余行里逐字找一遍；找得到，这个空就成了抄上下文——
   换一行挖。第 2 期 M4 终审抓到 3 处（`hash-search-linear-probing` 的探测两行在同程序的查找函数里原样出现、`lcs-length` 的比较行在回溯函数里原样出现），
-  修复时扫描又找出 2 处。**没有门**（做成门很便宜，记在第 2 期账本里当建议）；写完自己扫，评审也扫。
+  修复时扫描又找出 2 处。**只由关键字和标点组成的行（`else:`、`finally:`、`try:`）不算照抄空**——这种行在任何程序里都长一个样，挖它考的是结构位置，不是抄写；
+  其余的行，哪怕短如 `ops.append(token)`，也算。**没有门**（做成门很便宜，记在第 2 期账本里当建议）；写完自己扫本页，评审扫本波。
+  存量：ch01–ch14 按此口径还有 5 处（M3 4 处、第 1 期 1 处，清单在第 2 期账本 §三.4），改它们要升版，留给下一个动那几页的内容 PR。
 - **不挖跨嵌套块的多行空。** 判定器在答案与标准答案**行数不同**时完全不比缩进（`python/core/judge.js:162`，只在 `na.rel.length === nr.rel.length` 时比相对缩进），
   连改变语义的缩进也判对：三行的 `if a:` / `    if b: c()` / `d()` 被判等于 `d()` 缩进在外层 `if` 里的那四行。多行空只挖**同一层**的两三行，并用第 1 级提示钉住写法。
   （第 1 期账本 §一.3；判定器没改，第 2 期是靠这条规矩避开的——M3 26 个、M4 6 个多行空都在同一层。）
@@ -274,14 +276,18 @@ EOF
 **不手工合并。** 取基线分支（`main`，或你堆叠在其上的那个分支）的版本、补回本页条目、重跑生成脚本——配方写成了脚本，在停下的合并里跑：
 ```bash
 # 你的分支合进来（你在基线分支上）：--take HEAD --from MERGE_HEAD；你在自己的分支上合基线：--take MERGE_HEAD --from HEAD
-python3 .claude/skills/python-content-wave/resolve-registry-conflict.py --repo <worktree 绝对路径> --take MERGE_HEAD --from HEAD
-git -C <worktree> commit --no-edit
+R=<worktree 绝对路径>
+python3 $R/.claude/skills/python-content-wave/resolve-registry-conflict.py --repo $R --take MERGE_HEAD --from HEAD && git -C $R commit --no-edit
 ```
+必须用 `&&` 接提交：脚本红了之后冲突在索引里已标为解决，单独一行的 `git commit` 会照样成功。
 它取 `--take` 一侧的三个文件、把 `--from` 一侧多出的条目追加到 `tools` 末尾，冲突的工具页取 `--take` 一侧，
-然后 `build_programs.py`、`inline_core.py`、`sync_fallback.py`、`check.py`，全绿才按显式路径 `git add`；冲突落在别的文件上就什么都不动、退出码 2。
+然后 `build_programs.py`、`inline_core.py`、`sync_fallback.py`、`check.py`，全绿才按显式路径 `git add`。
+退出码 1（生成脚本或 `check.py` 红）时**照它打印的恢复命令做**，不要直接 `git merge --abort`（索引已 ≠ HEAD 时会失败）；
+退出码 2（冲突落在别的文件上）与 3（同一个已有条目在 `--from` 一侧改过、又与 `--take` 一侧不同，见 C「升级一页」）什么都没动。
 两侧的 `engine` 不同（有一侧改过 `core/`）时，`page_mirror_check` 会红——那不是配方能解的，先让两侧 engine 一致。
 
-**C. 升级一页**：版本三处同步——注册表 `version` + `changelog`（最新的放最前）、页面 `tool-version` meta、页面头部版本记录注释（右上角徽章读 meta，不用改）。改了 `core/` 时 engine 升一次，**所有工具与 `_skeleton.html` 一起升**（`page_mirror_check` 要求全库唯一）。版本号是缓存键：不升，线上用户会一直看到旧页面。
+**C. 升级一页**：升级改的是已有条目，与别的分支合并时，只要改动在 `--from` 一侧、而 `--take` 一侧的这一条与它不同，配方脚本就以退出码 3 点名这一条、什么都不动——这一条手工处理并写明理由（这是「注册表冲突不手工改」的唯一例外），其余照配方。
+版本三处同步——注册表 `version` + `changelog`（最新的放最前）、页面 `tool-version` meta、页面头部版本记录注释（右上角徽章读 meta，不用改）。改了 `core/` 时 engine 升一次，**所有工具与 `_skeleton.html` 一起升**（`page_mirror_check` 要求全库唯一）。版本号是缓存键：不升，线上用户会一直看到旧页面。
 
 ## 上报与负控制
 
@@ -290,6 +296,6 @@ git -C <worktree> commit --no-edit
 - **负控制一律串行跑，不要并行**——并行跑会互相污染对方临时改的共享文件，两边的「基线是绿的」这个前提都不再成立。
 - **负控制只做保证终止的变异。** 删 `visited.add`、删循环变量的更新这类可能死循环的不做：门有 2 秒时限之前，第 2 期一个这样的变异让门挂满 600 秒、
   swap 撑到约 21 GB、同机三个会话一起 ENOSPC（#183 由此而来）。子进程一律带超时——**本机（macOS）没有 `timeout` 命令**，
-  用 Python `subprocess.run(…, timeout=…, start_new_session=True)`，超时 `os.killpg` 整个进程组。
+  用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时 `os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组（`subprocess.run(timeout=…)` 只杀直接子进程，`check.py` 起的孙进程会留下）。
 - **遇到 ENOSPC / 磁盘满：停下回报，不删任何不是你自己写的文件。**
 - 报告「红」时附上变红那一行，并说明是**断言失败**还是**脚本崩溃**——崩溃的红与有效的红长得一样。

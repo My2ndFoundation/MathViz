@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""按配方解 python/ 注册表与导航页的合并冲突（python-content-wave 第 3、7 步用）。
+"""按配方解 python/ 注册表与导航页的合并冲突（python-content-wave 第 3、6、7 步用）。
 
 配方（第 1 期 R1 起两期共十余次冲突都这样解，零次手工合并）：
   取一侧（--take）的 python-tools.json / app.html / index.html
@@ -11,16 +11,29 @@
 两种用法（都在 `git merge` 停在冲突上之后、在那个 worktree 里跑）：
   集成构建者分支：  --take HEAD        --from MERGE_HEAD   （集成分支为准，补回构建者那一页）
   集成分支合 main： --take MERGE_HEAD  --from HEAD         （main 为准，本波各页追加在 main 已有条目之后）
+提交要接在它后面用 `&&`：它红了之后冲突在索引里已标为解决，不接 `&&` 的 `git commit` 会照样成功。
 
-冲突落在这四类文件之外（.py、chapter.json、refs、core……）时什么都不动、退出码 2——那不是配方能解的。
-两侧都有、内容却不同的注册表条目（programs / lines 除外）只打印警告，保留 --take 一侧：要不要带上另一侧的改动由你定。
+退出码：
+  0  全绿，已按显式路径暂存。
+  1  生成脚本或 check.py 红、或超时：生成结果没有 `git add`，但冲突文件已按 --take 一侧写回并进了索引——
+     此时直接 `git merge --abort` 会失败（索引 ≠ HEAD，工作区又被生成脚本改过）。脚本会打印一条实测可用的恢复命令，照它做。
+  2  冲突落在这四类文件之外（.py、chapter.json、refs、core……）：什么都没动。那不是配方能解的。
+  3  同一个注册表条目在 --from 一侧相对合并基改过、又与 --take 一侧不同（programs / lines 除外）：什么都没动。
+     取任何一侧都会静默丢掉另一侧对这条的改动，所以配方不适用。判定只读合并基、不做三方合并：
+     只有 --take 一侧改过的条目照常取 --take 一侧，不算冲突。
+     本波若要改已有工具的注册表条目（升级波），撞上这一类就手工处理这几条，并在台账里写明理由——
+     这是 skill 红旗「注册表冲突不手工改」的唯一例外；其余条目、导航页与生成区段仍按配方来。
 
-子进程一律带超时（本机 macOS 没有 `timeout` 命令）。
+子进程一律带超时，并各自开一个进程组（start_new_session），超时就 os.killpg 整组——
+subprocess.run(timeout=…) 只杀直接子进程，check.py 起的 node / python 孙进程会留下（本机 macOS 也没有 `timeout` 命令）。
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import shlex
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -31,27 +44,62 @@ GENERATORS = ('python/scripts/build_programs.py',
               'python/scripts/inline_core.py',
               'python/scripts/sync_fallback.py')
 DERIVED = ('programs', 'lines')
-HALF = ('但冲突文件已按 --take 一侧写回并进了索引（git checkout <提交> -- 会更新索引）；'
-        '要从头来就 git merge --abort 再合一次')
+
+
+def run_grouped(cmd: list[str], cwd: Path, timeout: int) -> subprocess.CompletedProcess:
+    """跑子进程；超时就杀掉它的整个进程组再抛 TimeoutExpired。"""
+    p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         text=True, start_new_session=True)
+    try:
+        out, err = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        p.communicate()
+        raise
+    return subprocess.CompletedProcess(cmd, p.returncode, out, err)
 
 
 def git(repo: Path, *args: str, check: bool = True) -> str:
-    r = subprocess.run(['git', '-C', str(repo), *args], capture_output=True, text=True, timeout=120)
+    try:
+        r = run_grouped(['git', '-C', str(repo), *args], cwd=repo, timeout=120)
+    except subprocess.TimeoutExpired:
+        sys.exit(f'ERROR: git {" ".join(args)} 超过 120 秒没有结束')
     if check and r.returncode != 0:
         sys.exit(f'ERROR: git {" ".join(args)} 失败（rc={r.returncode}）：\n{r.stderr}')
     return r.stdout
 
 
-def run(repo: Path, script: str, *args: str, timeout: int) -> subprocess.CompletedProcess:
+def recovery(repo: Path, pages: list[str]) -> str:
+    """rc=1 时的恢复命令：先让这几类文件回到 HEAD、生成脚本改过的其余文件回到索引，再 merge --abort。"""
+    head_side = [REGISTRY, *NAV_PAGES, *pages]
+    dirty = git(repo, 'diff', '--name-only', check=False).splitlines()   # 工作区 ≠ 索引
+    extra = [p for p in dirty if p.strip() and p not in head_side]
+    r = shlex.quote(str(repo))
+    cmd = f'git -C {r} checkout HEAD -- ' + ' '.join(shlex.quote(p) for p in head_side)
+    if extra:
+        cmd += f' && git -C {r} checkout -- ' + ' '.join(shlex.quote(p) for p in extra)
+    cmd += f' && git -C {r} merge --abort'
+    return ('生成结果没有 git add，但冲突文件已按 --take 一侧写回并进了索引，'
+            '此刻直接 git merge --abort 会失败。要从头来，照这条做（做完合并状态清除、工作区回到 HEAD）：\n  ' + cmd)
+
+
+def run(repo: Path, script: str, *args: str, timeout: int, pages: list[str]) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run([sys.executable, script, *args], cwd=repo, capture_output=True,
-                              text=True, timeout=timeout)
+        return run_grouped([sys.executable, script, *args], cwd=repo, timeout=timeout)
     except subprocess.TimeoutExpired:
-        sys.exit(f'ERROR: {script} 超过 {timeout} 秒没有结束——当作红，停下查原因')
+        sys.exit(f'ERROR: {script} 超过 {timeout} 秒没有结束（整个进程组已杀掉）——当作红，停下查原因。\n'
+                 + recovery(repo, pages))
 
 
 def strip_derived(entry: dict) -> dict:
     return {k: v for k, v in entry.items() if k not in DERIVED}
+
+
+def load_registry(repo: Path, rev: str) -> dict[str, dict]:
+    return {t['id']: t for t in json.loads(git(repo, 'show', f'{rev}:{REGISTRY}'))['tools']}
 
 
 def main() -> int:
@@ -62,6 +110,7 @@ def main() -> int:
     ap.add_argument('--check-timeout', type=int, default=600, help='check.py 的超时秒数')
     a = ap.parse_args()
     repo = Path(a.repo).resolve()
+    abort = f'git -C {shlex.quote(str(repo))} merge --abort'
 
     if not (repo / '.git').exists():
         sys.exit(f'ERROR: {repo} 不是一个 git worktree 的根')
@@ -78,7 +127,31 @@ def main() -> int:
         print('ERROR: 下列冲突不在配方范围内，脚本什么都没动：', file=sys.stderr)
         for p in other:
             print(f'  - {p}', file=sys.stderr)
+        print(f'要放弃这次合并：{abort}', file=sys.stderr)
         return 2
+
+    # 0. 两侧都有、--from 一侧又改过的条目：配方不适用（先判，什么都不动）
+    theirs = load_registry(repo, src)
+    ours = load_registry(repo, take)
+    base_sha = git(repo, 'merge-base', take, src, check=False).strip()
+    base = load_registry(repo, base_sha) if base_sha else {}
+    clash = []
+    for tid, t in theirs.items():
+        if tid not in ours or strip_derived(t) == strip_derived(ours[tid]):
+            continue
+        if tid in base and strip_derived(t) == strip_derived(base[tid]):
+            continue                      # 只有 --take 一侧改过：取 --take 一侧就对
+        fields = sorted(k for k in set(t) | set(ours[tid])
+                        if k not in DERIVED and t.get(k) != ours[tid].get(k))
+        clash.append((tid, fields))
+    if clash:
+        print('ERROR: 下列注册表条目在 --from 一侧改过、又与 --take 一侧不同——取哪一侧都会丢掉另一侧的改动，'
+              '配方不适用，脚本什么都没动：', file=sys.stderr)
+        for tid, fields in clash:
+            print(f'  - {tid}（不同的字段：{", ".join(fields)}）', file=sys.stderr)
+        print('升级波（本波有意改已有条目）才会撞上这一类：这几条手工处理并在台账写明理由，'
+              f'其余照配方。要放弃这次合并：{abort}', file=sys.stderr)
+        return 3
 
     # 1. 取 --take 一侧的三个文件与冲突的工具页
     git(repo, 'checkout', take, '--', REGISTRY, *NAV_PAGES)
@@ -90,15 +163,11 @@ def main() -> int:
     # 2. 补回 --from 一侧多出来的条目
     reg_path = repo / REGISTRY
     reg = json.loads(reg_path.read_text(encoding='utf-8'))
-    theirs = json.loads(git(repo, 'show', f'{src}:{REGISTRY}'))
-    have = {t['id']: t for t in reg['tools']}
     appended = []
-    for t in theirs['tools']:
-        if t['id'] not in have:
+    for tid, t in theirs.items():
+        if tid not in ours:
             reg['tools'].append(t)
-            appended.append(t['id'])
-        elif strip_derived(t) != strip_derived(have[t['id']]):
-            print(f'WARN: 条目 {t["id"]} 两侧内容不同，保留了 --take 一侧', file=sys.stderr)
+            appended.append(tid)
     reg_path.write_text(json.dumps(reg, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     print(f'追加条目：{", ".join(appended) if appended else "（无）"}')
     print('注册表顺序：' + ' '.join(f'{t["id"]}(M{t["module"]})' for t in reg['tools']))
@@ -106,21 +175,22 @@ def main() -> int:
     # 3. 三个生成脚本（--print-changed 会照常写文件，并把改过的路径一行一个打出来）
     changed: set[str] = set()
     for g in GENERATORS:
-        r = run(repo, g, '--print-changed', timeout=300)
+        r = run(repo, g, '--print-changed', timeout=300, pages=pages)
         if r.returncode != 0:
             print(r.stdout + r.stderr, file=sys.stderr)
-            sys.exit(f'ERROR: {g} rc={r.returncode}——生成结果没有 git add；' + HALF)
+            sys.exit(f'ERROR: {g} rc={r.returncode}。' + recovery(repo, pages))
         for line in r.stdout.splitlines():
             if line.strip():
                 changed.add(str(Path(line.strip()).resolve().relative_to(repo)))
 
-    # 4. check.py 必须全绿
-    r = run(repo, 'python/scripts/check.py', timeout=a.check_timeout)
-    tail = (r.stdout.strip().splitlines() or ['(无输出)'])[-1]
+    # 4. check.py 必须全绿（红时汇总行在 stderr，绿时在 stdout）
+    r = run(repo, 'python/scripts/check.py', timeout=a.check_timeout, pages=pages)
+    stream = r.stderr if r.returncode != 0 else r.stdout
+    tail = ([s for s in stream.splitlines() if s.strip()] or ['(无输出)'])[-1]
     print(f'check.py rc={r.returncode}：{tail}')
     if r.returncode != 0:
         print(r.stdout[-4000:] + r.stderr[-4000:], file=sys.stderr)
-        sys.exit('ERROR: check.py 红——生成结果没有 git add；' + HALF)
+        sys.exit('ERROR: check.py 红。' + recovery(repo, pages))
 
     # 5. 只暂存显式路径
     to_add = sorted({REGISTRY, *NAV_PAGES, *pages, *changed})
@@ -131,7 +201,7 @@ def main() -> int:
     print(f'索引里共 {len(status) - len(loose)} 条已暂存（含合并本身带进来的）；'
           '未暂存 / 未跟踪的（应为空，有就逐行看是不是别人的）：')
     print('\n'.join('  ' + s for s in loose) or '  （无）')
-    print('下一步：git -C <worktree> commit --no-edit')
+    print(f'下一步：git -C {shlex.quote(str(repo))} commit --no-edit')
     return 0
 
 
