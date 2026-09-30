@@ -17,6 +17,14 @@ T.eq(PI.filterPrograms(PROGS, { level: [1,3] }).map(p => p.id), ['a','b'], '同�
 T.eq(PI.filterPrograms(PROGS, { level: [3,5], kind: ['pattern'], boards: ['CIE'] }).map(p => p.id),
      ['c'], '多个维度是与');
 T.eq(PI.filterPrograms(PROGS, { maxLines: 40 }).map(p => p.id), ['a','b'], '长度上限含等号');
+(function () {
+  /* boards: [] 合法（用户裁决 2026-09-30：考纲外的程序一家都不写）——
+     不按考试局筛时照常出现；按任何一家筛时都不出现，这正是这个语义要的效果。 */
+  const withOff = PROGS.concat([{ id: 'z', level: 1, kind: 'syntax', boards: [], lines: 10, requires: [] }]);
+  T.eq(PI.filterPrograms(withOff, {}).map(p => p.id), ['a','b','c','z'], 'boards 为空的程序在不筛考试局时出现');
+  T.eq(PI.filterPrograms(withOff, { boards: ['AQA','OCR','Edexcel','CIE'] }).map(p => p.id), ['a','b','c'],
+       'boards 为空的程序按任何考试局筛都不出现');
+})();
 
 T.eq(PI.requirementLine(PROGS[0]), null, '无依赖不显示 pip 行');
 T.eq(PI.requirementLine(PROGS[2]), 'pip install numpy pandas', '依赖行按声明顺序');
@@ -88,8 +96,33 @@ T.eq(PI.requirementLine(PROGS[2]), 'pip install numpy pandas', '依赖行按声�
 
 /* 清空范围 */
 T.eq(PI.clearScope('program', PROGS, 'b'), ['b'], '单题只给自己');
-T.eq(PI.clearScope('module', PROGS, 'b'), ['a','b','c'], '模块级给本页全部');
+T.eq(PI.clearScope('page', PROGS, 'b'), ['a','b','c'], '本页级给本页全部');
 T.eq(PI.clearScope('all', PROGS, 'b'), null, '整项清空交给 Store.clearAll，不走 id 列表');
+T.throws(function () { PI.clearScope('module', PROGS, 'b'); },
+         '旧名 module 已改成 page：不认，当场抛（清空猜不得）', /未知范围/);
+
+/* 清空的文案必须说出它真实的范围。'page' 这一级给的只是本页内嵌的那一章
+   （clearScope 拿到的 programs 就是本页的 PROGRAMS），同模块别的页它看不见——
+   按钮原先写「清空本模块 / Clear this module」，确认框说「本模块现有 N 条记录」，
+   都比真实行为大了一整圈。这几条断言守的是措辞与行为一致。 */
+(function () {
+  T.eq(PI.ts('clearPage', 'zh'), '清空本页', '选择器底部按钮（中）：清空本页');
+  T.eq(PI.ts('clearPage', 'en'), 'Clear this page', '选择器底部按钮（英）：Clear this page');
+  const zh = PI.ts('confirmPage', 'zh', [7]);
+  const en = PI.ts('confirmPage', 'en', [7]);
+  T.ok(zh.indexOf('本页现有 7 条记录') !== -1, '确认框（中）说的是「本页现有 N 条记录」：' + zh);
+  T.ok(/on this page/.test(en), '确认框（英）说的是 on this page：' + en);
+  [PI.ts('clearPage', 'zh'), zh].forEach(function (s) {
+    T.ok(s.indexOf('模块') === -1, '本页级的中文文案不许出现「模块」：' + s);
+  });
+  [PI.ts('clearPage', 'en'), en].forEach(function (s) {
+    T.ok(!/module/i.test(s), '本页级的英文文案不许出现 module：' + s);
+  });
+  /* 旧键不再存在：t() 对未知键原样回键名，所以一个没改全的读取点会把
+     「clearModule」几个字母直接印在按钮上——这里钉住旧键确实已删。 */
+  T.eq(PI.ts('clearModule', 'zh'), 'clearModule', '旧键 clearModule 已删（未知键回键名）');
+  T.eq(PI.ts('confirmModule', 'zh'), 'confirmModule', '旧键 confirmModule 已删');
+})();
 
 /* ==================== 简报清单之外、但同属决策层的三条 ====================
    下面三个也是"DOM 只负责画出来"的那一侧的判断，所以一并抽成纯函数并测。 */
@@ -323,8 +356,8 @@ T.eq(PI.clearScope('all', PROGS, 'b'), null, '整项清空交给 Store.clearAll�
   PI.clearRecords(r, 'program', ['b']);
   T.eq(r.calls, ['flush', 'clearProgram:b'], '单题：flush 排在清之前');
   r = recorder();
-  PI.clearRecords(r, 'module', ['a', 'b']);
-  T.eq(r.calls, ['flush', 'clearMany:a,b'], '模块：flush 排在清之前');
+  PI.clearRecords(r, 'page', ['a', 'b']);
+  T.eq(r.calls, ['flush', 'clearMany:a,b'], '本页：flush 排在清之前');
   r = recorder();
   PI.clearRecords(r, 'all', null);
   T.eq(r.calls, ['flush', 'clearAll'], '整项：flush 排在 clearAll 之前');
@@ -455,8 +488,8 @@ T.eq(PI.clearScope('all', PROGS, 'b'), null, '整项清空交给 Store.clearAll�
   const PROGS2 = [{ id: 'a' }, { id: 'b' }];
   T.ok(!PI.clearHitsCurrent(PI.clearScope('program', PROGS2, 'b'), 'a'),
        '「⋯ → 清空本题」点在别人身上时，当前这一遍不作废');
-  T.ok(PI.clearHitsCurrent(PI.clearScope('module', PROGS2, 'b'), 'a'),
-       '模块清空扫到了她，那就该作废');
+  T.ok(PI.clearHitsCurrent(PI.clearScope('page', PROGS2, 'b'), 'a'),
+       '本页清空扫到了她，那就该作废');
 })();
 
 /* ---- mount 在没有 DOM 的地方必须响亮地拒绝 ---- */
@@ -521,10 +554,12 @@ T.throws(function () { PI.mount({ programs: PROGS }); },
   T.ok(!zh[1].placeholder, '有真实考试局时不是占位符');
   T.eq(zh[2].items, ['selection', 'if-elif-else'], '标签原样给（英文标识符，不翻译）');
   const emptyBoardsRow = PI.panelMeta(Object.assign({}, prog, { boards: [] }), 'zh', 2)[1];
-  T.eq(emptyBoardsRow.items, ['未标注'],
-       '考试局为空时显式写未标注（program_meta_check 要求非空，这是 UI 兜底）');
+  T.eq(emptyBoardsRow.items, ['不在考纲'],
+       '考试局为空时显式写不在考纲（boards: [] 合法：四家考纲都不含这个程序的核心教学点）');
+  T.eq(PI.panelMeta(Object.assign({}, prog, { boards: [] }), 'en', 2)[1].items, ['Not on the syllabus'],
+       '英文占位同样走 t()：Not on the syllabus');
   T.eq(emptyBoardsRow.placeholder, true,
-       '占位符带 placeholder:true——渲染层靠这个布尔判断，不拿翻译后的字符串去比「未标注」');
+       '占位符带 placeholder:true——渲染层靠这个布尔判断，不拿翻译后的字符串去比「不在考纲」');
   T.eq(PI.panelMeta(Object.assign({}, prog, { tags: [] }), 'zh', 2).map(function (r) { return r.key; }),
        ['summary', 'boards'], '没有标签就不出标签行');
   T.eq(PI.panelMeta(prog, 'zh', null)[0].items, ['难度 L2 · 惯用模式 · 23 行'], '空数算不出来时不编一个');

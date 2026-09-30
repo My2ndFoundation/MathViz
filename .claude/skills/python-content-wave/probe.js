@@ -27,6 +27,18 @@
  *      负控制：把第一个空的答案改掉，挖空的复制内容必须与读的不同。**临摹不比**：copyPayload('trace') 按定义交回的就是她打的字
  *      （state.typed 本身），拿读的内容当 typed 传进去再比，结果恒真、什么也观察不到。
  *      复制内容**真跑**不在这里——node 裸 vm 取、python3 跑，见 SKILL 第 4 步。
+ *   6. （给了 keys 才做）逐键临摹一段：keys = { prog: '<程序 id>', seg: <段号，0 起；不分段的程序省略> }。
+ *      整段粘贴测不到「只有逐键打才会碰到」的问题——第 5 期 #198 评审 I1：段尾空行在影子层看不见，
+ *      逐键打的人永远到不了「段完成」，而实现者与控制方的验收都是整段粘贴，都没看见。所以这里一次一个按键：
+ *      · 换行：在输入层上派发 keydown Enter，由**页面自己的** keydown 处理（applyEnter 自动缩进 / 跟随影子）；
+ *        之后自动缩进与参考下一行的缩进差，多了派发 Backspace（keydown 让页面记退格，再删一个字符、派发 input），少了逐个打空格。
+ *      · 其余字符一个一个：keydown（冒泡到 document——页面的 1/2/3/[/] 快捷键在输入框里不得劫持，劫持了这里会测出来）
+ *        → beforeinput（严格档会在这里拒绝错字符；拒绝就记一次 blocked）→ 插入 → input。
+ *      · 每按一下都看「完成了没有」：缓冲 === 段参考，分段时还要段按钮带 ✓、不是末段时出现「下一段」。
+ *        段尾空行由页面的 chunkTailFill 在最后那一下 Enter 时补齐——补齐了就停，不再按多余的 Enter。
+ *      负控制（内建）：记下「最后一个按键之前」的完成状态，**必须是未完成**；完成只能出现在最后一下。
+ *      报 keysDrive = { events, enters, backspaces, spaces, blocked, done, doneBeforeLast, stats }。
+ *      第 5 期 m7b 控制方用这套做法在 pong-full 段 1（35 行、段尾两个空行）上打了 984 个事件：段 ✓、「下一段」、缓冲 == 段全文。
  *   最后：zoom 复原、临摹输入清空、localStorage **只在本页的键上按差分复原**：本页的键 = python-draft:<本页程序 id>:… 、
  *      python-progress:<本页程序 id>，以及 python-prefs / python-store-v / python-lang；其中运行期间新出现的删掉、值变了的写回原值，别的键一概不碰。
  *      8777 是几个会话共用的同源，clear() 再整份写回会抹掉、改回别的标签页这几秒里写的键（第 4 期收尾评审 m5）。
@@ -36,7 +48,7 @@
  */
 window.PYPROBE = async function (opts) {
   var o = opts || {};
-  var page = o.page, marker = o.marker, copyIds = o.copyIds || [];
+  var page = o.page, marker = o.marker, copyIds = o.copyIds || [], keys = o.keys || null;
   var out = { page: page, ok: true, problems: [] };
   function bad(msg) { out.ok = false; out.problems.push(msg); }
 
@@ -170,6 +182,13 @@ window.PYPROBE = async function (opts) {
 
     /* 4. 临摹三层对齐 */
     ctl.setLang('zh'); ctl.setProgram(progs[0].id); ctl.setMode('trace'); await sleep(40);
+    /* 第一个程序若声明了 chunks，影子层只显示**当前段**——先切回第 1 段，前 4 行才与影子同源
+       （页面记着上次停在哪一段：刷新后从草稿恢复、或上一次探针的逐键项切到了别的段，都会让影子是别的段，
+       量出来就是「different chars」。第 5 期收尾在 py-pygame-games 上实测撞到过）。 */
+    if (progs[0].chunks) {
+      var seg0 = document.querySelectorAll('.py-chunk-seg')[0];
+      if (seg0) { seg0.click(); await sleep(60); } else { bad('对齐：第一个程序声明了 chunks，却找不到段按钮'); }
+    }
     var typed = Exercise.clean(progs[0].source).split('\n').slice(0, 4).join('\n');
     var idx = typed.length - 1;
     while (idx > 0 && /\s/.test(typed[idx])) { idx--; }            /* 可见字符：换行符的矩形是退化的，dx = 0 会是假阴 */
@@ -227,6 +246,98 @@ window.PYPROBE = async function (opts) {
         out.copies[id] = { readEqualsBlank: read === blankCopy, negativeDiffers: read !== blankWrong,
                            noDirective: read.indexOf('# >>> BLANK') === -1 && read.indexOf('# <<< BLANK') === -1 };
         if (!out.copies[id].readEqualsBlank || !out.copies[id].negativeDiffers || !out.copies[id].noDirective) { bad('复制内容 ' + id + '：' + JSON.stringify(out.copies[id])); }
+      }
+    }
+
+    /* 6. 逐键临摹（可选） */
+    if (keys) {
+      var kp = progs.filter(function (q) { return q.id === keys.prog; })[0];
+      if (!kp) { bad('keys.prog ' + keys.prog + ' 不在本页'); }
+      else {
+        ctl.setLang('zh'); ctl.setProgram(kp.id); ctl.setMode('trace'); await sleep(60);
+        var kclean = Exercise.clean(kp.source);
+        var ksegs = kp.chunks ? PyInteract.chunkSegments(kclean, kp.chunks) : null;
+        var kseg = ksegs ? (keys.seg || 0) : null;
+        if (ksegs) {
+          var segBtns = document.querySelectorAll('.py-chunk-seg');
+          if (!segBtns[kseg]) { bad('找不到第 ' + kseg + ' 段的段按钮'); }
+          else { segBtns[kseg].click(); await sleep(60); }
+        }
+        var kref = ksegs ? ksegs[kseg].text : kclean;
+        /* 点页面的「重来」：清掉这一段（不分段时整题）的缓冲、开一遍干净的 run——否则前面几项留下的 run
+           是 resumed（「接着上次的草稿打的」），统计行的正确率不是这一遍的。重来会重建输入层，之后再取。 */
+        var restartBtn = Array.prototype.filter.call(document.querySelectorAll('button'), function (b4) {
+          return b4.textContent === '重来' || b4.textContent === 'Restart';
+        })[0];
+        if (!restartBtn) { bad('逐键：找不到「重来」按钮'); } else { restartBtn.click(); await sleep(60); }
+        var kin = stage.querySelector('textarea.py-input');
+        kin.focus();
+        if (kin.value !== '') { bad('逐键：重来之后输入层不是空的'); }
+        var ev = { events: 0, enters: 0, backspaces: 0, spaces: 0, blocked: 0, hijacked: 0 };
+        var keyDown = function (k) {
+          var e = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true });
+          kin.dispatchEvent(e); ev.events++;
+          return e.defaultPrevented;
+        };
+        var insertCh = function (ch) {
+          if (keyDown(ch)) { ev.hijacked++; return; }                  /* 普通字符的 keydown 不该被任何人 preventDefault */
+          var bi = new InputEvent('beforeinput', { inputType: 'insertText', data: ch, bubbles: true, cancelable: true });
+          kin.dispatchEvent(bi);
+          if (bi.defaultPrevented) { ev.blocked++; return; }
+          var s0 = kin.selectionStart;
+          kin.value = kin.value.slice(0, s0) + ch + kin.value.slice(kin.selectionEnd);
+          kin.setSelectionRange(s0 + 1, s0 + 1);
+          kin.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: ch, bubbles: true }));
+        };
+        var backspace = function () {
+          keyDown('Backspace'); ev.backspaces++;
+          var s1 = kin.selectionStart;
+          if (s1 === 0) { return; }
+          kin.value = kin.value.slice(0, s1 - 1) + kin.value.slice(s1);
+          kin.setSelectionRange(s1 - 1, s1 - 1);
+          kin.dispatchEvent(new InputEvent('input', { inputType: 'deleteContentBackward', bubbles: true }));
+        };
+        var segDone = function () {
+          if (kin.value !== kref) { return false; }
+          if (!ksegs) { return true; }
+          var b2 = document.querySelectorAll('.py-chunk-seg')[kseg];
+          var ticked = !!b2 && b2.textContent.indexOf('✓') === 0;
+          var needNext = kseg < ksegs.length - 1;
+          return ticked && (!needNext || !!document.querySelector('.py-chunk-go'));
+        };
+        var doneBefore = null;
+        var step = function (fn) { doneBefore = segDone(); fn(); };
+        /* 照人打：只打影子层**看得见**的部分——参考去掉结尾换行（段尾空行在影子层里什么都不画），
+           打完最后一个可见行再按一下 Enter（手的惯性），然后停。段尾空行靠页面的 chunkTailFill 补。
+           第一版驱动逐行照参考打、把段尾空行也按了 Enter，在拿掉 chunkTailFill 的负控制页上照样「完成」——
+           它模拟的不是人，测不到 #198 I1；改成这样之后负控制页停在差段尾空行。 */
+        var kbody = kref.replace(/\n+$/, '');
+        var refLines = kbody.split('\n');
+        if (kbody !== kref) { refLines.push(''); }                    /* 那一下惯性的 Enter */
+        for (var li = 0; li < refLines.length && !segDone(); li++) {
+          var text = refLines[li];
+          if (li > 0) {
+            step(function () { keyDown('Enter'); ev.enters++; });   /* 页面的 keydown 处理做换行与自动缩进 */
+            if (segDone()) { break; }                                  /* chunkTailFill 补齐了段尾 */
+            var want = /^ */.exec(text)[0].length;
+            var auto = kin.value.slice(kin.value.lastIndexOf('\n') + 1);
+            if (/[^ ]/.test(auto)) { bad('逐键：Enter 之后新行里不只是空格：' + JSON.stringify(auto)); break; }
+            while (auto.length > want) { step(backspace); auto = kin.value.slice(kin.value.lastIndexOf('\n') + 1); }
+            while (auto.length < want) { step(function () { insertCh(' '); ev.spaces++; }); auto = kin.value.slice(kin.value.lastIndexOf('\n') + 1); }
+            text = text.slice(want);
+          }
+          for (var ci2 = 0; ci2 < text.length; ci2++) { step(insertCh.bind(null, text[ci2])); }
+        }
+        await sleep(60);
+        var statsEl = stage.querySelector('.py-stats');
+        out.keysDrive = { prog: kp.id, seg: kseg, refChars: kref.length, events: ev.events, enters: ev.enters,
+                          backspaces: ev.backspaces, spaces: ev.spaces, blocked: ev.blocked, hijacked: ev.hijacked,
+                          done: segDone(), doneBeforeLast: doneBefore, bufferEqualsRef: kin.value === kref,
+                          stats: statsEl ? statsEl.textContent : null };
+        if (!out.keysDrive.done) { bad('逐键：打完没有完成：' + JSON.stringify(out.keysDrive)); }
+        if (out.keysDrive.doneBeforeLast !== false) { bad('逐键负控制：最后一个按键之前就已「完成」——完成判据看不见差别'); }
+        if (ev.blocked || ev.hijacked) { bad('逐键：有按键被拒或被劫持：' + JSON.stringify(ev)); }
+        kin.value = ''; kin.dispatchEvent(new Event('input', { bubbles: true }));
       }
     }
   } catch (e) {

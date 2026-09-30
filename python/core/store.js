@@ -297,8 +297,8 @@
     });
   }
 
-  /* 模块级清空：按设计文档 §4.5，这一级只清 draft，不动 progress——
-     进度是"她已经会了"的记录，清草稿不该连带抹掉。 */
+  /* 本页级清空（调用方给的是本页那一章的 id）：按设计文档 §4.5，这一级只清
+     draft，不动 progress——进度是"她已经会了"的记录，清草稿不该连带抹掉。 */
   function clearMany(progIds) {
     (progIds || []).forEach(function (id) {
       removeKey(draftKey(id, 'blank'));

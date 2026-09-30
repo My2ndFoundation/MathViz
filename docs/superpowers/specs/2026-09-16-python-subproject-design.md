@@ -38,8 +38,10 @@ MathViz 仓库里的**第三个子项目**，与 `chess/` 和 `cryptography/` �
 ### 1.2 硬约束
 
 1. **单文件、零依赖、`file://` 可开。** 每个 `tools/*.html` 是一个完整的页面，双击即用。
-2. **整个 `python/` 目录被搬走后仍能独立运行。** 全目录只有一处父目录相对路径：
-   `PARENT_HOME = '../app.html'`（`app.html` / `index.html` 各一份）。
+2. **整个 `python/` 目录被搬走后仍能独立运行。** 父目录相对路径只许出现在两个导航页，
+   每页恰好 2 处：`PARENT_HOME = '../app.html'`（返回 MathViz 的链接，父项目不在时自己隐藏）
+   与同意横幅里的 `../privacy.html`；别处一律为零（`gates/hygiene.py` 的 `OUTBOUND_ALLOW`，
+   与 cryptography 同一个数）。
 3. **注册表隔离。** `python/python-tools.json` 只指向 `python/tools/*.html`；
    **绝不**把 Python 工具注册进根 `tools.json`，也绝不让本注册表指向 `../outputs/`。
 4. **不提供运行时。** 浏览器里不执行 Python，不提供编辑并运行的环境。
@@ -168,7 +170,9 @@ MathViz 仓库里的**第三个子项目**，与 `chess/` 和 `cryptography/` �
 
 - `kind ∈ { syntax, pattern, algorithm, project, embedded }`
 - `level ∈ 1..5`
-- `boards ⊆ { AQA, OCR, Edexcel, CIE }`
+- `boards ⊆ { AQA, OCR, Edexcel, CIE }`，列表、不重复、**可以为空**。语义（用户裁决 2026-09-30）：一个考试局只在它的
+  A-level 考纲点名了这个程序的核心教学点时才写；四家都不含就写 `[]`——面板显示「不在考纲」，按考试局筛选时不出现。
+  依据与逐程序判定表：`docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md`（取代原先的「拿不准就四家全写 / 确知不含才去掉」）。
 - `runtime ∈ { cpython, micropython-microbit, micropython-pico }`
 - `requires` 取自白名单 `{ numpy, pandas, matplotlib, scipy, pygame }`
 - `check.property` 是一个族名，取自闭集 `{ sort, search, structure, pure }`（第 1 期全部是 `pure`）。
@@ -256,8 +260,9 @@ MathViz 仓库里的**第三个子项目**，与 `chess/` 和 `cryptography/` �
 ```
 
 挖空体永远是**整行整行**的（两条指令行夹住中间），所以每个空渲染成一个占若干行的
-**块级内联输入区**：左边行号槽显示 ①②③ 序号徽章，缩进由左侧固定前缀撑出，
-输入区从缩进处开始、随打字长高。
+**块级内联输入区**：左边行号槽显示 ①②③ 序号徽章，输入区随打字长高。
+输入区的缺省值就是这个空的缩进本身；缩进是她答案的一部分（可删改，`Exercise.merge` 原样替换回源码），
+不是框外的固定前缀。判定器只比相对缩进，第一行的绝对缩进由 `blankFeedback` 另查（`lead-indent`）。
 
 - **逐空判定**，不是整篇判定。错了只报「第几个 token 起开始不同：期待 X，你写了 Y」
   并把光标送过去，**不给答案**。
@@ -399,13 +404,17 @@ python-progress:<progId>        { blank:{done,hintsUsed,at}, trace:{bestAcc,best
 **边输边存**：`input` 事件 → 防抖 400 ms 落盘；另在 `visibilitychange` 与 `pagehide`
 立即 flush（切标签页、关窗口不丢）。
 
-**三级清空**，每一级都二次确认且显示「将清除 N 条记录」：
+**三级清空**，每一级都二次确认，确认框里的 N 是 `Store.countRecords` 数出来的真实条数
+（`draft:blank` + `draft:trace` + `progress` 三种键）：
 
 | 粒度 | 入口 | 清掉 |
 |---|---|---|
-| 单题 | 程序选择器该项的 ⋯ 菜单 | 该题的 `draft:*`（可只清 blank 或只清 trace） |
-| 整个模块 | 工具页顶栏 | 本模块所有页、所有题的 draft |
-| 整个子项目 | 画廊/壳的设置 | 全部 `draft:*` + `progress:*`；语言与偏好保留。另有一个分开的「全部重置」连 prefs 一起清 |
+| 单题 | 程序选择器该项右侧的 ⋯ 按钮（直接弹「清空本题」的确认） | 该题的 `draft:blank` 与 `draft:trace`；进度保留。`Store.clearProgram(id, modes)` 支持只清一种模式，UI 不提供这个选项 |
+| 本页 | 工具页左侧程序选择器底部（「清空本页」，`clearScope('page', PROGRAMS)`） | 本页所有题的 draft；进度保留。页面只内嵌本页那一章，所以清的是**本页**，不是本模块所有页 |
+| 全部 | **工具页**左侧程序选择器底部，与上一级并排（「清空全部」，`clearScope('all')` → `Store.clearAll()`） | 全部 `draft:*` + `progress:*`，按键前缀扫，其他页的也一并清；语言与偏好保留。确认框只数得出本页的条数，所以明说「本页 N 条，其他页的记录也会一并清除」 |
+
+三级入口都在工具页的程序选择器（`aside.py-picker`）里，画廊与壳上没有清空入口。连 `python-prefs` 一起清的「全部重置」只存在于 API：
+`Store.clearAll({prefs: true})` 支持，**目前没有任何 UI 入口调用它**。
 
 > `store.js` **不认识任何一道题，也不认识模块**——清空 API 收一个 id 列表，
 > 由调用方从程序库拿。这是 chess `exercise.js`「题目只活在调用方传进来的字符串里」
@@ -526,7 +535,9 @@ python/tools/py-sorting.html
    入口函数要自己转成 `int` / `float` / `list` 再返回，否则类型不同即红。
 
 运行时的沙箱纪律：全新临时目录当 cwd（`_fixtures/` 先拷进去）、`PYTHONHASHSEED=0`、
-喂 `stdin`（缺省空串，这样裸 `input()` 会 EOFError 而不是挂死）、5 秒超时、无网络。
+喂 `stdin`（缺省空串，这样裸 `input()` 会 EOFError 而不是挂死）、`run.timeout` 秒超时（缺省 5）。
+**网络隔离没有实现**：`program_run_check` 不断网，程序不访问网络目前只靠评审把关
+（作者规则里也还没有这一条）。
 
 **豁免分两类，只有第二类需要具名。** 单一阈值在这里是自相矛盾的：M7/M8 几乎整章都跑不了，
 任何「一章里 compile-only 超过 N% 就红」的规则都会永远红。所以按**原因是否已经写在数据里**来分：
@@ -608,18 +619,19 @@ accent 按**模块**固定，同模块同色、相邻模块异色：
 M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 violet · M8 emerald。
 仍是契约 C6 的五色闭集，退路仍是 `--trace-unpaired`。
 
-### 6.2 八条契约的落地
+### 6.2 九条契约的落地（契约 v2.1）
 
 | 条款 | python 这边的做法 |
 |---|---|
 | **C1** 版本即缓存键 | `srcFor(id)`、`#btnAlone`、画廊 iframe（`regFingerprint()` 指纹）、每张卡片，四处全带 `?v=`。运行时 `tools.json` 映射里**必须抄 `d.version`** |
 | **C2** FALLBACK 带 `version` | `minimal()` 必须吐 `version`；**第一天就上 `fallback_version_check()`** |
-| **C3** 出站引用唯一 | 全目录只有一处 `../`：`PARENT_HOME = '../app.html'`；`wireParentLink()` 与既有四份逐字节相同 |
+| **C3** 出站引用唯一 | 父目录引用只在两个导航页，各 2 处：`PARENT_HOME = '../app.html'` 与同意横幅的 `../privacy.html`（`OUTBOUND_ALLOW`，§1.2）；`wireParentLink()` 与既有四份逐字节相同 |
 | **C4** 返回链接 `target="_top"` | 同上 |
 | **C5** 画廊撑满舞台 | `.wrap{max-width:min(2600px,96vw)}` + 简介 4 行钳位 + 眉题/tag 省略号 |
 | **C6** accent 闭集 | `ACCENTS` / `safeAccent()` 与既有四份逐字相同，退路 `unpaired` |
 | **C7** i18n 两页同源 | `python-lang` / `python-nav`，`resolveLang()` 与 `t()` 兜底 **`en`**；壳听 `storage` 但绝不 `setFrame()` |
 | **C8** 历史与 iframe | `contentWindow.location.replace()`；只有换工具 `pushState`；点当前项不出手，判断放在点击路径 |
+| **C9** 画廊背景四页同源 | `index.html` 带 `GENERATED:GALLERY-BG` 区段，由根 `scripts/apply_gallery_bg.py` 从 `scripts/gallery-bg.fragment` 原样写入，`--check` 守着；不在页面里手改 |
 
 > C2 那条是有前科的：规则同时写在根 `CLAUDE.md` 和 cryptography 自己的源码注释里，
 > 而 54 条 FALLBACK 一个 `version` 都没有，直到 `fallback_version_check()` 落地才暴露。
@@ -660,7 +672,7 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 
 | 门 | 守什么 |
 |---|---|
-| `outbound_ref_check()` | `core/` `programs/` `tools/` 里零个父目录相对路径；两个导航页各恰好一处 `PARENT_HOME` |
+| `outbound_ref_check()` | 整个 `python/` 子树的父目录相对路径普查：两个导航页各恰好 2 处（`PARENT_HOME` 与同意横幅的 `../privacy.html`，`OUTBOUND_ALLOW`），其余文件一律为零 |
 | `script_literal_check()` | `.js` 里不许出现 `<` + `script` + `>` 字面序列（包括注释里）——`awk` 抽取会静默吞行 |
 | `control_byte_check()` | 无 BOM、无 CRLF、无杂散控制字节 |
 | `lazy_dep_check()` | 没有任何模块在 UMD 工厂参数里直接抓 `root.X`（§4.6） |
@@ -687,6 +699,7 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 | `program_embed_roundtrip_check()` | HTML 里的 `source` 解码后与磁盘 `.py` 逐字节相同（§5.3） |
 | `chapter_manifest_check()` | 磁盘 `.py` 与 `chapter.json` 双向存在 |
 | `anchor_check()` | `lineNotes` / `chunks` 的行文本锚在源码里存在且唯一，`clean()` 之后仍唯一；★ 锚点可以落在挖空体内（§2.3） |
+| `chunks_check()` | 声明了 `chunks` 的程序：≥ 2 段、`title` 双语非空；段按源码顺序、互不重叠、**首尾相接**（第一段 `from` 之前、段缝里、最后一段 `to` 之后只许空行——落在外面的非空行她永远临摹不到）；并在工具页的裸 `vm` 里调页面内联的 `PyInteract.chunkSegments`，与门用 Python 算出的段逐个比、拼回去等于 `clean()` *（第 5 期 #198；本表此前漏了这一行，第 5 期收尾补）* |
 | `exemption_check()` | **例外豁免**（普通 cpython 程序却标 `compile-only`）必须带 `why`，每页 ≤ 2，且每次运行逐条打印；**结构性豁免**（`runtime != cpython` 或依赖 pygame）自动放行（§5.4） |
 | `source_ascii_check()` | 源码纯 ASCII（§2.5 规矩 2） |
 | `source_bmp_check()` | `.py` 里不许出现非 BMP 字符（含指令行）——CPython 给字符偏移、JS 给 UTF-16 码元偏移 |
@@ -694,7 +707,7 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 | ★ `blank_presence_check()` | 每个程序至少一个空，无豁免（第 1 期设计 D2） |
 | `blank_directive_check()` | BLANK 指令成对、`id/level/hint/hintEn` 齐全、id 页内唯一、`level ∈ 1..3`、挖空体非空；提示切出的段数等于 `level`（第 0 期起就有）；★ 分隔符改为唯一的 ` \|\| ` 并检查它的形状（第 1 期设计 B1） |
 | `program_meta_check()` | id 全库唯一；`kind`/`level`/`boards`/`runtime` 在闭集；双语字段齐全；`requires` 在白名单 |
-| `variant_check()` | 同一个 `problem` 的变体 ≥ 2 且标题互不相同 |
+| `variant_check()` | 成员数 > 1 的 `problem` 组内 `title.en` 互不相同（并排对照时分得出哪栏是哪种写法）；单例组合法、不查；另断言全库至少存在一个多变体组——否则这道门在全是单例的库上永远绿 |
 | `fixture_notes_check()` | 源码里写了 `_fixtures/<名>` 的程序，`notes` 中英两边都写出文件名，并把文件的每一行各自写成一段、连续、按原顺序（复制按钮不带数据文件，这份手抄是学生唯一的来源）；源码提到 `_fixtures` 却没写全路径也报红 *（第 3 期 #187）* |
 | `pygame_main_guard_check()` | pygame 程序（`runtime: cpython` 且 `requires` 含 `pygame`）的模块顶层只许 import / def / class / docstring / 常量赋值（调用只许 `pygame.Color` / `Rect` / `Vector2`）与恰好一个 `if __name__ == "__main__":`——导入即开窗或主循环在顶层时，property 无法导入，而无头 SDL 下顶层 `pygame.init()` 导入照样成功、只有这道门看得见 *（第 5 期开工前）* |
 | `micropython_main_guard_check()` | MicroPython 程序（`runtime` 以 `micropython` 开头）的顶层规则同上，调用只许 `const(...)` / `Image(...)`——顶层的 `Pin(...)`、`display.show(...)`、`while True:` 在装了硬件桩的导入里会撞桩或挂死 *（第 6 期开工前）* |
@@ -811,7 +824,7 @@ chess 现在要到运行时才暴露一个写错的路径。
 | 第 2 期 | M3 + M4 | 10 | ~120（实交 111；全库 217）|
 | 第 3 期 | M5 综合运用 | 4 | ~40（实交 47；全库 264）|
 | 第 4 期 | M6 科学计算与数理统计 | 5 | ~45（实交 46；全库 310）|
-| 第 5 期 | M7 pygame | 4 | ~35 |
+| 第 5 期 | M7 pygame | 4 | ~35（实交 36；全库 346）|
 | 第 6 期 | M8 嵌入式 Python | 3 | ~30 |
 
 程序数是**目标区间不是配额**：宁可一页 6 个真正经典的，也不凑到 12 个。
@@ -843,14 +856,19 @@ chess 现在要到运行时才暴露一个写错的路径。
 4. `file://` 直接双击打开每一个新页面：三种模式都能用，`localStorage` 三级清空都生效
 5. 随机抽三段程序，**点复制、粘进 PyCharm、真的跑一遍**——这是整套东西存在的理由，
    不能只靠门代劳
+
+   第 4、5 两条由用户做：第 5 期末用户裁决，人工验收由用户在线上做、有问题会提，不再作为每个 PR 的未勾选项
+   （第 1–4 期每个内容 PR 都列着它、没有一次勾上）。控制方这一侧的替代测量是 `python-content-wave` 第 4 步的
+   `copyrun.py`（页面自己的 `Exercise` 取复制内容，按层真跑或比 property）与 `live-frames.py`（pygame 活体跑帧）——
+   它们与门一样拷了 fixture、装了无头 SDL，**观察不到**「粘进 PyCharm 缺数据文件」「本机没装库」这一类，那一类只有人看得见。
 6. 临摹模式在三种缩放下三层不错位。仍没有机械门，但不再「靠看」：第 1 期起控制方在
    `document.body.style.zoom` = 0.9 / 1 / 1.25 下用 `Range` 量同一字符在影子层与输入层的矩形，
    要求 dx = dy = 0，并用一次负控制（给一层加 `padding-left`）证明这个测量看得见错位。
 
 ### 9.2 配套文档与 skill
 
-- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。**至第 4 期收尾仍未写**（第 3 期账本定的「第 4 期开工前」没做到），见第 4 期账本 §五.8
-- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（**至第 4 期收尾仍未写**，见第 4 期账本 §五.8）：API 签名、易踩的坑、
+- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。第 6 期文档 PR 补齐（此前拖欠：第 3 期账本定的「第 4 期开工前」没做到，见第 4 期账本 §五.8；第 3–5 期三次拖欠的经过见第 5 期账本 §五.5）
+- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（第 6 期文档 PR 补齐）：API 签名、易踩的坑、
   每一次实测发现的错误
 - `.claude/skills/python-drill-tool/SKILL.md` —— 作者须知：新增一页 / 新增一个程序 / 升级一页的作业流程，
   每条硬约束注明由哪道门守（第 1 期设计 B5）
