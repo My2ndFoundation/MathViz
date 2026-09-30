@@ -72,7 +72,7 @@
 | `snake-full` | | ⧉ | 移动、吃食变长、撞墙撞自己；食物用 `random.Random(种子)` 落在空格 🎲 | `snake_step(body, direction, food, n)` → `(body, "moved" / "ate" / "dead")` · 参照另写的列表切片实现 |
 | `snake-move-list` | snake-move | | 蛇身用列表：头插一格、没吃到就弹尾；**尾巴这一步会让开**，所以走进尾巴此刻的格子不算撞 | 同上入口 · 同上参照 |
 | `snake-move-deque` | snake-move | | 同一步用 `deque`：`appendleft` / `pop` 两头都是 O(1)（讲解一句，指回「栈与队列」页） | 同上 |
-| `breakout-full` | | ⧉ | 一排砖、一拍、一球：`Rect.collidelist` 找撞到的第一块砖、删掉它、反弹 | `brick_hit(ball, bricks)` → 下标或 `None` · 参照逐块坐标判相交 |
+| `breakout-full` | | ⧉ | 三行 × 十块砖、一拍、一球：`Rect.collidelist` 找撞到的第一块砖、删掉它、反弹 | `brick_hit(ball, bricks)` → 下标或 `None` · 参照逐块坐标判相交 |
 | `invaders-full` | | ⧉ | 一队外星人左右行进、碰边整体下移并掉头；一炮、一发子弹 | `fleet_step(aliens, direction, step, width, drop)` → `(aliens, direction)` · 参照先走一步再判越界 |
 | `bullet-cooldown` | | | 按住空格也不能连发：冷却计时器 `remaining -= dt`，到 0 才能再开火 | `try_fire(remaining, fire_held, cooldown, dt)` → `(remaining, fired)` · 参照另写的计时 |
 | `lives-and-invulnerability` | | | 被击中掉一条命、之后 2 秒无敌（闪烁）、命数到 0 结束：**先倒计时（夹到 0），无敌计时恰为 0 时不无敌**——到期那一帧被击中照样算 | `take_hit(lives, invuln, hit, dt)` → `(lives, invuln, game_over)` · 参照另写的计时（先算剩余、再判是否可被击中） |
