@@ -26,15 +26,15 @@ def _small_n(rng):
     return (rng.randint(0, 80),)
 
 
-def _search_n(rng):
-    # 0（空表：while 一次都不进）与 2 的幂附近（bit_length 在那里进位）都要抽到：
-    # 四分之一概率抽 0..3，四分之一概率抽 2 的幂 ± 1，其余 0..5000。
+def _found_n(rng):
+    # binary_found_total(n) 把 0..n-1 每个数都找一遍，O(n log n)：n 收到 0..2000。
+    # 0（空表，一次都不找）、1、2 与 2 的幂 ± 1（左右两半在这里由一样长变成差一个）专门抽。
     roll = rng.random()
     if roll < 0.25:
         return (rng.randint(0, 3),)
     if roll < 0.5:
-        return (2 ** rng.randint(1, 12) + rng.randint(-1, 1),)
-    return (rng.randint(0, 5000),)
+        return (2 ** rng.randint(1, 10) + rng.randint(-1, 1),)
+    return (rng.randint(0, 2000),)
 
 
 def _int_list(rng):
@@ -72,9 +72,15 @@ def _pairs_formula(n):
     return n * (n - 1) // 2
 
 
-def _bit_length(n):
-    # 被测程序真的做一遍二分查找再数「看了几次中间」，参照读 n 的二进制位数。
-    return n.bit_length()
+def _found_total_by_halves(n):
+    # 被测程序真的对 0..n-1 逐个做二分查找、把每次「看了几次中间」加起来（每一次都走「找到」
+    # 那个 return）。参照一次查找都不做：长 m 的区间里，每个目标都要先看一眼中间（共 m 次），
+    # 中间那个就此找到，其余的落进左边 (m - 1) // 2 个或右边 m - 1 - (m - 1) // 2 个里接着找。
+    # 所以总数 = m + 左半的总数 + 右半的总数，按区间长度递推。
+    if n == 0:
+        return 0
+    left = (n - 1) // 2
+    return n + _found_total_by_halves(left) + _found_total_by_halves(n - 1 - left)
 
 
 def _inversions_by_pairs(values):
@@ -128,8 +134,11 @@ REFERENCES = {
         'cases': _small_n,
     },
     'search-comparison-counts': {
-        'ref': _bit_length,
-        'cases': _search_n,
+        # entry 是 binary_found_total：它让被测的 binary_comparisons 每一次都走「找到」那一支
+        # （原先的 entry binary_worst_comparisons 只走「找不到」那一支，门对「找到」是瞎的）。
+        # 「找不到」那一支现在由 run.expect 里最坏情况那张表守（程序真跑门）。
+        'ref': _found_total_by_halves,
+        'cases': _found_n,
     },
     'insertion-shift-counts': {
         'ref': _inversions_by_pairs,

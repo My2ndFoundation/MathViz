@@ -2,7 +2,7 @@
 
 
 def counting_sort(items, max_value):
-# >>> BLANK id=table level=2 hint="一行，存进 counts：一张全是 0 的表，用 [0] 乘一个长度得到，[0] 写在乘号左边；长度写成 max_value + 1，外面加括号 || 值从 0 到 max_value 都可能出现，每个值占一格，所以一共要 max_value + 1 格" hintEn="One line stored in counts: a list of zeros made by multiplying [0] by a length, with [0] on the left of the *; write the length as max_value + 1, in brackets || Every value from 0 to max_value can occur and each gets one slot, so max_value + 1 slots are needed"
+# >>> BLANK id=table level=2 hint="一张全是 0 的表，存进 counts：用乘法造（不用推导式），[0] 写在乘号左边 || 值从 0 到 max_value 都可能出现，每个值占一格，所以长度是 max_value + 1；乘号右边的长度要加括号" hintEn="A list of zeros stored in counts: made by multiplication (not a comprehension), with [0] on the left of the * || Every value from 0 to max_value can occur and each gets one slot, so the length is max_value + 1; the length on the right of the * needs brackets"
     counts = [0] * (max_value + 1)
 # <<< BLANK
     for value in items:

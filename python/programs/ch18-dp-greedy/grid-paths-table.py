@@ -4,7 +4,7 @@
 def count_paths(grid):
     rows = len(grid)
     cols = len(grid[0])
-# >>> BLANK id=table level=2 hint="建一张 rows 行、cols 列、全是 0 的表：外层用列表推导式、循环变量写 _，每一轮新建一行；一行里的 0 用乘法写，[0] 在乘号左边（但别用乘法去复制整行——那样每一行都是同一个列表，改一格整列跟着变） || 推导式跑 range(rows) 那么多轮，每一轮产出的一行是 [0] 乘以 cols" hintEn="Build a table of rows rows and cols columns, all 0: the outside is a list comprehension with _ as the loop variable, building a fresh row each time round; the 0s in a row are written with multiplication, [0] on the left of the * (but do not copy whole rows with multiplication - every row would then be the same list, and changing one cell would change the whole column) || The comprehension runs range(rows) times, and the row it makes each time is [0] times cols"
+# >>> BLANK id=table level=2 hint="外层是列表推导式，循环变量写 _，每一轮新建一行；行里的 0 用乘法写，[0] 在乘号左边（别用乘法复制整行——那样每一行都是同一个列表，改一格整列跟着变） || 表要 rows 行、cols 列：推导式跑 range(rows) 那么多轮，每一轮产出的一行有 cols 个 0" hintEn="The outside is a list comprehension with _ as the loop variable, building a fresh row each time round; the 0s in a row are written with multiplication, [0] on the left of the * (but do not copy whole rows with multiplication - every row would then be the same list, and changing one cell would change the whole column) || The table has rows rows and cols columns: the comprehension runs over range(rows), and each row it makes holds cols 0s"
     ways = [[0] * cols for _ in range(rows)]
 # <<< BLANK
     for r in range(rows):

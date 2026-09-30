@@ -5,10 +5,10 @@ def lcs_table(a, b):
     table = [[0] * (len(b) + 1) for _ in range(len(a) + 1)]
     for i in range(1, len(a) + 1):
         for j in range(1, len(b) + 1):
-# >>> BLANK id=match level=1 hint="看两个串「这一格对应的字符」是否相同：表的第 i 行对应 a 的第 i 个字符，它的下标是 i - 1（b 与 j 同理）；写 a 的那一边在 == 左边" hintEn="Check whether the characters for this cell are the same: row i of the table stands for the i-th character of a, whose index is i - 1 (the same for b and j); the a side goes on the left of =="
             if a[i - 1] == b[j - 1]:
-# <<< BLANK
+# >>> BLANK id=diagonal level=2 hint="字符相同：这一格比左上角那一格多 1；左上角那一项写在加号前面，1 写在后面 || 左上角那一格在上一行、前一列：两个下标各减 1" hintEn="Same characters: this cell is one more than the cell up and to the left; the diagonal cell goes before the plus sign and the 1 after it || The cell up and to the left is in the previous row and the previous column: take 1 off both indexes"
                 table[i][j] = table[i - 1][j - 1] + 1
+# <<< BLANK
             else:
 # >>> BLANK id=skip-one level=2 hint="字符不同：两个串里总有一个的这个字符用不上。用 max 取两种「丢掉一个字符」里较好的那种，赋给这一格；先写丢掉 a 的字符那一种 || 丢掉 a 的字符是上一行同一列 table[i - 1][j]；丢掉 b 的字符是同一行前一列" hintEn="Different characters: one of the two strings cannot use its character here. Use max to take the better of the two ways of dropping a character and assign it to this cell; write dropping a's character first || Dropping a's character is the row above, same column: table[i - 1][j]; dropping b's is the same row, previous column"
                 table[i][j] = max(table[i - 1][j], table[i][j - 1])

@@ -11,7 +11,7 @@ def show_big(value):
 
 
 def growth_row(n):
-# >>> BLANK id=exact-log level=2 hint="n 是 2 的整数次幂，log2 n 可以不用 math 模块、用整数算：调用 n 自己的 bit_length 方法，再减去 1 || 2 的 k 次幂写成二进制是 1 后面跟 k 个 0，一共 k + 1 位" hintEn="n is a whole power of 2, so log2 n can be worked out in whole numbers without the math module: call n's own bit_length method, then subtract 1 || 2 to the power k in binary is a 1 followed by k zeros - k + 1 bits in all"
+# >>> BLANK id=exact-log level=2 hint="n 是 2 的整数次幂，log2 n 不用 math 模块、只用整数算：借 n 自己的 bit_length 方法，结果存进 log_n || 2 的 k 次幂写成二进制是 1 后面跟 k 个 0，一共 k + 1 位——位数比 log2 n 多 1，要减掉" hintEn="n is a whole power of 2, so log2 n can be worked out in whole numbers without the math module: use n's own bit_length method and store the result in log_n || 2 to the power k in binary is a 1 followed by k zeros - k + 1 bits in all, one more than log2 n, so take 1 off"
     log_n = n.bit_length() - 1
 # <<< BLANK
     return [n, log_n, n * log_n, n * n, show_big(2 ** n)]

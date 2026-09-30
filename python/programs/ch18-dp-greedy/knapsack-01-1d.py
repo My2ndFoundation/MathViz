@@ -2,7 +2,7 @@
 
 
 def best_value(weights, values, capacity):
-# >>> BLANK id=row level=1 hint="只要一行：下标 0 到 capacity 各一格、全是 0 的列表，用 [0] 乘以格数写出来，格数写成 capacity + 1（加上括号）" hintEn="Just one row: a list of 0s with one place for each index from 0 to capacity, written as [0] times the number of places, with the number written as capacity + 1 (in brackets)"
+# >>> BLANK id=row level=2 hint="只要一行 0：用 [0] 乘以格数写出来，[0] 在乘号左边（不用推导式） || 下标 0 到 capacity 各一格，一共 capacity + 1 格；乘号右边的格数加上括号" hintEn="Just one row of 0s: written as [0] times the number of places, [0] on the left of the * (not a comprehension) || One place for each index from 0 to capacity, so capacity + 1 places; put the number of places on the right of the * in brackets"
     best = [0] * (capacity + 1)
 # <<< BLANK
     for weight, value in zip(weights, values):

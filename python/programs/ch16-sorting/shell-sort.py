@@ -8,7 +8,7 @@ def shell_sort(items):
             key = items[i]
             j = i - gap
             while j >= 0 and items[j] > key:
-# >>> BLANK id=shift level=2 hint="两行，都和 insertion_sort 里的右移那两行一个样子，只是步长从 1 换成 gap；第二行用 -= 写 || 先把 items[j] 往后挪 gap 格，再让 j 往前退 gap 格" hintEn="Two lines, each shaped like the two shifting lines in insertion_sort, with the step changed from 1 to gap; write the second one with -= || First move items[j] gap places later, then step j gap places back"
+# >>> BLANK id=shift level=2 hint="两行，都和「插入排序」里的右移那两行一个样子，只是步长从 1 换成 gap；第二行用 -= 写 || 先把 items[j] 往后挪 gap 格，再让 j 往前退 gap 格" hintEn="Two lines, each shaped like the two shifting lines in Insertion Sort, with the step changed from 1 to gap; write the second one with -= || First move items[j] gap places later, then step j gap places back"
                 items[j + gap] = items[j]
                 j -= gap
 # <<< BLANK

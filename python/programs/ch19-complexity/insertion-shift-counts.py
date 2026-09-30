@@ -9,7 +9,7 @@ def count_shifts(values):
     for i in range(1, len(items)):
         key = items[i]
         j = i - 1
-# >>> BLANK id=shift-test level=2 hint="还有左邻、而且左邻比 key 大，就继续右移：一个 while，两个条件用 and 连起来，先判 j >= 0 || 第二个条件用严格的大于号比 items[j] 与 key——相等的元素不挪，它们本来就不是逆序对" hintEn="Keep shifting while there is a left neighbour and it is bigger than key: a while with two conditions joined by and, the j >= 0 test first || The second condition compares items[j] with key using a strict greater-than - equal items stay put, since they are not an out-of-order pair"
+# >>> BLANK id=shift-test level=2 hint="还有左邻、而且左邻比 key 大，就继续右移：一个 while，两个条件用 and 连起来。写法上钉两处：下标那个条件写在前，写成 >= 的比较（不写 > -1）；另一个条件里 items[j] 写在比较号左边 || 下标条件管的是 j 还没越过表头；另一个条件用严格的大于号——相等的元素不挪，它们本来就不是逆序对" hintEn="Keep shifting while there is a left neighbour and it is bigger than key: a while with two conditions joined by and. Two choices are fixed: the index condition comes first, written as a >= comparison (not > -1); in the other condition items[j] goes on the left of the comparison || The index condition says j has not run past the front; the other one uses a strict greater-than - equal items stay put, since they are not an out-of-order pair"
         while j >= 0 and items[j] > key:
 # <<< BLANK
             items[j + 1] = items[j]
