@@ -86,8 +86,11 @@ GitHub Pages 给 HTML 发 `cache-control: max-age=600`，浏览器还会留得�
 
 ### C3 · 出站引用收敛成一个常量，并且自愈
 
-整个子目录里**只有一处**父目录相对路径：`PARENT_HOME = '../app.html'`，
-`app.html` 与 `index.html` 各一份，别处一律为零。
+导航**目的地**只有一处父目录相对路径：`PARENT_HOME = '../app.html'`，
+`app.html` 与 `index.html` 各一份。每页另有**一处**不属于导航的出站引用——cookie 同意横幅里指向根目录的
+`../privacy.html`（`GENERATED:ANALYTICS` 区间，由 `scripts/apply_footer.py` 写入；ICO 要求横幅能点到一份说明）。
+所以三个子项目的 `outbound_ref_check()` 都是每页恰好 2 处（`OUTBOUND_ALLOW = {'app.html': 2, 'index.html': 2}`），别处一律为零。
+*（2026-09-30 更正：本段原写「整个子目录里只有一处」，与三个子项目的门和页面实情都不符——python 一致性清理 PR 发现。只改文字，不改任何门或页面。）*
 
 - 目的地是 MathViz 的**导航壳** `app.html`，不是扁平画廊 `index.html`。去程是「壳 → 壳」
   （根 `index.html` 的子项目卡片带 `target="_top"`），回程必须对称——指向 `index.html`
