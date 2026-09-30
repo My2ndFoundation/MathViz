@@ -151,3 +151,4 @@
 | — | `sir-epidemic-steps` | 浮点输出打印时 round 或格式化到固定位数，照 R4 两解释器比对 |
 | — | `ttt-minimax` cases | k ≥ 3 照做；门每次调用限时 2 秒 |
 | — | 组名 | 5 个组名与全库无重名；m5a 的清单到了由 Python编程 交叉核对，撞了由 m5a 改名 |
+| — | py-games 页名（终审 M8） | title 改为「控制台游戏」/ Console Games——本页全是文本界面的游戏，与 M7 pygame 的「图形与游戏」区分；页 id `py-games` 与章目录 `ch22-games` 不变 |
