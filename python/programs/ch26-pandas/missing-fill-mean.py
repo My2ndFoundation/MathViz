@@ -7,6 +7,8 @@ READINGS = [12.0, None, 15.0, 9.0, None, 14.0]
 
 def fill_with_mean(values):
     s = pd.Series(values, dtype="float64")
+    if s.isna().all():
+        return [None] * len(s)
 # >>> BLANK id=fill-gaps level=2 hint="把 s 里每个缺失的位置补上 s 的均值，结果存进 filled——用 fillna，实参直接写（不写 value=），就是 s 自己的 .mean() || mean() 求均值时会跳过 NaN，所以算出来的就是在场那些读数的均值，不用先 dropna" hintEn="Fill every missing place in s with the mean of s, keeping the result in filled - use fillna with the argument written straight in (no value=), and that argument is s's own .mean() || mean() skips NaN when it averages, so this is already the mean of the readings that are there; no need to dropna first"
     filled = s.fillna(s.mean())
 # <<< BLANK
@@ -26,3 +28,4 @@ if __name__ == "__main__":
     print(float(s.fillna(0).mean()))
     print(fill_with_mean(READINGS))
     print(fill_with_mean([None, 3, None]))
+    print(fill_with_mean([None, None]))

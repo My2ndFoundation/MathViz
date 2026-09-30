@@ -15,7 +15,7 @@ def draw_scatter(path):
 # >>> BLANK id=scatter level=3 hint="经过 ax 画散点，交回来的对象存进 points：前两个位置实参是横坐标 HOURS、纵坐标 SCORES，后面三个关键字实参按「大小、颜色、配色表」的顺序写 || 大小用关键字 s，给上一行算好的列表；颜色用关键字 c，给出勤率那张表 || 配色表用关键字 cmap，名字是 viridis（写成双引号字符串）" hintEn="Draw the scatter through ax and keep the returned object in points: the first two positional arguments are the x values HOURS and the y values SCORES, then three keyword arguments in the order size, colour, colour map || Size goes in keyword s, given the list the line above built; colour goes in keyword c, given the attendance list || The colour map goes in keyword cmap, and its name is viridis (written as a string in double quotes)"
     points = ax.scatter(HOURS, SCORES, s=sizes, c=ATTEND, cmap="viridis")
 # <<< BLANK
-# >>> BLANK id=colorbar level=2 hint="经过 fig 给 points 配一根颜色条（这一行只调用，不存返回值）：第一个实参是 points，再用关键字 ax= 说它挨着哪个坐标系，用关键字 label= 给它写名字（双引号） || 颜色条的名字是 Attendance (%)" hintEn="Through fig, give points a colour bar (this line only calls it, keeping nothing): the first argument is points, then keyword ax= says which axes it sits beside and keyword label= names it (double quotes) || The colour bar's name is Attendance (%)"
+# >>> BLANK id=colorbar level=2 hint="经过 fig 给 points 配一根颜色条（这一行只调用，不存返回值）：第一个实参是 points，再用关键字 ax= 说它挨着哪个坐标系，用关键字 label= 给它写名字（双引号）；先 ax 后 label || 颜色条的名字是 Attendance (%)" hintEn="Through fig, give points a colour bar (this line only calls it, keeping nothing): the first argument is points, then keyword ax= says which axes it sits beside and keyword label= names it (double quotes); ax first, then label || The colour bar's name is Attendance (%)"
     fig.colorbar(points, ax=ax, label="Attendance (%)")
 # <<< BLANK
     ax.set_xlabel("Hours revised")

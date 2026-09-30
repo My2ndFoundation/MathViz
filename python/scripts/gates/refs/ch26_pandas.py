@@ -13,8 +13,10 @@ numpy / pandas**，生成器造的也是纯 Python 实参。门逐层比值与�
 写法一致——pandas 求均值的求和次序与逐项相加不同，末位可能差一点，舍到 9 位后两边相同。
 
 缺失值：返回值里**不许有 NaN**（nan != nan，门会红得与程序无关）。merge-left-join 的入口
-把缺失的分数转成 None，参照同样给 None；missing-fill-mean 的生成器保证至少有一个在场的读数
-（全缺时均值本身就是 NaN，补不上）。
+把缺失的分数转成 None，参照同样给 None。missing-fill-mean 全缺时没有均值可补（均值本身就是
+NaN），入口整列交回 None，参照同样；生成器**有意**产出全缺的实参（约一成专门构造，另有随机
+自然落到的）——删掉入口的全缺判断、让它交回 [nan, …]，门在这一支上红（实跑过，见 m6b 修复报告）。
+别把生成器改回「保证至少一个在场」：那样这一支门就看不见了。
 
 本章的生成器写在本文件里，不动 `_gen.py`（那个文件逐字符冻结，理由见它的文件头）。
 """
@@ -75,14 +77,16 @@ def _missing_cases(rng):
     for i in range(len(values)):
         if rng.random() < 0.3:
             values[i] = None
-    if all(v is None for v in values):
-        values[rng.randrange(len(values))] = rng.randint(0, 20)
+    if rng.random() < 0.1:
+        values = [None] * len(values)       # 全缺：入口该交回全 None，而不是 NaN
     return (values,)
 
 
 def _missing_ref(values):
     # 被测靠 Series.fillna(Series.mean())；参照先挑出在场的值求均值，再逐个替换 None。
     present = [v for v in values if v is not None]
+    if not present:
+        return [None] * len(values)
     m = round(_mean(present), 9)
     return [m if v is None else round(float(v), 9) for v in values]
 
