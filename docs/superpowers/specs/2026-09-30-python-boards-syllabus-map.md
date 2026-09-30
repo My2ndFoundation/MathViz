@@ -70,6 +70,9 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | 数据可视化 | — | — | **未找到**（4.11 Big Data 不含画图） |
 | 事件驱动 / 游戏循环 | — | — | **未找到** |
 | 第三方库（NumPy / pandas / matplotlib / pygame） | — | — | **未找到** |
+| 位运算 / 掩码（第 6 期 m8a 补） | 4.7.3.5 | "logical bitwise operators (AND, OR, NOT, XOR), logical shift right, shift left"（机器码操作；R2：Python 的 `& \| ^ ~ << >>` 实现的是同一概念） | 点名 |
+| 补码（第 6 期 m8a 补） | 4.5.4.3 | "signed binary can be used to represent negative integers and … one possible coding scheme is two's complement" | 点名 |
+| 中断（第 6 期 m8a 补） | 4.7.3.6 | "Describe the role of interrupts and interrupt service routines (ISRs)" | 点名 |
 
 ## 二、OCR H446（Version 3.0，2026-04）
 
@@ -100,6 +103,9 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | 异常处理 | — | — | **未找到**（v3.0 全文检索，只有附录里一处 "with the exception of"） |
 | 有限状态机、正则、逆波兰、集合运算 | — | — | **未找到** |
 | 统计、矩阵运算、向量、数据可视化、事件驱动、第三方库 | — | — | **未找到** |
+| 中断（第 6 期 m8a 补） | 1.2.1(c) | "Interrupts, the role of interrupts and Interrupt Service Routines (ISR), role within the Fetch-Decode-Execute Cycle." | 点名（v3.0 全文核实） |
+| 补码（第 6 期 m8a 补） | 1.4.1(c) | "Use of sign and magnitude and two's complement to represent negative numbers in binary." | 点名（v3.0 全文核实） |
+| 位运算 / 掩码（第 6 期 m8a 补） | 1.4.1(i) | "Bitwise manipulation and masks: shifts, combining with AND, OR, and XOR." | 点名（v3.0 全文核实） |
 
 ## 三、Edexcel / Pearson — International A Level Computer Science（YCP01）
 
@@ -134,6 +140,9 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | SQLite | 8.3 | "Methods to retrieve data from an SQLite database" | 点名 |
 | 有限状态机、逆波兰、词法分析、JSON、向量点积、统计（除集中趋势）、事件驱动、pygame | — | — | **未找到** |
 | 规格没附的东西 | — | Unit 2 / 4 的 *Programming Language Subset (PLS)* 文档 | IAL 版 PLS **未找到**（只找到 GCSE 1CP2 的） |
+| 补码（第 6 期 m8a 补） | 2.1.3 | "Two's complement representation of signed numbers" | 点名 |
+| 位运算 / 掩码（第 6 期 m8a 补） | 2.2.2、7.1.3(d) | "Bitwise manipulation: Logical shift, Arithmetic shift, Bit masks: AND, OR, XOR"；Operators "(d) Bitwise" | 点名 |
+| 中断（第 6 期 m8a 补） | 11.2.1(e)、1.2.2(c) | "Interrupt handling in device management"；"Interrupt handling in multitasking" | 点名 |
 
 ## 四、CIE 9618（2027–2029）
 
@@ -160,6 +169,9 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | 回归 | 18.1 | "back propagation of errors and regression methods in machine learning" | 点名（**AI / 机器学习语境**下；最小二乘直线按此写 CIE） |
 | 优先队列、堆、双端队列、向量、矩阵运算、正则、JSON、其余统计、数据可视化、事件驱动、第三方库 | — | — | **未找到**（11.1 "library routines" 只是泛称） |
 | 作用域（局部 / 全局） | — | — | **未找到**（11.3 只有 procedure / function / parameter / by value / by reference） |
+| 补码（第 6 期 m8a 补） | 1.1 | "one's and two's complement representation for binary numbers" | 点名 |
+| 中断（第 6 期 m8a 补） | 4.1 | "Show understanding of the purpose of interrupts … use of an Interrupt Service handling Routine (ISR)" | 点名 |
+| 位运算 / 掩码（第 6 期 m8a 补） | 4.3 | "Show understanding of how bit manipulation can be used to monitor/control a device … Test and set a bit (using bit masking)" | 点名 |
 
 ## 判定原则
 
@@ -207,6 +219,8 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 |---|---|---|---|---|---|
 | 改前（main，346 个程序） | 346 | 346 | 346 | 346 | 0 |
 | 改后 | 216 | 183 | 252 | 179 | 70 |
+
+第 6 期 m8a 新增 18 个程序（ch33、ch34）：AQA +3 · OCR +3 · Edexcel +3 · CIE +3 · `[]` +15。
 
 相对 main，194 个程序的 `boards` 变了，分布在 29 页（每页 patch 升版一次并写 changelog）。
 
@@ -309,6 +323,18 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | types | 2 | AQA OCR Edexcel CIE：`int-float-str`、`digit-sum-string` | （组内一致） |
 | validation | 3 | AQA OCR Edexcel CIE：`input-validation-loop`、`ttt-game-loop`、`menu-driven-cli` | （组内一致） |
 | vectors | 6 | AQA Edexcel：`dot-product-angle`；AQA：`colour-lerp`、`diagonal-unnormalised`、`diagonal-normalised`、`mouse-steer-toward`、`thrust-max-speed` | 向量运算只有 AQA 4.2.8.1 点名；dot-product-angle 另因 NumPy 写 E |
+
+第 6 期 m8a 新增的概念组（组内一致）：
+
+| 概念组 | 程序数 | boards：程序 | 理由 |
+|---|---|---|---|
+| bitwise | 1 | AQA OCR Edexcel CIE：`gpio-bitmask` | （组内一致） |
+| twos-complement | 1 | AQA OCR Edexcel CIE：`radio-packet-bytes` | （组内一致） |
+| interrupts | 1 | AQA OCR Edexcel CIE：`pin-irq-counter` | （组内一致） |
+| radio-text | 1 | []：`radio-packet-csv` | 与 `radio-packet-bytes` 同一问题的文本版，核心是字符串解析报文、不涉及补码——同题不同组 |
+| ticks-wrap | 2 | []：`elapsed-naive-subtract`、`elapsed-ticks-diff` | （组内一致） |
+| microbit-io | 7 | []：`led-image-string`、`scroll-and-show`、`button-press-edges`、`accelerometer-tilt`、`spirit-level-column`、`compass-point`、`music-note-frequency` | （组内一致） |
+| pico-io | 5 | []：`blink-gpio-pin`、`pwm-duty-percent`、`pwm-servo-angle`、`adc-temperature`、`timer-periodic-callback` | （组内一致） |
 
 ## 附录 · 逐程序判定表
 
@@ -662,6 +688,24 @@ AQA 的节名：`fundamentals-of-programming`、`fundamentals-of-data-structures
 | ch32 | `invaders-full` | AQA OCR Edexcel CIE | `[]` **改** | pygame-game | 完整小游戏 Space Invaders：pygame / 游戏循环 / 事件驱动四家都未点名 |
 | ch32 | `bullet-cooldown` | AQA OCR Edexcel CIE | `[]` **改** | pygame-game | 开火冷却计时：pygame / 游戏循环 / 事件驱动四家都未点名 |
 | ch32 | `lives-and-invulnerability` | AQA OCR Edexcel CIE | `[]` **改** | pygame-game | 生命与无敌时间：pygame / 游戏循环 / 事件驱动四家都未点名 |
+| ch33 | `led-image-string` | （第 6 期新增） | `[]` | microbit-io | 5×5 亮度表拼成 Image 字符串，核心是字符串格式（R1）；四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch33 | `scroll-and-show` | （第 6 期新增） | `[]` | microbit-io | 点阵滚动与显示、sleep 毫秒：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch33 | `button-press-edges` | （第 6 期新增） | `[]` | microbit-io | 按钮上升沿计数（is_pressed / was_pressed）：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch33 | `accelerometer-tilt` | （第 6 期新增） | `[]` | microbit-io | 加速度计倾斜判定：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch33 | `spirit-level-column` | （第 6 期新增） | `[]` | microbit-io | 读数映射到点阵列：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch33 | `compass-point` | （第 6 期新增） | `[]` | microbit-io | 航向换八方位：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch33 | `radio-packet-csv` | （第 6 期新增） | `[]` | radio-text | 无线电文本报文 split 解析：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具）；字符串解析未单独点名 |
+| ch33 | `radio-packet-bytes` | （第 6 期新增） | AQA OCR Edexcel CIE | twos-complement | 有符号温度按一字节收发、>127 减 256 即 8 位补码：A 4.5.4.3 · O 1.4.1(c) · E 2.1.3 · C 1.1 |
+| ch33 | `music-note-frequency` | （第 6 期新增） | `[]` | microbit-io | 十二平均律算音符频率：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch34 | `blink-gpio-pin` | （第 6 期新增） | `[]` | pico-io | GPIO 输出闪灯：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch34 | `pwm-duty-percent` | （第 6 期新增） | `[]` | pico-io | 百分比换 duty_u16：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch34 | `pwm-servo-angle` | （第 6 期新增） | `[]` | pico-io | 角度换舵机脉宽：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch34 | `adc-temperature` | （第 6 期新增） | `[]` | pico-io | ADC 读数换摄氏度：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch34 | `pin-irq-counter` | （第 6 期新增） | AQA OCR Edexcel CIE | interrupts | 硬件中断与短小的中断处理函数：A 4.7.3.6 · O 1.2.1(c) · E 11.2.1(e)、1.2.2(c) · C 4.1 |
+| ch34 | `timer-periodic-callback` | （第 6 期新增） | `[]` | pico-io | 硬件定时器回调：四家都不点名 micro:bit / Pico 硬件 API（R3：库是工具） |
+| ch34 | `elapsed-naive-subtract` | （第 6 期新增） | `[]` | ticks-wrap | 计数器回绕时直接相减出错：四家点名补码的表示换算与 MOD 运算符，读不出覆盖「回绕差值」（R5） |
+| ch34 | `elapsed-ticks-diff` | （第 6 期新增） | `[]` | ticks-wrap | ticks_diff 的环形算术：同上（R5） |
+| ch34 | `gpio-bitmask` | （第 6 期新增） | AQA OCR Edexcel CIE | bitwise | 掩码置位 / 清零 / 翻转：A 4.7.3.5 · O 1.4.1(i) · E 2.2.2、7.1.3(d) · C 4.3（点名「用位掩码控制设备」） |
 
 ## 待办
 
