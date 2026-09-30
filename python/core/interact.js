@@ -146,12 +146,12 @@
                   en: 'Blocked: this line is indented {0} space(s) more than the reference - backspace {0} time(s) first' },
     lineLess:    { zh: '你比参考少了 {0} 行', en: 'You are {0} line(s) short of the reference' },
     clearOne:    { zh: '清空本题', en: 'Clear this program' },
-    clearModule: { zh: '清空本模块', en: 'Clear this module' },
+    clearPage:   { zh: '清空本页', en: 'Clear this page' },
     clearAll:    { zh: '清空全部', en: 'Clear everything' },
     confirmOne:  { zh: '清空本题的草稿？本题现有 {0} 条记录，其中的草稿会被清除，进度保留。',
                   en: 'Clear the drafts for this program? It has {0} record(s); the drafts go, the progress stays.' },
-    confirmModule:{ zh: '清空本模块所有题的草稿？本模块现有 {0} 条记录，其中的草稿会被清除，进度保留。',
-                  en: 'Clear drafts for every program in this module? {0} record(s) here; the drafts go, the progress stays.' },
+    confirmPage: { zh: '清空本页所有题的草稿？本页现有 {0} 条记录，其中的草稿会被清除，进度保留。',
+                  en: 'Clear drafts for every program on this page? {0} record(s) here; the drafts go, the progress stays.' },
     confirmAll:  { zh: '清空整个 python 子项目的草稿与进度？本页涉及 {0} 条记录，其他页的记录也会一并清除（语言与偏好保留）。',
                   en: 'Clear drafts and progress for the whole python subproject? {0} record(s) on this page, plus every record on the other pages (language and preferences are kept).' },
     cleared:     { zh: '已清空',   en: 'Cleared' },
@@ -387,9 +387,12 @@
      所以判据写成 `=== 'read'`（**白名单**）而不是 `!== 'blank'`（黑名单）：
      黑名单在加第四个模式时会默认放行，而「默认放行」正是这个洞的形状。
 
-     两道防线各守一半，缺一不可：
+     锚**可以**落在挖空体内——第 0 期的 `anchor_check()` 禁过，第 1 期（设计 D7）
+     放开了：值得讲解的行通常正是值得挖掉的行。所以数据层不再挡，泄题的防线
+     全在读取侧，两道各守一半，缺一不可：
        · 这里：非读模式面板里根本没有行注段；
-       · `anchor_check()`：锚一开始就不许落在挖空体内。 */
+       · `line_note_reader_check()`（gates/hygiene.py）：core 里只有本函数与
+         `noteLineIndex` 两处许读行注字段，别处新增一个读取点当场红。 */
   function panelLineNotes(program, mode) {
     if (mode !== 'read') { return []; }
     return (program && program.lineNotes) ? program.lineNotes : [];
@@ -397,17 +400,22 @@
 
   /* clearScope(scope, programs, currentId) → string[] | null
 
+     'page' 给的是 `programs` 的全部 id——也就是**本页**内嵌的那一章，不是整个
+     模块：页面只内嵌自己那一章（GENERATED:PROGRAMS），同模块别的页的 id 在这里
+     根本看不见。这一级原先叫 'module'、按钮写「清空本模块」，而它从来只清本页；
+     名字与文案都已改成与行为一致（「清空本页」）。
+
      'all' 这一支返回 **null**，含义是"交给 Store.clearAll()，不走 id 列表"：
      整项清空扫的是键前缀，本页根本列举不出别的页的 id，返回一个只含本页
      id 的数组会是一个看上去很对、实际上清不干净的谎（裁决 R4）。
      未知 scope 当场抛——清空是不可撤销的，猜不得。 */
   function clearScope(scope, programs, currentId) {
     if (scope === 'program') { return currentId ? [currentId] : []; }
-    if (scope === 'module') {
+    if (scope === 'page') {
       return (programs || []).map(function (p) { return p.id; });
     }
     if (scope === 'all') { return null; }
-    throw new Error('clearScope: 未知范围 ' + scope + '（只认 program / module / all）');
+    throw new Error('clearScope: 未知范围 ' + scope + '（只认 program / page / all）');
   }
 
   /* clearRecords(store, scope, ids) —— 按 scope 真正动手清
@@ -419,7 +427,7 @@
      "已清空"，她不会再去看第二眼。
 
      `ids === null` 是 `clearScope('all')` 的出口：交给 clearAll 扫键前缀。
-     单题 / 模块两级只清 draft（进度不连坐，spec §4.5）。 */
+     单题 / 本页两级只清 draft（进度不连坐，spec §4.5）。 */
   function clearRecords(store, scope, ids) {
     store.flush();
     if (ids === null) { store.clearAll(); return; }
@@ -1384,7 +1392,7 @@
 
       var tools = h('div', 'py-sec');
       var row = h('div', 'py-chips');
-      row.appendChild(btn('py-btn', t('clearModule', S.lang), function () { askClear('module', null); }));
+      row.appendChild(btn('py-btn', t('clearPage', S.lang), function () { askClear('page', null); }));
       row.appendChild(btn('py-btn', t('clearAll', S.lang), function () { askClear('all', null); }));
       tools.appendChild(row);
       picker.appendChild(tools);
@@ -1396,13 +1404,13 @@
       /* 二次确认里的条数是 Store.countRecords 的**真实条数**，不是估的。
          两处措辞上的诚实，都是因为这个数字与"这一级实际清掉什么"并不重合：
            · countRecords 数的是 draft:blank + draft:trace + progress 三种键，
-             而单题 / 模块两级只清 draft（进度是"她已经会了"的记录，spec §4.5
+             而单题 / 本页两级只清 draft（进度是"她已经会了"的记录，spec §4.5
              明确不连坐），所以文案说"其中的草稿会被清除、进度保留"。
            · 'all' 这一级本页列举不出别的页的 id，所以只能数出本页的那一部分，
              文案就明说"本页 N 条，其他页的记录也会一并清除"——报一个看上去
              精确、实际只数了本页的数字，是在撒谎。 */
       var n = St.countRecords(ids === null ? PROGRAMS.map(function (p) { return p.id; }) : ids);
-      var key = scope === 'program' ? 'confirmOne' : scope === 'module' ? 'confirmModule' : 'confirmAll';
+      var key = scope === 'program' ? 'confirmOne' : scope === 'page' ? 'confirmPage' : 'confirmAll';
       var ask = (win && typeof win.confirm === 'function') ? win.confirm : null;
       if (ask && !ask.call(win, ts(key, S.lang, [n]))) { return; }
       /* 动手的次序（先 flush 再清）在 clearRecords 里，那里测得到。 */
@@ -2419,6 +2427,10 @@
     runtimeLabel: runtimeLabel,
     KIND_LABELS: KIND_LABELS,
     RUNTIME_LABELS: RUNTIME_LABELS,
-    panelMeta: panelMeta
+    panelMeta: panelMeta,
+    /* 文案取值口（`ts(key, lang, args)`）。导出只为让 node 能断言面向使用者的
+       措辞与真实行为一致——「清空本模块」按钮实际只清本页，这种错只有测文案
+       才看得见（interact.test.js）。 */
+    ts: ts
   };
 });
