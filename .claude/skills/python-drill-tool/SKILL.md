@@ -79,6 +79,14 @@ description: >-
   之间选一种」的钉法放第 1 级提示**（她还没点开提示就写出另一种好写法时不该意外发现自己错了）；
   只有当写出这个钉法本身就等于把整行答案念出来时，才把它挪到最后一级。
 - **提示逐级更具体，任何一级都不许给出答案原文。**
+- **挖空答案不许原样出现在同一程序没挖的行上（「照抄空」）。** 把答案行去掉缩进，在同一个 `.py` 的其余行里逐字找一遍；找得到，这个空就成了抄上下文——
+  换一行挖。第 2 期 M4 终审抓到 3 处（`hash-search-linear-probing` 的探测两行在同程序的查找函数里原样出现、`lcs-length` 的比较行在回溯函数里原样出现），
+  修复时扫描又找出 2 处。**只由关键字和标点组成的行（`else:`、`finally:`、`try:`）不算照抄空**——这种行在任何程序里都长一个样，挖它考的是结构位置，不是抄写；
+  其余的行，哪怕短如 `ops.append(token)`，也算。**没有门**（做成门很便宜，记在第 2 期账本里当建议）；写完自己扫本页，评审扫本波。
+  存量：ch01–ch14 按此口径还有 5 处（M3 4 处、第 1 期 1 处，清单在第 2 期账本 §三.4），改它们要升版，留给下一个动那几页的内容 PR。
+- **不挖跨嵌套块的多行空。** 判定器在答案与标准答案**行数不同**时完全不比缩进（`python/core/judge.js:162`，只在 `na.rel.length === nr.rel.length` 时比相对缩进），
+  连改变语义的缩进也判对：三行的 `if a:` / `    if b: c()` / `d()` 被判等于 `d()` 缩进在外层 `if` 里的那四行。多行空只挖**同一层**的两三行，并用第 1 级提示钉住写法。
+  （第 1 期账本 §一.3；判定器没改，第 2 期是靠这条规矩避开的——M3 26 个、M4 6 个多行空都在同一层。）
 - 被挖的行里若有学生无从推断的文字（`input()` 的提示语、任意取的格式宽度），提示必须给出它，否则别挖。
 - **挖空错误反馈从不打印字符串/f-string 字面量的原文**（Task 11b）：期待的 token 是一个字符串或
   f-string 时，她只会看到它的类别（一个字符串 / 一个 f-string）与自己写的原文从第几个字符起开始
@@ -89,14 +97,18 @@ description: >-
   「和打印出来的一样」。第 1 期波 1 终审抓到 6 个这样的空（说明文字、文档串、`, studies at `），修法是最后一级给出那段文字。
 - `notes` / `blurb` 在三种模式都显示，不许逐字写出挖空答案；`lineNotes` 只在读模式显示，挂在被挖那行上没关系。
   也别让**未挖的字符串**（表头、标题）改个大小写就是答案（波 2 de-morgan）。
-- 讲解里指别的程序**写标题**，不写「下一个 / 上一个 / 本页最后一个程序」——页面可以筛选，顺序不可靠；
-  也不写「捕获到的输出」「看输出第几行」——她看不到输出。
+- 讲解里指别的程序**写标题**，不写「下一个 / 上一个 / 本页最后一个程序」——页面可以筛选，顺序不可靠；提示里也一样，不用函数名指代别的程序
+  （本程序里没有那个函数）。指别的**页**写注册表里的页名，用「」括起来：「递归的机制见「递归」一页」。**不用 `*星号*`**——`notes` 按纯文本渲染，
+  星号会原样显示（第 2 期 M4 有 8 处）。
+  也不写「捕获到的输出」「看输出第几行」「第一行是……」——她看不到输出；演示块算出的关键数字（计数、距离、路径）用文字在讲解里说出来。
   **notes 里也别举一个这道程序的挖空判定会判错的写法**当例子——「两种写法都对」的note配一个判定
   只认一种的题，是把她往错的方向带（review 在 ch01 抓到过这个）。
 - 右侧的说明面板在三种模式下都显示这个程序的 level / kind / lines / 挖空数 / boards / tags（非
   cpython 的 runtime 也显示）——**boards 必须写准**，她看到的就是这一份。
 - 中英文对等。`boards` 只有**确知**某考纲不含时才去掉；拿不准就上报，不猜。
 - 一个知识点只在一页**讲**（页面边界见第 1 期设计 §6.5）；做过的问题不跨页重复。
+- **递归「用，不重讲」**（第 2 期 M3、M4 两次裁决一致）：别的页的程序可以用递归，讲解只说这个结构 / 算法为什么自然分成子问题、基例是什么，
+  不讲调用栈、基例与递归步的一般机制；需要时写「递归的机制见「递归」一页」；`tags` 带 `recursion`，让选择器能筛。建树的辅助函数用了递归也算。
 - 输出确定：**不用 `random`、不读时间**；写文件只写当前目录；数据文件放 `_fixtures/`，要输入就用 `run.stdin`。
   打印异常时只打印自己写的话或 `type(e).__name__`——内置异常的消息措辞随 Python 小版本变（`UnboundLocalError`
   在 3.9.6 与 3.12.9 上实测不同；`int()` 的 `ValueError` 在 3.9–3.12 恰好相同，别据此推广），学生本机不一定是 CI 的 3.12。
@@ -227,16 +239,24 @@ EOF
 - **清单里写好的参照也要自己核对机制。** 标准库函数不等于「机制不同」：第 1 期波 2 的 `calendar.isleap` 在 3.12 的源码
   与被测的一表达式闰年**逐字相同**（`inspect.getsource` 一看便知），终审改成 400 年周期余数集合。参照与被测同源就上报。
 - 比较是严格的：值相等**且类型相同**。
+- **`entry` 不改实参。** 需要就地改的（排序、放哨兵、改网格），入口里先复制；原地算法另配一个 3 行包装（`result = list(items)` → 调原地函数 → `return result`）当 `entry`。
+  #181 之后门给被测与参照各一份 `copy.deepcopy` 的实参，已经看得见「改了实参」这类错，但这条约定照旧：它让 `entry` 与参照可以并排比，
+  也顺带讲清 `list.sort()` 与 `sorted()` 的约定（第 2 期 M4 排序页就这样写）。
+- **门在自己的进程里调用被测代码**，所以它的盲区都长在这个假设上：被测函数改了实参，参照看见改过的对象（#181 前）；被测函数不返回，门跟着挂住（#183 前）。
+  两个都是第 2 期起草清单时才发现的。今天的门：两边各拿一份深拷贝；每次调用限时 2 秒（SIGALRM），超时报「与参考实现不符」并写明「超过 2 秒没有返回」。
+  写参照或 `cases` 时再想一句：被测代码还能通过什么副作用影响门的进程（全局状态、递归深度上限 1000、打印）？想到了就上报。
 - 慢的程序（朴素递归）在 `cases` 里收紧实参范围，并写一句为什么。
 - **`cases` 必须真的走到被测函数的每一个返回分支。** 随机生成器抽不到的分支，property 门对它就是瞎的：
   波 2 的三角形生成器从不产生正边长的等边三角形，把 `"equilateral"` 改成 `"isosceles"` 门仍全绿。
   做法：每个 `return` 分支各做一次变异、确认门红（或统计一次种子下各分支命中数写进报告），抽不到的分支按一定概率专门构造。
+  第 2 期 M4 的实例：`search-comparison-counts` 的原 `entry` 根本走不到「找到」那一支；修成每次都命中的 `binary_found_total` 之后，
+  「找不到」那一支又只剩 `run.expect` 守——**一个程序只有一个 `entry`**，两支不能都进 property（第 1 期账本 §二「一个程序要验两个函数」同一件事）。走不到的支写进报告。
 - 注释里说明「它守得住什么变异」时，**举的变异必须先真跑一遍、看到门红**。`gates/properties.py` 文件头的 ⚠ 段记着一次反例：解释里举的两个变异，门一个都测不出来。
 
 ## 三种作业
 
 **A. 新增一页**（命令都在仓库根目录跑）
-1. `cp python/tools/_skeleton.html python/tools/py-<name>.html`，改文件开头注释列出的 6 处（description meta、tool-version、`<title>`、版本记录、`GENERATED:PROGRAMS none` 去掉 `none`、`TOOL` 块）。`TOOL.accent` 查上面的配色表；`TOOL.title` 必须与下面第 4 步注册表条目的 `title` 逐字相同（`page_mirror_check`）。
+1. `cp python/tools/_skeleton.html python/tools/py-<name>.html`，改文件开头注释列出的 6 处（description meta、tool-version、`<title>`、版本记录、`GENERATED:PROGRAMS none` 去掉 `none`、`TOOL` 块）。`TOOL.accent` 查上面的配色表；`TOOL.title` 必须与下面第 4 步注册表条目的 `title` 逐字相同（`page_mirror_check`）。`<title>` 元素里的 `&` 写成 `&amp;`（注册表与 `TOOL.title` 里照写 `&`；没有门看 `<title>`，第 2 期 M3 出过一次裸 `&`）。
 2. 建 `python/programs/chNN-<slug>/`：`chapter.json`（顶层 `"module"` 与 `"tool": "py-<name>"`）+ `.py` + 需要时 `_fixtures/`。`run.expect` 照下面「生成 `run.expect`」一节粘贴真实输出。
 3. 需要 property 时建 `gates/refs/chNN_<slug>.py`（章目录名的连字符换成下划线）。
 4. **自己在 `python/python-tools.json` 的 `tools` 数组末尾追加本页条目**，字段顺序照已有条目：
@@ -253,20 +273,29 @@ EOF
 （FALLBACK 不含这两个字段，两个导航页不会变）。提交 `.py` / `chapter.json` / refs、`python/tools/py-<name>.html`、`python/python-tools.json`。
 
 **堆叠分支之间的冲突**（多页并行时，`python-tools.json` 与两个导航页的 FALLBACK 必然冲突——都是数组末尾追加）：
-**不手工合并。** 取基线分支（`main`，或你堆叠在其上的那个分支；下面记作 `main`）的版本、补回本页条目、重跑生成脚本：
+**不手工合并。** 取基线分支（`main`，或你堆叠在其上的那个分支）的版本、补回本页条目、重跑生成脚本——配方写成了脚本，在停下的合并里跑：
 ```bash
-git checkout main -- python/python-tools.json python/app.html python/index.html   # 合并冲突中照样可用，直接按 main 的内容解决
-# 把本页那一条注册表条目重新追加到 tools 数组末尾（从自己分支的版本里拷：git show <你的分支>:python/python-tools.json）
-python3 python/scripts/build_programs.py && python3 python/scripts/sync_fallback.py && python3 python/scripts/check.py
-git add python/python-tools.json python/app.html python/index.html
+# 你的分支合进来（你在基线分支上）：--take HEAD --from MERGE_HEAD；你在自己的分支上合基线：--take MERGE_HEAD --from HEAD
+R=<worktree 绝对路径>
+python3 $R/.claude/skills/python-content-wave/resolve-registry-conflict.py --repo $R --take MERGE_HEAD --from HEAD && git -C $R commit --no-edit
 ```
-工具页的 `GENERATED:PROGRAMS` 区段若也冲突，同理：取任一边，重跑 `build_programs.py`。
+必须用 `&&` 接提交：脚本红了之后冲突在索引里已标为解决，单独一行的 `git commit` 会照样成功。
+它取 `--take` 一侧的三个文件、把 `--from` 一侧多出的条目追加到 `tools` 末尾，冲突的工具页取 `--take` 一侧，
+然后 `build_programs.py`、`inline_core.py`、`sync_fallback.py`、`check.py`，全绿才按显式路径 `git add`。
+退出码 1（生成脚本或 `check.py` 红）时**照它打印的恢复命令做**，不要直接 `git merge --abort`（索引已 ≠ HEAD 时会失败）；
+退出码 2（冲突落在别的文件上）与 3（同一个已有条目在 `--from` 一侧改过、又与 `--take` 一侧不同，见 C「升级一页」）什么都没动。
+两侧的 `engine` 不同（有一侧改过 `core/`）时，`page_mirror_check` 会红——那不是配方能解的，先让两侧 engine 一致。
 
-**C. 升级一页**：版本三处同步——注册表 `version` + `changelog`（最新的放最前）、页面 `tool-version` meta、页面头部版本记录注释（右上角徽章读 meta，不用改）。改了 `core/` 时 engine 升一次，**所有工具与 `_skeleton.html` 一起升**（`page_mirror_check` 要求全库唯一）。版本号是缓存键：不升，线上用户会一直看到旧页面。
+**C. 升级一页**：升级改的是已有条目，与别的分支合并时，只要改动在 `--from` 一侧、而 `--take` 一侧的这一条与它不同，配方脚本就以退出码 3 点名这一条、什么都不动——这一条手工处理并写明理由（这是「注册表冲突不手工改」的唯一例外），其余照配方。
+版本三处同步——注册表 `version` + `changelog`（最新的放最前）、页面 `tool-version` meta、页面头部版本记录注释（右上角徽章读 meta，不用改）。改了 `core/` 时 engine 升一次，**所有工具与 `_skeleton.html` 一起升**（`page_mirror_check` 要求全库唯一）。版本号是缓存键：不升，线上用户会一直看到旧页面。
 
 ## 上报与负控制
 
 - **「我的做法与简报不一致、而我的做法更对」本身就是上报项。** 简报或测试里的断言事实上错了，停下上报，不要改测试迁就实现。
 - 你新写或改动的检查，要**先把它守的东西改坏、看到它变红**才算数；从内存里的原字节复原，绝不 `git checkout`；先跑一次基线确认是绿的。
 - **负控制一律串行跑，不要并行**——并行跑会互相污染对方临时改的共享文件，两边的「基线是绿的」这个前提都不再成立。
+- **负控制只做保证终止的变异。** 删 `visited.add`、删循环变量的更新这类可能死循环的不做：门有 2 秒时限之前，第 2 期一个这样的变异让门挂满 600 秒、
+  swap 撑到约 21 GB、同机三个会话一起 ENOSPC（#183 由此而来）。子进程一律带超时——**本机（macOS）没有 `timeout` 命令**，
+  用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时或被打断时（`except BaseException`；SIGTERM 先用 `signal.signal` 转成异常）`os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组（`subprocess.run(timeout=…)` 只杀直接子进程，`check.py` 起的孙进程会留下）。
+- **遇到 ENOSPC / 磁盘满：停下回报，不删任何不是你自己写的文件。**
 - 报告「红」时附上变红那一行，并说明是**断言失败**还是**脚本崩溃**——崩溃的红与有效的红长得一样。

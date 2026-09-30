@@ -769,7 +769,7 @@ chess 现在要到运行时才暴露一个写错的路径。
 |---|---|---|---|
 | **第 0 期 · 地基** | `python/` 骨架、七个 core 模块 + 测试、三个脚本、全部门 + 全部负控制、根级 `check_nav_contract.py`、补给 chess 的 `registry_check()`、根 `index.html` 第三张卡、根 `CLAUDE.md`、契约文档 v2.0、`apply_branding.py` 跑一遍；外加**一个真页面 `py-basics`** 当活体验收 | 1 | ~10 |
 | 第 1 期 | M1 剩余 + M2 | 8 | ~95（实交 96；全库 106）|
-| 第 2 期 | M3 + M4 | 10 | ~120 |
+| 第 2 期 | M3 + M4 | 10 | ~120（实交 111；全库 217）|
 | 第 3 期 | M5 综合运用 | 4 | ~40 |
 | 第 4 期 | M6 科学计算与数理统计 | 5 | ~45 |
 | 第 5 期 | M7 pygame | 4 | ~35 |
@@ -810,8 +810,8 @@ chess 现在要到运行时才暴露一个写错的路径。
 
 ### 9.2 配套文档与 skill
 
-- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。**至第 1 期收尾仍未写**，见第 1 期账本
-- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（**至第 1 期收尾仍未写**，见第 1 期账本）：API 签名、易踩的坑、
+- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。**至第 2 期收尾仍未写**，见第 2 期账本
+- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（**至第 2 期收尾仍未写**，见第 2 期账本）：API 签名、易踩的坑、
   每一次实测发现的错误
 - `.claude/skills/python-drill-tool/SKILL.md` —— 作者须知：新增一页 / 新增一个程序 / 升级一页的作业流程，
   每条硬约束注明由哪道门守（第 1 期设计 B5）
