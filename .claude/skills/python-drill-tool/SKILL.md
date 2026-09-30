@@ -65,8 +65,9 @@ description: >-
 | `kind` / `level` / `boards` / `runtime` 在闭集；`title` `blurb` 双语；`notes` 是段落数组；`problem` `entry` 非空；不手写 `lines` / `source` | `program_meta_check` | 点名字段 |
 | `requires` 是白名单 `numpy` / `pandas` / `matplotlib` / `scipy` / `pygame` 的子集（可以是空数组） | `program_meta_check` | `requires=… 必须是 … 的子集` |
 | `"tier": "compile-only"`（普通 cpython 程序的例外豁免）必须带非空 `why`，每页至多 2 个 | `exemption_check` | `没有非空的 why` / `有 N 条例外豁免，上限是 2` |
+| 源码里写了 `_fixtures/<名>` 的程序：`notes` 中英两边都写出文件名，并把文件的**每一行各自写成一段、连续、按原顺序**（比较时去掉每行首尾空白）；源码提到 `_fixtures` 却没写全 `_fixtures/<名>`（如 `Path("_fixtures") / "x"`）也算错 | `fixture_notes_check`（#187） | `没有提到文件名` / `没有把 _fixtures/<名> 逐行抄出来……缺这几行` / `不是按原顺序连在一起` / `却没有一处写成 _fixtures/<文件名>` |
 | 带 `check.property` 的程序在 `gates/refs/` 里**同章文件**有参照 | `algorithm_property_check` | `没有它的参考实现` / `参照却登记在` |
-| 参照与被测函数对 200 组随机实参给出同值同类型 | `algorithm_property_check` | `与参考实现不符`，附反例实参 |
+| 参照与被测函数对 200 组随机实参给出同值同类型（**逐层**：list / tuple 按位置、dict 按键含键类型、set 比元素类型、叶子比 type，#192） | `algorithm_property_check` | `与参考实现不符`，附反例实参与 `首个差异：…` |
 | 同一 `problem` 的变体标题互不相同 | `variant_check` | 点名组 |
 | `chapter.json` 与目录里的 `.py` 双向一致 | `chapter_manifest_check` | 点名文件 |
 | 工具页 `TOOL.id` / `accent` / `title` 与 `tool-engine` 等于注册表 | `page_mirror_check` | `TOOL.<字段> 与注册表不同` |
@@ -82,11 +83,21 @@ description: >-
 - **挖空答案不许原样出现在同一程序没挖的行上（「照抄空」）。** 把答案行去掉缩进，在同一个 `.py` 的其余行里逐字找一遍；找得到，这个空就成了抄上下文——
   换一行挖。第 2 期 M4 终审抓到 3 处（`hash-search-linear-probing` 的探测两行在同程序的查找函数里原样出现、`lcs-length` 的比较行在回溯函数里原样出现），
   修复时扫描又找出 2 处。**只由关键字和标点组成的行（`else:`、`finally:`、`try:`）不算照抄空**——这种行在任何程序里都长一个样，挖它考的是结构位置，不是抄写；
-  其余的行，哪怕短如 `ops.append(token)`，也算。**没有门**（做成门很便宜，记在第 2 期账本里当建议）；写完自己扫本页，评审扫本波。
-  存量：ch01–ch14 按此口径还有 5 处（M3 4 处、第 1 期 1 处，清单在第 2 期账本 §三.4），改它们要升版，留给下一个动那几页的内容 PR。
+  其余的行，哪怕短如 `ops.append(token)`，也算。**近照抄也算**：从某一没挖的行上**剥掉一两层外壳**就得到答案——外壳指成对括号包住答案的部分：外层调用（`transpose(…)`、`round(…)`，开头、结尾各算一段）或切片（`[::-1]`）；
+  删掉的每一段要么是外层调用头（`name(`）、要么只由闭括号组成、要么是完整的下标 / 切片（`[…]`），合起来括号配平、至多四段，**而且答案占那一行记号的一半以上**。第 3 期 `board-move-2048` 的 right / up 两空
+  都能从未挖的 down 行剥掉 `transpose(…)` 或 `[::-1]` 得到，裁定为照抄空一类，改成挖 right 与 down、up 留作范例。
+  删掉的是参数、运算项、`as e` 一类，或答案只是长行里的一小截，都**不算**：`return node` 之于 `return [node.value] + preorder(node.left) + …`、`node = node.left` 之于 `node.left = insert(node.left, value)` 不是抄。
+  挖空模式下所有空同时隐藏，两个空之间互相抄不到，只看没挖的行。
+  **没有门**（做成门很便宜，记在第 2 期账本里当建议）；写完自己扫本页，评审扫本波。
+  存量：ch01–ch14 按逐字口径 5 处（M3 4 处、第 1 期 1 处，清单在第 2 期账本 §三.4），改它们要升版，留给下一个动那几页的内容 PR；
+  近照抄口径没有人工清点（收尾时按上面的定义机扫全库另得 0 处——机扫只是近似，不替代逐空看）。
 - **不挖跨嵌套块的多行空。** 判定器在答案与标准答案**行数不同**时完全不比缩进（`python/core/judge.js:162`，只在 `na.rel.length === nr.rel.length` 时比相对缩进），
   连改变语义的缩进也判对：三行的 `if a:` / `    if b: c()` / `d()` 被判等于 `d()` 缩进在外层 `if` 里的那四行。多行空只挖**同一层**的两三行，并用第 1 级提示钉住写法。
   （第 1 期账本 §一.3；判定器没改，第 2 期是靠这条规矩避开的——M3 26 个、M4 6 个多行空都在同一层。）
+  **唯一的例外是「复合语句头（`if` / `for` / `while`）+ 一行体」这种两行空**：体写错缩进时行数不变、判定器照比（实测判 `indent`）。
+  token 相同而行数不同的写法只有两种：写成一行 `if X: body`（语义与两行相同，判对是对的）；或在体里本来就有的括号里断行——后者若把体写到外层，
+  判定器照样判对、CPython 报 `IndentationError`（`judge.js:162` 的同一个洞，罕见，接受）。
+  第 3 期 ch21 有 6 个这样的空（5 个 `if` 头、1 个 `for` 头：`traffic-light-fsm`），终审接受。三行以上、或体不止一行的，仍按上面的规矩。
 - 被挖的行里若有学生无从推断的文字（`input()` 的提示语、任意取的格式宽度），提示必须给出它，否则别挖。
 - **挖空错误反馈从不打印字符串/f-string 字面量的原文**（Task 11b）：期待的 token 是一个字符串或
   f-string 时，她只会看到它的类别（一个字符串 / 一个 f-string）与自己写的原文从第几个字符起开始
@@ -109,15 +120,35 @@ description: >-
 - 一个知识点只在一页**讲**（页面边界见第 1 期设计 §6.5）；做过的问题不跨页重复。
 - **递归「用，不重讲」**（第 2 期 M3、M4 两次裁决一致）：别的页的程序可以用递归，讲解只说这个结构 / 算法为什么自然分成子问题、基例是什么，
   不讲调用栈、基例与递归步的一般机制；需要时写「递归的机制见「递归」一页」；`tags` 带 `recursion`，让选择器能筛。建树的辅助函数用了递归也算。
-- 输出确定：**不用 `random`、不读时间**；写文件只写当前目录；数据文件放 `_fixtures/`，要输入就用 `run.stdin`。
+- 输出确定：**不读时间**；写文件只写当前目录；数据文件放 `_fixtures/`，要输入就用 `run.stdin`。
   打印异常时只打印自己写的话或 `type(e).__name__`——内置异常的消息措辞随 Python 小版本变（`UnboundLocalError`
   在 3.9.6 与 3.12.9 上实测不同；`int()` 的 `ValueError` 在 3.9–3.12 恰好相同，别据此推广），学生本机不一定是 CI 的 3.12。
-- 复制按钮只复制 `.py`，**不带 `_fixtures/`**：学生粘进 PyCharm 时没有数据文件。读 fixture 的程序在讲解末段写明
-  文件放在哪（`_fixtures/<名>`）与逐行内容；这份手抄目前没有门守一致，改 fixture 时一起改。
-- 整个程序约 10–40 行（不含 BLANK 指令行；是取向，不是门）。
+- **随机数只有一种写法**（第 3 期裁决；此前是「不用 `random`」）。**作用域：stdlib 层**——`runtime: cpython` 且 `requires` 为空的程序（M1–M5）：
+  只用 `rng = random.Random(<固定种子>)` 这个实例，或把 `rng` / `seed` 当实参传进函数；
+  **不用模块级的 `random.random()` / `random.choice()` 等**。`random.Random(20260930)` 的 `random / randint / randrange / choice / shuffle / sample / uniform / gauss / choices`
+  在 CPython 3.9.6 与 3.12.9 上实测逐项相同，但这不是保证——**每个用到随机的 stdlib 层程序都在 `/usr/bin/python3`（3.9.6）与 3.12.x 上各跑一次、stdout 逐字节比对**，
+  并同时跑一个版本相关的程序（`import sys; print(sys.version_info[:2])`）确认两边真是两个解释器（两次跑的若是同一个解释器，比对永远相同、什么也没测）。
+  **scipy-stack 层（M6，`requires` 含 numpy）另有裁决**（第 4 期开工前，控制方定）：**numpy 的**随机数只许 `rng = np.random.default_rng(<固定种子>)` 这个实例，或把 `rng` 当实参传进函数；
+  **不许 `np.random.seed`、模块级 `np.random.*`（`np.random.rand()` 之类）、`RandomState`**。流不变靠钉住的库版本保证（#191，主规格 §5.4 第 1 条：`numpy==2.3.1` 等，升版 = 单独 PR、全层 `run.expect` 重生成）；
+  两解释器比对**不适用**——`/usr/bin/python3`（3.9.6）没有 numpy，`run.expect` 在钉住的那组版本上生成、由 CI（`PYTHON_GATES_REQUIRE_SCIPY=1`）核。
+  同一层的程序若也用标准库 `random`，照 stdlib 层只许 `random.Random(<固定种子>)`（它的流只随 CPython 版本，上面已实测 3.9.6 / 3.12.9 一致）。
+  讲解里说出的随机结果（估出的 π、频率、平均等待）写明「这个种子下」，并说明换种子会变。
+- **交互程序**（井字棋、猜数、菜单）用 `run.stdin` 喂一串输入；`input()` 的提示语写进 stdout、不换行——讲解与提示照「页面不显示输出」写。
+- **判「全是数字」用 `isdecimal()`，不用 `isdigit()`**：`'²'.isdigit()` 为真，`int('²')` 却抛 `ValueError`（第 3 期 m5a 终审 I1：`date-format-manual` 用 `isdigit` 在 `'²²/12/2024'` 上崩，而同模块的 py-systems 教的是 `isdecimal`）。
+  存量 ch02 `string-method-tour` 的 `is_pin` 仍用 `isdigit`、提示还写着「不是 isdecimal」——见第 3 期账本 §二.8，别照抄。
+- 复制按钮只复制 `.py`，**不带 `_fixtures/`**：学生粘进 PyCharm 时没有数据文件，讲解里的手抄是她唯一的来源。读 fixture 的程序在讲解里写明
+  文件放在哪（`_fixtures/<名>`），并把文件**一行一段**地抄出来——`fixture_notes_check`（见上表）守它与真文件一致，改 fixture 时门会逼你一起改讲解。
+  为什么是「一段一行」而不是「某段里包含这行」：讲解段落渲染成 `<p>`、`white-space: normal`，段内换行会塌成空格，她看到的仍是一行（#187）。
+  推论：fixture 要短（取向 ≤ 8 行、每行不长），**不要空行**，行首缩进会被去掉——JSON 写成每行一个完整对象（或一行外框）的紧凑形式，抄出来仍能拼回原文件。源码里路径写全 `_fixtures/<名>`，不拼路径。
+  **fixture 要被 git 跟踪，门看不见这一点**（门读磁盘）：根 `.gitignore` 的 `*.log` 曾静默挡掉 `_fixtures/access.log`——本地全绿、CI 会缺文件（第 3 期 m5a）。
+  今天根 `.gitignore` 有反向规则 `!python/programs/*/_fixtures/**`（并继续忽略其下的 `.DS_Store`、`._*`）；提交后仍要 `git ls-files 'python/programs/<章>/_fixtures/*'` 对一遍磁盘上的文件。
+- 整个程序约 10–40 行（不含 BLANK 指令行；是取向，不是门）。M5「综合运用」起放宽到**约 60 行**（第 3 期裁决）；超过的写进报告。选择器按 20 / 40 / 80 行分档，超过 80 行的会被「不超过 80 行」筛掉（第 3 期 `library-loans` 86 行）。
 - 一般 2–3 个空（门只要求至少 1 个），**挖整行**。
 - 本期**不用 `chunks`**。
 - **每页至少一个变体组**（同一 `problem` 两个以上写法）——`variant_check` 只要求**全库**至少一个，管不到每页。
+- **新造 `tags` 之前先 grep 全库已有写法**（`python/programs/*/chapter.json`），跟已有的走：选择器按 tag 筛，`nested loops` 与 `nested-loops` 分裂了就筛不全。
+  第 3 期 m5b 终审抓到 8 个新造的分裂（`state` / `state-machine`、`comprehension` / `list comprehension`……），m5a 漏了 1 个（`lookup-table` / `lookup table`）；
+  存量里的 `nested loops` / `nested-loops`、`2D list` / `list of lists`、`slice` / `slicing` 等清理（要升版），见第 3 期账本 §二.6。**没有门**。
 
 ## 一个程序长什么样
 
@@ -238,14 +269,21 @@ EOF
 - **参照的机制必须与被测程序不同。** 不能拿 `max` 当 `return max(a, b, c)` 的参照——那是拿自己验自己，被测程序错的地方参照会跟着错。
 - **清单里写好的参照也要自己核对机制。** 标准库函数不等于「机制不同」：第 1 期波 2 的 `calendar.isleap` 在 3.12 的源码
   与被测的一表达式闰年**逐字相同**（`inspect.getsource` 一看便知），终审改成 400 年周期余数集合。参照与被测同源就上报。
-- 比较是严格的：值相等**且类型相同**。
+- 比较是严格的：值相等**且类型相同，逐层**（#192）：`[3.0]` 对 `[3]`、`(True,)` 对 `(1,)`、列表里装着 `np.int64` 都是红。numpy 结果用 `.tolist()` 或逐元素转成内置类型——只在顶层 `list(arr)` 不够。
 - **`entry` 不改实参。** 需要就地改的（排序、放哨兵、改网格），入口里先复制；原地算法另配一个 3 行包装（`result = list(items)` → 调原地函数 → `return result`）当 `entry`。
   #181 之后门给被测与参照各一份 `copy.deepcopy` 的实参，已经看得见「改了实参」这类错，但这条约定照旧：它让 `entry` 与参照可以并排比，
   也顺带讲清 `list.sort()` 与 `sorted()` 的约定（第 2 期 M4 排序页就这样写）。
 - **门在自己的进程里调用被测代码**，所以它的盲区都长在这个假设上：被测函数改了实参，参照看见改过的对象（#181 前）；被测函数不返回，门跟着挂住（#183 前）。
   两个都是第 2 期起草清单时才发现的。今天的门：两边各拿一份深拷贝；每次调用限时 2 秒（SIGALRM），超时报「与参考实现不符」并写明「超过 2 秒没有返回」。
   写参照或 `cases` 时再想一句：被测代码还能通过什么副作用影响门的进程（全局状态、递归深度上限 1000、打印）？想到了就上报。
-- 慢的程序（朴素递归）在 `cases` 里收紧实参范围，并写一句为什么。
+- **`@dataclass` 的程序现在可以挂 property**：门执行被测程序时 `compile(…, dont_inherit=True)`（#188），不再把 `library.py` 的 `from __future__ import annotations` 继承给它——
+  之前注解全变成字符串，加上门给的 `__name__` 不在 `sys.modules`，`@dataclass` 在导入时崩（第 3 期 py-systems 的 `inventory-stock` 因此晚了一轮才挂上 P）。
+- **用随机的程序，property 只挂纯核心函数**：随机数由驱动（演示块或一个 `simulate(seed, …)`）生成，当实参传进被检查的核心函数；`cases` 自己造这些实参（任意的 `(a, b)` 列表、任意的 ±1 序列），
+  不经过被测程序的 rng。这样参照比的是确定值，不是「同一种子的另一份实现」（第 3 期 m5b 裁决 R2）。驱动里用 rng 的那一半只剩 `run.expect` 守，写进报告。
+  参照若只能是同一算法（`shuffle-fisher-yates` 对 `Random.shuffle`，裁决 R3），在 refs 注释里写明它守什么、守不住什么。
+- 慢的程序（朴素递归、博弈树）在 `cases` 里收紧实参范围，并写一句为什么（第 3 期 `ttt-minimax` 只取落了 k ≥ 3 步的局面，保证每次调用远在 2 秒以内）。
+- **为区分两种写法专门加的 `cases` 分支，在 refs 文件头写明它守什么、别删**：`refs/ch20_text_data.py` 的上标数字分支是 `isdecimal` 与 `isdigit` 之别的唯一守门——
+  复审实测去掉它、把被测改回 `isdigit`，门仍全绿；文件头原先写着「生成器只产出 ASCII」，照着「修正」就把守门删了（`:9-14` 现在写明了）。
 - **`cases` 必须真的走到被测函数的每一个返回分支。** 随机生成器抽不到的分支，property 门对它就是瞎的：
   波 2 的三角形生成器从不产生正边长的等边三角形，把 `"equilateral"` 改成 `"isosceles"` 门仍全绿。
   做法：每个 `return` 分支各做一次变异、确认门红（或统计一次种子下各分支命中数写进报告），抽不到的分支按一定概率专门构造。
@@ -299,3 +337,8 @@ python3 $R/.claude/skills/python-content-wave/resolve-registry-conflict.py --rep
   用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时或被打断时（`except BaseException`；SIGTERM 先用 `signal.signal` 转成异常）`os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组（`subprocess.run(timeout=…)` 只杀直接子进程，`check.py` 起的孙进程会留下）。
 - **遇到 ENOSPC / 磁盘满：停下回报，不删任何不是你自己写的文件。**
 - 报告「红」时附上变红那一行，并说明是**断言失败**还是**脚本崩溃**——崩溃的红与有效的红长得一样。
+  门在被测**抛错或超时**时印的「参照返回：None」是占位（`library.py` 这时不再调用参照），不是参照真的返回了 None——引用时写「参照未计算」。
+- **变异之后门是绿的，先问变异在语义上是不是等价**，再怀疑门：第 3 期 `competition-ranking` 把新名次 `place = position` 改成 `len(rows) + 1`——rows 每轮恰好多一行，两者恒等，是等价程序，门绿是对的。
+  「等价」要对**整个程序**说，不只对挂 property 的函数说：Fisher–Yates 的 `range` 终点 0 改 -1，对 property 门是等价的（每次调用用新种子，多取的那一位在全部交换之后），
+  对程序却不等价——`randrange(1)` 也消耗随机状态，演示块共用一个 `rng`，之后的输出全变了，`program_run_check` 断言红。所以它是「property 门看不见、`run.expect` 看得见」，不是「门绿是对的」。
+  等价的变异不要写进 refs 注释当「门守得住的例子」；只对一道门等价的，注释里写清是哪道门看不见。
