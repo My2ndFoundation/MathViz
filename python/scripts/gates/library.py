@@ -27,6 +27,7 @@ import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -220,6 +221,33 @@ def _ref_chapter_mismatches(prog_chapter: dict, ref_sources: dict) -> list:
     return out
 
 
+# 逐次调用的时限（秒）。被测函数或参照若进了死循环，原先这道门会一直跑下去——第 2 期 M4 终审
+# 的一个负控制（删掉 bfs-order 的 visited.add）让它跑满外层 600 秒、队列无限增长，swap 撑到约 21 GB，
+# 数据卷只剩约 124 MiB，把同机的三个会话一起拖垮。门跑在自己的进程里（被测程序是 exec 进来的），
+# 所以用 SIGALRM 打断当前调用，把死循环变成一条具名的红。200 组 × 两次调用，正常程序每次远低于 1 ms。
+PROPERTY_CALL_TIMEOUT = 2.0
+
+
+class _PropertyTimeout(Exception):
+    pass
+
+
+def _call_with_timeout(func, args):
+    """在 PROPERTY_CALL_TIMEOUT 秒内调用 func(*args)；超时抛 _PropertyTimeout。
+
+    只能在主线程用（signal 的限制）；check.py 与 CI 都是在主线程里跑门的。
+    """
+    def _on_alarm(_signum, _frame):
+        raise _PropertyTimeout()
+    previous = signal.signal(signal.SIGALRM, _on_alarm)
+    signal.setitimer(signal.ITIMER_REAL, PROPERTY_CALL_TIMEOUT)
+    try:
+        return func(*args)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
 def algorithm_property_check() -> int:
     """带 `check.property` 的程序：拿 `properties.REFERENCES[id]['ref']` 当独立裁判。
 
@@ -301,11 +329,21 @@ def algorithm_property_check() -> int:
             # `mapping.clear(); return {}`，修之前这道门是绿的。`args` 本身不交给任何一方，
             # 留给报错时打印原始实参。
             try:
-                got = fn(*copy.deepcopy(args))
+                got = _call_with_timeout(fn, copy.deepcopy(args))
+            except _PropertyTimeout:
+                bad = (args, f'超过 {PROPERTY_CALL_TIMEOUT:g} 秒没有返回（死循环？）', None)
+                break
             except Exception as exc:                         # noqa: BLE001
                 bad = (args, f'抛错 {type(exc).__name__}: {exc}', None)
                 break
-            want = ref(*copy.deepcopy(args))
+            try:
+                want = _call_with_timeout(ref, copy.deepcopy(args))
+            except _PropertyTimeout:
+                print(f'ERROR: {name} 的参考实现超过 {PROPERTY_CALL_TIMEOUT:g} 秒没有返回——'
+                      f'参照本身有问题（gates/refs/），实参 {args!r}', file=sys.stderr)
+                rc = 1
+                bad = None
+                break
             if got != want or type(got) is not type(want):
                 bad = (args, got, want)
                 break
