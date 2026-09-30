@@ -46,7 +46,7 @@
 - 负控制**串行**跑，从内存原字节复原，先确认基线是绿的；绝不 `git checkout` 一个被你改坏的文件来复原。
 - **负控制只做保证终止的变异**（改比较号、改常量、改下标都行；删掉 `visited.add`、删掉循环变量的更新这类可能死循环的不行——第 2 期一个这样的变异让门挂满 600 秒、swap 撑到约 21 GB、同机三个会话一起磁盘满）。
   跑 `check.py` 或任何子进程都带超时：**本机（macOS）没有 `timeout` 命令**，写 `timeout 120 …` 只会 rc=127、什么都没跑。用 Python：
-  `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时 `os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组（`subprocess.run(timeout=…)` 只杀直接子进程，孙进程会留下）。门自己也有时限（property 每次调用 2 秒、`program_run_check` 逐程序 `run.timeout`），子进程超时是兜底。
+  `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时或被打断时（`except BaseException`；SIGTERM 先用 `signal.signal` 转成异常）`os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组（`subprocess.run(timeout=…)` 只杀直接子进程，孙进程会留下）。门自己也有时限（property 每次调用 2 秒、`program_run_check` 逐程序 `run.timeout`），子进程超时是兜底。
 - **遇到 ENOSPC / 磁盘满**：停下回报。不删任何不是你自己写的文件（worktree、别人的草稿、缓存都不是你的）。
 - 写文件时不要写反斜杠-u 形式的转义：写文件工具会把它解码成真实字符（U+2028 之类不可见字符会让页面解析器崩溃）。需要这类字符时用 `chr()` 构造；写完扫一遍 U+2028 / U+2029 / U+0085 / U+FEFF。
 - 不推送、不开 PR、不合并、不改 git 配置、不 checkout 主工作区（`/Users/nickma/Develop/My2ndBrain/MathViz`）。

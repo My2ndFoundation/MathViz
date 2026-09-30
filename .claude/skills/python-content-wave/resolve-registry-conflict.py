@@ -19,12 +19,15 @@
      此时直接 `git merge --abort` 会失败（索引 ≠ HEAD，工作区又被生成脚本改过）。脚本会打印一条实测可用的恢复命令，照它做。
   2  冲突落在这四类文件之外（.py、chapter.json、refs、core……）：什么都没动。那不是配方能解的。
   3  同一个注册表条目在 --from 一侧相对合并基改过、又与 --take 一侧不同（programs / lines 除外）：什么都没动。
-     取任何一侧都会静默丢掉另一侧对这条的改动，所以配方不适用。判定只读合并基、不做三方合并：
-     只有 --take 一侧改过的条目照常取 --take 一侧，不算冲突。
-     本波若要改已有工具的注册表条目（升级波），撞上这一类就手工处理这几条，并在台账里写明理由——
-     这是 skill 红旗「注册表冲突不手工改」的唯一例外；其余条目、导航页与生成区段仍按配方来。
+     配方「取 --take 一侧」会静默丢掉 --from 一侧对这条的改动（若 --take 一侧也改过，两边都有改动要保），
+     所以配方不适用。判定只读合并基、不做三方合并：只有 --take 一侧改过的条目照常取 --take 一侧，不算冲突。
+     **撞上一处，脚本就整体拒绝、什么都不动**——这一次合并的注册表、两个导航页与生成区段要全部手工做
+     （照配方的各步：取一侧、合入这几条的改动、追加本页条目、跑三个生成脚本与 check.py、显式 add），
+     并在台账里写明理由。这是 skill 红旗「注册表冲突不手工改」的唯一例外，只在升级波（本波有意改已有条目）出现。
 
-子进程一律带超时，并各自开一个进程组（start_new_session），超时就 os.killpg 整组——
+子进程一律带超时，并各自开一个进程组（start_new_session），超时或本脚本被打断（Ctrl-C / SIGTERM）时就 os.killpg 整组——
+（自己的进程组意味着外面按进程组发的信号到不了它；所以打断时要由本脚本来杀。SIGKILL 接不住：--check-timeout 要短于调用方的超时。）
+
 subprocess.run(timeout=…) 只杀直接子进程，check.py 起的 node / python 孙进程会留下（本机 macOS 也没有 `timeout` 命令）。
 """
 from __future__ import annotations
@@ -52,7 +55,10 @@ def run_grouped(cmd: list[str], cwd: Path, timeout: int) -> subprocess.Completed
                          text=True, start_new_session=True)
     try:
         out, err = p.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
+    except BaseException:
+        # 不只超时：本脚本被 Ctrl-C / SIGTERM（main() 里转成 KeyboardInterrupt）打断时也杀整组。
+        # 子进程在自己的进程组里，外面按进程组发的信号到不了它——不在这里杀，它就成了孤儿。
+        # SIGKILL 谁也接不住：所以 --check-timeout 要小于调用方（例如 Bash 工具）的超时，让这里先超时。
         try:
             os.killpg(p.pid, signal.SIGKILL)
         except ProcessLookupError:
@@ -109,6 +115,11 @@ def main() -> int:
     ap.add_argument('--from', dest='src', required=True, help='从哪一侧补回缺的条目')
     ap.add_argument('--check-timeout', type=int, default=600, help='check.py 的超时秒数')
     a = ap.parse_args()
+
+    def _on_term(_signum, _frame):
+        raise KeyboardInterrupt('SIGTERM')
+    signal.signal(signal.SIGTERM, _on_term)   # 让 run_grouped 的 except 分支在被 TERM 时也能杀掉子进程组
+
     repo = Path(a.repo).resolve()
     abort = f'git -C {shlex.quote(str(repo))} merge --abort'
 
@@ -123,6 +134,17 @@ def main() -> int:
     known = {REGISTRY, *NAV_PAGES}
     pages = [p for p in unmerged if p.startswith('python/tools/') and p.endswith('.html')]
     other = [p for p in unmerged if p not in known and p not in pages]
+    # 合并之前就有的、与本次合并无关的未提交改动：rc=1 的恢复命令会用 checkout -- 抹掉它们，
+    # 所以一开始就拒绝，什么都不动。
+    stray = [p for p in git(repo, 'diff', '--name-only', check=False).split()
+             if p not in unmerged]
+    if stray:
+        print('ERROR: 工作区里有与这次合并无关的未提交改动，脚本什么都没动（它的恢复命令会抹掉它们）：',
+              file=sys.stderr)
+        for p in stray:
+            print(f'  - {p}', file=sys.stderr)
+        print('先提交或另存这些改动，再重跑。', file=sys.stderr)
+        return 2
     if other:
         print('ERROR: 下列冲突不在配方范围内，脚本什么都没动：', file=sys.stderr)
         for p in other:
@@ -145,12 +167,12 @@ def main() -> int:
                         if k not in DERIVED and t.get(k) != ours[tid].get(k))
         clash.append((tid, fields))
     if clash:
-        print('ERROR: 下列注册表条目在 --from 一侧改过、又与 --take 一侧不同——取哪一侧都会丢掉另一侧的改动，'
-              '配方不适用，脚本什么都没动：', file=sys.stderr)
+        print('ERROR: 下列注册表条目在 --from 一侧相对合并基改过、又与 --take 一侧不同——取 --take 一侧会丢掉 '
+              '--from 一侧的改动，配方不适用，脚本什么都没动：', file=sys.stderr)
         for tid, fields in clash:
             print(f'  - {tid}（不同的字段：{", ".join(fields)}）', file=sys.stderr)
-        print('升级波（本波有意改已有条目）才会撞上这一类：这几条手工处理并在台账写明理由，'
-              f'其余照配方。要放弃这次合并：{abort}', file=sys.stderr)
+        print('升级波（本波有意改已有条目）才会撞上这一类：这一次合并整个手工做（照配方各步，并合入这几条的改动），'
+              f'在台账写明理由。要放弃这次合并：{abort}', file=sys.stderr)
         return 3
 
     # 1. 取 --take 一侧的三个文件与冲突的工具页

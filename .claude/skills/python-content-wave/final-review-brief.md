@@ -24,7 +24,7 @@
 ## 只读
 不改 worktree 里受版本控制的文件、索引、HEAD、分支（下面的报告写进 worktree 的 `.superpowers/`，那是 gitignored 的台账目录，不算改 worktree）。临时文件放 {{REQUIRED scratchpad}}，前缀 `{{波名}}-review-`；**报告**写到 {{REQUIRED 集成 worktree 的 .superpowers/python-waves/<波>/review-report.md}}（草稿区会随会话重启清空，第 2 期 M3 的终审报告就这样丢了，只剩回传摘要）。改动性检查（变异看门红）在导出的副本上做：`git archive HEAD python | tar -x -C <scratchpad>/{{波名}}-review-copy`，先 `diff -r` 确认与 worktree 相同（门的根目录由脚本自身位置决定，副本是独立的树）；串行、从内存原字节复原并断言字节相同——这样只读严格成立（波 2 复审员的做法）。`check.py` 至多跑一次。你不派子代理。
 **变异只做保证终止的**：删 `visited.add`、删循环变量的更新这类可能死循环的不做——第 2 期 M4 终审就是这样让门挂满 600 秒、swap 撑到约 21 GB、同机几个会话一起磁盘满。
-子进程一律带超时，而**本机（macOS）没有 `timeout` 命令**：用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时 `os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组。遇到 ENOSPC 就停下回报，不删任何不是你写的文件。
+子进程一律带超时，而**本机（macOS）没有 `timeout` 命令**：用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时或被打断时（`except BaseException`；SIGTERM 先用 `signal.signal` 转成异常）`os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组。遇到 ENOSPC 就停下回报，不删任何不是你写的文件。
 
 ## 要查的
 **规格**：清单逐条对上（id、变体组、教什么、P 参照）；每程序 ≥ 1 空；每页 ≥ 1 个变体组；页面边界；元数据闭集与 `boards` 是否可信；注册表条目字段、accent 按模块表、version / engine 一致。

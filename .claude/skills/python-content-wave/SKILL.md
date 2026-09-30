@@ -40,7 +40,7 @@ description: >-
 
 **2. 派构建者**
 - 每页一个子代理，**同一条消息里并行派出**，`isolation: "worktree"`，`model: opus`。
-- 派发前若 origin/main 已前进，先把它合进集成分支、跑一次 `check.py`。然后实测两个值填进简报：集成分支 HEAD（`git -C $W rev-parse HEAD`）与
+- 派发前先 `git -C $M fetch origin`；若 origin/main 已前进，先把它合进集成分支、跑一次 `check.py`。然后实测两个值填进简报：集成分支 HEAD（`git -C $W rev-parse HEAD`）与
   `git -C $W merge-base HEAD origin/main`——后者是**派发前实测**的，不是集成分支切出时的 SHA（合过 main 之后两者不同，照切出时的填，构建者会在第一步全部停下）。
 - 简报用 `builder-brief.md` 填，**每个 REQUIRED 槽都要填**。
   构建者的 isolation worktree 是从 origin/main 切出来的，不是从集成分支：简报让它 `checkout -B <构建者分支> <集成分支>`（新 worktree 没有自己的提交，安全），
@@ -56,6 +56,8 @@ description: >-
 - `git -C $W merge --no-ff <构建者分支>`。`python-tools.json`、`python/app.html`、`python/index.html`、工具页 `GENERATED:PROGRAMS` 冲突时**不手工合并**，跑配方脚本：
   ```bash
   python3 $W/.claude/skills/python-content-wave/resolve-registry-conflict.py --repo $W --take HEAD --from MERGE_HEAD && git -C $W commit --no-edit
+  （它自己的 `--check-timeout` 默认 600 秒：**调用它的那一层（例如 Bash 工具）的超时要更长**，或把 `--check-timeout` 调到更短——
+  外层先超时发 SIGKILL 的话谁也接不住，脚本来不及杀它起的门进程组。）
   ```
   脚本路径用集成 worktree 里的绝对路径（`$W/…`）；**必须用 `&&` 接提交**——脚本红了之后冲突在索引里已标为解决，分成两行写的 `git commit` 会照样成功，提交里的注册表缺条目（没有钩子时实测如此）。
   它做的就是配方的每一步：取集成分支版本 → 把构建者分支多出的注册表条目追加回 `tools` 末尾 → `build_programs.py`、`inline_core.py`、`sync_fallback.py`、`check.py`
@@ -72,7 +74,7 @@ description: >-
 **4. 控制方亲验**（全部页集成之后、终审之前）
 - 全量验收命令。
 - 每页一个亲手负控制（先确认基线绿 → 变异 → 看门因断言失败而红、不是崩溃 → 从内存原字节复原 → 复绿），**串行**跑，**只做保证终止的变异**，
-  子进程一律用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时 `os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组，以此兜底（`subprocess.run(timeout=…)` 超时只杀直接子进程，`check.py` 起的 node / python 孙进程会留下；配方脚本的 `run_grouped()` 就是这个写法；**本机没有 `timeout` 命令**——第 2 期两个会话都写过 `timeout 120`，一个验收循环因此全部 rc=127 却没停下）：
+  子进程一律用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时或被打断时（`except BaseException`；SIGTERM 先用 `signal.signal` 转成异常）`os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组，以此兜底（`subprocess.run(timeout=…)` 超时只杀直接子进程，`check.py` 起的 node / python 孙进程会留下；配方脚本的 `run_grouped()` 就是这个写法；**本机没有 `timeout` 命令**——第 2 期两个会话都写过 `timeout 120`，一个验收循环因此全部 rc=127 却没停下）：
   页里有带 `check.property` 的程序 → 变异其中一个的被测函数，`algorithm_property_check` 应红；
   页里没有 → 改一个程序 `run.expect` 里的一个字符，`program_run_check` 应红。
 - 浏览器：见「浏览器验收」。
@@ -106,8 +108,9 @@ description: >-
 - 合并之后、拷走台账之前：`git -C $M count-objects -vH`（只读，整个仓库共用一个 `.git`，在主工作区跑安全）存成台账目录的 `git-size-after.txt`，与第 0 步的 `git-size-before.txt` 对称
   （第 2 期两波的波后量只报在回报里、没进台账文件，收尾账本只能从回报转抄）。
 - 删集成 worktree 之前，把整个台账目录拷到主工作区的 `.superpowers/python-phase<期>/<名>-ledger/`（gitignored；worktree 一删台账就没了），
-  再删集成 worktree、集成分支与各构建者分支（本地 + origin），以及**台账里记下的**每个构建者的原分支（`worktree-agent-*`）、isolation worktree 与自建 worktree，
-  最后 `git -C $M worktree prune`。只删台账里有的——主仓库里别的 `worktree-agent-*` 可能属于别的会话。
+  然后**先删 worktree、再删分支**（分支还检出在某个 worktree 里时 `git branch -D` 会报 used by worktree、rc=1）：
+  先 `git worktree remove` 集成 worktree 与**台账里记下的**每个构建者的 isolation worktree 与自建 worktree，
+  再删集成分支、各构建者分支与它们的原分支（`worktree-agent-*`）（本地 + origin），最后 `git -C $M worktree prune`。只删台账里有的——主仓库里别的 `worktree-agent-*` 可能属于别的会话。
 - 复盘：构建者与评审员指出的简报错误 → 改本 skill 的模板或 `python-drill-tool`（单独一个小 PR）；
   `git-size-before.txt` 与 `git-size-after.txt` 的对比记进下一期账本。
 
@@ -160,9 +163,9 @@ for f in python/core/*.test.js; do node "$f"; done
 | 写文件工具把反斜杠-u 转义解码成真实字符 | 不可见的 U+2028 进了源码或提示；`js_parser_parity_check` 会红，文档里则悄悄变假 | 代码里用 `chr(0x2028)`；写完扫一遍 U+2028 / U+2029 / U+0085 / U+FEFF |
 | 并行跑负控制 | 同时改同一批文件，互相污染基线 | 串行 |
 | 本机 `grep` 是 ugrep | `(…)?` 套交替时静默漏匹配 | 写钩子或门的正则时用顶层交替，并与 `/usr/bin/grep` 对比 |
-| 构建者的 worktree 从 origin/main 切出，不是从集成分支 | 集成分支切出后 origin/main 只要前进过（第 2 期 #179 / #180），worktree 基线就不是集成分支的祖先，`merge --ff-only <集成分支>` 失败；落错基线时评审包 diff 里出现假删除 | 简报让它 `checkout -B <构建者分支> <集成分支>` 并报告实测 HEAD 与 merge-base；打包一律 `git merge-base` 实测 |
+| 构建者的 worktree 从 origin/main 切出，不是从集成分支 | 集成分支合进了 origin/main 之后 origin/main 又前进（第 2 期 #179 / #180 落在切出之后、派发之前），worktree 基线就不是集成分支的祖先，`merge --ff-only <集成分支>` 失败（照第 2 步派发前先合 main 时它会成功，但时序不可靠）；落错基线时评审包 diff 里出现假删除 | 简报让它 `checkout -B <构建者分支> <集成分支>` 并报告实测 HEAD 与 merge-base；打包一律 `git merge-base` 实测 |
 | 报告、脚本、patch 放草稿区 | 会话重启时草稿区清空，第 2 期丢过构建者报告、终审报告、集成脚本 | 一律放 `$W/.superpowers/python-waves/<名>/`，第 7 步整体拷走 |
-| 负控制做了可能不终止的变异（删 `visited.add` 之类） | 门挂住而不是变红；第 2 期一次跑满 600 秒、swap 约 21 GB、同机会话一起 ENOSPC | 只做保证终止的变异；子进程用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时 `os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组（本机没有 `timeout` 命令，写了只会 rc=127） |
+| 负控制做了可能不终止的变异（删 `visited.add` 之类） | 门挂住而不是变红；第 2 期一次跑满 600 秒、swap 约 21 GB、同机会话一起 ENOSPC | 只做保证终止的变异；子进程用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时或被打断时（`except BaseException`；SIGTERM 先用 `signal.signal` 转成异常）`os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组（本机没有 `timeout` 命令，写了只会 rc=127） |
 | 集成后删构建者分支用 `git branch -d` | 主工作区的 `main` 不 pull，`-d` 按它判「未合并」而拒删 | 先 `merge-base --is-ancestor <分支> origin/main` 确认，再 `-D` |
 | 在不带引号的 heredoc 里写含反引号的 PR 文案 | 反引号被当命令替换执行，文案被吃掉 | heredoc 一律 `<<'EOF'`，路径走环境变量 |
 | 命令后接 `\| tail` / `\| head` 再 `echo rc=$?` | 打印的是管道末端的退出码，崩溃显示 `rc=0` | 要看退出码就不接管道，或先存 `rc` |

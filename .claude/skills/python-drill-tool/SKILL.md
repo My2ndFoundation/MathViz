@@ -296,6 +296,6 @@ python3 $R/.claude/skills/python-content-wave/resolve-registry-conflict.py --rep
 - **负控制一律串行跑，不要并行**——并行跑会互相污染对方临时改的共享文件，两边的「基线是绿的」这个前提都不再成立。
 - **负控制只做保证终止的变异。** 删 `visited.add`、删循环变量的更新这类可能死循环的不做：门有 2 秒时限之前，第 2 期一个这样的变异让门挂满 600 秒、
   swap 撑到约 21 GB、同机三个会话一起 ENOSPC（#183 由此而来）。子进程一律带超时——**本机（macOS）没有 `timeout` 命令**，
-  用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时 `os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组（`subprocess.run(timeout=…)` 只杀直接子进程，`check.py` 起的孙进程会留下）。
+  用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时或被打断时（`except BaseException`；SIGTERM 先用 `signal.signal` 转成异常）`os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组（`subprocess.run(timeout=…)` 只杀直接子进程，`check.py` 起的孙进程会留下）。
 - **遇到 ENOSPC / 磁盘满：停下回报，不删任何不是你自己写的文件。**
 - 报告「红」时附上变红那一行，并说明是**断言失败**还是**脚本崩溃**——崩溃的红与有效的红长得一样。
