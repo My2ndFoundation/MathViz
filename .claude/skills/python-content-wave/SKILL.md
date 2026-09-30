@@ -70,8 +70,14 @@ description: >-
       hits += _deep_mismatch(wrong(*args), want) is not None
   print(f'正确 == 参照 {agree}/{SAMPLES} · 错误被抓 {hits}/{SAMPLES}')
   ```
-  这个例子照抄只抓到 32/200——阈值很少恰好等于某个元素；`cases` 改成一半阈值取自 `xs`（`rng.choice(xs) if xs and rng.random() < 0.5 else rng.randint(-3, 3)`）就是 103/200。
+  这个例子照抄只抓到 32/200——阈值很少恰好等于某个元素；`cases` 改成一半阈值取自 `xs` 就是 103/200：
+  ```python
+  def cases(rng):
+      xs = [rng.randint(-9, 9) for _ in range(rng.randint(0, 8))]
+      return (xs, rng.choice(xs) if xs and rng.random() < 0.5 else rng.randint(-3, 3))
+  ```
   骨架自己的负控制：把 `ok` 的 `.tolist()` 换成 `list(…)`（列表里装着 numpy 标量），正确 == 参照掉到 44/200。一个错误实现不够时，每个 `return` 分支各写一个。
+  pygame 层（M7）的原型把 `import numpy` 换成 `import pygame`，并在导入前设无头环境：`SDL_VIDEODRIVER=dummy`、`SDL_AUDIODRIVER=dummy`、`PYGAME_HIDE_SUPPORT_PROMPT=1`（与 CI 相同，主规格 §5.4 末段）。
 - **清单里写到第三方库参数的语义，起草时核一句出处**：`inspect.getsource(…)`、`help(…)` / `__doc__`，或官方文档；核不到就不写进清单。
   第 4 期 m6b 清单两处都凭印象写错、都是构建者纠正的：多列 `sort_values` 走 `lexsort_indexer`、根本不读 `kind`（`inspect.getsource(pd.DataFrame.sort_values)` 一看便知）；
   「`.mean()` 返回 numpy 标量、打印前 `float()`」只对单个值成立，迭代 Series 交回的已是 Python 数。
@@ -93,7 +99,8 @@ description: >-
 - 构建者自己加注册表条目、连同重新生成的两个导航页一起提交（设计 §8.1）。
 - **派发前定一张本波共有约定表，填进每一份构建者简报**（`builder-brief.md` 的 REQUIRED 槽），并行的构建者互相看不见：
   全波共有的 tag 与拼法（至少库名、模块的主题词——第 4 期 m6a 三页并行，`numpy` tag 两页全带、一页一个没带，终审 I2）；
-  英文讲解里指别的页 / 别的程序的写法（第 4 期两波一边统一成 `the Lists page`、一边写「Lists」，全库今天 37 段对 36 段，见第 4 期账本 §三.6）。
+  英文讲解里指别的**程序**（变体标题）的写法。指别的**页**不进表，已有定论（第 4 期裁决 P28）：中文「页名」，英文 `the <注册表英文页名> page`，不加引号、不夹「」——
+  第 4 期两波各自定，结果一边 `the Lists page`、一边「Lists」，全库一度 37 段对 36 段（第 4 期账本 §三.6）。
   两波并行时这张表由期控制方给，两波同一张。
 - **构建者的报告写在它自己 worktree 的 `.superpowers/python-waves/<名>/<页>-report.md`**，不写集成 worktree：isolation worktree 拒写**主工作区目录树里、它自己 worktree 以外**的路径——
   集成 worktree 就在 `$M/.claude/worktrees/` 下，所以被拒（提示原话「Edit the worktree copy of this file instead of the shared-checkout path」）；scratchpad 不在主工作区树里，写得进（py-simulation 的报告就写在那里）。第 3 期 4 个构建者照 #186 的模板写集成 worktree，3 个被拒、1 个写成——行为不稳定，不能赌。
@@ -166,7 +173,7 @@ description: >-
 **6. PR**
 - 推送前再合一次 origin/main（冲突照第 3 步，脚本用 `--take MERGE_HEAD --from HEAD`：以 main 为准、本波各页追加在后；退出码 1 / 3 的处理同第 3 步），全量验收重跑。
 - 推送集成分支，`gh pr create`，描述用 `pr-body.md` 填（验证怎么做的就怎么写；PyCharm 那一项不打勾）。
-- 读 CI：`gh pr checks <n> --watch`，再从日志里核对 `Successfully set up CPython (3.12.x)`、钉版本那一步打印的 `scipy-stack 2.3.1 2.3.0 3.10.3`、python 门的「0 段因缺库跳过」与 `N 道门全绿`。红了读完整日志修，修复作为新提交。
+- 读 CI：`gh pr checks <n> --watch`，再从日志里核对 `Successfully set up CPython (3.12.x)`、钉版本那一步打印的 `scipy-stack 2.3.1 2.3.0 3.10.3`（有 pygame 程序时还有 `pygame 2.6.1 dummy`）、python 门的「0 段因缺库跳过」与 `N 道门全绿`。红了读完整日志修，修复作为新提交。
 - **⏸ 汇报 PR 链接、CI、负控制与裁决清单，等用户说合并。**
 
 **7. 合并**
@@ -203,8 +210,11 @@ python3 python/scripts/sync_fallback.py --check
 for f in python/core/*.test.js; do node "$f"; done
 ```
 
-`check.py` 不设 `PYTHON_GATES_REQUIRE_SCIPY=1` 时，scipy-stack 层（#196 起还有 pygame）缺库只打印一行「N 段因缺库跳过」、门照样绿——跳过的程序等于没验。每次都读「程序真跑」那一行，要的是「0 段因缺库跳过」；
-版本要是 CI 钉的那组（`python3 -c "import numpy,pandas,matplotlib;print(numpy.__version__,pandas.__version__,matplotlib.__version__)"` → `2.3.1 2.3.0 3.10.3`）。
+**严格模式才是保证**：不设 `PYTHON_GATES_REQUIRE_SCIPY=1` 时缺库只是跳过、门照样绿——跳过的程序等于没验。非严格跑的时候**两行都要读**：
+「程序真跑」行的「N 段因缺库跳过」（只数 scipy-stack 层——pygame 程序整段只过 `compile()`，永远不在这一行里），
+与「性质比对」行尾的「因缺库跳过 scipy-stack 层 N 个、pygame 层 N 个」（pygame 缺库只出现在这里）。
+版本要是 CI 钉的那组：`python3 -c "import numpy,pandas,matplotlib;print(numpy.__version__,pandas.__version__,matplotlib.__version__)"` → `2.3.1 2.3.0 3.10.3`；
+有 pygame 程序时 `python3 -c "import pygame;print(pygame.version.ver)"` → `2.6.1`（CI 那一步还打印 `pygame 2.6.1 dummy`，dummy 是无头 SDL 驱动）。
 
 ## 浏览器验收
 
@@ -221,16 +231,22 @@ await PYPROBE({ page: 'py-<页>', marker: '/.claude/worktrees/python-wave-<名>/
 ```
 它先断言 marker 取得到、且 `TOOL.id === page`，不成立就返回 `{ VOID: true }`——这次测量作废（量到的是别的分支或别的页）。然后逐项报数（文件头写着每一项怎么量）：
 - 中英 × 读 / 挖空 / 临摹：面板元数据；挖空输入框数 == 挖空数 ≥ 1；临摹三层在。
-- **字面量泄漏**：每个含 ≥ 3 字符字符串字面量的空改中间一个字符，中英各判一次（必须判错、反馈不印原文），并在页面上真点一次「检查」。报 `literalChecks`——**0 次就是没测，不是通过**
+- **字面量泄漏**：每个含 ≥ 3 字符字符串字面量的空改中间一个字符，中英各判一次（必须判错、反馈不印原文）。报 `literalChecks`——**0 次就是没测，不是通过**
   （第 2 期 M3 两页、M4 几乎全波，第 4 期 m6a 三页都是 0）；这时 `literalMode` 是 `'fallback'`，下面这一项就是字面量那一格的结论：
 - 全部空各改一个字符 × 中英：0 次判对、0 次印出标准答案行、0 条空消息；加合成对照（`x = "abcd"` 答成 `"abcQ"`：判错、不印 `abcd`）。
+- **页面层**（`literalDom`）：在页面上真点一次「检查」，看渲染出来的反馈——有字面量空用改了字面量的答案，没有（fallback）就用改了一个字符的答案，两种模式都走一次。
 - **临摹对齐**：往输入层打入第一个程序的前 4 行，从末尾往前找**可见字符**（量到换行符时矩形退化，dx = 0 可能是假阴），用 `Range` 量它在 `.py-typed` 与 `.py-shadow` 里的矩形，
   `document.body.style.zoom` = 0.9 / 1 / 1.25 三档 dx = dy = 0；每档报这个字符的宽度，**宽度必须随缩放严格变大**（第 4 期实测 7.063 / 7.844 / 9.797）才证明缩放真的生效；
-  负控制：`.py-typed` 加 3px `padding-left`，dx 必须 ≠ 0（实测 −13）。只比层外框宽度会得到假差异（`pre` 随内容收缩）。
-- 给了 `copyIds`：三种模式的复制内容相同、不含 BLANK 指令（复制内容**真跑**见第 4 步，node 裸 vm 取、python3 跑）。
-- 收尾：zoom 复原、临摹输入清空、localStorage 按**排序后的键**比较复原（键序会变）。语言走 `ctl.setLang`（不改地址栏）；不点同意横幅。
+  负控制：把 `.py-typed` 的 `padding-left` 设成「原值 + 3px」（原值 16px），dx 必须是 +3（实测 +3；第 4 期两波与收尾初版是**设成** 3px，净减 13px，所以记的是 −13）。只比层外框宽度会得到假差异（`pre` 随内容收缩）。
+- 给了 `copyIds`：读与挖空（每空填标准答案）的复制内容相同、不含 BLANK 指令；负控制：改一个空的答案，挖空的复制内容必须变得不同。
+  **临摹不比**：`copyPayload('trace', …)` 按定义交回的就是她打的字（`state.typed` 本身），拿读的内容当 typed 传进去再比，恒真、什么也观察不到（收尾初版就这样比过，第 4 期收尾评审 I3）。
+  复制内容**真跑**见第 4 步（node 裸 vm 取、python3 跑）。
+- 收尾：zoom 复原、临摹输入清空、localStorage **只在本页的键上按差分复原**（`python-draft:` / `python-progress:` 后接本页程序 id 的键，加 `python-prefs` / `python-store-v` / `python-lang`）——
+  8777 是几个会话共用的同源，`clear()` 再整份写回会抹掉、改回别的标签页这几秒里写的键。语言走 `ctl.setLang`（不改地址栏）；不点同意横幅。
 回报里贴它返回的对象（至少 `literalChecks` / `literalMode` / `allBlanks` / `align` / `alignNegative` / `localStorageRestored`），不写「通过」两个字了事。
-探针本身改了（页面 DOM 变了、要量新东西），改的是 skill 里这一份，并在一个真页面上做一次负控制（例如把 `PyInteract.blankFeedback` 临时包成「消息里拼上标准答案」，探针必须报出来）。
+探针本身改了（页面 DOM 变了、要量新东西），改的是 skill 里这一份，并在真页面上做负控制，**两层分开做**：
+把 `PyInteract.blankFeedback` 临时包成「消息里拼上标准答案」只控制判定层——页面内部调的是闭包里的 `blankFeedback`，包装到不了它（实测包了之后 `literalDom` 照样不泄漏）；
+页面层要在 DOM 上注入，例如定时往 `.py-msg` 的文字后面接上标准答案，`literalDom.leaks` 必须变成 true。
 
 `file://` 双击验收与「复制粘进 PyCharm 真跑」只能由用户做——PR 里列为未勾选项，不代为声称。
 
@@ -270,4 +286,4 @@ await PYPROBE({ page: 'py-<页>', marker: '/.claude/worktrees/python-wave-<名>/
 - 打算跑一个删掉 `visited.add` / 循环更新的负控制，或写 `timeout 120 …`
 - 探针报「0 处泄漏」而没报检查了几次；或用的不是 skill 里的 `probe.js`，或它返回了 `VOID` 还照样记结论
 - 让子代理把临时文件、导出副本放进集成 worktree（`.superpowers/` 也算）
-- 派构建者时简报里没有本波共有约定表（tag、英文里指别的页的写法）
+- 派构建者时简报里没有本波共有约定表（tag、英文里指别的程序的写法）；或把「英文里指别的页怎么写」又当成每波自己定的一项

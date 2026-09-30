@@ -200,7 +200,9 @@ one that breaks the most assumptions inherited from the other two:
   matplotlib==3.10.3`, in `registry-sync.yml`; printed formats drift between releases, and `run.expect`
   was generated on exactly these) and sets `PYTHON_GATES_REQUIRE_SCIPY=1`, so a missing library is red
   there (despite its name, since #196 the variable covers pygame too). **Locally a missing library is skipped with a one-line count and the gate stays green** — run
-  with the variable set and read the "0 段因缺库跳过" line. `scipy` is allowed in `requires` but CI does
+  with the variable set. Without it, two lines carry the skips: "程序真跑 … N 段因缺库跳过" counts only the
+  scipy-stack tier (pygame programs are compile-only there and never appear in it), and a pygame skip
+  shows up only at the end of the "性质比对" line. `scipy` is allowed in `requires` but CI does
   not install it: using it means adding it to the pinned install step in the same PR. And the property
   gate compares value **and type at every level** (#192) — `[np.int64(3)]` against `[3]` is red, so
   entry functions hand back built-ins via `.tolist()` / `int()` / `float()`.

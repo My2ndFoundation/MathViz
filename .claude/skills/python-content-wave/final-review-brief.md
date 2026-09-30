@@ -23,7 +23,7 @@
 .py、chapter.json、refs、注册表条目逐个读。
 
 ## 只读
-不改 worktree 里受版本控制的文件、索引、HEAD、分支（下面的报告写进 worktree 的 `.superpowers/`，那是 gitignored 的台账目录，不算改 worktree）。**临时文件与导出副本一律放草稿区 `{{REQUIRED scratchpad 绝对路径}}`**，文件名以 `{{波名}}-review-` 开头（范围复审员用 `{{波名}}-rereview-`，修复实现者用 `{{波名}}-fix-`）——**不放进 worktree**，`.superpowers/` 下也不放。草稿区里的东西**不必删，也不要试着删**，删被拒时更不要换命令绕（第 4 期把临时文件放在台账下的子目录，四方的 `rm -rf` 全被拒，集成 worktree 因此删不掉）。**报告**写到 {{REQUIRED 集成 worktree 的 .superpowers/python-waves/<波>/review-report.md}}（草稿区会随会话重启清空，第 2 期 M3 的终审报告就这样丢了，只剩回传摘要）；报告引用的、值得留下的脚本（照抄扫描器、泄漏扫描器、变异驱动）拷一份到报告旁边，导出副本不拷。改动性检查（变异看门红）在导出的副本上做：`git archive HEAD python | tar -x -C <草稿区>/{{波名}}-review-copy`，先 `diff -r` 确认与 worktree 相同（门的根目录由脚本自身位置决定，副本是独立的树）；串行、从内存原字节复原并断言字节相同——这样只读严格成立（波 2 复审员的做法）。`check.py` 至多跑一次。你不派子代理。
+不改 worktree 里受版本控制的文件、索引、HEAD、分支（下面的报告写进 worktree 的 `.superpowers/`，那是 gitignored 的台账目录，不算改 worktree）。**临时文件与导出副本一律放草稿区 `{{REQUIRED scratchpad 绝对路径}}`**，文件名以 `{{波名}}-review-` 开头（范围复审员用 `{{波名}}-rereview-`，修复实现者用 `{{波名}}-fix-`）——**不放进 worktree**，`.superpowers/` 下也不放。草稿区里的东西**不必删，也不要试着删**，删被拒时更不要换命令绕（第 4 期把临时文件放在台账下的子目录，四方的 `rm -rf` 全被拒，集成 worktree 因此删不掉）。**报告**写到 {{REQUIRED 集成 worktree 的 .superpowers/python-waves/<波>/review-report.md}}（草稿区会随会话重启清空，第 2 期 M3 的终审报告就这样丢了，只剩回传摘要）；报告引用的、值得留下的脚本（照抄扫描器、泄漏扫描器、变异驱动）拷一份到报告旁边，导出副本不拷。改动性检查（变异看门红）在导出的副本上做：`mkdir -p <草稿区>/{{波名}}-review-copy && git archive HEAD python | tar -x -C <草稿区>/{{波名}}-review-copy`（`tar -C` 要求目录已存在），先 `diff -r` 确认与 worktree 相同（门的根目录由脚本自身位置决定，副本是独立的树）；串行、从内存原字节复原并断言字节相同——这样只读严格成立（波 2 复审员的做法）。`check.py` 至多跑一次。你不派子代理。
 **变异只做保证终止的**：删 `visited.add`、删循环变量的更新这类可能死循环的不做——第 2 期 M4 终审就是这样让门挂满 600 秒、swap 撑到约 21 GB、同机几个会话一起磁盘满。
 子进程一律带超时，而**本机（macOS）没有 `timeout` 命令**：用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时或被打断时（`except BaseException`；SIGTERM 先用 `signal.signal` 转成异常）`os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组。遇到 ENOSPC 就停下回报，不删任何不是你写的文件。
 
@@ -45,7 +45,7 @@
   **照抄扫描与这道泄漏扫描同一个脚本、同一批空一起跑**，报告里写两者各自的命中数与两道对照的结果。
 - 中英两种语言是否等义？学生从程序、讲解与提示能否推断出挖空行里的字面量文字？（页面**不显示**程序输出，`run.expect` 只给门用——「看输出就知道」不算。）
 
-**页面文字**：工具页 `<title>` 元素里的 `&` 必须写成 `&amp;`（注册表与 `TOOL.title` 里照写 `&`；没有门看守 `<title>`，第 2 期 M3 抓到过裸 `&`）；讲解里指别的页写「页名」（用「」——notes 按纯文本渲染，`*星号*` 会原样显示，M4 抓到 8 处）。
+**页面文字**：工具页 `<title>` 元素里的 `&` 必须写成 `&amp;`（注册表与 `TOOL.title` 里照写 `&`；没有门看守 `<title>`，第 2 期 M3 抓到过裸 `&`）；讲解里指别的页：中文写「页名」，英文写 `the <注册表英文页名> page`（不加引号、不夹「」；第 4 期裁决 P28，存量留账不必报）；不用 `*星号*`（notes 按纯文本渲染，会原样显示，M4 抓到 8 处）。
 
 **元数据与词表**：新造的 `tags` 与全库已有写法是否分裂——把本波的 tag 与全库（`python/programs/*/chapter.json`）比，折叠大小写、空格与连字符后相同的（`nested loops` / `nested-loops`）、同义不同形的（`2D list` / `list of lists`、`slice` / `slicing`）都算；
 第 3 期 m5b 终审抓到 8 个，m5a 的终审没查、漏了 1 个（`lookup-table`）。存量分裂记在第 3 期账本 §二.6，不必再报。「全是数字」的判断是否用 `isdecimal`（`isdigit` 后接 `int()` 遇到 `'²'` 会抛错，第 3 期 m5a 终审 I1）。

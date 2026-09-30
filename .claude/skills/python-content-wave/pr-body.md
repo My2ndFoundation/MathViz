@@ -26,6 +26,6 @@
 - [x] （本波有用到随机的 stdlib 层程序才写）两解释器：控制方独立在 3.9.6 与 3.12.x 上跑本波全部 stdlib 层程序（`_fixtures/` 照门的方式拷进临时 cwd），stdout 相同且等于 `run.expect`；负控制：版本相关的程序两边不同。模块级 `random.*` 调用 {{n}} 处、读时间 {{n}} 处（扫描先对 `random.choice(xs)` 命中、对 `rng.choice(xs)` 不命中）。
 - [x] （本波有读 `_fixtures/` 的程序才写）fixture 文件都被 git 跟踪（`git ls-files` 与磁盘逐一对上）；`fixture_notes_check` 由控制方做过一次负控制（改 fixture 一个字符 → 断言红）。
 - [ ] **`file://` 双击打开新页面、复制程序粘进 PyCharm 真跑（读 `_fixtures/` 的程序要照讲解手工建数据文件）——需要人来做**
-- [ ] CI（请核：`Successfully set up CPython (3.12.x)`；钉版本那一步打印的 `scipy-stack 2.3.1 2.3.0 3.10.3`；python 门「0 段因缺库跳过」与 `{{N}} 道门全绿`）
+- [ ] CI（请核：`Successfully set up CPython (3.12.x)`；钉版本那一步打印的 `scipy-stack 2.3.1 2.3.0 3.10.3`，有 pygame 程序时还有 `pygame 2.6.1 dummy`；python 门「0 段因缺库跳过」、性质比对行尾没有「因缺库跳过」，与 `{{N}} 道门全绿`）
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

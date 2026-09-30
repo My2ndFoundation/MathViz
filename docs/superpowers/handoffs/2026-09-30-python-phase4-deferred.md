@@ -71,7 +71,7 @@
 | §二.8 `isdigit` 的存量（ch02 `is_pin`） | 仍开 | ch24–ch28 里 `isdigit` 0 处 |
 | §三.1 等价变异；`refs/ch21_simulation.py:256-257` 注释待改 | 注释仍待改；本期新增三条，见 §四.1 | `:256-257` 原文未动 |
 | §三.2 「fixture 必须被 git 跟踪」没有门 | 仍开（建议） | 本期两次合并前核验都手工核了 `pupils.csv` 被跟踪 |
-| §三.3 门在被测抛错 / 超时时印「参照返回：None」 | 仍开 | #192 之后行号变了：`python/scripts/gates/library.py:407`（超时）、`:410`（抛错）填 `None`，`:432` 照样印「参照返回」 |
+| §三.3 门在被测抛错 / 超时时印「参照返回：None」 | 仍开 | 行号随 #192、#196 移动：`python/scripts/gates/library.py` 在 `2349e0f` 上 `:408`（超时）、`:411`（抛错）填 `None`，`:432` 照样印「参照返回」；#196（`8493a5f`）之后是 `:439` / `:442` / `:463`；本收尾修复改了性质比对汇总行之后是 `:440` / `:443` / `:464` |
 | §三.4 tag 规范化门（建议「第 4 期开工之前连同存量一起做」） | **仍开，过了它自己写的时机** | 没做；M6 新造 43 个只在 ch24–ch28 出现的 tag，没有新分裂——靠的是作者规矩与两次终审，不是门 |
 | §三.5 `isdigit` → `int()` 扫描 | 仍开（建议） | 仍 0 处 |
 | §三.6 只由一条 `cases` 分支守的规则 | 仍开 | 本期同类的新例：`refs/ch26_pandas.py` 的 `_missing_cases` 约一成造全缺，是「全缺返回 None」唯一的守门（m6b 修复者写明「别把生成器改回去」） |
@@ -79,7 +79,7 @@
 | §四.1 Skill 工具读主工作区旧版 | **部分处理** | 第 4 期派发简报 §1 开头写明「用 Read 从 `$W/.claude/skills/` 读」，两波都照做（m6b 台账裁决 5）；主工作区今天仍停在 `533c813`，用 Skill 工具的读者照旧读到旧版 |
 | §四.2 构建者写不进集成 worktree | **本期处理了** | #193 的新模板（报告写构建者自己 worktree、集成时拷）下 5 个构建者 0 个 BLOCKED（复盘 1） |
 | §四.3 权限拒 `rm` → `review-tmp/` | **本期出了死结，已改方案**，见 §五.3 | |
-| §四.4 台账整目录拷走 | 本期处理了 | 两波都连脚本拷走：`m6a-ledger/` 20 项、`m6b-ledger/` 33 项（`m6a-probe.js`、`m6b-probe.js`、两份 `draft-proto.py`、`negctl.py`、`copy-run.py` 都在） |
+| §四.4 台账整目录拷走 | 本期处理了 | 两波都连脚本拷走：`m6a-ledger/` 20 项、`m6b-ledger/` 33 项（`m6a-probe.js`、`m6b-probe.js`、两份 `draft-proto.py`、`negctl.py`、m6a 的 `copyrun.py` 与 m6b 的 `copy-run.py` 都在） |
 | §四.5 对齐探针量到换行符 | **又发生一次，本期根治** | m6b 探针又量到 `\n`（第 3 期修的是那一次测量）；本收尾把探针做成标准件 `probe.js`，见 §五.4 |
 | §四.6 两解释器比对的口径 | 本期不适用 | M6 的 3 个 stdlib 层程序（`requires` 为空：`mean-variance-loop`、`mean-median-mode`、`z-test-one-sample`）都不用随机 |
 | §四.7 遗留的 worktree 与分支 | 本期处理了 | 见 §五.7 |
@@ -137,17 +137,19 @@ m6a 终审 m7 列了 7 处：挖空行与同程序里一行没挖的只差实参
 m6b 终审 M4：`line-plot-pyplot` 的 blurb 逐一点名了两个空的函数（`plt.xlabel`、`plt.legend`），notes 又给出 Day——合起来 `plt.xlabel("Day")` / `plt.legend()` 三种模式都能直接读到。不算逐字写出整行；变体对照正是要讲这些名字。
 （同一条里的 `plot-from-dataframe`「to_string 配 index=False」修复者已改。）**什么时候必须修**：若定下「blurb 不点名被挖的函数」这条规矩。
 
-### 6. 英文跨页写法：两波裁决相反，全库对半
+### 6. 英文跨页写法：两波裁决相反，收尾当天已裁决（P28），存量留账
 
-作者须知写「指别的页写注册表里的页名，用「」括起来」，没说英文怎么写。今天全库英文讲解（notes / blurb / lineNotes 按段数）：
+作者须知原来只写「指别的页写注册表里的页名，用「」括起来」，没说英文怎么写。`2349e0f` 上全库英文讲解（notes / blurb / lineNotes 按段数）：
 
 - `the X page`（不带引号）**37 段**：ch02 3、ch13 1、ch14 9、ch15 1、ch16 3、ch17 1、ch18 1、ch19 6、ch21 1、ch22 3、**ch24 4、ch25 2、ch28 2**；
 - 「」括英文名（页名与程序标题都有）**36 段**：ch20 11、ch23 10、**ch26 9、ch27 6**。
 
 第 4 期两波各往一边加：m6a 的修复（V7）按「全库存量多数」统一成 `the X page`、删掉英文里的「」；m6b 按 Python编程 的「讲解用「」」写，终审 M3 还要求英文变体标题加「」。
 另有存量：`ch02-strings` 三个程序（`index-and-slice`、`strings-are-immutable`、`string-method-tour`）英文写 `the Files and Errors page`，注册表页名是 `Files & Exceptions`。
-- **为什么没修**：改讲解要给 7 页升版；收尾 PR 只改文档。**哪一种对，是 Python编程 的裁决**（不是系统方向）；本收尾没替它选，只在 `python-content-wave` 第 2 步加了「本波共有约定表」，让下一波派发前定下来、各构建者同一口径。
-- **什么时候必须修**：Python编程 定下一种之后，下一个动这几页的内容 PR 顺手统一并升版。
+- **已裁决**（控制方，收尾当天，裁决文件 P28）：英文写 `the <注册表英文页名> page`，不加引号、不夹「」；中文照旧写「页名」。已写进 `python-drill-tool`、`final-review-brief.md`、`builder-brief.md`、`python-content-wave` 第 2 步；
+  「本波共有约定表」不再管页，只管 tag 与英文里指别的**程序**（变体标题）的写法。第 5 期两个会话已按这条接到通知。
+- **存量留账**：英文用「」的 ch20 11 段、ch23 10 段、ch26 9 段、ch27 6 段（其中有指页的，也有指程序标题的——后者不在 P28 管辖内，按当波约定表处理），`ch02` 三处 `the Files and Errors page`。
+- **为什么没修**：改讲解要给这几页升版；收尾 PR 只改文档。**什么时候必须修**：下一个动 ch02 / ch20 / ch23 / ch26 / ch27 的内容 PR 顺手按 P28 统一并升版。
 
 ### 7. tag
 
@@ -188,12 +190,15 @@ matplotlib 页的特别之处见 §四.3。
 
 ### 4. scipy-stack 层在本地非严格模式下会静默跳过
 
-`PYTHON_GATES_REQUIRE_SCIPY` 不设时缺库只打印一行「N 段因缺库跳过」、门仍绿（#196 起这个变量也管 pygame，名字是历史原因）。本期派发简报要求本地也用严格模式，两波照做；本收尾把严格模式写进了 `python-content-wave` 的验收命令，并在根 `CLAUDE.md` 的 python/ specifics 记了一条。
+`PYTHON_GATES_REQUIRE_SCIPY` 不设时缺库只是跳过、门仍绿（#196 起这个变量也管 pygame，名字是历史原因）。跳过分在**两行**里报：
+「程序真跑」行的「N 段因缺库跳过」只数 scipy-stack 层——pygame 程序整段只过 `compile()`（`library.py` 的 `_tier`），永远不在这一行；pygame 缺库只出现在「性质比对」行尾。
+那一行原先把 pygame 也写成「N 个 scipy-stack 程序因缺库跳过」——本收尾修复改成按层分别计数（「因缺库跳过 pygame 层 N 个、scipy-stack 层 N 个」）。负控制（本收尾修复做的，旧行取自 `ca50b9a` 的导出副本）：
+在内存里把 `markov-weather` 改成 pygame 程序、让 numpy 与 pygame 都「缺」，旧行印「20 个 scipy-stack 程序因缺库跳过」，新行印「因缺库跳过 pygame 层 1 个、scipy-stack 层 19 个」。本期派发简报要求本地也用严格模式，两波照做；本收尾把严格模式写进了 `python-content-wave` 的验收命令，并在根 `CLAUDE.md` 的 python/ specifics 记了一条。
 `scipy` 仍在 `requires` 白名单里、不在 CI 安装清单里——用它就得在同一个 PR 里把它加进钉版本的安装步骤（主规格 §5.4 第 2 条）。
 
 ### 5. 第 3 期账本 §三 的四条建议仍开
 
-「fixture 必须被 git 跟踪」的门、「参照返回：None」的措辞（今天 `library.py:407` / `:410` / `:432`）、tag 规范化门、`isdigit` → `int()` 扫描——见 §二 的表。
+「fixture 必须被 git 跟踪」的门、「参照返回：None」的措辞（行号见 §二 的表：#196 与本收尾修复之后是 `library.py:440` / `:443` / `:464`）、tag 规范化门、`isdigit` → `int()` 扫描——见 §二 的表。
 
 ---
 
@@ -206,16 +211,23 @@ matplotlib 页的特别之处见 §四.3。
    - m6b：评审、复审、修复者与控制方的 `rm -rf` **全部被拒**，`review-tmp/` 38 项（约 22 MB：导出副本、注入副本与脚本）留在集成 worktree 里；删 worktree 等于绕过那次拒绝，控制方不代删（P26）。
      **已处理：用户于收尾当天亲手删除了 `.claude/worktrees/python-wave-m6b` 与本地分支 `claude/python-wave-m6b`（`9a9101c`）。**
    - 同一个动作两波结果不同——权限的结果不能当流程的前提。方案 ①：临时文件与导出副本一律放 scratchpad（文件名带波名与角色前缀），只把报告（和报告引用、值得留下的脚本）写进台账。
-     **本收尾核出复盘 15 的一处前提不成立**：它说 scratchpad「写得进也删得掉」，而本收尾在本会话的 scratchpad 里 `rm -rf` 一个自建目录**同样被权限拒**（没有换命令绕）；scratchpad 里还躺着 `p2close-*` / `p3close-*` 的十来个克隆与导出副本，前两次收尾都没删。
+     **本收尾核出复盘 15 的一处前提不成立**：它说 scratchpad「写得进也删得掉」，而本收尾在本会话的 scratchpad 里 `rm -rf` 一个自建目录**同样被权限拒**（没有换命令绕）；scratchpad 里还躺着 `p2close-*` / `p3close-*` 的 77 个条目，其中 12 个目录是克隆与导出副本，前两次收尾都没删。
      方案 ① 仍然成立，但理由是「**不必删**」——临时文件在仓库目录树外，不挡 `git worktree remove`、不会被 `cp -R` 拷进台账——不是「删得掉」。skill 按这个理由写，并明写「不要试着删、更不要换命令绕」。
 4. **浏览器探针做成了标准件。** `.claude/skills/python-content-wave/probe.js` 由 `m6a-probe.js`（含全空改字符替代测量 `m6aAllBlanks`）与 `m6b-probe.js` 合成：先断言 marker 与 `TOOL.id`（不成立返回 `VOID`）；
-   字面量检查报次数，0 次时 `literalMode = 'fallback'`，全空改字符与合成对照就是结论；对齐从末尾往前找可见字符、每档报字宽并要求随缩放严格变大；负控制 `padding-left`；localStorage 按排序后的键复原。
-   本收尾在 http 预览上实测过（`2349e0f` 的页面，marker 用 probe.js 自身的路径证明读的是本 worktree）：py-numpy-basics 字面量 0 次 → fallback 52 次 0 判对 0 泄漏 0 空消息，字宽 7.063 / 7.844 / 9.797，dx = dy = 0，负控制 dx = −13；
-   py-pandas 字面量 40 次、页面层真点一次「检查」不印原文；错页 id、错 marker 都返回 `VOID`；把 `blankFeedback` 包成「消息里拼上标准答案」之后探针报出 42 条问题——与两波台账的数一致，测量看得见它要排除的东西。
+   字面量检查报次数，0 次时 `literalMode = 'fallback'`，全空改字符与合成对照就是结论；页面层真点一次「检查」（fallback 下用改了一个字符的答案，也要点）；对齐从末尾往前找可见字符、每档报字宽并要求随缩放严格变大；
+   负控制把 `padding-left` 设成「原值 + 3px」，dx 必须 +3；复制只比读与挖空（带「改一个空的答案 → 不同」的负控制）；localStorage 只在本页的键上按差分复原。
+   **初版（`ca50b9a`）有三处被收尾评审改掉**：复制比对里的「临摹」恒真（`copyPayload('trace')` 交回的就是传进去的 typed，I3）；复原用 `clear()` 再整份写回，会抹掉共用同源的别的标签页这几秒写的键（m5）；
+   负控制是把 `padding-left` **设成** 3px（原值 16px，所以 dx = −13，m4）。另：把 `PyInteract.blankFeedback` 包成泄漏版只控制判定层，页面内部调的是闭包里的那一个，包装到不了（m6）。
+   修复后在 http 预览上实测（`ca50b9a` 的页面，marker 用 probe.js 自身的路径证明读的是本 worktree，tabId 固定）：
+   - py-numpy-basics：字面量 0 次 → fallback，全空改字符 52 次 0 判对 0 泄漏 0 空消息；页面层（fallback）点了 `ndarray-create#describe`、不印答案；字宽 7.063 / 7.844 / 9.797，dx = dy = 0；负控制 dx = +3（原值 16px）；
+     复制 `numpy-scalar-repr`、`mean-variance-loop`：读 == 挖空，改一个空的答案后不同；运行期间别的「标签页」写的键（`p4fix-foreign` 从 a 改成 b、新加 `p4fix-foreign2`）复原后仍是 b 与 x——没被抹掉。
+   - py-pandas：字面量 40 次，页面层点了 `series-and-dataframe#derived-column`、不印原文；包泄漏版 `blankFeedback` 后判定层报出 42 条问题，`literalDom.leaks` 仍是 false（印证 m6）。
+   - 页面层负控制：定时往 `.py-msg` 的文字后面接上标准答案，`literalDom.leaks` 变成 true、`ok:false`。错页 id、错 marker 都返回 `VOID`（初版实测，逻辑未改）。
 5. **期控制方的合并核验进了台账**（第 3 期裁决 §四的要求）：`controller-log.md` 记了 #191 / #192 / #193 / #194 / #195 的 CI run、head、范围、本地全量与自选负控制，全部照录进裁决文件 P27。
 6. **起草期原型进了 skill。** 两波都做了（复盘 3、17）；m6b 的原型在清单阶段发现了门盲区（#192），m6a 的原型报出两个低触发变异，#192 之后几分钟内改成逐层比重验。本收尾把骨架写进 `python-content-wave` 第 1 步。
 7. **遗留的 worktree 与分支。** 两波台账记下的构建者 worktree 与分支都删了（m6a：集成 + 3 个构建者 worktree、7 个分支、origin 集成分支；m6b：2 个构建者 worktree、4 个分支、origin 集成分支）；m6b 的集成 worktree 与分支由用户删（第 3 条）。
-   今天主仓库仍是 46 个 `worktree-agent-*` 分支、16 个 `.claude/worktrees/agent-*` 目录——与第 2、3 期账本记的数相同；本地 `claude/python-wave-*` 0 条；origin 共 20 个 head、没有 python 分支。
+   收尾当天 15:00（BST）实测：主仓库仍是 46 个 `worktree-agent-*` 分支、16 个 `.claude/worktrees/agent-*` 目录——与第 2、3 期账本记的数相同；origin 共 20 个 head、没有 python 分支。
+   本地 `claude/python-wave-*` 在 14:17 是 0 条；到 15:00 有 2 条——**第 5 期两波已在起草、等本 PR**：`claude/python-wave-m7a`（14:35）、`claude/python-wave-m7b`（14:40），外加 `claude/python-chunks`（worktree `.claude/worktrees/python-chunks`，建于 14:35）。它们都不是第 4 期的遗留。
    另有本地分支 `claude/python-subproject-design`（`77a4f35`，2026-09-16「第 0 期（地基）实施计划」，是 origin/main 的祖先），归属不明，本收尾不删。
 8. **设计 §9.2 的两份文档仍未写，过了期限**：`docs/superpowers/python.md` 与 `docs/superpowers/prompts/python-handoff.md`（今天 `ls` 都不存在）。第 3 期账本说「第 4 期开工前」必须写，没写；
    第 4 期是靠派发简报 §2 与主规格 §5.4 走过来的，两波构建者读得到规则。第 5 期（M7 pygame）的**工具链**已由 #196（`8493a5f`，收尾期间合并）落地：
@@ -266,7 +278,8 @@ matplotlib 页的特别之处见 §四.3。
 
 4. **复盘 15「scratchpad 写得进也删得掉」**：本收尾在 scratchpad 里 `rm -rf` 被权限拒（§五.3）。方案 ① 的成立理由是「不必删」。
 5. **作者须知与第 3 期账本 §三.4 的「选择器按 tag 筛」**：`filterPrograms` 不按 tag 筛（§三.7）。
-6. **m6a 台账与控制方台账的「V1–V9 全部接受」**：台账只有 V1–V8（裁决文件 §二开头）。
+6. **m6a 的 V9 没进台账**：「V1–V9 全部接受」是对的，V9 只在 MDev-01 第 3 次回报的消息里，m6a-ledger 缺这一条——台账不全（裁决文件 §二开头，V9 已补录）。
+   本收尾初稿把它写成「只有 V1–V8、V9 是误记」，那是错的。V9 的「存量 35 处」与本收尾量到的 29 段 / 评审量到的 30 处口径不同，裁决文件照录三方的数。
 7. **m6a PR 描述「5 处近照抄」**：终审 m7 列的是 7 处（§三.4）。
 8. **复盘 22 与 m6b 台账「m6b 程序 24–41 行」**：24 是修复前的 `missing-fill-mean`，今天 25–41（§三.1）。
 9. **py-pandas 构建报告「稳定性只靠参照 `sorted` 与演示守」**：property 门守得住（`df.iloc[::-1]` 变异断言红，m6b 终审 M6，台账已更正）。
@@ -291,7 +304,7 @@ matplotlib 页的特别之处见 §四.3。
 | 8 | 同波构建者互相看不见 tag | CW 第 2 步「本波共有约定表」、第 3 步「送终审前先扫 tag」；`builder-brief.md` 新 REQUIRED 槽 |
 | 9 | 例外条款补 `except` | DT 例外条款（`if` / `for` / `while` / `except`）与第 4 期实例 |
 | 10 | 选择器不按 tag 筛 | DT tag 一条改了理由并写明 `filterPrograms` 的实情；要不要做 tag 筛选是产品决定（§三.7） |
-| 11 | 存量英文跨页写法三种 | **留账** §三.6（改讲解要升版）；并补了本期两波裁决相反这一事实，CW 约定表要求下一波先定一种 |
+| 11 | 存量英文跨页写法三种 | **已裁决、存量留账**：控制方收尾裁决 P28（英文 `the <英文页名> page`），写进 DT、`final-review-brief.md`、`builder-brief.md`、CW 第 2 步；存量分布见 §三.6（改讲解要升版） |
 | 12 | boards 拿不准表并入 | **留账** §三.2 |
 | 13 | 清单错：`sort_values` 多列不读 `kind`；`.mean()` 措辞过宽 | §七.1、§七.2；规则见 16 |
 | 14 | 对齐探针又量到换行符 | `probe.js` 标准件（§五.4）；CW「浏览器验收」要求用它、不从台账复制 |
