@@ -558,6 +558,14 @@ pygame 那一层还能再往前一步：程序按「逻辑函数 + `if __name__ 
 
 `program_run_check` 对 pygame 程序仍然只过 `compile()`：主循环不终止，整段真跑没有意义。
 
+**MicroPython 层（M8）照同一个思路，第 6 期开工前落地**（PR 见提交）：程序 = 纯逻辑函数（去抖、环形缓冲、滤波、状态机）+ `main()`
+（引脚、显示、无线电、主循环）+ 恰好一个 `if __name__ == "__main__":`（MicroPython 里板上的 main.py 就是 `__main__`）。
+`algorithm_property_check` 导入它之前把 `microbit` / `machine` / `utime` / `micropython` / `radio` 等装成**硬件桩**：
+常用名真的在桩模块上（`from microbit import *` 才导入得到 `Image`、`display`），取属性得到另一个桩，**调用就抛
+`HardwareStubCalled`**——property 入口若碰了硬件，门具名报红；`const()` 是恒等函数，`Image(...)` 是纯值构造；比完即卸桩，
+不漏到下一个程序。新门 `micropython_main_guard_check`：与 pygame 同一套顶层规则，调用只许 `const` / `Image`。
+不需要任何 MicroPython 运行时，也不装库。
+
 ### 5.5 `compile` 而从不 `import`（第三方库不必安装）
 
 `compile(src, id, 'exec')` 不执行 import 语句，所以 `import numpy` /
@@ -689,6 +697,7 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 | `variant_check()` | 同一个 `problem` 的变体 ≥ 2 且标题互不相同 |
 | `fixture_notes_check()` | 源码里写了 `_fixtures/<名>` 的程序，`notes` 中英两边都写出文件名，并把文件的每一行各自写成一段、连续、按原顺序（复制按钮不带数据文件，这份手抄是学生唯一的来源）；源码提到 `_fixtures` 却没写全路径也报红 *（第 3 期 #187）* |
 | `pygame_main_guard_check()` | pygame 程序（`runtime: cpython` 且 `requires` 含 `pygame`）的模块顶层只许 import / def / class / docstring / 常量赋值（调用只许 `pygame.Color` / `Rect` / `Vector2`）与恰好一个 `if __name__ == "__main__":`——导入即开窗或主循环在顶层时，property 无法导入，而无头 SDL 下顶层 `pygame.init()` 导入照样成功、只有这道门看得见 *（第 5 期开工前）* |
+| `micropython_main_guard_check()` | MicroPython 程序（`runtime` 以 `micropython` 开头）的顶层规则同上，调用只许 `const(...)` / `Image(...)`——顶层的 `Pin(...)`、`display.show(...)`、`while True:` 在装了硬件桩的导入里会撞桩或挂死 *（第 6 期开工前）* |
 
 **D·词法**
 
