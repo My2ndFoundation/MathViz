@@ -29,11 +29,11 @@ def main():
             if event.type == pygame.QUIT:
                 running = False
         target = None
-# >>> BLANK id=focus level=2 hint="两行：一个 if 加一次赋值。if 直接用 pygame.mouse 的一个函数的返回值当条件（不写 == True）；下一行把 pygame.mouse 另一个函数交回的坐标赋给 target || 条件问的是「鼠标在不在这个窗口里」：pygame.mouse.get_focused()；在的话，target 取 pygame.mouse.get_pos()" hintEn="Two lines: an if and one assignment. The if uses the return value of a pygame.mouse function directly as its condition (no == True); the next line assigns the position another pygame.mouse function returns to target || The condition asks whether the mouse is over this window: pygame.mouse.get_focused(); if it is, target is pygame.mouse.get_pos()"
         if pygame.mouse.get_focused():
             target = pygame.mouse.get_pos()
-# <<< BLANK
+# >>> BLANK id=call level=1 hint="一行：调用 step_toward，把交回的新位置赋回 pos；四个实参都按位置传（不写 形参名=），顺序照 step_toward 的形参，速率用本程序顶上的那个常量" hintEn="One line: call step_toward and assign the new position it returns back to pos; pass all four arguments by position (no name=), in the order of step_toward's parameters, with the constant at the top of this program as the speed"
         pos = step_toward(pos, target, SPEED, dt)
+# <<< BLANK
         screen.fill(BACKGROUND)
         if target is not None:
             pygame.draw.circle(screen, CURSOR, target, 14, 2)

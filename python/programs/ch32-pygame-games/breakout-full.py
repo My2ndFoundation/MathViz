@@ -86,10 +86,10 @@ def main():
             vel.x = (box.centerx - paddle.centerx) * 5
         index = brick_hit(box, bricks)
         if index is not None:
-# >>> BLANK id=break level=2 hint="两行，同一层：第一行用 del 删掉 bricks 里下标为 index 的那块砖（不用 pop）；第二行让球竖直方向掉头，直接给 vel.y 取负（写成 vel.y = -vel.y，不用 *=） || 撞到砖以后，砖要从列表里消失、球要弹回去——顺序是先删砖、再改速度" hintEn="Two lines at the same level: the first deletes the brick at position index from bricks with del (not pop); the second turns the ball round vertically by negating vel.y directly (written vel.y = -vel.y, not *=) || After a hit the brick has to leave the list and the ball has to bounce back - delete the brick first, then change the velocity"
+# >>> BLANK id=break level=2 hint="一行，用 del 语句（del 后面不加括号；不用 pop，也不用 remove） || 撞到的那块砖要从列表里消失：删掉的是 bricks 里、位置正是 brick_hit 刚交回的那个下标的那一块；下一行再让球竖直掉头" hintEn="One line, with a del statement (no brackets after del; not pop, not remove) || The brick that was hit has to leave the list: remove the one in bricks at the position brick_hit has just returned; the next line then turns the ball round vertically"
             del bricks[index]
-            vel.y = -vel.y
 # <<< BLANK
+            vel.y = -vel.y
         if box.top > HEIGHT:
             message = "Missed - press Space to play again"
         elif not bricks:

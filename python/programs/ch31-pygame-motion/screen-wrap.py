@@ -8,7 +8,7 @@ ROCK = (200, 200, 220)
 
 
 def wrap(x, y):
-# >>> BLANK id=modulo level=2 hint="两行普通赋值（不用 %=），先 x 后 y；各自对自己那条边的长度取模：x 对 WIDTH，y 对 HEIGHT || Python 的 % 在除数为正时，结果总落在 0 到除数之间（不含除数）——负数也一样，所以从左边出去（x 变成负数）也会从右边回来" hintEn="Two ordinary assignments (not %=), x first and then y; each one takes the remainder by the length of its own side: x by WIDTH, y by HEIGHT || With a positive divisor Python's % always lands between 0 and the divisor (not including it) - negative numbers too, so leaving on the left (x going negative) brings it back on the right"
+# >>> BLANK id=modulo level=2 hint="两行普通赋值（不用 %=），先 x 后 y；各自对自己那条边的长度取模：x 对 WIDTH，y 对 HEIGHT || 除数为正时，Python 的 % 对整数总落在 0 到除数之间（不含除数），负数也一样；浮点也落在这个范围里（只有极小的负数会被舍入成恰好等于除数，在这里无妨）——所以从左边出去（x 变成负数）也会从右边回来" hintEn="Two ordinary assignments (not %=), x first and then y; each one takes the remainder by the length of its own side: x by WIDTH, y by HEIGHT || With a positive divisor Python's % on whole numbers always lands between 0 and the divisor (not including it), negative numbers too; floats land in the same range (only a tiny negative number can round up to exactly the divisor, which does no harm here) - so leaving on the left (x going negative) brings it back on the right"
     x = x % WIDTH
     y = y % HEIGHT
 # <<< BLANK

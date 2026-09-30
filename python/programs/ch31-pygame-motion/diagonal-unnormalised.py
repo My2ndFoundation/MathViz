@@ -41,7 +41,7 @@ def main():
         vel = velocity(left, right, up, down, SPEED)
         player += pygame.Vector2(vel) * dt
         for racer in racers:
-# >>> BLANK id=finish level=2 hint="一个 if：用 Vector2 的 distance_to 量这个赛车手（racer[0]）到 START 的距离，严格小于 FINISH 才走——距离写在小于号左边；不用 length()，不用 <= || 还没碰到圆环的才继续前进，到了圆环就停在那里" hintEn="One if: measure the distance from this racer's position (racer[0]) to START with the Vector2 method distance_to, and move only while it is strictly less than FINISH - the distance on the left of the <; not length(), not <= || Only a racer that has not reached the ring yet keeps going; once it is at the ring it stays put"
+# >>> BLANK id=finish level=2 hint="一个 if：用 Vector2 的 distance_to 量这个赛车手（racer[0]）到 START 的距离，严格小于 FINISH 才走——距离写在小于号左边；从 racer[0] 上调用 distance_to，START 直接当实参（不包 Vector2）；不用 length()，不用 <= || 还没碰到圆环的才继续前进，到了圆环就停在那里" hintEn="One if: measure the distance from this racer's position (racer[0]) to START with the Vector2 method distance_to, and move only while it is strictly less than FINISH - the distance on the left of the <; call distance_to on racer[0] and pass START as it is (not wrapped in Vector2); not length(), not <= || Only a racer that has not reached the ring yet keeps going; once it is at the ring it stays put"
             if racer[0].distance_to(START) < FINISH:
 # <<< BLANK
                 racer[0] += racer[1] * dt
