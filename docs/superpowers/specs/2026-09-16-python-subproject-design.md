@@ -508,8 +508,22 @@ python/tools/py-sorting.html
 | 层 | 覆盖 | 怎么处理 |
 |---|---|---|
 | **stdlib** | M1–M5，约 265 段 | 每次都真跑，本地与 CI 都跑 |
-| **scipy-stack** | M6，约 45 段 | CI 里 `pip install numpy pandas matplotlib`，`MPLBACKEND=Agg`；本地缺库则跳过，并**打印跳过了几段** |
+| **scipy-stack** | M6，约 45 段 | CI 里 `pip install` **钉版本**的 numpy / pandas / matplotlib，`MPLBACKEND=Agg`，并设 `PYTHON_GATES_REQUIRE_SCIPY=1`——CI 上缺库是**红**；本地缺库则跳过，并**打印跳过了几段** |
 | **不可运行** | M7 pygame（要显示器 + 主循环不终止）、M8 MicroPython（要硬件），约 65 段 | 只过 `compile()` |
+
+**scipy-stack 层的三条补充（第 4 期开工前，PR 见提交）。**
+
+1. **版本钉死**：`numpy==2.3.1 pandas==2.3.0 matplotlib==3.10.3`（写在 `registry-sync.yml`）。numpy / pandas 的
+   打印格式（数组换行宽度、DataFrame 列对齐、浮点位数）随版本变，`run.expect` 是在这组版本上生成的；
+   不钉版本，某天上游一发版 CI 就无缘无故红。升版本 = 一个单独的 PR，全层 `run.expect` 重生成。
+2. **CI 严格**：本地缺库跳过是为了不逼人人装 numpy；但 CI 若也缺库，这些程序就**在任何地方都没跑过**，
+   门照样全绿——跳过只打印一行，没人看。所以 CI 设 `PYTHON_GATES_REQUIRE_SCIPY=1`，缺一个库就具名报红。
+   `scipy` 仍在 `requires` 白名单里但**不在 CI 的安装清单里**：真要用它，先在同一个 PR 里把它加进钉版本的安装步骤，
+   否则 CI 必红（这是有意的——本机也没有 scipy，构建者生成不了 `run.expect`）。
+3. **property 也覆盖这一层**：`algorithm_property_check` 原先对非 stdlib 层一律报红；现在 scipy-stack 程序
+   可以挂 `check.property`（缺库时同上：本地跳过、CI 红）。参照必须是**纯 Python** 的独立实现，
+   而且门比「值相等**且类型相同**」——numpy 函数返回 `np.int64` / `np.float64` / `ndarray` 时，
+   入口函数要自己转成 `int` / `float` / `list` 再返回，否则类型不同即红。
 
 运行时的沙箱纪律：全新临时目录当 cwd（`_fixtures/` 先拷进去）、`PYTHONHASHSEED=0`、
 喂 `stdin`（缺省空串，这样裸 `input()` 会 EOFError 而不是挂死）、5 秒超时、无网络。
@@ -647,7 +661,7 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 | 门 | 守什么 |
 |---|---|
 | **`program_run_check()`** | 全新临时目录里 `python3 <file>`，`PYTHONHASHSEED=0`，喂 `stdin`，5 秒超时，**比对 stdout 与 `expect`**；`_fixtures/` 先拷进去 |
-| ★ **`algorithm_property_check()`** | 把程序当模块导入，取 `entry` 函数，200 组随机实参，与 `gates/refs/chNN_*.py` 里按程序 id 登记、**机制不同**的参照逐个比对（值相等且类型相同）；被测与参照**各拿一份实参的深拷贝**——被测函数就地改了实参时，参照不再看到改过的对象（#181，第 2 期起草时发现） |
+| ★ **`algorithm_property_check()`** | 把程序当模块导入，取 `entry` 函数，200 组随机实参，与 `gates/refs/chNN_*.py` 里按程序 id 登记、**机制不同**的参照逐个比对（值相等且类型相同）；被测与参照**各拿一份实参的深拷贝**——被测函数就地改了实参时，参照不再看到改过的对象（#181，第 2 期起草时发现）；scipy-stack 层可挂，缺库时本地跳过、CI（`PYTHON_GATES_REQUIRE_SCIPY=1`）红（§5.4） |
 | `program_embed_roundtrip_check()` | HTML 里的 `source` 解码后与磁盘 `.py` 逐字节相同（§5.3） |
 | `chapter_manifest_check()` | 磁盘 `.py` 与 `chapter.json` 双向存在 |
 | `anchor_check()` | `lineNotes` / `chunks` 的行文本锚在源码里存在且唯一，`clean()` 之后仍唯一；★ 锚点可以落在挖空体内（§2.3） |
