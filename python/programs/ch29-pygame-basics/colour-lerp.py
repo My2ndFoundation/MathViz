@@ -14,7 +14,7 @@ def blend(c1, c2, t):
 # >>> BLANK id=lerp level=2 hint="一行赋值，结果叫 mixed：在 start 这个 Color 上调用它自己的渐变方法，实参依次是另一端的颜色（c2 原样传，不先包成 Color）和比例（不自己逐分量算） || start.lerp(…, …)，先 c2 后 t" hintEn="One assignment, the result called mixed: call the blending method of the Color start itself, passing the other end's colour (c2 as it is, not wrapped in a Color first) and then the fraction (do not work it out channel by channel) || start.lerp(…, …) with c2 first and t second"
     mixed = start.lerp(c2, t)
 # <<< BLANK
-# >>> BLANK id=rgb level=2 hint="一行 return：Color 有四个分量（最后一个是透明度 alpha），这里只要前三个；先把整个 mixed 变成元组，再在元组上切片，切片省略起点（不逐个写 .r .g .b） || tuple(mixed) 之后接一个只取前 3 个的切片" hintEn="One return: a Color has four parts (the last is alpha, the transparency) and only the first three are wanted; turn the whole of mixed into a tuple first and then slice that tuple, leaving out the start of the slice (do not list .r .g .b one by one) || tuple(mixed) followed by a slice that keeps the first 3"
+# >>> BLANK id=rgb level=2 hint="一行 return：Color 有四个分量（最后一个是透明度 alpha），这里只要前三个；先把整个 mixed 变成元组，再在元组上切片，切片省略起点、终点写正数 3（不写 -1，也不逐个写 .r .g .b） || tuple(mixed) 之后接一个只取前 3 个的切片" hintEn="One return: a Color has four parts (the last is alpha, the transparency) and only the first three are wanted; turn the whole of mixed into a tuple first and then slice that tuple, leaving out the start of the slice and ending it at a positive 3 (not -1, and do not list .r .g .b one by one) || tuple(mixed) followed by a slice that keeps the first 3"
     return tuple(mixed)[:3]
 # <<< BLANK
 

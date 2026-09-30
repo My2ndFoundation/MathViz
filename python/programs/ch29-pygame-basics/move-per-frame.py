@@ -22,7 +22,7 @@ def wrap(x):
 
 def position_after(frames, pixels):
     x = 0
-# >>> BLANK id=frames level=2 hint="两行：一个 for 加一行赋值；这里用不到循环变量，就写成下划线；range 只写一个实参；每一轮都交给 step_x 去挪（不写 +=） || 循环 frames 次，每次 x 都换成 step_x(x, pixels) 的结果" hintEn="Two lines: a for and one assignment; the loop variable is not used, so call it an underscore; range gets a single argument; each pass hands the move to step_x (no +=) || Loop frames times, each time replacing x with the result of step_x(x, pixels)"
+# >>> BLANK id=frames level=2 hint="两行：一个 for 加一行赋值；这里用不到循环变量，就写成下划线；range 只写一个实参；每一轮都交给 step_x 去挪（不写 +=） || 循环 frames 次；每一轮把 x 连同每步的像素数交给 step_x，再用它交回的值替换 x" hintEn="Two lines: a for and one assignment; the loop variable is not used, so call it an underscore; range gets a single argument; each pass hands the move to step_x (no +=) || Loop frames times; each pass hands x and the pixels per step to step_x and replaces x with what comes back"
     for _ in range(frames):
         x = step_x(x, pixels)
 # <<< BLANK

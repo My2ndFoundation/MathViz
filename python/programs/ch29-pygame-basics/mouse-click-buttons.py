@@ -16,7 +16,7 @@ BACKGROUND = pygame.Color(25, 25, 35)
 
 def clicked(buttons, pos):
     for i, button in enumerate(buttons):
-# >>> BLANK id=hit level=2 hint="两行：一个 if 加一行 return；先用 pygame.Rect(button) 把元组变成矩形，再在它上面直接调用判「点在不在里面」的方法，实参是 pos（不自己比坐标） || 点落在第 i 个按钮里，就交回 i——列表里靠前的按钮先赢" hintEn="Two lines: an if and a return; turn the tuple into a rectangle with pygame.Rect(button), then call its is-this-point-inside method on it straight away, passing pos (do not compare coordinates yourself) || If the point is inside button i, return i - earlier buttons in the list win"
+# >>> BLANK id=hit level=2 hint="两行：一个 if 加一行 return；先用 pygame.Rect(button) 把元组变成矩形，再在它上面直接调用判「点在不在里面」的方法，实参是 pos（不自己比坐标） || 点落在这个按钮里，就交回它在列表里的下标——列表里靠前的按钮先赢" hintEn="Two lines: an if and a return; turn the tuple into a rectangle with pygame.Rect(button), then call its is-this-point-inside method on it straight away, passing pos (do not compare coordinates yourself) || If the point is inside this button, hand back its index in the list - earlier buttons in the list win"
         if pygame.Rect(button).collidepoint(pos):
             return i
 # <<< BLANK

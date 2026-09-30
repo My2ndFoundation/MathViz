@@ -12,13 +12,15 @@ properties.SEED、SAMPLES 组、本文件的生成器；红在哪组实参上见
 入口都收内置值、交回内置类型（Rect / Color 在入口里转成 tuple），门逐层比类型。
 
 **参照所依据的 pygame 行为，是 pygame 2.6.1 上实测的，不是凭记忆写的**（第 5 期清单 §0、裁决 M7A-D7）：
-  · `Color.lerp` 逐分量按 `a·(1 − t) + b·t` 算、再四舍五入（对半向上）：
-    `Color(10, 20, 30).lerp((255, 0, 101), 0.5)` → `(133, 10, 66, 255)`。
-    清单 §0 写的等价式 `int(a + (b − a)·t + 0.5)` **只在 t 能被二进制浮点精确表示时**与它逐位相同：
-    t 取 k/100 时 10 万组里有 291 组差 1（例：a = 205、b = 255、t = 0.29，实数上恰好 219.5，
-    两种写法的浮点误差落在 0.5 两侧，pygame 给 219、这个式子给 220），t 取 k/4、k/8、k/64 时 0 组。所以下面 colour-lerp 的
-    cases 只取 t = k/64（二进制精确，两种写法都没有舍入误差），参照照清单用 `a + (b − a)·t + 0.5`。
-    **别把 t 的生成器「放宽」成 rng.random()**——那样参照会在对半的边界上与 pygame 差 1，门报的是参照的错。
+  · `Color.lerp` 逐分量按 `a·(1 − t) + b·t` 算、再加 0.5 截断（对半向上），即 `int(a·(1 − t) + b·t + 0.5)`：
+    `Color(10, 20, 30).lerp((255, 0, 101), 0.5)` → `(133, 10, 66, 255)`。下面的 `_blend_ref` 照这个实测式算。
+    第 5 期清单起草时写的 `int(a + (b − a)·t + 0.5)` 是错的（构建者实测、控制方复核、终审再测，2026-09-30 更正）：
+    两式在实数上相等，但浮点舍入不同；当实数值**恰好是 .5** 时，两式的浮点结果可能落在 .5 的两侧，
+    于是对半的舍入方向不同。例：a = 205、b = 255、t = 0.29，实数 219.5，pygame 给 219（加权式算出 219.49…），
+    旧式给 220。t 取 k/4、k/8、k/64（二进制精确）时两式逐位相同，所以构建时一度把 cases 限在 k/64——那是在迁就错参照，已撤。
+    **只放开 t 不够**：t 取 rng.random() 或 k/100 时，200 组里旧式一次都撞不上差 1 的组（终审实测，差异率约每通道万分之三），
+    门对新旧参照都绿。所以 `_colour_pair_t` 有一支专门造「实数值恰为 .5」的组（t = k/100，k 与 (a, b) 按下面注释取），
+    它是「参照照 pygame 的加权式算」这一条的**唯一守门**——删掉它，把参照换回旧式，门仍然绿（实测，见修复报告）。别删。
     t 超出 [0, 1] 时 lerp 抛 ValueError（被测不处理它，cases 不造）。
   · `Rect.center = (cx, cy)` 之后 `topleft == (cx − w // 2, cy − h // 2)`；
     `Rect(0, 0, W, H).center == (W // 2, H // 2)`（5×3 放在 (10, 10) → (8, 9)）。
@@ -86,20 +88,50 @@ def _grid_rects_ref(cols, rows, size, gap):
 
 # ── colour-lerp ──────────────────────────────────────────────────────────
 
+# 能让 (b − a)·k/100 的小数部分恰为 .5 的 k：需要 (b − a)·k ≡ 50 (mod 100) 有解，即 gcd(k, 100) 整除 50——
+# k 为 4 的倍数时无解。1..99 里共 75 个。k 必须从这里取：取到无解的 k，再怎么找 (a, b) 也凑不出半数。
+_HALF_K = tuple(k for k in range(1, 100) if any((d * k) % 100 == 50 for d in range(100)))
+assert len(_HALF_K) == 75
+
+
+def _half_channel(rng, k):
+    # 给定 k，取 a，再从 0..255 里挑一个使 (b − a)·k ≡ 50 (mod 100) 的 b——实数 a·(1 − t) + b·t 恰为 .5。
+    # 直接枚举候选而不拒绝采样：b − a 覆盖 256 个连续整数，比模 100 的一整圈长，候选必然非空（下面断言）。
+    a = rng.randint(0, 255)
+    candidates = [b for b in range(256) if ((b - a) * k) % 100 == 50]
+    assert candidates, (a, k)
+    return a, rng.choice(candidates)
+
+
 def _colour_pair_t(rng):
-    # t = k/64（k = 0..64）：二进制浮点精确，见文件头「Color.lerp」一条——别换成 rng.random()。
-    # 两端 k = 0 与 k = 64 各有约 1/65 的机会；另有 1/8 的组让两色相同（渐变恒等于它自己）。
+    # 一半的组走「实数恰为 .5」一支（见文件头「Color.lerp」一条：这一支是加权式的唯一守门，别删）：
+    # t = k/100，k 取自 _HALF_K，三个分量都造成实数值恰为 .5。
+    if rng.random() < 1 / 2:
+        k = rng.choice(_HALF_K)
+        c1, c2 = zip(*(_half_channel(rng, k) for _ in range(3)))
+        return tuple(c1), tuple(c2), k / 100
+    # 另一半随意取：1/8 的组两色相同（渐变恒等于它自己）；t 四种取法各占约 1/4——
+    # rng.random()、k/100、k/64（二进制精确）、两端 0 或 1。
     c1 = (rng.randint(0, 255), rng.randint(0, 255), rng.randint(0, 255))
     if rng.random() < 1 / 8:
         c2 = c1
     else:
         c2 = (rng.randint(0, 255), rng.randint(0, 255), rng.randint(0, 255))
-    return c1, c2, rng.randint(0, 64) / 64
+    kind = rng.randint(0, 3)
+    if kind == 0:
+        t = rng.random()
+    elif kind == 1:
+        t = rng.randint(0, 100) / 100
+    elif kind == 2:
+        t = rng.randint(0, 64) / 64
+    else:
+        t = float(rng.randint(0, 1))
+    return c1, c2, t
 
 
 def _blend_ref(c1, c2, t):
-    # 被测交给 Color.lerp；参照逐分量 a + (b − a)·t 再加 0.5 截断（t 是 k/64，全程无舍入误差）。
-    return tuple(int(a + (b - a) * t + 0.5) for a, b in zip(c1, c2))
+    # 被测交给 Color.lerp；参照逐分量按 pygame 实测的加权式 a·(1 − t) + b·t 算，加 0.5 截断（t ∈ [0, 1]、分量非负，int 即向下取整）。
+    return tuple(int(a * (1 - t) + b * t + 0.5) for a, b in zip(c1, c2))
 
 
 # ── keyboard-move-clamped ────────────────────────────────────────────────

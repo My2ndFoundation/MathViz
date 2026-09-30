@@ -15,7 +15,7 @@ def overlaps(a, b):
     across = ax < bx + bw and bx < ax + aw
 # <<< BLANK
     down = ay < by + bh and by < ay + ah
-# >>> BLANK id=both level=1 hint="横向和纵向都重叠才算碰；across 写在 and 的左边，不加括号" hintEn="It is only a hit when they overlap both across and down; across goes on the left of the and, with no brackets"
+# >>> BLANK id=both level=1 hint="横向和纵向都重叠才算碰；across 写在 and 的左边，不加括号" hintEn="It is only a hit when they overlap horizontally and vertically at the same time; across goes on the left of the and, with no brackets"
     return across and down
 # <<< BLANK
 

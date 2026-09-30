@@ -27,7 +27,7 @@ class Box(pygame.sprite.Sprite):
 
 
 def settle(shots, enemies):
-# >>> BLANK id=collide level=2 hint="一次比两个组：shots 在前、enemies 在后，两个 dokill 都按位置传 True；结果存进 hits || pygame.sprite 模块里比两个组的那个函数，名字是 group 接 collide" hintEn="Compare two groups in one call: shots first, enemies second, and both dokill flags passed by position as True; store the result in hits || The pygame.sprite function that compares two groups is named group followed by collide"
+# >>> BLANK id=collide level=2 hint="一次比两个组：子弹的组在前、目标的组在后；命中时子弹和目标都要删掉，两个 dokill 按位置传布尔值（不写 1，也不写成 dokilla= 的关键字）；结果存进 hits || 用 pygame.sprite 模块里比两个组的那个函数（讲解第一段讲的就是它）；两边都删，所以两个 dokill 都为真" hintEn="Compare two groups in one call: the bullets' group first, the targets' group second; on a hit both the bullet and the target must go, and the two dokill flags are passed by position as booleans (not 1, and not as dokilla= keywords); store the result in hits || Use the pygame.sprite function that compares two groups (the one the first paragraph of the notes is about); both sides are removed, so both dokill flags are true"
     hits = pygame.sprite.groupcollide(shots, enemies, True, True)
 # <<< BLANK
 # >>> BLANK id=score level=2 hint="用内置 sum 加一个生成式（不用 map，也不套方括号）：每颗命中的子弹对应一个列表，加起来的是这些列表的长度；循环变量叫 hit || hits 的键是子弹，值是这颗子弹打掉的目标列表，所以遍历 hits.values()" hintEn="Use the built-in sum with a generator expression (not map, and no square brackets): each bullet that hit has a list, and you add up the lengths of those lists; the loop variable is hit || The keys of hits are bullets and each value is the list of targets that bullet destroyed, so loop over hits.values()"

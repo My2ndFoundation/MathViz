@@ -31,7 +31,7 @@ refs 文件：`python/scripts/gates/refs/ch29_pygame_basics.py`、`ch30_pygame_s
 **起草期原型**（台账 `.superpowers/python-waves/m7a/draft-proto.py`，pygame 2.6.1、`SDL_VIDEODRIVER=dummy`、逐层比类型、200 组）：
 14 个 P 全部「正确 == 参照 200/200」，错误实现全部被抓到——命中数见 §2 各表下注。**原型只证可行（参照机制不同、cases 触得到错），不给构建者抄。**
 起草时实测的 pygame 行为（构建者照此写参照，不要凭记忆）：
-- `Color.lerp` 对半数向上舍入：`(10,20,30).lerp((255,0,101), 0.5)` → `(133, 10, 66)`，即 `int(a + (b − a)·t + 0.5)`。
+- `Color.lerp` 对半数向上舍入：`(10,20,30).lerp((255,0,101), 0.5)` → `(133, 10, 66)`，即逐分量 `int(a·(1 − t) + b·t + 0.5)`。**起草时写的公式有误（2026-09-30 构建者实测、控制方复核），已改**：原写 `int(a + (b − a)·t + 0.5)`，实数上相等，但实数值恰为 .5 时浮点结果可落在 .5 两侧（a = 205、b = 255、t = 0.29：pygame 219、原式 220）。
 - `Rect.center = (cx, cy)` 之后 `topleft == (cx − w // 2, cy − h // 2)`（5×3 放在 (10,10) → (8, 9)）。
 - `collidepoint` 不含右边与下边：4×4 的 `Rect(0,0,4,4)` 对 (3,3) 真、对 (4,4)、(4,0) 假。
 - `colliderect` 只碰边不算碰（`Rect(0,0,4,4)` 与 `Rect(4,0,4,4)` 为假）；零宽高的矩形与谁都不碰。
@@ -67,7 +67,7 @@ refs 文件：`python/scripts/gates/refs/ch29_pygame_basics.py`、`ch30_pygame_s
 | `move-per-frame` | frame-independent-motion | 每帧固定挪几像素：帧率一变速度就变（讲解算给她看：60 帧与 30 帧下一秒各走多远） | |
 | `move-with-dt` | frame-independent-motion | 同一问题按「像素 / 秒 × `dt`」挪：`dt = clock.tick(60) / 1000`；入口 `position_after(frames_ms, speed)` 逐帧累加 | 总毫秒数 × 速度 ÷ 1000 一步算完 |
 | `draw-primitives-grid` | | 绘图图元（`rect` / `circle` / `line` / `polygon` / 边框宽度）与坐标系（原点在左上、y 向下）；入口 `grid_rects(cols, rows, size, gap)` 算出一格格方块的矩形 | 两重 `while` 逐行逐列累加坐标 |
-| `colour-lerp` | | 颜色：RGB 元组、`pygame.Color`、`fill`；两色之间渐变 `Color.lerp`；入口 `blend(c1, c2, t)` 返回 RGB 三元组 | `int(a + (b − a)·t + 0.5)` 逐分量 |
+| `colour-lerp` | | 颜色：RGB 元组、`pygame.Color`、`fill`；两色之间渐变 `Color.lerp`；入口 `blend(c1, c2, t)` 返回 RGB 三元组 | `int(a·(1 − t) + b·t + 0.5)` 逐分量（pygame 实测式；起草时误写成 `a + (b − a)·t`，见 §0） |
 | `keyboard-move-clamped` | | 键盘：`KEYDOWN` 事件与 `key.get_pressed()` 的区别；方块随方向键移动、`Rect.clamp` 关在窗口里；入口 `step(pos, keys, step)`（`keys` 是方向名集合） | 方向布尔相减得位移、再 `min` / `max` 夹住 |
 | `mouse-click-buttons` | | 鼠标：`MOUSEBUTTONDOWN` 的 `pos`、`Rect.collidepoint` 判点在哪个按钮里（右、下边不算）；入口 `clicked(buttons, pos)` 返回按钮下标或 −1 | `pos[0] in range(x, x + w)` 式的半开区间判断 |
 | `text-centred` | | 文字：`pygame.font.Font(None, size)`、`render`、`get_rect(center=…)` 居中后 `blit`；入口 `centre_topleft(text_w, text_h, screen_w, screen_h)` | `cx − w // 2` 的整数算术 |
