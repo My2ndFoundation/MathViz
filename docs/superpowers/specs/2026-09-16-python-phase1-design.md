@@ -309,6 +309,8 @@ PR-A 与 PR-B **串行**：B 改 core、重生成 `py-basics.html`、迁移提�
 - 一行模块 docstring · 一个或多个入口函数 · `if __name__ == "__main__":` 演示块。
 - 输出确定：**不用 `random`、不读时间**；写文件只写当前目录（门在全新临时目录里跑）；
   数据文件放 `_fixtures/`；需要输入时用 `run.stdin`。
+  *（第 3 期起「不用 `random`」改为：只许 `random.Random(<固定种子>)` 实例，或把 `rng` / `seed` 当实参传入，不用模块级 `random.*`；
+  用到随机的程序在 CPython 3.9.6 与 3.12.x 上各跑一次、stdout 逐字节比对。现行规则见 `.claude/skills/python-drill-tool/SKILL.md`，裁决见第 3 期裁决 P1。）*
 - 整个程序约 10–40 行（不含 BLANK 指令行；这是取向，不是门）。本期**不用 `chunks`**（账本 §二「第一个带 chunks 的程序」触发条件保持未触发）。
 - 源码纯 ASCII（BLANK 指令行的 `hint=` 除外）、无非 BMP 字符、4 空格缩进、LF、行尾无空白、英文注释。
 - `kind` / `level` 的一般取向：`syntax` L1–L2 · `pattern` L2–L3 · `algorithm` L3–L4。由构建者定，评审核对。

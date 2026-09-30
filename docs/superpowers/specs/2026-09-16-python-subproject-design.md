@@ -659,6 +659,7 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 | `blank_directive_check()` | BLANK 指令成对、`id/level/hint/hintEn` 齐全、id 页内唯一、`level ∈ 1..3`、挖空体非空；提示切出的段数等于 `level`（第 0 期起就有）；★ 分隔符改为唯一的 ` \|\| ` 并检查它的形状（第 1 期设计 B1） |
 | `program_meta_check()` | id 全库唯一；`kind`/`level`/`boards`/`runtime` 在闭集；双语字段齐全；`requires` 在白名单 |
 | `variant_check()` | 同一个 `problem` 的变体 ≥ 2 且标题互不相同 |
+| `fixture_notes_check()` | 源码里写了 `_fixtures/<名>` 的程序，`notes` 中英两边都写出文件名，并把文件的每一行各自写成一段、连续、按原顺序（复制按钮不带数据文件，这份手抄是学生唯一的来源）；源码提到 `_fixtures` 却没写全路径也报红 *（第 3 期 #187）* |
 
 **D·词法**
 
@@ -770,7 +771,7 @@ chess 现在要到运行时才暴露一个写错的路径。
 | **第 0 期 · 地基** | `python/` 骨架、七个 core 模块 + 测试、三个脚本、全部门 + 全部负控制、根级 `check_nav_contract.py`、补给 chess 的 `registry_check()`、根 `index.html` 第三张卡、根 `CLAUDE.md`、契约文档 v2.0、`apply_branding.py` 跑一遍；外加**一个真页面 `py-basics`** 当活体验收 | 1 | ~10 |
 | 第 1 期 | M1 剩余 + M2 | 8 | ~95（实交 96；全库 106）|
 | 第 2 期 | M3 + M4 | 10 | ~120（实交 111；全库 217）|
-| 第 3 期 | M5 综合运用 | 4 | ~40 |
+| 第 3 期 | M5 综合运用 | 4 | ~40（实交 47；全库 264）|
 | 第 4 期 | M6 科学计算与数理统计 | 5 | ~45 |
 | 第 5 期 | M7 pygame | 4 | ~35 |
 | 第 6 期 | M8 嵌入式 Python | 3 | ~30 |
@@ -810,8 +811,8 @@ chess 现在要到运行时才暴露一个写错的路径。
 
 ### 9.2 配套文档与 skill
 
-- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。**至第 2 期收尾仍未写**，见第 2 期账本
-- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（**至第 2 期收尾仍未写**，见第 2 期账本）：API 签名、易踩的坑、
+- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。**至第 3 期收尾仍未写**，见第 3 期账本 §四.8
+- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（**至第 3 期收尾仍未写**，见第 3 期账本 §四.8）：API 签名、易踩的坑、
   每一次实测发现的错误
 - `.claude/skills/python-drill-tool/SKILL.md` —— 作者须知：新增一页 / 新增一个程序 / 升级一页的作业流程，
   每条硬约束注明由哪道门守（第 1 期设计 B5）
