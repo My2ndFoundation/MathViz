@@ -212,9 +212,9 @@ for f in python/core/*.test.js; do node "$f"; done
 
 **严格模式才是保证**：不设 `PYTHON_GATES_REQUIRE_SCIPY=1` 时缺库只是跳过、门照样绿——跳过的程序等于没验。非严格跑的时候**两行都要读**：
 「程序真跑」行的「N 段因缺库跳过」（只数 scipy-stack 层——pygame 程序整段只过 `compile()`，永远不在这一行里），
-与「性质比对」行尾的「因缺库跳过 scipy-stack 层 N 个、pygame 层 N 个」（pygame 缺库只出现在这里）。
+与「性质比对」行尾的「因缺库跳过 pygame 层 N 个、scipy-stack 层 N 个」（按层名排序，只列有跳过的层；pygame 缺库只出现在这里）。
 版本要是 CI 钉的那组：`python3 -c "import numpy,pandas,matplotlib;print(numpy.__version__,pandas.__version__,matplotlib.__version__)"` → `2.3.1 2.3.0 3.10.3`；
-有 pygame 程序时 `python3 -c "import pygame;print(pygame.version.ver)"` → `2.6.1`（CI 那一步还打印 `pygame 2.6.1 dummy`，dummy 是无头 SDL 驱动）。
+有 pygame 程序时 `PYGAME_HIDE_SUPPORT_PROMPT=1 python3 -c "import pygame;print(pygame.version.ver)"` → `2.6.1`（CI 那一步还打印 `pygame 2.6.1 dummy`，dummy 是无头 SDL 驱动）。
 
 ## 浏览器验收
 
