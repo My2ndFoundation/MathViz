@@ -522,7 +522,7 @@ python/tools/py-sorting.html
    否则 CI 必红（这是有意的——本机也没有 scipy，构建者生成不了 `run.expect`）。
 3. **property 也覆盖这一层**：`algorithm_property_check` 原先对非 stdlib 层一律报红；现在 scipy-stack 程序
    可以挂 `check.property`（缺库时同上：本地跳过、CI 红）。参照必须是**纯 Python** 的独立实现，
-   而且门比「值相等**且类型相同**」——numpy 函数返回 `np.int64` / `np.float64` / `ndarray` 时，
+   而且门比「值相等**且类型相同**」（逐层，§7.1）——numpy 函数返回 `np.int64` / `np.float64` / `ndarray` 时，
    入口函数要自己转成 `int` / `float` / `list` 再返回，否则类型不同即红。
 
 运行时的沙箱纪律：全新临时目录当 cwd（`_fixtures/` 先拷进去）、`PYTHONHASHSEED=0`、
@@ -661,7 +661,7 @@ M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 viol
 | 门 | 守什么 |
 |---|---|
 | **`program_run_check()`** | 全新临时目录里 `python3 <file>`，`PYTHONHASHSEED=0`，喂 `stdin`，5 秒超时，**比对 stdout 与 `expect`**；`_fixtures/` 先拷进去 |
-| ★ **`algorithm_property_check()`** | 把程序当模块导入，取 `entry` 函数，200 组随机实参，与 `gates/refs/chNN_*.py` 里按程序 id 登记、**机制不同**的参照逐个比对（值相等且类型相同）；被测与参照**各拿一份实参的深拷贝**——被测函数就地改了实参时，参照不再看到改过的对象（#181，第 2 期起草时发现）；scipy-stack 层可挂，缺库时本地跳过、CI（`PYTHON_GATES_REQUIRE_SCIPY=1`）红（§5.4） |
+| ★ **`algorithm_property_check()`** | 把程序当模块导入，取 `entry` 函数，200 组随机实参，与 `gates/refs/chNN_*.py` 里按程序 id 登记、**机制不同**的参照逐个比对（值相等且类型相同，**逐层**：list / tuple 按位置、dict 按键、set 比元素类型，叶子比 type——`[np.int64(3)]` 对 `[3]`、`[3.0]` 对 `[3]`、`(True,)` 对 `(1,)` 都是红；第 4 期 m6b 起草时发现原先只比顶层）；被测与参照**各拿一份实参的深拷贝**——被测函数就地改了实参时，参照不再看到改过的对象（#181，第 2 期起草时发现）；scipy-stack 层可挂，缺库时本地跳过、CI（`PYTHON_GATES_REQUIRE_SCIPY=1`）红（§5.4） |
 | `program_embed_roundtrip_check()` | HTML 里的 `source` 解码后与磁盘 `.py` 逐字节相同（§5.3） |
 | `chapter_manifest_check()` | 磁盘 `.py` 与 `chapter.json` 双向存在 |
 | `anchor_check()` | `lineNotes` / `chunks` 的行文本锚在源码里存在且唯一，`clean()` 之后仍唯一；★ 锚点可以落在挖空体内（§2.3） |
