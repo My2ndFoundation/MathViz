@@ -19,7 +19,7 @@ if __name__ == "__main__":
 
     state = np.array([1.0, 0.0])
     for day in range(1, 5):
-# >>> BLANK id=step level=1 hint="走一天：行向量 state 乘以转移矩阵 P（state 在 @ 左边），结果赋回 state；用 @，不用 +=" hintEn="Move on one day: the row vector state times the transition matrix P (state on the left of @), assigned back to state; use @, not an augmented assignment"
+# >>> BLANK id=step level=1 hint="走一天：行向量 state 乘以转移矩阵 P（state 在 @ 左边），结果赋回 state；用 @，但不用 @= 这种增强赋值，写成 state = … 的形式" hintEn="Move on one day: the row vector state times the transition matrix P (state on the left of @), assigned back to state; use @ but not the augmented assignment @=, and write it in the form state = …"
         state = state @ P
 # <<< BLANK
         print(day, state)
