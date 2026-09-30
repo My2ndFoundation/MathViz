@@ -118,7 +118,7 @@ def program_run_check() -> int:
 
         if tier == 'compile-only':
             try:
-                compile(src, prog.get('id', py_path.name), 'exec')
+                compile(src, prog.get('id', py_path.name), 'exec', dont_inherit=True)
             except SyntaxError as exc:
                 print(f'ERROR: {name} 编译失败（{py_path}:{exc.lineno}）：{exc.msg}',
                       file=sys.stderr)
@@ -302,7 +302,10 @@ def algorithm_property_check() -> int:
         src = read_text(py_path)
         ns: dict = {'__name__': '__pygate__'}   # 不是 __main__：别触发主程序
         try:
-            exec(compile(src, str(py_path), 'exec'), ns)     # noqa: S102
+            # dont_inherit=True：本模块有 `from __future__ import annotations`，compile 默认会把它继承给被测程序，
+            # 注解全变成字符串；加上 ns 的 __name__ 不在 sys.modules，@dataclass 在导入时崩（AttributeError）。
+            # 第 3 期 m5a 的 inventory-stock 因此挂不上 property，构建者发现、控制方复现。
+            exec(compile(src, str(py_path), 'exec', dont_inherit=True), ns)     # noqa: S102
         except Exception:                                    # noqa: BLE001
             print(f'ERROR: {name} 导入时抛错（{py_path}）：', file=sys.stderr)
             traceback.print_exc()
