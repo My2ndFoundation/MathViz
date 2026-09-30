@@ -17,10 +17,10 @@ def draw_grid(path):
     names = list(SHOPS)
     for r in range(2):
         for c in range(2):
-# >>> BLANK id=name-index level=2 hint="第 r 行第 c 列的格子该画 names 里的第几个名字？一行有 2 格，先数完前面整行再加上本行的列号，取出来存进 name；下标写成 r 乘 2 在前、加 c 在后（不写成 2 乘 r） || 前面有 r 整行、每行 2 格，所以先跳过 r 乘 2 个名字" hintEn="Which name in names belongs in the cell at row r, column c? A row holds 2 cells, so count the whole rows before it, then add the column number; keep it in name, writing the index as r times 2 first, then plus c (not 2 times r) || There are r whole rows before it with 2 cells each, so first skip r times 2 names"
+# >>> BLANK id=name-index level=2 hint="第 r 行第 c 列的格子该画 names 里的第几个名字？取出来存进 name || 下标写成 r 乘 2 在前、加 c 在后（不写成 2 乘 r）" hintEn="Which name in names belongs in the cell at row r, column c? Keep it in name || Write the index as r times 2 first, then plus c (not 2 times r)"
             name = names[r * 2 + c]
 # <<< BLANK
-# >>> BLANK id=cell level=2 hint="从 axes 里取出第 r 行第 c 列的那个坐标系，存进 ax——axes 是一个 2 行 2 列的网格，先取行、再取列，用两对分开的方括号（不写成一对方括号里的 r, c） || 第一对方括号里是 r，第二对里是 c" hintEn="Take the axes at row r, column c out of axes and keep them in ax - axes is a grid of 2 rows and 2 columns: row first, then column, with two separate pairs of square brackets (not r, c inside one pair) || The first pair of brackets holds r, the second holds c"
+# >>> BLANK id=cell level=2 hint="从 axes 这个 2 行 2 列的网格里，取出这一轮循环要画的那个坐标系，存进 ax || 先取第 r 行、再取第 c 列，用两对分开的方括号（不写成一对方括号里的 r, c）" hintEn="Out of axes - a grid of 2 rows and 2 columns - take the axes this pass of the loop draws on, and keep it in ax || Row r first, then column c, each in its own pair of square brackets (not r, c inside one pair)"
             ax = axes[r][c]
 # <<< BLANK
             ax.plot(MONTHS, SHOPS[name], marker="o")
