@@ -1,6 +1,6 @@
 # Python 子项目 · 第 4 期 · 波 m6a（M6「科学计算与数理统计」上半）程序清单
 
-> 状态：**草稿，待审**（清单、§3 边界、§4 随机、§5 浮点 / 打印格式、§6 递归需要裁决）。
+> 状态：**已批准**（2026-09-30，Python编程 审，受用户委托；批准时的清单提交 4939cf9）。裁决见 §8。
 > 日期：2026-09-30
 >
 > 上游：
@@ -149,3 +149,19 @@ refs 文件：`python/scripts/gates/refs/ch24_numpy_basics.py`、`ch25_numpy_lin
 | 线性代数（特征值、逆矩阵、变换矩阵） | `eigen-2x2`、`linear-system-*`、`determinant-and-identity`、`transform-2d-points` | 属 A-level Further Maths，不在 CS 考纲；OCR / AQA 的图形学或向量部分可能碰到变换 |
 | 统计与假设检验 | `py-statistics` 全页 | 属 A-level Maths 统计，不在 CS 考纲 |
 | 马尔可夫链 | `markov-weather` | 不在四家 CS 考纲 |
+
+---
+
+## 8. 裁决记录
+
+| # | 问题 | 决定 |
+|---|---|---|
+| M6A-D1 | §3.1 统计概念 vs 向量化 | 同意：均值方差只在 ch24 成组（`mean-variance`），statistics 不再写。**本期不开跨页变体组**——全库还没有，页面只列本页程序，跨页组的显示没人验过，不在内容波里首用 |
+| M6A-D2 | §3.2 / §3.4 / §3.5 / §3.6 | 同意 |
+| M6A-D3 | §3.3 matrix-product-matmul | 单独成题（problem = id），讲解点一句「循环写法见「列表」页」 |
+| M6A-D4 | §4 随机 | 同意。`normal-probabilities` 的 `requires` 按实际 import 写：经验对照用 `rng.normal` 就是 `["numpy"]`，property 入口本身保持纯标准库；构建者二选一写进报告 |
+| M6A-D5 | §5 浮点 / 打印 | 同意，另加两条 cases 约束：(a) `pearson-*` / `regression-*` 的 cases 保证 x、y 都不是常数列（否则出 nan，`nan != nan` 门红得与程序无关）；`cosine` 的 cases 排除零向量——入口若要处理这些退化情形，行为写进清单、参照同样处理、cases 覆盖到。(b) 6 位舍入的 `normal-between`、`z-test`：辛普森积分步数取到误差远小于 1e-7，报告写出步数与在 200 组上的最大绝对误差；撞上舍入边界就改 cases，不放宽位数 |
+| M6A-D6 | §6 递归 | 同意 |
+| M6A-D7 | §7 boards | 照现行规则四家全写，拿不准的在报告里列出；boards 语义仍待用户裁决，本期不改规则；§7 的表原样进台账，收尾时并入第 4 期 deferred |
+| M6A-D8 | tags | 新内容统一 `array` 单数；存量里的 `arrays` 不动（记账本） |
+| M6A-D9 | 组名 | 与 m6b 的交叉核由 Python编程 做，m6b 清单到了再告知是否撞名 |
