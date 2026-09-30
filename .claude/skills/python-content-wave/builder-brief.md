@@ -47,7 +47,8 @@
 - **「我的做法与简报不一致、而我的做法更对」本身就是上报项。** 简报或规则里的断言事实上错了（数字、锚点、预期输出），停下上报，**不要改测试或门去迁就**。
 - 报告「门变红」时贴出变红的那一行，并说明是**断言失败**还是**脚本崩溃**（崩溃的红与有效的红长得一样）。
 - 负控制**串行**跑，从内存原字节复原，先确认基线是绿的；绝不 `git checkout` 一个被你改坏的文件来复原。
-  变异之后门是绿的，先问这个变异是不是**等价程序**（第 3 期：Fisher–Yates 的 `range` 终点从 0 改成 -1 只多换一次自己、结果不变），是就换一个变异，并且别在注释里声称门守得住它。
+  变异之后门是绿的，先问这个变异是不是**等价程序**（第 3 期：`competition-ranking` 的新名次 `place = position` 改成 `len(rows) + 1`——rows 每轮恰好多一行，两者恒等），是就换一个变异，并且别在注释里声称门守得住它。
+  「等价」对整个程序说：Fisher–Yates 的 `range` 终点从 0 改成 -1，对 property 门等价，但 `randrange(1)` 也消耗随机状态，共用 `rng` 的演示块输出变了，`program_run_check` 断言红——那是「property 门看不见」，不是等价程序。
 - **负控制只做保证终止的变异**（改比较号、改常量、改下标都行；删掉 `visited.add`、删掉循环变量的更新这类可能死循环的不行——第 2 期一个这样的变异让门挂满 600 秒、swap 撑到约 21 GB、同机三个会话一起磁盘满）。
   跑 `check.py` 或任何子进程都带超时：**本机（macOS）没有 `timeout` 命令**，写 `timeout 120 …` 只会 rc=127、什么都没跑。用 Python：
   `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时或被打断时（`except BaseException`；SIGTERM 先用 `signal.signal` 转成异常）`os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组（`subprocess.run(timeout=…)` 只杀直接子进程，孙进程会留下）。门自己也有时限（property 每次调用 2 秒、`program_run_check` 逐程序 `run.timeout`），子进程超时是兜底。
@@ -59,9 +60,11 @@
   不挖跨嵌套块的多行空；挖空答案不许原样出现在同一程序没挖的行上（「照抄空」；从没挖的某一行删几个记号就能得到的也算——第 3 期 m5b 终审 I1）；讲解指别的程序写标题、指别的页写「页名」（用「」，不用星号）；用到递归的程序「用，不重讲」、`tags` 带 `recursion`。
 - 读 `_fixtures/` 的程序：复制出去不带数据文件，讲解要把文件逐行抄出来——`fixture_notes_check` 要求中英两边都写出文件名、文件的**每一行各自成一段、连续、按原顺序**（所以 fixture 要短、不要空行）；
   源码里路径写全 `_fixtures/<名>`。提交后 `git ls-files` 对一遍磁盘上的 `_fixtures/`：根 `.gitignore` 的规则（第 3 期的 `*.log`）可能静默挡掉它，门读磁盘看不见。
-- **随机数只许 `random.Random(<固定种子>)` 实例**（或把 `rng` / `seed` 当实参传进函数），不用模块级 `random.*`、不读时间；property 只挂在纯核心函数上，随机序列当实参传进去。
-  每个用到随机的程序，在 `/usr/bin/python3`（3.9.6）与 `python3`（3.12.x）上各跑一次（照 `python-drill-tool`「生成 `run.expect`」的条件），stdout 逐字节比对，写进报告；
-  同时跑一个版本相关的程序（`import sys; print(sys.version_info[:2])`）证明两边真是两个解释器。不一致就上报，不要只取一边。
+- **随机数**：stdlib 层（`runtime: cpython` 且 `requires` 为空）**只许 `random.Random(<固定种子>)` 实例**（或把 `rng` / `seed` 当实参传进函数），不用模块级 `random.*`、不读时间；
+  scipy-stack 层（`requires` 含 numpy）**只许 `np.random.default_rng(<固定种子>)` 实例**（或把 `rng` 当实参传入），不用 `np.random.seed`、模块级 `np.random.*`、`RandomState`（#191、主规格 §5.4：流不变靠钉住的库版本）。
+  property 只挂在纯核心函数上，随机序列当实参传进去。
+  每个用到随机的 **stdlib 层**程序，在 `/usr/bin/python3`（3.9.6）与 `python3`（3.12.x）上各跑一次（照 `python-drill-tool`「生成 `run.expect`」的条件；读 `_fixtures/` 的照门的方式把它 `copytree` 进临时 cwd），stdout 逐字节比对，写进报告；
+  同时跑一个版本相关的程序（`import sys; print(sys.version_info[:2])`）证明两边真是两个解释器。不一致就上报，不要只取一边。scipy-stack 层不做两解释器比对（`/usr/bin/python3` 没有 numpy），`run.expect` 在钉住的版本上生成。
 - 判「全是数字」用 `isdecimal()`，不用 `isdigit()`（`'²'` 过得了 `isdigit`，`int()` 却会抛错）。新造 `tags` 之前先 grep 全库已有写法，跟已有的走。
 - 长度取向约 {{REQUIRED 本期的行数取向，如 40 或 60}} 行（不含 BLANK 指令行，是取向不是门），超过的写进报告；{{REQUIRED 本期用不用 `chunks`，如「不用 `chunks`」}}。
 - 你自己不派子代理（不派帮手，更不派评审）。评审由控制方安排。
@@ -69,7 +72,7 @@
 ## 报告
 
 写到**你自己 worktree 里**的 `.superpowers/python-waves/{{REQUIRED 波名}}/{{页 id}}-report.md`（`.superpowers/` 是 gitignored，不进提交）——**不要**写集成 worktree：
-你的 isolation worktree 会拒写它以外的路径（第 3 期 4 个构建者里 3 个被拒）。自己 worktree 里也写不进，就写到 `{{REQUIRED scratchpad 绝对路径}}/{{页 id}}-report.md`；不要换别的办法绕过拒写。
+你的 isolation worktree 会拒写主工作区目录树里、你自己 worktree 以外的路径——集成 worktree 就在主工作区的 `.claude/worktrees/` 下（第 3 期 4 个构建者里 3 个被拒）。自己 worktree 里也写不进，就写到 `{{REQUIRED scratchpad 绝对路径}}/{{页 id}}-report.md`；不要换别的办法绕过拒写。
 然后只回复：状态（DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT）、提交（短 SHA + 标题）、一行测试结论、顾虑、**报告的实际绝对路径**（控制方要去那里拷）。
 
 报告必须包含：

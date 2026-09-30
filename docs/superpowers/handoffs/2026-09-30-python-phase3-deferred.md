@@ -54,9 +54,11 @@
 - **存量**：`python/core/judge.js:162` 仍是 `if (na.rel.length === nr.rel.length)`。今天重跑反例：
   `compare('if a:\n    if b: c()\nd()', 'if a:\n    if b:\n        c()\n    d()')` → `{"ok":true,…,"kind":"equal"}`；对照（行数相同、`d()` 缩进错）→ `{"ok":false,"index":3,"expected":4,"got":0,"kind":"indent"}`。
 - **新内容**：扫 ch20–ch23 的全部 128 个空，多行空 9 个：ch20 0、ch22 0；ch23 1 个（`bank-transfer-atomic` 的 move-money，两行同层）；
-  ch21 8 个，其中 2 个同层、**6 个是「if 头 + 一行体」**（`game-of-life-grid.py:11`、`game-of-life-set.py:17`、`random-walk-1d.py:11`、`:15`、`sir-epidemic-steps.py:28`、`traffic-light-fsm.py:29`，行号是指令行）。
-  后者按字面不是「同一层」，但判定器挡得住：这种两行空唯一能改变行数的写法是写成一行 `if X: body`，语义与两行相同；
-  实测 `compare('if abs(position) > farthest: farthest = abs(position)', 两行参考)` → equal，体缩进写成 0 或 8 → `kind:"indent"`。m5b 终审也判为「无跨嵌套块」。
+  ch21 8 个，其中 2 个同层、**6 个是「复合语句头 + 一行体」——5 个 `if` 头 + 1 个 `for` 头**（`game-of-life-grid.py:11`、`game-of-life-set.py:17`、`random-walk-1d.py:11`、`:15`、`sir-epidemic-steps.py:28` 是 `if`；
+  `traffic-light-fsm.py:29` 是 `for ticks in DURATION.values():` + `total += ticks`；行号是指令行）。
+  后者按字面不是「同一层」，体写错缩进时行数不变、判定器照比：实测 `compare('if abs(position) > farthest: farthest = abs(position)', 两行参考)` → equal，体缩进写成 0 或 8 → `kind:"indent"`；`for` 头同样（一行 equal、体 0 / 8 → indent）。
+  但「判定器挡得住」说过头：token 相同而行数不同的写法有两种——写成一行（语义相同）；或在体里本来就有的括号里断行、再把体写到外层（`if …:\nfarthest = abs(\n    position)`），
+  三行对两行、不比缩进 → **equal**，CPython 报 `IndentationError`（`judge.js:162` 的同一个洞；不会变成一个语义不同的合法程序，罕见，接受）。m5b 终审判为「无跨嵌套块」。
   本收尾把这条例外写进了 `python-drill-tool`（原句「只挖同一层」，字面上会让下一个评审把这 6 个当违例）。对照：同一扫描在 ch10–ch19 上报出 31 个多行空（ch10–14 26 个、ch15–19 5 个）、0 个混层；第 2 期账本记的是「M3 26 个、M4 6 个都同层」——M4 那个 6 是终审在修复之前数的，差的 1 个没有追查。
 - **为什么没修 / 什么时候必须修**：同第 2 期账本——改判定器是 core 改动；一个**必须**跨嵌套块挖三行以上的程序出现时，或第一次改 core 时先给 `judge_strictness_check` 加这条反例、看它红。
 
@@ -159,8 +161,9 @@ m5b 终审 M6 抓到本波新造的 8 个 tag 与库里已有写法分裂，修�
 ### 8. `isdigit` 的存量
 
 m5a 终审 I1 之后，作者规矩改成「判『全是数字』用 `isdecimal`」（`'²'.isdigit()` 为真，`int('²')` 却抛错）。本收尾扫全库 `.py`：
-**`isdigit()` 后接 `int()` 的 0 处**；`isdigit()` 共 3 处，都不接 `int()`——`ch02-strings/password-rules.py:15`（只数有几个数字字符，无害）、
-`ch02-strings/string-method-tour.py:12`（`is_pin`：`len(text) == 4 and text.isdigit()`）与 `:30`（演示行）。
+**`isdigit()` 后接 `int()` 的 0 处**；`isdigit()` 的代码调用共 4 处，都不接 `int()`——`ch02-strings/password-rules.py:15`（只数有几个数字字符，无害）、
+`ch02-strings/string-method-tour.py:12`（`is_pin`：`len(text) == 4 and text.isdigit()`）与 `:30`（演示行）、`ch20-text-data/date-format-manual.py:30`（`print(chr(178).isdigit(), chr(178).isdecimal())`，演示二者之别，无害）。
+另有两条提示原文提到 `isdigit`（`ch23-systems/menu-driven-cli.py:18`、`date-format-manual.py:11`，都是「用 isdecimal，不用 isdigit」），不是调用。
 **`is_pin` 这一空的第 1 级提示写着「不是 isdecimal 或 isnumeric」、第 2 级写着「每个字符是不是都是 0 到 9」**（`string-method-tour.py:11`）——
 后一句对 `isdigit` 不成立（`is_pin('12³4')` 为 True），前一句与 py-systems / py-text-data 教的正好相反，同 m5a 终审 I1 一类。
 - **为什么没修**：改提示要给 py-strings 升版；收尾 PR 只改文档。**什么时候必须修**：下一个动 py-strings 的 PR；学生先做 M5 再回头做 py-strings 就会撞上两条相反的规则。
@@ -174,7 +177,12 @@ m5a 终审 I1 之后，作者规矩改成「判『全是数字』用 `isdecimal`
 记下来是为了**下一个做负控制的人别把它们当成「cases 的盲区」**（复盘条目 21：变异后门绿，先问变异是不是等价）：
 
 - `competition-ranking`：新名次支 `place = position` 改成 `len(rows) + 1`——rows 每轮恰好多一行，两者恒等（m5a 控制方第一次负控制选了它、门绿，是选错不是门瞎；改选密集排名后断言红）。
-- `shuffle-fisher-yates`：`range(len(items) - 1, 0, -1)` 的终点 `0` 改成 `-1`——多走一次 i = 0，`randrange(1)` 只能取 0、自换，多取的随机位在最后，结果不变（构建者 refs 注释原先称门能守，实测后改正）。
+- `shuffle-fisher-yates`：`range(len(items) - 1, 0, -1)` 的终点 `0` 改成 `-1`——**只对 property 门等价，对程序不等价**。多走一次 i = 0，`randrange(1)` 只能取 0、自换；
+  property 门每次调用用新种子、多取的那一位在全部交换之后，所以 `algorithm_property_check` 绿。但 `randrange(1)` 也消耗随机状态，演示块用同一个 `rng` 连洗 6000 次，
+  之后的输出全变了——`program_run_check` 断言红（stdout 与 `run.expect` 不符，无 Traceback；收尾评审与本修复各在导出副本上实测一次，复原后两门复绿）。
+  所以构建者原先那句「门能守住」对整个 `check.py` 其实成立，它后来改成的「门是绿的，但那是等价程序」反而不准。
+  - **待改**：`python/scripts/gates/refs/ch21_simulation.py:256-257`（「range 的终点写成 -1……门是绿的，但那是等价程序：…不影响结果」）应改成「property 门看不见（新种子、多取的一位在最后），`program_run_check` 看得见」。
+    收尾 PR 只改文档，不动 refs；**什么时候改**：下一个动 ch21（或这份 refs）的 PR 顺手改。
 - `monte-carlo-pi-grid`：`<=` 改 `<`——两个奇数的平方和永远不等于 4n²（构建者声明，m5b 终审实测绿、确认等价；第 1 级钉 `<=`，第 3 级解释）。
 - `minesweeper-flood-reveal`：`!= 0` 改 `> 0`——出队的格子不会是雷（m5b 终审实测绿）。
 - `minesweeper-place-count`：`neighbours` 的边界放宽（`0 <= nx <= w`）或删掉「跳过自己」——出界格与自己本来就不在 `mines` 里（构建者报为「门盲点」，m5b 终审判为等价程序）。
@@ -198,7 +206,7 @@ m5a 控制方加了反向规则（今天 `.gitignore:55` `!python/programs/*/_fi
 
 ### 4. tag 规范化门（建议）
 
-规范化后相同即红。**规范化只能折叠大小写、空格与连字符**——实测全库 391 个不同 tag，这样折叠后有 2 组撞：`nested loops` / `nested-loops`、`lookup table` / `lookup-table`；
+规范化后相同即红。**规范化只能折叠大小写、空格与连字符**——实测全库 389 个不同 tag（264 个程序的 `tags` 去重、区分大小写），这样折叠后有 2 组撞：`nested loops` / `nested-loops`、`lookup table` / `lookup-table`；
 若连下划线一起去掉，还会误撞 4 组本来就不同义的（`repr` / `__repr__`、`len` / `__len__`、`str` / `__str__`、`main` / `__main__`：内置函数与特殊方法不是一回事）。
 `2D list` / `list of lists`、`slice` / `slicing` 这类同义不同形的，规范化门看不见——只能靠「先 grep 全库」的作者规矩。
 - **为什么没做**：门一上线就会因存量红；先清存量要升版（§二.6）。
@@ -226,9 +234,13 @@ m5a 控制方加了反向规则（今天 `.gitignore:55` `!python/programs/*/_fi
 
 1. **Skill 工具加载的是主工作区的 skill。** 主工作区不 pull（今天仍停在 `533c813`，第 1 期波 1 复盘之后），所以 Skill 工具读到的 `python-content-wave` 永远是旧版——缺 #186 的 `checkout -B` 等修正。
    m5b 控制方第 0 步发现、改从集成 worktree 读（m5b 台账裁决 1：判错的代价是照旧版派发、构建者第一步全部失败）。
-   已写回：`python-content-wave` 第 0 步「开完集成 worktree 后从 `$W/.claude/skills/` 重读本 skill」，简报模板也从 `$W` 取；构建者简报写明读自己 worktree 里的文件、不用 Skill 工具。
-2. **构建者写不进集成 worktree。** #186 的模板让构建者把报告写到集成 worktree 的 `.superpowers/python-waves/<波>/`；isolation worktree 的规则拒写本 worktree 以外的路径
-   （提示原话「Edit the worktree copy of this file instead of the shared-checkout path」）。4 个构建者里 3 个被拒（m5a 两个写进了自己 worktree 的同名相对路径，m5b 的 py-simulation 写进了 scratchpad），
+   已写回：`python-content-wave` 第 0 步「开完集成 worktree 后用 Read 从 `$W/.claude/skills/` 重读本 skill」，简报模板也从 `$W` 取；构建者简报写明读自己 worktree 里的文件、不用 Skill 工具。
+   **但这份写回对用 Skill 工具的读者无效，直到主工作区前进**：Skill 工具读的正是主工作区里没有这一条的旧版（收尾评审实测：`533c813` 那份里「重读」「checkout -B」0 处，
+   `builder-brief.md:19` 仍是 `merge --ff-only`）；根 `CLAUDE.md` 也从主工作区读、同样旧。m5b 是自己发现的，不是被文件告诉的。
+   所以**交给第 4 期的要求**：Python编程 给第 4 期的派发简报（phase4-brief），以及派模块控制方的每一份简报，**第一句**写「开完集成 worktree 后，用 Read 读 `$W/.claude/skills/` 下的
+   `python-content-wave` 与 `python-drill-tool`，不用 Skill 工具」。主工作区要不要前进、或在用户级记忆里放一句指路，等用户决定（第 10 条）。
+2. **构建者写不进集成 worktree。** #186 的模板让构建者把报告写到集成 worktree 的 `.superpowers/python-waves/<波>/`；isolation worktree 的规则拒写主工作区目录树里、它自己 worktree 以外的路径——
+   集成 worktree 就在 `$M/.claude/worktrees/` 下（提示原话「Edit the worktree copy of this file instead of the shared-checkout path」；scratchpad 不在这棵树里，写得进）。4 个构建者里 3 个被拒（m5a 两个写进了自己 worktree 的同名相对路径，m5b 的 py-simulation 写进了 scratchpad），
    m5b 的 py-games 同样的路径却写成了——行为不稳定。终审员、修复实现者、复审员不是 isolation worktree，都写进去了。每个被拒的构建者都没有绕过，报告里写明了实际路径，控制方拷入台账。
    已写回：构建者报告写**自己 worktree** 的 `.superpowers/python-waves/<波>/<页>-report.md`，写不进就写 scratchpad 并在回复里给实际路径；控制方第 3 步集成前拷进集成 worktree 台账。
 3. **权限拒 `rm` 与 `git add` / `git rm` 组合。** m5a 终审员删 `.superpowers/` 下的临时导出副本被拒（控制方代删）；m5a 复审员删 `.superpowers/python-waves/m5a/rereview-copy/` 被拒、留在原处；
@@ -246,8 +258,12 @@ m5a 控制方加了反向规则（今天 `.gitignore:55` `!python/programs/*/_fi
    origin 上 `git ls-remote --heads` 共 20 条、没有一条 python 分支）。第 2 期写回的「构建者第一行报原分支名、控制方按台账清理」这一次完整走通了。第 2 期留下的那 46 / 16 仍然归属不明，本收尾不删。
 8. **设计 §9.2 的两份文档仍未写**：`docs/superpowers/python.md` 与 `docs/superpowers/prompts/python-handoff.md`（今天 `ls` 都不存在）。第 2 期账本说「第 3 期派出第一个构建者之前」必须写，没写；
    第 3 期的 fixture 问题靠 #187 的门与简报解决了，构建者读得到规则。**什么时候必须修**：第 4 期（M6 scipy-stack，`program_run_check` 第一次要装第三方库）开工前——那一层的运行策略只写在主规格 §5.4。
+   收尾期间合并的 #191（`4b13c49`）已给这一层补了开工前提：CI 装钉版本的 `numpy==2.3.1 pandas==2.3.0 matplotlib==3.10.3`、`PYTHON_GATES_REQUIRE_SCIPY=1` 下缺库即红、`algorithm_property_check` 可覆盖 scipy-stack 程序（主规格 §5.4 三条补充）。
+   **M6 的 numpy 随机数已裁决**（控制方，收尾当天）：只许 `rng = np.random.default_rng(<固定种子>)` 实例或把 `rng` 当实参传入，不许 `np.random.seed` / 模块级 `np.random.*` / `RandomState`；
+   流不变靠钉住的库版本保证；两解释器比对不适用于 scipy-stack（`/usr/bin/python3` 3.9.6 没有 numpy）。第 3 期的「只许 `random.Random`」因此限定到 stdlib 层（`runtime: cpython` 且 `requires` 为空）——已写进 `python-drill-tool` 与 `python-content-wave` 的模板。
 9. **用户验收仍未做**：4 个新页面的 `file://` 双击打开、复制程序粘进 PyCharm 真跑（含**照讲解手工建 `_fixtures/`**）——#189、#190 都列为未勾选项；前 19 页同样未做。
-10. **三个等用户的决定照旧**：`boards` 语义、页面是否显示 `run.expect`、`core.hooksPath` 是否改成相对路径。本期都照现行规则、没有停下（简报 §2）。
+10. **等用户的决定**：三个照旧——`boards` 语义、页面是否显示 `run.expect`、`core.hooksPath` 是否改成相对路径（本期都照现行规则、没有停下，简报 §2）；
+    **新增一个**——主工作区（今天停在 `533c813`）要不要 fast-forward 到 main，或者给 `python-content-wave` / `python-drill-tool` 在用户级记忆里放一句「用 Read 读集成 worktree 里的版本」的指路（第 1 条：主工作区属于用户，控制方不动它）。
 11. **m5a 的 `git-size-before.txt` 没记测量时点**：m5a 台账第 0 步没有这一行，文件时间戳是拷贝时间；它比 m5b 的开工前多 21 个对象，应是晚于 m5b 测的。§五 照录。
 
 ---
