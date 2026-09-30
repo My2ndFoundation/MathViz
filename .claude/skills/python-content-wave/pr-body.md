@@ -19,13 +19,13 @@
 留到账本、未在本 PR 处理的：{{列表或「无」}}。
 
 ## 验证
-- [x] 全量验收命令本机全绿：`check.py` {{N}} 道门、导航契约 {{M}} 项、五道根级门、chess / cryptography 门、三个生成脚本 `--check`、core 测试。
+- [x] 全量验收命令本机全绿：`check.py` {{N}} 道门（严格模式 `PYTHON_GATES_REQUIRE_SCIPY=1`，「程序真跑」{{段数}} 段、0 段因缺库跳过）、导航契约 {{M}} 项、五道根级门、chess / cryptography 门、三个生成脚本 `--check`、core 测试。
 - [x] 每页至少一个 P 程序由控制方亲手做负控制：因断言失败而红，从内存原字节复原。
-- [x] 浏览器（浏览器工具不能操作 `file://`，所以改用 http 预览打开本分支的 worktree，探针先确认读到的是本分支）：中英 × 读 / 挖空 / 临摹；面板元数据；每个程序都有空；字面量反馈不印原文（写出实际检查了几次；0 次就写改做了什么，不写「通过」）；临摹三层在 0.9 / 1 / 1.25 缩放下对齐（量**可见字符**的坐标，写出每档的字宽证明缩放生效；负控制加 `padding-left` 后 dx ≠ 0）。
+- [x] 浏览器（浏览器工具不能操作 `file://`，所以改用 http 预览打开本分支的 worktree；探针用 skill 里的 `probe.js`，先确认读到的是本分支、`TOOL.id` 对得上）：中英 × 读 / 挖空 / 临摹；面板元数据；每个程序都有空；字面量反馈不印原文（写出实际检查了几次；0 次就写改做了什么，不写「通过」）；临摹三层在 0.9 / 1 / 1.25 缩放下对齐（量**可见字符**的坐标，写出每档的字宽证明缩放生效；负控制加 `padding-left` 后 dx ≠ 0）。
 - [x] 复制内容真跑：每页按种子 {{seed}} 抽 3 个程序（{{id 列表}}），三种模式的复制内容相同，python3 跑出的 stdout 与 `run.expect` 逐字节相同。
 - [x] （本波有用到随机的 stdlib 层程序才写）两解释器：控制方独立在 3.9.6 与 3.12.x 上跑本波全部 stdlib 层程序（`_fixtures/` 照门的方式拷进临时 cwd），stdout 相同且等于 `run.expect`；负控制：版本相关的程序两边不同。模块级 `random.*` 调用 {{n}} 处、读时间 {{n}} 处（扫描先对 `random.choice(xs)` 命中、对 `rng.choice(xs)` 不命中）。
 - [x] （本波有读 `_fixtures/` 的程序才写）fixture 文件都被 git 跟踪（`git ls-files` 与磁盘逐一对上）；`fixture_notes_check` 由控制方做过一次负控制（改 fixture 一个字符 → 断言红）。
 - [ ] **`file://` 双击打开新页面、复制程序粘进 PyCharm 真跑（读 `_fixtures/` 的程序要照讲解手工建数据文件）——需要人来做**
-- [ ] CI
+- [ ] CI（请核：`Successfully set up CPython (3.12.x)`；钉版本那一步打印的 `scipy-stack 2.3.1 2.3.0 3.10.3`；python 门「0 段因缺库跳过」与 `{{N}} 道门全绿`）
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

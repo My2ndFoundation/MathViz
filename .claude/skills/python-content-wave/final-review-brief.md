@@ -23,7 +23,7 @@
 .py、chapter.json、refs、注册表条目逐个读。
 
 ## 只读
-不改 worktree 里受版本控制的文件、索引、HEAD、分支（下面的报告写进 worktree 的 `.superpowers/`，那是 gitignored 的台账目录，不算改 worktree）。临时文件与导出副本一律放 `{{REQUIRED 集成 worktree 的 .superpowers/python-waves/<波>/review-tmp/}}` 这**一个**子目录（文件名前缀 `{{波名}}-review-`）；收尾时删不掉（权限拒）就别换命令绕，把留下的路径列在报告末尾，控制方统一删（第 3 期 m5a 的终审员与复审员删自己的导出副本都被拒过）。**报告**写到 {{REQUIRED 集成 worktree 的 .superpowers/python-waves/<波>/review-report.md}}（草稿区会随会话重启清空，第 2 期 M3 的终审报告就这样丢了，只剩回传摘要）。改动性检查（变异看门红）在导出的副本上做：`git archive HEAD python | tar -x -C <review-tmp>/{{波名}}-review-copy`，先 `diff -r` 确认与 worktree 相同（门的根目录由脚本自身位置决定，副本是独立的树）；串行、从内存原字节复原并断言字节相同——这样只读严格成立（波 2 复审员的做法）。`check.py` 至多跑一次。你不派子代理。
+不改 worktree 里受版本控制的文件、索引、HEAD、分支（下面的报告写进 worktree 的 `.superpowers/`，那是 gitignored 的台账目录，不算改 worktree）。**临时文件与导出副本一律放草稿区 `{{REQUIRED scratchpad 绝对路径}}`**，文件名以 `{{波名}}-review-` 开头（范围复审员用 `{{波名}}-rereview-`，修复实现者用 `{{波名}}-fix-`）——**不放进 worktree**，`.superpowers/` 下也不放。草稿区里的东西**不必删，也不要试着删**，删被拒时更不要换命令绕（第 4 期把临时文件放在台账下的子目录，四方的 `rm -rf` 全被拒，集成 worktree 因此删不掉）。**报告**写到 {{REQUIRED 集成 worktree 的 .superpowers/python-waves/<波>/review-report.md}}（草稿区会随会话重启清空，第 2 期 M3 的终审报告就这样丢了，只剩回传摘要）；报告引用的、值得留下的脚本（照抄扫描器、泄漏扫描器、变异驱动）拷一份到报告旁边，导出副本不拷。改动性检查（变异看门红）在导出的副本上做：`git archive HEAD python | tar -x -C <草稿区>/{{波名}}-review-copy`，先 `diff -r` 确认与 worktree 相同（门的根目录由脚本自身位置决定，副本是独立的树）；串行、从内存原字节复原并断言字节相同——这样只读严格成立（波 2 复审员的做法）。`check.py` 至多跑一次。你不派子代理。
 **变异只做保证终止的**：删 `visited.add`、删循环变量的更新这类可能死循环的不做——第 2 期 M4 终审就是这样让门挂满 600 秒、swap 撑到约 21 GB、同机几个会话一起磁盘满。
 子进程一律带超时，而**本机（macOS）没有 `timeout` 命令**：用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时或被打断时（`except BaseException`；SIGTERM 先用 `signal.signal` 转成异常）`os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组。遇到 ENOSPC 就停下回报，不删任何不是你写的文件。
 
@@ -39,6 +39,10 @@
   第 3 期 m5b 终审 I1：`board-move-2048` 的 right / up 两空都能从未挖的 down 行剥掉 `transpose(…)` 或 `[::-1]` 得到，裁定为照抄空一类。删掉的是参数、运算项、`as e`，或答案只是长行里的一小截（`return node` 之于 `return [node.value] + preorder(…) + …`），不算。
   扫描同样要有两道对照：注入一行孪生（负控制），以及拿 `board-move-2048` 修复前的版本（提交 `9994062`）确认 right、up 两条都报得出来（正对照）。
 - **等价写法在挖空模式下能不能互抄**：挖空模式下所有空同时隐藏，两个空之间互相抄不到；只看**没挖**的行。
+- **讲解泄漏**：`notes` / `blurb` 在三种模式都显示。写个脚本，把每个空的「核心」去掉空白后在中英 `notes`、`blurb` 与**每一级提示**里找——核心取：整行、赋值号右边、`print(…)` / `return` / `for` / `if` 后面的部分，
+  **以及答案行里每一对括号 / 方括号里的内容**（长度 ≥ 4）。第 4 期 m6b 的第一版扫描没把括号里的内容当核心，漏掉了只出现在下标里的 `r * 2 + c`（讲解原文「格子 (r, c) 拿第 r * 2 + c 个名字」），补上这一条才报出来。
+  候选逐条看过再报（`name`、`True` 这类单词命中是噪声）。两道对照：往副本的 notes 里注入一句含某个答案核心的话，确认报出（负控制）；拿一个已知泄漏的旧版本确认报出（正对照，例如 `subplots-grid` 修复前的 `5448b00`）。
+  **照抄扫描与这道泄漏扫描同一个脚本、同一批空一起跑**，报告里写两者各自的命中数与两道对照的结果。
 - 中英两种语言是否等义？学生从程序、讲解与提示能否推断出挖空行里的字面量文字？（页面**不显示**程序输出，`run.expect` 只给门用——「看输出就知道」不算。）
 
 **页面文字**：工具页 `<title>` 元素里的 `&` 必须写成 `&amp;`（注册表与 `TOOL.title` 里照写 `&`；没有门看守 `<title>`，第 2 期 M3 抓到过裸 `&`）；讲解里指别的页写「页名」（用「」——notes 按纯文本渲染，`*星号*` 会原样显示，M4 抓到 8 处）。

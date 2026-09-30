@@ -80,6 +80,9 @@ description: >-
   使用者写出更好的答案会被判错——要么别挖，要么让提示把形式钉死。**这类「只是在两种同样好的写法
   之间选一种」的钉法放第 1 级提示**（她还没点开提示就写出另一种好写法时不该意外发现自己错了）；
   只有当写出这个钉法本身就等于把整行答案念出来时，才把它挪到最后一级。
+  **numpy 标量与内置函数交互造成的等价写法，第 1 级必须钉**：单参数 `round(np.float64(x))` 返回的已是 Python `int`（NumPy 1.19 起），于是 `int(round(d))` 与 `round(d)`
+  值与类型都相同、property 门也分不出，判定器却只认一种；`float(x)`、`x.item()`、`x.tolist()` 对一个 `np.float64` 同样都交回 Python `float`。
+  第 4 期 `determinant-and-identity` 的 round-int 空靠第 1 级「再在外面套一层 int()」钉住（m6a 终审实测 `return round(d)` 等价、判错）。挖到这类行，先把这几种写法全拿判定器跑一遍。
 - **提示逐级更具体，任何一级都不许给出答案原文。**
 - **挖空答案不许原样出现在同一程序没挖的行上（「照抄空」）。** 把答案行去掉缩进，在同一个 `.py` 的其余行里逐字找一遍；找得到，这个空就成了抄上下文——
   换一行挖。第 2 期 M4 终审抓到 3 处（`hash-search-linear-probing` 的探测两行在同程序的查找函数里原样出现、`lcs-length` 的比较行在回溯函数里原样出现），
@@ -95,10 +98,11 @@ description: >-
 - **不挖跨嵌套块的多行空。** 判定器在答案与标准答案**行数不同**时完全不比缩进（`python/core/judge.js:162`，只在 `na.rel.length === nr.rel.length` 时比相对缩进），
   连改变语义的缩进也判对：三行的 `if a:` / `    if b: c()` / `d()` 被判等于 `d()` 缩进在外层 `if` 里的那四行。多行空只挖**同一层**的两三行，并用第 1 级提示钉住写法。
   （第 1 期账本 §一.3；判定器没改，第 2 期是靠这条规矩避开的——M3 26 个、M4 6 个多行空都在同一层。）
-  **唯一的例外是「复合语句头（`if` / `for` / `while`）+ 一行体」这种两行空**：体写错缩进时行数不变、判定器照比（实测判 `indent`）。
+  **唯一的例外是「复合语句头（`if` / `for` / `while` / `except`）+ 一行体」这种两行空**：体写错缩进时行数不变、判定器照比（实测判 `indent`）。
   token 相同而行数不同的写法只有两种：写成一行 `if X: body`（语义与两行相同，判对是对的）；或在体里本来就有的括号里断行——后者若把体写到外层，
   判定器照样判对、CPython 报 `IndentationError`（`judge.js:162` 的同一个洞，罕见，接受）。
-  第 3 期 ch21 有 6 个这样的空（5 个 `if` 头、1 个 `for` 头：`traffic-light-fsm`），终审接受。三行以上、或体不止一行的，仍按上面的规矩。
+  第 3 期 ch21 有 6 个这样的空（5 个 `if` 头、1 个 `for` 头：`traffic-light-fsm`），终审接受；第 4 期 ch24 `broadcasting-table` 的 `except ValueError as e:` + `print(type(e).__name__)`
+  同样（m6a 终审实测：体缩进错判 `indent`、写成一行判对、`as err` 与写死字符串由第 1 级钉住），ch25 `eigen-2x2`、ch26 `merge-left-join` 是 `if` 头。三行以上、或体不止一行的，仍按上面的规矩。
 - 被挖的行里若有学生无从推断的文字（`input()` 的提示语、任意取的格式宽度），提示必须给出它，否则别挖。
 - **挖空错误反馈从不打印字符串/f-string 字面量的原文**（Task 11b）：期待的 token 是一个字符串或
   f-string 时，她只会看到它的类别（一个字符串 / 一个 f-string）与自己写的原文从第几个字符起开始
@@ -121,10 +125,13 @@ description: >-
 - 一个知识点只在一页**讲**（页面边界见第 1 期设计 §6.5）；做过的问题不跨页重复。
 - **递归「用，不重讲」**（第 2 期 M3、M4 两次裁决一致）：别的页的程序可以用递归，讲解只说这个结构 / 算法为什么自然分成子问题、基例是什么，
   不讲调用栈、基例与递归步的一般机制；需要时写「递归的机制见「递归」一页」；`tags` 带 `recursion`，让选择器能筛。建树的辅助函数用了递归也算。
+- **讲解里对库行为的断言要有出处。** 写「从某版本起」（「NumPy 2 起」「Python 3.10 起」）之前查过那个库的 release notes，查不到就不写版本号——
+  第 4 期 m6a 终审建议、修复照写的「NumPy 2 起单参数 round 返回 int」实为 NumPy 1.19 起（1.19.0 release notes，gh-15840），范围复审才抓到；评审建议里的版本说法同样要查。
+  说第三方库的参数怎么起作用（`kind=` 管不管多列、`ddof` 的缺省）之前，用 `inspect.getsource(…)` / `help(…)` / 官方文档核一句（第 4 期清单写错过多列 `sort_values` 的 `kind`）。
 - 输出确定：**不读时间**；写文件只写当前目录；数据文件放 `_fixtures/`，要输入就用 `run.stdin`。
   打印异常时只打印自己写的话或 `type(e).__name__`——内置异常的消息措辞随 Python 小版本变（`UnboundLocalError`
   在 3.9.6 与 3.12.9 上实测不同；`int()` 的 `ValueError` 在 3.9–3.12 恰好相同，别据此推广），学生本机不一定是 CI 的 3.12。
-- **随机数只有一种写法**（第 3 期裁决；此前是「不用 `random`」）。**作用域：stdlib 层**——`runtime: cpython` 且 `requires` 为空的程序（M1–M5）：
+- **随机数只有一种写法**（第 3 期裁决；此前是「不用 `random`」）。**作用域：stdlib 层**——`runtime: cpython` 且 `requires` 为空的程序（M1–M5，以及 M6 页上只用标准库的程序；层看 `requires`，不看模块）：
   只用 `rng = random.Random(<固定种子>)` 这个实例，或把 `rng` / `seed` 当实参传进函数；
   **不用模块级的 `random.random()` / `random.choice()` 等**。`random.Random(20260930)` 的 `random / randint / randrange / choice / shuffle / sample / uniform / gauss / choices`
   在 CPython 3.9.6 与 3.12.9 上实测逐项相同，但这不是保证——**每个用到随机的 stdlib 层程序都在 `/usr/bin/python3`（3.9.6）与 3.12.x 上各跑一次、stdout 逐字节比对**，
@@ -147,7 +154,9 @@ description: >-
 - 一般 2–3 个空（门只要求至少 1 个），**挖整行**。
 - 本期**不用 `chunks`**。
 - **每页至少一个变体组**（同一 `problem` 两个以上写法）——`variant_check` 只要求**全库**至少一个，管不到每页。
-- **新造 `tags` 之前先 grep 全库已有写法**（`python/programs/*/chapter.json`），跟已有的走：选择器按 tag 筛，`nested loops` 与 `nested-loops` 分裂了就筛不全。
+- **新造 `tags` 之前先 grep 全库已有写法**（`python/programs/*/chapter.json`），跟已有的走；并照简报里的本波共有约定表写（同波的构建者互相看不见）。
+  tag 显示在三种模式的说明面板上——分裂了，她看到的就是自相矛盾的元数据（同一模块三页，偏偏「NumPy 基础」那页没有 `numpy`：第 4 期 m6a 终审 I2）。
+  选择器今天**不**按 tag 筛（`python/core/interact.js` 的 `filterPrograms` 只按 level / kind / boards / lines 筛；此前这里写的「选择器按 tag 筛」与代码不符，m6a 终审 m10），要不要加是产品决定。
   第 3 期 m5b 终审抓到 8 个新造的分裂（`state` / `state-machine`、`comprehension` / `list comprehension`……），m5a 漏了 1 个（`lookup-table` / `lookup table`）；
   存量里的 `nested loops` / `nested-loops`、`2D list` / `list of lists`、`slice` / `slicing` 等清理（要升版），见第 3 期账本 §二.6。**没有门**。
 

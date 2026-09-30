@@ -15,7 +15,7 @@ description: >-
 写程序的规则不在这里：**REQUIRED BACKGROUND:** 读 `.claude/skills/python-drill-tool/SKILL.md`——构建者照它写，
 终审照它查。本 skill 管的是从「要做这几页」到「PR 合并」之间控制方要做的每一件事。
 
-下面写的每一处取值都来自第 0–3 期真实付过的代价；照抄，不要凭记忆重推。
+下面写的每一处取值都来自第 0–4 期真实付过的代价；照抄，不要凭记忆重推。
 
 ## 运行（按顺序；⏸ = 停下等用户）
 
@@ -33,7 +33,9 @@ description: >-
 - 台账目录：`$W/.superpowers/python-waves/<名>/`（gitignored）。`progress.md` 第一行写本波页面与基线 SHA，以后每一步、每一条裁决都追加进去。
   **本波一切要活过会话的东西都放这里**——构建者报告（构建者写在它自己的 worktree 里，控制方收到回复就拷来，见第 2、3 步）、终审 / 修复 / 复审报告、集成与验收脚本、中断实现者的 patch。**不放草稿区**：
   草稿区随会话重启清空，第 2 期三次重启丢过构建者报告、终审报告和 M3 的集成脚本，台账是因为放在这里才活下来的。
-- `git -C $W count-objects -vH` 存进台账目录的 `git-size-before.txt`（`count` · `size` · `in-pack` · `size-pack` 四个字段，收尾账本要用）。
+  反过来，**一次性的临时文件（导出副本、克隆、注入副本、驱动脚本的输出）只放草稿区、不放台账**——见第 5 步；台账里放的是要留下来的东西。
+- `git -C $W count-objects -vH` 存进台账目录的 `git-size-before.txt`（`count` · `size` · `in-pack` · `size-pack` 四个字段，收尾账本要用），并在 `progress.md` 记一行「何时、在哪个 SHA 上测的」——
+  文件时间戳是拷贝时间，第 3 期 m5a、第 4 期 m6a 都没记，收尾账本只能推。
 - 若本期规格里还写着「每页一个 PR」「每页两轮评审」，以本 skill 为准，并在本波 PR 里把规格那几句改掉（台账记一条裁决）。
 
 **1. 程序清单**
@@ -45,6 +47,34 @@ description: >-
 - **每页的页名（注册表 `title`，中英）在清单里就定下来**，并与全部模块的页名（含还没做的，如 M7「图形与游戏」）比一遍会不会混。第 3 期 py-games 的「游戏」到终审才被指出与 M7 相混，改成「控制台游戏」只能另开一个提交。
 - **清单里举的例子要真能触发它声称要测的东西。** 给 `cases` 的边界例、讲解里「没有 X 就会出错」的例子，起草时拿一个**故意去掉 X 的错误实现**跑一遍，确认输出真的不同。
   第 3 期 m5b 清单给 2048 举的 `[2, 2, 2, 2]` 触不到 stack 写法的「刚合并」标志（删掉标志照样得到 `4, 4`），构建者换成 `4, 0, 4, 8` 才看得出差别。
+- **起草期原型：每个拟带 P 的程序写「正确实现 / 错误实现 / 纯 Python 参照 / cases」四件套**，用门自己的种子、组数与逐层比较跑一遍，结果写进清单。
+  第 4 期两波都做了：m6b 的原型在清单阶段就发现门只比顶层类型（→ #192），m6a 的原型报出两个只抓到 36/200、61/200 的错误实现。
+  要的结果：正确 == 参照 200/200；每个错误实现报出**命中数**（错误 ≠ 参照的组数）——低于约 50/200 的，清单里写明、要求构建者调 cases（把逼出边界的输入按一定概率专门造）。
+  原型放台账（`draft-proto.py`），它只证明「这个 P 能写、参照机制不同、cases 触得到错」，**不是给构建者抄的实现**。骨架（`sys.argv[1]` 给集成 worktree 路径）：
+  ```python
+  import random, sys
+  import numpy as np
+  sys.path.insert(0, sys.argv[1] + '/python/scripts')
+  from gates.library import _deep_mismatch                 # 门自己的逐层比较（#192）
+  from gates.properties import SEED, SAMPLES               # 门的种子与组数
+
+  def ok(xs, t):    a = np.array(xs, dtype=int); return a[a > t].tolist()    # 正确实现
+  def wrong(xs, t): a = np.array(xs, dtype=int); return a[a >= t].tolist()   # 错误实现：学生最可能错的那一处
+  def ref(xs, t):   return [x for x in xs if x > t]                          # 纯 Python 参照，机制不同
+  def cases(rng):   return ([rng.randint(-9, 9) for _ in range(rng.randint(0, 8))], rng.randint(-3, 3))
+
+  rng, agree, hits = random.Random(SEED), 0, 0
+  for _ in range(SAMPLES):
+      args = cases(rng); want = ref(*args)
+      agree += _deep_mismatch(ok(*args), want) is None
+      hits += _deep_mismatch(wrong(*args), want) is not None
+  print(f'正确 == 参照 {agree}/{SAMPLES} · 错误被抓 {hits}/{SAMPLES}')
+  ```
+  这个例子照抄只抓到 32/200——阈值很少恰好等于某个元素；`cases` 改成一半阈值取自 `xs`（`rng.choice(xs) if xs and rng.random() < 0.5 else rng.randint(-3, 3)`）就是 103/200。
+  骨架自己的负控制：把 `ok` 的 `.tolist()` 换成 `list(…)`（列表里装着 numpy 标量），正确 == 参照掉到 44/200。一个错误实现不够时，每个 `return` 分支各写一个。
+- **清单里写到第三方库参数的语义，起草时核一句出处**：`inspect.getsource(…)`、`help(…)` / `__doc__`，或官方文档；核不到就不写进清单。
+  第 4 期 m6b 清单两处都凭印象写错、都是构建者纠正的：多列 `sort_values` 走 `lexsort_indexer`、根本不读 `kind`（`inspect.getsource(pd.DataFrame.sort_values)` 一看便知）；
+  「`.mean()` 返回 numpy 标量、打印前 `float()`」只对单个值成立，迭代 Series 交回的已是 Python 数。
 - `problem` 命名：不在变体组里的程序，`problem` 一律等于程序 id（id 全库唯一有门守）；变体组名由控制方对全库现有 `problem` 名**和**并行的另一个模块的组名交叉核一遍——
   `variant_check` 按全库分组，重名会被静默并成一个跨页变体组，门不会红（第 2 期两个模块并行，靠这条零撞组）。
 
@@ -61,6 +91,10 @@ description: >-
   `checkout -B` 之后原分支还在、isolation worktree 目录也还在，**每个**构建者都会留一套，不只是自建 worktree 的那几个（第 2 期因此有 46 个 `worktree-agent-*` 分支分不清归属）。控制方把它们逐个记进台账，第 7 步按台账清理。
 - 构建者回报 BLOCKED 后续做时，它的 agent worktree 可能已被自动清理；它会按简报先 `git worktree prune`、再在 `$M/.claude/worktrees/<名>-<页>` 自建一个。自建目录同样记进台账。
 - 构建者自己加注册表条目、连同重新生成的两个导航页一起提交（设计 §8.1）。
+- **派发前定一张本波共有约定表，填进每一份构建者简报**（`builder-brief.md` 的 REQUIRED 槽），并行的构建者互相看不见：
+  全波共有的 tag 与拼法（至少库名、模块的主题词——第 4 期 m6a 三页并行，`numpy` tag 两页全带、一页一个没带，终审 I2）；
+  英文讲解里指别的页 / 别的程序的写法（第 4 期两波一边统一成 `the Lists page`、一边写「Lists」，全库今天 37 段对 36 段，见第 4 期账本 §三.6）。
+  两波并行时这张表由期控制方给，两波同一张。
 - **构建者的报告写在它自己 worktree 的 `.superpowers/python-waves/<名>/<页>-report.md`**，不写集成 worktree：isolation worktree 拒写**主工作区目录树里、它自己 worktree 以外**的路径——
   集成 worktree 就在 `$M/.claude/worktrees/` 下，所以被拒（提示原话「Edit the worktree copy of this file instead of the shared-checkout path」）；scratchpad 不在主工作区树里，写得进（py-simulation 的报告就写在那里）。第 3 期 4 个构建者照 #186 的模板写集成 worktree，3 个被拒、1 个写成——行为不稳定，不能赌。
   自己 worktree 也写不进就写 scratchpad，并在回复里给**实际路径**。终审员、修复实现者、复审员不是 isolation worktree，报告照旧写 `$W/.superpowers/python-waves/<名>/`。
@@ -84,6 +118,7 @@ description: >-
   这几条手工处理、在台账里写明理由——这是下面红旗「注册表冲突不手工改」的**唯一例外**；其余条目、导航页与生成区段仍然跑配方。
   只有 `--take` 一侧改过的条目（例如合 main 时 main 升级了一页、本波没碰）照常取 `--take` 一侧，不算冲突。
 - 每合一页跑一次 `check.py`，全绿再合下一页。构建者报告里的偏离、简报错误、拿不准的 `boards` 抄进台账。
+- 全部页合完、送终审之前，**先扫一遍本波的 tag**：与全库（`python/programs/*/chapter.json`）比，折叠大小写 / 空格 / 连字符后相同的、同义不同形的，在这里就统一（约定表里没列到的新 tag 最容易分裂）——别留给终审当 Important 报。
 
 **4. 控制方亲验**（全部页集成之后、终审之前）
 - 全量验收命令。
@@ -117,26 +152,32 @@ description: >-
 - 有发现：**一次**修复派发（全部发现一起给一个实现者）→ **一次**范围复审 → 残留问题带裁决记进台账。不做逐页评审循环。
   修复实现者直接在集成 worktree 里改（不另开 worktree）；它回报之前，控制方不在 `$W` 里做任何写操作。
   修复简报里写明：遇到 ENOSPC / 磁盘满就停下回报，**不删任何不是自己写的文件**（第 2 期 M3 的修复实现者这样做了，磁盘满的真因在别的会话）；负控制只做保证终止的变异、带超时。
-- 评审员、修复实现者、复审员的临时文件与导出副本一律放 `$W/.superpowers/python-waves/<名>/review-tmp/` 这一个子目录；删不掉（权限拒）就别换命令绕，列在报告末尾，
-  控制方读完报告后统一删这个子目录（第 3 期 m5a 的终审员与复审员在 `.superpowers/` 下删自己的导出副本都被拒，一份留在了原处）。
+- **评审员、修复实现者、复审员的临时文件一律放草稿区（scratchpad），文件名带波名与角色前缀**（`<名>-review-`、`<名>-fix-`、`<名>-rereview-`）；导出副本、克隆、注入副本、驱动的输出都算。
+  台账里只写**报告**，以及报告引用、值得留下的脚本（扫描器、变异驱动）——拷一份进去，不把导出副本拷进去。**草稿区里的东西不必删，也不要试着删**，更不要换命令绕。
+  为什么：第 3 期写回的做法是放台账下的一个临时子目录、删不掉留给控制方统一删；第 4 期 m6b 的评审、复审、修复者与控制方的 `rm -rf` **全部被权限拒**，38 项、22 MB 留在集成 worktree 里，
+  而删 worktree 等于绕过那次拒绝——worktree 与分支只能留给用户删（m6a 那一波控制方却删掉了：同一个动作结果不稳定，不能当流程的前提）。
+  草稿区在仓库目录树外：留在那里的东西不挡 `git worktree remove`，也不会被第 7 步的 `cp -R` 拷进台账。它成立的理由是「不必删」，不是「删得掉」——第 4 期收尾在草稿区里 `rm -rf` 同样被拒过。
+- **范围复审报出的 Important 若只动提示 / 讲解文字**（不动程序体、refs、门、注册表以外的东西），控制方可以照复审给的文字直接落地，不开第二轮修复：
+  落地后对改过的每个空用判定器（`PyInteract.blankFeedback`）跑标准答案与复审列出的写法，把判对 / 判错表连同钉住每个判错写法的那一级写进台账，再跑 `check.py`（第 4 期 m6a V8、m6b 裁决 10 都这样做）。
+  动到程序体、refs 或 `run.expect` 的，仍走修复实现者 + 复审。
 - 修复实现者中途中断（会话重启、磁盘满）：先 `git -C $W diff > $W/.superpowers/python-waves/<名>/fix-partial.patch` 备份，再派新实现者，
   让它**先逐条判定**上一个人的改动「已完成 / 部分 / 未做」、写进报告，在上面续做，最后全量验证（第 2 期两波都这样接手，M4 的接手者据此查出前任半截的 refs 让门是红的）。
 
 **6. PR**
 - 推送前再合一次 origin/main（冲突照第 3 步，脚本用 `--take MERGE_HEAD --from HEAD`：以 main 为准、本波各页追加在后；退出码 1 / 3 的处理同第 3 步），全量验收重跑。
 - 推送集成分支，`gh pr create`，描述用 `pr-body.md` 填（验证怎么做的就怎么写；PyCharm 那一项不打勾）。
-- 读 CI：`gh pr checks <n> --watch`，再从日志里核对 `Successfully set up CPython (3.12.x)` 与 `N 道门全绿` 两行。红了读完整日志修，修复作为新提交。
+- 读 CI：`gh pr checks <n> --watch`，再从日志里核对 `Successfully set up CPython (3.12.x)`、钉版本那一步打印的 `scipy-stack 2.3.1 2.3.0 3.10.3`、python 门的「0 段因缺库跳过」与 `N 道门全绿`。红了读完整日志修，修复作为新提交。
 - **⏸ 汇报 PR 链接、CI、负控制与裁决清单，等用户说合并。**
 
 **7. 合并**
 - 合并前：再读一次 `gh pr checks`；在 **PR head**（`gh pr view <n> --json headRefOid`，与你验过的 SHA 相同）上自己跑一遍全量验收，
-  外加**一个自己挑的负控制**——不是 PR 作者做过的那几个（第 2 期集中合并的控制方对 #184、#185 各做了一次）。然后 `gh pr merge <n> --merge`。
+  外加**一个自己挑的负控制**——不是 PR 作者做过的那几个（第 2 期集中合并的控制方对 #184、#185 各做了一次）。然后 `gh pr merge <n> --merge --match-head-commit <SHA>`。
+  核验的事实（CI run、head、diff 范围、本地全量、自选负控制与结果）**写进台账**——期控制方写它自己的台账文件：第 3 期 #189 的核验只留在会话里，收尾时差点记成「缺记录」；第 4 期的期控制方台账做到了。
 - **两波并行、由一个控制方集中合并时**：先合的那个 PR 一落地，后一个就必然与 main 的注册表 / FALLBACK 冲突。通知后一波的控制方：合 origin/main、
   用配方脚本（`--take MERGE_HEAD --from HEAD`）解、全量验收、push；它回报新的 head 之后，照上一条核 head 与 CI 再合。
 - 合并之后、拷走台账之前：`git -C $M count-objects -vH`（只读，整个仓库共用一个 `.git`，在主工作区跑安全）存成台账目录的 `git-size-after.txt`，与第 0 步的 `git-size-before.txt` 对称
   （第 2 期两波的波后量只报在回报里、没进台账文件，收尾账本只能从回报转抄）。
-- 拷台账之前，先确认 `$W/.superpowers/python-waves/<名>/review-tmp/` 与评审 / 复审的导出副本（`git archive` 出来的 `python/` 全量）都已删掉——下面的 `cp -R` 拷的是整个目录，
-  不删就会把整份导出副本一起拷进主工作区的台账（第 5 步让子代理把它们放在这里、删不掉就留给控制方，所以每一波都必然留下一份）。
+- 拷台账之前看一眼台账目录：里面应该只有报告与脚本。导出副本、克隆按第 5 步在草稿区，不在这里——若有人放进来了，拷贝时排除它（`rsync --exclude`，`diff -rq -x` 同样排除），别为它去删东西。
 - 删集成 worktree 之前，把**整个**台账目录拷到主工作区的 `.superpowers/python-phase<期>/<名>-ledger/`（gitignored；worktree 一删台账就没了），连脚本与探针一起、并核对：
   `mkdir -p <目标> && cp -R $W/.superpowers/python-waves/<名>/. <目标>/ && diff -rq $W/.superpowers/python-waves/<名> <目标>`（`diff` 无输出才算拷全；第 2 期 M4 只拷了 `*.md`，`m4-probe.js` 没保住，m5b 只好重写）。
   然后**先删 worktree、再删分支**（分支还检出在某个 worktree 里时 `git branch -D` 会报 used by worktree、rc=1）：
@@ -148,7 +189,7 @@ description: >-
 ## 验收命令
 
 ```bash
-python3 python/scripts/check.py
+PYTHON_GATES_REQUIRE_SCIPY=1 python3 python/scripts/check.py   # 严格模式：缺 requires 里任何一个库即红（#196 起也管 pygame）
 python3 scripts/check_nav_contract.py
 python3 scripts/sync_registry.py --check
 python3 scripts/apply_branding.py --check
@@ -162,6 +203,9 @@ python3 python/scripts/sync_fallback.py --check
 for f in python/core/*.test.js; do node "$f"; done
 ```
 
+`check.py` 不设 `PYTHON_GATES_REQUIRE_SCIPY=1` 时，scipy-stack 层（#196 起还有 pygame）缺库只打印一行「N 段因缺库跳过」、门照样绿——跳过的程序等于没验。每次都读「程序真跑」那一行，要的是「0 段因缺库跳过」；
+版本要是 CI 钉的那组（`python3 -c "import numpy,pandas,matplotlib;print(numpy.__version__,pandas.__version__,matplotlib.__version__)"` → `2.3.1 2.3.0 3.10.3`）。
+
 ## 浏览器验收
 
 浏览器工具**不能操作 `file://` 页面**。用预览服务器 `mathviz`（`preview_start {name: "mathviz"}`，端口 8777）。8777 可能已被别的会话的同一台服务器占着，这时 `preview_start {name: …}` 会失败；
@@ -169,21 +213,24 @@ for f in python/core/*.test.js; do node "$f"; done
 它的根目录是**主工作区**，所以直接开根路径测到的是别的分支的旧文件；本 worktree 在它下面：
 `http://localhost:8777/.claude/worktrees/python-wave-<名>/python/tools/py-<页>.html?lang=zh`。
 
-每个探针的第一步：
+**用标准件探针 `$W/.claude/skills/python-content-wave/probe.js`**，不要从上一波台账复制一份再改——第 3 期修了「量到换行符」只修在那一次测量上，第 4 期 m6b 的探针又量到了 `\n`。
+每次导航后重新注入，每次调用都传显式 `tabId`：
 ```js
-(await fetch('/.claude/worktrees/python-wave-<名>/.superpowers/python-waves/<名>/progress.md')).ok === true
-  && TOOL.id === 'py-<页>'
+eval(await (await fetch('/.claude/worktrees/python-wave-<名>/.claude/skills/python-content-wave/probe.js', { cache: 'no-store' })).text());
+await PYPROBE({ page: 'py-<页>', marker: '/.claude/worktrees/python-wave-<名>/.superpowers/python-waves/<名>/progress.md', copyIds: [/* 可省 */] });
 ```
-不成立就作废这次测量。每次调用都传显式 `tabId`。核对：中英 × 读 / 挖空 / 临摹；面板顶部元数据；每个程序挖空模式都有输入框；
-字面量泄漏：每页挑含字符串的空打错一处，确认反馈不印出字面量原文。探针要**报出实际检查了几次**——0 次就是**没测**，不是通过
-（第 2 期 M3 两页、M4 几乎全波没有带字面量的空）。0 次时改做：该页**全部空各改一个字符**、中英各跑一遍，确认 0 次判对、0 次印出标准答案行、0 条空消息，
-另加一个合成字面量对照（例如 `x = "abcd"` 答成 `"abcQ"`，反馈只说第几个字符起不同、不印 `abcd`）；临摹三层在 `document.body.style.zoom` = 0.9 / 1 / 1.25 下对齐（量坐标，不凭截图说对齐）：往输入层打入影子的前几行，
-用 `Range` 量**同一个字符**在 `.py-typed` 与 `.py-shadow` 里的矩形，dx = dy = 0；只比层外框宽度会得到假差异（`pre` 随内容收缩）。
-量的必须是**可见字符**：从打入内容的末尾往前找第一个非空白字符再量——量到换行符时矩形退化，dx = 0 可能是假阴（第 3 期 py-simulation 第一次就量到了 `\n`）。
-每一档缩放都报出这个字符的宽度，宽度随缩放变（例如 7.05 / 7.83 / 9.80）才证明缩放真的生效了。
-负控制：给 `.py-typed` 加一点 `padding-left`，dx 必须变成非零。探针脚本放在集成 worktree 的 `.superpowers/`（预览服务器能取到），
-每次导航后 `eval(await (await fetch(...)).text())` 重新注入；localStorage 复原后按**排序后的键**比较（键序会变）。
-模式按钮文字带快捷键数字（「挖空 2」/「Fill in 2」），按 `startsWith` 找。不点同意横幅。改过的 localStorage 先记后还。
+它先断言 marker 取得到、且 `TOOL.id === page`，不成立就返回 `{ VOID: true }`——这次测量作废（量到的是别的分支或别的页）。然后逐项报数（文件头写着每一项怎么量）：
+- 中英 × 读 / 挖空 / 临摹：面板元数据；挖空输入框数 == 挖空数 ≥ 1；临摹三层在。
+- **字面量泄漏**：每个含 ≥ 3 字符字符串字面量的空改中间一个字符，中英各判一次（必须判错、反馈不印原文），并在页面上真点一次「检查」。报 `literalChecks`——**0 次就是没测，不是通过**
+  （第 2 期 M3 两页、M4 几乎全波，第 4 期 m6a 三页都是 0）；这时 `literalMode` 是 `'fallback'`，下面这一项就是字面量那一格的结论：
+- 全部空各改一个字符 × 中英：0 次判对、0 次印出标准答案行、0 条空消息；加合成对照（`x = "abcd"` 答成 `"abcQ"`：判错、不印 `abcd`）。
+- **临摹对齐**：往输入层打入第一个程序的前 4 行，从末尾往前找**可见字符**（量到换行符时矩形退化，dx = 0 可能是假阴），用 `Range` 量它在 `.py-typed` 与 `.py-shadow` 里的矩形，
+  `document.body.style.zoom` = 0.9 / 1 / 1.25 三档 dx = dy = 0；每档报这个字符的宽度，**宽度必须随缩放严格变大**（第 4 期实测 7.063 / 7.844 / 9.797）才证明缩放真的生效；
+  负控制：`.py-typed` 加 3px `padding-left`，dx 必须 ≠ 0（实测 −13）。只比层外框宽度会得到假差异（`pre` 随内容收缩）。
+- 给了 `copyIds`：三种模式的复制内容相同、不含 BLANK 指令（复制内容**真跑**见第 4 步，node 裸 vm 取、python3 跑）。
+- 收尾：zoom 复原、临摹输入清空、localStorage 按**排序后的键**比较复原（键序会变）。语言走 `ctl.setLang`（不改地址栏）；不点同意横幅。
+回报里贴它返回的对象（至少 `literalChecks` / `literalMode` / `allBlanks` / `align` / `alignNegative` / `localStorageRestored`），不写「通过」两个字了事。
+探针本身改了（页面 DOM 变了、要量新东西），改的是 skill 里这一份，并在一个真页面上做一次负控制（例如把 `PyInteract.blankFeedback` 临时包成「消息里拼上标准答案」，探针必须报出来）。
 
 `file://` 双击验收与「复制粘进 PyCharm 真跑」只能由用户做——PR 里列为未勾选项，不代为声称。
 
@@ -205,7 +252,7 @@ for f in python/core/*.test.js; do node "$f"; done
 | 评审员或实现者自己又派子代理 | 重复一个评审席位 | 简报里写明不许派子代理 |
 | 用 Skill 工具加载本 skill 或 `python-drill-tool` | 读到的是主工作区（不 pull、停在旧提交）的版本；第 3 期 m5b 读到的是 #186 之前的版本。旧版里没有「重读」这一条，所以写在本 skill 里的提醒到不了用 Skill 工具的读者 | 给控制方的派发简报第一句写「开完集成 worktree 后用 Read 读 `$W/.claude/skills/`，不用 Skill 工具」；第 0 步照做；简报让子代理用 Read 读自己 worktree 里的文件 |
 | 构建者把报告写进集成 worktree | isolation worktree 拒写主工作区目录树里、它自己 worktree 以外的路径——集成 worktree 在 `$M/.claude/worktrees/` 下（第 3 期 4 个里 3 个被拒、1 个写成，不稳定） | 报告写构建者自己 worktree 的 `.superpowers/`，写不进就写 scratchpad、回复里给实际路径；控制方第 3 步集成前拷进台账 |
-| 在 worktree 里跑 `git add` / `git rm` 组合、或在 `.superpowers/` 下 `rm` | 被权限拒 | `.gitignore` 类负控制在 scratchpad 的临时仓库里做；子代理的临时文件放 `review-tmp/`，控制方统一删 |
+| 在 worktree 里跑 `git add` / `git rm` 组合、或 `rm -rf` 一个目录（`.superpowers/` 下、草稿区里都遇到过） | 被权限拒，且同一个动作这一次拒、下一次放行（第 4 期 m6a 控制方删掉了评审的临时子目录，m6b 四方全被拒）；留在集成 worktree 里的东西会让 worktree 删不掉——删它等于绕过拒绝 | 子代理的临时文件放草稿区、不必删、不试着删、不换命令绕；`.gitignore` 类负控制在草稿区的临时仓库里做 |
 | fixture 的文件名撞上根 `.gitignore` 的规则（`*.log` 之类） | `git add` 静默跳过它，本地门全绿、CI 缺文件；门读磁盘看不见 | 根 `.gitignore` 已有反向规则 `!python/programs/*/_fixtures/**`；提交前 `git ls-files` 对一遍磁盘上的 `_fixtures/` |
 
 ## 红旗——停下来重看本 skill
@@ -221,4 +268,6 @@ for f in python/core/*.test.js; do node "$f"; done
 - 照 Skill 工具加载出来的版本派发，没有先用 Read 从 `$W/.claude/skills/` 重读；或给控制方的派发简报第一句没写这一条
 - 负控制变异后门绿，就断定「门瞎了」而没先问变异是不是等价
 - 打算跑一个删掉 `visited.add` / 循环更新的负控制，或写 `timeout 120 …`
-- 探针报「0 处泄漏」而没报检查了几次
+- 探针报「0 处泄漏」而没报检查了几次；或用的不是 skill 里的 `probe.js`，或它返回了 `VOID` 还照样记结论
+- 让子代理把临时文件、导出副本放进集成 worktree（`.superpowers/` 也算）
+- 派构建者时简报里没有本波共有约定表（tag、英文里指别的页的写法）
