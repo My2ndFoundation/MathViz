@@ -1,6 +1,6 @@
 # Python 子项目 · 第 5 期 · 波 m7b：py-pygame-motion、py-pygame-games 程序清单
 
-> 状态：**草稿，待审**（Python编程 审完之前不派构建者；games 页另等 `chunks` PR 合并）。
+> 状态：**已批准**（2026-09-30，Python编程 审定 4fc58e2；裁决见 §9）。派构建者等第 4 期收尾 PR 合并；games 另等 `chunks` PR 合并。
 > 日期：2026-09-30
 >
 > 上游：主规格 §2.2（`py-pygame-motion` — 键鼠输入、向量运动、重力、反弹、摩擦；`py-pygame-games` — Pong、贪吃蛇、打砖块、太空侵略者（分段可读））、
@@ -129,3 +129,18 @@
 | game-state-screens | 0 | 未知事件回标题 | 106 |
 
 `bullet-cooldown` 与 `game-state-screens` 同类（纯逻辑、离散），构建者照同一协议补原型。三处「首版命中太少」就是简报 §2.4 要原型的原因：写进构建者简报，cases 必须带这些专门构造的分支。
+
+---
+
+## 9. 裁决（2026-09-30，Python编程 审定）
+
+| # | 问题 | 决定 |
+|---|---|---|
+| 页名 | | 「运动与物理」/ Motion & Physics、「图形游戏」/ Graphical Games |
+| 组名 | | diagonal-speed、friction-decay、snake-move 与全库、与 m7a（frame-independent-motion、rect-overlap）都不撞 |
+| B1–B4 | | 确认 |
+| B5 | Sprite 类 | 四个游戏**都不用** Sprite 类（Rect + 列表）；讲解点一句「用 Sprite / Group 写的版本见「精灵与碰撞」页」 |
+| 原型 | | 三处低命中（invaders 0/200、snake 2/200、pong 1/200）与改后的 cases 构造写进构建者简报，构建者报告写出最终命中数；bullet-cooldown 由构建者照同一协议补原型 |
+| 随机 / 资源 / 递归 / chunks | | 同意 |
+| 英文跨页写法 | 第 4 期收尾的新裁决 | 英文讲解写 `the <英文页名> page`（不加引号、不夹「」），中文写「页名」 |
+| 时序 | | motion 的构建者也等第 4 期收尾 PR 合并、main SHA 到了再派（本期两波同一版模板）；games 另等 chunks PR |
