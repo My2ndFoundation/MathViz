@@ -168,7 +168,9 @@ MathViz 仓库里的**第三个子项目**，与 `chess/` 和 `cryptography/` �
 
 - `kind ∈ { syntax, pattern, algorithm, project, embedded }`
 - `level ∈ 1..5`
-- `boards ⊆ { AQA, OCR, Edexcel, CIE }`
+- `boards ⊆ { AQA, OCR, Edexcel, CIE }`，列表、不重复、**可以为空**。语义（用户裁决 2026-09-30）：一个考试局只在它的
+  A-level 考纲点名了这个程序的核心教学点时才写；四家都不含就写 `[]`——面板显示「不在考纲」，按考试局筛选时不出现。
+  依据与逐程序判定表：`docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md`（取代原先的「拿不准就四家全写 / 确知不含才去掉」）。
 - `runtime ∈ { cpython, micropython-microbit, micropython-pico }`
 - `requires` 取自白名单 `{ numpy, pandas, matplotlib, scipy, pygame }`
 - `check.property` 是一个族名，取自闭集 `{ sort, search, structure, pure }`（第 1 期全部是 `pure`）。
@@ -849,8 +851,8 @@ chess 现在要到运行时才暴露一个写错的路径。
 
 ### 9.2 配套文档与 skill
 
-- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。**至第 4 期收尾仍未写**（第 3 期账本定的「第 4 期开工前」没做到），见第 4 期账本 §五.8
-- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（**至第 4 期收尾仍未写**，见第 4 期账本 §五.8）：API 签名、易踩的坑、
+- `docs/superpowers/python.md` —— 架构文档（对应 `cryptography.md`）。第 6 期文档 PR 补齐（此前拖欠：第 3 期账本定的「第 4 期开工前」没做到，见第 4 期账本 §五.8）
+- `docs/superpowers/prompts/python-handoff.md` —— 交接文档（第 6 期文档 PR 补齐）：API 签名、易踩的坑、
   每一次实测发现的错误
 - `.claude/skills/python-drill-tool/SKILL.md` —— 作者须知：新增一页 / 新增一个程序 / 升级一页的作业流程，
   每条硬约束注明由哪道门守（第 1 期设计 B5）
