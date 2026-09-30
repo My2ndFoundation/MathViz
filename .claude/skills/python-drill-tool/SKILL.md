@@ -97,12 +97,12 @@ description: >-
   **没有门**（做成门很便宜，记在第 2 期账本里当建议）；写完自己扫本页，评审扫本波。
   存量：ch01–ch14 按逐字口径 5 处（M3 4 处、第 1 期 1 处，清单在第 2 期账本 §三.4），改它们要升版，留给下一个动那几页的内容 PR；
   近照抄口径没有人工清点（收尾时按上面的定义机扫全库另得 0 处——机扫只是近似，不替代逐空看）。
-- **不挖跨嵌套块的多行空。** 判定器在答案与标准答案**行数不同**时完全不比缩进（`python/core/judge.js:162`，只在 `na.rel.length === nr.rel.length` 时比相对缩进），
+- **不挖跨嵌套块的多行空。** 判定器在答案与标准答案**行数不同**时完全不比缩进（`python/core/judge.js` 里 `if (na.rel.length === nr.rel.length)` 那一处：只在行数相同时比相对缩进；按代码找，不写行号——行号会漂），
   连改变语义的缩进也判对：三行的 `if a:` / `    if b: c()` / `d()` 被判等于 `d()` 缩进在外层 `if` 里的那四行。多行空只挖**同一层**的两三行，并用第 1 级提示钉住写法。
   （第 1 期账本 §一.3；判定器没改，第 2 期是靠这条规矩避开的——M3 26 个、M4 6 个多行空都在同一层。）
   **唯一的例外是「复合语句头（`if` / `elif` / `for` / `while` / `except`）+ 一行体」这种两行空**：体写错缩进时行数不变、判定器照比（实测判 `indent`）。
   token 相同而行数不同的写法只有两种：写成一行 `if X: body`（语义与两行相同，判对是对的）；或在体里本来就有的括号里断行——后者若把体写到外层，
-  判定器照样判对、CPython 报 `IndentationError`（`judge.js:162` 的同一个洞，罕见，接受）。
+  判定器照样判对、CPython 报 `IndentationError`（`judge.js` 里同一个 `na.rel.length === nr.rel.length` 的洞，罕见，接受）。
   第 3 期 ch21 有 6 个这样的空（5 个 `if` 头、1 个 `for` 头：`traffic-light-fsm`），终审接受；第 4 期 ch24 `broadcasting-table` 的 `except ValueError as e:` + `print(type(e).__name__)`
   同样（m6a 终审实测：体缩进错判 `indent`、写成一行判对、`as err` 与写死字符串由第 1 级钉住），ch25 `eigen-2x2`、ch26 `merge-left-join` 是 `if` 头。第 5 期 ch29–ch32 的 95 个空里 23 个两行空：16 个是这种头 + 一行体（13 个 `if`、1 个 `for`、2 个 **`elif`**——`keyboard-move-clamped` 的 keydown、`screen-states` 的 keymap），7 个是同一层的两行；
   `elif` 头第 5 期收尾实测（裸 vm、页面内联 core、`b.indent + 写法`）：标准答案判对，体少缩进或多缩进一层判 `indent`，写成一行判对——与 `if` 头相同。三行以上、或体不止一行的，仍按上面的规矩。

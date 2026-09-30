@@ -216,7 +216,7 @@ core 的七个区段**全部必需**，没有逐页选装清单：`inline_core.p
 读模式顶部排成一行标签，可以单看，也可以两栏并排对照（`PyInteract.variantsOf`）。
 `variant_check` 只对**成员数 > 1** 的组要求 `title.en` 互不相同（并排时两栏得分得清），
 外加一条全库断言：至少存在一个多变体组——没有它，这道门在一个全是单例的库上永远绿。
-（主规格 §7.1 的表写的是「变体 ≥ 2」，代码不要求每组 ≥ 2；单例组是大多数。）
+代码不要求每组 ≥ 2；单例组是大多数（主规格 §7.1 已照此改写）。
 
 ### 4.4 三层运行策略与具名豁免
 
@@ -231,7 +231,7 @@ core 的七个区段**全部必需**，没有逐页选装清单：`inline_core.p
 
 真跑的沙箱纪律（`program_run_check` 的 docstring）：`.py` 与 `_fixtures/` 先拷进一个全新临时目录当 cwd、
 `PYTHONHASHSEED=0`、`PYTHONIOENCODING=utf-8`、`MPLBACKEND=Agg`、喂 `run.stdin`（缺省空串，裸 `input()` 会 EOFError 而不是挂死）、
-`run.timeout` 秒超时（缺省 5）。主规格 §5.4 还写了「无网络」，门的代码里没有实现网络隔离。
+`run.timeout` 秒超时（缺省 5）。**没有网络隔离**：门不断网，程序不访问网络目前只靠评审（主规格 §5.4 已照此改写）。
 
 **豁免为什么分两类。** M7 / M8 几乎整章都跑不了，任何「一章 compile-only 超过 N% 就红」的阈值都会永远红；
 所以按「原因是否已经写在数据里」来分：结构性的原因已在 `runtime` / `requires` 里，再抄一遍 `why` 只会漂；
@@ -275,7 +275,7 @@ property 的入口一律交回**内置类型**：`np.int64` / `ndarray` 要 `int
 # <<< BLANK
 ```
 
-- 挖空体永远是**整行整行**的，夹在两条指令行之间；渲染成一个占若干行的块级输入区，左侧缩进由固定前缀撑出（主规格 §3.3）。
+- 挖空体永远是**整行整行**的，夹在两条指令行之间；渲染成一个占若干行的块级输入区，缺省值是这个空的缩进本身——缩进是她答案的一部分，不是框外的固定前缀（主规格 §3.3；绝对缩进见 §8.2）。
 - 四个属性 `id` / `level` / `hint` / `hintEn` 必须齐全；`id` 页内唯一；`level ∈ 1..3`；挖空体非空；指令成对（`blank_directive_check`）。
 - **每个程序至少一个空**，无豁免（`blank_presence_check`）。挖空是三种模式里唯一带判定的一种，零个空不是合法的内容形状。
 - 解析顺序：先摘 `hintEn`、再摘 `hint`、最后在裸文本上取 `id` / `level`——否则 `hint="…"` 的正则会先吃掉 `hintEn` 的值。
@@ -381,8 +381,7 @@ CPython 自己就拒绝的畸形语料跳过比对，由 `lex_never_throws_check
 `panelLineNotes` / `noteLineIndex` 两个函数体内、STR 键表里那一行声明、独立的 `t('lineNotes', …)` 调用。
 它是文本扫描，防的是日常写法里意外多出的一条读取路径，不防蓄意混淆（它的 docstring 逐条列了盲区）。
 
-`interact.js:390` 的注释仍写着「`anchor_check()`：锚一开始就不许落在挖空体内」，那是第 0 期的规则，第 1 期已拆掉（主规格 §2.3）；
-以主规格与本节为准。
+锚可以落在挖空体内（第 1 期拆掉了第 0 期的禁令，主规格 §2.3）；泄题的两道防线都在读取侧：`panelLineNotes` 的模式白名单与 `line_note_reader_check`。
 
 ---
 
@@ -507,15 +506,15 @@ python-progress:<progId>     { blank: {…}, trace: { bestAcc, bestCpm, at } }
 | 入口（都在工具页的程序选择器里） | 清掉 | 二次确认里的数字 |
 |---|---|---|
 | 每项的「⋯」 | 该题的两份 draft | `countRecords` 的真实条数 |
-| 「清空本模块」 | **本页**全部程序的 draft（`clearScope('module', PROGRAMS)`；页面只内嵌本页那一章） | 同上 |
+| 「清空本页」 | 本页全部程序的 draft（`clearScope('page', PROGRAMS)`；页面只内嵌本页那一章） | 同上 |
 | 「清空全部」 | 全部 `draft:*` + `progress:*`（`Store.clearAll()` 按前缀扫）；语言与偏好保留 | 只数得出本页的那部分，文案明说「其他页的记录也会一并清除」 |
 
 进度不随前两级连坐（「她已经会了」的记录）。清空前先 `flush()`，否则 400 ms 后排队中的那次防抖写会把草稿送回来（`clearRecords`）。
 只有清到当前这一题时才重读草稿、作废当前这一遍临摹（`clearHitsCurrent`）。
 
-这与主规格 §4.5 有三处不同：主规格的「整个模块」一级清的是本模块**所有页**；「整个子项目」一级在画廊 / 壳的设置里；
-另有一个连 `prefs` 一起清的「全部重置」。e342ba2 的代码里，「本模块」按钮只清本页、「清空全部」在工具页上、
-`Store.clearAll({prefs: true})` 这条路径存在但没有任何 UI 调用它。
+画廊与壳上没有清空入口。`Store.clearAll({prefs: true})`（连 `python-prefs` 一起清）API 支持，目前没有任何 UI 调用它。
+中间一级在 py-1.3.1 之前叫「清空本模块 / Clear this module」、scope 名 `'module'`，而它从来只清本页——
+文案、确认框与 scope 名都已改成「本页 / page」，`interact.test.js` 钉着措辞（主规格 §4.5 同步改写）。
 
 ---
 
@@ -530,7 +529,7 @@ python-progress:<progId>     { blank: {…}, trace: { bestAcc, bestCpm, at } }
 
 **版本三处同步**：注册表 `version` + `changelog`、页面 `tool-version` meta、页面头部版本记录注释。版本号同时是缓存键——不升，线上用户会一直看到旧页面。
 **engine 全库唯一**：改了 `core/` 就把所有工具与 `_skeleton.html` 的 `engine` 一起升（`page_mirror_check`）；
-三次：`py-1.1.0`（#173，第 1 期规则）、`py-1.2.0`（#198，分段临摹）、`py-1.3.0`（boards PR：空考试局的占位改为「不在考纲」）。
+四次：`py-1.1.0`（#173，第 1 期规则）、`py-1.2.0`（#198，分段临摹）、`py-1.3.0`（boards PR：空考试局的占位改为「不在考纲」）、`py-1.3.1`（一致性清理：「清空本模块」改为与行为一致的「清空本页」，外加三处 core 注释订正；只动文案与注释，各页 `version` 不升）。
 
 ### 10.2 模块闭集与配色
 
@@ -565,7 +564,7 @@ accent 按**模块**事先定死：M1 cyan · M2 violet · M3 emerald · M4 rose
 | C9 画廊背景四页同源 | `index.html` 的 `GALLERY-BG` 区段 | 根 `apply_gallery_bg.py --check` |
 
 `outbound_ref_check` 对两个导航页各允许 **2** 处父目录引用：`PARENT_HOME` 加上同意横幅里的 `../privacy.html`（`hygiene.py` 的 `OUTBOUND_ALLOW`，
-与 cryptography 同一个原因）；`core/` `programs/` `tools/` 与注册表里一处都不许有。主规格 §1.2 / §6.2 写的「全目录只有一处」没有算隐私链接。
+与 cryptography 同一个原因）；`core/` `programs/` `tools/` 与注册表里一处都不许有（主规格 §1.2 / §6.2 / §7.1 已照此改写）。
 
 ---
 
