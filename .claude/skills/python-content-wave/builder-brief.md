@@ -81,7 +81,7 @@
   不拼缩进时判定器报第 1 行缩进对不上（`lead-indent`），与写法无关（第 5 期 m7b 控制方头一轮把这当成了「钉法漏了」）。判定器在 node 的**裸 `vm` context** 里加载页面内联的 core 调，不用 `require`（`require` 走 node 分支）。
 - 判「全是数字」用 `isdecimal()`，不用 `isdigit()`（`'²'` 过得了 `isdigit`，`int()` 却会抛错）。新造 `tags` 之前先 grep 全库已有写法，跟已有的走。
 - **本波共有约定**（控制方定，同波并行的构建者照同一张表写——你们互相看不见，第 4 期 m6a 一页漏了全波共有的 `numpy` tag）：
-  {{REQUIRED 本波共有约定表：全波共有的 tag 与拼法（库名、模块主题词）；英文讲解里指别的程序（变体标题）的写法}}
+  {{REQUIRED 本波共有约定表：全波共有的 tag 与拼法（库名、模块主题词）；英文讲解里指别的程序（变体标题）的写法；两波并行时的跨波写法约定（模块导入写法如 utime / time、另一波页面的中英页名）}}
   指别的**页**不在表里，是定论：中文「页名」，英文 `the <注册表英文页名> page`（不加引号、不夹「」）。
   英文里指别的**程序**、而那个程序的英文标题以冠词开头（A / An / The）时，**不再加 the**：写 `see An AI Paddle That Can Be Beaten`，不写 `the An AI Paddle…`（第 5 期 m7b 终审 M5 的裁决）。
 - 长度取向约 {{REQUIRED 本期的行数取向，如 40 或 60}} 行（不含 BLANK 指令行，是取向不是门），超过的写进报告；{{REQUIRED 本期用不用 `chunks`：「不用 `chunks`」，或「这几个程序声明 `chunks`：…，写法照 `python-drill-tool`「分段临摹 chunks」一节」}}。
@@ -96,8 +96,11 @@
 报告必须包含：
 1. 第一行：原分支名与 worktree 路径（`checkout -B` 之前记下的），实测 `HEAD` 与 `merge-base`。
 2. 每个程序：挖了哪几行、level、为什么这一行写法唯一（或第 1 级提示钉住了哪一点）；你用判定器试过的等价写法及结果。
+   **空数不手数**：照 `python3 .claude/skills/python-content-wave/copyrun.py --repo <你的 worktree 绝对路径> --chapters {{chNN-slug}} --k 1` 印的「空数」行写（页面自己的 `Exercise.parse` 数的；第 6 期一个构建者手数报 25，页面实为 26）。
 3. 每个 `run.expect` 的生成命令（照 `python-drill-tool`「生成 `run.expect`」一节）。
 4. 每个 P 程序：你实际跑过的一个变异，门在哪组实参上变红（贴红行，注明断言失败还是崩溃）；各返回分支的覆盖证据；`entry` 不改实参的确认（怎么确认的）。
+   **每个空是否都在 `entry` 走得到的路径上**：走不到的空（entry 是 `decode()`、空在 `encode()` 里）除 `compile()` 外没有门守——照 `python-drill-tool` property 一节改成往返 entry，或在报告里点名它只有 compile 守。
+   变异让门保持绿时，先报这个变异在定义域上（或门的 200 组 cases 上）与原程序输出不同的个数——0 就是等价变异，换一个；清单给的命中数若是几处一起改的，单改每一处各报一次。
 5. 每个程序的 `boards` 与依据（考纲条目编号，查 `docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md`）：**不在考纲就不写，一家都没点名就写 `[]`（合法）**；那份文件里查不到的条目照 R5 不写，单独列出。
    另列：超过长度取向的程序与行数；新造的 `tags`（及你 grep 过的全库已有写法）；用到随机的程序的两解释器比对结果（含版本相关程序那道负控制）；读 `_fixtures/` 的程序的 `git ls-files` 核对结果。
 6. 注册表条目已由你加入的确认，以及 `desc` / `tag` / `changelog` 草稿原文。

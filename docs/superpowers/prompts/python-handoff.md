@@ -15,29 +15,29 @@
 
 ## 1. 现在的状态
 
-### 1.1 快照 · 写于 `e342ba2`
+### 1.1 快照 · 写于 `b3d8546`（上一版写于 `e342ba2`）
 
 **这是两份文档里唯一一张会随内容过期的数字表**（历史事件里的数字，如某次事故的 21 GB，不在此列）。`python.md` 不再抄这些数字，只指到这里；下一次有人更新数字，改这一张、重跑下面的命令即可。
 
-| 项 | 值（至 `e342ba2`） | 重算命令（编号见下） |
+| 项 | 值（至 `b3d8546`） | 重算命令（编号见下） |
 |---|---|---|
-| 已上线的工具页 | **32**（模块 1–7；模块 8 还没有页） | ① |
-| 程序（`.py`） | **346** | ①、② |
-| `lines` 合计 | **11,099**（`lines` 口径见 `python.md` §4.1） | ① |
-| engine | 至 `e342ba2` 全库唯一 **`py-1.2.0`**，骨架同值。boards PR 合并后会变（engine 预计升级） | ①、②「页面镜像」行 |
-| 门 | **44**（生成 3 · A 8 · B 7 · C 5 · D·库 17 · D·词法 4） | ② 最后一行 |
-| core 断言 | 7 个测试文件，**811** 条（editor 33 · exercise 43 · interact 354 · judge 37 · py-lex 273 · store 31 · trace 40） | ② 开头七行 |
-| 运行层 | stdlib **267** · scipy-stack **43** · pygame **36**（compile-only）· MicroPython **0**；`runtime` 全部是 `cpython` | ⑤ |
-| 真跑 / 只过 `compile` / 因缺库跳过 | **310 / 36 / 0**（严格模式） | ②「程序真跑」行 |
-| 带 property 的程序 | **235**（× 200 组实参） | ②「性质比对」行；⑤ |
-| 挖空 | **874** 个 | ②「挖空下限」行 |
-| 变体 | 275 个 `problem` 组，其中 63 个多变体 | ②「变体」行 |
+| 已上线的工具页 | **35**（模块 1–8） | ① |
+| 程序（`.py`） | **375** | ①、② |
+| `lines` 合计 | **12,247**（`lines` 口径见 `python.md` §4.1） | ① |
+| engine | 全库唯一 **`py-1.3.1`**，骨架同值（`py-1.3.0`：#203 boards；`py-1.3.1`：#204 一致性清理） | ①、②「页面镜像」行 |
+| 门 | **45**（生成 3 · A 8 · B 7 · C 5 · D·库 18 · D·词法 4；#206 加了 `boards_map_check`） | ② 最后一行 |
+| core 断言 | 7 个测试文件，**825** 条（editor 33 · exercise 43 · interact 368 · judge 37 · py-lex 273 · store 31 · trace 40） | ② 开头七行 |
+| 运行层 | stdlib **267** · scipy-stack **43** · pygame **36**（compile-only）· MicroPython **29**（compile-only；`micropython-microbit` 15、`micropython-pico` 14）；其余 346 个 `runtime` 是 `cpython` | ⑤ |
+| 真跑 / 只过 `compile` / 因缺库跳过 | **310 / 65 / 0**（严格模式） | ②「程序真跑」行 |
+| 带 property 的程序 | **259**（× 200 组实参；其中 MicroPython 24 个） | ②「性质比对」行；⑤ |
+| 挖空 | **953** 个 | ②「挖空下限」行 |
+| 变体 | 298 个 `problem` 组，其中 68 个多变体 | ②「变体」行 |
 | 分段临摹（`chunks`） | 5 个程序、15 段，落在 2 个工具页 | ②「分段」行；⑤ |
 | `_fixtures/` | 4 个章目录带；源码里 9 处引用（fixture 手抄） | ⑥；②「fixture 手抄」行 |
-| 例外豁免 | 0 条（结构性豁免 36 条） | ②「豁免」行 |
-| pygame 程序 / MicroPython 程序 | 36 / 0 | ②「pygame 顶层」「MicroPython 顶层」行 |
-| `boards` | 至 `e342ba2`：346 条全部写满四家考试局。boards PR 合并后会变（按新规则允许空列表） | ⑤ |
-| 主工作区 HEAD | `e342ba2`，与 `origin/main` 相同 | ④ |
+| 例外豁免 | 0 条（结构性豁免 65 条） | ②「豁免」行 |
+| pygame 程序 / MicroPython 程序 | 36 / 29 | ②「pygame 顶层」「MicroPython 顶层」行 |
+| `boards` | 按考纲判（#203）：四家 156 · 三家 33 · 两家 34 · 一家 59 · `[]` 93；按考试局 AQA 222 · OCR 187 · Edexcel 256 · CIE 185；依据表附录 375 行与 `chapter.json` 逐行一致 | ⑤；②「boards 依据」行 |
+| 主工作区 HEAD | `b3d8546`，与 `origin/main` 相同，`status` 为空 | ④ |
 
 分模块（①的输出）：
 
@@ -50,7 +50,9 @@
 | 5 综合运用 | 4 | 47 | py-simulation · py-games · py-text-data · py-systems |
 | 6 科学计算与数理统计 | 5 | 46 | py-numpy-basics · py-numpy-linalg · py-statistics · py-pandas · py-matplotlib |
 | 7 图形与游戏 | 4 | 36 | py-pygame-basics · py-pygame-sprites · py-pygame-motion · py-pygame-games |
-| 8 嵌入式 Python | 0 | 0 | 第 6 期在建（`e342ba2` 时） |
+| 8 嵌入式 Python | 3 | 29 | py-microbit · py-pico · py-embedded-patterns |
+
+（页 id 按注册表顺序列，也就是导航页的顺序。M5、M6 两行与主规格 §2.2 的页序不同——text-data、pandas 在 §2.2 里更靠前；见第 6 期账本 §三.4。）
 
 重算命令（都在仓库根目录跑，都是写这份文件时实跑过的；编号在两份文档里唯一，`python.md` 引用时用的也是这里的编号）：
 
@@ -63,20 +65,20 @@ PYTHON_GATES_REQUIRE_SCIPY=1 python3 python/scripts/check.py
 git log --merges --first-parent origin/main --format='%h %s' | awk 'match($0,/pull request #[0-9]+/){n=substr($0,RSTART+14,RLENGTH-14)+0; if(n>=169) print}'
 # ④ 主工作区是否跟上 main
 M=/Users/nickma/Develop/My2ndBrain/MathViz; git -C $M log --oneline -1; git -C $M status --short | head; git -C $M rev-parse origin/main
-# ⑤ 章目录扫描：程序数、runtime、运行层；property 数、chunks 数、boards 写满四家的条数
+# ⑤ 章目录扫描：程序数、runtime、运行层；property 数、chunks 数；boards 按家数的分布与按考试局的条数
 python3 -c "
 import json,glob,collections as C
 P=[p for f in sorted(glob.glob('python/programs/ch*/chapter.json')) for p in json.load(open(f))['programs']]
-print(len(P), C.Counter(p.get('runtime','cpython') for p in P), C.Counter('pygame' if 'pygame' in p['requires'] else ('scipy-stack' if p['requires'] else 'stdlib') for p in P))
-print(sum(1 for p in P if (p.get('check') or {}).get('property')), sum(1 for p in P if 'chunks' in p), sum(len(p['boards'])==4 for p in P))
+print(len(P), C.Counter(p.get('runtime','cpython') for p in P), C.Counter('micropython' if p.get('runtime','cpython').startswith('micropython') else 'pygame' if 'pygame' in p['requires'] else ('scipy-stack' if p['requires'] else 'stdlib') for p in P))
+print(sum(1 for p in P if (p.get('check') or {}).get('property')), sum(1 for p in P if 'chunks' in p), sorted(C.Counter(len(p['boards']) for p in P).items()), C.Counter(b for p in P for b in p['boards']))
 "
 # ⑥ 带数据文件的章目录数
 ls -d python/programs/*/_fixtures | wc -l
 ```
 
-（⑤ 的运行层分类是近似口径：它没有看 `runtime` 与例外豁免，`e342ba2` 时两者都不影响结果；严格的分层以 `gates/library.py` 的 `_tier()` 为准。）
+（⑤ 的运行层分类是近似口径：它看了 `runtime`（`micropython-*` 单列——`e342ba2` 那一版只看 `requires`，`b3d8546` 上会把 29 个 MicroPython 程序算进 stdlib，报成 296），没看例外豁免（至 `b3d8546` 例外 0 条，不影响结果）；严格的分层以 `gates/library.py` 的 `_tier()` 为准。）
 
-**先跑一遍确认起点是绿的**：② 末行必须是「N 道门全绿」（`e342ba2` 时 N = 44）且「0 段因缺库跳过」；完整的验收命令列表在
+**先跑一遍确认起点是绿的**：② 末行必须是「N 道门全绿」（`b3d8546` 时 N = 45）且「0 段因缺库跳过」；完整的验收命令列表在
 `python-content-wave` 的「验收命令」一节（含五道根级门与 chess / cryptography 的门）——照那张表跑，不要只跑 ②。
 
 ### 1.2 各期的 PR（③的输出，按期归类）
@@ -88,8 +90,8 @@ ls -d python/programs/*/_fixtures | wc -l
 | 2 | property 门深拷贝与逐次时限、M3 + M4 | #181 · #183 · #184 · #185 · 收尾 #186 |
 | 3 | fixture 门、`compile` 不继承 future、M5 | #187 · #188 · #189 · #190 · 收尾 #193 |
 | 4 | scipy-stack 层、逐层比类型、M6 | #191 · #192 · #194 · #195 · 收尾 #197 |
-| 5 | pygame 层、分段临摹、M7 | #196 · #198 · #199 · #200 · 收尾 PR 未合 |
-| 6 | MicroPython 层（前提）；M8 在建（`e342ba2` 时） | #201 |
+| 5 | pygame 层、分段临摹、M7 | #196 · #198 · #199 · #200 · 收尾 #205 |
+| 6 | MicroPython 层（前提）、两份文档、boards 按考纲、一致性清理、boards 依据门、M8 | #201 · #202 · #203 · #204 · #206 · #207 · #208 · 收尾（`claude/python-phase6-close`，`b3d8546` 时未开） |
 
 同期不属于 python 的：#171（deploy-guard）、#179（根画廊）、#180（四个画廊共用背景：改了四个画廊，在 `python/` 里只动了 `index.html`）。
 
@@ -296,8 +298,8 @@ ls -d python/programs/*/_fixtures | wc -l
 | 2 | `2026-09-30-python-phase2-rulings.md` · `-deferred.md` | 两波并行（M3 / M4），三个控制方；两次修门（#181、#183）。台账第一次活下来。 | 21 GB 那次事故：一个负控制本身就能把机器拖垮 |
 | 3 | `2026-09-30-python-phase3-rulings.md` · `-deferred.md` | fixture 门（#187）、`dont_inherit`（#188）、M5 四页；随机数只许 `random.Random(种子)`。期控制方的合并核验第一次被要求进台账。 | #187 的作者按「我的做法更对」申报：子串式「逐行包含」守不住页面上的一行一行（`<p>` 的 `white-space: normal` 把段内换行塌成空格） |
 | 4 | `2026-09-30-python-phase4-rulings.md` · `-deferred.md` | scipy-stack 层（#191，钉版本 + 严格模式）、逐层比类型（#192）、M6 五页；标准件 `probe.js`；英文跨页写 `the <页名> page`（P28）。 | 起草期原型在清单阶段就发现了门的盲区——比终审早两步 |
-| 5 | `2026-09-30-python-phase5-rulings.md` · `-deferred.md` **（由期 5 收尾 PR 引入，文件名按既有命名推断；`e342ba2` 时未合）** | pygame 层（#196）、分段临摹（#198，engine `py-1.2.0`）、M7 四页（#199、#200）。 | 控制方简报的 `Color.lerp` 公式错、构建者对；原型 200/200 通过是因为 `t` 取了「好看」的值 |
-| 6 | 期 6 收尾时再补 | MicroPython 层前提（#201）；写于 `e342ba2` 时，M8 三页与本文档 PR 在做。 | —— |
+| 5 | `2026-09-30-python-phase5-rulings.md` · `-deferred.md`（期 5 收尾 #205 引入） | pygame 层（#196）、分段临摹（#198，engine `py-1.2.0`）、M7 四页（#199、#200）。 | 控制方简报的 `Color.lerp` 公式错、构建者对；原型 200/200 通过是因为 `t` 取了「好看」的值 |
+| 6 | `2026-10-01-python-phase6-rulings.md` · `-deferred.md`（期 6 收尾引入） | MicroPython 层（#201）、本文档（#202）、boards 按考纲重判（#203）、一致性清理（#204）、boards 依据门（#206）、M8 三页 29 个程序（#207、#208）。主规格 §9 的最后一期，§9.3 记规划完成。 | 期控制方的派发简报两处被纠正：m8b 起草者提出逻辑函数收 `elapsed_ms`（按构造不受回绕影响）而不是简报的 `now_ms`；约定表里的 `fsm` 违反「tag 先 grep」，改用全库已有的 `state-machine`。另：控制方第一个负控制变异（罗盘 `+45 → +44`）是等价变异——先穷举差异数再选变异 |
 
 各期设计（清单与裁决表）在 `docs/superpowers/specs/2026-09-*-python-phase*-*.md`；主规格是 `2026-09-16-python-subproject-design.md`。
 
@@ -320,7 +322,7 @@ ls -d python/programs/*/_fixtures | wc -l
 
 ## 9. 已知未做 / 未决
 
-逐条的来龙去脉在最新一期的账本里（`2026-09-30-python-phase4-deferred.md`，期 5 的账本合并后以它为准）。这里只列还开着的、按「谁来定」分。
+逐条的来龙去脉在最新一期的账本里（至 `b3d8546` 是第 6 期账本 `2026-10-01-python-phase6-deferred.md`，§十 是规划完成时仍开着的汇总）。这里只列还开着的、按「谁来定」分（本节的状态句写于 `e342ba2`，以第 6 期账本为准）。
 
 **方向已定、存量未改**
 

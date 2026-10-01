@@ -11,6 +11,7 @@ node 裸 vm context——走浏览器分支，不走 node 分支，见根 CLAUDE
      · MicroPython 程序：没有可跑的——只做第 2 道。
   2. 带 check.property 的程序：从复制内容里导入 entry（MicroPython 装门的硬件桩、pygame 无头），
      拿门自己的参照、种子、组数、逐层比较（gates.library._deep_mismatch）比 200 组——跑帧看不见的错，这里看得见。
+另外逐章报**空数**（全章每个程序，不只抽到的）：页面自己的 `Exercise.parse` 数出来的挖空个数——构建报告与 PR 描述里的空数照它写、不手数。
 负控制（内建，每个程序都做）：第一个空填成 `pass` 的复制内容。第 1 道对它的判别力按层不同——
 m7a 实测 pygame 跑帧只抓到 1/6（空多在只有事件或碰撞才走到的分支里），第 2 道抓到 5/6；所以两道的命中数分开报。
 
@@ -42,7 +43,8 @@ JS = (
     "vm.runInContext(fs.readFileSync(process.argv[1],'utf8'),c);"
     "if(typeof c.Exercise!=='object'){throw new Error('裸 vm 里没有 Exercise：区段没取对');}"
     "const src=fs.readFileSync(0,'utf8');const b=c.Exercise.parse(src).blanks;const mode=process.argv[2];"
-    "if(mode==='clean'){process.stdout.write(c.Exercise.clean(src));}"
+    "if(mode==='count'){process.stdout.write(String(b.length));}"
+    "else if(mode==='clean'){process.stdout.write(c.Exercise.clean(src));}"
     "else{const a={};b.forEach((x,i)=>{a[x.id]=(mode==='wrong'&&i===0)?x.indent+'pass':x.body;});"
     "process.stdout.write(c.Exercise.merge(src,a));}"
 )
@@ -140,6 +142,7 @@ def main() -> int:
     lf = load_live_frames()
 
     fails, rows = 0, []
+    blank_counts: dict[str, tuple[int, int]] = {}                   # 章 → (空数, 程序数)
     neg = {'run': [0, 0], 'frames': [0, 0], 'property': [0, 0]}      # [抓到, 做了]
     for ch in a.chapters:
         d = repo / 'python/programs' / ch
@@ -147,6 +150,10 @@ def main() -> int:
         js_file = page_exercise(repo, data['tool'], library)
         try:
             progs = {p['id']: p for p in data['programs']}
+            # 空数：本章**全部**程序（不只抽到的 k 个），用页面自己的 Exercise.parse 数——构建报告里手数的空数对它核
+            # （第 6 期 m8b 构建者报 25，页面实为 26，控制方靠浏览器探针才对出来；复盘 11）。
+            blank_counts[ch] = (sum(int(payload(js_file, (d / p['file']).read_text(encoding='utf-8'), 'count'))
+                                    for p in data['programs']), len(progs))
             for pid in random.Random(a.seed).sample(sorted(progs), min(a.k, len(progs))):
                 prog = progs[pid]
                 src = (d / prog['file']).read_text(encoding='utf-8')
@@ -186,6 +193,10 @@ def main() -> int:
         finally:
             js_file.unlink(missing_ok=True)
     print('\n'.join(rows))
+    for ch, (nb, np_) in blank_counts.items():
+        print(f'空数：{ch} {nb} 个空（全章 {np_} 个程序，页面自己的 Exercise.parse 数）')
+    if len(blank_counts) > 1:
+        print(f'空数合计：{sum(v[0] for v in blank_counts.values())}')
     caught = sum(v[0] for v in neg.values())
     print('负控制（首空填 pass 的复制内容被抓到 / 做了）：' +
           '，'.join(f'{k} {v[0]}/{v[1]}' for k, v in neg.items() if v[1]))
