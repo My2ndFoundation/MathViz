@@ -3,7 +3,10 @@
 
 配方（第 1 期 R1 起两期共十余次冲突都这样解，零次手工合并）：
   取一侧（--take）的 python-tools.json / app.html / index.html
-  → 把另一侧（--from）有、这一侧没有的注册表条目按原顺序追加到 tools 末尾
+  → 把另一侧（--from）有、这一侧没有的注册表条目按 (module, 章号) 插进 tools：每一条放在「键不大于它的最后一条」之后，
+    已有条目一条都不挪（章号取自工作区 python/programs/chNN-*/chapter.json 的 "tool"；没有章目录的条目章号当无穷大，
+    落在本模块末尾）。第 6 期收尾加的：旧版一律追加到末尾，m8a 合 main（#207 已先合进 ch35）时得到
+    patterns、microbit、pico，控制方只好手工挪成主规格 §2.2 的 microbit、pico、patterns（章号 33、34、35 与 §2.2 页序一致）
   → 冲突的工具页取 --take 一侧，GENERATED:PROGRAMS 交给 build_programs.py 重写
   → build_programs.py、inline_core.py、sync_fallback.py、check.py 依次跑
   → 只 `git add` 显式路径（冲突文件 + 生成脚本报出改过的文件）；不提交，提交由你做。
@@ -120,6 +123,47 @@ def load_registry(repo: Path, rev: str) -> dict[str, dict]:
     return {t['id']: t for t in json.loads(git(repo, 'show', f'{rev}:{REGISTRY}'))['tools']}
 
 
+CHAPTER_DIR_RE = re.compile(r'ch(\d+)-')
+
+
+def chapter_numbers(repo: Path) -> dict[str, int]:
+    """工具 id → 章号，读工作区（合并停下时两侧的章目录都在）的 python/programs/chNN-*/chapter.json 顶层 "tool"。"""
+    out: dict[str, int] = {}
+    for f in sorted((repo / 'python/programs').glob('ch*/chapter.json')):
+        m = CHAPTER_DIR_RE.match(f.parent.name)
+        if not m:
+            continue
+        try:
+            tool = json.loads(f.read_text(encoding='utf-8')).get('tool')
+        except (OSError, ValueError):
+            continue
+        if isinstance(tool, str):
+            out[tool] = int(m.group(1))
+    return out
+
+
+def out_of_order_modules(tools: list[dict], chapters: dict[str, int]) -> list:
+    """全表逐模块查：模块内有章号的条目是否按章号升序。交回不按章号的模块号。"""
+    bad = []
+    for mod in sorted({t.get('module') for t in tools}, key=str):
+        known = [chapters[t['id']] for t in tools if t.get('module') == mod and t['id'] in chapters]
+        if known != sorted(known):
+            bad.append(mod)
+    return bad
+
+
+def insert_by_chapter(tools: list[dict], new: list[dict], chapters: dict[str, int]) -> list[dict]:
+    """把 new 按 (module, 章号) 插进 tools：每条放在「键不大于它的最后一条」之后，tools 里已有的条目不挪。"""
+    def key(t: dict) -> tuple:
+        return (t.get('module', 0), chapters.get(t['id'], float('inf')))
+    out = list(tools)
+    for t in sorted(new, key=key):                      # sorted 稳定：同键的按 --from 一侧原顺序
+        k = key(t)
+        at = max((i for i, u in enumerate(out) if key(u) <= k), default=-1)
+        out.insert(at + 1, t)
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--repo', required=True, help='停在冲突上的那个 worktree 的绝对路径')
@@ -216,6 +260,7 @@ def main() -> int:
     reg_path = repo / REGISTRY
     reg = json.loads(reg_path.read_text(encoding='utf-8'))
     appended = []
+    new_entries = []
     engine_pages = []
     for tid, t in theirs.items():
         if tid not in ours:
@@ -230,13 +275,22 @@ def main() -> int:
                              + recovery(repo, pages))
                 page_path.write_text(new, encoding='utf-8')
                 engine_pages.append(page_rel)
-            reg['tools'].append(t)
+            new_entries.append(t)
             appended.append(tid)
+    chapters = chapter_numbers(repo)
+    reg['tools'] = insert_by_chapter(reg['tools'], new_entries, chapters)
     reg_path.write_text(json.dumps(reg, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    print(f'追加条目：{", ".join(appended) if appended else "（无）"}')
+    print(f'追加条目：{", ".join(appended) if appended else "（无）"}（按 (module, 章号) 插入，已有条目不挪）')
     if engine_pages:
         print(f'engine 改成 {take_engines[0]}（--engine-from take）：{", ".join(engine_pages)}（注册表条目与 tool-engine meta）')
     print('注册表顺序：' + ' '.join(f'{t["id"]}(M{t["module"]})' for t in reg['tools']))
+    for mod in sorted({t.get('module') for t in new_entries}, key=str):
+        row = [t for t in reg['tools'] if t.get('module') == mod]
+        print(f'模块 {mod} 内顺序：' + ' '.join(
+            f'{t["id"]}(ch{chapters[t["id"]]})' if t['id'] in chapters else f'{t["id"]}(无章目录)' for t in row))
+    for mod in out_of_order_modules(reg['tools'], chapters):          # 全表查，不只本次插入的模块
+        print(f'WARN: 模块 {mod} 的注册表顺序不按章号（已有条目的存量顺序，脚本不挪）——导航页按注册表顺序列页，'
+              f'要与主规格 §2.2 的页序对齐得另做一次改动', file=sys.stderr)
 
     # 3. 三个生成脚本（--print-changed 会照常写文件，并把改过的路径一行一个打出来）
     changed: set[str] = set()

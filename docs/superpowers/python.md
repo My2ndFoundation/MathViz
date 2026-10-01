@@ -16,7 +16,7 @@
 文件改动之后行号会漂，以函数名为准去找。
 
 **数字不写进这份文档。** 页数、程序数、行数、门数、core 断言数、engine 版本、运行层分布、property / chunks / fixture 的条数、
-`boards` 的现状——这些会随每一波内容变化的数字，只在交接文档 §1.1 的「快照 · 写于 e342ba2」表里出现一次，附重算命令（编号 ①–⑥，
+`boards` 的现状——这些会随每一波内容变化的数字，只在交接文档 §1.1 的「快照」表（至 b3d8546）里出现一次，附重算命令（编号 ①–⑥，
 在交接文档里唯一）。本文正文只写结构与规则；需要数字时去那张表，或直接跑那几条命令。
 门在本地缺库时的跳过数随机器而变，严格模式的含义见 §11.3。
 
@@ -248,7 +248,7 @@ core 的七个区段**全部必需**，没有逐页选装清单：`inline_core.p
   顶层的 `pygame.init()`、`set_mode(...)` 在无头 SDL 下照样导入成功、property 照样绿，只有结构门看得见（主规格 §5.4）。
 - MicroPython（#201 起）：导入前把 `microbit` / `machine` / `utime` 等装成**硬件桩**——取属性得到另一个桩，**调用即抛**
   `HardwareStubCalled`；`const()` 是恒等函数，`Image(...)` 是纯值构造；比完即卸桩。顶层规则同上，调用只许 `const` / `Image`，
-  由 `micropython_main_guard_check` 守。e342ba2 全库还没有 MicroPython 程序（交接文档 §1.1），这两处只在负控制里被执行过（门的输出如实这样说）。
+  由 `micropython_main_guard_check` 守。e342ba2 时全库还没有 MicroPython 程序，这两处只在负控制里被执行过；第 6 期（#207、#208）之后由真实程序执行（至 b3d8546 的个数见交接文档 §1.1）。
 
 property 的入口一律交回**内置类型**：`np.int64` / `ndarray` 要 `int()` / `.tolist()`，`pygame.Rect` / `Vector2` 要转 `tuple`，
 因为门逐层比「值相等且类型相同」（§11.2）。
@@ -536,7 +536,7 @@ python-progress:<progId>     { blank: {…}, trace: { bestAcc, bestCpm, at } }
 `MODULE_LABELS` 是八个模块的闭集，`app.html` 与 `index.html` 两份必须逐字节相同、1–8 一个不缺（`module_label_check`）。
 accent 按**模块**事先定死：M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 violet · M8 emerald——
 八个模块五种颜色，临场挑「相邻异色」到第六个模块一定撞色（`gates/__init__.py` 的 `MODULE_ACCENTS` 注释）。
-`accent_module_check` 同时校验表本身相邻异色。M8 在 e342ba2 还没有页，标签与配色已经在表里。
+`accent_module_check` 同时校验表本身相邻异色。M8 在 e342ba2 时还没有页、标签与配色已经在表里；它的三页随第 6 期（#207、#208）上线，照表是 emerald。
 
 ### 10.3 FALLBACK 是生成的
 
@@ -738,8 +738,8 @@ CI（`registry-sync.yml`）装**钉死版本**的 `numpy==2.3.1 pandas==2.3.0 ma
 你自己分支上的 skill 改动，Skill 工具要等合并、快进之后才读得到。
 
 各期规格在 `docs/superpowers/specs/2026-09-*-python-*.md`，各期裁决在 `docs/superpowers/handoffs/2026-09-*-python-phase*-{rulings,deferred}.md`
-（第 0–4 期已在仓库）。第 5 期的两份按既有命名应为 `2026-09-30-python-phase5-rulings.md` / `-deferred.md`，由第 5 期收尾 PR 引入，
-e342ba2 尚未进 `main`。每期的摘要与「最值得记住的一条」在交接文档。
+（至 b3d8546：第 0–5 期都在仓库，第 5 期的两份由 #205 引入；第 6 期的是 `docs/superpowers/handoffs/2026-10-01-python-phase6-{rulings,deferred}.md`，
+由第 6 期收尾 PR 引入）。每期的摘要与「最值得记住的一条」在交接文档。
 
 ---
 

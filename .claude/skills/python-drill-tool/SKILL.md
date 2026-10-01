@@ -67,7 +67,7 @@ description: >-
 | `requires` 是白名单 `numpy` / `pandas` / `matplotlib` / `scipy` / `pygame` 的子集（可以是空数组） | `program_meta_check` | `requires=… 必须是 … 的子集` |
 | `"tier": "compile-only"`（普通 cpython 程序的例外豁免）必须带非空 `why`，每页至多 2 个 | `exemption_check` | `没有非空的 why` / `有 N 条例外豁免，上限是 2` |
 | 源码里写了 `_fixtures/<名>` 的程序：`notes` 中英两边都写出文件名，并把文件的**每一行各自写成一段、连续、按原顺序**（比较时去掉每行首尾空白）；源码提到 `_fixtures` 却没写全 `_fixtures/<名>`（如 `Path("_fixtures") / "x"`）也算错 | `fixture_notes_check`（#187） | `没有提到文件名` / `没有把 _fixtures/<名> 逐行抄出来……缺这几行` / `不是按原顺序连在一起` / `却没有一处写成 _fixtures/<文件名>` |
-| 每个程序在考纲依据表 `docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md` 的**附录**里有一行（章、`id`、boards、概念组、依据），boards 与 `chapter.json` 相同——**加程序就加行，改 boards 就两边一起改** | `boards_map_check` | `在依据表附录里没有行` / `≠ 依据表的` / `概念组或依据是空的` / `出现不止一行` |
+| 每个程序在考纲依据表 `docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md` 的**附录**里有一行（章、`id`、boards、概念组、依据），boards 与 `chapter.json` 相同——**加程序就加行，改 boards 就两边一起改**（「计数」一节只加一句本波的增量，不改文件开头、不写累计数：程序总数看这道门的输出行） | `boards_map_check` | `在依据表附录里没有行` / `≠ 依据表的` / `概念组或依据是空的` / `出现不止一行` |
 | MicroPython 程序（`runtime` 以 `micropython` 开头）的模块顶层同样只有 import / def / class / docstring / 常量赋值（调用只许 `const(...)` / `Image(...)`）和恰好一个 `if __name__ == "__main__":`；引脚、显示、无线电、主循环放进 `main()`；property 入口不许碰硬件（门装硬件桩，调用即 `HardwareStubCalled`） | `micropython_main_guard_check`（第 6 期开工前） | `顶层有 … 语句` / `顶层赋值里调用了 …` / `抛错 HardwareStubCalled` |
 | pygame 程序（`requires` 含 `pygame`）的模块顶层只有 import / def / class / docstring / 常量赋值（调用只许 `pygame.Color` / `Rect` / `Vector2`）和恰好一个 `if __name__ == "__main__":`；`pygame.init()`、`set_mode`、时钟、主循环都放进 `main()` | `pygame_main_guard_check`（第 5 期开工前） | `顶层有 … 语句` / `顶层赋值里调用了 …` / `` `if __name__ == "__main__":` 有 N 个，应恰好 1 个`` |
 | 带 `check.property` 的程序在 `gates/refs/` 里**同章文件**有参照 | `algorithm_property_check` | `没有它的参考实现` / `参照却登记在` |
@@ -304,6 +304,10 @@ EOF
 
 **pygame 与 MicroPython 程序不写 `run` 字段**（第 5 期定论）：门对它们只过 `compile()`（`library.py` 的 `_tier`：`requires` 含 `pygame`、或 `runtime` 不是 `cpython`，都是 compile-only 层），没有可比的 stdout；
 写了也没人读，还会让人以为它被验过。它们的正确性靠逻辑函数上的 property 与控制方的活体跑帧（`python-content-wave/live-frames.py`，只有 pygame）。
+**MicroPython 程序的 `main()` 在任何地方都没有执行过**（没有活体跑帧的对应物：本机没有 MicroPython，门只在硬件桩下导入、调 entry），所以 `main()` 里的东西只由 `compile()` 与评审读代码守——能放进纯逻辑函数的逻辑就放进去、挂 P。
+**MicroPython 的时间模块一律 `import utime`**（第 6 期裁决：整个 M8 统一，与 micro:bit 文档一致；讲解可以说固件也认 `import time`，但不说「utime 是旧名字」）。
+逻辑函数里的时间收**毫秒整数实参**，优先收「本拍与上一拍的间隔」`elapsed_ms`（`main()` 里用 `utime.ticks_diff` 算好传入）——按构造就不受计数器回绕影响；`sleep` / `ticks_ms` 只在 `main()` 里调。
+写「据官方文档、本机未实测」的硬件行为（`ticks_diff` 的范围、`duty_u16` 的量程、加速度计单位、罗盘航向范围）时，refs 文件头与讲解都写明出处、标「据文档、未实测」。
 
 ## property 检查
 
@@ -334,6 +338,12 @@ EOF
 - **被测里用了会取整 / 舍入的库函数时**（`pygame.Color.lerp`、`Rect` 的属性赋值——四舍五入、半数远离零，与构造和 `move` 的截断不同、与 Python `round` 的半数取偶也不同：第 5 期收尾在 pygame 2.6.1 上对 `r.x = k/8`、k ∈ [−4000, 4000] 共 8001 个值复测，0 处不符，换成 `round` 不符 500、换成截断不符 4000；`round`……），`cases` 要有一部分造在**舍入边界**上，
   并做一次「参照换成另一种舍入 → 门红」的负控制。第 5 期 `colour-lerp`：清单写的公式在实数上与 pygame 相等、浮点上在「恰为 .5」处差 1；t 随机取值时新旧参照都绿，
   专门造「真实值恰为 .5」的分支之后门同种子 200 组旧式错 22、新式 0（m7a 终审 I1）。写进讲解或 refs 头的「实测行为」标注测了多少组、怎么取的。
+- **每个空都要落在 `entry` 走得到的路径上。** 走不到的空（entry 是 `decode()`、空在 `encode()` 里），除 `compile()` 外没有任何门守——property 的 cases 自己造实参，从不经过它。
+  一个程序只有一个 `entry`（门按程序 id 登记一条参照），所以要两个函数都进 property，就把 entry 换成**往返包装**：`def roundtrip(device, temp, light): return decode(encode(device, temp, light))`，
+  参照是恒等（把实参原样交回），cases 常取边界（有符号字节就取 −128、−1、0、127）——encode 或 decode 任一边的单边错都会红。
+  第 6 期 m8a `radio-packet-bytes`：终审把 encode 的 `temp % 256` 改成 `% 255`，门照绿（I2）；换成往返 entry 之后同一变异断言红，`copyrun.py` 的「首空填 pass」负控制从 3/4 变成 4/4。
+  **往返 entry 的盲区写进 refs 文件头**：两个空同时错、而且错得互相抵消（encode 多加的被 decode 多减回来）时恒等照样成立，门看不见。
+  检查办法：每个空所在的函数是不是 entry 本身或它调用到的（往返包装算调用到）；`copyrun.py` 的「首空填 pass」负控制没被抓到的程序，先查这一条。
 - 注释里说明「它守得住什么变异」时，**举的变异必须先真跑一遍、看到门红**。`gates/properties.py` 文件头的 ⚠ 段记着一次反例：解释里举的两个变异，门一个都测不出来。
 
 ## 三种作业
@@ -363,7 +373,7 @@ R=<worktree 绝对路径>
 python3 $R/.claude/skills/python-content-wave/resolve-registry-conflict.py --repo $R --take MERGE_HEAD --from HEAD && git -C $R commit --no-edit
 ```
 必须用 `&&` 接提交：脚本红了之后冲突在索引里已标为解决，单独一行的 `git commit` 会照样成功。
-它取 `--take` 一侧的三个文件、把 `--from` 一侧多出的条目追加到 `tools` 末尾，冲突的工具页取 `--take` 一侧，
+它取 `--take` 一侧的三个文件、把 `--from` 一侧多出的条目按 (module, 章号) 插进 `tools`（已有条目不挪；第 6 期收尾前是一律追加到末尾），冲突的工具页取 `--take` 一侧，
 然后 `build_programs.py`、`inline_core.py`、`sync_fallback.py`、`check.py`，全绿才按显式路径 `git add`。
 退出码 1（生成脚本或 `check.py` 红）时**照它打印的恢复命令做**，不要直接 `git merge --abort`（索引已 ≠ HEAD 时会失败）；
 退出码 2（冲突落在别的文件上）与 3（同一个已有条目在 `--from` 一侧改过、又与 `--take` 一侧不同，见 C「升级一页」）什么都没动。

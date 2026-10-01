@@ -6,7 +6,8 @@
 
 槽的键：`{{…}}` 里去掉开头的 `REQUIRED`，再截到第一个「，」或「：」之前，去掉首尾空白——
 所以 `{{REQUIRED 页 id，如 py-strings}}` 与 `{{页 id}}` 是同一个键「页 id」，填一次到处生效。
-`--list` 列出模板的全部键（带 REQUIRED 标记与出现次数），照它写 JSON。
+`--list` 列出模板的全部键：每行第一列就是 JSON 里要写的键（JSON 字符串，原样用），后面是出现次数与「必填 / 可选」。
+（第 6 期之前 `--list` 把「REQUIRED 」印在键前面，照抄进 JSON 就成了拼错的键——m8b 控制方踩过，复盘 9。）
 
 值：字符串照原样替换（多行也行）；`null` 表示「这一项本次不适用」——删掉含这个槽的**整行**
 （PR 模板里「本波有用到随机的 stdlib 层程序才写」那类可选行就这样去掉）。REQUIRED 槽给 null 或空串都是 rc 1。
@@ -62,13 +63,16 @@ def main() -> int:
         return 1
 
     if a.list:
+        # 每行开头就是 JSON 里要写的键（JSON 字符串，原样粘进值文件），后面才是次数与是否必填。
+        # 旧版把「REQUIRED 」印在键的前面，照抄进 JSON 就是拼错的键、rc 1（第 6 期 m8b 复盘 9）。
         seen: dict[str, list] = {}
         for _, k, req in slots:
             e = seen.setdefault(k, [0, False])
             e[0] += 1
             e[1] |= req
+        print('# 每行第一列是 JSON 键（带引号，原样用）；「必填」的不能给 null 或空串')
         for k, (n, req) in seen.items():
-            print(f'{"REQUIRED " if req else "         "}{k}  ×{n}')
+            print(f'{json.dumps(k, ensure_ascii=False)}\t×{n}\t{"必填" if req else "可选（null = 整行去掉）"}')
         return 0
 
     if not (a.values and a.out):
