@@ -142,6 +142,16 @@ def chapter_numbers(repo: Path) -> dict[str, int]:
     return out
 
 
+def out_of_order_modules(tools: list[dict], chapters: dict[str, int]) -> list:
+    """全表逐模块查：模块内有章号的条目是否按章号升序。交回不按章号的模块号。"""
+    bad = []
+    for mod in sorted({t.get('module') for t in tools}, key=str):
+        known = [chapters[t['id']] for t in tools if t.get('module') == mod and t['id'] in chapters]
+        if known != sorted(known):
+            bad.append(mod)
+    return bad
+
+
 def insert_by_chapter(tools: list[dict], new: list[dict], chapters: dict[str, int]) -> list[dict]:
     """把 new 按 (module, 章号) 插进 tools：每条放在「键不大于它的最后一条」之后，tools 里已有的条目不挪。"""
     def key(t: dict) -> tuple:
@@ -276,13 +286,11 @@ def main() -> int:
     print('注册表顺序：' + ' '.join(f'{t["id"]}(M{t["module"]})' for t in reg['tools']))
     for mod in sorted({t.get('module') for t in new_entries}, key=str):
         row = [t for t in reg['tools'] if t.get('module') == mod]
-        nums = [chapters.get(t['id']) for t in row]
         print(f'模块 {mod} 内顺序：' + ' '.join(
-            f'{t["id"]}(ch{n})' if n is not None else f'{t["id"]}(无章目录)' for t, n in zip(row, nums)))
-        known = [n for n in nums if n is not None]
-        if known != sorted(known):
-            print(f'WARN: 模块 {mod} 的注册表顺序不按章号（已有条目的存量顺序，脚本不挪）——导航页按注册表顺序列页，'
-                  f'要与主规格 §2.2 的页序对齐得另做一次改动', file=sys.stderr)
+            f'{t["id"]}(ch{chapters[t["id"]]})' if t['id'] in chapters else f'{t["id"]}(无章目录)' for t in row))
+    for mod in out_of_order_modules(reg['tools'], chapters):          # 全表查，不只本次插入的模块
+        print(f'WARN: 模块 {mod} 的注册表顺序不按章号（已有条目的存量顺序，脚本不挪）——导航页按注册表顺序列页，'
+              f'要与主规格 §2.2 的页序对齐得另做一次改动', file=sys.stderr)
 
     # 3. 三个生成脚本（--print-changed 会照常写文件，并把改过的路径一行一个打出来）
     changed: set[str] = set()

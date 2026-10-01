@@ -12,6 +12,7 @@ node 裸 vm context——走浏览器分支，不走 node 分支，见根 CLAUDE
   2. 带 check.property 的程序：从复制内容里导入 entry（MicroPython 装门的硬件桩、pygame 无头），
      拿门自己的参照、种子、组数、逐层比较（gates.library._deep_mismatch）比 200 组——跑帧看不见的错，这里看得见。
 另外逐章报**空数**（全章每个程序，不只抽到的）：页面自己的 `Exercise.parse` 数出来的挖空个数——构建报告与 PR 描述里的空数照它写、不手数。
+数的是**磁盘上的 `.py`**（用页面内联的 parser）；页面里嵌入的那份程序是否与磁盘同步，由门 `program_embed_roundtrip_check` 守，这里不管。
 负控制（内建，每个程序都做）：第一个空填成 `pass` 的复制内容。第 1 道对它的判别力按层不同——
 m7a 实测 pygame 跑帧只抓到 1/6（空多在只有事件或碰撞才走到的分支里），第 2 道抓到 5/6；所以两道的命中数分开报。
 

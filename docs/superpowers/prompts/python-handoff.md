@@ -328,11 +328,11 @@ ls -d python/programs/*/_fixtures | wc -l
 
 - **讲解与提示指向「页面上看不到的输出」**：第 1 期列的 27 处（25 个程序）加第 2 期 1 处，一直没改。「页面显示 `run.expect`」这条路已被用户否决，
   所以存量只剩逐条改写一条路（要给涉及的页升版）。
-- **`boards`**：新规则已定（§2 第 9 条）；全库按新规则的审计由 boards PR 做，考纲对照文件随它进仓库。
+- **`boards`**：新规则已定（§2 第 9 条）；全库按新规则的审计已由 #203 做完（考纲对照文件随它进仓库），附录与 `chapter.json` 的防漂门由 #206（`boards_map_check`）加上。
 
 **门与判定器**
 
-- **判定器在行数不同时完全不比缩进**（`python/core/judge.js:162`）。`compare('if a:\n    if b: c()\nd()', 'if a:\n    if b:\n        c()\n    d()')` 在 `e342ba2` 上实跑仍是 `equal`——`d()` 被移出了外层 `if`。
+- **判定器在行数不同时完全不比缩进**（`python/core/judge.js` 里 `na.rel.length === nr.rel.length` 那一处；按代码找，不写行号——行号会漂）。`compare('if a:\n    if b: c()\nd()', 'if a:\n    if b:\n        c()\n    d()')` 在 `e342ba2` 上实跑仍是 `equal`——`d()` 被移出了外层 `if`。
   靠作者规矩挡着（多行空只挖同一层，或「复合语句头 + 一行体」）。第一次改 core 时先给 `judge_strictness_check` 加这条反例、看它红，再改判定器。
 - **一个程序只有一个 property 入口**：多函数的程序只验一个（第 1、2 期账本列了实例），其余靠 `run.expect`。
 - 建议的门，至 `e342ba2` 都还没做：fixture 必须被 git 跟踪；tag 规范化（存量两组分裂）；`isdigit` → `int()` 扫描；「照抄空」扫描（第 2 期账本 §三.4 列了 5 处存量，之后的账本没再跟踪；抽查 `infix-to-rpn`、`sentinel-running-total` 两处在 `e342ba2` 仍在）。

@@ -880,7 +880,7 @@ chess 现在要到运行时才暴露一个写错的路径。
 ### 9.3 规划完成（第 6 期收尾，至 `b3d8546`）
 
 上表六期全部交付：M1–M8 八个模块、**35 页、375 个程序**（第 0 期 10 · 第 1 期 96 · 第 2 期 111 · 第 3 期 47 · 第 4 期 46 · 第 5 期 36 · 第 6 期 29），
-其中 259 个带 property 检查；`python/scripts/check.py` **45 道门**（第 0 期地基时 34 道），engine 全库唯一 **`py-1.3.1`**。
+其中 259 个带 property 检查；`python/scripts/check.py` **45 道门**，engine 全库唯一 **`py-1.3.1`**（各项的当前值与重算命令见交接文档 §1.1 快照表）。
 这些数字至 `b3d8546`（#208 合并后的 `main`）；以后的数字看交接文档 `docs/superpowers/prompts/python-handoff.md` §1.1 的快照表，不在这里改。
 各期的裁决与账本在 `docs/superpowers/handoffs/2026-09-*-python-phase{0..5}-*.md` 与 `2026-10-01-python-phase6-{rulings,deferred}.md`。
 

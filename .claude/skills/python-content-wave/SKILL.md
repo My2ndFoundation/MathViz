@@ -149,7 +149,8 @@ description: >-
   「按章号插回」是第 6 期收尾加的：旧版一律追加到末尾，m8a 合 main（#207 已先带进 ch35）时得到 patterns、microbit、pico，控制方手工挪成主规格 §2.2 的 microbit、pico、patterns（章号就是 §2.2 的页序）。
   回放（第 6 期收尾账本 §四.6）：新脚本在这次合并上与手工结果 `99c0231` 的注册表与两个导航页**逐字节相同**（合并后另做的 N4 升版代入之后），旧脚本不同；m8a 集成 pico（`21b4d62`）新旧都逐字节相同（回归）；
   第 4 期 m6b 合 main（`9a9101c`）旧脚本逐字节复现当时的提交——M6 的 statistics 排在 pandas 之前就是这样来的——新脚本给出 §2.2 的 basics、linalg、pandas、matplotlib、statistics。
-  脚本打印「模块 N 内顺序」；已有条目本身不按章号时（存量：M5 的 text-data、M6 的 statistics）打 WARN、不去挪它们。
+  脚本打印本次插入的模块的「模块 N 内顺序」，并**对全表逐模块**查章序：哪个模块不按章号（存量：M5 的 text-data、M6 的 statistics）就打 WARN、不去挪它们——所以今天每次跑都会报 M5、M6 两条 WARN，直到有人把它们挪好。
+  负控制（第 6 期收尾）：m8a 集成 pico（`21b4d62`）的回放只插入 M8，新版照样报 M5、M6 两条 WARN、注册表与 `21b4d62` 逐字节相同；只查插入模块的上一版在同一回放上 0 条 WARN。
 - 退出码：`0` 已暂存；`4` 要追加的条目 engine 与 `--take` 一侧不同、没给 `--engine-from take`，什么都没动（见上）；`1` 生成脚本或 `check.py` 红（或超时）——**照它打印的恢复命令做**，不要直接 `git merge --abort`：`--take MERGE_HEAD` 时索引已 ≠ HEAD、
   生成脚本又改过工作区，直接 abort 会 rc=128 `not uptodate`；只把注册表和两个导航页 `checkout HEAD` 再 abort，abort 会成功，但生成脚本改到的别的页会留在工作区。
   打印的命令先把这两类都复原（`checkout HEAD -- <注册表、两个导航页、冲突的页>`，再 `checkout -- <生成脚本改过的其余文件>`），最后 `merge --abort`；`2` 冲突落在这几类文件之外、什么都没动；`3` 同一个已有条目在 `--from` 一侧改过、又与 `--take` 一侧不同，什么都没动。
@@ -194,7 +195,7 @@ description: >-
   内建负控制：第一个空填 `pass` 的复制内容，各道测量分别报「抓到 / 做了」。第 5 期 m7a 实测：pygame 跑帧对错答案的判别力弱（1/6——空多在只有事件或碰撞才走到的分支里），
   property 那一道抓到 5/6；所以 pygame / MicroPython 页的「整段对不对」主要靠第二道。各层**分别**报；某一层 0/n 时打印 WARN（合计抓到 ≥ 1 会掩盖它——例如只抽 ch31 时跑帧 0/3）。收尾跑的是 `copyrun.py --repo $W --chapters ch29-pygame-basics ch30-pygame-sprites ch31-pygame-motion ch32-pygame-games ch26-pandas ch05-files-errors ch21-simulation --seed 20260930 --k 3`：21/21 通过，负控制 run 9/9、跑帧 4/12、property 16/16（写协议不写数：换一组章，数就不同）；
   MicroPython 分支第 6 期第一次真用：m8a 首跑负控制 property 3/4——没抓到的 `radio-packet-bytes` 首空在 `encode()`、entry 是 `decode()`，这一空除 compile 外无门守（终审 I2，改成往返 entry 之后 4/4，见 `python-drill-tool` property 一节）；m8b 10/10。
-  它还逐章印「**空数**：<章> N 个空（全章每个程序，页面自己的 `Exercise.parse` 数）」——构建报告与 PR 描述里的空数照这一行写、不手数：第 6 期 m8b 构建者报 25，页面实为 26，控制方靠浏览器探针才对出来。
+  它还逐章印「**空数**：<章> N 个空（全章每个程序，页面自己的 `Exercise.parse` 数磁盘上的 `.py`；页面嵌入的那份是否同步由 `program_embed_roundtrip_check` 守）」——构建报告与 PR 描述里的空数照这一行写、不手数：第 6 期 m8b 构建者报 25，页面实为 26，控制方靠浏览器探针才对出来。
   （第 6 期收尾的负控制：在导出副本里给 ch35 一个程序多包一对 BLANK，这一行从 26 变 27。）
   不要自己写正则剥指令——第 2 期 M3 控制方的正则只认 `# >>> BLANK`，被一行 `# >>>BLANK`（少一个空格，解析器与门都接受）骗过一次，报成页面与本地不一致。
   这项测量与门一样拷了 fixture，观察不到「粘进 PyCharm 缺数据文件」——人工验收由用户在线上做（第 5 期末用户裁决）。
