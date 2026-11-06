@@ -14,7 +14,7 @@ if __name__ == "__main__":
         name[0] = "P"
 # <<< BLANK
     except TypeError as err:
-        print("TypeError:", err)
+        print(type(err).__name__)
     print(name)
     fixed = name[0].upper() + name[1:]
     print(fixed, name)

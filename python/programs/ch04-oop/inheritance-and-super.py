@@ -23,7 +23,7 @@ class Student(Person):
         self.school = school
 
     def describe(self):
-# >>> BLANK id=extend-describe level=2 hint="返回一个双引号的 f-string，不用 + 拼接；第一个花括号里放父类那份 describe() 的结果，不要把 name 和 age 再写一遍 || 父类那份后面紧接着的文字逐字是：一个逗号、一个空格、studies at、再一个空格；最后一个花括号里放学校" hintEn="Return one double-quoted f-string, not + concatenation; the first pair of braces holds the result of the parent's describe(), rather than writing name and age out again || Straight after the parent's part comes, exactly: a comma, a space, the words studies at and one more space; the last pair of braces holds the school"
+# >>> BLANK id=extend-describe level=2 hint="返回一个双引号的 f-string，不用 + 拼接；第一个花括号里放父类那份 describe() 的结果，用空括号的 super() 去调，不直接写父类的名字，也不要把 name 和 age 再写一遍 || 父类那份后面紧接着的文字逐字是：一个逗号、一个空格、studies at、再一个空格；最后一个花括号里放学校" hintEn="Return one double-quoted f-string, not + concatenation; the first pair of braces holds the result of the parent's describe(), reached through super() with empty brackets, not by writing the parent's name, and not by writing name and age out again || Straight after the parent's part comes, exactly: a comma, a space, the words studies at and one more space; the last pair of braces holds the school"
         return f"{super().describe()}, studies at {self.school}"
 # <<< BLANK
 
