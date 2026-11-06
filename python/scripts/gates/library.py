@@ -24,6 +24,7 @@ import ast
 import copy
 import io
 import json
+import keyword
 import os
 import pathlib
 import re
@@ -409,6 +410,11 @@ def _call_with_timeout(func, args, limit: float = None):
         signal.signal(signal.SIGALRM, previous)
 
 
+def property_key(pid: str, fn: str) -> str:
+    """额外入口在 refs 里的键：`'<程序 id>::<函数名>'`（主入口的键仍是程序 id 本身）。"""
+    return f'{pid}::{fn}'
+
+
 def algorithm_property_check() -> int:
     """带 `check.property` 的程序：拿 `properties.REFERENCES[id]['ref']` 当独立裁判。
 
@@ -422,9 +428,15 @@ def algorithm_property_check() -> int:
     是红，不是跳过——否则加一个程序就悄悄少一份覆盖。
 
     实参由 `properties.SEED` 固定种子生成 `properties.SAMPLES` 组，逐次可复现。
+
+    **额外入口**（清理波，phase6-deferred §三.3、phase1-deferred §二「一个程序要验两个函数」）：
+    `check.alsoEntries: ["fn", …]` 列出 `entry` 之外也要比的函数，每个在 refs 里以
+    `'<程序 id>::<函数名>'`（`property_key`）登记一份参照，各自比 SAMPLES 组。没有这个字段的
+    程序行为不变（向后兼容）。登记了键、程序却没列这个入口 → 红（同「多出来的参照」）。
     """
     rc = 0
     checked = 0
+    checked_entries = 0
     prop_skipped = {}                    # 层 → 因缺库跳过的程序数（scipy-stack / pygame 分开数）
     cases_total = 0
     with_property = set()
@@ -438,9 +450,15 @@ def algorithm_property_check() -> int:
         prop = check.get('property')
         if not prop:
             continue
-        with_property.add(prog.get('id'))
-        prog_chapter[prog.get('id')] = chapter_dir.name
         name = _pid(chapter_dir, prog)
+        # 入口：`entry`（参照键 = 程序 id）+ `check.alsoEntries` 里的每个函数（参照键 = 'id::函数名'，
+        # phase6-deferred §三.3）。形状由 program_meta_check 校验；这里只取合法的那部分。
+        also = check.get('alsoEntries') or []
+        also = [f for f in also if isinstance(f, str) and f] if isinstance(also, list) else []
+        targets = [(prog.get('entry'), prog.get('id'))] + [(f, property_key(prog.get('id'), f)) for f in also]
+        for _fn, key in targets:
+            with_property.add(key)
+            prog_chapter[key] = chapter_dir.name
         if prop not in PROPERTIES:
             print(f'ERROR: {name} 的 check.property={prop!r} 不在闭集 '
                   f'{sorted(PROPERTIES)} 内', file=sys.stderr)
@@ -473,12 +491,13 @@ def algorithm_property_check() -> int:
                 continue
             if pygame_prog:
                 _headless_sdl()
-        ref_entry = properties.REFERENCES.get(prog['id'])
-        if ref_entry is None:
-            print(f'ERROR: {name} 有 check.property={prop!r}，但 gates/refs/ 里没有它的参考实现'
-                  f'（应写在 gates/refs/{chapter_dir.name.replace("-", "_")}.py）。\n'
-                  f'       参照按**程序 id** 登记（R6），不能跟同族的别的程序共用一份。',
-                  file=sys.stderr)
+        missing_refs = [key for _fn, key in targets if properties.REFERENCES.get(key) is None]
+        if missing_refs:
+            for key in missing_refs:
+                print(f'ERROR: {name} 有 check.property={prop!r}，但 gates/refs/ 里没有 {key!r} 的参考实现'
+                      f'（应写在 gates/refs/{chapter_dir.name.replace("-", "_")}.py）。\n'
+                      f'       参照按**程序 id** 登记（R6；额外入口按 \'<id>::<函数名>\'），'
+                      f'每个入口一份。', file=sys.stderr)
             rc = 1
             continue
         entry_name = prog.get('entry')
@@ -512,68 +531,108 @@ def algorithm_property_check() -> int:
             traceback.print_exc()
             rc = 1
             continue
-        fn = ns.get(entry_name)
-        if not callable(fn):
-            print(f'ERROR: {name} 的 entry={entry_name!r} 在模块里不是可调用对象',
-                  file=sys.stderr)
-            rc = 1
-            continue
-
-        import random
-        rng = random.Random(properties.SEED)
-        ref = ref_entry['ref']
-        cases = ref_entry['cases']
-        bad = None
-        for _ in range(properties.SAMPLES):
-            args = cases(rng)
-            cases_total += 1
-            # 被测与参照**各拿一份深拷贝**。原先两者拿的是同一批对象：被测函数若就地改了
-            # 实参（原地排序写坏、清空字典……），参照看到的已是改过的对象，于是「错的输出」
-            # 与「对改过的输入算出的正确答案」相等，门比不出来。实测：把 invert() 改成
-            # `mapping.clear(); return {}`，修之前这道门是绿的。`args` 本身不交给任何一方，
-            # 留给报错时打印原始实参。
-            try:
-                got = _call_with_timeout(fn, copy.deepcopy(args))
-            except _PropertyTimeout:
-                bad = (args, f'超过 {PROPERTY_CALL_TIMEOUT:g} 秒没有返回（死循环？）', None)
-                break
-            except Exception as exc:                         # noqa: BLE001
-                bad = (args, f'抛错 {type(exc).__name__}: {exc}', None)
-                break
-            try:
-                want = _call_with_timeout(ref, copy.deepcopy(args))
-            except _PropertyTimeout:
-                print(f'ERROR: {name} 的参考实现超过 {PROPERTY_CALL_TIMEOUT:g} 秒没有返回——'
-                      f'参照本身有问题（gates/refs/），实参 {args!r}', file=sys.stderr)
+        prog_ok = True
+        for entry_name, key in targets:
+            fn = ns.get(entry_name)
+            if not callable(fn):
+                print(f'ERROR: {name} 的 {"entry" if key == prog["id"] else "check.alsoEntries 里的"}'
+                      f'{"=" if key == prog["id"] else " "}{entry_name!r} 在模块里不是可调用对象',
+                      file=sys.stderr)
                 rc = 1
-                bad = None
-                break
-            where = _deep_mismatch(got, want)
-            if where is not None:
-                bad = (args, got, want, where)
-                break
-        if bad is not None:
-            args, got, want, *rest = bad
-            where = rest[0] if rest else None
-            print(f'ERROR: {name} 的 {entry_name}() 与参考实现不符（property={prop}，'
-                  f'种子 {properties.SEED}）\n'
-                  f'    反例实参：{args!r}\n'
-                  f'    被测返回：{got!r}\n'
-                  f'    参照返回：{want!r}\n'
-                  + (f'    首个差异：{where}\n' if where else '')
-                  + f'    源码：{py_path}', file=sys.stderr)
-            rc = 1
-            continue
-        checked += 1
+                prog_ok = False
+                continue
+            res = _property_compare(name, prop, py_path, entry_name, fn, properties.REFERENCES[key])
+            cases_total += res[1]
+            if res[0]:
+                rc = 1
+                prog_ok = False
+        if prog_ok:
+            checked += 1
+            checked_entries += len(targets)
     if pending_uninstall is not None:
         pending_uninstall()
+    rc |= _property_tail(with_property, prog_chapter)
+    if checked == 0 and rc == 0:
+        print('ERROR: 一个带 check.property 的程序都没验到——这道门跑了个寂寞',
+              file=sys.stderr)
+        return 1
+    if rc == 0:
+        print(f'性质比对：{checked} 个程序（{checked_entries} 个入口）× {properties.SAMPLES} 组实参 = '
+              f'{cases_total} 次调用，与独立参考实现全部一致（种子 {properties.SEED}）'
+              + ('；因缺库跳过 ' + '、'.join(f'{layer} 层 {n} 个' for layer, n in sorted(prop_skipped.items()))
+                 + '（CI 上不许）' if prop_skipped else ''))
+    return rc
 
-    # 反方向：REFERENCES 里登记了、库里却没有这个程序。一条这样的参照什么都不验，
+
+# 被测抛错 / 超时时门不再调用参照：报错里印「参照未计算」，不印 None（phase3-deferred §三.3——
+# 原先印「参照返回：None」，读报告的人以为参照真的返回了 None，m5a 修复报告就这样引过一次）。
+_REF_NOT_COMPUTED = object()
+
+
+def _property_compare(name, prop, py_path, entry_name, fn, ref_entry):
+    """一个入口对它的参照比 SAMPLES 组；返回 (是否红, 调用组数)。"""
+    import random
+    rng = random.Random(properties.SEED)
+    ref = ref_entry['ref']
+    cases = ref_entry['cases']
+    bad = None
+    rc = 0
+    cases_total = 0
+    for _ in range(properties.SAMPLES):
+        args = cases(rng)
+        cases_total += 1
+        # 被测与参照**各拿一份深拷贝**。原先两者拿的是同一批对象：被测函数若就地改了
+        # 实参（原地排序写坏、清空字典……），参照看到的已是改过的对象，于是「错的输出」
+        # 与「对改过的输入算出的正确答案」相等，门比不出来。实测：把 invert() 改成
+        # `mapping.clear(); return {}`，修之前这道门是绿的。`args` 本身不交给任何一方，
+        # 留给报错时打印原始实参。
+        try:
+            got = _call_with_timeout(fn, copy.deepcopy(args))
+        except _PropertyTimeout:
+            bad = (args, f'超过 {PROPERTY_CALL_TIMEOUT:g} 秒没有返回（死循环？）', _REF_NOT_COMPUTED, None)
+            break
+        except Exception as exc:                         # noqa: BLE001
+            bad = (args, f'抛错 {type(exc).__name__}: {exc}', _REF_NOT_COMPUTED, None)
+            break
+        try:
+            want = _call_with_timeout(ref, copy.deepcopy(args))
+        except _PropertyTimeout:
+            print(f'ERROR: {name} 的参考实现超过 {PROPERTY_CALL_TIMEOUT:g} 秒没有返回——'
+                  f'参照本身有问题（gates/refs/），实参 {args!r}', file=sys.stderr)
+            rc = 1
+            bad = None
+            break
+        where = _deep_mismatch(got, want)
+        if where is not None:
+            bad = (args, got, want, where)
+            break
+    if bad is not None:
+        args, got, want, where = bad
+        if want is _REF_NOT_COMPUTED:
+            ref_line = '    参照：未计算（被测已抛错 / 已超时，门不再调用参照）\n'
+            got_line = f'    被测：{got}\n'
+        else:
+            ref_line = f'    参照返回：{want!r}\n'
+            got_line = f'    被测返回：{got!r}\n'
+        print(f'ERROR: {name} 的 {entry_name}() 与参考实现不符（property={prop}，'
+              f'种子 {properties.SEED}）\n'
+              f'    反例实参：{args!r}\n'
+              + got_line + ref_line
+              + (f'    首个差异：{where}\n' if where else '')
+              + f'    源码：{py_path}', file=sys.stderr)
+        rc = 1
+    return rc, cases_total
+
+
+def _property_tail(with_property: set, prog_chapter: dict) -> int:
+    """性质比对跑完之后的登记核对：多出来的参照、refs 导入错误、文件对不上章、参照登记在别章。"""
+    rc = 0
+    # 反方向：REFERENCES 里登记了、库里却没有这个程序（或这个入口）。一条这样的参照什么都不验，
     # 但会让 `REFERENCES` 看上去比实际覆盖更宽——同一类「广告了并不具备的覆盖」。
     for stale in sorted(set(properties.REFERENCES) - with_property):
         print(f'ERROR: gates/refs/{properties.REF_SOURCES.get(stale)} 里有 {stale!r} 的参考实现，'
-              f'但程序库里没有带 check.property 的同名程序——这条参照一次都不会被'
-              f'执行', file=sys.stderr)
+              f'但程序库里没有带 check.property 的同名程序（或 check.alsoEntries 里没有这个函数）'
+              f'——这条参照一次都不会被执行', file=sys.stderr)
         rc = 1
 
     for err in properties.REF_ERRORS:
@@ -589,16 +648,6 @@ def algorithm_property_check() -> int:
     for msg in _ref_chapter_mismatches(prog_chapter, properties.REF_SOURCES):
         print(f'ERROR: {msg}', file=sys.stderr)
         rc = 1
-
-    if checked == 0 and rc == 0:
-        print('ERROR: 一个带 check.property 的程序都没验到——这道门跑了个寂寞',
-              file=sys.stderr)
-        return 1
-    if rc == 0:
-        print(f'性质比对：{checked} 个程序 × {properties.SAMPLES} 组实参 = '
-              f'{cases_total} 次调用，与独立参考实现全部一致（种子 {properties.SEED}）'
-              + ('；因缺库跳过 ' + '、'.join(f'{layer} 层 {n} 个' for layer, n in sorted(prop_skipped.items()))
-                 + '（CI 上不许）' if prop_skipped else ''))
     return rc
 
 
@@ -1733,6 +1782,20 @@ def program_meta_check() -> int:
                 print(f'ERROR: {name} 的 check.property={check["property"]!r} 不在'
                       f'闭集 {sorted(PROPERTIES)} 内', file=sys.stderr)
                 rc = 1
+            if isinstance(check, dict) and 'alsoEntries' in check:
+                also = check['alsoEntries']
+                if not check.get('property'):
+                    print(f'ERROR: {name} 写了 check.alsoEntries 却没有 check.property——'
+                          f'额外入口只在 property 门里有意义', file=sys.stderr)
+                    rc = 1
+                if not isinstance(also, list) or not also \
+                        or not all(isinstance(f, str) and f.isidentifier() for f in also):
+                    print(f'ERROR: {name} 的 check.alsoEntries={also!r} 必须是非空的函数名数组', file=sys.stderr)
+                    rc = 1
+                elif len(set(also)) != len(also) or prog.get('entry') in also:
+                    print(f'ERROR: {name} 的 check.alsoEntries={also!r} 有重复，或重复了 entry '
+                          f'{prog.get("entry")!r}', file=sys.stderr)
+                    rc = 1
 
     if total == 0:
         print('ERROR: 一条程序元数据都没扫到——这道门跑了个寂寞', file=sys.stderr)
@@ -2081,4 +2144,575 @@ def fixture_notes_check() -> int:
     if rc == 0:
         print(f'fixture 手抄：{len(checked)} 处引用（{"、".join(checked)}），'
               f'讲解中英两边都逐行、按序抄出了文件内容并写出文件名')
+    return rc
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 清理波新门（phase2-deferred §三.4、phase3-deferred §三.2/§三.4/§三.5、phase6-deferred §四.3 / §十）
+#
+# 四道门今天都会因**存量**红：early / later 两个内容构建者在并行清它们。为了让本分支能提交，
+# 每道门带一张显式的存量豁免表（`*_STOCK`，每条写账本出处）。表里的一条**对不上**今天的
+# 任何违例时同样是红（「存量已清，删掉这一条」）——一张没人删的豁免表会悄悄放过以后
+# 长回来的同一处违例。控制方集成三条分支之后删表、确认全绿。
+# ══════════════════════════════════════════════════════════════════════════
+
+def _stale_exemptions(name: str, table: dict, used: set) -> int:
+    rc = 0
+    for key in sorted(set(table) - used, key=repr):
+        print(f'ERROR: {name} 的存量豁免 {key!r}（{table[key]}）今天对不上任何违例——'
+              f'存量已清，删掉这一条（留着它会放过以后长回来的同一处）', file=sys.stderr)
+        rc = 1
+    return rc
+
+
+# ── fixture_tracked_check ────────────────────────────────────────────────
+
+FIXTURE_IGNORED_NAMES = ('.DS_Store',)
+FIXTURE_IGNORED_PREFIXES = ('._',)
+
+
+def _disk_fixtures(programs_dir: pathlib.Path) -> list:
+    """磁盘上 `programs/*/_fixtures/**` 的每个文件（相对仓库根、正斜杠），`.DS_Store`、`._*` 除外。"""
+    repo = programs_dir.parent.parent
+    out = []
+    for fx_dir in sorted(programs_dir.glob('*/_fixtures')):
+        for path in sorted(fx_dir.rglob('*')):
+            if not path.is_file():
+                continue
+            if path.name in FIXTURE_IGNORED_NAMES or path.name.startswith(FIXTURE_IGNORED_PREFIXES):
+                continue
+            out.append(path.relative_to(repo).as_posix())
+    return out
+
+
+def _git_tracked(repo: pathlib.Path, under: str):
+    """`git ls-files -z -- <under>` 的集合；git 不可用或不是仓库时返回 (None, 原因)。"""
+    try:
+        proc = subprocess.run(['git', 'ls-files', '-z', '--', under], cwd=str(repo),
+                              capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, f'{type(exc).__name__}: {exc}'
+    if proc.returncode != 0:
+        return None, proc.stderr.decode('utf-8', 'replace').strip()
+    return {p for p in proc.stdout.decode('utf-8').split('\0') if p}, None
+
+
+def fixture_tracked_check(tracked: set = None, programs_dir: pathlib.Path = None) -> int:
+    """磁盘上每个 `python/programs/*/_fixtures/*` 文件都必须在 `git ls-files` 里。
+
+    其余的门都读**磁盘**：一个被忽略规则静默挡掉的 fixture（根 `.gitignore` 的 `*.log` 挡过
+    `_fixtures/access.log`，第 3 期 m5a）本地全绿、CI 的 checkout 里却没有它。CI 上磁盘就是索引，
+    这道门只在本地（提交钩子里）有判别力——它守的正是「本地绿、CI 红」。
+
+    `tracked` / `programs_dir` 只给负控制注入用（不碰真索引）：缺省时现取 `git ls-files`。
+    git 不可用时是红，不是跳过——跳过的门在 CI 上会一直绿而什么都没看。
+    """
+    programs_dir = programs_dir or PROGRAMS_DIR
+    repo = programs_dir.parent.parent
+    disk = _disk_fixtures(programs_dir)
+    if not disk:
+        print('ERROR: 磁盘上一个 _fixtures 文件都没有——这道门跑了个寂寞', file=sys.stderr)
+        return 1
+    if tracked is None:
+        under = programs_dir.relative_to(repo).as_posix()
+        tracked, why = _git_tracked(repo, under)
+        if tracked is None:
+            print(f'ERROR: 取不到 git ls-files（{why}）——这道门守的是「磁盘有、索引没有」，'
+                  f'看不见索引就什么都没守', file=sys.stderr)
+            return 1
+    missing = [p for p in disk if p not in tracked]
+    for p in missing:
+        print(f'ERROR: {p} 在磁盘上、不在 git 索引里——多半被某条忽略规则挡掉了'
+              f'（`git check-ignore -v {p}` 看是哪条）。本地的门读磁盘、全绿，CI 的 checkout 里没有它。',
+              file=sys.stderr)
+    if missing:
+        return 1
+    print(f'fixture 已跟踪：磁盘上 {len(disk)} 个 _fixtures 文件全部在 git 索引里')
+    return 0
+
+
+# ── tag_normalize_check ──────────────────────────────────────────────────
+
+# 存量豁免（清理波集成时清空：两组存量已由内容分支统一；表留着，以后若需要豁免须带出处）。
+TAG_STOCK = {}
+
+
+def _tag_fold(tag: str) -> str:
+    """折叠大小写、空格与连字符。**不折下划线**：`len` / `__len__`、`repr` / `__repr__`
+    不同义（内置函数与特殊方法），实测折下划线会误撞 4 组（phase3-deferred §三.4）。"""
+    return tag.lower().replace(' ', '').replace('-', '')
+
+
+def _tag_collisions(tags_by_program: list) -> dict:
+    """[(程序名, [tag…])] → {折叠键: {原文: [程序名…]}}，只留原文不止一种的组。纯函数。"""
+    groups: dict = {}
+    for name, tags in tags_by_program:
+        for t in tags:
+            groups.setdefault(_tag_fold(t), {}).setdefault(t, []).append(name)
+    return {k: v for k, v in groups.items() if len(v) > 1}
+
+
+def tag_normalize_check(stock: dict = None) -> int:
+    """全库 tag 折叠大小写、空格、连字符之后相同、而原文不同 → 红。
+
+    tag 显示在三种模式的说明面板上，分裂了她看到的就是自相矛盾的元数据（第 4 期 m6a 终审 I2）。
+    同义不同形的（`2D list` / `list of lists`、`slice` / `slicing`）这道门看不见——只能靠
+    「新造 tag 之前先 grep 全库」的作者规矩。
+    """
+    stock = TAG_STOCK if stock is None else stock
+    items = []
+    total = 0
+    for chapter_dir, _data, prog, _py in iter_programs():
+        total += 1
+        tags = prog.get('tags') or []
+        items.append((_pid(chapter_dir, prog), [t for t in tags if isinstance(t, str)]))
+    if total == 0:
+        print('ERROR: 一个程序都没扫到——这道门跑了个寂寞', file=sys.stderr)
+        return 1
+    rc = 0
+    used = set()
+    collisions = _tag_collisions(items)
+    for key in sorted(collisions):
+        forms = collisions[key]
+        fs = frozenset(forms)
+        if fs in stock:
+            used.add(fs)
+            continue
+        detail = '；'.join(f'{t!r} ×{len(ps)}（{", ".join(ps[:3])}{" …" if len(ps) > 3 else ""}）'
+                          for t, ps in sorted(forms.items()))
+        print(f'ERROR: tag 写法分裂：{detail}——折叠大小写、空格、连字符后相同。'
+              f'统一成全库已有的那一种（多数写法），改了要给页升版', file=sys.stderr)
+        rc = 1
+    rc |= _stale_exemptions('tag_normalize_check', stock, used)
+    if rc == 0:
+        distinct = len({t for _n, ts in items for t in ts})
+        print(f'tag 规范化：{total} 个程序、{distinct} 个不同的 tag，折叠大小写 / 空格 / 连字符后'
+              f'没有新的分裂（存量豁免 {len(used)} 组）')
+    return rc
+
+
+# ── copied_blank_check（「照抄空」）─────────────────────────────────────
+
+# 存量豁免：(章目录, 程序 id, 去缩进的答案行) → 出处。清理波集成时清空（phase2-deferred §三.4 的 5 处已改挖）。
+COPY_BLANK_STOCK = {}
+
+_PY_TOKEN_RE = re.compile(
+    r'''[A-Za-z]{0,2}(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")'''   # 字符串（含前缀）
+    r'|\d[\w.]*'                                                   # 数字
+    r'|\w+'                                                        # 名字 / 关键字
+    r'|\*\*=?|//=?|->|:=|==|!=|<=|>=|<<=?|>>=?|[-+*/%&|^@]='       # 多字符运算符
+    r'|\S')
+
+
+def _py_tokens(line: str) -> list:
+    """一行去缩进的代码 → 记号列表（门自己的轻量切分；行可以是一条语句的半截）。"""
+    code = line.split('#', 1)[0] if '#' in line and not re.search(r'''['"]''', line) else line
+    return _PY_TOKEN_RE.findall(code.strip())
+
+
+def _keyword_only(tokens: list) -> bool:
+    """只由关键字与标点组成（`else:`、`finally:`、`try:`）——这种行哪儿都长一个样，挖它考的是结构位置。"""
+    return bool(tokens) and all(keyword.iskeyword(t) or not re.match(r'\w', t) for t in tokens)
+
+
+_OPEN, _CLOSE = '([{', ')]}'
+
+
+def _shell_segment(seg: list) -> bool:
+    """一段被剥掉的「外壳」：外层调用头 `name(` / `a.b(`、只由闭括号组成、或一个完整的下标 / 切片 `[…]`。"""
+    if not seg:
+        return False
+    if all(t in _CLOSE for t in seg):
+        return True
+    if seg[-1] == '(' and len(seg) >= 2 and re.match(r'[A-Za-z_]\w*$', seg[0]):
+        mid = seg[:-1]
+        return all((i % 2 == 0 and re.match(r'[A-Za-z_]\w*$', t)) or (i % 2 == 1 and t == '.')
+                   for i, t in enumerate(mid))
+    if seg[0] == '[' and seg[-1] == ']':
+        depth = 0
+        for i, t in enumerate(seg):
+            depth += t in _OPEN
+            depth -= t in _CLOSE
+            if depth == 0 and i != len(seg) - 1:
+                return False
+        return depth == 0
+    return False
+
+
+def _near_copy(ans: list, line: list, max_segs: int = 4) -> bool:
+    """`ans` 能否由 `line` 剥掉一至 max_segs 段外壳得到（删掉的段合起来括号配平），且答案占那一行记号一半以上。"""
+    if not ans or len(ans) * 2 <= len(line) or len(ans) >= len(line):
+        return False
+
+    def balanced(segs):
+        for o, c in zip(_OPEN, _CLOSE):
+            if sum(s.count(o) for s in segs) != sum(s.count(c) for s in segs):
+                return False
+        return True
+
+    def go(i, j, segs):
+        if i == len(ans):
+            rest = line[j:]
+            if rest:
+                if len(segs) >= max_segs or not _shell_segment(rest):
+                    return False
+                segs = segs + [rest]
+            return bool(segs) and balanced(segs)
+        if j < len(line) and line[j] == ans[i] and go(i + 1, j + 1, segs):
+            return True
+        if len(segs) < max_segs:
+            for k in range(j + 1, len(line) + 1):
+                if _shell_segment(line[j:k]) and go(i, k, segs + [line[j:k]]):
+                    return True
+        return False
+
+    return go(0, 0, [])
+
+
+def _blank_spans(lines: list) -> list:
+    """[(开始指令行下标, 结束指令行下标)]；不配对的由 blank_directive_check 报，这里跳过。"""
+    spans, start = [], None
+    for i, ln in enumerate(lines):
+        if BLANK_OPEN_RE.match(ln):
+            start = i
+        elif BLANK_CLOSE_RE.match(ln) and start is not None:
+            spans.append((start, i))
+            start = None
+    return spans
+
+
+def _copied_blanks(src: str) -> list:
+    """一段源码里的照抄空：[(答案行号 1 起, 去缩进的答案行, 未挖行号, 口径 '逐字' / '近照抄')]。纯函数。"""
+    lines = src.split('\n')
+    spans = _blank_spans(lines)
+    inside = set()
+    for a, b in spans:
+        inside.update(range(a, b + 1))
+    open_rows = [(i, lines[i].strip()) for i in range(len(lines))
+                 if i not in inside and lines[i].strip() and not lines[i].strip().startswith('#')]
+    by_text: dict = {}
+    for i, s in open_rows:
+        by_text.setdefault(s, i)
+    hits = []
+    for a, b in spans:
+        for i in range(a + 1, b):
+            ans = lines[i].strip()
+            if not ans or ans.startswith('#'):
+                continue
+            toks = _py_tokens(ans)
+            if _keyword_only(toks):
+                continue
+            if ans in by_text:
+                hits.append((i + 1, ans, by_text[ans] + 1, '逐字'))
+                continue
+            for j, s in open_rows:
+                if _near_copy(toks, _py_tokens(s)):
+                    hits.append((i + 1, ans, j + 1, '近照抄'))
+                    break
+    return hits
+
+
+def copied_blank_check(stock: dict = None) -> int:
+    """挖空答案（每行去缩进）原样出现在同一程序**没挖的行**上 → 红（「照抄空」）。
+
+    挖空模式下所有空同时隐藏，两个空之间互相抄不到，只看没挖的行。只由关键字和标点组成的行
+    （`else:`、`finally:`、`try:`）不算。**近照抄**也算：从某一没挖的行剥掉一至四段外壳——外层调用头
+    `name(`、只由闭括号组成的段、或一个完整的下标 / 切片 `[…]`，合起来括号配平——就得到答案，
+    而且答案占那一行记号的一半以上（`python-drill-tool`「照抄空」一条的定义）。记号由门自己的
+    轻量切分得到（一行可以是语句的半截，CPython 的 tokenize 吃不下），是近似。
+    """
+    stock = COPY_BLANK_STOCK if stock is None else stock
+    rc = 0
+    used = set()
+    scanned = blanks = 0
+    for chapter_dir, _data, prog, py_path in iter_programs():
+        if not py_path.is_file():
+            continue
+        src = read_text(py_path)
+        scanned += 1
+        blanks += len(_blank_spans(src.split('\n')))
+        for row, ans, src_row, how in _copied_blanks(src):
+            key = (chapter_dir.name, prog.get('id'), ans)
+            if key in stock:
+                used.add(key)
+                continue
+            print(f'ERROR: {_pid(chapter_dir, prog)} 的挖空答案 {ans!r}（{py_path.name}:{row}）'
+                  f'{"原样" if how == "逐字" else "剥掉外壳后"}出现在没挖的第 {src_row} 行（{how}）——'
+                  f'这个空抄上下文就能填，换一行挖', file=sys.stderr)
+            rc = 1
+    if scanned == 0 or blanks == 0:
+        print('ERROR: 一个空都没扫到——这道门跑了个寂寞', file=sys.stderr)
+        return 1
+    rc |= _stale_exemptions('copied_blank_check', stock, used)
+    if rc == 0:
+        print(f'照抄空：{scanned} 个程序、{blanks} 个空，逐字与近照抄都没有新的'
+              f'（存量豁免 {len(used)} 处）')
+    return rc
+
+
+# ── isdigit_check ────────────────────────────────────────────────────────
+
+# 存量豁免：(章目录/文件, 去缩进的那一行) → 出处。清理波集成时清空（string-method-tour 已改用 isdecimal）。
+ISDIGIT_STOCK = {}
+
+_CONVERTERS = {'int', 'float'}
+
+
+def _calls_converter(node) -> bool:
+    return any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in _CONVERTERS
+               for n in ast.walk(node))
+
+
+def _is_constant_receiver(node) -> bool:
+    """`"2026".isdigit()`、`chr(178).isdigit()`：在一个编译期就定死的值上调——演示方法本身。"""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return len(node.value) <= 1
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'chr'
+            and all(isinstance(a, ast.Constant) for a in node.args))
+
+
+def _isdigit_findings(src: str) -> list:
+    """[(行号, 判语 'guard' / 'whole' )]：违例的 isdigit 调用。纯函数。
+
+    口径：
+      · 守着一次 `int()` / `float()` 的（同一个 and/or 里、或它所在的 if / while / 条件表达式 /
+        推导式条件的分支里、或 if 之后的同一块里）→ 红，不论接收者是什么（`'²'.isdigit()` 为真，
+        `int('²')` 抛 ValueError）。
+      · 接收者是 for / 推导式的循环变量：只拿结果分类、计数（`elif ch.isdigit(): has_digit = True`、
+        `sum(1 for c in s if c.isdigit())`）→ 放行；被守着的那一段**用到了这个字符**（`number += ch`、
+        `[c for c in s if c.isdigit()]`——把「数字字符」收集起来，之后要当数用）→ 红
+        （第 3 期 m5a 的 `tokenise-loop` 就是这一种）。
+      · 接收者是**单字符**字面量或 `chr(<字面量>)`（演示 `chr(178).isdigit()` 与 isdecimal 之别）→ 放行：
+        结果编译期就定死，判的不是任何数据。多字符字面量（`"2026".isdigit()`）不放行——
+        它演示的正是「用 isdigit 判一串是不是数字」。
+      · 其余（判一个字符串是不是全是数字）→ 红。
+    """
+    tree = ast.parse(src)
+    parent = {}
+    for p in ast.walk(tree):
+        for c in ast.iter_child_nodes(p):
+            parent[c] = p
+
+    def guarded(node) -> bool:
+        cur = node
+        while cur in parent:
+            par = parent[cur]
+            if isinstance(par, ast.BoolOp) and any(_calls_converter(v) for v in par.values if v is not cur):
+                return True
+            if isinstance(par, (ast.If, ast.While)) and cur is par.test:
+                if any(_calls_converter(s) for s in par.body + par.orelse):
+                    return True
+                block = parent.get(par)
+                for field in ('body', 'orelse', 'finalbody'):
+                    seq = getattr(block, field, None)
+                    if isinstance(seq, list) and par in seq:
+                        if any(_calls_converter(s) for s in seq[seq.index(par) + 1:]):
+                            return True
+                return False
+            if isinstance(par, ast.IfExp) and cur is par.test:
+                return _calls_converter(par.body) or _calls_converter(par.orelse)
+            if isinstance(par, ast.comprehension) and cur in par.ifs:
+                comp = parent.get(par)
+                parts = [getattr(comp, f) for f in ('elt', 'key', 'value') if hasattr(comp, f)]
+                return any(_calls_converter(p) for p in parts)
+            if isinstance(par, ast.stmt):
+                return False
+            cur = par
+        return False
+
+    def loop_var(node) -> bool:
+        if not isinstance(node, ast.Name):
+            return False
+        cur = node
+        while cur in parent:
+            par = parent[cur]
+            if isinstance(par, ast.For) and isinstance(par.target, ast.Name) and par.target.id == node.id:
+                return True
+            if isinstance(par, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+                if any(isinstance(g.target, ast.Name) and g.target.id == node.id for g in par.generators):
+                    return True
+            if isinstance(par, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                return False
+            cur = par
+        return False
+
+    def guarded_part(node) -> list:
+        """isdigit 调用所在的条件守着的那一段：if 的体、推导式的元素、条件表达式的真分支。"""
+        cur = node
+        while cur in parent:
+            par = parent[cur]
+            if isinstance(par, ast.If) and cur is par.test:
+                return list(par.body)
+            if isinstance(par, ast.IfExp) and cur is par.test:
+                return [par.body]
+            if isinstance(par, ast.comprehension) and cur in par.ifs:
+                comp = parent.get(par)
+                return [getattr(comp, f) for f in ('elt', 'key', 'value') if hasattr(comp, f)]
+            if isinstance(par, ast.stmt):
+                return []
+            cur = par
+        return []
+
+    def collects(node, var: str) -> bool:
+        return any(isinstance(n, ast.Name) and n.id == var
+                   for part in guarded_part(node) for n in ast.walk(part))
+
+    out = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == 'isdigit'):
+            continue
+        recv = node.func.value
+        if guarded(node):
+            out.append((node.lineno, 'guard'))
+        elif _is_constant_receiver(recv):
+            continue
+        elif loop_var(recv):
+            if collects(node, recv.id):
+                out.append((node.lineno, 'collect'))
+        else:
+            out.append((node.lineno, 'whole'))
+    # 一行几处调用只报一次：guard 优先（它是更具体的那句话）
+    best: dict = {}
+    for row, why in out:
+        if best.get(row) != 'guard':
+            best[row] = why
+    return sorted(best.items())
+
+
+def isdigit_check(stock: dict = None) -> int:
+    """判「全是数字」用 `isdecimal()`，不用 `isdigit()`（`python-drill-tool`；phase3-deferred §二.8、§三.5）。
+
+    `'²'.isdigit()` 为真，`int('²')` 却抛 ValueError（第 3 期 m5a 终审 I1：`date-format-manual` 在
+    `'²²/12/2024'` 上崩）。口径见 `_isdigit_findings`：守着一次转换的、判整串的都红；逐字符分类计数、
+    在一个单字符常量上演示的放行——放行是按**用法**写的显式规则，不看同一行有没有 isdecimal。
+    """
+    stock = ISDIGIT_STOCK if stock is None else stock
+    rc = 0
+    used = set()
+    scanned = calls = 0
+    for chapter_dir, _data, prog, py_path in iter_programs():
+        if not py_path.is_file():
+            continue
+        src = read_text(py_path)
+        scanned += 1
+        try:
+            findings = _isdigit_findings(src)
+            calls += sum(1 for n in ast.walk(ast.parse(src)) if isinstance(n, ast.Call)
+                         and isinstance(n.func, ast.Attribute) and n.func.attr == 'isdigit')
+        except SyntaxError:
+            continue                     # 语法错由 program_run_check 等报
+        lines = src.split('\n')
+        for row, why in findings:
+            text = lines[row - 1].strip()
+            key = (f'{chapter_dir.name}/{py_path.name}', text)
+            if key in stock:
+                used.add(key)
+                continue
+            what = {'guard': '它守着一次 int() / float() 转换',
+                    'collect': '它决定哪些字符被收集起来当数字用'}.get(why, '它在判一个字符串是不是全是数字')
+            print(f'ERROR: {_pid(chapter_dir, prog)} 的 {py_path.name}:{row} 用了 isdigit()，{what}：{text!r}\n'
+                  f"       用 isdecimal()——'²'.isdigit() 为真，int('²') 却抛 ValueError",
+                  file=sys.stderr)
+            rc = 1
+    if scanned == 0:
+        print('ERROR: 一个程序都没扫到——这道门跑了个寂寞', file=sys.stderr)
+        return 1
+    rc |= _stale_exemptions('isdigit_check', stock, used)
+    if rc == 0:
+        print(f'isdigit：{scanned} 个程序里 {calls} 处 isdigit() 调用（代码，不含提示），没有新的「守着转换」或「判整串」'
+              f'（存量豁免 {len(used)} 处）')
+    return rc
+
+
+# ── boards_groups_check ──────────────────────────────────────────────────
+
+_GROUP_ROW_RE = re.compile(r'^\|\s*([a-z0-9][a-z0-9-]*)\s*\|\s*(\d+)\s*\|([^|]*)\|([^|]*)\|\s*$')
+_BOARD_CITE = {'AQA': r'(?:A|AQA)', 'OCR': r'(?:O|OCR)', 'Edexcel': r'(?:E|Edexcel)', 'CIE': r'(?:C|CIE)'}
+
+
+def _self_check_groups(text: str):
+    """「一致性自查（按概念组）」一节：{概念组: (程序数, {程序 id})}，以及重复的组名。纯函数。"""
+    groups, dupes = {}, []
+    section = None
+    for line in text.splitlines():
+        if line.startswith('## '):
+            section = line
+            continue
+        if not (section and section.startswith('## 一致性自查')):
+            continue
+        m = _GROUP_ROW_RE.match(line)
+        if not m:
+            continue
+        g, n, dist, _why = m.groups()
+        if g in groups:
+            dupes.append(g)
+        groups[g] = (int(n), set(re.findall(r'`([^`]+)`', dist)))
+    return groups, dupes
+
+
+def _board_cited(board: str, basis: str) -> bool:
+    """依据栏里有这家的条目引用：缩写或全名，后接条目编号（`A 4.1.1.2`、`O 5d`、`O H446 3.2.3(a)`）。"""
+    return re.search(r'(?<![A-Za-z])' + _BOARD_CITE[board] + r'(?: H446)? ?(?:\d|5d)', basis) is not None
+
+
+def boards_groups_check(text: str = None) -> int:
+    """考纲依据表的「一致性自查（按概念组）」一节与附录逐组一致，附录每写一家都引了那家的条目。
+
+    `boards_map_check` 只守附录与 `chapter.json`（phase6-deferred §四.3）。这道门再守两件：
+      1. 附录里出现的概念组与「一致性自查」一节的组**双向相同**；每组的「程序数」等于附录里该组的行数，
+         分布栏里点名的程序 id 集合等于附录里该组的 id 集合——加程序只加附录行、忘了自查表，这里红。
+      2. 附录每一行「新 boards」里的每一家，「依据」栏都有那家的条目编号（缩写或全名）——
+         「每个程序的判定都写依据」（`python-drill-tool`）。
+    **不做**的：依据里的条目编号能不能在四家各节里查到——各节按主题列条目、不是全表，实测 878 处引用里
+    50 个不同编号（157 处）在各节里查不到（如 C 11.1、C 11.2、E 8.2.4），做成门要先补文档的各节；
+    「计数」一节是增量句、没有可比的总数。
+    """
+    if text is None:
+        if not BOARDS_MAP.is_file():
+            print(f'ERROR: 找不到 boards 依据表 {BOARDS_MAP}', file=sys.stderr)
+            return 1
+        text = BOARDS_MAP.read_text(encoding='utf-8')
+    rows, _dupes = _map_rows(text)
+    groups, gdupes = _self_check_groups(text)
+    if not rows or not groups:
+        print(f'ERROR: 依据表附录 {len(rows)} 行、自查表 {len(groups)} 组——有一边没解析到，这道门跑了个寂寞',
+              file=sys.stderr)
+        return 1
+    rc = 0
+    for g in sorted(set(gdupes)):
+        print(f'ERROR: 一致性自查表里概念组 {g} 出现不止一行', file=sys.stderr)
+        rc = 1
+    by_group: dict = {}
+    for pid, (_ch, _b, g, _basis) in rows.items():
+        by_group.setdefault(g, set()).add(pid)
+    for g in sorted(set(by_group) - set(groups)):
+        print(f'ERROR: 附录里有概念组 {g}（{", ".join(sorted(by_group[g]))}），一致性自查表里没有它', file=sys.stderr)
+        rc = 1
+    for g in sorted(set(groups) - set(by_group)):
+        print(f'ERROR: 一致性自查表里有概念组 {g}，附录里没有一行属于它', file=sys.stderr)
+        rc = 1
+    for g in sorted(set(groups) & set(by_group)):
+        n, ids = groups[g]
+        app = by_group[g]
+        if n != len(app):
+            print(f'ERROR: 概念组 {g}：自查表写 {n} 个程序，附录里 {len(app)} 行', file=sys.stderr)
+            rc = 1
+        if ids != app:
+            print(f'ERROR: 概念组 {g}：自查表点名的程序与附录不同——只在自查表 {sorted(ids - app)}，'
+                  f'只在附录 {sorted(app - ids)}', file=sys.stderr)
+            rc = 1
+    cites = 0
+    for pid, (_ch, boards, _g, basis) in sorted(rows.items()):
+        for board in sorted(boards):
+            cites += 1
+            if board not in _BOARD_CITE:
+                continue                 # 闭集外的值由 boards_map_check / program_meta_check 报
+            if not _board_cited(board, basis):
+                print(f'ERROR: 依据表附录 `{pid}` 写了 {board}，依据栏里没有 {board} 的条目编号：{basis!r}',
+                      file=sys.stderr)
+                rc = 1
+    if rc == 0:
+        print(f'boards 自查：{len(groups)} 个概念组与附录 {len(rows)} 行逐组一致（程序数、点名的程序），'
+              f'附录写的 {cites} 处考试局都引了那家的条目')
     return rc

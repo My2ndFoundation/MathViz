@@ -108,6 +108,77 @@ def _loop_clip(numbers):
     return out
 
 
+
+# ── 额外入口（清理波：check.alsoEntries，键 '<程序 id>::<函数名>'；phase1-deferred §二） ──
+
+def _words(rng):
+    # 大小写混合的短词，**不含空串**（first_letters 取 word[0]，空串在它的声明之外）；
+    # 只从很小的字母表里取，同一个词（重复键）与同一个首字母（集合去重）都常出现，
+    # 首字母大写的词约占一半——.lower() 那一步才测得到。
+    pool = 'aAbBcC'
+    return ([''.join(rng.choice(pool) for _ in range(rng.randint(1, 4)))
+             for _ in range(rng.randint(0, 8))],)
+
+
+def _loop_word_lengths(words):
+    # 被测：字典推导式里 len(word)；参照：显式循环逐字符数长度、逐条赋值（重复的词后来者覆盖，值相同）。
+    out = {}
+    for word in words:
+        n = 0
+        for _ in word:
+            n += 1
+        out[word] = n
+    return out
+
+
+def _loop_first_letters(words):
+    # 被测：集合推导式里 word[0].lower()；参照：不调 lower()，按码位把 A–Z 挪到 a–z，再 set.add。
+    out = set()
+    for word in words:
+        c = word[0]
+        if 'A' <= c <= 'Z':
+            c = chr(ord(c) + 32)
+        out.add(c)
+    return out
+
+
+def _ragged(rng):
+    # 参差的网格：行长 0..4 各自独立（含空行），整个网格也可以是空的——flatten 不看列数。
+    return ([[rng.randint(0, 99) for _ in range(rng.randint(0, 4))] for _ in range(rng.randint(0, 5))],)
+
+
+def _chain_flatten(grid):
+    # 被测：嵌套推导式（for row … for cell in row）；参照：itertools.chain.from_iterable（第 1 期设计 §7.7 列的参照）。
+    import itertools
+    return list(itertools.chain.from_iterable(grid))
+
+
+def _insertion_desc_then_name(players):
+    # 被测：sorted(key=(-分数, 名字))；参照：手写插入排序，比较函数显式写「分数高的在前，同分名字小的在前」。
+    # 同分同名的元组完全相同，谁先谁后输出都一样，所以这里不必另证稳定性。先拷贝，不动实参。
+    def before(a, b):
+        return a[1] > b[1] or (a[1] == b[1] and a[0] < b[0])
+    out = list(players)
+    for i in range(1, len(out)):
+        item = out[i]
+        j = i - 1
+        while j >= 0 and before(item, out[j]):
+            out[j + 1] = out[j]
+            j -= 1
+        out[j + 1] = item
+    return out
+
+
+def _loop_drop(numbers):
+    # 被测：推导式末尾的 if（过滤）；参照：普通 for，负数 continue，其余 append。
+    out = []
+    for n in numbers:
+        if n < 0:
+            continue
+        out.append(n)
+    return out
+
+
 REFERENCES = {
     'squares-append-loop': {
         # 被测：for + append；参照：map + lambda。实测：n * n 改成 n * 2 即红。
@@ -135,9 +206,9 @@ REFERENCES = {
         'cases': _str_int_dict,
     },
     'flatten-and-transpose': {
-        # entry 只能点名一个函数：这里验 transpose（参照 zip(*m)）。flatten 只由
-        # program_run_check 比对输出——设计 §7.7 给它列的参照 chain.from_iterable
-        # 没有落点，见构建报告的偏离说明。不写一个门永远不调的参照函数：那是广告覆盖。
+        # entry 验 transpose（参照 zip(*m)）；flatten 原先只由 program_run_check 比对输出（entry 只能
+        # 点名一个函数），清理波起由 check.alsoEntries 另登记一份（键 'flatten-and-transpose::flatten'，
+        # 参照 chain.from_iterable，见本文件末尾）。
         # 实测：range(len(matrix[0])) 改成 range(len(matrix))（列数错取成行数）即红，红在 1×4 的非方阵上。
         'ref': _zip_transpose,
         'cases': _matrix,
@@ -156,6 +227,32 @@ REFERENCES = {
     'if-placement-in-comprehension': {
         # 实测：else 0 改成 else -n 即红。（>= 改成 > 测不出来：0 走哪一支结果都是 0。）
         'ref': _loop_clip,
+        'cases': _int_list,
+    },
+    # ── 额外入口（check.alsoEntries）。每条的变异都在构建报告里跑过、看到红。──
+    'dict-and-set-comprehensions::word_lengths': {
+        # 实测：len(word) 改成 len(word) - 1 即红。
+        'ref': _loop_word_lengths,
+        'cases': _words,
+    },
+    'dict-and-set-comprehensions::first_letters': {
+        # 实测：去掉 .lower() 即红（生成器里约一半的词首字母大写）。
+        'ref': _loop_first_letters,
+        'cases': _words,
+    },
+    'flatten-and-transpose::flatten': {
+        # 实测：for cell in row 改成 for cell in row[1:]（每行丢第一格）即红。
+        'ref': _chain_flatten,
+        'cases': _ragged,
+    },
+    'sorted-min-max-with-key::by_score_desc_then_name': {
+        # 实测：key 去掉 player[0]（同分不再按名字排、保留原顺序）即红；-player[1] 改成 player[1] 即红。
+        'ref': _insertion_desc_then_name,
+        'cases': _players,
+    },
+    'if-placement-in-comprehension::drop_negatives': {
+        # 实测：n >= 0 改成 n > 0（把 0 也丢掉）即红——_int_list 的 -20..20 里 0 常出现。
+        'ref': _loop_drop,
         'cases': _int_list,
     },
 }
