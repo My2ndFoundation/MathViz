@@ -14,7 +14,7 @@ def add_interest(balance, rate_percent, months):
 
 
 def show(pence):
-# >>> BLANK id=split-pounds level=1 hint="一行同时得到英镑数和余下的便士数，拆包进 pounds 和 pennies——用内置的 divmod，除数是 100" hintEn="Get the pounds and the pence left over in one line, unpacked into pounds and pennies - use the built-in divmod with 100 as the divisor"
+# >>> BLANK id=split-pounds level=1 hint="一行同时得到英镑数和余下的便士数，拆包进 pounds 和 pennies（等号左边不加括号）——用内置的 divmod，除数是 100" hintEn="Get the pounds and the pence left over in one line, unpacked into pounds and pennies (no brackets on the left of the =) - use the built-in divmod with 100 as the divisor"
     pounds, pennies = divmod(pence, 100)
 # <<< BLANK
     return f"{pounds}.{pennies:02d}"

@@ -10,9 +10,7 @@ def to_rpn(expression):
         if token in PRECEDENCE:
             while ops and ops[-1] != "(" and PRECEDENCE[ops[-1]] >= PRECEDENCE[token]:
                 output.append(ops.pop())
-# >>> BLANK id=push-op level=1 hint="优先级不低于它的运算符都已经送进输出了，现在把这个运算符自己压进运算符栈——用列表方法，不用 +=" hintEn="Every operator of equal or higher precedence has gone to the output; now push this operator itself onto the operator stack - with a list method, not +="
             ops.append(token)
-# <<< BLANK
         elif token == "(":
             ops.append(token)
         elif token == ")":
@@ -24,7 +22,9 @@ def to_rpn(expression):
             ops.pop()
 # <<< BLANK
         else:
+# >>> BLANK id=number-out level=1 hint="不是运算符、也不是括号，那就是一个数：数不用等，直接放到输出列表的末尾——用列表方法 append，不用 +=" hintEn="Not an operator and not a bracket, so it is a number: numbers never wait, so put it straight on the end of the output list - with the list method append, not +="
             output.append(token)
+# <<< BLANK
     while ops:
         output.append(ops.pop())
     return " ".join(output)

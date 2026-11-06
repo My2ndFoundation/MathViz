@@ -5,7 +5,7 @@ def bubble_sort(items):
     n = len(items)
     for i in range(n - 1):
         swapped = False
-# >>> BLANK id=shrink level=2 hint="内层 for 仍用 j 走 range，只给一个实参；上界是一个减法式子，要减去的 i 写在最后 || 第 i 趟开始时，末尾 i 个位置已经放好了最大的 i 个数，不必再比：上界是基础版的 n - 1 再减去 i" hintEn="The inner for still walks j over a range with a single argument; the bound is a subtraction, with the i being taken off written last || When pass i starts, the last i places already hold the i largest values, so there is nothing to compare there: the bound is the basic version's n - 1 with i taken off"
+# >>> BLANK id=shrink level=2 hint="内层 for 仍用 j 走 range，只给一个实参；上界是一个减法式子：从 n 出发（不再写 len(items)），整个式子不加括号，要减去的 i 写在最后 || 第 i 趟开始时，末尾 i 个位置已经放好了最大的 i 个数，不必再比：上界是基础版的 n - 1 再减去 i" hintEn="The inner for still walks j over a range with a single argument; the bound is a subtraction that starts from n (not len(items) again), with no brackets anywhere in it and the i being taken off written last || When pass i starts, the last i places already hold the i largest values, so there is nothing to compare there: the bound is the basic version's n - 1 with i taken off"
         for j in range(n - 1 - i):
 # <<< BLANK
             if items[j] > items[j + 1]:
