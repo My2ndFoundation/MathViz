@@ -315,7 +315,7 @@ property 的入口一律交回**内置类型**：`np.int64` / `ndarray` 要 `int
 
 判定器只认一种写法（§8）。一行若有同样好的另一种写法（`half ** 2` 对 `half * half`，`round(d)` 对 `int(round(d))`），
 她写出另一种会被判错。规则是：要么别挖这一行，要么**在第 1 级提示里把形式钉死**；只有钉法本身等于念出整行时才挪到最后一级。
-多行空只挖同一层的两三行，因为判定器在两边行数不同时不比缩进（§8.2）。这些都是**靠人**的规矩，没有门；
+多行空只挖同一层的两三行（判定器在两边行数不同时改比块结构，§8.2，但跨块的空写法太多、钉不住）。钉法是**靠人**的规矩，没有门；
 细则、已知的存量缺口与例子见 `python-drill-tool` 与各期 deferred 文件。
 
 ---
@@ -450,15 +450,19 @@ PyLex 的 token 干脆不带 `value` 字段——`1e10` 被 stringify 成 `10000
 
 这三样能被保留，是因为 `Judge.normalize()` **从不改写 token 的文字**——每个 token 都是原文切片，不算数值、不统一引号（`judge.js` 文件头）。
 token 化不是为了放宽，是为了报错报得有意义：「第 4 个 token 起不同：期待 `//`，你写了 `/`」，而不是「第 37 个字符不对」。
-`judge_strictness_check`（D·词法）用一组正负样例守住上表：换空白 / 换注释判同，换引号、换数字写法、改相对缩进判异。
+`judge_strictness_check`（D·词法）用一组正负样例守住上表：换空白 / 换注释判同，换引号、换数字写法、改相对缩进判异；行数不同时的块结构（§8.2）各有判同、判异的样例。
 
 ### 8.2 判定器看不见的两处，以及怎么补
 
 - **整块的绝对缩进。** `compare` 只比行与行之间的相对缩进，单行空 `    x = 1` 与 `x = 1` 在它眼里相等；
   但 `merge` 是把她的原文替换回源码的，少四格就是 `IndentationError`。所以 `PyInteract.blankFeedback` 在调 `compare` 之前
   先自己比第一行的绝对缩进，不同即报 `lead-indent`。
-- **行数不同时不比缩进。** `compare` 只在两边有效行条数相同时比相对缩进（行数不同属于少写 / 多写了一整行，归 missing / extra，裁决 R35）。
-  代价是：一个跨嵌套块的多行空，写成改变语义的缩进也可能判对。补法是写作规矩——多行空只挖同一层（§5.3，`python-drill-tool`）。
+- **行数不同时比块结构，不比缩进宽度**（engine `py-1.3.2` 起，清理波；此前行数不同时完全不比缩进）。两边有效行条数相同时，`compare` 照旧逐行比相对缩进宽度（`indent`）；
+  条数不同（一行写法 `if x: y`、括号内断行）时，各切成逻辑行（括号内、反斜杠续行、跨行三引号并入上一行），复合语句头同一行的体算深一层，用缩进栈映射成块层级，
+  token 原文相同而层级不同，或作答的退缩进对不上任何外层，判 `block`（`judge.js` 的 `blockLevels`；反馈只报行号）。
+  从前「`if a:` / `    if b: c()` / `d()` 判等于 `d()` 在外层 if 里」的洞因此关上；`if a: b` 对两行写法、续行顶格的括号内断行（合法 Python）仍判同。
+  仍看不见的：行数相同而宽度不同、却不改变块结构的写法（例如外层缩进 4、内层缩进 2 对参考的 4 / 8）——那条路径按宽度严比，判 `indent`，是有意的严格。
+  多行空仍只挖同一层（§5.3，`python-drill-tool`）。
 
 ### 8.3 反馈不泄露字面量
 
@@ -532,7 +536,7 @@ python-progress:<progId>     { blank: {…}, trace: { bestAcc, bestCpm, at } }
 
 **版本三处同步**：注册表 `version` + `changelog`、页面 `tool-version` meta、页面头部版本记录注释。版本号同时是缓存键——不升，线上用户会一直看到旧页面。
 **engine 全库唯一**：改了 `core/` 就把所有工具与 `_skeleton.html` 的 `engine` 一起升（`page_mirror_check`）；
-四次：`py-1.1.0`（#173，第 1 期规则）、`py-1.2.0`（#198，分段临摹）、`py-1.3.0`（boards PR：空考试局的占位改为「不在考纲」）、`py-1.3.1`（一致性清理：「清空本模块」改为与行为一致的「清空本页」，外加三处 core 注释订正；只动文案与注释，各页 `version` 不升）。
+五次：`py-1.1.0`（#173，第 1 期规则）、`py-1.2.0`（#198，分段临摹）、`py-1.3.0`（boards PR：空考试局的占位改为「不在考纲」）、`py-1.3.1`（一致性清理：「清空本模块」改为与行为一致的「清空本页」，外加三处 core 注释订正；只动文案与注释，各页 `version` 不升）、`py-1.3.2`（清理波：判定器在行数不同时比块结构，§8.2；新反馈 `block`；各页 `version` 由控制方统一升）。
 
 ### 10.2 模块闭集与配色
 
@@ -635,7 +639,7 @@ accent 按**模块**事先定死：M1 cyan · M2 violet · M3 emerald · M4 rose
 | 门 | 守什么 |
 |---|---|
 | `program_run_check` | 可运行层真跑，stdout 逐字节等于 `run.expect`；compile-only 层过 `compile()`（§4.4） |
-| `algorithm_property_check` | 挂 `check.property` 的程序：导入、取 `entry`，固定种子 200 组实参，与 `gates/refs/` 里按程序 id 登记、**机制不同**的参照比（下文） |
+| `algorithm_property_check` | 挂 `check.property` 的程序：导入、取 `entry`（与 `check.alsoEntries` 里的每个函数），固定种子 200 组实参，与 `gates/refs/` 里按程序 id（额外入口按 `'<id>::<函数名>'`）登记、**机制不同**的参照比（下文） |
 | `program_embed_roundtrip_check` | 页面里每段 `source` 在裸 `vm` 里解码后与磁盘 `.py` 逐字节相同 |
 | `chapter_manifest_check` | `.py` 与 `chapter.json` 双向点名；章目录与注册表工具页一一对应 |
 | `anchor_check` | `lineNotes` / `chunks` 的锚在源码里、在 `clean()` 之后都存在且唯一 |
@@ -651,6 +655,12 @@ accent 按**模块**事先定死：M1 cyan · M2 violet · M3 emerald · M4 rose
 | `fixture_notes_check` | 源码引用 `_fixtures/<名>` 的程序，`notes` 中英两边都写出文件名并逐行手抄文件内容（复制按钮不带数据文件，#187） |
 | `pygame_main_guard_check` | pygame 程序的顶层结构（§4.4） |
 | `micropython_main_guard_check` | MicroPython 程序的顶层结构（§4.4） |
+| `boards_map_check` | 依据表附录与各 `chapter.json` 的 boards 逐行一致 |
+| `boards_groups_check` | 依据表「一致性自查（按概念组）」与附录逐组一致（组集合、程序数、点名的程序）；附录每写一家都引了那家的条目编号 |
+| `fixture_tracked_check` | 磁盘上每个 `_fixtures` 文件都在 `git ls-files` 里（只在本地有判别力） |
+| `tag_normalize_check` | tag 折叠大小写 / 空格 / 连字符后相同而原文不同 → 红（不折下划线） |
+| `copied_blank_check` | 「照抄空」：挖空答案行逐字或剥壳后出现在同程序没挖的行上 |
+| `isdigit_check` | `isdigit()` 守着 `int()` / `float()`、判整串、收集数字字符 → 红 |
 
 **D·词法**（`gates/lexer.py`）
 
@@ -663,7 +673,7 @@ accent 按**模块**事先定死：M1 cyan · M2 violet · M3 emerald · M4 rose
 
 **`algorithm_property_check` 的四条讲究**（`gates/library.py`、`gates/properties.py`、`gates/refs/__init__.py` 的文件头）：
 
-1. **参照按程序 id 登记，按章一个文件**（`gates/refs/chNN_<slug>.py`，连字符换下划线）。同一 property 族名下两个机制不同的程序，参照也必须不同；
+1. **参照按程序 id 登记，按章一个文件**（`gates/refs/chNN_<slug>.py`，连字符换下划线；额外入口 `check.alsoEntries` 按 `'<id>::<函数名>'` 各登记一份）。参照不能与任何一个被测同源（几个程序可以共用一份与它们都不同源的参照）；
    「挂了 property 却没登记参照」是红不是跳过；登记了参照却没有对应程序也是红——那种参照一次都不执行，却让覆盖看起来更宽。
    参照必须与被测程序**机制不同**：标准库函数不自动算「不同」，要看源码（主规格 §2.3、裁决 R26）。
 2. **逐层比值与类型**（#192，`_deep_mismatch`）：list / tuple 按位置、dict 按键、set 比元素类型，叶子比 type 与值——
@@ -761,6 +771,5 @@ CI（`registry-sync.yml`）装**钉死版本**的 `numpy==2.3.1 pandas==2.3.0 ma
 | t 分布的 p 值 | 第 4 期规格 / 裁决 | 检验入门的 p 值只用 `statistics.NormalDist`（z 检验）；t 检验只算统计量并与给定临界值比 |
 | `boards` 写满「凑数」 | 用户裁决（boards PR 落地） | 不在考纲就不写、空列表合法（§4.5） |
 | 分段的每段行数进门 | 第 5 期 chunks 设计 C8 | 只是取向；硬拆一个完整的 `main()` 更糟 |
-| 为「照抄空」写门 | `python-drill-tool` | 至 e342ba2 靠作者自扫与终审；做成门的建议记在第 2 期账本 |
 
 「不做」不等于「做不到」：它们都是有理由、有代价的取舍，理由与代价写在出处里。想推翻其中一条，先读出处，再在新的裁决里写清为什么现在不同了。
