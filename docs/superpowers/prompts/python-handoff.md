@@ -26,7 +26,7 @@
 | `lines` 合计 | **12,247**（`lines` 口径见 `python.md` §4.1） | ① |
 | engine | 全库唯一 **`py-1.3.2`**，骨架同值（`py-1.3.0`：#203 boards；`py-1.3.1`：#204 一致性清理；`py-1.3.2`：清理波，判定器行数不同时比块结构） | ①、②「页面镜像」行 |
 | 门 | **50**（生成 3 · A 8 · B 7 · C 5 · D·库 23 · D·词法 4；#206 加了 `boards_map_check`；清理波加了 `boards_groups_check`、`fixture_tracked_check`、`tag_normalize_check`、`copied_blank_check`、`isdigit_check`） | ② 最后一行 |
-| core 断言 | 7 个测试文件，**825** 条（editor 33 · exercise 43 · interact 368 · judge 37 · py-lex 273 · store 31 · trace 40） | ② 开头七行 |
+| core 断言 | 7 个测试文件，**857** 条（editor 33 · exercise 43 · interact 376 · judge 61 · py-lex 273 · store 31 · trace 40；清理波） | ② 开头七行 |
 | 运行层 | stdlib **267** · scipy-stack **43** · pygame **36**（compile-only）· MicroPython **29**（compile-only；`micropython-microbit` 15、`micropython-pico` 14）；其余 346 个 `runtime` 是 `cpython` | ⑤ |
 | 真跑 / 只过 `compile` / 因缺库跳过 | **310 / 65 / 0**（严格模式） | ②「程序真跑」行 |
 | 带 property 的程序 | **259**（× 200 组实参；其中 MicroPython 24 个） | ②「性质比对」行；⑤ |
@@ -153,7 +153,7 @@ ls -d python/programs/*/_fixtures | wc -l
 | `Exercise.merge(source, answers) → string` | `exercise.js:366` | `answers[id]` **原样**替换整个指令块——不补缩进。答 `'return 2'` 给一个缩进 4 的空，拼出来就是顶格的 `return 2`（`exercise.test.js:59` 传的是带 8 个空格的整行）。缺的 id 用原 `body` 兜底。◆ |
 | `Exercise.DIRECTIVE_OPEN / DIRECTIVE_CLOSE` | `exercise.js:121-122` | 允许 `#`、`>>>`、`BLANK` 之间任意空白（`\s*`）。门以外的工具要识别指令行，用这两个正则或 `clean`，不要手写只认一个空格的前缀（第 2 期 M3 的复制真跑被 `# >>>BLANK` 骗过）。 |
 | `PyInteract.blankFeedback(answer, reference, lang) → { ok, kind, caret, message }` | `interact.js:508`（文档 `:482`） | **`answer` 的第一行必须带这个空自己的缩进**：`reference` 就是 `b.body`（带缩进），第一行前导空格数不同直接判 `lead-indent`。实跑：`blankFeedback('x = 1', '    x = 1', 'en')` → `lead-indent`；加上四个空格 → `equal`。页面里 textarea 的初值就是 `b.indent`（`interact.js:1557`），调用在 `:1630`。自己写判定器探针时一律「`b.indent` + 写法」，并先断言标准答案判对。◆ |
-| `Judge.compare(answer, reference) → { ok, index, expected, got, kind }` | `judge.js:158` | 它**看不见整块的绝对缩进**（`compare('x = 1', '    x = 1')` 判 `equal`），所以绝对缩进由 `blankFeedback` 另查。相对缩进**只在两边有效行数相同时比**（`:162`）——行数不同时连改变语义的缩进也判对（§9）。`index` 的语义随 `kind` 变：`indent` 时是物理行号（0 起），其余是有效 token 下标。◆ |
+| `Judge.compare(answer, reference) → { ok, index, expected, got, kind }` | `judge.js:158` | 它**看不见整块的绝对缩进**（`compare('x = 1', '    x = 1')` 判 `equal`），所以绝对缩进由 `blankFeedback` 另查。相对缩进在两边有效行数相同时逐行比宽度（`indent`）；行数不同时（单行复合语句、括号内断行）比块结构，把一行移出它的块判 `block`（清理波，`py-1.3.2`）。`index` 的语义随 `kind` 变：`indent` / `block` 时是物理行号（0 起），其余是有效 token 下标。◆ |
 | `PyInteract.hintAt(blank, tier, lang) → string` | `interact.js:360` | 按 `HINT_MARK = ' \|\| '`（`:357`）切；`tier` 是「给到第几级」，0 返回空串，超过 `level` 截到 `level`；多级之间用 `' · '` 拼回（`:358`）。`；` 与 `; ` 是普通标点。◆ |
 | `PyInteract.chunkSegments(cleanText, chunks) → null \| [{ index, title, start, end, text, fromLine, toLine }]` | `interact.js:783` | 参数是 **clean 文本**，不是带指令的源码。`[start, end)` 半开区间；段 = 从本段 `from` 行到**下一段 `from` 之前**（不是 `from…to` 闭区间），最后一段到文本末尾含结尾换行，所以各段拼回去逐字节等于 clean；`to` 只作校验。失败不抛，返回 `null`（页面退回不分段）。实跑 `'a\nb\n\nc\nd\n'` 两段 → `[0,5)`、`[5,9)`，段间空行归前一段。◆ |
 | `PyInteract.encodeChunkDraft(seg, typed)` / `decodeChunkDraft(raw, n)` | `interact.js:835` / `:848` | 草稿仍存在 `(id, 'trace')` 键下，值是 JSON `{"v":1,"seg":k,"typed":[…]}`；不分段程序的草稿仍是纯字符串。`decode` 在纯字符串、版本不认识、**数组长度 ≠ 段数 `n`**、`seg` 越界时都返回 `null`——「视为无」，不删旧字符串。◆ |
@@ -336,8 +336,7 @@ ls -d python/programs/*/_fixtures | wc -l
 
 **方向已定、存量未改**
 
-- **讲解与提示指向「页面上看不到的输出」**：第 1 期列的 27 处（25 个程序）加第 2 期 1 处，一直没改。「页面显示 `run.expect`」这条路已被用户否决，
-  所以存量只剩逐条改写一条路（要给涉及的页升版）。
+- **讲解与提示指向「页面上看不到的输出」**：第 1 期 27 处、第 2 期 1 处，清理波已逐条改写（另扫出同类 14 处一并改）。
 - **`boards`**：新规则已定（§2 第 9 条）；全库按新规则的审计已由 #203 做完（考纲对照文件随它进仓库），附录与 `chapter.json` 的防漂门由 #206（`boards_map_check`）加上。
 
 **门与判定器**
@@ -349,13 +348,12 @@ ls -d python/programs/*/_fixtures | wc -l
 
 **内容存量**（改就要给页升版，下一个动这些页的内容 PR 顺手做）
 
-- 5 个程序打印内置 / 操作系统的异常消息（ch02 三个、ch05 两个）——`e342ba2` 时在 3.9.6 与 3.12.x 上逐字相同，CI Python 升版时要复查。
-- 英文讲解里用「」括页名的存量（ch20、ch23、ch26、ch27），与 ch02 三处 `the Files and Errors page`（注册表页名是 Files & Exceptions）。
-- 讲解用程序 id 指代兄弟程序（ch01–ch07）；`library-loans` 86 行被「不超过 80 行」筛掉；各期记下的钉法缺口。
+- 清理波已改：5 个程序打印内置 / 操作系统的异常消息（改打印类名或自己的话）；英文讲解用「」括页名 36 段与 ch02 三处页名；讲解用程序 id 指兄弟程序（ch01–ch07）；各期记下的钉法缺口（第 1 期 §四、第 3 期 §二.3、第 4 期 §三.3）；`isdigit` 存量；照抄空 5 处；tag 分裂。
+- 仍开：`library-loans` 86 行被「不超过 80 行」筛掉（不修）。
 
 **流程与配置**
 
-- **`core.hooksPath` 改相对路径：待用户决定**（§6 第 15 条）。
+- **`core.hooksPath`**：2026-10-01 用户设成相对路径 `.githooks`；2026-11-06 清理波实测共享配置里又是指向主工作区 `.githooks` 的绝对路径（原因不明，未改动用户配置）。
 - 全库「只由 `run.expect` 守」的部分、各期的等价变异清单：见各期账本，做负控制前先查。
 
 ---

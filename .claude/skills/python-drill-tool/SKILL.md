@@ -102,8 +102,8 @@ description: >-
   删掉的是参数、运算项、`as e` 一类，或答案只是长行里的一小截，都**不算**：`return node` 之于 `return [node.value] + preorder(node.left) + …`、`node = node.left` 之于 `node.left = insert(node.left, value)` 不是抄。
   挖空模式下所有空同时隐藏，两个空之间互相抄不到，只看没挖的行。
   **门：`copied_blank_check`**（清理波）：逐字与近照抄两种口径都查；近照抄用门自己的轻量记号切分（一行可以是语句的半截），是近似，不替代逐空看。
-  存量：ch01–ch14 按逐字口径 5 处（M3 4 处、第 1 期 1 处，清单在第 2 期账本 §三.4），改它们要升版，留给下一个动那几页的内容 PR；
-  门里的存量豁免表 `COPY_BLANK_STOCK` 列着这 5 处，清掉一处就删一条（对不上违例的豁免本身是红）。近照抄口径机扫全库 0 处（清理波实测，与第 6 期收尾一致）。
+  **门：`copied_blank_check`**（清理波）按逐字与上面的近照抄口径扫全库。原存量 5 处（第 2 期账本 §三.4：M3 4 处、第 1 期 1 处）清理波已改挖，豁免表 `COPY_BLANK_STOCK` 已清空；
+  以后要豁免一处须带出处写进表里（对不上违例的豁免本身是红）。门是机扫的近似，不替代逐空看。
 - **多行空仍以同一层为主。** 判定器在答案与标准答案**行数相同**时按相对缩进宽度严比（判 `indent`）；**行数不同**时（一行写法 `if X: body`、括号内断行）
   比**块结构**（engine `py-1.3.2` 起，清理波）：两边各切成逻辑行（括号内、反斜杠续行、跨行三引号并入上一行），复合语句头同一行的体算深一层，用缩进栈映射成块层级，
   token 原文相同而层级不同 → 判 `block`（反馈只报行号，不印层级与字面量）。所以 `if a:` / `    if b: c()` / `d()` 对 `d()` 在外层 `if` 里的那四行**判错**（以前判对）；
@@ -125,7 +125,7 @@ description: >-
 - `notes` / `blurb` 在三种模式都显示，不许逐字写出挖空答案；`lineNotes` 只在读模式显示，挂在被挖那行上没关系。
   也别让**未挖的字符串**（表头、标题）改个大小写就是答案（波 2 de-morgan）。
 - 讲解里指别的程序**写标题**，不写「下一个 / 上一个 / 本页最后一个程序」——页面可以筛选，顺序不可靠；提示里也一样，不用函数名指代别的程序
-  （本程序里没有那个函数）。指别的**页**：中文写注册表里的页名、用「」括起来（「递归的机制见「递归」一页」）；英文写 `the <注册表英文页名> page`，不加引号、不夹「」（`see the Recursion page`）——第 4 期收尾的控制方裁决（第 4 期裁决 P28）。存量里 ch20 11 段、ch23 10 段、ch26 9 段、ch27 6 段英文用「」、ch02 三处写成 `the Files and Errors page`（注册表是 Files & Exceptions），留账（第 4 期账本 §三.6），下次动那几页时改。
+  （本程序里没有那个函数）。指别的**页**：中文写注册表里的页名、用「」括起来（「递归的机制见「递归」一页」）；英文写 `the <注册表英文页名> page`，不加引号、不夹「」（`see the Recursion page`）——第 4 期收尾的控制方裁决（第 4 期裁决 P28）。原存量（ch20 / ch23 / ch26 / ch27 英文用「」36 段、ch02 三处写成 `the Files and Errors page`，第 4 期账本 §三.6）清理波已改，全库扫描 0 残留。
   英文里指别的**程序**（变体标题）怎么写，照派发简报里的本波共有约定表；**标题以冠词开头（A / An / The）时不再加 the**——写 `see An AI Paddle That Can Be Beaten`，
   不写 `the An AI Paddle…`（第 5 期 m7b 终审 M5 的裁决；收尾扫全库，ch29–ch32 修复后 0 处，存量 0 处——扫描在修复前的 `8a97b28` 上报出 2 处，是正对照）。**不用 `*星号*`**——`notes` 按纯文本渲染，
   星号会原样显示（第 2 期 M4 有 8 处）。
@@ -163,7 +163,7 @@ description: >-
 - **判「全是数字」用 `isdecimal()`，不用 `isdigit()`**：`'²'.isdigit()` 为真，`int('²')` 却抛 `ValueError`（第 3 期 m5a 终审 I1：`date-format-manual` 用 `isdigit` 在 `'²²/12/2024'` 上崩，而同模块的 py-systems 教的是 `isdecimal`）。
   **门：`isdigit_check`**（清理波）：`isdigit()` 守着一次 `int()` / `float()`、判一个字符串是不是全是数字、或决定哪些字符被收集起来当数字用（`number += ch`）→ 红；
   逐字符只拿结果分类计数（`elif ch.isdigit(): has_digit = True`）、在单字符常量上演示（`chr(178).isdigit()`）放行——放行按用法写，不看同一行有没有 `isdecimal`。
-  存量 ch02 `string-method-tour` 的 `is_pin` 仍用 `isdigit`、提示还写着「不是 isdecimal」——见第 3 期账本 §二.8，别照抄。
+  原存量 ch02 `string-method-tour` 的 `is_pin`（第 3 期账本 §二.8）清理波已改用 `isdecimal`；`password-rules` 的 `isdigit` 只给单个字符分类、不接 `int()`，按规矩保留。
 - 复制按钮只复制 `.py`，**不带 `_fixtures/`**：学生粘进 PyCharm 时没有数据文件，讲解里的手抄是她唯一的来源。读 fixture 的程序在讲解里写明
   文件放在哪（`_fixtures/<名>`），并把文件**一行一段**地抄出来——`fixture_notes_check`（见上表）守它与真文件一致，改 fixture 时门会逼你一起改讲解。
   为什么是「一段一行」而不是「某段里包含这行」：讲解段落渲染成 `<p>`、`white-space: normal`，段内换行会塌成空格，她看到的仍是一行（#187）。
@@ -195,7 +195,9 @@ description: >-
   tag 显示在三种模式的说明面板上——分裂了，她看到的就是自相矛盾的元数据（同一模块三页，偏偏「NumPy 基础」那页没有 `numpy`：第 4 期 m6a 终审 I2）。
   选择器今天**不**按 tag 筛（`python/core/interact.js` 的 `filterPrograms` 只按 level / kind / boards / lines 筛；此前这里写的「选择器按 tag 筛」与代码不符，m6a 终审 m10），要不要加是产品决定。
   第 3 期 m5b 终审抓到 8 个新造的分裂（`state` / `state-machine`、`comprehension` / `list comprehension`……），m5a 漏了 1 个（`lookup-table` / `lookup table`）；
-  存量里的 `nested loops` / `nested-loops`、`2D list` / `list of lists`、`slice` / `slicing` 等清理（要升版），见第 3 期账本 §二.6。
+  清理波统一过存量（第 3 期账本 §二.6）：`nested loops`→`nested-loops`、`lookup table`→`lookup-table`、`list of lists`→`2D list`、`slicing`→`slice`、`tuples`→`tuple`、`arrays`→`array`、`pointer`→`pointers`、`count`→`counting`、
+  `integer-division`→`floor-division`、`type-hints`→`type-hint`、`exceptions`→`exception`、`%`→`modulo`；**方法 tag 写裸名**（`lower`、`get`、`isdecimal`，不写 `str.lower`；裁决 C2），模块函数照写带模块名（`json.load`、`re.sub`）。
+  故意不并的同形异义：`round` / `rounding`、`dtype` / `dtypes`、`groups` / `grouping`、`json.dump` / `json.dumps`、`len` / `__len__` 一类。
   **门：`tag_normalize_check`**（清理波）只抓折叠大小写、空格、连字符后相同的分裂（不折下划线：`len` / `__len__` 不同义）；同义不同形的（`2D list` / `list of lists`）仍只靠「先 grep」。
 
 ## 一个程序长什么样
