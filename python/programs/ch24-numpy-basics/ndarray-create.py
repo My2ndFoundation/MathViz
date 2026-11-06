@@ -36,6 +36,6 @@ if __name__ == "__main__":
     tenths = np.array([0.1, 0.2])
     total = tenths.sum()
     print(total == 0.3)
-# >>> BLANK id=isclose level=2 hint="打印「total 与 0.3 是否足够接近」的判断结果：用 NumPy 里逐个元素判断的那个函数（不是 allclose），total 写在前、0.3 写在后，不另外给容差 || 这个函数是 np.isclose，整行就是 print 包着它" hintEn="Print whether total and 0.3 are close enough: use the NumPy function that checks element by element (not allclose), with total first and 0.3 second, and no extra tolerance || The function is np.isclose, and the whole line is print wrapped around it"
+# >>> BLANK id=isclose level=2 hint="打印「total 与 0.3 是否足够接近」的判断结果：用 NumPy 里逐个元素判断的那个函数（不是 allclose），total 写在前、0.3 写在后，两个都按位置给（不写 a=、b=），不另外给容差；直接打印这个函数交回的结果，不再套 bool() || 这个函数是 np.isclose，整行就是 print 包着它" hintEn="Print whether total and 0.3 are close enough: use the NumPy function that checks element by element (not allclose), with total first and 0.3 second, both given by position (no a= or b=), and no extra tolerance; print what the function hands back as it is, with no bool() round it || The function is np.isclose, and the whole line is print wrapped around it"
     print(np.isclose(total, 0.3))
 # <<< BLANK

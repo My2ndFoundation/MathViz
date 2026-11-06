@@ -9,7 +9,7 @@ def parse_config(text):
         if not line or line.startswith("#"):
             continue
         if line.startswith("[") and line.endswith("]"):
-# >>> BLANK id=section level=3 hint="进入（或新建）这一节，让 section 指向这一节的字典：用 config 的 setdefault 方法，第二个实参是一个空字典、写成一对花括号（不用 dict()）；节名用切片从 line 里取出来（不用 strip 去掉方括号字符） || 第一个实参是节名：line 去掉第一个和最后一个字符，再去掉两头的空白 || 切片的起点是 1、终点是 -1，后面紧跟 strip()" hintEn="Enter (or create) this section and make section point at its dictionary: call config's setdefault method with an empty dictionary written as a pair of braces as the second argument (not dict()); cut the section name out of line with a slice (not strip with the bracket characters) || The first argument is the section name: line without its first and last characters, with the whitespace at both ends stripped off || The slice starts at 1 and stops at -1, followed straight away by strip()"
+# >>> BLANK id=section level=3 hint="进入（或新建）这一节，让 section 指向这一节的字典：用 config 的 setdefault 方法，第二个实参是一个空字典、写成一对花括号（不用 dict()）；节名用切片从 line 里取出来（不用 strip 去掉方括号字符），切片的终点写成负下标（不用 len） || 第一个实参是节名：line 去掉第一个和最后一个字符，再去掉两头的空白 || 切片的起点是 1、终点是 -1，后面紧跟 strip()" hintEn="Enter (or create) this section and make section point at its dictionary: call config's setdefault method with an empty dictionary written as a pair of braces as the second argument (not dict()); cut the section name out of line with a slice (not strip with the bracket characters), its stop written as a negative index (not with len) || The first argument is the section name: line without its first and last characters, with the whitespace at both ends stripped off || The slice starts at 1 and stops at -1, followed straight away by strip()"
             section = config.setdefault(line[1:-1].strip(), {})
 # <<< BLANK
             continue

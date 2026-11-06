@@ -36,10 +36,10 @@ def delete_value(head, target):
             prev.next = current.next
 # <<< BLANK
             return head
-# >>> BLANK id=follow level=2 hint="两行，顺序要紧：先让 prev 跟上 current，再让 current 往前走一步——反过来，prev 会和 current 落在同一个节点上 || 第二行用的是 current 的 next" hintEn="Two lines, and the order matters: first prev catches up with current, then current moves one step on - the other way round, prev lands on the same node as current || The second line uses current's next"
+# >>> BLANK id=follow level=2 hint="一行赋值，写在 current 往前走的那一行之前：让 prev 跟上 current，指向 current 此刻指着的那个节点 || 顺序要紧：这一行要是挪到下一行之后，prev 会和 current 落在同一个节点上，再也不在它身后" hintEn="One assignment, written before the line that moves current on: make prev catch up with current, referring to the node current refers to right now || The order matters: moved below the next line, this would leave prev on the same node as current instead of one behind it"
         prev = current
-        current = current.next
 # <<< BLANK
+        current = current.next
     return head
 
 

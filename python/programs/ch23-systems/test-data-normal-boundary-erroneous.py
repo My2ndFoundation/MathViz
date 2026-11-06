@@ -30,7 +30,7 @@ def run_tests(check):
     passed = 0
     for kind, text, expected in TESTS:
         try:
-# >>> BLANK id=assert-row level=2 hint="断言：把 text 交给 check 得到的结果等于这一行期待的 expected——调用写在 == 左边，不带说明信息 || 断言不成立时抛 AssertionError，由下面的 except 接住" hintEn="Assert that handing text to check gives the expected value for this row - the call on the left of ==, with no message || When the assertion fails it raises AssertionError, which the except below catches"
+# >>> BLANK id=assert-row level=2 hint="断言：把 text 交给 check 得到的结果等于这一行期待的 expected——调用写在 == 左边，整个条件不加括号，不带说明信息 || 断言不成立时抛 AssertionError，由下面的 except 接住" hintEn="Assert that handing text to check gives the expected value for this row - the call on the left of ==, no brackets round the condition, and no message || When the assertion fails it raises AssertionError, which the except below catches"
             assert check(text) == expected
 # <<< BLANK
 # >>> BLANK id=count-pass level=1 hint="走到这一行说明断言成立：通过数加一——用增强赋值 +=" hintEn="Reaching this line means the assertion held: add one to the pass count - use the augmented assignment +="

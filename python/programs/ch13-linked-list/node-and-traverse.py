@@ -12,9 +12,7 @@ class Node:
 def length(head):
     count = 0
     current = head
-# >>> BLANK id=loop level=2 hint="循环条件：current 还指着一个节点就继续；写成 is not 与 None 的比较，不靠真假值、不用 != || 走过最后一个节点之后，current 会变成最后那个节点的 next" hintEn="The loop condition: carry on while current still refers to a node; write it as an is not comparison with None, not a truthiness test and not != || After the last node, current becomes that last node's next"
     while current is not None:
-# <<< BLANK
         count += 1
         current = current.next
     return count
@@ -24,7 +22,9 @@ def show(head):
     parts = []
     current = head
     while current is not None:
+# >>> BLANK id=collect level=2 hint="一行：把当前节点的值变成字符串，追加到 parts 的末尾——用内置的 str() 转换（不用 f-string），用列表方法 append（不用 +=） || 值在 current 的 value 属性里；后面的 join 只接受字符串，所以要先转" hintEn="One line: turn the current node's value into a string and add it to the end of parts - convert with the built-in str() (not an f-string) and add with the list method append (not +=) || The value is in current's value attribute; the join further down accepts only strings, so convert it first"
         parts.append(str(current.value))
+# <<< BLANK
         current = current.next
     return " -> ".join(parts)
 
