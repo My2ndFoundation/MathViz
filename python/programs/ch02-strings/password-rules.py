@@ -25,7 +25,7 @@ def broken_rules(password):
         failed.append("a lower-case letter")
     if not has_digit:
         failed.append("a digit")
-# >>> BLANK id=space level=2 hint="最后一条规则：密码里有空格就追加这条说明；用成员测试 in 来问，不用 find() 或 count()；说明文字放在双引号里 || 一个 if 问一个空格字符串在不在 password 里；说明文字逐字是：no spaces" hintEn="The last rule: if the password contains a space, append this rule's description; ask with the membership test in, not find() or count(); the description in double quotes || An if asking whether a string holding one space is in password; the description reads, word for word: no spaces"
+# >>> BLANK id=space level=2 hint="最后一条规则：密码里有空格就追加这条说明；用成员测试 in 来问，不用 find() 或 count()；空格字符串和说明文字都放在双引号里 || 一个 if 问一个空格字符串在不在 password 里；说明文字逐字是：no spaces" hintEn="The last rule: if the password contains a space, append this rule's description; ask with the membership test in, not find() or count(); both the space string and the description in double quotes || An if asking whether a string holding one space is in password; the description reads, word for word: no spaces"
     if " " in password:
         failed.append("no spaces")
 # <<< BLANK

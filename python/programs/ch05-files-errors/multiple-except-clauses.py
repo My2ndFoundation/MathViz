@@ -5,10 +5,10 @@ def parse_and_divide(text, divisor):
     try:
         number = int(text.strip())
         return number / divisor
-# >>> BLANK id=except-value level=2 hint="第一个子句接住 int() 读不懂文字时抛的那种异常，并把异常对象绑到一个名字上，下一行要打印它 || 异常类是 ValueError；绑定用 as，名字就是下一行花括号里的那个" hintEn="The first clause catches the exception int() raises when it cannot read the text, and binds the exception object to a name, because the next line prints it || the class is ValueError; binding uses as, and the name is the one inside the braces on the next line"
+# >>> BLANK id=except-value level=2 hint="第一个子句接住 int() 读不懂文字时抛的那种异常，并把异常对象绑到下一行用到的那个名字上 || 异常类是 ValueError；绑定用 as，名字就是下一行花括号里 type() 括号中的那个" hintEn="The first clause catches the exception int() raises when it cannot read the text, and binds the exception object to the name the next line uses || the class is ValueError; binding uses as, and the name is the one inside type() in the first pair of braces on the next line"
     except ValueError as e:
 # <<< BLANK
-        print(f"  ValueError: {e}")
+        print(f"  {type(e).__name__}: {text!r} is not a whole number")
     except ZeroDivisionError:
         print("  ZeroDivisionError: the divisor is zero")
     except TypeError:
