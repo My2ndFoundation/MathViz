@@ -92,6 +92,9 @@ python/
 注册表冲突的合并配方是一个脚本，但它不在 `python/` 里，而在
 `.claude/skills/python-content-wave/resolve-registry-conflict.py`——它属于控制方作业，用法见 `python-drill-tool`「三种作业」。
 
+同目录还有四个控制方标准件，也不在 `python/` 里：`probe.js`（浏览器验收探针）、`copyrun.py`（复制内容按层真跑、逐章数空）、
+`live-frames.py`（pygame 活体跑帧）、`fill-template.py`（填简报与 PR 模板）。用法见 `python-content-wave`；每一波用这一份，不从台账里复制改。
+
 ### 2.1 编辑源有两类
 
 chess 与 cryptography 只有一类编辑源（`core/**/*.js`）。python 有两类，外加注册表：

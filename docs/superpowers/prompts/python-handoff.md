@@ -131,10 +131,13 @@ ls -d python/programs/*/_fixtures | wc -l
 | 加一页 | `python-drill-tool`「三种作业」A | 复制 `_skeleton.html` 改 6 处，建章目录，自己追加注册表条目，跑三个生成脚本 + `check.py` |
 | 给已有页加程序 | 同上 B；「一个程序长什么样」「生成 `run.expect`」「property 检查」 | `run.expect` 粘贴真实输出，不要想；参照机制必须与被测不同 |
 | 升级一页 | 同上 C | 版本三处；改了 `core/` 则 engine 全库一起升 |
-| 并行分支的注册表冲突 | 同上「堆叠分支之间的冲突」 | 不手工合并，跑 `resolve-registry-conflict.py`，用 `&&` 接提交 |
+| 并行分支的注册表冲突 | 同上「堆叠分支之间的冲突」 | 不手工合并，跑 `resolve-registry-conflict.py`（标准件，在 `python-content-wave/` 下），用 `&&` 接提交 |
 | 跑一波（一个模块的几页） | `python-content-wave`「运行」第 0–7 步 | 一波一个集成 worktree、一次终审、一轮修复、一次范围复审、一个 PR |
 | 浏览器验收 | `python-content-wave`「浏览器验收」+ `probe.js` | 用标准件探针，不要复制上一波台账里的探针 |
 | 起草一波的程序清单 | `python-content-wave` 第 1 步 | 每个 property 程序先做起草期原型，证明 cases 能触发它声称要测的分支 |
+| 复制内容真跑、数空 | `python-content-wave` 第 4 步 + `copyrun.py` | 用页面自己内联的 `Exercise` 取复制内容，按层真跑；逐章印空数，报告里的空数照它写 |
+| pygame 活体跑帧 | `python-content-wave` 第 4 步 + `live-frames.py` | 先 `--self-test` 四道对照（OK / SHORT / HANG / ERROR），再跑本波的 pygame 章 |
+| 填简报与 PR 描述 | `python-content-wave` 第 2、5、6 步 + `fill-template.py` | `--list` 列键 → 值写 JSON 文件 → `--values` 填；拒绝漏填与拼错的键，不经过 shell |
 
 ---
 

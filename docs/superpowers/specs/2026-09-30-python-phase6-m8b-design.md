@@ -5,7 +5,7 @@
 >
 > 上游：主规格 §2.2（`py-embedded-patterns` — 非阻塞主循环、按键去抖、环形缓冲、有限状态机、传感器滤波）、
 > §5.4 末段（MicroPython 层，#201）；第 6 期派发简报 `.superpowers/python-phase6/phase6-brief.md` §2；
-> m8a 已批准清单（`cc212b2`，Python编程 转达：`button-press-edges` 讲边沿、**不去抖**；`timer-periodic-callback` 讲硬件定时器回调；
+> m8a 已批准清单（`cc212b2`，Python编程 转达：`button-press-edges` 讲边沿、**不去抖**；`timer-periodic-callback` 讲`machine.Timer` 定时器（rp2 上是软件定时器）回调；
 > `pin-irq-counter` 讲中断本身；`gpio-bitmask` 讲位运算；`elapsed-time` 组讲直接相减 vs `ticks_diff` 回绕；组名 `radio-packet`、`elapsed-time`）。
 
 ---
@@ -33,7 +33,7 @@
 | 已有 / 并行 | 在哪 | 本波怎么避开 |
 |---|---|---|
 | 边沿计数、`is_pressed` / `was_pressed`（不去抖） | m8a `py-microbit` · `button-press-edges` | 去抖从「抖动」本身讲起：原始电平序列里的毛刺；边沿检测只用、讲解指回「micro:bit」页 |
-| 硬件定时器回调 | m8a `py-pico` · `timer-periodic-callback` | 本页讲**主循环里的软件调度**（不开定时器），讲解对照一句「硬件定时器见树莓派 Pico 页」 |
+| `machine.Timer` 定时器回调 | m8a `py-pico` · `timer-periodic-callback` | 本页讲**主循环里的软件调度**（不开定时器），讲解对照一句「`machine.Timer` 定时器见树莓派 Pico 页」 |
 | 中断本身（`Pin.irq`、计数） | m8a `py-pico` · `pin-irq-counter` | 本页 `ring-buffer-isr-handoff` 讲「中断 → 主循环」的**数据交接**，中断注册只用、不重讲 |
 | `ticks_diff` 回绕（`elapsed-time` 组） | m8a `py-pico` | **本页不再做回绕程序**（派发简报 §2.1 要求的「专门讲回绕」由 m8a 覆盖）；本页凡涉及时间，`main()` 用 `ticks_diff` 算出 `elapsed_ms` 传给逻辑函数，讲解指回「树莓派 Pico」页的 elapsed-time（§4） |
 | 位运算 `gpio-bitmask` | m8a | 本页不做位掩码程序（原拟的 `status-flags-bitmask` 已删）；`ema-fixed-point` 用 `>>` 做除法，讲解指回 |
@@ -156,7 +156,7 @@ runtime 分配：pico 5、microbit 6。每个程序只用本 runtime 真有的 A
 
 ## 8. 裁决（2026-09-30，Python编程 审定 5704977）
 
-Python编程 逐程序对过 m8a（`cc212b2` 的 18 个）与全库：无同题（two-leds-nonblocking 是主循环 ticks 调度、m8a `timer-periodic-callback` 是硬件定时器回调；
+Python编程 逐程序对过 m8a（`cc212b2` 的 18 个）与全库：无同题（two-leds-nonblocking 是主循环 ticks 调度、m8a `timer-periodic-callback` 是`machine.Timer` 定时器回调；
 ring-buffer-isr-handoff 是 ISR → 主循环交接、m8a `pin-irq-counter` 是中断本身；hysteresis-thermostat 消费温度、m8a `adc-temperature` 做换算）。组名不撞。
 
 - **D1** 逻辑函数收 `elapsed_ms`：**采用**。比派发简报的 `now_ms` 更对（按构造不受回绕影响）——记为「简报被纠正」。
