@@ -110,6 +110,67 @@ T.eq(J.compare('x = 1', 'x = 1').index, -1, '判同时 index 为 -1');
   T.eq(r.ok, true, '全空行、且两侧空行条数不同，仍判同——空行不参与比对');
 })();
 
+/* ---- 清理波：有效行条数不同时比块层级（kind 'block'） ---- */
+(function () {
+  const ref = 'if a:\n    if b:\n        c()\n    d()';
+  const r = J.compare('if a:\n    if b: c()\nd()', ref);
+  T.eq(r.ok, false, 'd() 被移出外层 if：判错（以前判同）');
+  T.eq(r.kind, 'block', '分类是 block');
+  T.eq(r.index, 2, 'index 是答案侧物理行号 2（d() 那一行）');
+  T.eq(r.expected, 1, 'expected 是参考的块层级 1');
+  T.eq(r.got, 0, 'got 是她写的块层级 0');
+  ok('if a:\n    if b: c()\n    d()', ref, 'd() 仍在外层 if 里：判同');
+})();
+ok('if a: b', 'if a:\n    b', '一行写法对两行写法判同');
+ok('if a:\n    b', 'if a: b', '两行写法对一行写法判同');
+ok('for i in r: print(i)', 'for i in r:\n    print(i)', 'for 头一行写法判同');
+ok('if x:\n    f(a,\nb)', 'if x:\n    f(a, b)', '括号内断行、续行顶格是合法 Python，判同');
+ok('x = f(a,\n      b)', 'x = f(a, b)', '没有语句头的括号内断行判同');
+ok('if a: x = 1 + \\\n2', 'if a:\n    x = 1 + \\\n        2', '反斜杠续行并入上一逻辑行（续行顶格也不当成退到外层的新行）');
+(function () {
+  const r = J.compare('if x:\nf(a,\n    b)', 'if x:\n    f(a, b)');
+  T.eq(r.kind, 'block', '括号内断行、体的第一行写到外层：block（CPython 报 IndentationError）');
+  T.eq(r.index, 1, 'index 指向 f 所在的第 1 行（0 起）');
+})();
+(function () {
+  const r = J.compare('if a: b\n    c', 'if a:\n    b\n    c');
+  T.eq(r.kind, 'block', '一行写法之后又多缩进一行：block（unexpected indent）');
+  T.eq(r.got, 2, '多缩进的那一行比 b 还深一层');
+})();
+(function () {
+  const r = J.compare('if a:\n    b\n  c\nd', 'if a:\n    b\nc');
+  T.eq(r.kind, 'block', '退缩进退到栈里没有的宽度：block（即使 token 之后还多一个 d）');
+})();
+(function () {
+  /* 层级碰巧与参考相同（c 都在第 1 层），但 2 格的退缩进对不上任何外层：CPython 报
+     unindent does not match any outer indentation level。只有 bad 标记能抓住它。 */
+  const r = J.compare('if a:\n    f(x,\ny)\n  c', 'if a:\n    f(x, y)\n    c');
+  T.eq(r.kind, 'block', '退缩进到栈里没有的宽度、层级碰巧相同：仍是 block');
+  T.eq(r.index, 3, 'index 指向 c 那一行');
+})();
+(function () {
+  /* 语句头之后没有变深，层级碰巧相同：`if b:` 后面的 c 与参考同在第 1 层，
+     但参考里 `if b:` 是一行写法（体是 d），作答把 d 断开写到了下一行同层。 */
+  const r = J.compare('if a:\n    if b:\n    d\n    c', 'if a:\n    if b: d\n    c');
+  T.eq(r.kind, 'block', '语句头之后没有缩进（expected an indented block）：block');
+})();
+(function () {
+  const r = J.compare('def f(x: int) -> int: return x\ny = 1', 'def f(x: int) -> int:\n    return x\ny = 1');
+  T.eq(r.ok, true, '括号里的 : 不是语句头的冒号');
+})();
+(function () {
+  const r = J.compare('    return x\nprint(y)', '    return x\n\nprint(y)');
+  T.eq(r.ok, true, '行数相同（空行不计）时照旧按宽度比——片段退到第一行之外也判同');
+})();
+(function () {
+  const r = J.compare('if a: s = """\n""" + c', 'if a:\n    s = """\n""" + c');
+  T.eq(r.ok, true, '跨行三引号字符串结束那一行上的 token 仍属同一逻辑行');
+})();
+(function () {
+  const r = J.compare('s = """a\nb""" + c', 's = """a\nb""" +\\\n    c');
+  T.eq(r.kind, 'different', '行数不同、token 不同时照旧报 token 差异（c 对 反斜杠）');
+})();
+
 /* ---- normalize 暴露出来供门复用 ---- */
 (function () {
   const n = J.normalize('a = 1  # c\nb = 2');
