@@ -68,6 +68,11 @@ describe("manifests", () => {
       const m = JSON.parse(manifestText(t));
       expect(m.id).toBe(loadTarget(t).appId);
       expect(m.port).toBe(loadTarget(t).port);
+      // user ruling 2026-11-07: "Viz Learn Buddy for <subject>", the same name in manifest and app
+      const tg = loadTarget(t);
+      expect(m.name).toBe(tg.name.en);
+      expect(tg.name.en).toBe(`Viz Learn Buddy ${tg.subject.en}`);
+      expect(tg.subject.en).toMatch(/^for [A-Z]/);
       // design §5.3 (user ruling): every app opens in PrimeForge Desktop's own window
       expect(m.ui).toEqual({ window: { width: 1280, height: 820, minWidth: 900, minHeight: 600 } });
     }
