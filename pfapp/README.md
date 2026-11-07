@@ -9,5 +9,6 @@ Layout: one package here (`package.json`, `bun.lock`); the Next.js project is `a
 ```bash
 bun install
 bun run test
+bun run check:content   # 内容门：四个目标的提取 vs 网页版（见根 CLAUDE.md「pfapp/」）
 bunx biome check .
 ```
