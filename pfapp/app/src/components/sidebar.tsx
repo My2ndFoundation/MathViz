@@ -27,6 +27,8 @@ export interface ShellText {
   switchTo: string;
   switchToLabel: string;
   contentVersion: string;
+  notes: string;
+  askLibrary: string;
 }
 
 /**
@@ -99,6 +101,25 @@ export function Shell({
           <span>{text.search}</span>
           <kbd>⌘K</kbd>
         </button>
+        <div className="sb-links">
+          {(
+            [
+              ["ask", text.askLibrary],
+              ["notes", text.notes],
+            ] as const
+          ).map(([page, label]) => (
+            <Link
+              key={page}
+              href={`/${locale}/${page}`}
+              className="item"
+              data-testid={`nav-${page}`}
+              aria-current={pathname === `/${locale}/${page}` ? "page" : undefined}
+            >
+              <span className="dot" />
+              <span className="tx">{label}</span>
+            </Link>
+          ))}
+        </div>
         <div className="sb-list">
           {groups.map((g) => (
             <section key={g.id} data-testid="sidebar-group" data-group={g.id}>

@@ -207,10 +207,17 @@ test("the shell opens nothing in a new window (PrimeForge's app window hands tho
   if (!first) throw new Error("empty pack");
   await page.goto(`${base()}/en/tool/${first.id}`);
   await expect(page.getByTestId("tool-frame")).toHaveAttribute("src", /./);
+  await expect(page.getByTestId("ask-panel")).toBeVisible();
   // the shell's own DOM only: the tool page inside the iframe is the web version, unchanged
   expect(await page.locator('[target="_blank"], [target="_new"]').count()).toBe(0);
-  const html = await page.content();
-  expect(html).not.toContain("window.open");
+  expect(await page.content()).not.toContain("window.open");
+  // the shell's own pages too (with answers in them: tests/e2e/qa.spec.ts)
+  for (const p of ["ask", "notes"]) {
+    await page.goto(`${base()}/en/${p}`);
+    await expect(page.getByTestId(p === "ask" ? "library-ask" : "notes-view")).toBeVisible();
+    expect([p, await page.locator('[target="_blank"], [target="_new"]').count()]).toEqual([p, 0]);
+    expect(await page.content()).not.toContain("window.open");
+  }
 });
 
 test("⌘K filters by tag and opens the chosen tool", async ({ page }) => {

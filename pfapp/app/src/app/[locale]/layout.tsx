@@ -46,6 +46,8 @@ export default async function LocaleLayout(props: LayoutProps<"/[locale]">) {
               switchTo: t.nav.switchTo,
               switchToLabel: t.nav.switchToLabel,
               contentVersion: t.content.version.replace("{version}", content.version),
+              notes: t.nav.notes,
+              askLibrary: t.nav.askLibrary,
             }}
           >
             {props.children}

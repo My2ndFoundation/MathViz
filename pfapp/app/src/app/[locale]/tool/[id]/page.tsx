@@ -37,6 +37,8 @@ export default async function ToolPage(props: PageProps<"/[locale]/tool/[id]">) 
       toolId={id}
       src={src}
       title={locale === "zh" ? item.title_zh : item.title_en}
+      locale={locale}
+      python={app.target.id === "python"}
     />
   );
 }

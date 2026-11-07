@@ -248,6 +248,23 @@ interface MessageLite {
   text: string;
 }
 
+/**
+ * An earlier message of the conversation as the agent may see it (Task 10 review, Minor 3): a
+ * read-mode answer or the student's pasted attempt can quote a hidden answer line, and an agent
+ * that repeats its own history would then be refused by submit_answer for something it was handed.
+ * `forbidden` is forbiddenForJob's list (empty in read mode for the program). Every line of the
+ * text that leakCheck flags is replaced by REDACTED (its indentation kept); if the text as a whole
+ * still gives a line away (one split over several lines), all of it is.
+ */
+export function redactHistory(text: string, forbidden: readonly string[]): string {
+  if (forbidden.length === 0) return text;
+  const out = text
+    .split("\n")
+    .map((l) => (leakCheck(l, forbidden) === null ? l : `${/^\s*/.exec(l)?.[0] ?? ""}${REDACTED}`))
+    .join("\n");
+  return leakCheck(out, forbidden) === null ? out : REDACTED;
+}
+
 /** What mv_get_task returns for a job. */
 export function buildTask(db: Db, dir: string | null, job: AiJobRow) {
   const input = inputOf(job);
@@ -264,13 +281,14 @@ export function buildTask(db: Db, dir: string | null, job: AiJobRow) {
     }
   }
   const ps = input.pyState;
+  const forbidden = forbiddenForJob(dir, job);
   return {
     workflow: job.workflow,
     locale: input.locale,
     question: last >= 0 ? (messages[last] as MessageLite).text : "",
     conversation: (last >= 0 ? messages.slice(0, last) : messages).map((m) => ({
       role: m.role === "user" ? "student" : "tutor",
-      text: m.text,
+      text: redactHistory(m.text, forbidden),
     })),
     page: ps ? { programId: ps.progId, mode: ps.mode, focusedBlank: ps.blankId } : null,
     subjects: input.subjects.map((s) => subjectMaterial(db, dir, s, input.pyState)),

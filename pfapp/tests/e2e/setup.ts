@@ -3,7 +3,9 @@
  * (production: the shell CSP without 'unsafe-eval', as PrimeForge runs it), MATHVIZ_TARGET=python,
  * on a free 127.0.0.1 port, with its own temp PRIMEFORGE_DATA_DIR. No PrimeForge platform: no
  * PRIMEFORGE_API_URL, so the only content source is the manual import (what the empty state's
- * import writes).
+ * import writes). The Q&A spec starts its own app with the fake platform (startFakePlatform)
+ * behind PRIMEFORGE_API_URL / _SECRET — the variables PrimeForge itself sets, so there is no
+ * test-only switch in the app.
  *
  * globalSetup (default export): builds the app when .next is older than its sources, extracts the
  * python pack once (tests/e2e/prepare.ts, under Bun), and starts one app with the pack installed.
@@ -75,7 +77,7 @@ export function preparePack(): Pack {
   return JSON.parse(bun(["tests/e2e/prepare.ts", "pack"])) as Pack;
 }
 
-function freePort(): Promise<number> {
+export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const s = createServer();
     s.once("error", reject);
@@ -101,11 +103,58 @@ async function waitReady(base: string, child: ChildProcess, ms = 60_000): Promis
   throw new Error(`${base} did not become ready`);
 }
 
-/** Start the built app on a free port; `pfaddon` (if given) is installed first as a manual import. */
-export async function startApp({ pfaddon }: { pfaddon?: string } = {}): Promise<RunningApp> {
+export interface FakePlatformProcess {
+  url: string;
+  secret: string;
+  stop(): Promise<void>;
+}
+
+/**
+ * The fake PrimeForge platform (tests/e2e/fake-platform-server.ts, under Bun) for an app that will
+ * listen on `appPort`. Pass its url and secret to startApp as PRIMEFORGE_API_URL / _SECRET.
+ */
+export function startFakePlatform(appPort: number): Promise<FakePlatformProcess> {
+  const child = spawn("bun", ["tests/e2e/fake-platform-server.ts", String(appPort)], {
+    cwd: PFAPP,
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  const stop = () =>
+    new Promise<void>((resolve) => {
+      if (child.exitCode !== null) return resolve();
+      child.once("exit", () => resolve());
+      child.kill("SIGTERM");
+      setTimeout(() => child.kill("SIGKILL"), 5_000).unref();
+    });
+  return new Promise((resolve, reject) => {
+    let out = "";
+    child.once("exit", (code) => reject(new Error(`fake platform exited with ${code}`)));
+    child.stdout?.on("data", (d) => {
+      out += d;
+      const line = out.split("\n")[0];
+      if (out.includes("\n") && line) {
+        const { url, secret } = JSON.parse(line) as { url: string; secret: string };
+        resolve({ url, secret, stop });
+      }
+    });
+  });
+}
+
+/**
+ * Start the built app on a free port (or `port`); `pfaddon` (if given) is installed first as a
+ * manual import; `env` is added to the app's environment (the fake platform's PRIMEFORGE_API_*).
+ */
+export async function startApp({
+  pfaddon,
+  port: wanted,
+  env: extra = {},
+}: {
+  pfaddon?: string;
+  port?: number;
+  env?: Record<string, string>;
+} = {}): Promise<RunningApp> {
   const dataDir = mkdtempSync(path.join(tmpdir(), "pfapp-e2e-data-"));
   if (pfaddon) bun(["tests/e2e/prepare.ts", "install", pfaddon, dataDir]);
-  const port = await freePort();
+  const port = wanted ?? (await freePort());
   const base = `http://127.0.0.1:${port}`;
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
@@ -117,6 +166,7 @@ export async function startApp({ pfaddon }: { pfaddon?: string } = {}): Promise<
     PRIMEFORGE_DATA_DIR: dataDir,
     PRIMEFORGE_PORT: String(port),
     PORT: String(port),
+    ...extra,
   });
   const child: ChildProcess = spawn(NEXT, ["start", "app", "-H", "127.0.0.1", "-p", String(port)], {
     cwd: PFAPP,
