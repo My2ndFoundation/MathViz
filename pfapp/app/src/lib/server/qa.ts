@@ -207,11 +207,32 @@ function threadSubjects(db: Db, threadId: string): Subject[] {
 const threadExists = (db: Db, id: string) =>
   !!db.prepare("SELECT 1 AS x FROM threads WHERE id = ?").get(id);
 
+/**
+ * A thread's subjects are fixed when it is created (Task 11 review, Minor 1): a follow-up may not
+ * turn it into a conversation about something else. A library thread is followed up with
+ * `library` only; any other thread with `ask` or `hint` only — and a hint only for a blank of a
+ * program the thread is already about. Anything else is 400 workflow_mismatch.
+ */
+function followUpFits(had: readonly Subject[], workflow: Workflow, pyState: PyState | null) {
+  const library = had.some((s) => s.type === "library");
+  if (library !== (workflow === "library")) throw new HttpError(400, "workflow_mismatch");
+  if (workflow !== "hint" || !pyState) return;
+  const programs = new Set<string>();
+  for (const s of had) {
+    if (s.type === "program") programs.add(s.id);
+    const ref = s.type === "blank" ? parseBlankSubject(s.id) : null;
+    if (ref) programs.add(ref.programId);
+  }
+  if (!programs.has(pyState.progId)) throw new HttpError(400, "workflow_mismatch");
+}
+
 export const postFollowUp: Handler = async (app, { req, params }) => {
   const body = parse(followUpSchema, await readJson(req));
   const id = params.id ?? "";
   if (!threadExists(app.db, id)) throw new HttpError(404, "not_found");
-  const { subjects, pyState } = plan(app, body.workflow, threadSubjects(app.db, id), body.pyState);
+  const had = threadSubjects(app.db, id);
+  followUpFits(had, body.workflow, body.pyState === undefined ? null : toPyState(body.pyState));
+  const { subjects, pyState } = plan(app, body.workflow, had, body.pyState);
   requireAi(app);
   const open = app.db
     .prepare(
@@ -398,8 +419,41 @@ export interface NoteView {
   question: string;
   text: string;
   citations: CitationView[];
-  subjects: Subject[];
+  subjects: SubjectView[];
   createdAt: string;
+}
+
+/**
+ * A note's subject as the notes page filters by it (spec §7.4 "按主题"): its title, and for a
+ * program or a blank the program and the tool it belongs to — so a program note is found under its
+ * tool too. Titles fall back to the id when the content no longer has the item.
+ */
+export interface SubjectView {
+  type: SubjectType;
+  id: string;
+  title: { en: string; zh: string } | null;
+  toolId: string | null;
+  programId: string | null;
+}
+
+function subjectViews(app: AppContext, subjects: readonly Subject[]): SubjectView[] {
+  const tool = app.db.prepare("SELECT title_en, title_zh FROM catalog_items WHERE id = ?");
+  return subjects.map((s): SubjectView => {
+    if (s.type === "library") return { ...s, title: null, toolId: null, programId: null };
+    if (s.type === "tool") {
+      const t = tool.get<{ title_en: string; title_zh: string }>(s.id);
+      return {
+        ...s,
+        title: { en: t?.title_en ?? s.id, zh: t?.title_zh ?? s.id },
+        toolId: s.id,
+        programId: null,
+      };
+    }
+    const programId = s.type === "blank" ? (parseBlankSubject(s.id)?.programId ?? s.id) : s.id;
+    const p = app.content ? loadProgram(app.content.dir, programId) : null;
+    const en = p?.title?.en ?? p?.title?.zh ?? programId;
+    return { ...s, title: { en, zh: p?.title?.zh ?? en }, toolId: p?.tool ?? null, programId };
+  });
 }
 
 export const getNotes: Handler = (app, { query }) => {
@@ -436,7 +490,7 @@ export const getNotes: Handler = (app, { query }) => {
     question: r.question,
     text: r.text,
     citations: resolveCitations(app, citationIds(r.citations)),
-    subjects: threadSubjects(app.db, r.thread_id),
+    subjects: subjectViews(app, threadSubjects(app.db, r.thread_id)),
     createdAt: r.created_at,
   }));
   return { body: { notes } };

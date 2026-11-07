@@ -265,6 +265,27 @@ export function redactHistory(text: string, forbidden: readonly string[]): strin
   return leakCheck(out, forbidden) === null ? out : REDACTED;
 }
 
+/**
+ * The answer lines the conversation handed to the agent must not contain: forbiddenForJob over
+ * every subject the thread has ever had as well as the job's own (Task 11 review, Minor 1 —
+ * defence in depth: a later job about fewer subjects must not unlock what an earlier turn quoted).
+ */
+export function forbiddenForHistory(db: Db, dir: string | null, job: AiJobRow): string[] {
+  const input = inputOf(job);
+  const subjects: Subject[] = [...input.subjects];
+  const rows = db
+    .prepare(
+      "SELECT subject_type AS type, subject_id AS id FROM thread_subjects WHERE thread_id = ?",
+    )
+    .all<{ type: Subject["type"]; id: string }>(job.thread_id);
+  for (const r of rows) {
+    if (!subjects.some((s) => s.type === r.type && s.id === r.id)) {
+      subjects.push({ type: r.type, id: r.id });
+    }
+  }
+  return forbiddenForJob(dir, { ...job, input: JSON.stringify({ ...input, subjects }) });
+}
+
 /** What mv_get_task returns for a job. */
 export function buildTask(db: Db, dir: string | null, job: AiJobRow) {
   const input = inputOf(job);
@@ -281,7 +302,7 @@ export function buildTask(db: Db, dir: string | null, job: AiJobRow) {
     }
   }
   const ps = input.pyState;
-  const forbidden = forbiddenForJob(dir, job);
+  const forbidden = forbiddenForHistory(db, dir, job);
   return {
     workflow: job.workflow,
     locale: input.locale,

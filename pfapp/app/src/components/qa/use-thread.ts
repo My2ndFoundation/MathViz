@@ -2,10 +2,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Locale } from "@/lib/i18n/locale";
 import type { PyState } from "@/lib/py-state";
-import { api, errorText, type Job, OPEN_STATUSES, type Thread } from "./api";
+import { ApiError, api, errorText, type Job, OPEN_STATUSES, type Thread } from "./api";
 
 /** How often the page asks whether the tutor is done (MathTestBuddy tutor-thread.tsx: 1.5 s). */
 export const POLL_MS = 1500;
+/** Consecutive failed polls before the page gives up (each waits longer: 1.5 s, 3 s, 6 s, 12 s). */
+export const MAX_POLL_FAILURES = 5;
+const MAX_BACKOFF_MS = 15_000;
 
 export interface Ask {
   workflow: "ask" | "hint" | "library";
@@ -41,23 +44,38 @@ export function useThread(locale: Locale) {
     if (!jobId) return;
     let stop = false;
     let timer: number | undefined;
+    let failures = 0;
     const poll = async () => {
+      let j: Job;
       try {
-        const j = await api<Job>("GET", `/api/jobs/${encodeURIComponent(jobId)}`);
-        if (stop) return;
-        if (OPEN_STATUSES.includes(j.status)) {
-          timer = window.setTimeout(poll, POLL_MS);
-          return;
-        }
-        await reload(j.threadId);
-        if (stop) return;
-        if (j.status !== "completed") setFailure({ kind: "job", status: j.status, error: j.error });
-        setJobId(null);
+        j = await api<Job>("GET", `/api/jobs/${encodeURIComponent(jobId)}`);
       } catch (e) {
         if (stop) return;
-        setFailure({ kind: "http", text: errorText(e, locale) });
-        setJobId(null);
+        // a passing error (the app restarting, a dropped request) must not end the wait: retry
+        // with a back-off; give up only on a job the app does not know or after MAX_POLL_FAILURES
+        failures++;
+        if ((e instanceof ApiError && e.status === 404) || failures >= MAX_POLL_FAILURES) {
+          setFailure({ kind: "http", text: errorText(e, locale) });
+          setJobId(null);
+          return;
+        }
+        timer = window.setTimeout(poll, Math.min(POLL_MS * 2 ** failures, MAX_BACKOFF_MS));
+        return;
       }
+      if (stop) return;
+      failures = 0;
+      if (OPEN_STATUSES.includes(j.status)) {
+        timer = window.setTimeout(poll, POLL_MS);
+        return;
+      }
+      try {
+        await reload(j.threadId);
+      } catch (e) {
+        if (!stop) setFailure({ kind: "http", text: errorText(e, locale) });
+      }
+      if (stop) return;
+      if (j.status !== "completed") setFailure({ kind: "job", status: j.status, error: j.error });
+      setJobId(null);
     };
     timer = window.setTimeout(poll, POLL_MS);
     return () => {
@@ -66,8 +84,12 @@ export function useThread(locale: Locale) {
     };
   }, [jobId, reload, locale]);
 
+  // a ref, not state: two Enter presses in one tick both see the same state (Task 11 review, Minor 6)
+  const inFlight = useRef(false);
   const send = useCallback(
     async (a: Ask): Promise<boolean> => {
+      if (inFlight.current) return false;
+      inFlight.current = true;
       setFailure(null);
       setSending(true);
       try {
@@ -89,13 +111,19 @@ export function useThread(locale: Locale) {
               subjects: a.subjects,
             });
         threadId.current = r.threadId;
-        await reload(r.threadId);
+        // the job exists now: poll it whatever happens to the reload (else the thread stays busy, 409)
         setJobId(r.jobId);
+        try {
+          await reload(r.threadId);
+        } catch {
+          // the poll reloads the thread when the job ends
+        }
         return true;
       } catch (e) {
         setFailure({ kind: "http", text: errorText(e, locale) });
         return false;
       } finally {
+        inFlight.current = false;
         setSending(false);
       }
     },

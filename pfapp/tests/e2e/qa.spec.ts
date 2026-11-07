@@ -108,6 +108,14 @@ test("ask panel on a python tool page: answer shown, saved as a note; /notes lis
   await expect(page.getByTestId("notes-empty")).toBeVisible();
   await page.getByTestId("notes-search").fill("");
   await expect(notes).toHaveCount(1);
+  // by subject: the program, and the tool it belongs to (spec §7.4)
+  const filter = page.getByTestId("notes-subject");
+  await filter.selectOption(`program:${prog}`);
+  await expect(notes).toHaveCount(1);
+  await filter.selectOption(`tool:${programTool(prog)}`);
+  await expect(notes).toHaveCount(1);
+  await filter.selectOption("");
+  await expect(notes).toHaveCount(1);
   expect(await newWindowLinks(page)).toBe(0);
   await shot(page, "notes.png");
 });
@@ -127,6 +135,31 @@ test("the hint button is disabled outside fill-in mode", async ({ page }) => {
   // the question itself is never blocked
   await page.getByTestId("ask-input").fill("What does this do?");
   await expect(page.getByTestId("ask-submit")).toBeEnabled();
+});
+
+test("the hint button is enabled in fill-in mode with a blank focused, and a hint comes back", async ({
+  page,
+}) => {
+  await page.goto(`${app.base}/en/tool/${firstTool()}`);
+  const frameEl = page.getByTestId("tool-frame");
+  const frame = await toolFrame(page);
+  const hint = page.getByTestId("ask-hint");
+  await frame.getByRole("button", { name: /\s2$/ }).click();
+  await expect(frameEl).toHaveAttribute("data-py-mode", "blank");
+  // the page's blanks are textareas; focusing one reports its id over the bridge
+  await frame.locator("textarea").first().focus();
+  await expect(page.getByTestId("ask-context")).toContainText(/blank \S+/);
+  await expect(hint).toBeEnabled();
+  await hint.click();
+  const panel = page.getByTestId("ask-panel");
+  await expect(panel.locator('[data-testid=qa-message][data-role="user"]')).toContainText(
+    "Could I have a hint for blank",
+  );
+  await expect(panel.locator('[data-testid=qa-message][data-role="assistant"]')).toContainText(
+    "which kind of division",
+    { timeout: 30_000 },
+  );
+  await expect(panel.getByTestId("ask-error")).toHaveCount(0);
 });
 
 test("/ask: the answer's citation opens /tool/<id>?prog=<programId> in place", async ({ page }) => {

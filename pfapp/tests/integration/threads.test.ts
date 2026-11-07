@@ -15,8 +15,8 @@ import { GET as listNotes, POST as postNote } from "../../app/src/app/api/notes/
 import { GET as getThread, POST as postFollowUp } from "../../app/src/app/api/threads/[id]/route";
 import { POST as postThread } from "../../app/src/app/api/threads/route";
 import { createPlatformClient } from "../../app/src/lib/agent/platform/client";
-import { loadProgram } from "../../app/src/lib/ai/context";
-import { blankSubject, inputOf } from "../../app/src/lib/ai/jobs";
+import { buildTask, loadProgram } from "../../app/src/lib/ai/context";
+import { blankSubject, createJob, inputOf } from "../../app/src/lib/ai/jobs";
 import { blanksOf } from "../../app/src/lib/ai/leak";
 import { REDACTED } from "../../app/src/lib/content/index-builder";
 import { importAddonFile } from "../../app/src/lib/content/manual-import";
@@ -217,6 +217,16 @@ describe("ask → answer → note", () => {
       threadId: r.body.threadId,
       question: "Why multiply by 9/5?",
     });
+    // what the notes page filters by: the program, and the tool it belongs to
+    expect(all.body.notes[0].subjects).toEqual([
+      {
+        type: "program",
+        id: PROG,
+        title: { en: expect.any(String), zh: expect.any(String) },
+        toolId: PROG_TOOL,
+        programId: PROG,
+      },
+    ]);
     const hit = await call(listNotes(req("GET", "/api/notes?q=division")));
     expect(hit.body.notes.length).toBe(1);
     const byQuestion = await call(listNotes(req("GET", "/api/notes?q=multiply")));
@@ -499,6 +509,60 @@ describe("follow-ups and the conversation handed to the agent", () => {
     expect(unknown.status).toBe(404);
     f.release("ask");
     await f.idle();
+  });
+
+  test("a thread's subjects are fixed: a follow-up that would change them is 400 workflow_mismatch", async () => {
+    const { ctx: c, fake: f } = await start();
+    const programThread = seededThread(c);
+    const lib = await followUp(programThread, undefined, "library");
+    expect([lib.status, lib.body.error.code]).toEqual([400, "workflow_mismatch"]);
+    // a hint for a blank of another program than the thread is about
+    const other = await followUp(programThread, blankState({ progId: "hello-name" }), "hint");
+    expect([other.status, other.body.error.code]).toEqual([400, "workflow_mismatch"]);
+    // switching between ask and hint on the thread's own program is fine
+    expect((await followUp(programThread, blankState(), "hint")).status).toBe(202);
+    await f.idle();
+
+    const r = await call(
+      postThread(
+        req("POST", "/api/threads", {
+          subjects: [{ type: "library", id: "all" }],
+          message: "Where are loops?",
+          workflow: "library",
+        }),
+      ),
+    );
+    await f.idle();
+    for (const w of ["ask", "hint"]) {
+      const x = await followUp(r.body.threadId, blankState(), w);
+      expect([w, x.status, x.body.error.code]).toEqual([w, 400, "workflow_mismatch"]);
+    }
+    expect((await followUp(r.body.threadId, undefined, "library")).status).toBe(202);
+    await f.idle();
+    const jobs = c.db.prepare("SELECT COUNT(*) AS n FROM ai_jobs").get<{ n: number }>()?.n;
+    expect(jobs).toBe(3);
+  });
+
+  test("history is redacted against every subject the thread has had, not only the job's", async () => {
+    const { ctx: c } = await start();
+    const threadId = seededThread(c);
+    const at = new Date().toISOString();
+    c.db
+      .prepare(
+        "INSERT INTO messages (id, thread_id, role, text, created_at) VALUES (?, ?, 'user', ?, ?)",
+      )
+      .run(newId(at), threadId, "Now about the library", at);
+    // a job about the library alone, with no bridge state (as a crafted request might make one)
+    const job = createJob(c.db, {
+      threadId,
+      workflow: "library",
+      subjects: [{ type: "library", id: "all" }],
+      pyState: null,
+    });
+    const task = buildTask(c.db, c.content?.dir ?? null, jobRow(job.id));
+    const flat = JSON.stringify(task.conversation);
+    expect(flat).not.toContain(FIRST_ANSWER);
+    expect(flat).toContain(REDACTED);
   });
 
   test("an unknown thread is 404", async () => {

@@ -45,7 +45,17 @@ export interface Note {
   question: string;
   text: string;
   citations: Citation[];
+  subjects: NoteSubject[];
   createdAt: string;
+}
+
+/** A note's subject (lib/server/qa SubjectView): a program or blank also names its tool. */
+export interface NoteSubject {
+  type: string;
+  id: string;
+  title: { en: string; zh: string } | null;
+  toolId: string | null;
+  programId: string | null;
 }
 
 export class ApiError extends Error {
