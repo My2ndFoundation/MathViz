@@ -7,12 +7,20 @@ import { HttpError } from "./errors";
 
 export const JSON_LIMIT = 256 * 1024;
 
+/** The largest `.pfaddon` the empty state's import accepts (the file itself). */
+export const UPLOAD_FILE_LIMIT = 64 * 1024 * 1024;
+/** Multipart framing around the file: boundaries and part headers. */
+const MULTIPART_SLACK = 64 * 1024;
+export const IMPORT_PATH = "/api/content/import";
+
 /**
  * The body limit of an /api path. The proxy refuses a declared Content-Length over it before Next
- * buffers the body; the route counts the bytes it reads.
+ * buffers the body; the route counts the bytes it reads. next.config.mjs's
+ * `proxyClientMaxBodySize` must stay above the largest of these, or Next truncates the body it
+ * buffers for the proxy and the route reads a cut-off upload.
  */
-export function bodyLimitFor(_pathname: string): number {
-  return JSON_LIMIT;
+export function bodyLimitFor(pathname: string): number {
+  return pathname === IMPORT_PATH ? UPLOAD_FILE_LIMIT + MULTIPART_SLACK : JSON_LIMIT;
 }
 
 /**

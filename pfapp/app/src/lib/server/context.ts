@@ -36,6 +36,8 @@ export type Log = (event: string, fields?: Record<string, unknown>) => void;
 export interface AppContext {
   readonly target: Target;
   readonly db: Db;
+  /** PRIMEFORGE_DATA_DIR (or the development default): the database and manual imports. */
+  readonly dataDir: string;
   /** The content pack served under /c/<content.version>/…; null when none is installed. */
   readonly content: FoundContent | null;
   /** The port the guard requires in Host. */
@@ -113,6 +115,7 @@ export async function createAppContext(
   return {
     target,
     db,
+    dataDir,
     get content() {
       return content;
     },

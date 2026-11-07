@@ -1,0 +1,145 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
+import type { ShellGroup } from "@/lib/catalog";
+import type { Locale } from "@/lib/i18n/locale";
+import { accentColor, CommandK } from "./command-k";
+import { LangSwitch } from "./lang-switch";
+
+export interface ShellText {
+  search: string;
+  searchPlaceholder: string;
+  noResults: string;
+  close: string;
+  collapse: string;
+  expand: string;
+  switchTo: string;
+  switchToLabel: string;
+  contentVersion: string;
+}
+
+/**
+ * The shell (design §7.2): the sidebar re-implemented natively after the web version's
+ * python/app.html — groups in the pack's order, tools in registry order, labels in the URL's
+ * language, the current tool highlighted (aria-current), each tool's version — plus the stage the
+ * page renders into, the collapse edge and ⌘K.
+ */
+export function Shell({
+  groups,
+  locale,
+  appName,
+  text,
+  children,
+}: {
+  groups: ShellGroup[];
+  locale: Locale;
+  appName: { eyebrow: string; name: string };
+  text: ShellText;
+  children: ReactNode;
+}) {
+  const pathname = usePathname();
+  const current = decodeURIComponent(pathname.match(/^\/[^/]+\/tool\/([^/]+)/)?.[1] ?? "");
+  const [collapsed, setCollapsed] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const onOpenChange = useCallback((o: boolean) => setSearching(o), []);
+  const items = groups.flatMap((g) => g.items);
+
+  useEffect(() => {
+    try {
+      setCollapsed(localStorage.getItem("pfapp-sidebar") === "collapsed");
+    } catch {
+      // no storage: open
+    }
+  }, []);
+  const toggle = (c: boolean) => {
+    setCollapsed(c);
+    try {
+      localStorage.setItem("pfapp-sidebar", c ? "collapsed" : "open");
+    } catch {
+      // no storage: this session only
+    }
+  };
+
+  return (
+    <div className="shell" data-collapsed={collapsed}>
+      <nav className="sidebar" aria-label={appName.name} data-testid="sidebar">
+        <div className="sb-head">
+          <Link href={`/${locale}`} className="brand no-underline">
+            <span className="eyebrow">{appName.eyebrow}</span>
+            <span className="name">{appName.name}</span>
+          </Link>
+          <button
+            type="button"
+            className="iconbtn"
+            title={text.collapse}
+            aria-label={text.collapse}
+            onClick={() => toggle(true)}
+          >
+            ◀
+          </button>
+        </div>
+        <button
+          type="button"
+          className="chip sb-search"
+          data-testid="search-open"
+          onClick={() => setSearching(true)}
+        >
+          <span>{text.search}</span>
+          <kbd>⌘K</kbd>
+        </button>
+        <div className="sb-list">
+          {groups.map((g) => (
+            <section key={g.id} data-testid="sidebar-group" data-group={g.id}>
+              <div className="grp" data-testid="sidebar-group-label">
+                {g.label[locale]}
+              </div>
+              {g.items.map((it) => (
+                <Link
+                  key={it.id}
+                  href={`/${locale}/tool/${encodeURIComponent(it.id)}`}
+                  className="item"
+                  data-testid="sidebar-item"
+                  data-id={it.id}
+                  aria-current={it.id === current ? "page" : undefined}
+                  style={{ "--c": accentColor(it.accent) } as never}
+                >
+                  <span className="dot" />
+                  <span className="tx">{it.title[locale]}</span>
+                  <span className="ver" data-testid="sidebar-item-version">
+                    v{it.version}
+                  </span>
+                </Link>
+              ))}
+            </section>
+          ))}
+        </div>
+        <div className="sb-foot">
+          <span data-testid="content-version">{text.contentVersion}</span>
+          <span className="sp" />
+          <LangSwitch locale={locale} label={text.switchTo} title={text.switchToLabel} />
+        </div>
+      </nav>
+      <button
+        type="button"
+        className="edge"
+        title={text.expand}
+        aria-label={text.expand}
+        onClick={() => toggle(false)}
+      >
+        ▶
+      </button>
+      <main className="stage">{children}</main>
+      <CommandK
+        items={items}
+        locale={locale}
+        open={searching}
+        onOpenChange={onOpenChange}
+        placeholder={text.searchPlaceholder}
+        noResults={text.noResults}
+        closeLabel={text.close}
+      />
+    </div>
+  );
+}

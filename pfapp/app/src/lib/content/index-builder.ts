@@ -9,6 +9,8 @@ import { type FoundContent, isRegularFile } from "./installed";
  * step 3, §7.5). Rebuilt whole, in one transaction, whenever the pack differs from the one
  * `content_state` records; otherwise left alone.
  *
+ * catalog_groups: the pack's `groups` (order and labels); catalog_items.grp refers to them.
+ *
  * library_docs (and through its triggers library_fts):
  * - `tool:<id>`    one per catalog item: titles, kicker, desc, tag, group label (zh and en).
  * - `program:<id>` (python) one per `source/<id>.json`: titles, blurb, notes, tags, and the source
@@ -38,7 +40,19 @@ const catalogSchema = z.object({
       tag: bilingual.optional(),
     }),
   ),
+  /** The web navigation page's group order and labels (absent: first appearance among items). */
+  groups: z.array(z.object({ id: z.string().min(1), label: bilingual })).optional(),
 });
+
+/** The pack's groups in order; without catalog.groups, the items' own groupLabel, first seen first. */
+function groupsOf(catalog: z.infer<typeof catalogSchema>) {
+  if (catalog.groups) return catalog.groups;
+  const seen = new Map<string, { id: string; label: { en: string; zh: string } }>();
+  for (const it of catalog.items) {
+    if (!seen.has(it.group)) seen.set(it.group, { id: it.group, label: it.groupLabel });
+  }
+  return [...seen.values()];
+}
 
 const notesSchema = z
   .object({ en: z.array(z.string()).default([]), zh: z.array(z.string()).default([]) })
@@ -196,13 +210,31 @@ export function ensureIndexed(db: Db, content: FoundContent): boolean {
   db.transaction(() => {
     // Plain DELETE + INSERT: the library_docs triggers keep library_fts in step row by row.
     db.exec("DELETE FROM catalog_items");
+    db.exec("DELETE FROM catalog_groups");
     db.exec("DELETE FROM library_docs");
     const item = db.prepare(
-      "INSERT INTO catalog_items (id, grp, ord, title_en, title_zh, file, version, accent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO catalog_items (id, grp, ord, title_en, title_zh, file, version, accent, tag_en, tag_zh) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     for (const it of catalog.items) {
-      item.run(it.id, it.group, it.order, it.title.en, it.title.zh, it.file, it.version, it.accent);
+      item.run(
+        it.id,
+        it.group,
+        it.order,
+        it.title.en,
+        it.title.zh,
+        it.file,
+        it.version,
+        it.accent,
+        it.tag?.en ?? null,
+        it.tag?.zh ?? null,
+      );
     }
+    const group = db.prepare(
+      "INSERT INTO catalog_groups (id, ord, label_en, label_zh) VALUES (?, ?, ?, ?)",
+    );
+    groupsOf(catalog).forEach((g, i) => {
+      group.run(g.id, i, g.label.en, g.label.zh);
+    });
     const doc = db.prepare("INSERT INTO library_docs (id, kind, title, body) VALUES (?, ?, ?, ?)");
     for (const d of docs) doc.run(d.id, d.kind, d.title, d.body);
     db.prepare(

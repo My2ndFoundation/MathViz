@@ -13,6 +13,11 @@ export const en = {
     notes: "Notes",
     askLibrary: "Ask the whole library",
     settings: "Settings",
+    searchPlaceholder: "Filter by title or tag…",
+    noResults: "No tool matches.",
+    close: "Close",
+    switchTo: "中文",
+    switchToLabel: "Switch to Chinese",
   },
   settings: {
     language: "Language",
@@ -21,6 +26,13 @@ export const en = {
   },
   content: {
     none: "No content pack is installed.",
+    noneBody:
+      "The tools come in a content pack. Install it from the PrimeForge store, or import a .pfaddon file you already have.",
+    fromStore: "Install from the store",
+    fromStoreBody:
+      "Open this app's page in the PrimeForge store and install its content pack; the app picks it up when you reload.",
+    importLocal: "Import a local content pack",
+    importing: "Importing…",
     version: "Content version {version}",
   },
   tool: {
@@ -35,6 +47,8 @@ export const en = {
     body_too_large: "The request is too large.",
     bad_json: "The request could not be read.",
     bad_request: "The request is not valid.",
+    not_gzip: "That file is not a content pack (.pfaddon).",
+    bad_addon: "That file is not a content pack for this app, or it is damaged.",
     not_found: "Not found.",
     read_only:
       "This data was written by a newer version of the app; it can be read but not changed.",

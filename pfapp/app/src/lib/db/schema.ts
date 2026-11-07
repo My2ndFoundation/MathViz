@@ -52,12 +52,26 @@ export const catalog_items = sqliteTable(
     file: text().notNull(),
     version: text().notNull(),
     accent: text().notNull(),
+    /** The catalog's `tag` (⌘K filters on it); null when the item has none. */
+    tag_en: text(),
+    tag_zh: text(),
   },
   (t) => [
     uniqueIndex("catalog_items_file").on(t.file),
     index("catalog_items_grp").on(t.grp, t.ord),
   ],
 );
+
+/**
+ * The sidebar's groups, in the web navigation page's own order (catalog.json `groups`), with
+ * their labels. catalog_items.grp refers to id (no foreign key: both are rebuilt together).
+ */
+export const catalog_groups = sqliteTable("catalog_groups", {
+  id: text().primaryKey(),
+  ord: integer().notNull(),
+  label_en: text().notNull(),
+  label_zh: text().notNull(),
+});
 
 /**
  * What "ask the whole library" searches: `tool:<id>` and `program:<id>` documents. Indexed by
@@ -166,6 +180,7 @@ export const ai_jobs = sqliteTable(
 export type SettingRow = typeof settings.$inferSelect;
 export type ContentStateRow = typeof content_state.$inferSelect;
 export type CatalogItemRow = typeof catalog_items.$inferSelect;
+export type CatalogGroupRow = typeof catalog_groups.$inferSelect;
 export type LibraryDocRow = typeof library_docs.$inferSelect;
 export type ThreadRow = typeof threads.$inferSelect;
 export type ThreadSubjectRow = typeof thread_subjects.$inferSelect;

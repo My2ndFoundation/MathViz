@@ -12,6 +12,11 @@ export const zh: Messages = {
     notes: "笔记",
     askLibrary: "问整个库",
     settings: "设置",
+    searchPlaceholder: "按标题或标签筛选…",
+    noResults: "没有匹配的工具。",
+    close: "关闭",
+    switchTo: "English",
+    switchToLabel: "切换到英文",
   },
   settings: {
     language: "语言",
@@ -20,6 +25,11 @@ export const zh: Messages = {
   },
   content: {
     none: "还没有安装内容包。",
+    noneBody: "工具装在内容包里。可以从 PrimeForge 商店安装，也可以导入手头已有的 .pfaddon 文件。",
+    fromStore: "从商店安装",
+    fromStoreBody: "在 PrimeForge 商店里打开本应用的页面，安装它的内容包；装好后刷新本页即可。",
+    importLocal: "导入本地内容包",
+    importing: "正在导入…",
     version: "内容版本 {version}",
   },
   tool: {
@@ -34,6 +44,8 @@ export const zh: Messages = {
     body_too_large: "请求太大了。",
     bad_json: "无法读取请求内容。",
     bad_request: "请求无效。",
+    not_gzip: "这个文件不是内容包（.pfaddon）。",
+    bad_addon: "这个文件不是本应用的内容包，或者已经损坏。",
     not_found: "没有找到。",
     read_only: "这份数据由更新版本的应用写入，只能读，不能改。",
     not_ready: "应用还在启动，请稍后再试。",
