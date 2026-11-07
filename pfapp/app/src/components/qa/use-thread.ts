@@ -22,10 +22,18 @@ export type Failure =
   | { kind: "job"; status: string; error: string | null }
   | { kind: "http"; text: string };
 
+/** What a tool page's conversation is about (GET /api/threads?subject=). */
+export interface ThreadSubject {
+  type: "tool" | "program";
+  id: string;
+}
+
 /**
  * One conversation: the first question creates the thread (POST /api/threads), later ones follow
  * it up (POST /api/threads/:id). While a job is open the page polls GET /api/jobs/:id, then reads
  * the thread again. No streaming (design §7.4): "thinking…" until the answer is there.
+ * `restore(subject)` reopens the newest conversation about a tool or program, resuming the poll
+ * if its job is still open; a restore overtaken by another restore, a reset or a question is dropped.
  */
 export function useThread(locale: Locale) {
   const [thread, setThread] = useState<Thread | null>(null);
@@ -33,6 +41,8 @@ export function useThread(locale: Locale) {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [sending, setSending] = useState(false);
   const threadId = useRef<string | null>(null);
+  // bumped by restore, reset and send: a restore that resolves under a later number is stale
+  const seq = useRef(0);
 
   const reload = useCallback(async (id: string) => {
     const t = await api<Thread>("GET", `/api/threads/${encodeURIComponent(id)}`);
@@ -90,6 +100,7 @@ export function useThread(locale: Locale) {
     async (a: Ask): Promise<boolean> => {
       if (inFlight.current) return false;
       inFlight.current = true;
+      seq.current++;
       setFailure(null);
       setSending(true);
       try {
@@ -153,12 +164,41 @@ export function useThread(locale: Locale) {
     [locale, reload],
   );
 
+  const restore = useCallback(async (subject: ThreadSubject) => {
+    const mine = ++seq.current;
+    let found: Thread | null;
+    try {
+      const r = await api<{ thread: Thread | null }>(
+        "GET",
+        `/api/threads?subject=${encodeURIComponent(`${subject.type}:${subject.id}`)}`,
+      );
+      found = r.thread;
+    } catch {
+      return; // nothing to reopen is not an error worth showing: the panel starts empty
+    }
+    if (mine !== seq.current || !found) return;
+    threadId.current = found.id;
+    setThread(found);
+    if (found.job && OPEN_STATUSES.includes(found.job.status)) setJobId(found.job.id);
+  }, []);
+
   const reset = useCallback(() => {
+    seq.current++;
     threadId.current = null;
     setThread(null);
     setJobId(null);
     setFailure(null);
   }, []);
 
-  return { thread, thinking: jobId !== null, sending, failure, send, cancel, saveNote, reset };
+  return {
+    thread,
+    thinking: jobId !== null,
+    sending,
+    failure,
+    send,
+    cancel,
+    saveNote,
+    reset,
+    restore,
+  };
 }

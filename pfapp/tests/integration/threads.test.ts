@@ -13,7 +13,7 @@ import { DELETE, GET, POST } from "../../app/src/app/api/mcp/[[...path]]/route";
 import { DELETE as deleteNote } from "../../app/src/app/api/notes/[id]/route";
 import { GET as listNotes, POST as postNote } from "../../app/src/app/api/notes/route";
 import { GET as getThread, POST as postFollowUp } from "../../app/src/app/api/threads/[id]/route";
-import { POST as postThread } from "../../app/src/app/api/threads/route";
+import { GET as findThread, POST as postThread } from "../../app/src/app/api/threads/route";
 import { failureText } from "../../app/src/components/qa/thread-view";
 import { createPlatformClient } from "../../app/src/lib/agent/platform/client";
 import { buildTask } from "../../app/src/lib/ai/context";
@@ -28,6 +28,7 @@ import { CSRF_HEADER } from "../../app/src/lib/http/guard";
 import { MESSAGES } from "../../app/src/lib/i18n/locale";
 import { startAi } from "../../app/src/lib/server/ai";
 import { type AppContext, createAppContext, setAppContext } from "../../app/src/lib/server/context";
+import { setAiLang } from "../../app/src/lib/server/settings";
 import { loadTarget } from "../../app/src/lib/target";
 import { buildPfaddon, extractPayload, pickBlankProgram, tmp } from "../helpers/content-fixtures";
 import { type Agent, type FakePlatform, startFakePlatform, type ToolCall } from "./fake-platform";
@@ -607,5 +608,204 @@ describe("follow-ups and the conversation handed to the agent", () => {
       (await call(getThread(req("GET", "/api/threads/nope"), params({ id: "nope" })))).status,
     ).toBe(404);
     expect((await followUp("nope", blankState())).status).toBe(404);
+  });
+});
+
+describe("GET /api/threads?subject= (the tool page reopens its conversation)", () => {
+  const find = (subject: string | null) =>
+    call(
+      findThread(
+        req(
+          "GET",
+          subject === null ? "/api/threads" : `/api/threads?subject=${encodeURIComponent(subject)}`,
+        ),
+      ),
+    );
+  const ask = (
+    subjects: unknown,
+    message: string,
+    workflow = "ask",
+    pyState: unknown = undefined,
+  ) =>
+    call(
+      postThread(
+        req("POST", "/api/threads", {
+          subjects,
+          message,
+          workflow,
+          ...(pyState === undefined ? {} : { pyState }),
+        }),
+      ),
+    );
+
+  test("none → null; after a question about a program, the program's thread with its messages", async () => {
+    const { fake: f } = await start();
+    expect(await find(`program:${PROG}`)).toEqual({ status: 200, body: { thread: null } });
+    expect(await find(`tool:${PROG_TOOL}`)).toEqual({ status: 200, body: { thread: null } });
+    expect(await find("program:no-such")).toEqual({ status: 200, body: { thread: null } });
+
+    const r = await ask([{ type: "program", id: PROG }], "Why multiply by 9/5?");
+    await f.idle();
+    const got = await find(`program:${PROG}`);
+    expect(got.status).toBe(200);
+    expect(got.body.thread.id).toBe(r.body.threadId);
+    expect(
+      got.body.thread.messages.map((m: Json) => [m.role, m.role === "user" ? m.text : ""]),
+    ).toEqual([
+      ["user", "Why multiply by 9/5?"],
+      ["assistant", ""],
+    ]);
+    expect(got.body.thread.job).toMatchObject({ id: r.body.jobId, status: "completed" });
+    // the same body GET /api/threads/:id answers
+    const byId = await call(
+      getThread(req("GET", `/api/threads/${r.body.threadId}`), params({ id: r.body.threadId })),
+    );
+    expect(got.body.thread).toEqual(byId.body);
+    // a program thread is not the tool's thread
+    expect((await find(`tool:${PROG_TOOL}`)).body.thread).toBeNull();
+  });
+
+  test("an open job comes back with the thread, so the page can resume polling", async () => {
+    const { fake: f } = await start();
+    f.sim.hold.add("ask");
+    const r = await ask([{ type: "tool", id: PROG_TOOL }], "Still thinking?");
+    const got = await find(`tool:${PROG_TOOL}`);
+    expect(got.body.thread.id).toBe(r.body.threadId);
+    expect(["queued", "running"]).toContain(got.body.thread.job.status);
+    f.release("ask");
+    await f.idle();
+  });
+
+  test("a thread that has had a hint (a blank subject added) is still found by its program", async () => {
+    const { fake: f } = await start();
+    const r = await ask([{ type: "program", id: PROG }], "A hint, please.", "hint", blankState());
+    expect(r.status).toBe(202);
+    await f.idle();
+    const got = await find(`program:${PROG}`);
+    expect(got.body.thread.id).toBe(r.body.threadId);
+    expect(got.body.thread.subjects).toContainEqual({
+      type: "blank",
+      id: blankSubject(PROG, FIRST_BLANK),
+    });
+    // and a hint follow-up on an ask thread keeps it findable too
+    const a = await ask([{ type: "program", id: PROG }], "Explain it");
+    await f.idle();
+    const h = await call(
+      postFollowUp(
+        req("POST", `/api/threads/${a.body.threadId}`, {
+          message: "And a hint?",
+          workflow: "hint",
+          pyState: blankState(),
+        }),
+        params({ id: a.body.threadId }),
+      ),
+    );
+    expect(h.status).toBe(202);
+    await f.idle();
+    expect((await find(`program:${PROG}`)).body.thread.id).toBe(a.body.threadId);
+  });
+
+  test("the newest of two wins — by the last message, not by creation", async () => {
+    const { ctx: c, fake: f } = await start();
+    const older = await ask([{ type: "program", id: PROG }], "First question");
+    await f.idle();
+    const newer = await ask([{ type: "program", id: PROG }], "Second question");
+    await f.idle();
+    expect((await find(`program:${PROG}`)).body.thread.id).toBe(newer.body.threadId);
+    // ordered by updated_at (the last message), not by creation: an older stamp loses
+    c.db
+      .prepare("UPDATE threads SET updated_at = ? WHERE id = ?")
+      .run("2000-01-01T00:00:00.000Z", newer.body.threadId);
+    expect((await find(`program:${PROG}`)).body.thread.id).toBe(older.body.threadId);
+    c.db.prepare("UPDATE threads SET archived = 1 WHERE id = ?").run(older.body.threadId);
+    // an archived thread is not reopened
+    expect((await find(`program:${PROG}`)).body.thread.id).toBe(newer.body.threadId);
+  });
+
+  test("a library thread is never returned, even one that also names the program", async () => {
+    const { ctx: c, fake: f } = await start();
+    const lib = await ask([{ type: "program", id: PROG }], "Where are loops?", "library");
+    expect(lib.status).toBe(202);
+    await f.idle();
+    expect((await find(`program:${PROG}`)).body.thread).toBeNull();
+    // a crafted row: library and program both (plan() never stores this; the lookup still refuses it)
+    c.db
+      .prepare(
+        "INSERT INTO thread_subjects (thread_id, subject_type, subject_id) VALUES (?, 'program', ?)",
+      )
+      .run(lib.body.threadId, PROG);
+    expect((await find(`program:${PROG}`)).body.thread).toBeNull();
+  });
+
+  test("a bad subject is 400", async () => {
+    await start();
+    for (const bad of [
+      null,
+      "",
+      "program",
+      "program:",
+      `blank:${blankSubject(PROG, FIRST_BLANK)}`,
+      "library:all",
+      `page:${PROG}`,
+      `:${PROG}`,
+      `program:${"x".repeat(201)}`,
+    ]) {
+      const r = await find(bad);
+      expect([bad, r.status, r.body.error.code]).toEqual([bad, 400, "bad_request"]);
+    }
+  });
+});
+
+describe("the reply language (settings.aiLang)", () => {
+  const ask = (locale?: "en" | "zh") =>
+    call(
+      postThread(
+        req("POST", "/api/threads", {
+          subjects: [{ type: "program", id: PROG }],
+          message: "Which language?",
+          workflow: "ask",
+          ...(locale ? { locale } : {}),
+        }),
+      ),
+    );
+
+  test("'page' (the default): the asking page's locale, else the shell's; 'en' / 'zh' win over it", async () => {
+    const { ctx: c, fake: f } = await start();
+    const localeOf = async (locale?: "en" | "zh") => {
+      const r = await ask(locale);
+      expect(r.status).toBe(202);
+      await f.idle();
+      return inputOf(jobRow(r.body.jobId)).locale;
+    };
+    expect(await localeOf("zh")).toBe("zh");
+    expect(await localeOf("en")).toBe("en");
+    expect(await localeOf()).toBe("en"); // python's defaultLang, nothing stored
+    setAiLang(c.db, "zh");
+    expect(await localeOf("en")).toBe("zh");
+    expect(await localeOf()).toBe("zh");
+    setAiLang(c.db, "en");
+    expect(await localeOf("zh")).toBe("en");
+    setAiLang(c.db, "page");
+    expect(await localeOf("zh")).toBe("zh");
+  });
+
+  test("a follow-up follows the setting too", async () => {
+    const { ctx: c, fake: f } = await start();
+    const r = await ask("en");
+    await f.idle();
+    setAiLang(c.db, "zh");
+    const up = await call(
+      postFollowUp(
+        req("POST", `/api/threads/${r.body.threadId}`, {
+          message: "Again?",
+          workflow: "ask",
+          locale: "en",
+        }),
+        params({ id: r.body.threadId }),
+      ),
+    );
+    expect(up.status).toBe(202);
+    await f.idle();
+    expect(inputOf(jobRow(up.body.jobId)).locale).toBe("zh");
   });
 });

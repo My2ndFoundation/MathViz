@@ -10,6 +10,7 @@ import { migrationsDir } from "../../app/src/lib/db/open";
 import { SHELL_CSP, TOOL_CACHE_CONTROL, TOOL_CSP } from "../../app/src/lib/http/csp";
 import { CSRF_HEADER, processCsrfToken } from "../../app/src/lib/http/guard";
 import { type AppContext, createAppContext, setAppContext } from "../../app/src/lib/server/context";
+import { getAiLang, setAiLang } from "../../app/src/lib/server/settings";
 import { loadTarget } from "../../app/src/lib/target";
 import { proxy } from "../../app/src/proxy";
 import { buildPfaddon, extractPayload, tmp } from "../helpers/content-fixtures";
@@ -167,13 +168,13 @@ describe("GET /c/<ver>/tools/<file>", () => {
 });
 
 describe("/api/settings", () => {
-  test("a fresh install reads lang 'en' (target.defaultLang)", async () => {
+  test("a fresh install reads lang 'en' (target.defaultLang) and aiLang 'page'", async () => {
     const c = await contextFor(tmp("http-fresh"));
     setAppContext(c);
     try {
       const res = await getSettings(req("/api/settings"));
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ lang: "en" });
+      expect(await res.json()).toEqual({ lang: "en", aiLang: "page" });
     } finally {
       setAppContext(ctx);
     }
@@ -195,7 +196,10 @@ describe("/api/settings", () => {
     const wrong = await put({ [CSRF_HEADER]: "0".repeat(64) }, { lang: "zh" });
     expect(wrong.status).toBe(403);
     expect((await getSettings(req("/api/settings"))).status).toBe(200);
-    expect(await (await getSettings(req("/api/settings"))).json()).toEqual({ lang: "en" });
+    expect(await (await getSettings(req("/api/settings"))).json()).toEqual({
+      lang: "en",
+      aiLang: "page",
+    });
 
     const tokenRes = await getSessionToken(req("/api/session-token"));
     expect(tokenRes.status).toBe(200);
@@ -205,8 +209,11 @@ describe("/api/settings", () => {
 
     const ok = await put({ [CSRF_HEADER]: token }, { lang: "zh" });
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ lang: "zh" });
-    expect(await (await getSettings(req("/api/settings"))).json()).toEqual({ lang: "zh" });
+    expect(await ok.json()).toEqual({ lang: "zh", aiLang: "page" });
+    expect(await (await getSettings(req("/api/settings"))).json()).toEqual({
+      lang: "zh",
+      aiLang: "page",
+    });
     const row = ctx.db.prepare("SELECT value FROM settings WHERE key = 'lang'").get<{
       value: string;
     }>();
@@ -215,7 +222,31 @@ describe("/api/settings", () => {
     for (const bad of [{ lang: "fr" }, { lang: 1 }, {}, []]) {
       expect((await put({ [CSRF_HEADER]: token }, bad)).status).toBe(400);
     }
-    expect(await (await getSettings(req("/api/settings"))).json()).toEqual({ lang: "zh" });
+    expect(await (await getSettings(req("/api/settings"))).json()).toEqual({
+      lang: "zh",
+      aiLang: "page",
+    });
+
+    // aiLang: on its own, with lang, and strictly checked; an unknown stored value reads 'page'
+    const aiLang = async (body: unknown) => {
+      const r = await put({ [CSRF_HEADER]: token }, body);
+      return [r.status, await r.json()];
+    };
+    expect(await aiLang({ aiLang: "en" })).toEqual([200, { lang: "zh", aiLang: "en" }]);
+    expect(await aiLang({ lang: "en", aiLang: "zh" })).toEqual([200, { lang: "en", aiLang: "zh" }]);
+    expect(await aiLang({ aiLang: "page" })).toEqual([200, { lang: "en", aiLang: "page" }]);
+    for (const bad of [{ aiLang: "fr" }, { aiLang: null }, { aiLang: "en", theme: "dark" }]) {
+      expect((await put({ [CSRF_HEADER]: token }, bad)).status).toBe(400);
+    }
+    expect(getAiLang(ctx.db)).toBe("page");
+    setAiLang(ctx.db, "zh");
+    expect(getAiLang(ctx.db)).toBe("zh");
+    ctx.db.prepare("UPDATE settings SET value = 'klingon' WHERE key = 'aiLang'").run();
+    expect(getAiLang(ctx.db)).toBe("page");
+    expect(await (await getSettings(req("/api/settings"))).json()).toEqual({
+      lang: "en",
+      aiLang: "page",
+    });
 
     // a token from another process (another context) is not this one's
     const other = await contextFor(tmp("http-other"));

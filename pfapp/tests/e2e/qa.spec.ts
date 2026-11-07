@@ -22,7 +22,9 @@ interface Catalog {
   items: { id: string; order: number }[];
 }
 const catalog = (): Catalog => JSON.parse(readFileSync(process.env.E2E_CATALOG as string, "utf8"));
-const firstTool = () => [...catalog().items].sort((a, b) => a.order - b.order)[0]?.id as string;
+const nthTool = (n: number) =>
+  [...catalog().items].sort((a, b) => a.order - b.order)[n]?.id as string;
+const firstTool = () => nthTool(0);
 const programTool = (programId: string): string =>
   JSON.parse(
     readFileSync(
@@ -136,13 +138,14 @@ test("hiding the ask panel keeps the conversation: ask, hide at once, show, the 
   await page.getByTestId("ask-open").click();
   await expect(panel).toBeVisible();
   await expect(page.getByTestId("ask-hide")).toBeFocused();
-  await expect(panel.locator('[data-testid=qa-message][data-role="user"]')).toHaveText(
+  // the panel reopened the earlier tests' conversation: this question is the latest in it
+  await expect(panel.locator('[data-testid=qa-message][data-role="user"]').last()).toHaveText(
     /What if I hide the panel now\?/,
   );
-  await expect(panel.locator('[data-testid=qa-message][data-role="assistant"]')).toContainText(
-    "which kind of division",
-    { timeout: 30_000 },
-  );
+  await expect(
+    panel.locator('[data-testid=qa-message][data-role="assistant"]').last(),
+  ).toContainText("which kind of division", { timeout: 30_000 });
+  await expect(panel.getByTestId("thinking")).toHaveCount(0);
 });
 
 test("the hint button is disabled outside fill-in mode", async ({ page }) => {
@@ -177,14 +180,44 @@ test("the hint button is enabled in fill-in mode with a blank focused, and a hin
   await expect(hint).toBeEnabled();
   await hint.click();
   const panel = page.getByTestId("ask-panel");
-  await expect(panel.locator('[data-testid=qa-message][data-role="user"]')).toContainText(
+  await expect(panel.locator('[data-testid=qa-message][data-role="user"]').last()).toContainText(
     "Could I have a hint for blank",
   );
-  await expect(panel.locator('[data-testid=qa-message][data-role="assistant"]')).toContainText(
-    "which kind of division",
-    { timeout: 30_000 },
-  );
+  await expect(
+    panel.locator('[data-testid=qa-message][data-role="assistant"]').last(),
+  ).toContainText("which kind of division", { timeout: 30_000 });
+  await expect(panel.getByTestId("thinking")).toHaveCount(0);
   await expect(panel.getByTestId("ask-error")).toHaveCount(0);
+});
+
+test("the ask panel reopens the conversation: ask, reload, the Q&A is there and a follow-up continues it", async ({
+  page,
+}) => {
+  // a tool no earlier test asked about: nothing to reopen yet, so the counts below are this test's
+  await page.goto(`${app.base}/en/tool/${nthTool(1)}`);
+  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
+  const panel = page.getByTestId("ask-panel");
+  const users = panel.locator('[data-testid=qa-message][data-role="user"]');
+  const answers = panel.locator('[data-testid=qa-message][data-role="assistant"]');
+  await expect(users).toHaveCount(0);
+  await panel.getByTestId("ask-input").fill("Will this still be here after a reload?");
+  await panel.getByTestId("ask-submit").click();
+  await expect(answers).toHaveCount(1, { timeout: 30_000 });
+  await expect(panel.getByTestId("thinking")).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
+  await expect(users).toHaveCount(1);
+  await expect(users.first()).toHaveText(/Will this still be here after a reload\?/);
+  await expect(answers.first()).toContainText("which kind of division");
+  await expect(panel.getByTestId("ask-new")).toBeVisible();
+
+  // a question now follows that conversation up rather than starting another
+  await panel.getByTestId("ask-input").fill("And a follow-up?");
+  await panel.getByTestId("ask-submit").click();
+  await expect(answers).toHaveCount(2, { timeout: 30_000 });
+  await expect(users).toHaveCount(2);
+  await expect(users.last()).toHaveText(/And a follow-up\?/);
 });
 
 test("/ask: the answer's citation opens /tool/<id>?prog=<programId> in place", async ({ page }) => {
