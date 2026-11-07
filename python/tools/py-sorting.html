@@ -29,13 +29,17 @@
      跟着改。版本号要在三处同步：注册表 python-tools.json 的 version、这里的
      tool-version meta、右上角的徽章——徽章直接读 meta（见第二个脚本块里的
      VERSION），所以它永远不需要单独改。 -->
-<meta name="tool-version" content="1.0.1">
-<meta name="tool-engine" content="py-1.3.1">
+<meta name="tool-version" content="1.0.2">
+<meta name="tool-engine" content="py-1.3.2">
 <!-- >>> GENERATED:FAVICON -->
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAA/1BMVEUUVrceN6YEl50nKYgDod8FapoEX3V6I+AEZ8gDbtxPFYdQIJ4DOTgCwv+GE8sFU1kDQDtmIL8pEVcGyrkDgdAAAABoKNkWCSwDSasAevQEGSgBqfc3F3QBs/paKNADJTUAa/SPG+pPIawCFRdzJuQDNUcDNlcEZcUAW/dGGY0lBzgjDEUBnPMDRIcQJVMCK0kyEmYCU7AHV4WiE/MOXLoEQ1sMedVSIqsHZY50FLoFNpdRHqkEhYdNDHYEOWwBgfYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADRsqliAAAAQHRSTlOjjpdhy2lM7KvNXYwU/74wGMUn+bkA/AuR/Qf5TPz4Df39rwP/GCKt/mwPGfNVIxc5lU7/pSnOnV+tdaV0RjX/bR25hAAAAVdJREFUeNqtk2d/gyAQh40rq7sFRECDK0Oz92jz/b9V/ZmYgCTpm/JCT+7hTu7+p4E/lvZPQGiasbw/bA5FwH9mzJf8GE9FwGWMEYGwcQc7MkAIMd3S/4NxpyMDhFkZMcOLfzpVgLFPsq/iI8F4ARwFSECSkUZujzHuAhUgSe5qrDR/VPgVIGMxiO3NbKYdj01wA2BWrFvLeLmxut3iMk5PAvzZq34qQ7I6vZ1eTeqFfShr4C7OEXYX4C30dftaRbc4owkRPvXDk9iHkZE/dg3jAoRhtcMjVQ9oMBA2ayhfMjCYz1+E36i16uuKor7nvHUlqEFRVXJbztPS7rdpX9Ek4rxemjCi6ZqmqA9F0X5zfj4WQC9P8EGNSSqpesuj4ioUwslN2aM6fC8SwODOXEyiiJYJbg/OHsJ2ACG9O1l5dAi94MHo0cjzpATKbO49jz4cXlRJAMAvD+ldcxDlRcsAAAAASUVORK5CYII=">
 <!-- <<< GENERATED:FAVICON -->
 <title>Sorting · 排序</title>
 <!-- 版本记录（changelog，新→旧）：
+     1.0.2  2026-11-06  提前退出的冒泡排序，内层上界的写法在第 1 级提示里钉死；tag
+                        slicing、tuples 统一为 slice、tuple。 判定器（engine
+                        py-1.3.2）：答案与标准答案行数不同时也比较代码块结构（新反馈 kind
+                        block）。清理波：第 6 期账本 §十 第一、二组。
      1.0.1  2026-09-30  考试局按四家官方考纲重核（用户裁决：考纲外不写，[] 合法；依据见
                         docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md）：
                         selection-sort AQA/OCR/Edexcel/CIE→[]；insertion-sort
@@ -1634,6 +1638,165 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     return { toks: toks, rel: ind.rel, relLines: ind.relLines };
   }
 
+  /* ---- 块层级：两边有效行条数不同时才用（清理波，phase1-deferred §一.3） ----
+
+     有效行条数相同时，compare() 照旧按相对缩进**宽度**严比（rel）。条数不同的
+     合法写法只有两种：单行复合语句（`if x: y` 对两行写法）与括号内断行。以前这时
+     完全不比缩进，于是 `if a:\n    if b: c()\nd()` 判等于 `d()` 缩进在外层 if
+     里的那四行——语义变了也判对。
+
+     这里把源码切成**逻辑行**（括号深度 > 0、或上一个有效 token 是反斜杠续行
+     `\`、或上一个 token 是跨行的三引号字符串时，并入上一逻辑行），用一个缩进栈
+     把每条逻辑行映射成**块层级**（第一条逻辑行为 0）；复合语句头（行首是
+     COMPOUND 里的关键字、或按 softKeywordHeader 判为语句头的 match / case，括号深度 0
+     的第一个 `:`）后面同一行的体算深一层。
+     compare() 再逐 token 比层级：原文相同、层级不同 → kind 'block'。
+
+     CPython 会拒绝的三种缩进：
+       · unexpected indent（上一逻辑行不是以 `:` 结尾的语句头，这一行却变深）：
+         「变深」时层级取上一逻辑行**最深处**加一——`if a: b` 之后多缩进一行，它比 b
+         还深、不与 b 同层——所以它的层级按构造就比合法的参考多一层；
+       · expected an indented block（以 `:` 结尾的语句头之后没有变深）：参考是合法
+         Python，同一串 token 在参考里语句头之后的那个 token 必在深一层，作答不深，
+         层级按构造就不同；
+       · unindent does not match any outer indentation level（退缩进到栈里没有的
+         宽度）：层级可能碰巧等于参考，只有这一种记成 bad，不论层级等不等都判错。
+     前两种另记 bad 是冗余的：负控制实测，另记的 bad 删掉，测试与门全绿，所以不留。 */
+  var COMPOUND = { 'if': 1, 'elif': 1, 'else': 1, 'for': 1, 'while': 1, 'try': 1,
+                   'except': 1, 'finally': 1, 'with': 1, 'def': 1, 'class': 1 };
+  var OPENERS = { '(': 1, '[': 1, '{': 1 };
+  var CLOSERS = { ')': 1, ']': 1, '}': 1 };
+
+  /* match / case 是**软关键字**（清理波终审 M2）：`match = 3`、`match.group(1)`、`case(x)` 是普通
+     语句。判据（逻辑行 toks[a..b)，首词是 match / case）：
+       1. 第二个 token 能开一个 subject / 模式：名字（不是 if / else / in / is / and / or / for /
+          as / lambda 这类只能接在表达式后面的关键字）、数字、字符串、`(` `[` `{`、`-` `+` `~` `*`。
+          于是 `=` / `.` / `:` / `,` / 增强赋值 / 下标之外的运算符开头的都不是语句头。
+       2. 行里有括号深度 0 的 `:`，而它之前（括号深度 0）没有 `=`、增强赋值、`:=`、`lambda`——
+          排除 `case = lambda: 0`、`case, x = lambda: 0, 1` 一类。
+       3. match 头的 `:` 必须是这一逻辑行最后一个 token：CPython 的 match 头之后只能换行
+          （`match x: case 1: …` 是语法错），所以 match 按构造不会有同一行的体——认它是头与否
+          不改变任何层级，这一条只防把 `match: T = v` 之类的行算进来。
+     没有括号深度 0 冒号的行（`case(x)`、`match.group(1)`、`match = 3`）分不分类都一样：
+     colon 是 -1，层级不变。
+     仍分不出的（记在这里，靠「只挖写法唯一的行」）：`case[0]: int = 1`（给名为 case 的东西的下标
+     加注解）与 `case [0]: int = 1`（序列模式 + 一行体）token 完全相同，只有「是否在 match 块里」能
+     区分，而挖空片段常常不含 match 那一行——这里一律按 case 头处理。 */
+  var SOFT_HEAD_BAD_NAME = { 'if': 1, 'else': 1, 'elif': 1, 'in': 1, 'is': 1, 'and': 1, 'or': 1,
+                             'for': 1, 'as': 1, 'lambda': 1, 'from': 1, 'import': 1 };
+  var SOFT_HEAD_OK_PUNCT = { '(': 1, '[': 1, '{': 1, '-': 1, '+': 1, '~': 1, '*': 1 };
+  function isAssignOp(t) {
+    return t === '=' || t === ':=' ||
+      (t.length >= 2 && t.charAt(t.length - 1) === '=' && t !== '==' && t !== '!=' && t !== '<=' && t !== '>=');
+  }
+  function softKeywordHeader(toks, a, b) {
+    var head = toks[a].text;
+    if ((head !== 'match' && head !== 'case') || a + 2 >= b) { return false; }
+    var nx = toks[a + 1].text;
+    var starts = SOFT_HEAD_OK_PUNCT[nx] ||
+      (/^[A-Za-z_]/.test(nx) && !SOFT_HEAD_BAD_NAME[nx]) ||
+      /^[0-9'"]/.test(nx) || /^\.[0-9]/.test(nx);
+    if (!starts) { return false; }
+    var d = 0;
+    for (var j = a + 1; j < b; j++) {
+      var t = toks[j].text;
+      if (OPENERS[t]) { d++; continue; }
+      if (CLOSERS[t] && d > 0) { d--; continue; }
+      if (d !== 0) { continue; }
+      if (t === ':') { return head === 'case' || j === b - 1; }
+      if (t === 'lambda' || isAssignOp(t)) { return false; }
+    }
+    return false;
+  }
+
+  function countNewlines(s) {
+    var n = 0;
+    for (var i = 0; i < s.length; i++) { if (s.charAt(i) === '\n') { n++; } }
+    return n;
+  }
+
+  /* blockLevels(toks) -> { lvl: number[], bad: boolean[] }，与 toks 一一对应。 */
+  function blockLevels(toks) {
+    var lvl = new Array(toks.length);
+    var bad = new Array(toks.length);
+    if (toks.length === 0) { return { lvl: lvl, bad: bad }; }
+
+    /* 1. 切逻辑行：每项是 toks 的下标区间 [from, to) */
+    var logical = [];
+    var depth = 0, from = 0;
+    for (var i = 0; i < toks.length; i++) {
+      if (i > 0) {
+        var prev = toks[i - 1];
+        var prevEnd = prev.line + countNewlines(prev.text);
+        if (depth === 0 && toks[i].line > prevEnd && prev.text !== '\\') {
+          logical.push([from, i]);
+          from = i;
+        }
+      }
+      var tx = toks[i].text;
+      if (OPENERS[tx]) { depth++; } else if (CLOSERS[tx] && depth > 0) { depth--; }
+    }
+    logical.push([from, toks.length]);
+
+    /* 2. 缩进栈 */
+    var stack = null;           /* [{ w, lvl }] */
+    var prevDeepest = 0;        /* 上一逻辑行最深的层级 */
+    for (var k = 0; k < logical.length; k++) {
+      var a = logical[k][0], b = logical[k][1];
+      var w = toks[a].col;
+      var level, isBad = false;
+      if (stack === null) {
+        stack = [{ w: w, lvl: 0 }];
+        level = 0;
+      } else {
+        var top = stack[stack.length - 1];
+        if (w > top.w) {
+          level = prevDeepest + 1;
+          stack.push({ w: w, lvl: level });
+        } else if (w === top.w) {
+          level = top.lvl;
+        } else {
+          var popped = null;
+          while (stack.length && stack[stack.length - 1].w > w) { popped = stack.pop(); }
+          if (stack.length === 0) {
+            /* 空的片段可以退到第一行之外（一个空从函数体末尾跨到模块顶层）：
+               记成比被弹掉的最外层浅一层的新栈底，不算不合法。 */
+            level = popped.lvl - 1;
+            stack.push({ w: w, lvl: level });
+          } else if (stack[stack.length - 1].w === w) {
+            level = stack[stack.length - 1].lvl;
+          } else {
+            level = stack[stack.length - 1].lvl + 1;
+            isBad = true;
+            stack.push({ w: w, lvl: level });
+          }
+        }
+      }
+
+      /* 3. 复合语句头：括号深度 0 的第一个 `:`，其后同一逻辑行的 token 深一层 */
+      var head = toks[a].text;
+      var isHeader = !!COMPOUND[head] ||
+        (head === 'async' && a + 1 < b && /^(def|for|with)$/.test(toks[a + 1].text)) ||
+        softKeywordHeader(toks, a, b);
+      var colon = -1;
+      if (isHeader) {
+        var d = 0;
+        for (var j = a; j < b; j++) {
+          var t = toks[j].text;
+          if (OPENERS[t]) { d++; } else if (CLOSERS[t] && d > 0) { d--; }
+          else if (t === ':' && d === 0) { colon = j; break; }
+        }
+      }
+      for (var m = a; m < b; m++) {
+        lvl[m] = (colon !== -1 && m > colon) ? level + 1 : level;
+        bad[m] = isBad;
+      }
+      /* 一行写法：体在同一行，这一逻辑行最深处深一层 */
+      prevDeepest = (colon !== -1 && colon < b - 1) ? level + 1 : level;
+    }
+    return { lvl: lvl, bad: bad };
+  }
+
   /* 两个数组第一处不同的下标；一个是另一个的前缀时，下标取较短那个的长度；
      完全相同返回 -1。 */
   function firstDiffIndex(a, b) {
@@ -1646,7 +1809,11 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
   }
 
   /* compare(answer, reference) -> { ok, index, expected, got, kind }
-     kind ∈ 'equal' | 'different' | 'missing' | 'extra' | 'indent'
+     kind ∈ 'equal' | 'different' | 'missing' | 'extra' | 'indent' | 'block'
+
+     'block'（清理波）：两边有效行条数不同、token 原文到此处都相同、而块层级不同
+     （或答案这一逻辑行的缩进 CPython 会拒绝）——见 blockLevels。index 与 'indent'
+     同语义（答案侧物理行号，0 起），expected/got 是块层级数字。
 
      顺序：先比 rel，**但只有两边有效行条数相同时**，值不同才归类 'indent'；
      rel 相同、或有效行条数本身就不同，都落到逐 token 比原文，短的一方先到头
@@ -1685,10 +1852,22 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     }
 
     var at = na.toks, rt = nr.toks;
+    /* 有效行条数不同：相对缩进宽度没法逐行对，改比块层级（见 blockLevels）。
+       条数相同时上面已经按宽度严比过，这里不再重复。 */
+    var la = null, lr = null;
+    if (na.rel.length !== nr.rel.length) {
+      la = blockLevels(at);
+      lr = blockLevels(rt);
+    }
     var n = Math.min(at.length, rt.length);
     for (var i = 0; i < n; i++) {
       if (at[i].text !== rt[i].text) {
         return { ok: false, index: i, expected: rt[i].text, got: at[i].text, kind: 'different' };
+      }
+      if (la && (la.bad[i] || la.lvl[i] !== lr.lvl[i])) {
+        /* 'block'：与 'indent' 同一套 index 语义（答案侧**物理行号**，0 起），
+           expected/got 是块层级（相对第一条逻辑行，数字）。从不涉及字面量原文。 */
+        return { ok: false, index: at[i].line - 1, expected: lr.lvl[i], got: la.lvl[i], kind: 'block' };
       }
     }
     if (at.length < rt.length) {
@@ -2114,6 +2293,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
                   en: 'token #{0} is extra: {1} does not belong here' },
     blankIndent: { zh: '第 {0} 行缩进对不上：期待相对缩进 {1} 格，你写了 {2} 格',
                   en: 'line {0} indent is off: expected {1} spaces relative, you wrote {2}' },
+    blankBlock:  { zh: '第 {0} 行落进了另一层代码块：块结构与参考不同（看这一行的缩进，和它前面写成一行的语句头）',
+                  en: 'line {0} lands in a different block: the block structure differs from the reference (check this line\'s indent and any header written on one line before it)' },
     blankLead:   { zh: '第 1 行缩进对不上：这个空从第 {1} 格开始，你写了 {2} 格',
                   en: 'line 1 indent is off: this blank starts at column {1}, you wrote {2}' },
     blankDiffLiteral: { zh: '第 {0} 个 token（{1}）里第 {2} 个字符起不同',
@@ -2509,6 +2690,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
          所以要用 PyLex.significant 现取它在 answer 里的偏移。
        kind 'indent'：index 是**物理行号**，expected/got 是**相对缩进数值**
          （不是 null、不是字符串）。光标去那一行的行首。裁决 R30/R31。
+       kind 'block'（清理波）：同 'indent' 的 index 语义，expected/got 是块层级；
+         消息只报行号。
 
      另有 Judge 结构上看不见的一种错：**整块的绝对缩进**。Judge.normalize 比的是
      行与行之间的相对缩进，所以单行挖空体 `    x = 1` 与 `x = 1` 在它眼里完全
@@ -2542,6 +2725,20 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     var cmp = judge().compare(a, r);
     if (cmp.ok) {
       return { ok: true, kind: 'equal', caret: 0, message: t('blankOk', lang) };
+    }
+
+    /* 'block'（清理波）：两边有效行条数不同时，Judge 比的是块层级，index 同样是
+       答案侧**物理行号**。消息不印层级数字——「第 1 层 / 第 0 层」对她没有意义——
+       也从不涉及字面量原文。 */
+    if (cmp.kind === 'block') {
+      var bStarts = editor().lineStarts(a);
+      var bi = Math.max(0, Math.min(cmp.index, bStarts.length - 1));
+      return {
+        ok: false,
+        kind: 'block',
+        caret: bStarts[bi],
+        message: ts('blankBlock', lang, [cmp.index + 1])
+      };
     }
 
     if (cmp.kind === 'indent') {
@@ -4579,7 +4776,7 @@ var PyPrograms = {
       "check": {
         "property": "sort"
       },
-      "source": "\"\"\"Bubble sort that stops after a pass with no swaps and compares one pair fewer each pass.\"\"\"\n\n\ndef bubble_sort(items):\n    n = len(items)\n    for i in range(n - 1):\n        swapped = False\n# >>> BLANK id=shrink level=2 hint=\"\u5185\u5c42 for \u4ecd\u7528 j \u8d70 range\uff0c\u53ea\u7ed9\u4e00\u4e2a\u5b9e\u53c2\uff1b\u4e0a\u754c\u662f\u4e00\u4e2a\u51cf\u6cd5\u5f0f\u5b50\uff0c\u8981\u51cf\u53bb\u7684 i \u5199\u5728\u6700\u540e || \u7b2c i \u8d9f\u5f00\u59cb\u65f6\uff0c\u672b\u5c3e i \u4e2a\u4f4d\u7f6e\u5df2\u7ecf\u653e\u597d\u4e86\u6700\u5927\u7684 i \u4e2a\u6570\uff0c\u4e0d\u5fc5\u518d\u6bd4\uff1a\u4e0a\u754c\u662f\u57fa\u7840\u7248\u7684 n - 1 \u518d\u51cf\u53bb i\" hintEn=\"The inner for still walks j over a range with a single argument; the bound is a subtraction, with the i being taken off written last || When pass i starts, the last i places already hold the i largest values, so there is nothing to compare there: the bound is the basic version's n - 1 with i taken off\"\n        for j in range(n - 1 - i):\n# \u003c\u003c\u003c BLANK\n            if items[j] > items[j + 1]:\n                items[j], items[j + 1] = items[j + 1], items[j]\n                swapped = True\n# >>> BLANK id=stop level=2 hint=\"\u4e00\u4e2a if\uff0c\u6761\u4ef6\u7528 not \u76f4\u63a5\u4f5c\u7528\u5728\u6807\u5fd7\u4e0a\uff0c\u4e0d\u5199 == False || \u6574\u8d9f\u4e00\u6b21\u4ea4\u6362\u90fd\u6ca1\u53d1\u751f\uff0c\u8bf4\u660e\u8868\u5df2\u7ecf\u6709\u5e8f\uff0c\u4e0b\u4e00\u884c\u7684 break \u5c31\u8df3\u51fa\u5916\u5c42\u5faa\u73af\" hintEn=\"An if whose condition applies not directly to the flag, not == False || A whole pass without a single swap means the list is already in order, and the break on the next line leaves the outer loop\"\n        if not swapped:\n# \u003c\u003c\u003c BLANK\n            break\n\n\ndef sorted_copy(items):\n    result = list(items)\n    bubble_sort(result)\n    return result\n\n\nif __name__ == \"__main__\":\n    print(sorted_copy([5, 1, 4, 2, 8]))\n    print(sorted_copy([1, 2, 3, 4, 5]))\n    print(sorted_copy([2, 1, 3, 4, 5]))\n    print(sorted_copy([5, 4, 3, 2, 1]))\n",
+      "source": "\"\"\"Bubble sort that stops after a pass with no swaps and compares one pair fewer each pass.\"\"\"\n\n\ndef bubble_sort(items):\n    n = len(items)\n    for i in range(n - 1):\n        swapped = False\n# >>> BLANK id=shrink level=2 hint=\"\u5185\u5c42 for \u4ecd\u7528 j \u8d70 range\uff0c\u53ea\u7ed9\u4e00\u4e2a\u5b9e\u53c2\uff1b\u4e0a\u754c\u662f\u4e00\u4e2a\u51cf\u6cd5\u5f0f\u5b50\uff1a\u4ece n \u51fa\u53d1\uff08\u4e0d\u518d\u5199 len(items)\uff09\uff0c\u6574\u4e2a\u5f0f\u5b50\u4e0d\u52a0\u62ec\u53f7\uff0c\u8981\u51cf\u53bb\u7684 i \u5199\u5728\u6700\u540e || \u7b2c i \u8d9f\u5f00\u59cb\u65f6\uff0c\u672b\u5c3e i \u4e2a\u4f4d\u7f6e\u5df2\u7ecf\u653e\u597d\u4e86\u6700\u5927\u7684 i \u4e2a\u6570\uff0c\u4e0d\u5fc5\u518d\u6bd4\uff1a\u4e0a\u754c\u662f\u57fa\u7840\u7248\u7684 n - 1 \u518d\u51cf\u53bb i\" hintEn=\"The inner for still walks j over a range with a single argument; the bound is a subtraction that starts from n (not len(items) again), with no brackets anywhere in it and the i being taken off written last || When pass i starts, the last i places already hold the i largest values, so there is nothing to compare there: the bound is the basic version's n - 1 with i taken off\"\n        for j in range(n - 1 - i):\n# \u003c\u003c\u003c BLANK\n            if items[j] > items[j + 1]:\n                items[j], items[j + 1] = items[j + 1], items[j]\n                swapped = True\n# >>> BLANK id=stop level=2 hint=\"\u4e00\u4e2a if\uff0c\u6761\u4ef6\u7528 not \u76f4\u63a5\u4f5c\u7528\u5728\u6807\u5fd7\u4e0a\uff0c\u4e0d\u5199 == False || \u6574\u8d9f\u4e00\u6b21\u4ea4\u6362\u90fd\u6ca1\u53d1\u751f\uff0c\u8bf4\u660e\u8868\u5df2\u7ecf\u6709\u5e8f\uff0c\u4e0b\u4e00\u884c\u7684 break \u5c31\u8df3\u51fa\u5916\u5c42\u5faa\u73af\" hintEn=\"An if whose condition applies not directly to the flag, not == False || A whole pass without a single swap means the list is already in order, and the break on the next line leaves the outer loop\"\n        if not swapped:\n# \u003c\u003c\u003c BLANK\n            break\n\n\ndef sorted_copy(items):\n    result = list(items)\n    bubble_sort(result)\n    return result\n\n\nif __name__ == \"__main__\":\n    print(sorted_copy([5, 1, 4, 2, 8]))\n    print(sorted_copy([1, 2, 3, 4, 5]))\n    print(sorted_copy([2, 1, 3, 4, 5]))\n    print(sorted_copy([5, 4, 3, 2, 1]))\n",
       "lines": 26
     },
     {
@@ -4848,7 +5045,7 @@ var PyPrograms = {
         "sorting",
         "while",
         "merge",
-        "slicing",
+        "slice",
         "in-place"
       ],
       "requires": [],
@@ -5092,7 +5289,7 @@ var PyPrograms = {
       "tags": [
         "sorting",
         "stability",
-        "tuples",
+        "tuple",
         "list comprehension"
       ],
       "requires": [],

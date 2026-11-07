@@ -11,6 +11,7 @@ node 裸 vm context——走浏览器分支，不走 node 分支，见根 CLAUDE
      · MicroPython 程序：没有可跑的——只做第 2 道。
   2. 带 check.property 的程序：从复制内容里导入 entry（MicroPython 装门的硬件桩、pygame 无头），
      拿门自己的参照、种子、组数、逐层比较（gates.library._deep_mismatch）比 200 组——跑帧看不见的错，这里看得见。
+     `check.alsoEntries` 里的额外入口（参照键 '<id>::<函数名>'，gates.library.property_key）一样各比一遍。
 另外逐章报**空数**（全章每个程序，不只抽到的）：页面自己的 `Exercise.parse` 数出来的挖空个数——构建报告与 PR 描述里的空数照它写、不手数。
 数的是**磁盘上的 `.py`**（用页面内联的 parser）；页面里嵌入的那份程序是否与磁盘同步，由门 `program_embed_roundtrip_check` 守，这里不管。
 负控制（内建，每个程序都做）：第一个空填成 `pass` 的复制内容。第 1 道对它的判别力按层不同——
@@ -94,8 +95,14 @@ def run_stdout(code: str, chapter_dir: pathlib.Path, prog: dict):
     return r.returncode, r.stdout
 
 
-def property_agree(code: str, prog: dict, library, properties) -> str | int:
-    """复制内容里的 entry 对门的参照：返回一致的组数，或导入失败的异常名。"""
+def property_targets(prog: dict, library) -> list:
+    """[(函数名, 参照键)]：entry 加 check.alsoEntries（与 algorithm_property_check 同一口径）。"""
+    also = (prog.get('check') or {}).get('alsoEntries') or []
+    return [(prog['entry'], prog['id'])] + [(f, library.property_key(prog['id'], f)) for f in also]
+
+
+def property_agree(code: str, prog: dict, library, properties, fn_name: str = None, key: str = None) -> str | int:
+    """复制内容里的一个入口（缺省 entry）对门的参照：返回一致的组数，或导入失败的异常名。"""
     micro = library._is_micropython(prog)
     if 'pygame' in prog.get('requires', []):
         library._headless_sdl()
@@ -108,10 +115,10 @@ def property_agree(code: str, prog: dict, library, properties) -> str | int:
             f = pathlib.Path(td, prog['file'])
             f.write_text(code, encoding='utf-8')
             try:
-                fn = runpy.run_path(str(f), run_name='__copyrun__')[prog['entry']]
+                fn = runpy.run_path(str(f), run_name='__copyrun__')[fn_name or prog['entry']]
             except Exception as e:                                    # noqa: BLE001
                 return f'导入失败 {type(e).__name__}'
-            ref = properties.REFERENCES[prog['id']]
+            ref = properties.REFERENCES[key or prog['id']]
             rng = random.Random(properties.SEED)
             good = 0
             for _ in range(properties.SAMPLES):
@@ -183,12 +190,15 @@ def main() -> int:
                 else:
                     notes.append('无可跑（只做 property）')
                 if (prog.get('check') or {}).get('property'):
-                    g = property_agree(clean, prog, library, properties)
-                    gw = property_agree(wrong, prog, library, properties)
-                    ok &= g == properties.SAMPLES
-                    notes.append(f'P {g}/{properties.SAMPLES}（首空填 pass：{gw}）')
-                    neg['property'][1] += 1
-                    neg['property'][0] += gw != properties.SAMPLES
+                    caught = False
+                    for fn_name, key in property_targets(prog, library):
+                        g = property_agree(clean, prog, library, properties, fn_name, key)
+                        gw = property_agree(wrong, prog, library, properties, fn_name, key)
+                        ok &= g == properties.SAMPLES
+                        notes.append(f'P {fn_name} {g}/{properties.SAMPLES}（首空填 pass：{gw}）')
+                        caught |= gw != properties.SAMPLES
+                    neg['property'][1] += 1                          # 按程序计：任一入口抓到就算抓到
+                    neg['property'][0] += caught
                 fails += not ok
                 rows.append(f'{"ok " if ok else "BAD"} {ch}/{pid}  ' + ' · '.join(notes))
         finally:

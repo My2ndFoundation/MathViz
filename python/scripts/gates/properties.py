@@ -16,8 +16,16 @@ REF_SOURCES / REF_ERRORS，外加性质比对用的 SAMPLES / SEED 两个常量�
 （第 1 期设计 A4），不是按 property 族名。`chapter.json` 里的
 `check.property`（第 0 期合法取值只有 `"pure"`）只是一个族名，T14 的
 `algorithm_property_check()` 用它挑错误信息的措辞，真正的参考实现与实参生成器
-都是逐个程序单独登记的——同一个族名下的两个程序（这里 `max-of-three-if` 与
-`max-of-three-builtin`）机制不同，参照也就必须不同，不能共用一份。
+都是逐个程序单独登记的。**参照不能与任何一个被测同源**：同一个族名下的两个程序
+（这里 `max-of-three-if` 与 `max-of-three-builtin`）机制不同，一份参照若与其中一个
+同源，它就验不了那一个，所以这里各登记一份、各自与被测不同。几个程序**可以**共用
+同一个参照函数——只要它与每一个被测的机制都不同（第 5 期 m7a 的两个 `rect-overlap`
+程序共用格点求交，phase5-deferred §三.6；此前这里写的「参照也就必须不同，不能共用一份」
+是字面过严，意图是不同源）。
+
+额外入口（清理波，phase6-deferred §三.3）：一个程序除 `entry` 外还可以在
+`check.alsoEntries` 里列别的函数名，每个在 refs 里以 `'<程序 id>::<函数名>'` 为键
+各登记一份参照；同源的规矩对每个入口各自成立。
 
 裁决 R26：`max-of-three-builtin.py` 的代码本身就是 `return max(a, b, c)`，如果拿
 `max` 当它的参照，等于拿自己验自己——被测程序错的地方参照会跟着错，任何变异都测不出来。

@@ -217,6 +217,37 @@ JUDGE_CASES = [
     ('少写一个 token',              'a + b',            'a +',              False),
     ('多写一个 token',              'a + b',            'a + b + c',        False),
     ('换了一个 token',              'a // b',           'a / b',            False),
+    # ── 行数不同时的块结构（清理波：phase1-deferred §一.3、phase6-deferred §一.3）──
+    # 两边有效行条数不同时，判定器以前完全不比缩进；下面三条「判异」在那时都判同。
+    ('块结构：单行 if 体，下一行被移出外层 if',
+     'if a:\n    if b:\n        c()\n    d()', 'if a:\n    if b: c()\nd()',     False),
+    ('块结构：括号内断行，体的第一行写到了外层（CPython 报 IndentationError）',
+     'if x:\n    f(a, b)',  'if x:\nf(a,\n    b)',                          False),
+    ('块结构：单行 if 体之后又多缩进一行（CPython 报 unexpected indent）',
+     'if a:\n    b\n    c', 'if a: b\n    c',                               False),
+    ('块结构：if a: b 写成一行，与两行写法判同',
+     'if a:\n    b',        'if a: b',                                      True),
+    ('块结构：参考是一行写法、作答写成两行，判同',
+     'if a: b',             'if a:\n    b',                                 True),
+    ('块结构：体内括号里断行、续行顶格（合法 Python），判同',
+     'if x:\n    f(a, b)',  'if x:\n    f(a,\nb)',                          True),
+    ('块结构：内层单行 if 体、外层下一行仍在外层 if 里，判同',
+     'if a:\n    if b:\n        c()\n    d()', 'if a:\n    if b: c()\n    d()', True),
+    # ── match / case 是软关键字（清理波终审 M2）──
+    # 判同的两条在 COMPOUND 不认 case 时判 block；判异的三条防「只看首词」的过宽修法：
+    # 把 `case[0] = lambda: 0` / `case.x: int = 1` 当语句头，参考冒号后的 token 会被抬一层，
+    # 恰好与作答非法断到下一行的那一层对上而误判同。
+    ('块结构：case 头 + 一行体写成一行，判同',
+     'match x:\n    case 1:\n        a()\n    case _:\n        b()',
+     'match x:\n    case 1: a()\n    case _: b()',                         True),
+    ('块结构：带守卫、映射模式的 case 头写成一行，判同',
+     'case {"k": v} if v > 0:\n    f(v)', 'case {"k": v} if v > 0: f(v)',    True),
+    ('块结构：`case = lambda: 0` 不是语句头，冒号后断行判异',
+     'case = lambda: 0\nb()', 'case = lambda:\n    0\nb()',                 False),
+    ('块结构：`case[0] = lambda: 0` 不是语句头（冒号前有 =），冒号后断行判异',
+     'case[0] = lambda: 0\nb()', 'case[0] = lambda:\n    0\nb()',           False),
+    ('块结构：`case.x: int = 1` 是带注解赋值，冒号后断行判异',
+     'case.x: int = 1\nb()', 'case.x:\n    int = 1\nb()',                   False),
 ]
 
 # 拿来当语料的标准库文件。**不是随手挑的**：小、稳定、纯 ASCII、语法不花哨。

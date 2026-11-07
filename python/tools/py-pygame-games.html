@@ -29,13 +29,17 @@
      跟着改。版本号要在三处同步：注册表 python-tools.json 的 version、这里的
      tool-version meta、右上角的徽章——徽章直接读 meta（见第二个脚本块里的
      VERSION），所以它永远不需要单独改。 -->
-<meta name="tool-version" content="1.0.1">
-<meta name="tool-engine" content="py-1.3.1">
+<meta name="tool-version" content="1.0.2">
+<meta name="tool-engine" content="py-1.3.2">
 <!-- >>> GENERATED:FAVICON -->
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAA/1BMVEUUVrceN6YEl50nKYgDod8FapoEX3V6I+AEZ8gDbtxPFYdQIJ4DOTgCwv+GE8sFU1kDQDtmIL8pEVcGyrkDgdAAAABoKNkWCSwDSasAevQEGSgBqfc3F3QBs/paKNADJTUAa/SPG+pPIawCFRdzJuQDNUcDNlcEZcUAW/dGGY0lBzgjDEUBnPMDRIcQJVMCK0kyEmYCU7AHV4WiE/MOXLoEQ1sMedVSIqsHZY50FLoFNpdRHqkEhYdNDHYEOWwBgfYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADRsqliAAAAQHRSTlOjjpdhy2lM7KvNXYwU/74wGMUn+bkA/AuR/Qf5TPz4Df39rwP/GCKt/mwPGfNVIxc5lU7/pSnOnV+tdaV0RjX/bR25hAAAAVdJREFUeNqtk2d/gyAQh40rq7sFRECDK0Oz92jz/b9V/ZmYgCTpm/JCT+7hTu7+p4E/lvZPQGiasbw/bA5FwH9mzJf8GE9FwGWMEYGwcQc7MkAIMd3S/4NxpyMDhFkZMcOLfzpVgLFPsq/iI8F4ARwFSECSkUZujzHuAhUgSe5qrDR/VPgVIGMxiO3NbKYdj01wA2BWrFvLeLmxut3iMk5PAvzZq34qQ7I6vZ1eTeqFfShr4C7OEXYX4C30dftaRbc4owkRPvXDk9iHkZE/dg3jAoRhtcMjVQ9oMBA2ayhfMjCYz1+E36i16uuKor7nvHUlqEFRVXJbztPS7rdpX9Ek4rxemjCi6ZqmqA9F0X5zfj4WQC9P8EGNSSqpesuj4ioUwslN2aM6fC8SwODOXEyiiJYJbg/OHsJ2ACG9O1l5dAi94MHo0cjzpATKbO49jz4cXlRJAMAvD+ldcxDlRcsAAAAASUVORK5CYII=">
 <!-- <<< GENERATED:FAVICON -->
 <title>Graphical Games · 图形游戏</title>
 <!-- 版本记录（changelog，新→旧）：
+     1.0.2  2026-11-06  「开火冷却」与「命数与无敌时间」的讲解互相指回，说明二者是同一种倒计时器。
+                        判定器（engine
+                        py-1.3.2）：答案与标准答案行数不同时也比较代码块结构（新反馈 kind
+                        block）。清理波：第 6 期账本 §十 第一、二组。
      1.0.1  2026-09-30  考试局按四家官方考纲重核（用户裁决：考纲外不写，[] 合法；依据见
                         docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md）：
                         pong-full AQA/OCR/Edexcel/CIE→[]；pong-ai-paddle
@@ -1630,6 +1634,165 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     return { toks: toks, rel: ind.rel, relLines: ind.relLines };
   }
 
+  /* ---- 块层级：两边有效行条数不同时才用（清理波，phase1-deferred §一.3） ----
+
+     有效行条数相同时，compare() 照旧按相对缩进**宽度**严比（rel）。条数不同的
+     合法写法只有两种：单行复合语句（`if x: y` 对两行写法）与括号内断行。以前这时
+     完全不比缩进，于是 `if a:\n    if b: c()\nd()` 判等于 `d()` 缩进在外层 if
+     里的那四行——语义变了也判对。
+
+     这里把源码切成**逻辑行**（括号深度 > 0、或上一个有效 token 是反斜杠续行
+     `\`、或上一个 token 是跨行的三引号字符串时，并入上一逻辑行），用一个缩进栈
+     把每条逻辑行映射成**块层级**（第一条逻辑行为 0）；复合语句头（行首是
+     COMPOUND 里的关键字、或按 softKeywordHeader 判为语句头的 match / case，括号深度 0
+     的第一个 `:`）后面同一行的体算深一层。
+     compare() 再逐 token 比层级：原文相同、层级不同 → kind 'block'。
+
+     CPython 会拒绝的三种缩进：
+       · unexpected indent（上一逻辑行不是以 `:` 结尾的语句头，这一行却变深）：
+         「变深」时层级取上一逻辑行**最深处**加一——`if a: b` 之后多缩进一行，它比 b
+         还深、不与 b 同层——所以它的层级按构造就比合法的参考多一层；
+       · expected an indented block（以 `:` 结尾的语句头之后没有变深）：参考是合法
+         Python，同一串 token 在参考里语句头之后的那个 token 必在深一层，作答不深，
+         层级按构造就不同；
+       · unindent does not match any outer indentation level（退缩进到栈里没有的
+         宽度）：层级可能碰巧等于参考，只有这一种记成 bad，不论层级等不等都判错。
+     前两种另记 bad 是冗余的：负控制实测，另记的 bad 删掉，测试与门全绿，所以不留。 */
+  var COMPOUND = { 'if': 1, 'elif': 1, 'else': 1, 'for': 1, 'while': 1, 'try': 1,
+                   'except': 1, 'finally': 1, 'with': 1, 'def': 1, 'class': 1 };
+  var OPENERS = { '(': 1, '[': 1, '{': 1 };
+  var CLOSERS = { ')': 1, ']': 1, '}': 1 };
+
+  /* match / case 是**软关键字**（清理波终审 M2）：`match = 3`、`match.group(1)`、`case(x)` 是普通
+     语句。判据（逻辑行 toks[a..b)，首词是 match / case）：
+       1. 第二个 token 能开一个 subject / 模式：名字（不是 if / else / in / is / and / or / for /
+          as / lambda 这类只能接在表达式后面的关键字）、数字、字符串、`(` `[` `{`、`-` `+` `~` `*`。
+          于是 `=` / `.` / `:` / `,` / 增强赋值 / 下标之外的运算符开头的都不是语句头。
+       2. 行里有括号深度 0 的 `:`，而它之前（括号深度 0）没有 `=`、增强赋值、`:=`、`lambda`——
+          排除 `case = lambda: 0`、`case, x = lambda: 0, 1` 一类。
+       3. match 头的 `:` 必须是这一逻辑行最后一个 token：CPython 的 match 头之后只能换行
+          （`match x: case 1: …` 是语法错），所以 match 按构造不会有同一行的体——认它是头与否
+          不改变任何层级，这一条只防把 `match: T = v` 之类的行算进来。
+     没有括号深度 0 冒号的行（`case(x)`、`match.group(1)`、`match = 3`）分不分类都一样：
+     colon 是 -1，层级不变。
+     仍分不出的（记在这里，靠「只挖写法唯一的行」）：`case[0]: int = 1`（给名为 case 的东西的下标
+     加注解）与 `case [0]: int = 1`（序列模式 + 一行体）token 完全相同，只有「是否在 match 块里」能
+     区分，而挖空片段常常不含 match 那一行——这里一律按 case 头处理。 */
+  var SOFT_HEAD_BAD_NAME = { 'if': 1, 'else': 1, 'elif': 1, 'in': 1, 'is': 1, 'and': 1, 'or': 1,
+                             'for': 1, 'as': 1, 'lambda': 1, 'from': 1, 'import': 1 };
+  var SOFT_HEAD_OK_PUNCT = { '(': 1, '[': 1, '{': 1, '-': 1, '+': 1, '~': 1, '*': 1 };
+  function isAssignOp(t) {
+    return t === '=' || t === ':=' ||
+      (t.length >= 2 && t.charAt(t.length - 1) === '=' && t !== '==' && t !== '!=' && t !== '<=' && t !== '>=');
+  }
+  function softKeywordHeader(toks, a, b) {
+    var head = toks[a].text;
+    if ((head !== 'match' && head !== 'case') || a + 2 >= b) { return false; }
+    var nx = toks[a + 1].text;
+    var starts = SOFT_HEAD_OK_PUNCT[nx] ||
+      (/^[A-Za-z_]/.test(nx) && !SOFT_HEAD_BAD_NAME[nx]) ||
+      /^[0-9'"]/.test(nx) || /^\.[0-9]/.test(nx);
+    if (!starts) { return false; }
+    var d = 0;
+    for (var j = a + 1; j < b; j++) {
+      var t = toks[j].text;
+      if (OPENERS[t]) { d++; continue; }
+      if (CLOSERS[t] && d > 0) { d--; continue; }
+      if (d !== 0) { continue; }
+      if (t === ':') { return head === 'case' || j === b - 1; }
+      if (t === 'lambda' || isAssignOp(t)) { return false; }
+    }
+    return false;
+  }
+
+  function countNewlines(s) {
+    var n = 0;
+    for (var i = 0; i < s.length; i++) { if (s.charAt(i) === '\n') { n++; } }
+    return n;
+  }
+
+  /* blockLevels(toks) -> { lvl: number[], bad: boolean[] }，与 toks 一一对应。 */
+  function blockLevels(toks) {
+    var lvl = new Array(toks.length);
+    var bad = new Array(toks.length);
+    if (toks.length === 0) { return { lvl: lvl, bad: bad }; }
+
+    /* 1. 切逻辑行：每项是 toks 的下标区间 [from, to) */
+    var logical = [];
+    var depth = 0, from = 0;
+    for (var i = 0; i < toks.length; i++) {
+      if (i > 0) {
+        var prev = toks[i - 1];
+        var prevEnd = prev.line + countNewlines(prev.text);
+        if (depth === 0 && toks[i].line > prevEnd && prev.text !== '\\') {
+          logical.push([from, i]);
+          from = i;
+        }
+      }
+      var tx = toks[i].text;
+      if (OPENERS[tx]) { depth++; } else if (CLOSERS[tx] && depth > 0) { depth--; }
+    }
+    logical.push([from, toks.length]);
+
+    /* 2. 缩进栈 */
+    var stack = null;           /* [{ w, lvl }] */
+    var prevDeepest = 0;        /* 上一逻辑行最深的层级 */
+    for (var k = 0; k < logical.length; k++) {
+      var a = logical[k][0], b = logical[k][1];
+      var w = toks[a].col;
+      var level, isBad = false;
+      if (stack === null) {
+        stack = [{ w: w, lvl: 0 }];
+        level = 0;
+      } else {
+        var top = stack[stack.length - 1];
+        if (w > top.w) {
+          level = prevDeepest + 1;
+          stack.push({ w: w, lvl: level });
+        } else if (w === top.w) {
+          level = top.lvl;
+        } else {
+          var popped = null;
+          while (stack.length && stack[stack.length - 1].w > w) { popped = stack.pop(); }
+          if (stack.length === 0) {
+            /* 空的片段可以退到第一行之外（一个空从函数体末尾跨到模块顶层）：
+               记成比被弹掉的最外层浅一层的新栈底，不算不合法。 */
+            level = popped.lvl - 1;
+            stack.push({ w: w, lvl: level });
+          } else if (stack[stack.length - 1].w === w) {
+            level = stack[stack.length - 1].lvl;
+          } else {
+            level = stack[stack.length - 1].lvl + 1;
+            isBad = true;
+            stack.push({ w: w, lvl: level });
+          }
+        }
+      }
+
+      /* 3. 复合语句头：括号深度 0 的第一个 `:`，其后同一逻辑行的 token 深一层 */
+      var head = toks[a].text;
+      var isHeader = !!COMPOUND[head] ||
+        (head === 'async' && a + 1 < b && /^(def|for|with)$/.test(toks[a + 1].text)) ||
+        softKeywordHeader(toks, a, b);
+      var colon = -1;
+      if (isHeader) {
+        var d = 0;
+        for (var j = a; j < b; j++) {
+          var t = toks[j].text;
+          if (OPENERS[t]) { d++; } else if (CLOSERS[t] && d > 0) { d--; }
+          else if (t === ':' && d === 0) { colon = j; break; }
+        }
+      }
+      for (var m = a; m < b; m++) {
+        lvl[m] = (colon !== -1 && m > colon) ? level + 1 : level;
+        bad[m] = isBad;
+      }
+      /* 一行写法：体在同一行，这一逻辑行最深处深一层 */
+      prevDeepest = (colon !== -1 && colon < b - 1) ? level + 1 : level;
+    }
+    return { lvl: lvl, bad: bad };
+  }
+
   /* 两个数组第一处不同的下标；一个是另一个的前缀时，下标取较短那个的长度；
      完全相同返回 -1。 */
   function firstDiffIndex(a, b) {
@@ -1642,7 +1805,11 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
   }
 
   /* compare(answer, reference) -> { ok, index, expected, got, kind }
-     kind ∈ 'equal' | 'different' | 'missing' | 'extra' | 'indent'
+     kind ∈ 'equal' | 'different' | 'missing' | 'extra' | 'indent' | 'block'
+
+     'block'（清理波）：两边有效行条数不同、token 原文到此处都相同、而块层级不同
+     （或答案这一逻辑行的缩进 CPython 会拒绝）——见 blockLevels。index 与 'indent'
+     同语义（答案侧物理行号，0 起），expected/got 是块层级数字。
 
      顺序：先比 rel，**但只有两边有效行条数相同时**，值不同才归类 'indent'；
      rel 相同、或有效行条数本身就不同，都落到逐 token 比原文，短的一方先到头
@@ -1681,10 +1848,22 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     }
 
     var at = na.toks, rt = nr.toks;
+    /* 有效行条数不同：相对缩进宽度没法逐行对，改比块层级（见 blockLevels）。
+       条数相同时上面已经按宽度严比过，这里不再重复。 */
+    var la = null, lr = null;
+    if (na.rel.length !== nr.rel.length) {
+      la = blockLevels(at);
+      lr = blockLevels(rt);
+    }
     var n = Math.min(at.length, rt.length);
     for (var i = 0; i < n; i++) {
       if (at[i].text !== rt[i].text) {
         return { ok: false, index: i, expected: rt[i].text, got: at[i].text, kind: 'different' };
+      }
+      if (la && (la.bad[i] || la.lvl[i] !== lr.lvl[i])) {
+        /* 'block'：与 'indent' 同一套 index 语义（答案侧**物理行号**，0 起），
+           expected/got 是块层级（相对第一条逻辑行，数字）。从不涉及字面量原文。 */
+        return { ok: false, index: at[i].line - 1, expected: lr.lvl[i], got: la.lvl[i], kind: 'block' };
       }
     }
     if (at.length < rt.length) {
@@ -2110,6 +2289,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
                   en: 'token #{0} is extra: {1} does not belong here' },
     blankIndent: { zh: '第 {0} 行缩进对不上：期待相对缩进 {1} 格，你写了 {2} 格',
                   en: 'line {0} indent is off: expected {1} spaces relative, you wrote {2}' },
+    blankBlock:  { zh: '第 {0} 行落进了另一层代码块：块结构与参考不同（看这一行的缩进，和它前面写成一行的语句头）',
+                  en: 'line {0} lands in a different block: the block structure differs from the reference (check this line\'s indent and any header written on one line before it)' },
     blankLead:   { zh: '第 1 行缩进对不上：这个空从第 {1} 格开始，你写了 {2} 格',
                   en: 'line 1 indent is off: this blank starts at column {1}, you wrote {2}' },
     blankDiffLiteral: { zh: '第 {0} 个 token（{1}）里第 {2} 个字符起不同',
@@ -2505,6 +2686,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
          所以要用 PyLex.significant 现取它在 answer 里的偏移。
        kind 'indent'：index 是**物理行号**，expected/got 是**相对缩进数值**
          （不是 null、不是字符串）。光标去那一行的行首。裁决 R30/R31。
+       kind 'block'（清理波）：同 'indent' 的 index 语义，expected/got 是块层级；
+         消息只报行号。
 
      另有 Judge 结构上看不见的一种错：**整块的绝对缩进**。Judge.normalize 比的是
      行与行之间的相对缩进，所以单行挖空体 `    x = 1` 与 `x = 1` 在它眼里完全
@@ -2538,6 +2721,20 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     var cmp = judge().compare(a, r);
     if (cmp.ok) {
       return { ok: true, kind: 'equal', caret: 0, message: t('blankOk', lang) };
+    }
+
+    /* 'block'（清理波）：两边有效行条数不同时，Judge 比的是块层级，index 同样是
+       答案侧**物理行号**。消息不印层级数字——「第 1 层 / 第 0 层」对她没有意义——
+       也从不涉及字面量原文。 */
+    if (cmp.kind === 'block') {
+      var bStarts = editor().lineStarts(a);
+      var bi = Math.max(0, Math.min(cmp.index, bStarts.length - 1));
+      return {
+        ok: false,
+        kind: 'block',
+        caret: bStarts[bi],
+        message: ts('blankBlock', lang, [cmp.index + 1])
+      };
     }
 
     if (cmp.kind === 'indent') {
@@ -5069,6 +5266,7 @@ var PyPrograms = {
         "en": [
           "What the window shows: a very dark window with a purple cannon at the bottom. Hold Space and yellow bullets stream upwards, evenly spaced. The white text at the top shows the cooldown in seconds and how many bullets are on the screen; the thin red bar at the bottom left shrinks as the cooldown runs out. Up adds 0.05 seconds to the cooldown and Down takes 0.05 off, never going below 0.05.",
           "try_fire runs once a frame. It first takes this frame's time off remaining. If some time is still left, there is no shot this frame, whatever the key is doing. If the time has run out and Space is held, it fires and starts the timer again at the full cooldown. If the time has run out and Space is not held, it waits at 0.0, ready to fire on the very next frame that Space is down.",
+          "Lives and Invulnerability runs the same kind of timer for the opposite job: here the countdown keeps the next shot from happening, there it keeps a rock from taking another life. In both, the time left goes down by dt once a frame before anything is decided, so the frame on which it runs out already counts as ready, and the event itself - a shot here, a hit that counts there - starts the timer again at its full length.",
           "At 60 frames a second the starting cooldown of 0.25 seconds lets a shot through every 15 frames - four shots a second - and a bullet takes about 0.9 seconds to leave the top of the window, so three or four are on the screen at once. At the smallest cooldown, 0.05, it is one shot every 3 frames, twenty a second.",
           "remaining counts down in seconds using dt, so the rate of fire is the same at any frame rate, to within one frame. Space is read with key.get_pressed - is it held right now? - rather than as a KEYDOWN event, which would give only one shot per press; the Pygame Basics page covers both kinds of input.",
           "The page's checker compares try_fire with a version that compares remaining and dt exactly, as fractions, before subtracting - on hundreds of made-up times left, with Space held or not. Some of them have remaining exactly equal to dt: the timer runs out on that very frame, and a held Space must fire."
@@ -5076,6 +5274,7 @@ var PyPrograms = {
         "zh": [
           "\u7a97\u53e3\u91cc\u770b\u5230\u7684\uff1a\u5f88\u6697\u7684\u7a97\u53e3\uff0c\u5e95\u90e8\u4e00\u95e8\u7d2b\u8272\u70ae\u53f0\u3002\u6309\u4f4f\u7a7a\u683c\uff0c\u9ec4\u8272\u5b50\u5f39\u4e00\u53d1\u63a5\u4e00\u53d1\u5f80\u4e0a\u98de\uff0c\u95f4\u9694\u5747\u5300\u3002\u9876\u4e0a\u7684\u767d\u5b57\u663e\u793a\u51b7\u5374\u65f6\u957f\uff08\u79d2\uff09\u4e0e\u5c4f\u5e55\u4e0a\u7684\u5b50\u5f39\u6570\uff1b\u5de6\u4e0b\u89d2\u7ec6\u7ec6\u7684\u7ea2\u6761\u968f\u7740\u51b7\u5374\u8d70\u5b8c\u800c\u7f29\u77ed\u3002\u4e0a\u65b9\u5411\u952e\u7ed9\u51b7\u5374\u52a0 0.05 \u79d2\uff0c\u4e0b\u65b9\u5411\u952e\u51cf 0.05 \u79d2\uff0c\u6700\u4f4e 0.05\u3002",
           "try_fire \u6bcf\u5e27\u8fd0\u884c\u4e00\u6b21\u3002\u5b83\u5148\u4ece remaining \u91cc\u51cf\u53bb\u8fd9\u4e00\u5e27\u7684\u65f6\u957f\u3002\u8fd8\u6709\u5269\u4f59\uff0c\u8fd9\u4e00\u5e27\u5c31\u4e0d\u5f00\u706b\uff0c\u4e0d\u7ba1\u7a7a\u683c\u6309\u6ca1\u6309\u3002\u65f6\u95f4\u8d70\u5b8c\u4e86\u3001\u7a7a\u683c\u53c8\u6309\u7740\uff0c\u5c31\u5f00\u706b\uff0c\u5e76\u628a\u8ba1\u65f6\u5668\u91cd\u65b0\u8bbe\u6210\u6574\u6574\u4e00\u4e2a\u51b7\u5374\u65f6\u957f\u3002\u65f6\u95f4\u8d70\u5b8c\u4e86\u3001\u7a7a\u683c\u6ca1\u6309\uff0c\u5c31\u505c\u5728 0.0 \u7b49\u7740\uff0c\u7a7a\u683c\u4e00\u6309\u4e0b\u7684\u90a3\u4e00\u5e27\u5c31\u80fd\u5f00\u706b\u3002",
+          "\u300c\u547d\u6570\u4e0e\u65e0\u654c\u65f6\u95f4\u300d\u7528\u7684\u662f\u540c\u4e00\u79cd\u8ba1\u65f6\u5668\uff0c\u7ba1\u7684\u4e8b\u6b63\u76f8\u53cd\uff1a\u8fd9\u91cc\u5012\u8ba1\u65f6\u671f\u95f4\u6253\u4e0d\u51fa\u4e0b\u4e00\u53d1\uff0c\u90a3\u91cc\u5012\u8ba1\u65f6\u671f\u95f4\u77f3\u5934\u62ff\u4e0d\u8d70\u547d\u3002\u4e24\u8fb9\u90fd\u662f\u6bcf\u5e27\u5148\u4ece\u5269\u4f59\u65f6\u95f4\u91cc\u51cf\u6389 dt\u3001\u518d\u505a\u5224\u65ad\uff0c\u6240\u4ee5\u8ba1\u65f6\u8d70\u5b8c\u7684\u90a3\u4e00\u5e27\u5df2\u7ecf\u7b97\u300c\u597d\u4e86\u300d\uff1b\u800c\u90a3\u4ef6\u4e8b\u672c\u8eab\u2014\u2014\u8fd9\u91cc\u662f\u5f00\u4e00\u67aa\uff0c\u90a3\u91cc\u662f\u4e00\u6b21\u7b97\u6570\u7684\u649e\u51fb\u2014\u2014\u53c8\u628a\u8ba1\u65f6\u5668\u91cd\u65b0\u8bbe\u6210\u6574\u6574\u4e00\u4e2a\u65f6\u957f\u3002",
           "\u6bcf\u79d2 60 \u5e27\u65f6\uff0c\u8d77\u59cb\u51b7\u5374 0.25 \u79d2\u6bcf 15 \u5e27\u653e\u4e00\u53d1\u2014\u2014\u6bcf\u79d2\u56db\u53d1\uff1b\u4e00\u53d1\u5b50\u5f39\u5927\u7ea6 0.9 \u79d2\u98de\u51fa\u7a97\u53e3\u9876\u8fb9\uff0c\u6240\u4ee5\u5c4f\u5e55\u4e0a\u540c\u65f6\u6709\u4e09\u56db\u53d1\u3002\u51b7\u5374\u8c03\u5230\u6700\u5c0f\u7684 0.05\uff0c\u5c31\u662f\u6bcf 3 \u5e27\u4e00\u53d1\uff0c\u6bcf\u79d2\u4e8c\u5341\u53d1\u3002",
           "remaining \u7528 dt \u6309\u79d2\u5012\u6570\uff0c\u6240\u4ee5\u4e0d\u8bba\u5e27\u7387\u591a\u5c11\uff0c\u5c04\u901f\u90fd\u4e00\u6837\uff08\u8bef\u5dee\u4e0d\u8d85\u8fc7\u4e00\u5e27\uff09\u3002\u7a7a\u683c\u7528 key.get_pressed \u8bfb\u2014\u2014\u6b64\u523b\u662f\u4e0d\u662f\u6309\u7740\u2014\u2014\u800c\u4e0d\u662f\u5f53 KEYDOWN \u4e8b\u4ef6\u8bfb\uff0c\u90a3\u6837\u6309\u4e00\u6b21\u53ea\u80fd\u6253\u4e00\u53d1\uff1b\u4e24\u79cd\u8f93\u5165\u89c1\u300cpygame \u5165\u95e8\u300d\u4e00\u9875\u3002",
           "\u9875\u9762\u7684\u68c0\u67e5\u5668\u628a try_fire \u4e0e\u53e6\u4e00\u4e2a\u7248\u672c\u6bd4\u8f83\uff1a\u5b83\u5728\u505a\u51cf\u6cd5\u4e4b\u524d\uff0c\u5148\u628a remaining \u4e0e dt \u5f53\u4f5c\u5206\u6570\u7cbe\u786e\u5730\u6bd4\u4e00\u6bd4\u2014\u2014\u5728\u51e0\u767e\u7ec4\u968f\u624b\u9020\u7684\u5269\u4f59\u65f6\u95f4\u3001\u7a7a\u683c\u6309\u7740\u6216\u6ca1\u6309\u7684\u7ec4\u5408\u4e0a\u9010\u4e00\u6838\u5bf9\u3002\u5176\u4e2d\u6709\u7684 remaining \u6070\u597d\u7b49\u4e8e dt\uff1a\u8ba1\u65f6\u5668\u6b63\u597d\u5728\u8fd9\u4e00\u5e27\u8d70\u5b8c\uff0c\u6309\u7740\u7a7a\u683c\u5c31\u5fc5\u987b\u5f00\u706b\u3002"
@@ -5134,6 +5333,7 @@ var PyPrograms = {
           "What the window shows: a dark window with five red squares - rocks - falling from the top, each one starting again at the top after it leaves the bottom. The purple square near the bottom is the player, moved with the Left and Right arrow keys. White text at the top left reads lives 3. When a rock touches the player, the number drops by one and the player flashes, off and on five times a second, for two seconds; rocks pass straight through it while it flashes. When the last life goes, the player disappears, the rocks stop and the text reads GAME OVER.",
           "take_hit runs once a frame, and the order inside it is the whole point. First the invulnerable time counts down by this frame's time, and is held at zero rather than going below it. Only then does it ask whether this frame's hit counts, and a hit counts only when the timer is exactly zero. So a hit on the frame the timer runs out does count: after counting down first, that frame is already an ordinary one. Asking first and counting down afterwards would ignore that hit and hand the player an extra frame of safety every time.",
           "A hit that counts takes one life and starts the timer again at INVULN, two seconds. If that was the last life, the timer goes back to 0.0 instead - with no lives left there is nothing to protect - and the third value handed back, the game-over flag, is True exactly when lives has reached 0.",
+          "Fire Cooldown runs the same kind of timer for the opposite job: there the countdown keeps the next shot from happening, here it keeps a rock from taking another life. In both, the time left goes down by dt once a frame before anything is decided, so the frame on which it runs out already counts as ready, and the event itself - a shot there, a hit that counts here - starts the timer again at its full length.",
           "Why the two seconds are needed: at 60 frames a second a rock falls 4 pixels a frame, so on its way past it overlaps the 30-pixel-tall player for about 13 frames, a little over a fifth of a second. Without invulnerability each of those frames would be a hit, and a single rock would take all three lives in three frames.",
           "The flashing is worked out from the same timer. int(invuln * 10) counts the tenths of a second left, and % 2 makes that alternate between even and odd, so the player is drawn only on the even tenths; once the timer is 0 it is drawn every frame. collidelist hands back the index of the first rock the player overlaps, or -1 when there is none - Rect collisions are on the Sprites & Collisions page.",
           "The page's checker compares take_hit with a version that works out the time left without holding it at zero, decides from that whether the player can be hit, and sets the new lives and timer in one step - on hundreds of made-up frames. About four in ten of them are the frame on which the timer runs out, most of those with a hit on that very frame."
@@ -5142,6 +5342,7 @@ var PyPrograms = {
           "\u7a97\u53e3\u91cc\u770b\u5230\u7684\uff1a\u6df1\u8272\u7a97\u53e3\u91cc\uff0c\u4e94\u5757\u7ea2\u8272\u65b9\u5757\u2014\u2014\u77f3\u5934\u2014\u2014\u4ece\u9876\u4e0a\u5f80\u4e0b\u843d\uff0c\u6bcf\u4e00\u5757\u4ece\u5e95\u8fb9\u51fa\u53bb\u540e\u53c8\u4ece\u9876\u4e0a\u91cd\u65b0\u843d\u4e0b\u3002\u9760\u8fd1\u5e95\u90e8\u7684\u7d2b\u8272\u65b9\u5757\u662f\u73a9\u5bb6\uff0c\u7528\u5de6\u3001\u53f3\u65b9\u5411\u952e\u79fb\u52a8\u3002\u5de6\u4e0a\u89d2\u7684\u767d\u5b57\u5199\u7740 lives 3\u3002\u77f3\u5934\u78b0\u5230\u73a9\u5bb6\uff0c\u6570\u5b57\u5c31\u5c11\u4e00\uff0c\u73a9\u5bb6\u95ea\u70c1\u4e24\u79d2\uff0c\u6bcf\u79d2\u706d\u3001\u4eae\u4e94\u6b21\uff1b\u95ea\u70c1\u671f\u95f4\u77f3\u5934\u76f4\u63a5\u7a7f\u8fc7\u5b83\u3002\u6700\u540e\u4e00\u6761\u547d\u6ca1\u4e86\uff0c\u73a9\u5bb6\u6d88\u5931\uff0c\u77f3\u5934\u505c\u4f4f\uff0c\u6587\u5b57\u53d8\u6210 GAME OVER\u3002",
           "take_hit \u6bcf\u5e27\u8fd0\u884c\u4e00\u6b21\uff0c\u91cc\u9762\u7684\u5148\u540e\u987a\u5e8f\u6b63\u662f\u8981\u70b9\u3002\u5148\u628a\u65e0\u654c\u65f6\u95f4\u51cf\u6389\u8fd9\u4e00\u5e27\u7684\u65f6\u957f\uff0c\u5e76\u6258\u5728\u96f6\u4e0a\uff0c\u4e0d\u8ba9\u5b83\u53d8\u6210\u8d1f\u6570\u3002\u7136\u540e\u624d\u95ee\u8fd9\u4e00\u5e27\u7684\u649e\u51fb\u7b97\u4e0d\u7b97\uff1a\u53ea\u6709\u8ba1\u65f6\u6070\u597d\u662f\u96f6\u65f6\u624d\u7b97\u3002\u6240\u4ee5\u5728\u8ba1\u65f6\u8d70\u5b8c\u7684\u90a3\u4e00\u5e27\u88ab\u649e\uff0c\u7167\u6837\u7b97\u6570\uff1a\u5148\u5012\u8ba1\u65f6\uff0c\u8fd9\u4e00\u5e27\u5c31\u5df2\u7ecf\u662f\u666e\u901a\u7684\u4e00\u5e27\u4e86\u3002\u8981\u662f\u5148\u5224\u65ad\u3001\u540e\u5012\u8ba1\u65f6\uff0c\u8fd9\u4e00\u4e0b\u649e\u51fb\u4f1a\u88ab\u5ffd\u7565\uff0c\u73a9\u5bb6\u6bcf\u6b21\u90fd\u767d\u767d\u591a\u8eb2\u8fc7\u4e00\u5e27\u3002",
           "\u7b97\u6570\u7684\u649e\u51fb\u6389\u4e00\u6761\u547d\uff0c\u5e76\u628a\u8ba1\u65f6\u91cd\u65b0\u8bbe\u6210 INVULN\uff0c\u4e5f\u5c31\u662f\u4e24\u79d2\u3002\u5982\u679c\u6389\u7684\u662f\u6700\u540e\u4e00\u6761\u547d\uff0c\u8ba1\u65f6\u6539\u56de 0.0\u2014\u2014\u4e00\u6761\u547d\u90fd\u6ca1\u6709\u4e86\uff0c\u4e5f\u5c31\u6ca1\u4ec0\u4e48\u53ef\u4fdd\u62a4\u7684\u2014\u2014\u4ea4\u56de\u7684\u7b2c\u4e09\u4e2a\u503c\uff08\u6e38\u620f\u662f\u5426\u7ed3\u675f\uff09\u6070\u597d\u5728 lives \u5230 0 \u65f6\u4e3a True\u3002",
+          "\u300c\u5f00\u706b\u51b7\u5374\u300d\u7528\u7684\u662f\u540c\u4e00\u79cd\u8ba1\u65f6\u5668\uff0c\u7ba1\u7684\u4e8b\u6b63\u76f8\u53cd\uff1a\u90a3\u91cc\u5012\u8ba1\u65f6\u671f\u95f4\u6253\u4e0d\u51fa\u4e0b\u4e00\u53d1\uff0c\u8fd9\u91cc\u5012\u8ba1\u65f6\u671f\u95f4\u77f3\u5934\u62ff\u4e0d\u8d70\u547d\u3002\u4e24\u8fb9\u90fd\u662f\u6bcf\u5e27\u5148\u4ece\u5269\u4f59\u65f6\u95f4\u91cc\u51cf\u6389 dt\u3001\u518d\u505a\u5224\u65ad\uff0c\u6240\u4ee5\u8ba1\u65f6\u8d70\u5b8c\u7684\u90a3\u4e00\u5e27\u5df2\u7ecf\u7b97\u300c\u597d\u4e86\u300d\uff1b\u800c\u90a3\u4ef6\u4e8b\u672c\u8eab\u2014\u2014\u90a3\u91cc\u662f\u5f00\u4e00\u67aa\uff0c\u8fd9\u91cc\u662f\u4e00\u6b21\u7b97\u6570\u7684\u649e\u51fb\u2014\u2014\u53c8\u628a\u8ba1\u65f6\u5668\u91cd\u65b0\u8bbe\u6210\u6574\u6574\u4e00\u4e2a\u65f6\u957f\u3002",
           "\u4e3a\u4ec0\u4e48\u9700\u8981\u8fd9\u4e24\u79d2\uff1a\u6bcf\u79d2 60 \u5e27\u65f6\u77f3\u5934\u6bcf\u5e27\u843d 4 \u50cf\u7d20\uff0c\u5b83\u7ecf\u8fc7 30 \u50cf\u7d20\u9ad8\u7684\u73a9\u5bb6\u65f6\uff0c\u524d\u540e\u5927\u7ea6\u6709 13 \u5e27\u4e0e\u73a9\u5bb6\u91cd\u53e0\uff0c\u7565\u591a\u4e8e\u4e94\u5206\u4e4b\u4e00\u79d2\u3002\u6ca1\u6709\u65e0\u654c\u65f6\u95f4\uff0c\u8fd9\u4e9b\u5e27\u6bcf\u4e00\u5e27\u90fd\u7b97\u4e00\u6b21\u649e\u51fb\uff0c\u4e00\u5757\u77f3\u5934\u4e09\u5e27\u4e4b\u5185\u5c31\u80fd\u628a\u4e09\u6761\u547d\u5168\u62ff\u8d70\u3002",
           "\u95ea\u70c1\u4e5f\u7531\u540c\u4e00\u4e2a\u8ba1\u65f6\u51b3\u5b9a\u3002int(invuln * 10) \u6570\u7684\u662f\u8fd8\u5269\u51e0\u4e2a\u5341\u5206\u4e4b\u4e00\u79d2\uff0c% 2 \u8ba9\u5b83\u5728\u5076\u6570\u4e0e\u5947\u6570\u4e4b\u95f4\u4ea4\u66ff\uff0c\u4e8e\u662f\u73a9\u5bb6\u53ea\u5728\u5076\u6570\u7684\u90a3\u4e9b\u5341\u5206\u4e4b\u4e00\u79d2\u91cc\u753b\u51fa\u6765\uff1b\u8ba1\u65f6\u4e3a 0 \u65f6\u5219\u6bcf\u5e27\u90fd\u753b\u3002collidelist \u4ea4\u56de\u73a9\u5bb6\u78b0\u5230\u7684\u7b2c\u4e00\u5757\u77f3\u5934\u7684\u4e0b\u6807\uff0c\u4e00\u5757\u90fd\u6ca1\u78b0\u5230\u65f6\u4ea4\u56de -1\u2014\u2014\u77e9\u5f62\u78b0\u649e\u89c1\u300c\u7cbe\u7075\u4e0e\u78b0\u649e\u300d\u4e00\u9875\u3002",
           "\u9875\u9762\u7684\u68c0\u67e5\u5668\u628a take_hit \u4e0e\u53e6\u4e00\u4e2a\u7248\u672c\u6bd4\u8f83\uff1a\u5b83\u5148\u7b97\u51fa\u5269\u4e0b\u7684\u65f6\u95f4\u3001\u4e0d\u6258\u5728\u96f6\u4e0a\uff0c\u636e\u6b64\u5224\u65ad\u73a9\u5bb6\u6b64\u523b\u80fd\u4e0d\u80fd\u88ab\u6253\u4e2d\uff0c\u518d\u4e00\u6b65\u5b9a\u51fa\u65b0\u7684\u547d\u6570\u4e0e\u8ba1\u65f6\u2014\u2014\u5728\u51e0\u767e\u7ec4\u968f\u624b\u9020\u7684\u5e27\u4e0a\u9010\u4e00\u6838\u5bf9\u3002\u5176\u4e2d\u7ea6\u56db\u6210\u662f\u8ba1\u65f6\u6b63\u597d\u8d70\u5b8c\u7684\u90a3\u4e00\u5e27\uff0c\u591a\u534a\u8fd8\u5728\u540c\u4e00\u5e27\u88ab\u649e\u4e0a\u3002"

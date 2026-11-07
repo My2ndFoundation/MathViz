@@ -7,7 +7,7 @@ class Point:
         self.y = y
 
     def __repr__(self):
-# >>> BLANK id=repr-return level=2 hint="返回一个双引号的 f-string，不用 + 拼接；类名直接写出来；两个字段都用 !r 转换 || 输出要和打印出来的那一行一模一样：类名、圆括号，里面是 x=、y= 各带自己的值，逗号后跟一个空格" hintEn="Return one double-quoted f-string, not + concatenation; write the class name out; apply !r to both fields || The text must be exactly the line that gets printed: the class name and round brackets, holding x= and y= each with its value, a space after the comma"
+# >>> BLANK id=repr-return level=2 hint="返回一个双引号的 f-string，不用 + 拼接；类名直接写出来；两个字段都用 !r 转换 || 交回的文字是 Point(x=1, y=2) 这个样子：类名、圆括号，里面是 x=、y= 各带自己的值，逗号后跟一个空格" hintEn="Return one double-quoted f-string, not + concatenation; write the class name out; apply !r to both fields || The text comes out like Point(x=1, y=2): the class name and round brackets, holding x= and y= each with its value, a space after the comma"
         return f"Point(x={self.x!r}, y={self.y!r})"
 # <<< BLANK
 

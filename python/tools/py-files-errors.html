@@ -29,13 +29,18 @@
      跟着改。版本号要在三处同步：注册表 python-tools.json 的 version、这里的
      tool-version meta、右上角的徽章——徽章直接读 meta（见第二个脚本块里的
      VERSION），所以它永远不需要单独改。 -->
-<meta name="tool-version" content="1.0.2">
-<meta name="tool-engine" content="py-1.3.1">
+<meta name="tool-version" content="1.0.3">
+<meta name="tool-engine" content="py-1.3.2">
 <!-- >>> GENERATED:FAVICON -->
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAA/1BMVEUUVrceN6YEl50nKYgDod8FapoEX3V6I+AEZ8gDbtxPFYdQIJ4DOTgCwv+GE8sFU1kDQDtmIL8pEVcGyrkDgdAAAABoKNkWCSwDSasAevQEGSgBqfc3F3QBs/paKNADJTUAa/SPG+pPIawCFRdzJuQDNUcDNlcEZcUAW/dGGY0lBzgjDEUBnPMDRIcQJVMCK0kyEmYCU7AHV4WiE/MOXLoEQ1sMedVSIqsHZY50FLoFNpdRHqkEhYdNDHYEOWwBgfYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADRsqliAAAAQHRSTlOjjpdhy2lM7KvNXYwU/74wGMUn+bkA/AuR/Qf5TPz4Df39rwP/GCKt/mwPGfNVIxc5lU7/pSnOnV+tdaV0RjX/bR25hAAAAVdJREFUeNqtk2d/gyAQh40rq7sFRECDK0Oz92jz/b9V/ZmYgCTpm/JCT+7hTu7+p4E/lvZPQGiasbw/bA5FwH9mzJf8GE9FwGWMEYGwcQc7MkAIMd3S/4NxpyMDhFkZMcOLfzpVgLFPsq/iI8F4ARwFSECSkUZujzHuAhUgSe5qrDR/VPgVIGMxiO3NbKYdj01wA2BWrFvLeLmxut3iMk5PAvzZq34qQ7I6vZ1eTeqFfShr4C7OEXYX4C30dftaRbc4owkRPvXDk9iHkZE/dg3jAoRhtcMjVQ9oMBA2ayhfMjCYz1+E36i16uuKor7nvHUlqEFRVXJbztPS7rdpX9Ek4rxemjCi6ZqmqA9F0X5zfj4WQC9P8EGNSSqpesuj4ioUwslN2aM6fC8SwODOXEyiiJYJbg/OHsJ2ACG9O1l5dAi94MHo0cjzpATKbO49jz4cXlRJAMAvD+ldcxDlRcsAAAAASUVORK5CYII=">
 <!-- <<< GENERATED:FAVICON -->
 <title>Files &amp; Exceptions · 文件与异常</title>
 <!-- 版本记录（changelog，新→旧）：
+     1.0.3  2026-11-06  两个程序不再打印内置或操作系统的异常消息（改打印异常类名）；讲解不再指向看不到的输出、用
+                        标题指别的程序；tag exceptions 统一为 exception。
+                        判定器（engine
+                        py-1.3.2）：答案与标准答案行数不同时也比较代码块结构（新反馈 kind
+                        block）。清理波：第 6 期账本 §十 第一、二组。
      1.0.2  2026-09-30  考试局按四家官方考纲重核（用户裁决：考纲外不写，[] 合法；依据见
                         docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md）：
                         try-except-else-finally
@@ -1635,6 +1640,165 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     return { toks: toks, rel: ind.rel, relLines: ind.relLines };
   }
 
+  /* ---- 块层级：两边有效行条数不同时才用（清理波，phase1-deferred §一.3） ----
+
+     有效行条数相同时，compare() 照旧按相对缩进**宽度**严比（rel）。条数不同的
+     合法写法只有两种：单行复合语句（`if x: y` 对两行写法）与括号内断行。以前这时
+     完全不比缩进，于是 `if a:\n    if b: c()\nd()` 判等于 `d()` 缩进在外层 if
+     里的那四行——语义变了也判对。
+
+     这里把源码切成**逻辑行**（括号深度 > 0、或上一个有效 token 是反斜杠续行
+     `\`、或上一个 token 是跨行的三引号字符串时，并入上一逻辑行），用一个缩进栈
+     把每条逻辑行映射成**块层级**（第一条逻辑行为 0）；复合语句头（行首是
+     COMPOUND 里的关键字、或按 softKeywordHeader 判为语句头的 match / case，括号深度 0
+     的第一个 `:`）后面同一行的体算深一层。
+     compare() 再逐 token 比层级：原文相同、层级不同 → kind 'block'。
+
+     CPython 会拒绝的三种缩进：
+       · unexpected indent（上一逻辑行不是以 `:` 结尾的语句头，这一行却变深）：
+         「变深」时层级取上一逻辑行**最深处**加一——`if a: b` 之后多缩进一行，它比 b
+         还深、不与 b 同层——所以它的层级按构造就比合法的参考多一层；
+       · expected an indented block（以 `:` 结尾的语句头之后没有变深）：参考是合法
+         Python，同一串 token 在参考里语句头之后的那个 token 必在深一层，作答不深，
+         层级按构造就不同；
+       · unindent does not match any outer indentation level（退缩进到栈里没有的
+         宽度）：层级可能碰巧等于参考，只有这一种记成 bad，不论层级等不等都判错。
+     前两种另记 bad 是冗余的：负控制实测，另记的 bad 删掉，测试与门全绿，所以不留。 */
+  var COMPOUND = { 'if': 1, 'elif': 1, 'else': 1, 'for': 1, 'while': 1, 'try': 1,
+                   'except': 1, 'finally': 1, 'with': 1, 'def': 1, 'class': 1 };
+  var OPENERS = { '(': 1, '[': 1, '{': 1 };
+  var CLOSERS = { ')': 1, ']': 1, '}': 1 };
+
+  /* match / case 是**软关键字**（清理波终审 M2）：`match = 3`、`match.group(1)`、`case(x)` 是普通
+     语句。判据（逻辑行 toks[a..b)，首词是 match / case）：
+       1. 第二个 token 能开一个 subject / 模式：名字（不是 if / else / in / is / and / or / for /
+          as / lambda 这类只能接在表达式后面的关键字）、数字、字符串、`(` `[` `{`、`-` `+` `~` `*`。
+          于是 `=` / `.` / `:` / `,` / 增强赋值 / 下标之外的运算符开头的都不是语句头。
+       2. 行里有括号深度 0 的 `:`，而它之前（括号深度 0）没有 `=`、增强赋值、`:=`、`lambda`——
+          排除 `case = lambda: 0`、`case, x = lambda: 0, 1` 一类。
+       3. match 头的 `:` 必须是这一逻辑行最后一个 token：CPython 的 match 头之后只能换行
+          （`match x: case 1: …` 是语法错），所以 match 按构造不会有同一行的体——认它是头与否
+          不改变任何层级，这一条只防把 `match: T = v` 之类的行算进来。
+     没有括号深度 0 冒号的行（`case(x)`、`match.group(1)`、`match = 3`）分不分类都一样：
+     colon 是 -1，层级不变。
+     仍分不出的（记在这里，靠「只挖写法唯一的行」）：`case[0]: int = 1`（给名为 case 的东西的下标
+     加注解）与 `case [0]: int = 1`（序列模式 + 一行体）token 完全相同，只有「是否在 match 块里」能
+     区分，而挖空片段常常不含 match 那一行——这里一律按 case 头处理。 */
+  var SOFT_HEAD_BAD_NAME = { 'if': 1, 'else': 1, 'elif': 1, 'in': 1, 'is': 1, 'and': 1, 'or': 1,
+                             'for': 1, 'as': 1, 'lambda': 1, 'from': 1, 'import': 1 };
+  var SOFT_HEAD_OK_PUNCT = { '(': 1, '[': 1, '{': 1, '-': 1, '+': 1, '~': 1, '*': 1 };
+  function isAssignOp(t) {
+    return t === '=' || t === ':=' ||
+      (t.length >= 2 && t.charAt(t.length - 1) === '=' && t !== '==' && t !== '!=' && t !== '<=' && t !== '>=');
+  }
+  function softKeywordHeader(toks, a, b) {
+    var head = toks[a].text;
+    if ((head !== 'match' && head !== 'case') || a + 2 >= b) { return false; }
+    var nx = toks[a + 1].text;
+    var starts = SOFT_HEAD_OK_PUNCT[nx] ||
+      (/^[A-Za-z_]/.test(nx) && !SOFT_HEAD_BAD_NAME[nx]) ||
+      /^[0-9'"]/.test(nx) || /^\.[0-9]/.test(nx);
+    if (!starts) { return false; }
+    var d = 0;
+    for (var j = a + 1; j < b; j++) {
+      var t = toks[j].text;
+      if (OPENERS[t]) { d++; continue; }
+      if (CLOSERS[t] && d > 0) { d--; continue; }
+      if (d !== 0) { continue; }
+      if (t === ':') { return head === 'case' || j === b - 1; }
+      if (t === 'lambda' || isAssignOp(t)) { return false; }
+    }
+    return false;
+  }
+
+  function countNewlines(s) {
+    var n = 0;
+    for (var i = 0; i < s.length; i++) { if (s.charAt(i) === '\n') { n++; } }
+    return n;
+  }
+
+  /* blockLevels(toks) -> { lvl: number[], bad: boolean[] }，与 toks 一一对应。 */
+  function blockLevels(toks) {
+    var lvl = new Array(toks.length);
+    var bad = new Array(toks.length);
+    if (toks.length === 0) { return { lvl: lvl, bad: bad }; }
+
+    /* 1. 切逻辑行：每项是 toks 的下标区间 [from, to) */
+    var logical = [];
+    var depth = 0, from = 0;
+    for (var i = 0; i < toks.length; i++) {
+      if (i > 0) {
+        var prev = toks[i - 1];
+        var prevEnd = prev.line + countNewlines(prev.text);
+        if (depth === 0 && toks[i].line > prevEnd && prev.text !== '\\') {
+          logical.push([from, i]);
+          from = i;
+        }
+      }
+      var tx = toks[i].text;
+      if (OPENERS[tx]) { depth++; } else if (CLOSERS[tx] && depth > 0) { depth--; }
+    }
+    logical.push([from, toks.length]);
+
+    /* 2. 缩进栈 */
+    var stack = null;           /* [{ w, lvl }] */
+    var prevDeepest = 0;        /* 上一逻辑行最深的层级 */
+    for (var k = 0; k < logical.length; k++) {
+      var a = logical[k][0], b = logical[k][1];
+      var w = toks[a].col;
+      var level, isBad = false;
+      if (stack === null) {
+        stack = [{ w: w, lvl: 0 }];
+        level = 0;
+      } else {
+        var top = stack[stack.length - 1];
+        if (w > top.w) {
+          level = prevDeepest + 1;
+          stack.push({ w: w, lvl: level });
+        } else if (w === top.w) {
+          level = top.lvl;
+        } else {
+          var popped = null;
+          while (stack.length && stack[stack.length - 1].w > w) { popped = stack.pop(); }
+          if (stack.length === 0) {
+            /* 空的片段可以退到第一行之外（一个空从函数体末尾跨到模块顶层）：
+               记成比被弹掉的最外层浅一层的新栈底，不算不合法。 */
+            level = popped.lvl - 1;
+            stack.push({ w: w, lvl: level });
+          } else if (stack[stack.length - 1].w === w) {
+            level = stack[stack.length - 1].lvl;
+          } else {
+            level = stack[stack.length - 1].lvl + 1;
+            isBad = true;
+            stack.push({ w: w, lvl: level });
+          }
+        }
+      }
+
+      /* 3. 复合语句头：括号深度 0 的第一个 `:`，其后同一逻辑行的 token 深一层 */
+      var head = toks[a].text;
+      var isHeader = !!COMPOUND[head] ||
+        (head === 'async' && a + 1 < b && /^(def|for|with)$/.test(toks[a + 1].text)) ||
+        softKeywordHeader(toks, a, b);
+      var colon = -1;
+      if (isHeader) {
+        var d = 0;
+        for (var j = a; j < b; j++) {
+          var t = toks[j].text;
+          if (OPENERS[t]) { d++; } else if (CLOSERS[t] && d > 0) { d--; }
+          else if (t === ':' && d === 0) { colon = j; break; }
+        }
+      }
+      for (var m = a; m < b; m++) {
+        lvl[m] = (colon !== -1 && m > colon) ? level + 1 : level;
+        bad[m] = isBad;
+      }
+      /* 一行写法：体在同一行，这一逻辑行最深处深一层 */
+      prevDeepest = (colon !== -1 && colon < b - 1) ? level + 1 : level;
+    }
+    return { lvl: lvl, bad: bad };
+  }
+
   /* 两个数组第一处不同的下标；一个是另一个的前缀时，下标取较短那个的长度；
      完全相同返回 -1。 */
   function firstDiffIndex(a, b) {
@@ -1647,7 +1811,11 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
   }
 
   /* compare(answer, reference) -> { ok, index, expected, got, kind }
-     kind ∈ 'equal' | 'different' | 'missing' | 'extra' | 'indent'
+     kind ∈ 'equal' | 'different' | 'missing' | 'extra' | 'indent' | 'block'
+
+     'block'（清理波）：两边有效行条数不同、token 原文到此处都相同、而块层级不同
+     （或答案这一逻辑行的缩进 CPython 会拒绝）——见 blockLevels。index 与 'indent'
+     同语义（答案侧物理行号，0 起），expected/got 是块层级数字。
 
      顺序：先比 rel，**但只有两边有效行条数相同时**，值不同才归类 'indent'；
      rel 相同、或有效行条数本身就不同，都落到逐 token 比原文，短的一方先到头
@@ -1686,10 +1854,22 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     }
 
     var at = na.toks, rt = nr.toks;
+    /* 有效行条数不同：相对缩进宽度没法逐行对，改比块层级（见 blockLevels）。
+       条数相同时上面已经按宽度严比过，这里不再重复。 */
+    var la = null, lr = null;
+    if (na.rel.length !== nr.rel.length) {
+      la = blockLevels(at);
+      lr = blockLevels(rt);
+    }
     var n = Math.min(at.length, rt.length);
     for (var i = 0; i < n; i++) {
       if (at[i].text !== rt[i].text) {
         return { ok: false, index: i, expected: rt[i].text, got: at[i].text, kind: 'different' };
+      }
+      if (la && (la.bad[i] || la.lvl[i] !== lr.lvl[i])) {
+        /* 'block'：与 'indent' 同一套 index 语义（答案侧**物理行号**，0 起），
+           expected/got 是块层级（相对第一条逻辑行，数字）。从不涉及字面量原文。 */
+        return { ok: false, index: at[i].line - 1, expected: lr.lvl[i], got: la.lvl[i], kind: 'block' };
       }
     }
     if (at.length < rt.length) {
@@ -2115,6 +2295,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
                   en: 'token #{0} is extra: {1} does not belong here' },
     blankIndent: { zh: '第 {0} 行缩进对不上：期待相对缩进 {1} 格，你写了 {2} 格',
                   en: 'line {0} indent is off: expected {1} spaces relative, you wrote {2}' },
+    blankBlock:  { zh: '第 {0} 行落进了另一层代码块：块结构与参考不同（看这一行的缩进，和它前面写成一行的语句头）',
+                  en: 'line {0} lands in a different block: the block structure differs from the reference (check this line\'s indent and any header written on one line before it)' },
     blankLead:   { zh: '第 1 行缩进对不上：这个空从第 {1} 格开始，你写了 {2} 格',
                   en: 'line 1 indent is off: this blank starts at column {1}, you wrote {2}' },
     blankDiffLiteral: { zh: '第 {0} 个 token（{1}）里第 {2} 个字符起不同',
@@ -2510,6 +2692,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
          所以要用 PyLex.significant 现取它在 answer 里的偏移。
        kind 'indent'：index 是**物理行号**，expected/got 是**相对缩进数值**
          （不是 null、不是字符串）。光标去那一行的行首。裁决 R30/R31。
+       kind 'block'（清理波）：同 'indent' 的 index 语义，expected/got 是块层级；
+         消息只报行号。
 
      另有 Judge 结构上看不见的一种错：**整块的绝对缩进**。Judge.normalize 比的是
      行与行之间的相对缩进，所以单行挖空体 `    x = 1` 与 `x = 1` 在它眼里完全
@@ -2543,6 +2727,20 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     var cmp = judge().compare(a, r);
     if (cmp.ok) {
       return { ok: true, kind: 'equal', caret: 0, message: t('blankOk', lang) };
+    }
+
+    /* 'block'（清理波）：两边有效行条数不同时，Judge 比的是块层级，index 同样是
+       答案侧**物理行号**。消息不印层级数字——「第 1 层 / 第 0 层」对她没有意义——
+       也从不涉及字面量原文。 */
+    if (cmp.kind === 'block') {
+      var bStarts = editor().lineStarts(a);
+      var bi = Math.max(0, Math.min(cmp.index, bStarts.length - 1));
+      return {
+        ok: false,
+        kind: 'block',
+        caret: bStarts[bi],
+        message: ts('blankBlock', lang, [cmp.index + 1])
+      };
     }
 
     if (cmp.kind === 'indent') {
@@ -4557,7 +4755,7 @@ var PyPrograms = {
         "en": [
           "The file is read in two stages. readline() takes the header row on its own, and the for loop then carries on from wherever the file currently is, so it sees only the data rows. A file object remembers its position; you do not have to skip the header inside the loop.",
           "Every field comes back as a string, including the marks. \"91\" + \"78\" is \"9178\", so each mark goes through int() before it is stored. sum() on the resulting list is then real arithmetic.",
-          "This works because the file is simple. CSV allows a field to contain a comma if the field is wrapped in quotes, so a row like \"Smith, Jo\",70 is two fields: the name Smith, Jo and the mark 70. split(\",\") knows nothing about quotes and cuts it into three pieces - '\"Smith', ' Jo\"' and '70' - and every column after the name is now off by one. Nothing raises an error; the marks are simply wrong. The sibling program read-csv-module reads the same file with the csv module, which does understand the quoting rules.",
+          "This works because the file is simple. CSV allows a field to contain a comma if the field is wrapped in quotes, so a row like \"Smith, Jo\",70 is two fields: the name Smith, Jo and the mark 70. split(\",\") knows nothing about quotes and cuts it into three pieces - '\"Smith', ' Jo\"' and '70' - and every column after the name is now off by one. Nothing raises an error; the marks are simply wrong. Read a CSV: the csv Module reads the same file with the csv module, which does understand the quoting rules.",
           "To run this in PyCharm you need the data file too: make a folder called _fixtures next to the program and put a file scores.csv in it. It has these four lines, one per paragraph below:",
           "name,maths,physics,cs",
           "Ada,91,78,95",
@@ -4568,7 +4766,7 @@ var PyPrograms = {
         "zh": [
           "\u6587\u4ef6\u5206\u4e24\u6b65\u8bfb\u3002readline() \u5355\u72ec\u62ff\u8d70\u8868\u5934\u90a3\u4e00\u884c\uff0c\u4e4b\u540e\u7684 for \u5faa\u73af\u4ece\u6587\u4ef6\u5f53\u524d\u6240\u5728\u7684\u4f4d\u7f6e\u63a5\u7740\u8bfb\uff0c\u6240\u4ee5\u5b83\u53ea\u770b\u5230\u6570\u636e\u884c\u3002\u6587\u4ef6\u5bf9\u8c61\u8bb0\u5f97\u81ea\u5df1\u8bfb\u5230\u4e86\u54ea\u513f\uff0c\u4e0d\u9700\u8981\u5728\u5faa\u73af\u91cc\u518d\u8df3\u8fc7\u8868\u5934\u3002",
           "\u6bcf\u4e2a\u5b57\u6bb5\u8bfb\u56de\u6765\u90fd\u662f\u5b57\u7b26\u4e32\uff0c\u5206\u6570\u4e5f\u4e0d\u4f8b\u5916\u3002\"91\" + \"78\" \u5f97\u5230\u7684\u662f \"9178\"\uff0c\u6240\u4ee5\u6bcf\u4e2a\u5206\u6570\u5b58\u8fdb\u53bb\u4e4b\u524d\u90fd\u8fc7\u4e00\u904d int()\u3002\u4e4b\u540e\u5bf9\u5217\u8868\u505a sum() \u624d\u662f\u771f\u6b63\u7684\u7b97\u672f\u3002",
-          "\u5b83\u80fd\u7528\uff0c\u662f\u56e0\u4e3a\u8fd9\u4efd\u6587\u4ef6\u7b80\u5355\u3002CSV \u5141\u8bb8\u5b57\u6bb5\u91cc\u542b\u9017\u53f7\u2014\u2014\u53ea\u8981\u7528\u5f15\u53f7\u628a\u8fd9\u4e2a\u5b57\u6bb5\u62ec\u8d77\u6765\u2014\u2014\u6240\u4ee5 \"Smith, Jo\",70 \u8fd9\u4e00\u884c\u662f\u4e24\u4e2a\u5b57\u6bb5\uff1a\u540d\u5b57 Smith, Jo \u4e0e\u5206\u6570 70\u3002split(\",\") \u4e0d\u8ba4\u8bc6\u5f15\u53f7\uff0c\u4f1a\u628a\u5b83\u5207\u6210\u4e09\u6bb5\uff1a'\"Smith'\u3001' Jo\"' \u548c '70'\uff0c\u540d\u5b57\u4e4b\u540e\u7684\u6bcf\u4e00\u5217\u90fd\u9519\u5f00\u4e00\u4f4d\u3002\u4e0d\u4f1a\u6709\u4efb\u4f55\u62a5\u9519\uff0c\u53ea\u662f\u5206\u6570\u5168\u9519\u4e86\u3002\u5144\u5f1f\u7a0b\u5e8f read-csv-module \u7528 csv \u6a21\u5757\u8bfb\u540c\u4e00\u4efd\u6587\u4ef6\uff0c\u90a3\u4e2a\u6a21\u5757\u61c2\u5f15\u53f7\u89c4\u5219\u3002",
+          "\u5b83\u80fd\u7528\uff0c\u662f\u56e0\u4e3a\u8fd9\u4efd\u6587\u4ef6\u7b80\u5355\u3002CSV \u5141\u8bb8\u5b57\u6bb5\u91cc\u542b\u9017\u53f7\u2014\u2014\u53ea\u8981\u7528\u5f15\u53f7\u628a\u8fd9\u4e2a\u5b57\u6bb5\u62ec\u8d77\u6765\u2014\u2014\u6240\u4ee5 \"Smith, Jo\",70 \u8fd9\u4e00\u884c\u662f\u4e24\u4e2a\u5b57\u6bb5\uff1a\u540d\u5b57 Smith, Jo \u4e0e\u5206\u6570 70\u3002split(\",\") \u4e0d\u8ba4\u8bc6\u5f15\u53f7\uff0c\u4f1a\u628a\u5b83\u5207\u6210\u4e09\u6bb5\uff1a'\"Smith'\u3001' Jo\"' \u548c '70'\uff0c\u540d\u5b57\u4e4b\u540e\u7684\u6bcf\u4e00\u5217\u90fd\u9519\u5f00\u4e00\u4f4d\u3002\u4e0d\u4f1a\u6709\u4efb\u4f55\u62a5\u9519\uff0c\u53ea\u662f\u5206\u6570\u5168\u9519\u4e86\u3002\u300c\u8bfb CSV\uff1acsv \u6a21\u5757\u300d\u7528 csv \u6a21\u5757\u8bfb\u540c\u4e00\u4efd\u6587\u4ef6\uff0c\u90a3\u4e2a\u6a21\u5757\u61c2\u5f15\u53f7\u89c4\u5219\u3002",
           "\u8981\u5728 PyCharm \u91cc\u8dd1\uff0c\u8fd8\u5f97\u6709\u8fd9\u4efd\u6570\u636e\u6587\u4ef6\uff1a\u5728\u7a0b\u5e8f\u65c1\u8fb9\u5efa\u4e00\u4e2a\u53eb _fixtures \u7684\u6587\u4ef6\u5939\uff0c\u91cc\u9762\u653e scores.csv\uff0c\u5185\u5bb9\u5c31\u662f\u4e0b\u9762\u56db\u884c\uff0c\u4e00\u6bb5\u4e00\u884c\uff1a",
           "name,maths,physics,cs",
           "Ada,91,78,95",
@@ -4628,15 +4826,15 @@ var PyPrograms = {
         "zh": "\u8bfb CSV\uff1acsv \u6a21\u5757"
       },
       "blurb": {
-        "en": "The same file and the same output as the split version, with the parsing handed to the csv module.",
-        "zh": "\u540c\u4e00\u4efd\u6587\u4ef6\u3001\u540c\u4e00\u4efd\u8f93\u51fa\uff0c\u53ea\u662f\u628a\u300c\u5207\u5f00\u300d\u8fd9\u4ef6\u4e8b\u4ea4\u7ed9\u4e86 csv \u6a21\u5757\u3002"
+        "en": "The same file and the same results as Read a CSV: split by Hand, with the parsing handed to the csv module.",
+        "zh": "\u548c\u300c\u8bfb CSV\uff1a\u624b\u5de5 split\u300d\u540c\u4e00\u4efd\u6587\u4ef6\u3001\u540c\u6837\u7684\u7ed3\u679c\uff0c\u53ea\u662f\u628a\u300c\u5207\u5f00\u300d\u8fd9\u4ef6\u4e8b\u4ea4\u7ed9\u4e86 csv \u6a21\u5757\u3002"
       },
       "notes": {
         "en": [
-          "A csv reader wraps the open file and hands back each row already split into a list of strings, with the newline removed. It understands quoted fields, so \"Smith, Jo\",70 comes back as the two fields it really is. That is the whole reason to use it: the output here matches read-csv-split only because scores.csv contains no quotes.",
+          "A csv reader wraps the open file and hands back each row already split into a list of strings, with the newline removed. It understands quoted fields, so \"Smith, Jo\",70 comes back as the two fields it really is. That is the whole reason to use it: this program prints the same as Read a CSV: split by Hand only because scores.csv contains no quotes.",
           "The file is opened with newline set to the empty string. Normally Python translates line endings as it reads; the csv module wants to see the raw line endings itself, because a quoted field is allowed to contain a line break. The csv documentation asks for this on every file you hand to the csv module, reading or writing.",
           "A reader is an iterator, the same kind of thing a file object is. The built-in next() takes one row out of it - the header - and the for loop continues from the row after. If the file were completely empty, next() would raise StopIteration, which is a loud failure rather than a silent wrong answer.",
-          "The values are still strings. The csv module splits text; it does not guess types, so the int() conversion is exactly the same as in the split version.",
+          "The values are still strings. The csv module splits text; it does not guess types, so the int() conversion is exactly the same as in Read a CSV: split by Hand.",
           "To run this in PyCharm you need the data file too: make a folder called _fixtures next to the program and put a file scores.csv in it. It has these four lines, one per paragraph below:",
           "name,maths,physics,cs",
           "Ada,91,78,95",
@@ -4645,10 +4843,10 @@ var PyPrograms = {
           "The path _fixtures/scores.csv is relative, so it is looked up from the folder the program is run in, which is PyCharm's working directory, normally the program's own folder."
         ],
         "zh": [
-          "csv \u8bfb\u53d6\u5668\u5305\u4f4f\u5df2\u6253\u5f00\u7684\u6587\u4ef6\uff0c\u6bcf\u6b21\u4ea4\u56de\u4e00\u884c\u5df2\u7ecf\u5207\u597d\u7684\u5b57\u7b26\u4e32\u5217\u8868\uff0c\u6362\u884c\u4e5f\u5df2\u53bb\u6389\u3002\u5b83\u61c2\u5e26\u5f15\u53f7\u7684\u5b57\u6bb5\uff0c\"Smith, Jo\",70 \u8bfb\u56de\u6765\u5c31\u662f\u5b83\u771f\u6b63\u7684\u4e24\u4e2a\u5b57\u6bb5\u3002\u7528\u5b83\u7684\u5168\u90e8\u7406\u7531\u5c31\u5728\u8fd9\u91cc\uff1a\u672c\u7a0b\u5e8f\u7684\u8f93\u51fa\u4e0e read-csv-split \u4e00\u6837\uff0c\u53ea\u662f\u56e0\u4e3a scores.csv \u91cc\u6070\u597d\u6ca1\u6709\u5f15\u53f7\u3002",
+          "csv \u8bfb\u53d6\u5668\u5305\u4f4f\u5df2\u6253\u5f00\u7684\u6587\u4ef6\uff0c\u6bcf\u6b21\u4ea4\u56de\u4e00\u884c\u5df2\u7ecf\u5207\u597d\u7684\u5b57\u7b26\u4e32\u5217\u8868\uff0c\u6362\u884c\u4e5f\u5df2\u53bb\u6389\u3002\u5b83\u61c2\u5e26\u5f15\u53f7\u7684\u5b57\u6bb5\uff0c\"Smith, Jo\",70 \u8bfb\u56de\u6765\u5c31\u662f\u5b83\u771f\u6b63\u7684\u4e24\u4e2a\u5b57\u6bb5\u3002\u7528\u5b83\u7684\u5168\u90e8\u7406\u7531\u5c31\u5728\u8fd9\u91cc\uff1a\u672c\u7a0b\u5e8f\u6253\u5370\u7684\u4e0e\u300c\u8bfb CSV\uff1a\u624b\u5de5 split\u300d\u4e00\u6837\uff0c\u53ea\u662f\u56e0\u4e3a scores.csv \u91cc\u6070\u597d\u6ca1\u6709\u5f15\u53f7\u3002",
           "\u6253\u5f00\u6587\u4ef6\u65f6\u628a newline \u8bbe\u6210\u4e86\u7a7a\u5b57\u7b26\u4e32\u3002\u5e73\u5e38 Python \u8bfb\u6587\u4ef6\u65f6\u4f1a\u7ffb\u8bd1\u884c\u5c3e\uff1bcsv \u6a21\u5757\u8981\u81ea\u5df1\u770b\u5230\u539f\u59cb\u7684\u884c\u5c3e\uff0c\u56e0\u4e3a\u5e26\u5f15\u53f7\u7684\u5b57\u6bb5\u91cc\u5141\u8bb8\u51fa\u73b0\u6362\u884c\u3002csv \u6587\u6863\u8981\u6c42\uff1a\u4ea4\u7ed9 csv \u6a21\u5757\u7684\u6bcf\u4e2a\u6587\u4ef6\uff0c\u8bfb\u4e5f\u597d\u5199\u4e5f\u597d\uff0c\u90fd\u8fd9\u6837\u6253\u5f00\u3002",
           "\u8bfb\u53d6\u5668\u662f\u4e00\u4e2a\u8fed\u4ee3\u5668\uff0c\u548c\u6587\u4ef6\u5bf9\u8c61\u662f\u540c\u4e00\u7c7b\u4e1c\u897f\u3002\u5185\u7f6e\u7684 next() \u4ece\u91cc\u9762\u53d6\u51fa\u4e00\u884c\u2014\u2014\u8868\u5934\u2014\u2014\u4e4b\u540e\u7684 for \u5faa\u73af\u4ece\u4e0b\u4e00\u884c\u63a5\u7740\u8d70\u3002\u6587\u4ef6\u82e5\u5b8c\u5168\u662f\u7a7a\u7684\uff0cnext() \u4f1a\u629b StopIteration\uff1a\u54cd\u4eae\u5730\u5931\u8d25\uff0c\u800c\u4e0d\u662f\u6084\u6084\u7ed9\u51fa\u9519\u7b54\u6848\u3002",
-          "\u503c\u4f9d\u7136\u662f\u5b57\u7b26\u4e32\u3002csv \u6a21\u5757\u53ea\u7ba1\u5207\uff0c\u4e0d\u731c\u7c7b\u578b\uff0c\u6240\u4ee5 int() \u8f6c\u6362\u548c split \u7248\u4e00\u6a21\u4e00\u6837\u3002",
+          "\u503c\u4f9d\u7136\u662f\u5b57\u7b26\u4e32\u3002csv \u6a21\u5757\u53ea\u7ba1\u5207\uff0c\u4e0d\u731c\u7c7b\u578b\uff0c\u6240\u4ee5 int() \u8f6c\u6362\u548c\u300c\u8bfb CSV\uff1a\u624b\u5de5 split\u300d\u91cc\u4e00\u6a21\u4e00\u6837\u3002",
           "\u8981\u5728 PyCharm \u91cc\u8dd1\uff0c\u8fd8\u5f97\u6709\u8fd9\u4efd\u6570\u636e\u6587\u4ef6\uff1a\u5728\u7a0b\u5e8f\u65c1\u8fb9\u5efa\u4e00\u4e2a\u53eb _fixtures \u7684\u6587\u4ef6\u5939\uff0c\u91cc\u9762\u653e scores.csv\uff0c\u5185\u5bb9\u5c31\u662f\u4e0b\u9762\u56db\u884c\uff0c\u4e00\u6bb5\u4e00\u884c\uff1a",
           "name,maths,physics,cs",
           "Ada,91,78,95",
@@ -4762,7 +4960,7 @@ var PyPrograms = {
         "except",
         "else",
         "finally",
-        "exceptions"
+        "exception"
       ],
       "requires": [],
       "runtime": "cpython",
@@ -4772,18 +4970,18 @@ var PyPrograms = {
         "zh": "try\u3001except\u3001else\u3001finally"
       },
       "blurb": {
-        "en": "Each of the four clauses prints its own name, so the output is the order they ran in - once without an error, once with one.",
-        "zh": "\u56db\u4e2a\u5b50\u53e5\u5404\u81ea\u6253\u5370\u81ea\u5df1\u7684\u540d\u5b57\uff0c\u4e8e\u662f\u8f93\u51fa\u5c31\u662f\u5b83\u4eec\u7684\u6267\u884c\u987a\u5e8f\u2014\u2014\u4e00\u6b21\u6ca1\u51fa\u9519\uff0c\u4e00\u6b21\u51fa\u4e86\u9519\u3002"
+        "en": "Each of the four clauses prints its own name, tracing the order they run in - once without an error, once with one.",
+        "zh": "\u56db\u4e2a\u5b50\u53e5\u5404\u81ea\u6253\u5370\u81ea\u5df1\u7684\u540d\u5b57\uff0c\u8bb0\u4e0b\u5b83\u4eec\u7684\u6267\u884c\u987a\u5e8f\u2014\u2014\u4e00\u6b21\u6ca1\u51fa\u9519\uff0c\u4e00\u6b21\u51fa\u4e86\u9519\u3002"
       },
       "notes": {
         "en": [
-          "Read the two runs side by side. 10 / 4 raises nothing, so the except clause is skipped and else runs. 1 / 0 raises ZeroDivisionError on the division line; the rest of the try block is abandoned, the matching except runs, and else is skipped. In both runs finally runs, and then execution carries on after the whole statement.",
+          "Follow the two calls side by side. 10 / 4 raises nothing, so the except clause is skipped and else runs. 1 / 0 raises ZeroDivisionError on the division line; the rest of the try block is abandoned, the matching except runs, and else is skipped. In both calls finally runs, and then execution carries on after the whole statement.",
           "else is for code that should run only when the try block succeeded. It could be written at the end of the try block instead, but then an exception of the same kind raised by that code would be caught by the except clause too, and blamed on the wrong line. Keeping the try block as short as the risky operation, and putting the follow-up in else, keeps the except honest.",
           "finally is for clean-up that must happen whatever went on: closing something, printing a closing message, releasing a lock. leave_early shows the strongest case - the try block returns, and finally still runs before the value actually leaves the function. with closes a file for you on the same principle.",
           "Only an exception that matches the except clause is caught. If a / b raised something else, such as TypeError, finally would still run, but the exception would then carry on out of divide() and stop the program."
         ],
         "zh": [
-          "\u628a\u4e24\u6b21\u8fd0\u884c\u5e76\u6392\u8bfb\u300210 / 4 \u4ec0\u4e48\u90fd\u4e0d\u629b\uff0c\u6240\u4ee5\u8df3\u8fc7 except\u3001\u6267\u884c else\u30021 / 0 \u5728\u9664\u6cd5\u90a3\u4e00\u884c\u629b\u51fa ZeroDivisionError\uff1btry \u5757\u5269\u4e0b\u7684\u90e8\u5206\u88ab\u653e\u5f03\uff0c\u5339\u914d\u7684 except \u6267\u884c\uff0celse \u88ab\u8df3\u8fc7\u3002\u4e24\u6b21\u8fd0\u884c\u91cc finally \u90fd\u6267\u884c\uff0c\u7136\u540e\u63a5\u7740\u6267\u884c\u6574\u4e2a\u8bed\u53e5\u4e4b\u540e\u7684\u4ee3\u7801\u3002",
+          "\u628a\u4e24\u6b21\u8c03\u7528\u5e76\u6392\u8ddf\u4e00\u904d\u300210 / 4 \u4ec0\u4e48\u90fd\u4e0d\u629b\uff0c\u6240\u4ee5\u8df3\u8fc7 except\u3001\u6267\u884c else\u30021 / 0 \u5728\u9664\u6cd5\u90a3\u4e00\u884c\u629b\u51fa ZeroDivisionError\uff1btry \u5757\u5269\u4e0b\u7684\u90e8\u5206\u88ab\u653e\u5f03\uff0c\u5339\u914d\u7684 except \u6267\u884c\uff0celse \u88ab\u8df3\u8fc7\u3002\u4e24\u6b21\u8c03\u7528\u91cc finally \u90fd\u6267\u884c\uff0c\u7136\u540e\u63a5\u7740\u6267\u884c\u6574\u4e2a\u8bed\u53e5\u4e4b\u540e\u7684\u4ee3\u7801\u3002",
           "else \u653e\u7684\u662f\u300c\u53ea\u6709 try \u5757\u6210\u529f\u4e86\u624d\u8be5\u8dd1\u300d\u7684\u4ee3\u7801\u3002\u5b83\u4e5f\u53ef\u4ee5\u5199\u5728 try \u5757\u672b\u5c3e\uff0c\u4f46\u90a3\u6837\u7684\u8bdd\uff0c\u8fd9\u6bb5\u4ee3\u7801\u81ea\u5df1\u629b\u51fa\u7684\u540c\u7c7b\u5f02\u5e38\u4e5f\u4f1a\u88ab except \u63a5\u4f4f\u3001\u88ab\u7b97\u5230\u9519\u8bef\u7684\u90a3\u4e00\u884c\u5934\u4e0a\u3002\u8ba9 try \u5757\u53ea\u5305\u4f4f\u90a3\u4e2a\u6709\u98ce\u9669\u7684\u64cd\u4f5c\u3001\u628a\u540e\u7eed\u653e\u8fdb else\uff0cexcept \u624d\u4e0d\u4f1a\u51a4\u6789\u4eba\u3002",
           "finally \u653e\u7684\u662f\u65e0\u8bba\u53d1\u751f\u4ec0\u4e48\u90fd\u5fc5\u987b\u505a\u7684\u6536\u5c3e\uff1a\u5173\u6389\u67d0\u6837\u4e1c\u897f\u3001\u6253\u5370\u6536\u5c3e\u4fe1\u606f\u3001\u91ca\u653e\u9501\u3002leave_early \u6f14\u793a\u4e86\u6700\u5f3a\u7684\u60c5\u5f62\u2014\u2014try \u5757\u91cc\u76f4\u63a5 return\uff0cfinally \u4f9d\u7136\u5728\u503c\u771f\u6b63\u79bb\u5f00\u51fd\u6570\u4e4b\u524d\u6267\u884c\u3002with \u66ff\u4f60\u5173\u6587\u4ef6\uff0c\u9760\u7684\u4e5f\u662f\u540c\u4e00\u4e2a\u539f\u7406\u3002",
           "\u53ea\u6709\u4e0e except \u5339\u914d\u7684\u5f02\u5e38\u624d\u4f1a\u88ab\u63a5\u4f4f\u3002\u5982\u679c a / b \u629b\u7684\u662f\u522b\u7684\uff0c\u6bd4\u5982 TypeError\uff0cfinally \u4f9d\u7136\u6267\u884c\uff0c\u4f46\u5f02\u5e38\u968f\u540e\u4f1a\u7ee7\u7eed\u51b2\u51fa divide()\uff0c\u8ba9\u7a0b\u5e8f\u505c\u4e0b\u3002"
@@ -4842,13 +5040,13 @@ var PyPrograms = {
         "en": [
           "When the try block raises, Python checks the except clauses in the order they are written and runs the first one that matches; the rest are ignored. Matching includes subclasses: an except for a class also catches every exception derived from it.",
           "That is why the most specific clauses come first and Exception comes last. ZeroDivisionError, ValueError and TypeError are all subclasses of Exception, so if the Exception clause were at the top it would catch every one of them and the specific clauses below it could never run. Python does not warn you about an unreachable except clause.",
-          "as e binds the exception object to a name so you can use it. Printing it gives the message Python attached: for 'ten' that is invalid literal for int() with base 10: 'ten'. The ZeroDivisionError and TypeError clauses print their own wording instead, because they do not need anything from the exception object.",
+          "as e binds the exception object to a name so you can use it. Here the ValueError clause reads the class name off it with type(e).__name__ and adds its own words, so 'ten' is reported as ValueError: 'ten' is not a whole number. The message Python attaches to the exception is not printed, because Python does not promise to keep the wording of its built-in messages the same from one version to the next. The ZeroDivisionError and TypeError clauses print only their own wording, because they do not need anything from the exception object.",
           "The last case passes None. None has no strip method, so the very first line of the try block raises AttributeError - a mistake none of the specific clauses expected. The catch-all reports it by class name. A catch-all is useful at the edge of a program, but it is also how real bugs get hidden, so it should always say what it caught rather than stay silent."
         ],
         "zh": [
           "try \u5757\u4e00\u629b\u5f02\u5e38\uff0cPython \u5c31\u6309\u4e66\u5199\u987a\u5e8f\u9010\u4e2a\u68c0\u67e5 except \u5b50\u53e5\uff0c\u6267\u884c\u7b2c\u4e00\u4e2a\u5339\u914d\u7684\uff0c\u5176\u4f59\u5168\u90e8\u5ffd\u7565\u3002\u300c\u5339\u914d\u300d\u5305\u62ec\u5b50\u7c7b\uff1a\u63a5\u4f4f\u4e00\u4e2a\u7c7b\u7684\u5b50\u53e5\uff0c\u4e5f\u63a5\u4f4f\u4ece\u5b83\u6d3e\u751f\u51fa\u6765\u7684\u6240\u6709\u5f02\u5e38\u3002",
           "\u6240\u4ee5\u6700\u5177\u4f53\u7684\u5b50\u53e5\u653e\u524d\u9762\uff0cException \u653e\u6700\u540e\u3002ZeroDivisionError\u3001ValueError\u3001TypeError \u90fd\u662f Exception \u7684\u5b50\u7c7b\uff1b\u8981\u662f Exception \u90a3\u4e2a\u5b50\u53e5\u6392\u5728\u6700\u4e0a\u9762\uff0c\u5b83\u4f1a\u628a\u8fd9\u4e9b\u7edf\u7edf\u63a5\u8d70\uff0c\u4e0b\u9762\u90a3\u4e9b\u5177\u4f53\u5b50\u53e5\u6c38\u8fdc\u8f6e\u4e0d\u5230\u3002Python \u4e0d\u4f1a\u5c31\u300c\u6267\u884c\u4e0d\u5230\u7684 except\u300d\u63d0\u9192\u4f60\u3002",
-          "as e \u628a\u5f02\u5e38\u5bf9\u8c61\u7ed1\u5230\u4e00\u4e2a\u540d\u5b57\u4e0a\uff0c\u597d\u8ba9\u4f60\u7528\u5b83\u3002\u6253\u5370\u5b83\u5f97\u5230\u7684\u662f Python \u9644\u4e0a\u7684\u6d88\u606f\uff1a'ten' \u5bf9\u5e94\u7684\u662f invalid literal for int() with base 10: 'ten'\u3002ZeroDivisionError \u4e0e TypeError \u4e24\u4e2a\u5b50\u53e5\u6253\u5370\u81ea\u5df1\u5199\u7684\u8bdd\uff0c\u56e0\u4e3a\u5b83\u4eec\u7528\u4e0d\u7740\u5f02\u5e38\u5bf9\u8c61\u91cc\u7684\u4efb\u4f55\u4e1c\u897f\u3002",
+          "as e \u628a\u5f02\u5e38\u5bf9\u8c61\u7ed1\u5230\u4e00\u4e2a\u540d\u5b57\u4e0a\uff0c\u597d\u8ba9\u4f60\u7528\u5b83\u3002\u8fd9\u91cc ValueError \u5b50\u53e5\u7528 type(e).__name__ \u4ece\u5b83\u8eab\u4e0a\u8bfb\u51fa\u7c7b\u540d\u3001\u518d\u63a5\u4e0a\u81ea\u5df1\u5199\u7684\u8bdd\uff0c\u6240\u4ee5 'ten' \u62a5\u51fa\u6765\u662f ValueError: 'ten' is not a whole number\u3002Python \u9644\u5728\u5f02\u5e38\u4e0a\u7684\u6d88\u606f\u6ca1\u6709\u6253\u5370\uff0c\u56e0\u4e3a Python \u4e0d\u4fdd\u8bc1\u5185\u7f6e\u6d88\u606f\u7684\u63aa\u8f9e\u5728\u5404\u4e2a\u7248\u672c\u4e4b\u95f4\u4fdd\u6301\u4e0d\u53d8\u3002ZeroDivisionError \u4e0e TypeError \u4e24\u4e2a\u5b50\u53e5\u53ea\u6253\u5370\u81ea\u5df1\u5199\u7684\u8bdd\uff0c\u56e0\u4e3a\u5b83\u4eec\u7528\u4e0d\u7740\u5f02\u5e38\u5bf9\u8c61\u91cc\u7684\u4efb\u4f55\u4e1c\u897f\u3002",
           "\u6700\u540e\u4e00\u7ec4\u4f20\u7684\u662f None\u3002None \u6ca1\u6709 strip \u65b9\u6cd5\uff0c\u6240\u4ee5 try \u5757\u7684\u7b2c\u4e00\u884c\u5c31\u629b\u51fa AttributeError\u2014\u2014\u54ea\u4e2a\u5177\u4f53\u5b50\u53e5\u90fd\u6ca1\u6599\u5230\u7684\u9519\u3002\u515c\u5e95\u5b50\u53e5\u6309\u7c7b\u540d\u628a\u5b83\u62a5\u51fa\u6765\u3002\u515c\u5e95\u5728\u7a0b\u5e8f\u7684\u6700\u5916\u5c42\u5f88\u6709\u7528\uff0c\u4f46\u5b83\u4e5f\u6b63\u662f\u771f bug \u88ab\u85cf\u8d77\u6765\u7684\u5730\u65b9\uff0c\u6240\u4ee5\u5b83\u5e94\u5f53\u603b\u662f\u8bf4\u51fa\u81ea\u5df1\u63a5\u4f4f\u4e86\u4ec0\u4e48\uff0c\u800c\u4e0d\u662f\u4e00\u58f0\u4e0d\u542d\u3002"
         ]
       },
@@ -4866,10 +5064,10 @@ var PyPrograms = {
       ],
       "run": {
         "stdin": "",
-        "expect": "' 12 ' / 4\n  result: 3.0\n'ten' / 2\n  ValueError: invalid literal for int() with base 10: 'ten'\n  result: None\n'7' / 0\n  ZeroDivisionError: the divisor is zero\n  result: None\n'9' / '3'\n  TypeError: the divisor is not a number\n  result: None\nNone / 1\n  something else: AttributeError\n  result: None\n",
+        "expect": "' 12 ' / 4\n  result: 3.0\n'ten' / 2\n  ValueError: 'ten' is not a whole number\n  result: None\n'7' / 0\n  ZeroDivisionError: the divisor is zero\n  result: None\n'9' / '3'\n  TypeError: the divisor is not a number\n  result: None\nNone / 1\n  something else: AttributeError\n  result: None\n",
         "timeout": 5
       },
-      "source": "\"\"\"Handle different exceptions with separate except clauses, most specific first.\"\"\"\n\n\ndef parse_and_divide(text, divisor):\n    try:\n        number = int(text.strip())\n        return number / divisor\n# >>> BLANK id=except-value level=2 hint=\"\u7b2c\u4e00\u4e2a\u5b50\u53e5\u63a5\u4f4f int() \u8bfb\u4e0d\u61c2\u6587\u5b57\u65f6\u629b\u7684\u90a3\u79cd\u5f02\u5e38\uff0c\u5e76\u628a\u5f02\u5e38\u5bf9\u8c61\u7ed1\u5230\u4e00\u4e2a\u540d\u5b57\u4e0a\uff0c\u4e0b\u4e00\u884c\u8981\u6253\u5370\u5b83 || \u5f02\u5e38\u7c7b\u662f ValueError\uff1b\u7ed1\u5b9a\u7528 as\uff0c\u540d\u5b57\u5c31\u662f\u4e0b\u4e00\u884c\u82b1\u62ec\u53f7\u91cc\u7684\u90a3\u4e2a\" hintEn=\"The first clause catches the exception int() raises when it cannot read the text, and binds the exception object to a name, because the next line prints it || the class is ValueError; binding uses as, and the name is the one inside the braces on the next line\"\n    except ValueError as e:\n# \u003c\u003c\u003c BLANK\n        print(f\"  ValueError: {e}\")\n    except ZeroDivisionError:\n        print(\"  ZeroDivisionError: the divisor is zero\")\n    except TypeError:\n        print(\"  TypeError: the divisor is not a number\")\n# >>> BLANK id=except-catch-all level=2 hint=\"\u6700\u540e\u4e00\u4e2a\u5b50\u53e5\u515c\u5e95\uff1a\u63a5\u4f4f\u4efb\u4f55\u666e\u901a\u5f02\u5e38\uff0c\u7ed1\u5b9a\u5230 e\uff0c\u4e0b\u4e00\u884c\u8981\u6253\u5370\u5b83\u7684\u7c7b\u540d\u2014\u2014\u5b83\u5fc5\u987b\u6392\u5728\u6240\u6709\u5177\u4f53\u5b50\u53e5\u4e4b\u540e\uff1b\u7c7b\u540d\u8981\u660e\u5199\uff0c\u4e0d\u7528\u88f8 except || \u7528\u6240\u6709\u666e\u901a\u5f02\u5e38\u5171\u540c\u7684\u90a3\u4e2a\u57fa\u7c7b\uff08\u4e0d\u662f\u8fde KeyboardInterrupt \u4e5f\u63a5\u4f4f\u7684\u90a3\u4e2a\u66f4\u9ad8\u4e00\u5c42\u7684\uff09\" hintEn=\"The last clause is the safety net: it catches any ordinary exception and binds it to e, because the next line prints its class name - it has to come after every specific clause; name the class, no bare except || use the base class every ordinary exception shares (not the one above it that would catch KeyboardInterrupt too)\"\n    except Exception as e:\n# \u003c\u003c\u003c BLANK\n        print(f\"  something else: {type(e).__name__}\")\n    return None\n\n\nif __name__ == \"__main__\":\n    cases = [(\" 12 \", 4), (\"ten\", 2), (\"7\", 0), (\"9\", \"3\"), (None, 1)]\n    for text, divisor in cases:\n        print(f\"{text!r} / {divisor!r}\")\n        print(f\"  result: {parse_and_divide(text, divisor)}\")\n",
+      "source": "\"\"\"Handle different exceptions with separate except clauses, most specific first.\"\"\"\n\n\ndef parse_and_divide(text, divisor):\n    try:\n        number = int(text.strip())\n        return number / divisor\n# >>> BLANK id=except-value level=2 hint=\"\u7b2c\u4e00\u4e2a\u5b50\u53e5\u63a5\u4f4f int() \u8bfb\u4e0d\u61c2\u6587\u5b57\u65f6\u629b\u7684\u90a3\u79cd\u5f02\u5e38\uff0c\u5e76\u628a\u5f02\u5e38\u5bf9\u8c61\u7ed1\u5230\u4e0b\u4e00\u884c\u7528\u5230\u7684\u90a3\u4e2a\u540d\u5b57\u4e0a || \u5f02\u5e38\u7c7b\u662f ValueError\uff1b\u7ed1\u5b9a\u7528 as\uff0c\u540d\u5b57\u5c31\u662f\u4e0b\u4e00\u884c\u82b1\u62ec\u53f7\u91cc type() \u62ec\u53f7\u4e2d\u7684\u90a3\u4e2a\" hintEn=\"The first clause catches the exception int() raises when it cannot read the text, and binds the exception object to the name the next line uses || the class is ValueError; binding uses as, and the name is the one inside type() in the first pair of braces on the next line\"\n    except ValueError as e:\n# \u003c\u003c\u003c BLANK\n        print(f\"  {type(e).__name__}: {text!r} is not a whole number\")\n    except ZeroDivisionError:\n        print(\"  ZeroDivisionError: the divisor is zero\")\n    except TypeError:\n        print(\"  TypeError: the divisor is not a number\")\n# >>> BLANK id=except-catch-all level=2 hint=\"\u6700\u540e\u4e00\u4e2a\u5b50\u53e5\u515c\u5e95\uff1a\u63a5\u4f4f\u4efb\u4f55\u666e\u901a\u5f02\u5e38\uff0c\u7ed1\u5b9a\u5230 e\uff0c\u4e0b\u4e00\u884c\u8981\u6253\u5370\u5b83\u7684\u7c7b\u540d\u2014\u2014\u5b83\u5fc5\u987b\u6392\u5728\u6240\u6709\u5177\u4f53\u5b50\u53e5\u4e4b\u540e\uff1b\u7c7b\u540d\u8981\u660e\u5199\uff0c\u4e0d\u7528\u88f8 except || \u7528\u6240\u6709\u666e\u901a\u5f02\u5e38\u5171\u540c\u7684\u90a3\u4e2a\u57fa\u7c7b\uff08\u4e0d\u662f\u8fde KeyboardInterrupt \u4e5f\u63a5\u4f4f\u7684\u90a3\u4e2a\u66f4\u9ad8\u4e00\u5c42\u7684\uff09\" hintEn=\"The last clause is the safety net: it catches any ordinary exception and binds it to e, because the next line prints its class name - it has to come after every specific clause; name the class, no bare except || use the base class every ordinary exception shares (not the one above it that would catch KeyboardInterrupt too)\"\n    except Exception as e:\n# \u003c\u003c\u003c BLANK\n        print(f\"  something else: {type(e).__name__}\")\n    return None\n\n\nif __name__ == \"__main__\":\n    cases = [(\" 12 \", 4), (\"ten\", 2), (\"7\", 0), (\"9\", \"3\"), (None, 1)]\n    for text, divisor in cases:\n        print(f\"{text!r} / {divisor!r}\")\n        print(f\"  result: {parse_and_divide(text, divisor)}\")\n",
       "lines": 23
     },
     {
@@ -4947,7 +5145,7 @@ var PyPrograms = {
         "CIE"
       ],
       "tags": [
-        "exceptions",
+        "exception",
         "class",
         "inheritance",
         "raise",
@@ -4969,13 +5167,13 @@ var PyPrograms = {
           "An exception class is an ordinary class that inherits from Exception, directly or indirectly. BankError needs no body beyond its docstring - a docstring is enough to make a class body valid, just as pass is in AccountFrozen. What makes these useful is not their code but their names and their place in the hierarchy.",
           "The hierarchy is the point. InsufficientFunds and AccountFrozen both inherit from BankError, so one except clause naming the base class catches either one, while a caller that only cares about one case can catch that subclass alone. A module that raises its own base class lets callers say \"anything that went wrong with the bank\" without also catching unrelated bugs, which catching Exception would do.",
           "InsufficientFunds takes the balance and the amount and keeps them as attributes, so a caller can do arithmetic with them - short by 150 - instead of trying to pick numbers back out of the message string. super().__init__(message) passes the text up to Exception, which is what makes print(e) show it.",
-          "type(e).__name__ reads the class name off the exception object. In the loop the same except clause receives two different classes, and the output shows which one arrived each time."
+          "type(e).__name__ reads the class name off the exception object. In the loop the same except clause receives two different classes: InsufficientFunds the first time round, AccountFrozen the second."
         ],
         "zh": [
           "\u5f02\u5e38\u7c7b\u5c31\u662f\u4e00\u4e2a\u666e\u901a\u7684\u7c7b\uff0c\u76f4\u63a5\u6216\u95f4\u63a5\u7ee7\u627f Exception\u3002BankError \u9664\u4e86\u6587\u6863\u4e32\u4ec0\u4e48\u90fd\u4e0d\u9700\u8981\u2014\u2014\u6587\u6863\u4e32\u672c\u8eab\u5c31\u8db3\u4ee5\u8ba9\u7c7b\u4f53\u5408\u6cd5\uff0c\u548c AccountFrozen \u91cc\u7684 pass \u4f5c\u7528\u76f8\u540c\u3002\u5b83\u4eec\u6709\u7528\uff0c\u4e0d\u5728\u4e8e\u4ee3\u7801\uff0c\u800c\u5728\u4e8e\u540d\u5b57\uff0c\u4ee5\u53ca\u5728\u5c42\u6b21\u7ed3\u6784\u91cc\u7684\u4f4d\u7f6e\u3002",
           "\u5c42\u6b21\u7ed3\u6784\u624d\u662f\u91cd\u70b9\u3002InsufficientFunds \u4e0e AccountFrozen \u90fd\u7ee7\u627f BankError\uff0c\u6240\u4ee5\u4e00\u4e2a\u5199\u57fa\u7c7b\u7684 except \u5b50\u53e5\u4e24\u4e2a\u90fd\u63a5\u5f97\u4f4f\uff1b\u53ea\u5173\u5fc3\u5176\u4e2d\u4e00\u79cd\u60c5\u51b5\u7684\u8c03\u7528\u65b9\uff0c\u53ef\u4ee5\u53ea\u63a5\u90a3\u4e2a\u5b50\u7c7b\u3002\u6a21\u5757\u629b\u81ea\u5df1\u7684\u57fa\u7c7b\uff0c\u8c03\u7528\u65b9\u5c31\u80fd\u8bf4\u300c\u94f6\u884c\u8fd9\u8fb9\u51fa\u7684\u4efb\u4f55\u9519\u300d\uff0c\u800c\u4e0d\u4f1a\u987a\u5e26\u628a\u4e0d\u76f8\u5e72\u7684 bug \u4e5f\u63a5\u4f4f\u2014\u2014\u63a5 Exception \u5c31\u4f1a\u8fd9\u6837\u3002",
           "InsufficientFunds \u6536\u4e0b\u4f59\u989d\u4e0e\u91d1\u989d\u5e76\u5b58\u6210\u5c5e\u6027\uff0c\u8c03\u7528\u65b9\u53ef\u4ee5\u76f4\u63a5\u62ff\u6765\u7b97\u2014\u2014short by 150\u2014\u2014\u800c\u4e0d\u5fc5\u4ece\u6d88\u606f\u5b57\u7b26\u4e32\u91cc\u628a\u6570\u5b57\u62a0\u56de\u6765\u3002super().__init__(message) \u628a\u6587\u5b57\u4ea4\u7ed9 Exception\uff0cprint(e) \u80fd\u663e\u793a\u5b83\uff0c\u9760\u7684\u5c31\u662f\u8fd9\u4e00\u53e5\u3002",
-          "type(e).__name__ \u4ece\u5f02\u5e38\u5bf9\u8c61\u4e0a\u8bfb\u51fa\u7c7b\u540d\u3002\u5faa\u73af\u91cc\u540c\u4e00\u4e2a except \u5b50\u53e5\u5148\u540e\u6536\u5230\u4e24\u4e2a\u4e0d\u540c\u7684\u7c7b\uff0c\u8f93\u51fa\u663e\u793a\u6bcf\u6b21\u6765\u7684\u662f\u54ea\u4e00\u4e2a\u3002"
+          "type(e).__name__ \u4ece\u5f02\u5e38\u5bf9\u8c61\u4e0a\u8bfb\u51fa\u7c7b\u540d\u3002\u5faa\u73af\u91cc\u540c\u4e00\u4e2a except \u5b50\u53e5\u5148\u540e\u6536\u5230\u4e24\u4e2a\u4e0d\u540c\u7684\u7c7b\uff1a\u7b2c\u4e00\u8f6e\u662f InsufficientFunds\uff0c\u7b2c\u4e8c\u8f6e\u662f AccountFrozen\u3002"
         ]
       },
       "lineNotes": [
@@ -5036,8 +5234,8 @@ var PyPrograms = {
         "en": [
           "EAFP stands for \"easier to ask forgiveness than permission\": do the thing, and deal with the failure if it happens. The open() call is the check. If the file is there you have already opened it; if it is not, the except clause runs. There is no moment in between where the answer could change.",
           "The except clause names only the file-not-found exception, not OSError and not a bare except. A file that exists but cannot be read - no permission, or a folder with that name - raises a different exception, and hiding that behind \"using defaults\" would make a real problem look like a normal first run.",
-          "The exception object records which file it was about: filename holds the path exactly as it was passed to open(), and printing the exception gives the error number and the system's description. Both are relative here because the path was relative, which keeps the output the same on every computer.",
-          "Compare with missing-file-lbyl, which checks first. Both give the same first three lines of output.",
+          "The exception object records which file it was about: filename holds the path exactly as it was passed to open(), here no_such_file.txt. Printing the exception itself would add the error number and the operating system's description, whose wording differs between systems and Python versions, so the program prints the exception's class name instead. The path is relative because it was passed relative, which keeps what is printed the same on every computer.",
+          "Compare with Missing File: Look Before You Leap, which checks first. For the first two calls both print exactly the same: the two settings read from the file, then the not-found message followed by the defaults.",
           "To run this in PyCharm, make a folder called _fixtures next to the program with a file settings.txt in it. It holds these two lines, one per paragraph below:",
           "volume=8",
           "theme=light",
@@ -5046,8 +5244,8 @@ var PyPrograms = {
         "zh": [
           "EAFP \u662f \"easier to ask forgiveness than permission\"\u2014\u2014\u5148\u505a\uff0c\u51fa\u4e86\u95ee\u9898\u518d\u6536\u62fe\u3002open() \u8fd9\u4e2a\u8c03\u7528\u672c\u8eab\u5c31\u662f\u68c0\u67e5\uff1a\u6587\u4ef6\u5728\uff0c\u4f60\u5df2\u7ecf\u628a\u5b83\u6253\u5f00\u4e86\uff1b\u4e0d\u5728\uff0c\u5c31\u6267\u884c except\u3002\u4e2d\u95f4\u4e0d\u5b58\u5728\u4e00\u4e2a\u300c\u7b54\u6848\u53ef\u80fd\u53c8\u53d8\u4e86\u300d\u7684\u7a7a\u6863\u3002",
           "except \u5b50\u53e5\u53ea\u5199\u300c\u6587\u4ef6\u4e0d\u5b58\u5728\u300d\u90a3\u4e00\u79cd\u5f02\u5e38\uff0c\u4e0d\u662f OSError\uff0c\u4e5f\u4e0d\u662f\u88f8 except\u3002\u6587\u4ef6\u5b58\u5728\u5374\u8bfb\u4e0d\u4e86\u2014\u2014\u6ca1\u6709\u6743\u9650\uff0c\u6216\u8005\u540c\u540d\u7684\u5176\u5b9e\u662f\u4e2a\u6587\u4ef6\u5939\u2014\u2014\u629b\u7684\u662f\u522b\u7684\u5f02\u5e38\uff1b\u7528\u300c\u6539\u7528\u9ed8\u8ba4\u503c\u300d\u628a\u90a3\u79cd\u60c5\u51b5\u4e5f\u76d6\u8fc7\u53bb\uff0c\u4f1a\u8ba9\u4e00\u4e2a\u771f\u95ee\u9898\u770b\u8d77\u6765\u50cf\u4e00\u6b21\u666e\u901a\u7684\u9996\u6b21\u8fd0\u884c\u3002",
-          "\u5f02\u5e38\u5bf9\u8c61\u8bb0\u7740\u5b83\u8bf4\u7684\u662f\u54ea\u4e2a\u6587\u4ef6\uff1afilename \u5c31\u662f\u4f20\u7ed9 open() \u7684\u90a3\u4e2a\u8def\u5f84\u539f\u6837\uff1b\u6253\u5370\u5f02\u5e38\u672c\u8eab\u5f97\u5230\u9519\u8bef\u53f7\u548c\u7cfb\u7edf\u7684\u63cf\u8ff0\u3002\u8fd9\u91cc\u4e24\u8005\u90fd\u662f\u76f8\u5bf9\u7684\uff0c\u56e0\u4e3a\u8def\u5f84\u672c\u6765\u5c31\u662f\u76f8\u5bf9\u8def\u5f84\u2014\u2014\u8fd9\u6837\u8f93\u51fa\u5728\u6bcf\u53f0\u7535\u8111\u4e0a\u90fd\u4e00\u6837\u3002",
-          "\u548c\u5148\u68c0\u67e5\u7684 missing-file-lbyl \u5bf9\u7167\u7740\u770b\u3002\u4e24\u4e2a\u7a0b\u5e8f\u8f93\u51fa\u7684\u524d\u4e09\u884c\u5b8c\u5168\u76f8\u540c\u3002",
+          "\u5f02\u5e38\u5bf9\u8c61\u8bb0\u7740\u5b83\u8bf4\u7684\u662f\u54ea\u4e2a\u6587\u4ef6\uff1afilename \u5c31\u662f\u4f20\u7ed9 open() \u7684\u90a3\u4e2a\u8def\u5f84\u539f\u6837\uff0c\u8fd9\u91cc\u662f no_such_file.txt\u3002\u76f4\u63a5\u6253\u5370\u5f02\u5e38\u672c\u8eab\u4f1a\u5e26\u4e0a\u9519\u8bef\u53f7\u548c\u64cd\u4f5c\u7cfb\u7edf\u7684\u63cf\u8ff0\uff0c\u800c\u90a3\u6bb5\u63aa\u8f9e\u968f\u7cfb\u7edf\u548c Python \u7248\u672c\u800c\u53d8\uff0c\u6240\u4ee5\u7a0b\u5e8f\u6253\u5370\u7684\u662f\u5f02\u5e38\u7684\u7c7b\u540d\u3002\u8def\u5f84\u662f\u76f8\u5bf9\u7684\uff0c\u56e0\u4e3a\u4f20\u8fdb\u53bb\u7684\u5c31\u662f\u76f8\u5bf9\u8def\u5f84\u2014\u2014\u8fd9\u6837\u6253\u5370\u51fa\u6765\u7684\u4e1c\u897f\u5728\u6bcf\u53f0\u7535\u8111\u4e0a\u90fd\u4e00\u6837\u3002",
+          "\u548c\u5148\u68c0\u67e5\u7684\u300c\u6587\u4ef6\u53ef\u80fd\u4e0d\u5728\uff1a\u5148\u770b\u518d\u505a\u300d\u5bf9\u7167\u7740\u770b\u3002\u524d\u4e24\u6b21\u8c03\u7528\uff0c\u4e24\u4e2a\u7a0b\u5e8f\u6253\u5370\u7684\u5b8c\u5168\u76f8\u540c\uff1a\u5148\u662f\u4ece\u6587\u4ef6\u8bfb\u5230\u7684\u4e24\u6761\u8bbe\u7f6e\uff0c\u518d\u662f\u300c\u6ca1\u627e\u5230\u300d\u7684\u63d0\u793a\u548c\u9ed8\u8ba4\u503c\u3002",
           "\u8981\u5728 PyCharm \u91cc\u8dd1\uff1a\u5728\u7a0b\u5e8f\u65c1\u8fb9\u5efa\u4e00\u4e2a _fixtures \u6587\u4ef6\u5939\uff0c\u91cc\u9762\u653e settings.txt\uff0c\u5185\u5bb9\u5c31\u662f\u4e0b\u9762\u4e24\u884c\uff0c\u4e00\u6bb5\u4e00\u884c\uff1a",
           "volume=8",
           "theme=light",
@@ -5068,10 +5266,10 @@ var PyPrograms = {
       ],
       "run": {
         "stdin": "",
-        "expect": "['volume=8', 'theme=light']\nno_such_file.txt not found, using defaults\n['volume=5', 'theme=dark']\nno_such_file.txt | [Errno 2] No such file or directory: 'no_such_file.txt'\n",
+        "expect": "['volume=8', 'theme=light']\nno_such_file.txt not found, using defaults\n['volume=5', 'theme=dark']\nno_such_file.txt | FileNotFoundError\n",
         "timeout": 5
       },
-      "source": "\"\"\"Open a file that may not exist: just try it, and handle FileNotFoundError.\"\"\"\n\nDEFAULTS = [\"volume=5\", \"theme=dark\"]\n\n\ndef read_settings(path):\n    try:\n        with open(path) as f:\n            return f.read().splitlines()\n# >>> BLANK id=except-missing level=1 hint=\"\u53ea\u63a5\u4f4f\u300c\u6587\u4ef6\u4e0d\u5b58\u5728\u300d\u8fd9\u4e00\u79cd\u5f02\u5e38\uff0c\u4e0d\u7ed1\u5b9a\u5f02\u5e38\u5bf9\u8c61\u2014\u2014\u5176\u4ed6\u9519\u8bef\uff08\u6bd4\u5982\u6ca1\u6709\u6743\u9650\uff09\u5e94\u5f53\u7167\u6837\u629b\u51fa\u53bb\" hintEn=\"Catch only the file-does-not-exist exception, without binding the exception object - any other error (no permission, say) should still be raised\"\n    except FileNotFoundError:\n# \u003c\u003c\u003c BLANK\n        print(f\"{path} not found, using defaults\")\n        return DEFAULTS\n\n\nif __name__ == \"__main__\":\n    print(read_settings(\"_fixtures/settings.txt\"))\n    print(read_settings(\"no_such_file.txt\"))\n    try:\n        open(\"no_such_file.txt\")\n    except FileNotFoundError as e:\n# >>> BLANK id=error-filename level=2 hint=\"\u6253\u5370\u5f02\u5e38\u5bf9\u8c61\u4e0a\u8bb0\u7740\u7684\u90a3\u4e2a\u51fa\u4e8b\u7684\u6587\u4ef6\u540d\uff0c\u540e\u9762\u8ddf\u4e00\u4e2a\u7ad6\u7ebf\u3001\u518d\u8ddf\u5f02\u5e38\u672c\u8eab\u2014\u2014print \u7684\u4e09\u4e2a\u5b9e\u53c2\uff0c\u7ad6\u7ebf\u662f\u53cc\u5f15\u53f7\u5b57\u7b26\u4e32\uff1b\u5f02\u5e38\u5bf9\u8c61\u539f\u6837\u4ea4\u7ed9 print\uff0c\u4e0d\u81ea\u5df1\u5957 str() || \u6587\u4ef6\u540d\u5b58\u5728\u5f02\u5e38\u5bf9\u8c61\u7684 filename \u5c5e\u6027\u91cc\" hintEn=\"Print the name of the file that caused it, which the exception object records, then a vertical bar, then the exception itself - three arguments to print, the bar a double-quoted string; hand the exception object to print as it is, without wrapping it in str() || the file name lives in the exception's filename attribute\"\n        print(e.filename, \"|\", e)\n# \u003c\u003c\u003c BLANK\n",
+      "source": "\"\"\"Open a file that may not exist: just try it, and handle FileNotFoundError.\"\"\"\n\nDEFAULTS = [\"volume=5\", \"theme=dark\"]\n\n\ndef read_settings(path):\n    try:\n        with open(path) as f:\n            return f.read().splitlines()\n# >>> BLANK id=except-missing level=1 hint=\"\u53ea\u63a5\u4f4f\u300c\u6587\u4ef6\u4e0d\u5b58\u5728\u300d\u8fd9\u4e00\u79cd\u5f02\u5e38\uff0c\u4e0d\u7ed1\u5b9a\u5f02\u5e38\u5bf9\u8c61\u2014\u2014\u5176\u4ed6\u9519\u8bef\uff08\u6bd4\u5982\u6ca1\u6709\u6743\u9650\uff09\u5e94\u5f53\u7167\u6837\u629b\u51fa\u53bb\" hintEn=\"Catch only the file-does-not-exist exception, without binding the exception object - any other error (no permission, say) should still be raised\"\n    except FileNotFoundError:\n# \u003c\u003c\u003c BLANK\n        print(f\"{path} not found, using defaults\")\n        return DEFAULTS\n\n\nif __name__ == \"__main__\":\n    print(read_settings(\"_fixtures/settings.txt\"))\n    print(read_settings(\"no_such_file.txt\"))\n    try:\n        open(\"no_such_file.txt\")\n    except FileNotFoundError as e:\n# >>> BLANK id=error-filename level=2 hint=\"\u6253\u5370\u5f02\u5e38\u5bf9\u8c61\u4e0a\u8bb0\u7740\u7684\u90a3\u4e2a\u51fa\u4e8b\u7684\u6587\u4ef6\u540d\uff0c\u540e\u9762\u8ddf\u4e00\u4e2a\u7ad6\u7ebf\u3001\u518d\u8ddf\u5f02\u5e38\u7684\u7c7b\u540d\u2014\u2014print \u7684\u4e09\u4e2a\u5b9e\u53c2\uff0c\u7ad6\u7ebf\u662f\u53cc\u5f15\u53f7\u5b57\u7b26\u4e32\uff1b\u7c7b\u540d\u7528 type() \u4ece\u5f02\u5e38\u5bf9\u8c61\u4e0a\u53d6\uff0c\u4e0d\u7528 __class__\uff0c\u4e5f\u4e0d\u81ea\u5df1\u5199\u6b7b || \u6587\u4ef6\u540d\u5b58\u5728\u5f02\u5e38\u5bf9\u8c61\u7684 filename \u5c5e\u6027\u91cc\uff1b\u7c7b\u540d\u662f type() \u4ea4\u56de\u7684\u90a3\u4e2a\u7c7b\u7684 __name__\" hintEn=\"Print the name of the file that caused it, which the exception object records, then a vertical bar, then the exception's class name - three arguments to print, the bar a double-quoted string; get the class name from the exception object with type(), not __class__, and do not write it out yourself || the file name lives in the exception's filename attribute; the class name is the __name__ of the class that type() hands back\"\n        print(e.filename, \"|\", type(e).__name__)\n# \u003c\u003c\u003c BLANK\n",
       "lines": 21
     },
     {
@@ -5180,13 +5378,13 @@ var PyPrograms = {
           "Two different things can be wrong with the answer, and they are checked in two different ways. Whether the text is a whole number at all is found out by trying int() and catching ValueError. Whether the number is in range is an ordinary if. Only when both pass does return end the loop - and the function.",
           "continue jumps straight back to the top of the loop. Without it, after 'four' failed to convert, the program would go on to the range check with value never assigned, and crash with an error that has nothing to do with what the user typed.",
           "int() is stricter and looser than you might guess. It accepts ' 4' with spaces around it, and a sign, but rejects '3.5' - a float in a string is not a whole number - and rejects the empty string you get when someone just presses Enter.",
-          "The demo feeds five lines through standard input: four, 3.5, an empty line, 0 and then 4. input() does not echo what it reads, so in the output each prompt is followed directly by the response to it. Typed at a real keyboard the answers would appear after the prompts."
+          "The demo feeds five lines through standard input: four, 3.5, an empty line, 0 and then 4 with a space in front. The first four are turned away - three because int() cannot read them, 0 because it is out of range - and the last is accepted, so the rating is 4. Typed at a real keyboard, each answer would appear after its prompt."
         ],
         "zh": [
           "\u7b54\u6848\u53ef\u80fd\u9519\u5728\u4e24\u4ef6\u4e0d\u540c\u7684\u4e8b\u4e0a\uff0c\u7528\u4e24\u79cd\u4e0d\u540c\u7684\u65b9\u5f0f\u67e5\u3002\u6587\u5b57\u5230\u5e95\u662f\u4e0d\u662f\u6574\u6570\uff0c\u9760\u300c\u8bd5\u7740 int()\u3001\u63a5\u4f4f ValueError\u300d\u6765\u53d1\u73b0\uff1b\u6570\u5b57\u5728\u4e0d\u5728\u8303\u56f4\u91cc\uff0c\u662f\u4e00\u4e2a\u666e\u901a\u7684 if\u3002\u4e24\u5173\u90fd\u8fc7\uff0creturn \u624d\u7ed3\u675f\u5faa\u73af\u2014\u2014\u4e5f\u7ed3\u675f\u51fd\u6570\u3002",
           "continue \u76f4\u63a5\u8df3\u56de\u5faa\u73af\u5f00\u5934\u3002\u6ca1\u6709\u5b83\uff0c'four' \u8f6c\u6362\u5931\u8d25\u4e4b\u540e\u7a0b\u5e8f\u4f1a\u7ee7\u7eed\u53bb\u505a\u8303\u56f4\u68c0\u67e5\uff0c\u800c\u90a3\u65f6 value \u6839\u672c\u6ca1\u88ab\u8d4b\u503c\uff0c\u4e8e\u662f\u5d29\u5728\u4e00\u4e2a\u4e0e\u7528\u6237\u8f93\u5165\u6beb\u4e0d\u76f8\u5e72\u7684\u9519\u8bef\u4e0a\u3002",
           "int() \u6bd4\u4f60\u4ee5\u4e3a\u7684\u66f4\u4e25\u3001\u4e5f\u66f4\u677e\u3002\u5b83\u63a5\u53d7\u4e24\u8fb9\u5e26\u7a7a\u683c\u7684 ' 4'\uff0c\u4e5f\u63a5\u53d7\u6b63\u8d1f\u53f7\uff1b\u4f46\u62d2\u7edd '3.5'\u2014\u2014\u5b57\u7b26\u4e32\u91cc\u7684\u5c0f\u6570\u4e0d\u662f\u6574\u6570\u2014\u2014\u4e5f\u62d2\u7edd\u522b\u4eba\u76f4\u63a5\u6309\u56de\u8f66\u65f6\u5f97\u5230\u7684\u7a7a\u5b57\u7b26\u4e32\u3002",
-          "\u6f14\u793a\u901a\u8fc7\u6807\u51c6\u8f93\u5165\u5582\u4e86\u4e94\u884c\uff1afour\u30013.5\u3001\u4e00\u4e2a\u7a7a\u884c\u30010\uff0c\u7136\u540e\u662f 4\u3002input() \u4e0d\u56de\u663e\u8bfb\u5230\u7684\u5185\u5bb9\uff0c\u6240\u4ee5\u8f93\u51fa\u91cc\u6bcf\u4e2a\u63d0\u793a\u540e\u9762\u7d27\u8ddf\u7684\u662f\u5bf9\u5b83\u7684\u56de\u5e94\u3002\u6362\u6210\u771f\u952e\u76d8\u8f93\u5165\uff0c\u7b54\u6848\u4f1a\u51fa\u73b0\u5728\u63d0\u793a\u4e4b\u540e\u3002"
+          "\u6f14\u793a\u901a\u8fc7\u6807\u51c6\u8f93\u5165\u5582\u4e86\u4e94\u884c\uff1afour\u30013.5\u3001\u4e00\u4e2a\u7a7a\u884c\u30010\uff0c\u7136\u540e\u662f\u524d\u9762\u5e26\u4e00\u4e2a\u7a7a\u683c\u7684 4\u3002\u524d\u56db\u4e2a\u90fd\u88ab\u6253\u56de\u2014\u2014\u4e09\u4e2a\u662f int() \u8bfb\u4e0d\u61c2\uff0c0 \u662f\u8d85\u51fa\u8303\u56f4\u2014\u2014\u6700\u540e\u4e00\u4e2a\u88ab\u63a5\u53d7\uff0c\u4e8e\u662f\u8bc4\u5206\u662f 4\u3002\u6362\u6210\u771f\u952e\u76d8\u8f93\u5165\uff0c\u6bcf\u4e2a\u7b54\u6848\u4f1a\u51fa\u73b0\u5728\u5b83\u7684\u63d0\u793a\u540e\u9762\u3002"
         ]
       },
       "lineNotes": [

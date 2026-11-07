@@ -29,13 +29,18 @@
      跟着改。版本号要在三处同步：注册表 python-tools.json 的 version、这里的
      tool-version meta、右上角的徽章——徽章直接读 meta（见第二个脚本块里的
      VERSION），所以它永远不需要单独改。 -->
-<meta name="tool-version" content="1.1.1">
-<meta name="tool-engine" content="py-1.3.1">
+<meta name="tool-version" content="1.1.2">
+<meta name="tool-engine" content="py-1.3.2">
 <!-- >>> GENERATED:FAVICON -->
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAA/1BMVEUUVrceN6YEl50nKYgDod8FapoEX3V6I+AEZ8gDbtxPFYdQIJ4DOTgCwv+GE8sFU1kDQDtmIL8pEVcGyrkDgdAAAABoKNkWCSwDSasAevQEGSgBqfc3F3QBs/paKNADJTUAa/SPG+pPIawCFRdzJuQDNUcDNlcEZcUAW/dGGY0lBzgjDEUBnPMDRIcQJVMCK0kyEmYCU7AHV4WiE/MOXLoEQ1sMedVSIqsHZY50FLoFNpdRHqkEhYdNDHYEOWwBgfYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADRsqliAAAAQHRSTlOjjpdhy2lM7KvNXYwU/74wGMUn+bkA/AuR/Qf5TPz4Df39rwP/GCKt/mwPGfNVIxc5lU7/pSnOnV+tdaV0RjX/bR25hAAAAVdJREFUeNqtk2d/gyAQh40rq7sFRECDK0Oz92jz/b9V/ZmYgCTpm/JCT+7hTu7+p4E/lvZPQGiasbw/bA5FwH9mzJf8GE9FwGWMEYGwcQc7MkAIMd3S/4NxpyMDhFkZMcOLfzpVgLFPsq/iI8F4ARwFSECSkUZujzHuAhUgSe5qrDR/VPgVIGMxiO3NbKYdj01wA2BWrFvLeLmxut3iMk5PAvzZq34qQ7I6vZ1eTeqFfShr4C7OEXYX4C30dftaRbc4owkRPvXDk9iHkZE/dg3jAoRhtcMjVQ9oMBA2ayhfMjCYz1+E36i16uuKor7nvHUlqEFRVXJbztPS7rdpX9Ek4rxemjCi6ZqmqA9F0X5zfj4WQC9P8EGNSSqpesuj4ioUwslN2aM6fC8SwODOXEyiiJYJbg/OHsJ2ACG9O1l5dAi94MHo0cjzpATKbO49jz4cXlRJAMAvD+ldcxDlRcsAAAAASUVORK5CYII=">
 <!-- <<< GENERATED:FAVICON -->
 <title>Basics: Values &amp; Output · 基础：值与输出</title>
 <!-- 版本记录（changelog，新→旧）：
+     1.1.2  2026-11-06  讲解不再指向页面上看不到的输出，改用文字说出关键结果；指别的程序改写标题；tag
+                        integer-division 统一为 floor-division。
+                        判定器（engine
+                        py-1.3.2）：答案与标准答案行数不同时也比较代码块结构（新反馈 kind
+                        block）。清理波：第 6 期账本 §十 第一、二组。
      1.1.1  2026-09-30  考试局按四家官方考纲重核（用户裁决：考纲外不写，[] 合法；依据见
                         docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md）：
                         swap-two-tuple AQA/OCR/Edexcel/CIE→OCR/Edexcel；
@@ -1627,6 +1632,165 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     return { toks: toks, rel: ind.rel, relLines: ind.relLines };
   }
 
+  /* ---- 块层级：两边有效行条数不同时才用（清理波，phase1-deferred §一.3） ----
+
+     有效行条数相同时，compare() 照旧按相对缩进**宽度**严比（rel）。条数不同的
+     合法写法只有两种：单行复合语句（`if x: y` 对两行写法）与括号内断行。以前这时
+     完全不比缩进，于是 `if a:\n    if b: c()\nd()` 判等于 `d()` 缩进在外层 if
+     里的那四行——语义变了也判对。
+
+     这里把源码切成**逻辑行**（括号深度 > 0、或上一个有效 token 是反斜杠续行
+     `\`、或上一个 token 是跨行的三引号字符串时，并入上一逻辑行），用一个缩进栈
+     把每条逻辑行映射成**块层级**（第一条逻辑行为 0）；复合语句头（行首是
+     COMPOUND 里的关键字、或按 softKeywordHeader 判为语句头的 match / case，括号深度 0
+     的第一个 `:`）后面同一行的体算深一层。
+     compare() 再逐 token 比层级：原文相同、层级不同 → kind 'block'。
+
+     CPython 会拒绝的三种缩进：
+       · unexpected indent（上一逻辑行不是以 `:` 结尾的语句头，这一行却变深）：
+         「变深」时层级取上一逻辑行**最深处**加一——`if a: b` 之后多缩进一行，它比 b
+         还深、不与 b 同层——所以它的层级按构造就比合法的参考多一层；
+       · expected an indented block（以 `:` 结尾的语句头之后没有变深）：参考是合法
+         Python，同一串 token 在参考里语句头之后的那个 token 必在深一层，作答不深，
+         层级按构造就不同；
+       · unindent does not match any outer indentation level（退缩进到栈里没有的
+         宽度）：层级可能碰巧等于参考，只有这一种记成 bad，不论层级等不等都判错。
+     前两种另记 bad 是冗余的：负控制实测，另记的 bad 删掉，测试与门全绿，所以不留。 */
+  var COMPOUND = { 'if': 1, 'elif': 1, 'else': 1, 'for': 1, 'while': 1, 'try': 1,
+                   'except': 1, 'finally': 1, 'with': 1, 'def': 1, 'class': 1 };
+  var OPENERS = { '(': 1, '[': 1, '{': 1 };
+  var CLOSERS = { ')': 1, ']': 1, '}': 1 };
+
+  /* match / case 是**软关键字**（清理波终审 M2）：`match = 3`、`match.group(1)`、`case(x)` 是普通
+     语句。判据（逻辑行 toks[a..b)，首词是 match / case）：
+       1. 第二个 token 能开一个 subject / 模式：名字（不是 if / else / in / is / and / or / for /
+          as / lambda 这类只能接在表达式后面的关键字）、数字、字符串、`(` `[` `{`、`-` `+` `~` `*`。
+          于是 `=` / `.` / `:` / `,` / 增强赋值 / 下标之外的运算符开头的都不是语句头。
+       2. 行里有括号深度 0 的 `:`，而它之前（括号深度 0）没有 `=`、增强赋值、`:=`、`lambda`——
+          排除 `case = lambda: 0`、`case, x = lambda: 0, 1` 一类。
+       3. match 头的 `:` 必须是这一逻辑行最后一个 token：CPython 的 match 头之后只能换行
+          （`match x: case 1: …` 是语法错），所以 match 按构造不会有同一行的体——认它是头与否
+          不改变任何层级，这一条只防把 `match: T = v` 之类的行算进来。
+     没有括号深度 0 冒号的行（`case(x)`、`match.group(1)`、`match = 3`）分不分类都一样：
+     colon 是 -1，层级不变。
+     仍分不出的（记在这里，靠「只挖写法唯一的行」）：`case[0]: int = 1`（给名为 case 的东西的下标
+     加注解）与 `case [0]: int = 1`（序列模式 + 一行体）token 完全相同，只有「是否在 match 块里」能
+     区分，而挖空片段常常不含 match 那一行——这里一律按 case 头处理。 */
+  var SOFT_HEAD_BAD_NAME = { 'if': 1, 'else': 1, 'elif': 1, 'in': 1, 'is': 1, 'and': 1, 'or': 1,
+                             'for': 1, 'as': 1, 'lambda': 1, 'from': 1, 'import': 1 };
+  var SOFT_HEAD_OK_PUNCT = { '(': 1, '[': 1, '{': 1, '-': 1, '+': 1, '~': 1, '*': 1 };
+  function isAssignOp(t) {
+    return t === '=' || t === ':=' ||
+      (t.length >= 2 && t.charAt(t.length - 1) === '=' && t !== '==' && t !== '!=' && t !== '<=' && t !== '>=');
+  }
+  function softKeywordHeader(toks, a, b) {
+    var head = toks[a].text;
+    if ((head !== 'match' && head !== 'case') || a + 2 >= b) { return false; }
+    var nx = toks[a + 1].text;
+    var starts = SOFT_HEAD_OK_PUNCT[nx] ||
+      (/^[A-Za-z_]/.test(nx) && !SOFT_HEAD_BAD_NAME[nx]) ||
+      /^[0-9'"]/.test(nx) || /^\.[0-9]/.test(nx);
+    if (!starts) { return false; }
+    var d = 0;
+    for (var j = a + 1; j < b; j++) {
+      var t = toks[j].text;
+      if (OPENERS[t]) { d++; continue; }
+      if (CLOSERS[t] && d > 0) { d--; continue; }
+      if (d !== 0) { continue; }
+      if (t === ':') { return head === 'case' || j === b - 1; }
+      if (t === 'lambda' || isAssignOp(t)) { return false; }
+    }
+    return false;
+  }
+
+  function countNewlines(s) {
+    var n = 0;
+    for (var i = 0; i < s.length; i++) { if (s.charAt(i) === '\n') { n++; } }
+    return n;
+  }
+
+  /* blockLevels(toks) -> { lvl: number[], bad: boolean[] }，与 toks 一一对应。 */
+  function blockLevels(toks) {
+    var lvl = new Array(toks.length);
+    var bad = new Array(toks.length);
+    if (toks.length === 0) { return { lvl: lvl, bad: bad }; }
+
+    /* 1. 切逻辑行：每项是 toks 的下标区间 [from, to) */
+    var logical = [];
+    var depth = 0, from = 0;
+    for (var i = 0; i < toks.length; i++) {
+      if (i > 0) {
+        var prev = toks[i - 1];
+        var prevEnd = prev.line + countNewlines(prev.text);
+        if (depth === 0 && toks[i].line > prevEnd && prev.text !== '\\') {
+          logical.push([from, i]);
+          from = i;
+        }
+      }
+      var tx = toks[i].text;
+      if (OPENERS[tx]) { depth++; } else if (CLOSERS[tx] && depth > 0) { depth--; }
+    }
+    logical.push([from, toks.length]);
+
+    /* 2. 缩进栈 */
+    var stack = null;           /* [{ w, lvl }] */
+    var prevDeepest = 0;        /* 上一逻辑行最深的层级 */
+    for (var k = 0; k < logical.length; k++) {
+      var a = logical[k][0], b = logical[k][1];
+      var w = toks[a].col;
+      var level, isBad = false;
+      if (stack === null) {
+        stack = [{ w: w, lvl: 0 }];
+        level = 0;
+      } else {
+        var top = stack[stack.length - 1];
+        if (w > top.w) {
+          level = prevDeepest + 1;
+          stack.push({ w: w, lvl: level });
+        } else if (w === top.w) {
+          level = top.lvl;
+        } else {
+          var popped = null;
+          while (stack.length && stack[stack.length - 1].w > w) { popped = stack.pop(); }
+          if (stack.length === 0) {
+            /* 空的片段可以退到第一行之外（一个空从函数体末尾跨到模块顶层）：
+               记成比被弹掉的最外层浅一层的新栈底，不算不合法。 */
+            level = popped.lvl - 1;
+            stack.push({ w: w, lvl: level });
+          } else if (stack[stack.length - 1].w === w) {
+            level = stack[stack.length - 1].lvl;
+          } else {
+            level = stack[stack.length - 1].lvl + 1;
+            isBad = true;
+            stack.push({ w: w, lvl: level });
+          }
+        }
+      }
+
+      /* 3. 复合语句头：括号深度 0 的第一个 `:`，其后同一逻辑行的 token 深一层 */
+      var head = toks[a].text;
+      var isHeader = !!COMPOUND[head] ||
+        (head === 'async' && a + 1 < b && /^(def|for|with)$/.test(toks[a + 1].text)) ||
+        softKeywordHeader(toks, a, b);
+      var colon = -1;
+      if (isHeader) {
+        var d = 0;
+        for (var j = a; j < b; j++) {
+          var t = toks[j].text;
+          if (OPENERS[t]) { d++; } else if (CLOSERS[t] && d > 0) { d--; }
+          else if (t === ':' && d === 0) { colon = j; break; }
+        }
+      }
+      for (var m = a; m < b; m++) {
+        lvl[m] = (colon !== -1 && m > colon) ? level + 1 : level;
+        bad[m] = isBad;
+      }
+      /* 一行写法：体在同一行，这一逻辑行最深处深一层 */
+      prevDeepest = (colon !== -1 && colon < b - 1) ? level + 1 : level;
+    }
+    return { lvl: lvl, bad: bad };
+  }
+
   /* 两个数组第一处不同的下标；一个是另一个的前缀时，下标取较短那个的长度；
      完全相同返回 -1。 */
   function firstDiffIndex(a, b) {
@@ -1639,7 +1803,11 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
   }
 
   /* compare(answer, reference) -> { ok, index, expected, got, kind }
-     kind ∈ 'equal' | 'different' | 'missing' | 'extra' | 'indent'
+     kind ∈ 'equal' | 'different' | 'missing' | 'extra' | 'indent' | 'block'
+
+     'block'（清理波）：两边有效行条数不同、token 原文到此处都相同、而块层级不同
+     （或答案这一逻辑行的缩进 CPython 会拒绝）——见 blockLevels。index 与 'indent'
+     同语义（答案侧物理行号，0 起），expected/got 是块层级数字。
 
      顺序：先比 rel，**但只有两边有效行条数相同时**，值不同才归类 'indent'；
      rel 相同、或有效行条数本身就不同，都落到逐 token 比原文，短的一方先到头
@@ -1678,10 +1846,22 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     }
 
     var at = na.toks, rt = nr.toks;
+    /* 有效行条数不同：相对缩进宽度没法逐行对，改比块层级（见 blockLevels）。
+       条数相同时上面已经按宽度严比过，这里不再重复。 */
+    var la = null, lr = null;
+    if (na.rel.length !== nr.rel.length) {
+      la = blockLevels(at);
+      lr = blockLevels(rt);
+    }
     var n = Math.min(at.length, rt.length);
     for (var i = 0; i < n; i++) {
       if (at[i].text !== rt[i].text) {
         return { ok: false, index: i, expected: rt[i].text, got: at[i].text, kind: 'different' };
+      }
+      if (la && (la.bad[i] || la.lvl[i] !== lr.lvl[i])) {
+        /* 'block'：与 'indent' 同一套 index 语义（答案侧**物理行号**，0 起），
+           expected/got 是块层级（相对第一条逻辑行，数字）。从不涉及字面量原文。 */
+        return { ok: false, index: at[i].line - 1, expected: lr.lvl[i], got: la.lvl[i], kind: 'block' };
       }
     }
     if (at.length < rt.length) {
@@ -2107,6 +2287,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
                   en: 'token #{0} is extra: {1} does not belong here' },
     blankIndent: { zh: '第 {0} 行缩进对不上：期待相对缩进 {1} 格，你写了 {2} 格',
                   en: 'line {0} indent is off: expected {1} spaces relative, you wrote {2}' },
+    blankBlock:  { zh: '第 {0} 行落进了另一层代码块：块结构与参考不同（看这一行的缩进，和它前面写成一行的语句头）',
+                  en: 'line {0} lands in a different block: the block structure differs from the reference (check this line\'s indent and any header written on one line before it)' },
     blankLead:   { zh: '第 1 行缩进对不上：这个空从第 {1} 格开始，你写了 {2} 格',
                   en: 'line 1 indent is off: this blank starts at column {1}, you wrote {2}' },
     blankDiffLiteral: { zh: '第 {0} 个 token（{1}）里第 {2} 个字符起不同',
@@ -2502,6 +2684,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
          所以要用 PyLex.significant 现取它在 answer 里的偏移。
        kind 'indent'：index 是**物理行号**，expected/got 是**相对缩进数值**
          （不是 null、不是字符串）。光标去那一行的行首。裁决 R30/R31。
+       kind 'block'（清理波）：同 'indent' 的 index 语义，expected/got 是块层级；
+         消息只报行号。
 
      另有 Judge 结构上看不见的一种错：**整块的绝对缩进**。Judge.normalize 比的是
      行与行之间的相对缩进，所以单行挖空体 `    x = 1` 与 `x = 1` 在它眼里完全
@@ -2535,6 +2719,20 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     var cmp = judge().compare(a, r);
     if (cmp.ok) {
       return { ok: true, kind: 'equal', caret: 0, message: t('blankOk', lang) };
+    }
+
+    /* 'block'（清理波）：两边有效行条数不同时，Judge 比的是块层级，index 同样是
+       答案侧**物理行号**。消息不印层级数字——「第 1 层 / 第 0 层」对她没有意义——
+       也从不涉及字面量原文。 */
+    if (cmp.kind === 'block') {
+      var bStarts = editor().lineStarts(a);
+      var bi = Math.max(0, Math.min(cmp.index, bStarts.length - 1));
+      return {
+        ok: false,
+        kind: 'block',
+        caret: bStarts[bi],
+        message: ts('blankBlock', lang, [cmp.index + 1])
+      };
     }
 
     if (cmp.kind === 'indent') {
@@ -4479,12 +4677,12 @@ var PyPrograms = {
         "en": [
           "input() always hands you a str, whatever the person typed. Type 42 and you get the two characters \"42\", not the number. Almost every week-one bug of the form \"why is my arithmetic wrong\" traces back to this one sentence.",
           "The f-string is preferred over \"Hello, \" + name + \"!\" for a reason that shows up later rather than here: concatenation needs str() around anything that is not already a string, and the sentence gets harder to read every time you add a piece. The f-string keeps the sentence looking like a sentence.",
-          "Note the first line of the output: the prompt passed to input() is written to standard output with no newline after it, so the greeting lands on the same line as the question mark. That is not a quirk of this program, it is what the prompt argument does."
+          "The prompt passed to input() is written to standard output with no newline after it, so the cursor waits on the same line, right after the question mark, and the name is typed there. That is not a quirk of this program, it is what the prompt argument does - and it is why the prompt ends with a space."
         ],
         "zh": [
           "input() \u4ea4\u7ed9\u4f60\u7684\u6c38\u8fdc\u662f str\uff0c\u4e0d\u7ba1\u5bf9\u65b9\u6572\u4e86\u4ec0\u4e48\u3002\u5979\u6572 42\uff0c\u4f60\u62ff\u5230\u7684\u662f \"42\" \u8fd9\u4e24\u4e2a\u5b57\u7b26\uff0c\u4e0d\u662f\u6570\u5b57\u3002\u5f00\u5b66\u7b2c\u4e00\u5468\u51e0\u4e4e\u6240\u6709\u300c\u6211\u7684\u7b97\u672f\u600e\u4e48\u7b97\u9519\u4e86\u300d\uff0c\u6e90\u5934\u90fd\u662f\u8fd9\u4e00\u53e5\u3002",
           "\u8fd9\u91cc\u7528 f-string \u800c\u4e0d\u662f \"Hello, \" + name + \"!\"\uff0c\u7406\u7531\u4e0d\u5728\u8fd9\u4e00\u884c\u3001\u5728\u4ee5\u540e\uff1a\u62fc\u63a5\u8981\u7ed9\u6bcf\u4e2a\u975e\u5b57\u7b26\u4e32\u7684\u4e1c\u897f\u5957\u4e0a str()\uff0c\u800c\u4e14\u6bcf\u591a\u62fc\u4e00\u6bb5\uff0c\u90a3\u53e5\u8bdd\u5c31\u66f4\u96be\u8bfb\u4e00\u5206\u3002f-string \u8ba9\u4e00\u53e5\u8bdd\u770b\u4e0a\u53bb\u8fd8\u662f\u4e00\u53e5\u8bdd\u3002",
-          "\u6ce8\u610f\u8f93\u51fa\u7684\u7b2c\u4e00\u884c\uff1a\u4f20\u7ed9 input() \u7684\u63d0\u793a\u4e32\u662f\u5199\u5230\u6807\u51c6\u8f93\u51fa\u7684\uff0c\u540e\u9762\u4e0d\u6362\u884c\uff0c\u6240\u4ee5\u95ee\u5019\u8bed\u843d\u5728\u95ee\u53f7\u7684\u540c\u4e00\u884c\u4e0a\u3002\u8fd9\u4e0d\u662f\u672c\u7a0b\u5e8f\u7684\u602a\u7656\uff0c\u8fd9\u5c31\u662f\u63d0\u793a\u53c2\u6570\u7684\u884c\u4e3a\u3002"
+          "\u4f20\u7ed9 input() \u7684\u63d0\u793a\u4e32\u662f\u5199\u5230\u6807\u51c6\u8f93\u51fa\u7684\uff0c\u540e\u9762\u4e0d\u6362\u884c\uff0c\u6240\u4ee5\u5149\u6807\u5c31\u505c\u5728\u540c\u4e00\u884c\u3001\u95ee\u53f7\u7684\u540e\u9762\uff0c\u540d\u5b57\u5c31\u6572\u5728\u90a3\u91cc\u3002\u8fd9\u4e0d\u662f\u672c\u7a0b\u5e8f\u7684\u602a\u7656\uff0c\u8fd9\u5c31\u662f\u63d0\u793a\u53c2\u6570\u7684\u884c\u4e3a\u2014\u2014\u4e5f\u6b63\u56e0\u4e3a\u5982\u6b64\uff0c\u63d0\u793a\u4e32\u672b\u5c3e\u7559\u4e86\u4e00\u4e2a\u7a7a\u683c\u3002"
         ]
       },
       "lineNotes": [
@@ -4538,12 +4736,12 @@ var PyPrograms = {
       "notes": {
         "en": [
           "In Python 3 the / operator always produces a float, even when it divides evenly: 4 / 2 is 2.0, not 2. That is why 0C prints as 32.0F and not 32F. If you wanted a whole number you would have to ask for one; Python will not quietly give you one back.",
-          "Look at 36.6C. The answer prints as 97.88000000000001. Nothing is broken: 36.6 has no exact binary representation, so the multiplication carries a tiny error that the division then scales. This is the reason marks, money and temperatures get round() applied at the moment they are displayed, and never in the middle of a chain of calculations, where rounding twice quietly moves the answer.",
+          "36.6C does not come out as 97.88: the answer prints as 97.88000000000001. Nothing is broken: 36.6 has no exact binary representation, so the multiplication carries a tiny error that the division then scales. This is the reason marks, money and temperatures get round() applied at the moment they are displayed, and never in the middle of a chain of calculations, where rounding twice quietly moves the answer.",
           "round() has a detail worth knowing before you need it: round(x) with no second argument returns an int, round(x, 1) returns a float. Same function, two different types out, decided by whether you asked for decimal places."
         ],
         "zh": [
           "Python 3 \u91cc / \u7684\u7ed3\u679c\u6c38\u8fdc\u662f float\uff0c\u54ea\u6015\u9664\u5f97\u5c3d\uff1a4 / 2 \u662f 2.0\uff0c\u4e0d\u662f 2\u3002\u6240\u4ee5 0C \u6253\u51fa\u6765\u662f 32.0F \u800c\u4e0d\u662f 32F\u3002\u60f3\u8981\u6574\u6570\u4f60\u5f97\u81ea\u5df1\u5f00\u53e3\u8981\uff0cPython \u4e0d\u4f1a\u5077\u5077\u8fd8\u4f60\u4e00\u4e2a\u3002",
-          "\u770b 36.6C \u90a3\u4e00\u884c\uff0c\u7b54\u6848\u6253\u6210\u4e86 97.88000000000001\u3002\u6ca1\u6709\u4e1c\u897f\u574f\u6389\uff1a36.6 \u5728\u4e8c\u8fdb\u5236\u91cc\u6ca1\u6709\u7cbe\u786e\u5199\u6cd5\uff0c\u4e58\u6cd5\u5e26\u8fdb\u4e00\u70b9\u8bef\u5dee\uff0c\u9664\u6cd5\u53c8\u628a\u5b83\u653e\u5927\u4e86\u4e00\u70b9\u3002\u8fd9\u6b63\u662f\u5206\u6570\u3001\u91d1\u989d\u3001\u6e29\u5ea6\u90fd\u5728\u300c\u8981\u663e\u793a\u7684\u90a3\u4e00\u523b\u300d\u624d round()\u3001\u800c\u7edd\u4e0d\u5728\u7b97\u5f0f\u4e2d\u95f4 round() \u7684\u7406\u7531\u2014\u2014\u4e2d\u9014 round \u4e24\u6b21\uff0c\u7b54\u6848\u4f1a\u6084\u6084\u632a\u4f4d\u3002",
+          "36.6C \u6362\u7b97\u51fa\u6765\u4e0d\u662f 97.88\uff0c\u800c\u662f\u6253\u6210\u4e86 97.88000000000001\u3002\u6ca1\u6709\u4e1c\u897f\u574f\u6389\uff1a36.6 \u5728\u4e8c\u8fdb\u5236\u91cc\u6ca1\u6709\u7cbe\u786e\u5199\u6cd5\uff0c\u4e58\u6cd5\u5e26\u8fdb\u4e00\u70b9\u8bef\u5dee\uff0c\u9664\u6cd5\u53c8\u628a\u5b83\u653e\u5927\u4e86\u4e00\u70b9\u3002\u8fd9\u6b63\u662f\u5206\u6570\u3001\u91d1\u989d\u3001\u6e29\u5ea6\u90fd\u5728\u300c\u8981\u663e\u793a\u7684\u90a3\u4e00\u523b\u300d\u624d round()\u3001\u800c\u7edd\u4e0d\u5728\u7b97\u5f0f\u4e2d\u95f4 round() \u7684\u7406\u7531\u2014\u2014\u4e2d\u9014 round \u4e24\u6b21\uff0c\u7b54\u6848\u4f1a\u6084\u6084\u632a\u4f4d\u3002",
           "round() \u6709\u4e2a\u7ec6\u8282\u503c\u5f97\u5728\u9700\u8981\u5b83\u4e4b\u524d\u5c31\u77e5\u9053\uff1around(x) \u4e0d\u5e26\u7b2c\u4e8c\u4e2a\u53c2\u6570\u8fd4\u56de int\uff0cround(x, 1) \u8fd4\u56de float\u3002\u540c\u4e00\u4e2a\u51fd\u6570\uff0c\u51fa\u6765\u4e24\u79cd\u7c7b\u578b\uff0c\u53d6\u51b3\u4e8e\u4f60\u6709\u6ca1\u6709\u95ee\u5b83\u8981\u5c0f\u6570\u4f4d\u3002"
         ]
       },
@@ -4599,12 +4797,12 @@ var PyPrograms = {
         "en": [
           "The second branch never mentions a. It does not need to: reaching that branch already proves the first test failed, so a has already lost and only the other two are still in the running. Every branch in a chain inherits the negation of every branch above it, and using that is what keeps the chain from growing to nine conditions.",
           "An if / elif / else chain has a property that three separate if statements do not: exactly one branch runs, so largest is assigned exactly once and always. Write it as three independent ifs, forget the final else, and Python will not warn you. You find out at run time, with a NameError, and only on the inputs that happen to reach that path.",
-          "This version and its sibling max-of-three-builtin return the same answers for every input. They are not competing; the exam asks you to show the algorithm, and this is what the algorithm looks like when nothing is hidden inside a built-in."
+          "This version and Largest of Three: built-in max() return the same answers for every input. They are not competing; the exam asks you to show the algorithm, and this is what the algorithm looks like when nothing is hidden inside a built-in."
         ],
         "zh": [
           "\u7b2c\u4e8c\u4e2a\u5206\u652f\u5b8c\u5168\u6ca1\u63d0 a\u3002\u5b83\u4e0d\u9700\u8981\u63d0\uff1a\u80fd\u8d70\u5230\u90a3\u4e2a\u5206\u652f\uff0c\u672c\u8eab\u5c31\u8bc1\u660e\u4e86\u7b2c\u4e00\u4e2a\u5224\u65ad\u4e3a\u5047\uff0c\u4e5f\u5c31\u662f a \u5df2\u7ecf\u51fa\u5c40\uff0c\u53ea\u5269\u53e6\u5916\u4e24\u4e2a\u8fd8\u5728\u6bd4\u3002\u94fe\u6761\u91cc\u6bcf\u4e2a\u5206\u652f\u90fd\u514d\u8d39\u7ee7\u627f\u4e86\u4e0a\u9762\u6240\u6709\u5206\u652f\u7684\u5426\u5b9a\uff0c\u7528\u4e0a\u8fd9\u4e00\u70b9\uff0c\u624d\u4e0d\u81f3\u4e8e\u628a\u8fd9\u6761\u94fe\u5199\u6210\u4e5d\u4e2a\u6761\u4ef6\u3002",
           "if / elif / else \u94fe\u6709\u4e00\u4e2a\u4e09\u6761\u72ec\u7acb if \u6ca1\u6709\u7684\u6027\u8d28\uff1a\u6070\u597d\u4e00\u4e2a\u5206\u652f\u4f1a\u6267\u884c\uff0c\u6240\u4ee5 largest \u6070\u597d\u88ab\u8d4b\u503c\u4e00\u6b21\u3001\u800c\u4e14\u4e00\u5b9a\u88ab\u8d4b\u503c\u3002\u5199\u6210\u4e09\u6761\u72ec\u7acb\u7684 if\u3001\u518d\u5fd8\u6389\u6700\u540e\u7684 else\uff0cPython \u4e0d\u4f1a\u8b66\u544a\u4f60\u3002\u4f60\u4f1a\u5728\u8fd0\u884c\u65f6\u624d\u53d1\u73b0\uff0c\u4ee5 NameError \u7684\u5f62\u5f0f\uff0c\u800c\u4e14\u53ea\u5728\u6070\u597d\u8d70\u5230\u90a3\u6761\u8def\u7684\u8f93\u5165\u4e0a\u624d\u53d1\u73b0\u3002",
-          "\u8fd9\u4e00\u7248\u548c\u5b83\u7684\u5144\u5f1f max-of-three-builtin \u5bf9\u4efb\u4f55\u8f93\u5165\u90fd\u7ed9\u540c\u6837\u7684\u7b54\u6848\u3002\u5b83\u4eec\u4e0d\u662f\u5728\u7ade\u4e89\uff1a\u5377\u5b50\u8981\u4f60\u628a\u7b97\u6cd5\u5199\u51fa\u6765\uff0c\u800c\u7b97\u6cd5\u5728\u6ca1\u6709\u4efb\u4f55\u4e1c\u897f\u85cf\u8fdb\u5185\u7f6e\u51fd\u6570\u65f6\uff0c\u957f\u7684\u5c31\u662f\u8fd9\u4e2a\u6837\u5b50\u3002"
+          "\u8fd9\u4e00\u7248\u548c\u300c\u4e09\u6570\u53d6\u5927\uff1a\u5185\u7f6e max()\u300d\u5bf9\u4efb\u4f55\u8f93\u5165\u90fd\u7ed9\u540c\u6837\u7684\u7b54\u6848\u3002\u5b83\u4eec\u4e0d\u662f\u5728\u7ade\u4e89\uff1a\u5377\u5b50\u8981\u4f60\u628a\u7b97\u6cd5\u5199\u51fa\u6765\uff0c\u800c\u7b97\u6cd5\u5728\u6ca1\u6709\u4efb\u4f55\u4e1c\u897f\u85cf\u8fdb\u5185\u7f6e\u51fd\u6570\u65f6\uff0c\u957f\u7684\u5c31\u662f\u8fd9\u4e2a\u6837\u5b50\u3002"
         ]
       },
       "lineNotes": [
@@ -4616,7 +4814,7 @@ var PyPrograms = {
         {
           "at": "    return largest",
           "en": "This line can only be reached with largest already assigned, and that guarantee comes from the chain above ending in a branch with no condition on it. A chain that ends on a condition instead has a path where nothing is assigned, and the failure arrives here, one line later, as a NameError.",
-          "zh": "\u80fd\u8d70\u5230\u8fd9\u4e00\u884c\uff0clargest \u5c31\u4e00\u5b9a\u5df2\u7ecf\u88ab\u8d4b\u8fc7\u503c\u4e86\uff0c\u800c\u8fd9\u6761\u4fdd\u8bc1\u6765\u81ea\u4e0a\u9762\u90a3\u6761\u94fe**\u4ee5\u4e00\u4e2a\u4e0d\u5e26\u6761\u4ef6\u7684\u5206\u652f\u6536\u5c3e**\u3002\u82e5\u90a3\u6761\u94fe\u662f\u4ee5\u4e00\u4e2a\u5e26\u6761\u4ef6\u7684\u5206\u652f\u7ed3\u675f\u7684\uff0c\u5c31\u5b58\u5728\u4e00\u6761\u4ec0\u4e48\u90fd\u6ca1\u8d4b\u503c\u7684\u8def\u5f84\uff0c\u800c\u5931\u8d25\u4f1a\u5728\u8fd9\u91cc\u3001\u5728\u665a\u4e00\u884c\u7684\u5730\u65b9\uff0c\u4ee5 NameError \u7684\u5f62\u5f0f\u51fa\u73b0\u3002"
+          "zh": "\u80fd\u8d70\u5230\u8fd9\u4e00\u884c\uff0clargest \u5c31\u4e00\u5b9a\u5df2\u7ecf\u88ab\u8d4b\u8fc7\u503c\u4e86\uff0c\u800c\u8fd9\u6761\u4fdd\u8bc1\u6765\u81ea\u4e0a\u9762\u90a3\u6761\u94fe\u4ee5\u4e00\u4e2a\u4e0d\u5e26\u6761\u4ef6\u7684\u5206\u652f\u6536\u5c3e\u3002\u82e5\u90a3\u6761\u94fe\u662f\u4ee5\u4e00\u4e2a\u5e26\u6761\u4ef6\u7684\u5206\u652f\u7ed3\u675f\u7684\uff0c\u5c31\u5b58\u5728\u4e00\u6761\u4ec0\u4e48\u90fd\u6ca1\u8d4b\u503c\u7684\u8def\u5f84\uff0c\u800c\u5931\u8d25\u4f1a\u5728\u8fd9\u91cc\u3001\u5728\u665a\u4e00\u884c\u7684\u5730\u65b9\uff0c\u4ee5 NameError \u7684\u5f62\u5f0f\u51fa\u73b0\u3002"
         }
       ],
       "run": {
@@ -4654,8 +4852,8 @@ var PyPrograms = {
         "zh": "\u4e09\u6570\u53d6\u5927\uff1a\u5185\u7f6e max()"
       },
       "blurb": {
-        "en": "The same answers as the branch version in one line, plus the two shapes of max() worth telling apart.",
-        "zh": "\u548c\u5206\u652f\u7248\u4e00\u6a21\u4e00\u6837\u7684\u7b54\u6848\uff0c\u4e00\u884c\u5199\u5b8c\uff1b\u5916\u52a0 max() \u90a3\u4e24\u79cd\u503c\u5f97\u5206\u6e05\u7684\u7528\u6cd5\u3002"
+        "en": "The same answers as Largest of Three: if / elif / else in one line, plus the two shapes of max() worth telling apart.",
+        "zh": "\u548c\u300c\u4e09\u6570\u53d6\u5927\uff1aif / elif / else\u300d\u4e00\u6a21\u4e00\u6837\u7684\u7b54\u6848\uff0c\u4e00\u884c\u5199\u5b8c\uff1b\u5916\u52a0 max() \u90a3\u4e24\u79cd\u503c\u5f97\u5206\u6e05\u7684\u7528\u6cd5\u3002"
       },
       "notes": {
         "en": [
@@ -4719,12 +4917,12 @@ var PyPrograms = {
         "en": [
           "Try it without temp and the failure is instructive: copying b into a overwrites a, and the old value of a is gone before anything can copy it across into b. Both variables end up holding b. The temporary is not politeness, it is the only surviving copy.",
           "The function assigns to a and b, and the caller's x and y are untouched by that. Parameters are names bound inside the function; rebinding them rebinds nothing outside. This is why the swap has to be returned, and why the caller has to assign the result back to x and y itself. Students who expect the swap to happen in place are not being careless, they are carrying a habit over from languages that pass by reference.",
-          "return a, b builds a tuple on the way out, and the caller unpacks it on the way in. Which is exactly the mechanism the sibling program swap-two-tuple uses to do the whole job in one line."
+          "return a, b builds a tuple on the way out, and the caller unpacks it on the way in. Which is exactly the mechanism Swap With Tuple Unpacking uses to do the whole job in one line."
         ],
         "zh": [
           "\u628a temp \u53bb\u6389\u8bd5\u4e00\u6b21\uff0c\u5931\u8d25\u7684\u65b9\u5f0f\u5f88\u6709\u6559\u76ca\uff1a\u628a b \u6284\u8fdb a \u7684\u90a3\u4e00\u4e0b\u5c31\u628a a \u8986\u76d6\u6389\u4e86\uff0ca \u7684\u65e7\u503c\u8fd8\u6ca1\u6765\u5f97\u53ca\u6284\u8fdb b \u5c31\u5df2\u7ecf\u6ca1\u4e86\u3002\u4e24\u4e2a\u53d8\u91cf\u6700\u540e\u90fd\u88c5\u7740 b\u3002\u90a3\u4e2a\u4e34\u65f6\u53d8\u91cf\u4e0d\u662f\u5ba2\u5957\uff0c\u5b83\u662f\u552f\u4e00\u5e78\u5b58\u7684\u90a3\u4efd\u526f\u672c\u3002",
           "\u51fd\u6570\u91cc\u7ed9 a \u548c b \u8d4b\u4e86\u503c\uff0c\u8c03\u7528\u65b9\u7684 x \u548c y \u5374\u6beb\u53d1\u65e0\u635f\u3002\u53c2\u6570\u662f\u7ed1\u5728\u51fd\u6570\u5185\u90e8\u7684\u540d\u5b57\uff0c\u91cd\u65b0\u7ed1\u5b9a\u5b83\u4eec\uff0c\u51fd\u6570\u5916\u9762\u4ec0\u4e48\u90fd\u4e0d\u4f1a\u53d8\u3002\u8fd9\u6b63\u662f\u4ea4\u6362\u5fc5\u987b\u88ab return \u51fa\u6765\u3001\u8c03\u7528\u65b9\u5fc5\u987b\u4eb2\u624b\u628a\u7ed3\u679c\u8d4b\u56de x \u548c y \u7684\u539f\u56e0\u3002\u4ee5\u4e3a\u4ea4\u6362\u4f1a\u5c31\u5730\u53d1\u751f\u7684\u5b66\u751f\u4e0d\u662f\u7c97\u5fc3\uff0c\u4ed6\u4eec\u662f\u5e26\u7740\u300c\u4f20\u5f15\u7528\u300d\u90a3\u7c7b\u8bed\u8a00\u7684\u4e60\u60ef\u8fc7\u6765\u7684\u3002",
-          "return a, b \u5728\u51fa\u53bb\u7684\u8def\u4e0a\u6253\u5305\u6210\u4e00\u4e2a\u5143\u7ec4\uff0c\u8c03\u7528\u65b9\u5728\u8fdb\u6765\u7684\u8def\u4e0a\u628a\u5b83\u62c6\u5f00\u3002\u800c\u8fd9\u6070\u597d\u5c31\u662f\u5144\u5f1f\u7a0b\u5e8f swap-two-tuple \u7528\u6765\u4e00\u884c\u529e\u5b8c\u5168\u90e8\u4e8b\u60c5\u7684\u90a3\u5957\u673a\u5236\u3002"
+          "return a, b \u5728\u51fa\u53bb\u7684\u8def\u4e0a\u6253\u5305\u6210\u4e00\u4e2a\u5143\u7ec4\uff0c\u8c03\u7528\u65b9\u5728\u8fdb\u6765\u7684\u8def\u4e0a\u628a\u5b83\u62c6\u5f00\u3002\u800c\u8fd9\u6070\u597d\u5c31\u662f\u300c\u4ea4\u6362\u4e24\u6570\uff1a\u5143\u7ec4\u89e3\u5305\u300d\u7528\u6765\u4e00\u884c\u529e\u5b8c\u5168\u90e8\u4e8b\u60c5\u7684\u90a3\u5957\u673a\u5236\u3002"
         ]
       },
       "lineNotes": [
@@ -4782,12 +4980,12 @@ var PyPrograms = {
         "en": [
           "The one-line swap is not a special swap syntax. The rule is general: the whole right-hand side is evaluated first, into a tuple, and only then is it unpacked into the names on the left. By the time anything is assigned, both old values are already held safely in that tuple. Python made the temporary for you.",
           "Because the rule is general, it explains things that look unrelated. Advancing a Fibonacci pair in one line - the new first value is the old second, the new second is the sum of the two - is correct for the same reason. And it explains why the one-line swap and a = b followed by b = a are not two spellings of one idea: the second pair evaluates in sequence, the first does not.",
-          "Compare this with swap-two-temp and notice what is actually different. Not the number of lines: what changed is who makes the copy. Writing the temporary yourself is the same algorithm with the mechanism visible."
+          "Compare this with Swap With a Temporary and notice what is actually different. Not the number of lines: what changed is who makes the copy. Writing the temporary yourself is the same algorithm with the mechanism visible."
         ],
         "zh": [
           "\u8fd9\u4e00\u884c\u4ea4\u6362\u4e0d\u662f\u67d0\u79cd\u4e13\u95e8\u7684\u4ea4\u6362\u8bed\u6cd5\u3002\u8fd9\u6761\u89c4\u5219\u662f\u901a\u7528\u7684\uff1a\u7b49\u53f7\u53f3\u8fb9\u6574\u4f53\u5148\u6c42\u503c\u3001\u6253\u5305\u6210\u4e00\u4e2a\u5143\u7ec4\uff0c\u7136\u540e\u624d\u62c6\u5f00\u8d4b\u7ed9\u5de6\u8fb9\u7684\u540d\u5b57\u3002\u8f6e\u5230\u8d4b\u503c\u53d1\u751f\u65f6\uff0c\u4e24\u4e2a\u65e7\u503c\u65e9\u5df2\u5b89\u7a33\u5730\u5f85\u5728\u90a3\u4e2a\u5143\u7ec4\u91cc\u3002\u4e34\u65f6\u53d8\u91cf\u662f Python \u66ff\u4f60\u9020\u7684\u3002",
           "\u6b63\u56e0\u4e3a\u89c4\u5219\u662f\u901a\u7528\u7684\uff0c\u5b83\u80fd\u89e3\u91ca\u4e00\u4e9b\u770b\u4e0a\u53bb\u6beb\u4e0d\u76f8\u5e72\u7684\u4e8b\u3002\u4e00\u884c\u63a8\u8fdb\u4e00\u5bf9\u6590\u6ce2\u90a3\u5951\u6570\u2014\u2014\u65b0\u7684\u7b2c\u4e00\u4e2a\u662f\u65e7\u7684\u7b2c\u4e8c\u4e2a\uff0c\u65b0\u7684\u7b2c\u4e8c\u4e2a\u662f\u4e24\u8005\u4e4b\u548c\u2014\u2014\u6210\u7acb\u7684\u662f\u540c\u4e00\u6761\u7406\u7531\u3002\u5b83\u4e5f\u89e3\u91ca\u4e86\u4e3a\u4ec0\u4e48\u8fd9\u4e00\u884c\u4ea4\u6362\u548c\u300c\u5148 a = b \u518d b = a\u300d\u4e0d\u662f\u540c\u4e00\u4e2a\u610f\u601d\u7684\u4e24\u79cd\u5199\u6cd5\uff1a\u540e\u8005\u662f\u6309\u987a\u5e8f\u6c42\u503c\u7684\uff0c\u524d\u8005\u4e0d\u662f\u3002",
-          "\u548c swap-two-temp \u5bf9\u7740\u770b\uff0c\u6ce8\u610f\u771f\u6b63\u7684\u5dee\u522b\u5728\u54ea\u3002\u4e0d\u5728\u884c\u6570\uff1a\u53d8\u7684\u662f\u300c\u8c01\u6765\u9020\u90a3\u4efd\u526f\u672c\u300d\u3002\u81ea\u5df1\u5199\u90a3\u4e2a\u4e34\u65f6\u53d8\u91cf\uff0c\u662f\u540c\u4e00\u4e2a\u7b97\u6cd5\uff0c\u53ea\u662f\u628a\u673a\u5236\u6446\u5728\u4e86\u660e\u5904\u3002"
+          "\u548c\u300c\u4ea4\u6362\u4e24\u6570\uff1a\u4e34\u65f6\u53d8\u91cf\u300d\u5bf9\u7740\u770b\uff0c\u6ce8\u610f\u771f\u6b63\u7684\u5dee\u522b\u5728\u54ea\u3002\u4e0d\u5728\u884c\u6570\uff1a\u53d8\u7684\u662f\u300c\u8c01\u6765\u9020\u90a3\u4efd\u526f\u672c\u300d\u3002\u81ea\u5df1\u5199\u90a3\u4e2a\u4e34\u65f6\u53d8\u91cf\uff0c\u662f\u540c\u4e00\u4e2a\u7b97\u6cd5\uff0c\u53ea\u662f\u628a\u673a\u5236\u6446\u5728\u4e86\u660e\u5904\u3002"
         ]
       },
       "lineNotes": [
@@ -4946,7 +5144,7 @@ var PyPrograms = {
         "CIE"
       ],
       "tags": [
-        "integer-division",
+        "floor-division",
         "modulo",
         "divmod",
         "round"
@@ -4959,18 +5157,18 @@ var PyPrograms = {
         "zh": "\u6574\u9664\u4e0e\u53d6\u4f59"
       },
       "blurb": {
-        "en": "Turning seconds into h:mm:ss, and the three results in the output that look wrong and are not.",
-        "zh": "\u628a\u79d2\u6570\u53d8\u6210 h:mm:ss\uff1b\u5916\u52a0\u8f93\u51fa\u91cc\u90a3\u4e09\u4e2a\u770b\u7740\u50cf\u9519\u4e86\u3001\u5176\u5b9e\u6ca1\u9519\u7684\u7ed3\u679c\u3002"
+        "en": "Turning seconds into h:mm:ss, and three results that look wrong and are not.",
+        "zh": "\u628a\u79d2\u6570\u53d8\u6210 h:mm:ss\uff1b\u5916\u52a0\u4e09\u4e2a\u770b\u7740\u50cf\u9519\u4e86\u3001\u5176\u5b9e\u6ca1\u9519\u7684\u7ed3\u679c\u3002"
       },
       "notes": {
         "en": [
           "// and % are one operation seen from two sides: how many whole times it goes in, and what is left over. That is why divmod() returns both from a single call - it is not a convenience wrapper, it is the shape of the underlying operation. Line one of the function uses divmod, the blanked lines use // and % separately; they compute the same pair.",
-          "Look at 3 1 -4 1 in the output. Python's % takes the sign of the divisor, so -7 % 2 is 1, not -1, and -7 // 2 is -4, not -3. The invariant Python preserves is (a // b) * b + (a % b) == a, and it checks out: -4 * 2 + 1 == -7. C and Java made the opposite choice, so an algorithm copied between them changes its answers on negative inputs without changing a character.",
+          "The line that prints 7 // 2, 7 % 2, -7 // 2 and -7 % 2 gives 3 1 -4 1. Python's % takes the sign of the divisor, so -7 % 2 is 1, not -1, and -7 // 2 is -4, not -3. The invariant Python preserves is (a // b) * b + (a % b) == a, and it checks out: -4 * 2 + 1 == -7. C and Java made the opposite choice, so an algorithm copied between them changes its answers on negative inputs without changing a character.",
           "The last line holds two different surprises that get blamed on each other. round(2.5) is 2 while round(3.5) is 4, because Python rounds a half to the nearest even neighbour - that keeps long columns of numbers from drifting upward the way always-round-up does. But round(2.675, 2) giving 2.67 is not that rule at all: 2.675 simply is not exactly 2.675 in binary, and the value being rounded is a hair below the half. Two results, two unrelated causes."
         ],
         "zh": [
           "// \u548c % \u662f\u540c\u4e00\u4e2a\u8fd0\u7b97\u7684\u4e24\u9762\uff1a\u6574\u6574\u88c5\u5f97\u4e0b\u51e0\u6b21\uff0c\u4ee5\u53ca\u5269\u4e0b\u591a\u5c11\u3002\u6240\u4ee5 divmod() \u4e00\u6b21\u8c03\u7528\u5c31\u628a\u4e24\u4e2a\u90fd\u8fd8\u7ed9\u4f60\u2014\u2014\u5b83\u4e0d\u662f\u987a\u624b\u5305\u4e00\u5c42\u7684\u4fbf\u5229\u51fd\u6570\uff0c\u5b83\u5c31\u662f\u5e95\u5c42\u90a3\u4e2a\u8fd0\u7b97\u7684\u5f62\u72b6\u3002\u51fd\u6570\u7b2c\u4e00\u884c\u7528\u7684\u662f divmod\uff0c\u88ab\u6316\u7a7a\u7684\u4e24\u884c\u5206\u5f00\u7528 // \u548c %\uff1b\u5b83\u4eec\u7b97\u7684\u662f\u540c\u4e00\u5bf9\u6570\u3002",
-          "\u770b\u8f93\u51fa\u91cc\u90a3\u884c 3 1 -4 1\u3002Python \u7684 % \u53d6\u9664\u6570\u7684\u7b26\u53f7\uff0c\u6240\u4ee5 -7 % 2 \u662f 1 \u4e0d\u662f -1\uff0c\u800c -7 // 2 \u662f -4 \u4e0d\u662f -3\u3002Python \u5b88\u4f4f\u7684\u6052\u7b49\u5f0f\u662f (a // b) * b + (a % b) == a\uff0c\u4ee3\u8fdb\u53bb\u9a8c\u4e00\u4e0b\uff1a-4 * 2 + 1 == -7\u3002C \u548c Java \u5f53\u5e74\u9009\u4e86\u76f8\u53cd\u7684\u65b9\u5411\uff0c\u4e8e\u662f\u4e00\u4e2a\u7b97\u6cd5\u5728\u4e24\u8005\u4e4b\u95f4\u6284\u6765\u6284\u53bb\u3001\u4e00\u4e2a\u5b57\u7b26\u90fd\u6ca1\u6539\uff0c\u5728\u8d1f\u6570\u8f93\u5165\u4e0a\u7684\u7b54\u6848\u5c31\u53d8\u4e86\u3002",
+          "\u6253\u5370 7 // 2\u30017 % 2\u3001-7 // 2\u3001-7 % 2 \u7684\u90a3\u4e00\u884c\u5f97\u5230 3 1 -4 1\u3002Python \u7684 % \u53d6\u9664\u6570\u7684\u7b26\u53f7\uff0c\u6240\u4ee5 -7 % 2 \u662f 1 \u4e0d\u662f -1\uff0c\u800c -7 // 2 \u662f -4 \u4e0d\u662f -3\u3002Python \u5b88\u4f4f\u7684\u6052\u7b49\u5f0f\u662f (a // b) * b + (a % b) == a\uff0c\u4ee3\u8fdb\u53bb\u9a8c\u4e00\u4e0b\uff1a-4 * 2 + 1 == -7\u3002C \u548c Java \u5f53\u5e74\u9009\u4e86\u76f8\u53cd\u7684\u65b9\u5411\uff0c\u4e8e\u662f\u4e00\u4e2a\u7b97\u6cd5\u5728\u4e24\u8005\u4e4b\u95f4\u6284\u6765\u6284\u53bb\u3001\u4e00\u4e2a\u5b57\u7b26\u90fd\u6ca1\u6539\uff0c\u5728\u8d1f\u6570\u8f93\u5165\u4e0a\u7684\u7b54\u6848\u5c31\u53d8\u4e86\u3002",
           "\u6700\u540e\u4e00\u884c\u85cf\u7740\u4e24\u4e2a\u4e92\u4e0d\u76f8\u5e72\u3001\u5374\u603b\u88ab\u7b97\u5230\u5f7c\u6b64\u5934\u4e0a\u7684\u610f\u5916\u3002round(2.5) \u662f 2 \u800c round(3.5) \u662f 4\uff0c\u56e0\u4e3a Python \u628a\u300c\u6070\u597d\u4e00\u534a\u300dround \u5230\u6700\u8fd1\u7684\u5076\u6570\u90bb\u5c45\u2014\u2014\u8fd9\u80fd\u8ba9\u957f\u957f\u4e00\u5217\u6570\u4e0d\u50cf\u300c\u9022\u534a\u8fdb\u4e00\u300d\u90a3\u6837\u6574\u4f53\u5411\u4e0a\u6f02\u3002\u4f46 round(2.675, 2) \u5f97\u5230 2.67 \u5b8c\u5168\u4e0d\u662f\u8fd9\u6761\u89c4\u5219\uff1a2.675 \u5728\u4e8c\u8fdb\u5236\u91cc\u672c\u6765\u5c31\u4e0d\u662f\u7cbe\u786e\u7684 2.675\uff0c\u88ab round \u7684\u90a3\u4e2a\u503c\u6bd4\u4e00\u534a\u4f4e\u4e86\u4e00\u4e1d\u3002\u4e24\u4e2a\u7ed3\u679c\uff0c\u4e24\u4e2a\u65e0\u5173\u7684\u6210\u56e0\u3002"
         ]
       },

@@ -122,6 +122,11 @@ GATES = [
     ('D·库', 'pygame_main_guard_check',        library.pygame_main_guard_check),
     ('D·库', 'micropython_main_guard_check',   library.micropython_main_guard_check),
     ('D·库', 'boards_map_check',               library.boards_map_check),
+    ('D·库', 'boards_groups_check',            library.boards_groups_check),
+    ('D·库', 'fixture_tracked_check',          library.fixture_tracked_check),
+    ('D·库', 'tag_normalize_check',            library.tag_normalize_check),
+    ('D·库', 'copied_blank_check',             library.copied_blank_check),
+    ('D·库', 'isdigit_check',                  library.isdigit_check),
 
     ('D·词法', 'lex_roundtrip_check',    lexer.lex_roundtrip_check),
     ('D·词法', 'lex_vs_cpython_check',   lexer.lex_vs_cpython_check),

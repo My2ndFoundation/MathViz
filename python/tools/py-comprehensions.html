@@ -29,13 +29,18 @@
      跟着改。版本号要在三处同步：注册表 python-tools.json 的 version、这里的
      tool-version meta、右上角的徽章——徽章直接读 meta（见第二个脚本块里的
      VERSION），所以它永远不需要单独改。 -->
-<meta name="tool-version" content="1.0.1">
-<meta name="tool-engine" content="py-1.3.1">
+<meta name="tool-version" content="1.0.2">
+<meta name="tool-engine" content="py-1.3.2">
 <!-- >>> GENERATED:FAVICON -->
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAA/1BMVEUUVrceN6YEl50nKYgDod8FapoEX3V6I+AEZ8gDbtxPFYdQIJ4DOTgCwv+GE8sFU1kDQDtmIL8pEVcGyrkDgdAAAABoKNkWCSwDSasAevQEGSgBqfc3F3QBs/paKNADJTUAa/SPG+pPIawCFRdzJuQDNUcDNlcEZcUAW/dGGY0lBzgjDEUBnPMDRIcQJVMCK0kyEmYCU7AHV4WiE/MOXLoEQ1sMedVSIqsHZY50FLoFNpdRHqkEhYdNDHYEOWwBgfYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADRsqliAAAAQHRSTlOjjpdhy2lM7KvNXYwU/74wGMUn+bkA/AuR/Qf5TPz4Df39rwP/GCKt/mwPGfNVIxc5lU7/pSnOnV+tdaV0RjX/bR25hAAAAVdJREFUeNqtk2d/gyAQh40rq7sFRECDK0Oz92jz/b9V/ZmYgCTpm/JCT+7hTu7+p4E/lvZPQGiasbw/bA5FwH9mzJf8GE9FwGWMEYGwcQc7MkAIMd3S/4NxpyMDhFkZMcOLfzpVgLFPsq/iI8F4ARwFSECSkUZujzHuAhUgSe5qrDR/VPgVIGMxiO3NbKYdj01wA2BWrFvLeLmxut3iMk5PAvzZq34qQ7I6vZ1eTeqFfShr4C7OEXYX4C30dftaRbc4owkRPvXDk9iHkZE/dg3jAoRhtcMjVQ9oMBA2ayhfMjCYz1+E36i16uuKor7nvHUlqEFRVXJbztPS7rdpX9Ek4rxemjCi6ZqmqA9F0X5zfj4WQC9P8EGNSSqpesuj4ioUwslN2aM6fC8SwODOXEyiiJYJbg/OHsJ2ACG9O1l5dAi94MHo0cjzpATKbO49jz4cXlRJAMAvD+ldcxDlRcsAAAAASUVORK5CYII=">
 <!-- <<< GENERATED:FAVICON -->
 <title>Comprehensions &amp; Built-ins · 推导式与内置函数</title>
 <!-- 版本记录（changelog，新→旧）：
+     1.0.2  2026-11-06  讲解不再指向看不到的输出；指别的程序写标题；filter 的例子改用
+                        str.isdecimal；tag % 与 list of lists 统一为
+                        modulo 与 2D list。 判定器（engine
+                        py-1.3.2）：答案与标准答案行数不同时也比较代码块结构（新反馈 kind
+                        block）。清理波：第 6 期账本 §十 第一、二组。
      1.0.1  2026-09-30  考试局按四家官方考纲重核（用户裁决：考纲外不写，[] 合法；依据见
                         docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md）：
                         squares-comprehension
@@ -1640,6 +1645,165 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     return { toks: toks, rel: ind.rel, relLines: ind.relLines };
   }
 
+  /* ---- 块层级：两边有效行条数不同时才用（清理波，phase1-deferred §一.3） ----
+
+     有效行条数相同时，compare() 照旧按相对缩进**宽度**严比（rel）。条数不同的
+     合法写法只有两种：单行复合语句（`if x: y` 对两行写法）与括号内断行。以前这时
+     完全不比缩进，于是 `if a:\n    if b: c()\nd()` 判等于 `d()` 缩进在外层 if
+     里的那四行——语义变了也判对。
+
+     这里把源码切成**逻辑行**（括号深度 > 0、或上一个有效 token 是反斜杠续行
+     `\`、或上一个 token 是跨行的三引号字符串时，并入上一逻辑行），用一个缩进栈
+     把每条逻辑行映射成**块层级**（第一条逻辑行为 0）；复合语句头（行首是
+     COMPOUND 里的关键字、或按 softKeywordHeader 判为语句头的 match / case，括号深度 0
+     的第一个 `:`）后面同一行的体算深一层。
+     compare() 再逐 token 比层级：原文相同、层级不同 → kind 'block'。
+
+     CPython 会拒绝的三种缩进：
+       · unexpected indent（上一逻辑行不是以 `:` 结尾的语句头，这一行却变深）：
+         「变深」时层级取上一逻辑行**最深处**加一——`if a: b` 之后多缩进一行，它比 b
+         还深、不与 b 同层——所以它的层级按构造就比合法的参考多一层；
+       · expected an indented block（以 `:` 结尾的语句头之后没有变深）：参考是合法
+         Python，同一串 token 在参考里语句头之后的那个 token 必在深一层，作答不深，
+         层级按构造就不同；
+       · unindent does not match any outer indentation level（退缩进到栈里没有的
+         宽度）：层级可能碰巧等于参考，只有这一种记成 bad，不论层级等不等都判错。
+     前两种另记 bad 是冗余的：负控制实测，另记的 bad 删掉，测试与门全绿，所以不留。 */
+  var COMPOUND = { 'if': 1, 'elif': 1, 'else': 1, 'for': 1, 'while': 1, 'try': 1,
+                   'except': 1, 'finally': 1, 'with': 1, 'def': 1, 'class': 1 };
+  var OPENERS = { '(': 1, '[': 1, '{': 1 };
+  var CLOSERS = { ')': 1, ']': 1, '}': 1 };
+
+  /* match / case 是**软关键字**（清理波终审 M2）：`match = 3`、`match.group(1)`、`case(x)` 是普通
+     语句。判据（逻辑行 toks[a..b)，首词是 match / case）：
+       1. 第二个 token 能开一个 subject / 模式：名字（不是 if / else / in / is / and / or / for /
+          as / lambda 这类只能接在表达式后面的关键字）、数字、字符串、`(` `[` `{`、`-` `+` `~` `*`。
+          于是 `=` / `.` / `:` / `,` / 增强赋值 / 下标之外的运算符开头的都不是语句头。
+       2. 行里有括号深度 0 的 `:`，而它之前（括号深度 0）没有 `=`、增强赋值、`:=`、`lambda`——
+          排除 `case = lambda: 0`、`case, x = lambda: 0, 1` 一类。
+       3. match 头的 `:` 必须是这一逻辑行最后一个 token：CPython 的 match 头之后只能换行
+          （`match x: case 1: …` 是语法错），所以 match 按构造不会有同一行的体——认它是头与否
+          不改变任何层级，这一条只防把 `match: T = v` 之类的行算进来。
+     没有括号深度 0 冒号的行（`case(x)`、`match.group(1)`、`match = 3`）分不分类都一样：
+     colon 是 -1，层级不变。
+     仍分不出的（记在这里，靠「只挖写法唯一的行」）：`case[0]: int = 1`（给名为 case 的东西的下标
+     加注解）与 `case [0]: int = 1`（序列模式 + 一行体）token 完全相同，只有「是否在 match 块里」能
+     区分，而挖空片段常常不含 match 那一行——这里一律按 case 头处理。 */
+  var SOFT_HEAD_BAD_NAME = { 'if': 1, 'else': 1, 'elif': 1, 'in': 1, 'is': 1, 'and': 1, 'or': 1,
+                             'for': 1, 'as': 1, 'lambda': 1, 'from': 1, 'import': 1 };
+  var SOFT_HEAD_OK_PUNCT = { '(': 1, '[': 1, '{': 1, '-': 1, '+': 1, '~': 1, '*': 1 };
+  function isAssignOp(t) {
+    return t === '=' || t === ':=' ||
+      (t.length >= 2 && t.charAt(t.length - 1) === '=' && t !== '==' && t !== '!=' && t !== '<=' && t !== '>=');
+  }
+  function softKeywordHeader(toks, a, b) {
+    var head = toks[a].text;
+    if ((head !== 'match' && head !== 'case') || a + 2 >= b) { return false; }
+    var nx = toks[a + 1].text;
+    var starts = SOFT_HEAD_OK_PUNCT[nx] ||
+      (/^[A-Za-z_]/.test(nx) && !SOFT_HEAD_BAD_NAME[nx]) ||
+      /^[0-9'"]/.test(nx) || /^\.[0-9]/.test(nx);
+    if (!starts) { return false; }
+    var d = 0;
+    for (var j = a + 1; j < b; j++) {
+      var t = toks[j].text;
+      if (OPENERS[t]) { d++; continue; }
+      if (CLOSERS[t] && d > 0) { d--; continue; }
+      if (d !== 0) { continue; }
+      if (t === ':') { return head === 'case' || j === b - 1; }
+      if (t === 'lambda' || isAssignOp(t)) { return false; }
+    }
+    return false;
+  }
+
+  function countNewlines(s) {
+    var n = 0;
+    for (var i = 0; i < s.length; i++) { if (s.charAt(i) === '\n') { n++; } }
+    return n;
+  }
+
+  /* blockLevels(toks) -> { lvl: number[], bad: boolean[] }，与 toks 一一对应。 */
+  function blockLevels(toks) {
+    var lvl = new Array(toks.length);
+    var bad = new Array(toks.length);
+    if (toks.length === 0) { return { lvl: lvl, bad: bad }; }
+
+    /* 1. 切逻辑行：每项是 toks 的下标区间 [from, to) */
+    var logical = [];
+    var depth = 0, from = 0;
+    for (var i = 0; i < toks.length; i++) {
+      if (i > 0) {
+        var prev = toks[i - 1];
+        var prevEnd = prev.line + countNewlines(prev.text);
+        if (depth === 0 && toks[i].line > prevEnd && prev.text !== '\\') {
+          logical.push([from, i]);
+          from = i;
+        }
+      }
+      var tx = toks[i].text;
+      if (OPENERS[tx]) { depth++; } else if (CLOSERS[tx] && depth > 0) { depth--; }
+    }
+    logical.push([from, toks.length]);
+
+    /* 2. 缩进栈 */
+    var stack = null;           /* [{ w, lvl }] */
+    var prevDeepest = 0;        /* 上一逻辑行最深的层级 */
+    for (var k = 0; k < logical.length; k++) {
+      var a = logical[k][0], b = logical[k][1];
+      var w = toks[a].col;
+      var level, isBad = false;
+      if (stack === null) {
+        stack = [{ w: w, lvl: 0 }];
+        level = 0;
+      } else {
+        var top = stack[stack.length - 1];
+        if (w > top.w) {
+          level = prevDeepest + 1;
+          stack.push({ w: w, lvl: level });
+        } else if (w === top.w) {
+          level = top.lvl;
+        } else {
+          var popped = null;
+          while (stack.length && stack[stack.length - 1].w > w) { popped = stack.pop(); }
+          if (stack.length === 0) {
+            /* 空的片段可以退到第一行之外（一个空从函数体末尾跨到模块顶层）：
+               记成比被弹掉的最外层浅一层的新栈底，不算不合法。 */
+            level = popped.lvl - 1;
+            stack.push({ w: w, lvl: level });
+          } else if (stack[stack.length - 1].w === w) {
+            level = stack[stack.length - 1].lvl;
+          } else {
+            level = stack[stack.length - 1].lvl + 1;
+            isBad = true;
+            stack.push({ w: w, lvl: level });
+          }
+        }
+      }
+
+      /* 3. 复合语句头：括号深度 0 的第一个 `:`，其后同一逻辑行的 token 深一层 */
+      var head = toks[a].text;
+      var isHeader = !!COMPOUND[head] ||
+        (head === 'async' && a + 1 < b && /^(def|for|with)$/.test(toks[a + 1].text)) ||
+        softKeywordHeader(toks, a, b);
+      var colon = -1;
+      if (isHeader) {
+        var d = 0;
+        for (var j = a; j < b; j++) {
+          var t = toks[j].text;
+          if (OPENERS[t]) { d++; } else if (CLOSERS[t] && d > 0) { d--; }
+          else if (t === ':' && d === 0) { colon = j; break; }
+        }
+      }
+      for (var m = a; m < b; m++) {
+        lvl[m] = (colon !== -1 && m > colon) ? level + 1 : level;
+        bad[m] = isBad;
+      }
+      /* 一行写法：体在同一行，这一逻辑行最深处深一层 */
+      prevDeepest = (colon !== -1 && colon < b - 1) ? level + 1 : level;
+    }
+    return { lvl: lvl, bad: bad };
+  }
+
   /* 两个数组第一处不同的下标；一个是另一个的前缀时，下标取较短那个的长度；
      完全相同返回 -1。 */
   function firstDiffIndex(a, b) {
@@ -1652,7 +1816,11 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
   }
 
   /* compare(answer, reference) -> { ok, index, expected, got, kind }
-     kind ∈ 'equal' | 'different' | 'missing' | 'extra' | 'indent'
+     kind ∈ 'equal' | 'different' | 'missing' | 'extra' | 'indent' | 'block'
+
+     'block'（清理波）：两边有效行条数不同、token 原文到此处都相同、而块层级不同
+     （或答案这一逻辑行的缩进 CPython 会拒绝）——见 blockLevels。index 与 'indent'
+     同语义（答案侧物理行号，0 起），expected/got 是块层级数字。
 
      顺序：先比 rel，**但只有两边有效行条数相同时**，值不同才归类 'indent'；
      rel 相同、或有效行条数本身就不同，都落到逐 token 比原文，短的一方先到头
@@ -1691,10 +1859,22 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     }
 
     var at = na.toks, rt = nr.toks;
+    /* 有效行条数不同：相对缩进宽度没法逐行对，改比块层级（见 blockLevels）。
+       条数相同时上面已经按宽度严比过，这里不再重复。 */
+    var la = null, lr = null;
+    if (na.rel.length !== nr.rel.length) {
+      la = blockLevels(at);
+      lr = blockLevels(rt);
+    }
     var n = Math.min(at.length, rt.length);
     for (var i = 0; i < n; i++) {
       if (at[i].text !== rt[i].text) {
         return { ok: false, index: i, expected: rt[i].text, got: at[i].text, kind: 'different' };
+      }
+      if (la && (la.bad[i] || la.lvl[i] !== lr.lvl[i])) {
+        /* 'block'：与 'indent' 同一套 index 语义（答案侧**物理行号**，0 起），
+           expected/got 是块层级（相对第一条逻辑行，数字）。从不涉及字面量原文。 */
+        return { ok: false, index: at[i].line - 1, expected: lr.lvl[i], got: la.lvl[i], kind: 'block' };
       }
     }
     if (at.length < rt.length) {
@@ -2120,6 +2300,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
                   en: 'token #{0} is extra: {1} does not belong here' },
     blankIndent: { zh: '第 {0} 行缩进对不上：期待相对缩进 {1} 格，你写了 {2} 格',
                   en: 'line {0} indent is off: expected {1} spaces relative, you wrote {2}' },
+    blankBlock:  { zh: '第 {0} 行落进了另一层代码块：块结构与参考不同（看这一行的缩进，和它前面写成一行的语句头）',
+                  en: 'line {0} lands in a different block: the block structure differs from the reference (check this line\'s indent and any header written on one line before it)' },
     blankLead:   { zh: '第 1 行缩进对不上：这个空从第 {1} 格开始，你写了 {2} 格',
                   en: 'line 1 indent is off: this blank starts at column {1}, you wrote {2}' },
     blankDiffLiteral: { zh: '第 {0} 个 token（{1}）里第 {2} 个字符起不同',
@@ -2515,6 +2697,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
          所以要用 PyLex.significant 现取它在 answer 里的偏移。
        kind 'indent'：index 是**物理行号**，expected/got 是**相对缩进数值**
          （不是 null、不是字符串）。光标去那一行的行首。裁决 R30/R31。
+       kind 'block'（清理波）：同 'indent' 的 index 语义，expected/got 是块层级；
+         消息只报行号。
 
      另有 Judge 结构上看不见的一种错：**整块的绝对缩进**。Judge.normalize 比的是
      行与行之间的相对缩进，所以单行挖空体 `    x = 1` 与 `x = 1` 在它眼里完全
@@ -2548,6 +2732,20 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     var cmp = judge().compare(a, r);
     if (cmp.ok) {
       return { ok: true, kind: 'equal', caret: 0, message: t('blankOk', lang) };
+    }
+
+    /* 'block'（清理波）：两边有效行条数不同时，Judge 比的是块层级，index 同样是
+       答案侧**物理行号**。消息不印层级数字——「第 1 层 / 第 0 层」对她没有意义——
+       也从不涉及字面量原文。 */
+    if (cmp.kind === 'block') {
+      var bStarts = editor().lineStarts(a);
+      var bi = Math.max(0, Math.min(cmp.index, bStarts.length - 1));
+      return {
+        ok: false,
+        kind: 'block',
+        caret: bStarts[bi],
+        message: ts('blankBlock', lang, [cmp.index + 1])
+      };
     }
 
     if (cmp.kind === 'indent') {
@@ -4544,13 +4742,13 @@ var PyPrograms = {
       },
       "notes": {
         "en": [
-          "A list comprehension has the shape [expression for item in iterable]. Read it as: for each item in the iterable, work out the expression, and collect the results in a new list. It does the same job as the loop-and-append version and gives an identical result for every input - compare the two programs side by side.",
+          "A list comprehension has the shape [expression for item in iterable]. Read it as: for each item in the iterable, work out the expression, and collect the results in a new list. It does the same job as Squares: Loop and append and gives an identical result for every input - compare the two programs side by side.",
           "The expression comes first even though it is worked out last. That order is the part that feels backwards at first: the brackets say what each new item looks like before they say where the items come from.",
           "The loop variable belongs to the comprehension. It does not exist before it, and in Python 3 it does not survive after it, so a comprehension cannot accidentally overwrite a variable of the same name outside.",
           "Use a comprehension when the job is exactly build a new list from an old one. When the loop body has to do more than produce one value per item, the plain loop is the better tool - the program \"Comprehension or Loop?\" is about that."
         ],
         "zh": [
-          "\u5217\u8868\u63a8\u5bfc\u5f0f\u7684\u5f62\u72b6\u662f [\u8868\u8fbe\u5f0f for \u9879 in \u53ef\u8fed\u4ee3\u5bf9\u8c61]\u3002\u8bfb\u6cd5\uff1a\u5bf9\u53ef\u8fed\u4ee3\u5bf9\u8c61\u91cc\u7684\u6bcf\u4e00\u9879\uff0c\u7b97\u51fa\u8868\u8fbe\u5f0f\uff0c\u628a\u7ed3\u679c\u6536\u8fdb\u4e00\u4e2a\u65b0\u5217\u8868\u3002\u5b83\u548c\u300c\u5faa\u73af\u52a0 append\u300d\u90a3\u4e2a\u7248\u672c\u505a\u7684\u662f\u540c\u4e00\u4ef6\u4e8b\uff0c\u5bf9\u4efb\u4f55\u8f93\u5165\u7ed3\u679c\u90fd\u76f8\u540c\u2014\u2014\u628a\u4e24\u4e2a\u7a0b\u5e8f\u5e76\u6392\u5bf9\u7167\u770b\u770b\u3002",
+          "\u5217\u8868\u63a8\u5bfc\u5f0f\u7684\u5f62\u72b6\u662f [\u8868\u8fbe\u5f0f for \u9879 in \u53ef\u8fed\u4ee3\u5bf9\u8c61]\u3002\u8bfb\u6cd5\uff1a\u5bf9\u53ef\u8fed\u4ee3\u5bf9\u8c61\u91cc\u7684\u6bcf\u4e00\u9879\uff0c\u7b97\u51fa\u8868\u8fbe\u5f0f\uff0c\u628a\u7ed3\u679c\u6536\u8fdb\u4e00\u4e2a\u65b0\u5217\u8868\u3002\u5b83\u548c\u300c\u5e73\u65b9\u8868\uff1a\u5faa\u73af\u52a0 append\u300d\u505a\u7684\u662f\u540c\u4e00\u4ef6\u4e8b\uff0c\u5bf9\u4efb\u4f55\u8f93\u5165\u7ed3\u679c\u90fd\u76f8\u540c\u2014\u2014\u628a\u4e24\u4e2a\u7a0b\u5e8f\u5e76\u6392\u5bf9\u7167\u770b\u770b\u3002",
           "\u8868\u8fbe\u5f0f\u5199\u5728\u6700\u524d\u9762\uff0c\u867d\u7136\u5b83\u662f\u6700\u540e\u624d\u7b97\u7684\u3002\u4e00\u5f00\u59cb\u89c9\u5f97\u522b\u626d\u7684\u5c31\u662f\u8fd9\u4e2a\u987a\u5e8f\uff1a\u65b9\u62ec\u53f7\u5148\u8bf4\u300c\u6bcf\u4e2a\u65b0\u9879\u957f\u4ec0\u4e48\u6837\u300d\uff0c\u518d\u8bf4\u300c\u9879\u4ece\u54ea\u91cc\u6765\u300d\u3002",
           "\u5faa\u73af\u53d8\u91cf\u5c5e\u4e8e\u63a8\u5bfc\u5f0f\u81ea\u5df1\u3002\u63a8\u5bfc\u5f0f\u4e4b\u524d\u5b83\u4e0d\u5b58\u5728\uff0c\u5728 Python 3 \u91cc\u63a8\u5bfc\u5f0f\u7ed3\u675f\u540e\u5b83\u4e5f\u4e0d\u7559\u4e0b\uff0c\u6240\u4ee5\u63a8\u5bfc\u5f0f\u4e0d\u4f1a\u610f\u5916\u8986\u76d6\u5916\u9762\u540c\u540d\u7684\u53d8\u91cf\u3002",
           "\u5f53\u4efb\u52a1\u6070\u597d\u662f\u300c\u7531\u65e7\u5217\u8868\u9020\u65b0\u5217\u8868\u300d\u65f6\u7528\u63a8\u5bfc\u5f0f\u3002\u5faa\u73af\u4f53\u8981\u505a\u7684\u4e8b\u4e0d\u6b62\u300c\u6bcf\u9879\u4ea7\u51fa\u4e00\u4e2a\u503c\u300d\u65f6\uff0c\u666e\u901a\u5faa\u73af\u624d\u662f\u5408\u9002\u7684\u5de5\u5177\u2014\u2014\u300c\u63a8\u5bfc\u5f0f\u8fd8\u662f\u5faa\u73af\uff1f\u300d\u8fd9\u4e2a\u7a0b\u5e8f\u8bb2\u7684\u5c31\u662f\u8fd9\u4e2a\u3002"
@@ -4581,7 +4779,7 @@ var PyPrograms = {
       "tags": [
         "list comprehension",
         "if",
-        "%"
+        "modulo"
       ],
       "requires": [],
       "runtime": "cpython",
@@ -4598,12 +4796,12 @@ var PyPrograms = {
         "en": [
           "Adding if condition after the for turns a comprehension into a filter: an item is kept only when the condition is true for it, and the items that are kept go in unchanged. The new list can be shorter than the old one, or empty, as the second call shows.",
           "Even means the remainder after dividing by 2 is 0. That works for negative numbers and zero too: in Python -4 % 2 is 0 and 0 % 2 is 0, so both are kept.",
-          "The filtered comprehension does the same job as a loop with an if inside and one append under it. The paired program does it a third way, with the built-in filter."
+          "The filtered comprehension does the same job as a loop with an if inside and one append under it. Keep the Evens: filter and lambda does it a third way, with the built-in filter."
         ],
         "zh": [
           "\u5728 for \u540e\u9762\u52a0\u4e0a if \u6761\u4ef6\uff0c\u63a8\u5bfc\u5f0f\u5c31\u6210\u4e86\u7b5b\u5b50\uff1a\u53ea\u6709\u6761\u4ef6\u4e3a\u771f\u7684\u9879\u624d\u7559\u4e0b\uff0c\u7559\u4e0b\u7684\u9879\u539f\u6837\u653e\u8fdb\u53bb\u3002\u65b0\u5217\u8868\u53ef\u4ee5\u6bd4\u65e7\u7684\u77ed\uff0c\u4e5f\u53ef\u4ee5\u662f\u7a7a\u7684\uff0c\u7b2c\u4e8c\u6b21\u8c03\u7528\u5c31\u662f\u8fd9\u6837\u3002",
           "\u5076\u6570\u7684\u610f\u601d\u662f\u9664\u4ee5 2 \u7684\u4f59\u6570\u4e3a 0\u3002\u8fd9\u5bf9\u8d1f\u6570\u548c 0 \u540c\u6837\u6210\u7acb\uff1aPython \u91cc -4 % 2 \u662f 0\uff0c0 % 2 \u4e5f\u662f 0\uff0c\u6240\u4ee5\u4e24\u4e2a\u90fd\u7559\u4e0b\u3002",
-          "\u5e26\u7b5b\u9009\u7684\u63a8\u5bfc\u5f0f\u548c\u300c\u5faa\u73af\u91cc\u4e00\u4e2a if\u3001if \u4e0b\u4e00\u4e2a append\u300d\u505a\u7684\u662f\u540c\u4e00\u4ef6\u4e8b\u3002\u914d\u5bf9\u7684\u7a0b\u5e8f\u7528\u7b2c\u4e09\u79cd\u65b9\u5f0f\u2014\u2014\u5185\u7f6e\u7684 filter\u2014\u2014\u6765\u505a\u3002"
+          "\u5e26\u7b5b\u9009\u7684\u63a8\u5bfc\u5f0f\u548c\u300c\u5faa\u73af\u91cc\u4e00\u4e2a if\u3001if \u4e0b\u4e00\u4e2a append\u300d\u505a\u7684\u662f\u540c\u4e00\u4ef6\u4e8b\u3002\u300c\u53ea\u7559\u5076\u6570\uff1afilter \u52a0 lambda\u300d\u7528\u7b2c\u4e09\u79cd\u65b9\u5f0f\u2014\u2014\u5185\u7f6e\u7684 filter\u2014\u2014\u6765\u505a\u3002"
         ]
       },
       "lineNotes": [],
@@ -4648,12 +4846,12 @@ var PyPrograms = {
         "en": [
           "filter(function, iterable) calls the function on each item and keeps the items for which it returns something true. The function here is a lambda: a one-expression function written in place, so there is no need to def a named function used only once.",
           "filter does not build a list. It hands back a filter object, an iterator that produces the kept items only when something asks for them, and it can be gone through only once. That is why the second line converts it before returning: printing the filter object itself would show something like \u003cfilter object at 0x...>, not the numbers.",
-          "Most Python programmers find the comprehension version easier to read than filter with a lambda, and it is the more common style. filter reads well when you already have a named function to pass, such as filter(str.isdigit, parts)."
+          "Most Python programmers find Keep the Evens: Comprehension with if easier to read than filter with a lambda, and the comprehension is the more common style. filter reads well when you already have a named function to pass, such as filter(str.isdecimal, parts)."
         ],
         "zh": [
           "filter(\u51fd\u6570, \u53ef\u8fed\u4ee3\u5bf9\u8c61) \u5bf9\u6bcf\u4e00\u9879\u8c03\u7528\u51fd\u6570\uff0c\u7559\u4e0b\u8fd4\u56de\u771f\u503c\u7684\u90a3\u4e9b\u9879\u3002\u8fd9\u91cc\u7684\u51fd\u6570\u662f\u4e00\u4e2a lambda\uff1a\u5c31\u5730\u5199\u51fa\u6765\u7684\u5355\u8868\u8fbe\u5f0f\u51fd\u6570\uff0c\u53ea\u7528\u4e00\u6b21\u7684\u51fd\u6570\u4e0d\u5fc5\u4e13\u95e8 def \u4e00\u4e2a\u540d\u5b57\u3002",
           "filter \u4e0d\u5efa\u5217\u8868\u3002\u5b83\u4ea4\u56de\u4e00\u4e2a filter \u5bf9\u8c61\u2014\u2014\u4e00\u4e2a\u8fed\u4ee3\u5668\uff0c\u6709\u4eba\u6765\u8981\u65f6\u624d\u4e00\u9879\u9879\u4ea7\u51fa\u7559\u4e0b\u7684\u503c\uff0c\u800c\u4e14\u53ea\u80fd\u8d70\u4e00\u904d\u3002\u6240\u4ee5\u7b2c\u4e8c\u884c\u5148\u8f6c\u6362\u518d return\uff1a\u76f4\u63a5\u6253\u5370 filter \u5bf9\u8c61\uff0c\u770b\u5230\u7684\u662f \u003cfilter object at 0x...> \u8fd9\u6837\u7684\u4e1c\u897f\uff0c\u4e0d\u662f\u90a3\u4e9b\u6570\u3002",
-          "\u591a\u6570 Python \u7a0b\u5e8f\u5458\u89c9\u5f97\u63a8\u5bfc\u5f0f\u7248\u672c\u6bd4 filter \u52a0 lambda \u597d\u8bfb\uff0c\u5b83\u4e5f\u662f\u66f4\u5e38\u89c1\u7684\u5199\u6cd5\u3002\u624b\u5934\u5df2\u7ecf\u6709\u4e00\u4e2a\u73b0\u6210\u7684\u5177\u540d\u51fd\u6570\u65f6\uff0cfilter \u8bfb\u8d77\u6765\u624d\u987a\uff0c\u6bd4\u5982 filter(str.isdigit, parts)\u3002"
+          "\u591a\u6570 Python \u7a0b\u5e8f\u5458\u89c9\u5f97\u300c\u53ea\u7559\u5076\u6570\uff1a\u5e26 if \u7684\u63a8\u5bfc\u5f0f\u300d\u6bd4 filter \u52a0 lambda \u597d\u8bfb\uff0c\u63a8\u5bfc\u5f0f\u4e5f\u662f\u66f4\u5e38\u89c1\u7684\u5199\u6cd5\u3002\u624b\u5934\u5df2\u7ecf\u6709\u4e00\u4e2a\u73b0\u6210\u7684\u5177\u540d\u51fd\u6570\u65f6\uff0cfilter \u8bfb\u8d77\u6765\u624d\u987a\uff0c\u6bd4\u5982 filter(str.isdecimal, parts)\u3002"
         ]
       },
       "lineNotes": [],
@@ -4779,7 +4977,11 @@ var PyPrograms = {
         "timeout": 5
       },
       "check": {
-        "property": "pure"
+        "property": "pure",
+        "alsoEntries": [
+          "word_lengths",
+          "first_letters"
+        ]
       },
       "source": "\"\"\"Build dictionaries and sets with comprehensions.\"\"\"\n\n\ndef invert(mapping):\n# >>> BLANK id=invert level=2 hint=\"\u4e00\u884c return \u4e00\u4e2a\u5b57\u5178\u63a8\u5bfc\u5f0f\uff1a\u904d\u5386 mapping.items()\uff0c\u5faa\u73af\u53d8\u91cf\u4f9d\u6b21\u53eb key\u3001value\uff08\u4e0d\u52a0\u62ec\u53f7\uff09\uff1b\u4e0d\u7528 mapping[key] \u53d6\u503c || \u53cd\u8f6c\u5c31\u662f\u628a\u6bcf\u4e00\u5bf9\u7684\u4e24\u8fb9\u5bf9\u8c03\uff1a\u5192\u53f7\u5de6\u8fb9\u6210\u4e86\u65b0\u952e\uff0c\u53f3\u8fb9\u6210\u4e86\u65b0\u503c\" hintEn=\"One line: return a dictionary comprehension that walks mapping.items() with loop variables key then value (no brackets round them); do not look values up with mapping[key] || Inverting swaps the two sides of every pair: what goes left of the colon becomes the new key, what goes right becomes the new value\"\n    return {value: key for key, value in mapping.items()}\n# \u003c\u003c\u003c BLANK\n\n\ndef word_lengths(words):\n    return {word: len(word) for word in words}\n\n\ndef first_letters(words):\n# >>> BLANK id=set-comprehension level=2 hint=\"\u4e00\u884c return \u4e00\u4e2a\u96c6\u5408\u63a8\u5bfc\u5f0f\uff0c\u5faa\u73af\u53d8\u91cf\u53eb word\uff1b\u6bcf\u4e00\u9879\u662f word \u7684\u7b2c\u4e00\u4e2a\u5b57\u7b26\u53d8\u6210\u5c0f\u5199\u2014\u2014\u5148\u7528\u4e0b\u6807\uff08\u4e0d\u7528\u5207\u7247\uff09\u53d6\u51fa\u7b2c\u4e00\u4e2a\u5b57\u7b26\uff0c\u518d\u8c03 lower() || \u96c6\u5408\u63a8\u5bfc\u5f0f\u548c\u5217\u8868\u63a8\u5bfc\u5f0f\u957f\u5f97\u4e00\u6837\uff0c\u53ea\u662f\u5916\u9762\u6362\u6210\u82b1\u62ec\u53f7\uff0c\u800c\u4e14\u91cc\u9762\u6ca1\u6709\u5192\u53f7\" hintEn=\"One line: return a set comprehension with loop variable word; each item is the first character of word in lower case - index out the first character first (an index, not a slice), then call lower() || A set comprehension looks just like a list comprehension, except the outside is curly braces and there is no colon inside\"\n    return {word[0].lower() for word in words}\n# \u003c\u003c\u003c BLANK\n\n\nif __name__ == \"__main__\":\n    codes = {\"red\": \"#f00\", \"green\": \"#0f0\", \"blue\": \"#00f\"}\n    print(invert(codes))\n    print(invert({\"a\": 1, \"b\": 2, \"c\": 1}))\n    words = [\"Apple\", \"avocado\", \"Banana\", \"cherry\", \"apple\"]\n    print(word_lengths(words))\n    print(sorted(first_letters(words)))\n",
       "lines": 22
@@ -4796,7 +4998,7 @@ var PyPrograms = {
       ],
       "tags": [
         "nested comprehension",
-        "list of lists",
+        "2D list",
         "range"
       ],
       "requires": [],
@@ -4842,7 +5044,10 @@ var PyPrograms = {
         "timeout": 5
       },
       "check": {
-        "property": "pure"
+        "property": "pure",
+        "alsoEntries": [
+          "flatten"
+        ]
       },
       "source": "\"\"\"Flatten a grid and swap its rows and columns with nested comprehensions.\"\"\"\n\n\ndef flatten(grid):\n# >>> BLANK id=flatten level=3 hint=\"\u4e00\u884c return \u4e00\u4e2a\u5217\u8868\u63a8\u5bfc\u5f0f\uff0c\u91cc\u9762\u53ea\u6709\u4e00\u5bf9\u65b9\u62ec\u53f7\u3001\u4e24\u4e2a for\uff1b\u5916\u5c42\u5faa\u73af\u53d8\u91cf\u53eb row\u3001\u5185\u5c42\u53eb cell || \u4e24\u4e2a for \u7684\u5148\u540e\u4e0e\u5199\u6210\u4e24\u5c42\u666e\u901a\u5faa\u73af\u65f6\u4e00\u6837\uff1a\u5148\u53d6\u51fa\u6bcf\u4e00\u884c\uff0c\u518d\u4ece\u8fd9\u4e00\u884c\u91cc\u53d6\u683c\u5b50 || \u6bcf\u4e00\u9879\u5c31\u662f\u683c\u5b50\u672c\u8eab\uff0c\u4e0d\u7528\u518d\u505a\u8fd0\u7b97\" hintEn=\"One line: return a list comprehension with a single pair of brackets and two fors; the outer loop variable is row and the inner one is cell || The two fors come in the same order as two ordinary nested loops would: first take each row, then take the cells out of that row || Each item is just the cell itself, with nothing worked out\"\n    return [cell for row in grid for cell in row]\n# \u003c\u003c\u003c BLANK\n\n\ndef transpose(matrix):\n# >>> BLANK id=transpose level=3 hint=\"\u4e00\u884c return \u4e00\u4e2a\u5d4c\u5957\u63a8\u5bfc\u5f0f\uff0c\u4e0d\u7528 zip\uff1a\u5916\u5c42\u65b9\u62ec\u53f7\u9010\u4e2a\u5217\u53f7\u751f\u6210\u65b0\u7684\u4e00\u884c\uff0c\u5217\u53f7\u53eb i\uff0c\u7531 range \u6309\u7b2c\u4e00\u884c\u7684\u957f\u5ea6\u4ea7\u751f\uff1b\u5185\u5c42\u65b9\u62ec\u53f7\u9010\u884c\u53d6\u51fa\u7b2c i \u683c\uff0c\u5faa\u73af\u53d8\u91cf\u53eb row || \u5916\u5c42\u7684 for \u5199\u5728\u5916\u5c42\u65b9\u62ec\u53f7\u91cc\u3001\u5185\u5c42\u65b9\u62ec\u53f7\u4e4b\u540e\uff1b\u5185\u5c42\u7684 for \u5199\u5728\u5185\u5c42\u65b9\u62ec\u53f7\u91cc || \u5185\u5c42\u6bcf\u4e00\u9879\u7528 i \u53bb\u4e0b\u6807 row\uff1b\u5217\u53f7\u6709\u51e0\u4e2a\uff0c\u770b matrix \u7b2c\u4e00\u884c\uff08\u4e0b\u6807 0\uff09\u6709\u591a\u957f\" hintEn=\"One line: return a nested comprehension, no zip: the outer brackets build one new row per column number, called i, produced by range from the length of the first row; the inner brackets take cell i out of each row, with loop variable row || The outer for sits inside the outer brackets, after the inner brackets; the inner for sits inside the inner brackets || Each inner item indexes row with i; how many column numbers there are depends on how long the first row of matrix (index 0) is\"\n    return [[row[i] for row in matrix] for i in range(len(matrix[0]))]\n# \u003c\u003c\u003c BLANK\n\n\nif __name__ == \"__main__\":\n    grid = [[1, 2, 3], [4, 5, 6]]\n    print(flatten(grid))\n    print(flatten([[7], [], [8, 9]]))\n    print(transpose(grid))\n    print(transpose(transpose(grid)) == grid)\n    print(transpose([[1, 2], [3, 4], [5, 6]]))\n",
       "lines": 18
@@ -5027,7 +5232,10 @@ var PyPrograms = {
         "timeout": 5
       },
       "check": {
-        "property": "pure"
+        "property": "pure",
+        "alsoEntries": [
+          "by_score_desc_then_name"
+        ]
       },
       "source": "\"\"\"Sort, and find the smallest and largest, by a key you choose.\"\"\"\n\n\ndef by_score(players):\n# >>> BLANK id=key-lambda level=2 hint=\"\u4e00\u884c return \u5185\u7f6e sorted \u7684\u7ed3\u679c\uff1a\u6309\u6bcf\u4e2a (\u540d\u5b57, \u5206\u6570) \u5143\u7ec4\u7684\u5206\u6570\u4ece\u4f4e\u5230\u9ad8\u6392\uff1bkey= \u7ed9\u4e00\u4e2a lambda\uff0c\u53c2\u6570\u53eb player\u3001\u53d6\u5206\u6570\u65f6\u7528\u6b63\u7684\u4e0b\u6807\uff0c\u4e0d\u7528 operator.itemgetter || lambda \u4ea4\u56de\u7684\u662f\u6392\u5e8f\u65f6\u62ff\u6765\u6bd4\u8f83\u7684\u90a3\u4e2a\u503c\uff1aplayer \u91cc\u4e0b\u6807\u4e3a 1 \u7684\u90a3\u4e00\u9879\" hintEn=\"One line: return the result of the built-in sorted, ordering the (name, score) tuples by score from low to high; pass key= a lambda whose parameter is player and which reaches the score with a positive index, not operator.itemgetter || What the lambda hands back is the value compared while sorting: the item of player at index 1\"\n    return sorted(players, key=lambda player: player[1])\n# \u003c\u003c\u003c BLANK\n\n\ndef by_score_desc_then_name(players):\n# >>> BLANK id=tuple-key level=3 hint=\"\u4e00\u884c return sorted \u7684\u7ed3\u679c\uff1a\u5206\u6570\u9ad8\u7684\u5728\u524d\uff0c\u540c\u5206\u6309\u540d\u5b57\u5b57\u6bcd\u5e8f\uff1b\u53ea\u7528\u4e00\u4e2a key= lambda\uff08\u53c2\u6570\u53eb player\uff09\uff0c\u5b83\u4ea4\u56de\u4e00\u4e2a\u5143\u7ec4\uff0c\u4e0d\u7528 reverse= || lambda \u4ea4\u56de\u4e00\u4e2a\u4e8c\u5143\u7ec4\uff1a\u5148\u6bd4\u7b2c\u4e00\u9879\uff0c\u76f8\u7b49\u65f6\u624d\u6bd4\u7b2c\u4e8c\u9879 || \u8ba9\u5206\u6570\u4ece\u9ad8\u5230\u4f4e\uff0c\u662f\u5728\u7b2c\u4e00\u9879\u7684\u5206\u6570\u524d\u9762\u76f4\u63a5\u5199\u4e00\u4e2a\u8d1f\u53f7\uff1b\u540d\u5b57\u539f\u6837\u653e\u5728\u7b2c\u4e8c\u9879\" hintEn=\"One line: return the result of sorted with higher scores first and equal scores in alphabetical order of name; use a single key= lambda (parameter player) that hands back a tuple, and no reverse= || The lambda hands back a pair: the first items are compared first, and the second only when the first are equal || High-to-low scores come from writing a minus sign straight in front of the score in the first item; the name goes second, unchanged\"\n    return sorted(players, key=lambda player: (-player[1], player[0]))\n# \u003c\u003c\u003c BLANK\n\n\nif __name__ == \"__main__\":\n    players = [(\"Chen\", 88), (\"Ada\", 91), (\"Eve\", 64), (\"Bob\", 88), (\"Dan\", 91)]\n    print(by_score(players))\n    print(by_score_desc_then_name(players))\n    print(min(players, key=lambda player: player[1]))\n# >>> BLANK id=max-key level=1 hint=\"\u7167\u4e0a\u4e00\u884c\u7684\u6837\u5b50\u6253\u5370\u5206\u6570\u6700\u9ad8\u7684\u90a3\u4e2a\u5143\u7ec4\uff1a\u6362\u4e00\u4e2a\u5185\u7f6e\u51fd\u6570\uff0ckey= \u7684 lambda \u4e00\u5b57\u4e0d\u6539\" hintEn=\"Following the line above, print the tuple with the highest score: swap to the other built-in function and keep the key= lambda exactly the same\"\n    print(max(players, key=lambda player: player[1]))\n# \u003c\u003c\u003c BLANK\n    print(max(players))\n",
       "lines": 18
@@ -5061,13 +5269,13 @@ var PyPrograms = {
       "notes": {
         "en": [
           "These two look alike and do different jobs. An if-else before the for is a conditional expression - value_if_true if condition else value_if_false - and it is part of the item: every item of the old list produces one item of the new one, so the length stays the same. An if after the for is a filter: items that fail are left out, so the new list can be shorter.",
-          "The third output line counts it: six readings, six clipped values, four kept values.",
+          "Counting the lengths shows it: six readings, six clipped values, four kept values.",
           "Mixing the two up gives a syntax error rather than a wrong answer. An if at the end cannot have an else, and an if before the for must have one, because every item needs a value. If Python complains about else in a comprehension, check which side of the for the if is on.",
           "Both can appear in one comprehension - a conditional expression in front and a filter at the back - but at that point a plain loop is usually clearer."
         ],
         "zh": [
           "\u8fd9\u4e24\u79cd\u957f\u5f97\u50cf\uff0c\u5e72\u7684\u6d3b\u5374\u4e0d\u540c\u3002for \u524d\u9762\u7684 if-else \u662f\u6761\u4ef6\u8868\u8fbe\u5f0f\u2014\u2014\u771f\u65f6\u7684\u503c if \u6761\u4ef6 else \u5047\u65f6\u7684\u503c\u2014\u2014\u5b83\u662f\u300c\u9879\u300d\u7684\u4e00\u90e8\u5206\uff1a\u65e7\u5217\u8868\u6bcf\u4e00\u9879\u90fd\u4ea7\u51fa\u65b0\u5217\u8868\u7684\u4e00\u9879\uff0c\u6240\u4ee5\u957f\u5ea6\u4e0d\u53d8\u3002for \u540e\u9762\u7684 if \u662f\u7b5b\u5b50\uff1a\u4e0d\u6ee1\u8db3\u7684\u9879\u88ab\u53bb\u6389\uff0c\u65b0\u5217\u8868\u53ef\u80fd\u66f4\u77ed\u3002",
-          "\u8f93\u51fa\u7b2c\u4e09\u884c\u628a\u8fd9\u70b9\u6570\u4e86\u51fa\u6765\uff1a\u516d\u4e2a\u8bfb\u6570\uff0c\u88c1\u526a\u540e\u516d\u4e2a\uff0c\u7b5b\u9009\u540e\u56db\u4e2a\u3002",
+          "\u6570\u4e00\u6570\u957f\u5ea6\u5c31\u770b\u5f97\u51fa\uff1a\u516d\u4e2a\u8bfb\u6570\uff0c\u88c1\u526a\u540e\u516d\u4e2a\uff0c\u7b5b\u9009\u540e\u56db\u4e2a\u3002",
           "\u628a\u4e24\u79cd\u5f04\u6df7\u5f97\u5230\u7684\u662f\u8bed\u6cd5\u9519\u8bef\uff0c\u800c\u4e0d\u662f\u9519\u7684\u7b54\u6848\u3002\u672b\u5c3e\u7684 if \u4e0d\u80fd\u5e26 else\uff1bfor \u524d\u9762\u7684 if \u5fc5\u987b\u5e26 else\uff0c\u56e0\u4e3a\u6bcf\u4e00\u9879\u90fd\u5f97\u6709\u4e2a\u503c\u3002Python \u62b1\u6028\u63a8\u5bfc\u5f0f\u91cc\u7684 else \u65f6\uff0c\u5148\u770b\u770b if \u5728 for \u7684\u54ea\u4e00\u8fb9\u3002",
           "\u4e24\u79cd\u53ef\u4ee5\u51fa\u73b0\u5728\u540c\u4e00\u4e2a\u63a8\u5bfc\u5f0f\u91cc\u2014\u2014\u524d\u9762\u6761\u4ef6\u8868\u8fbe\u5f0f\u3001\u540e\u9762\u7b5b\u5b50\u2014\u2014\u4f46\u5230\u4e86\u90a3\u4e00\u6b65\uff0c\u666e\u901a\u5faa\u73af\u901a\u5e38\u66f4\u6e05\u695a\u3002"
         ]
@@ -5085,7 +5293,10 @@ var PyPrograms = {
         "timeout": 5
       },
       "check": {
-        "property": "pure"
+        "property": "pure",
+        "alsoEntries": [
+          "drop_negatives"
+        ]
       },
       "source": "\"\"\"Where the if goes in a comprehension: change every item, or drop some.\"\"\"\n\n\ndef clip_negatives(numbers):\n# >>> BLANK id=if-else-front level=2 hint=\"\u4e00\u884c return \u4e00\u4e2a\u5217\u8868\u63a8\u5bfc\u5f0f\uff0c\u5faa\u73af\u53d8\u91cf\u53eb n\uff0c\u7ed3\u679c\u548c numbers \u4e00\u6837\u957f\uff1an \u4e0d\u5c0f\u4e8e 0 \u65f6\u7559\u4e0b n\uff0c\u5426\u5219\u6362\u6210 0\uff1b\u7528\u6761\u4ef6\u8868\u8fbe\u5f0f\uff08\u4e0d\u7528 max\uff0c\u5916\u9762\u4e0d\u52a0\u62ec\u53f7\uff09\uff0c\u6761\u4ef6\u5199\u6210 n >= 0 || \u5e26 else \u7684\u6761\u4ef6\u8868\u8fbe\u5f0f\u662f\u300c\u6bcf\u4e00\u9879\u957f\u4ec0\u4e48\u6837\u300d\u7684\u4e00\u90e8\u5206\uff0c\u6240\u4ee5\u5199\u5728 for \u7684\u524d\u9762\" hintEn=\"One line: return a list comprehension with loop variable n whose result is as long as numbers: keep n when it is not below 0, otherwise put 0 in its place; use a conditional expression (not max, and no brackets round it), with the condition written as n >= 0 || A conditional expression with else is part of what each item looks like, so it goes before the for\"\n    return [n if n >= 0 else 0 for n in numbers]\n# \u003c\u003c\u003c BLANK\n\n\ndef drop_negatives(numbers):\n# >>> BLANK id=if-back level=2 hint=\"\u4e00\u884c return \u4e00\u4e2a\u5217\u8868\u63a8\u5bfc\u5f0f\uff0c\u5faa\u73af\u53d8\u91cf\u53eb n\uff1a\u53ea\u7559\u4e0b\u4e0d\u5c0f\u4e8e 0 \u7684 n\uff0c\u5176\u4f59\u7684\u6574\u4e2a\u53bb\u6389\uff1b\u6761\u4ef6\u5199\u6210 n >= 0\uff0c\u4e0d\u52a0\u62ec\u53f7 || \u7b5b\u6389\u9879\u7684 if \u6ca1\u6709 else\uff0c\u5199\u5728 for \u7684\u540e\u9762\" hintEn=\"One line: return a list comprehension with loop variable n that keeps only the n not below 0 and leaves the rest out entirely; write the condition as n >= 0, with no brackets || The if that drops items has no else and goes after the for\"\n    return [n for n in numbers if n >= 0]\n# \u003c\u003c\u003c BLANK\n\n\nif __name__ == \"__main__\":\n    readings = [4, -2, 7, 0, -9, 3]\n    print(clip_negatives(readings))\n    print(drop_negatives(readings))\n    print(len(readings), len(clip_negatives(readings)), len(drop_negatives(readings)))\n    print([\"even\" if n % 2 == 0 else \"odd\" for n in range(4)])\n",
       "lines": 17
@@ -5119,13 +5330,13 @@ var PyPrograms = {
       },
       "notes": {
         "en": [
-          "A comprehension exists to build a list. shout_all_comprehension uses one only to call print, so it builds a list nobody wants - the output shows [None, None], one None per call to print - and a reader expects a result that is never used. When the point of the loop is what it does, not what it makes, write a for loop.",
+          "A comprehension exists to build a list. shout_all_comprehension uses one only to call print, so it builds a list nobody wants - [None, None], one None per call to print - and a reader expects a result that is never used. When the point of the loop is what it does, not what it makes, write a for loop.",
           "rising_triples_comprehension fits on one line but asks the reader to hold three loops and a condition in mind at once. It is also written the most direct way: b and c each run over the whole of range(n), so for n = 4 it tries all 64 combinations and its if throws away all but 4.",
           "The loop version starts each inner range just above the outer variable, so the a \u003c b \u003c c test is never needed and no combination is thrown away. That trick is not something only a loop can do: the same starting points fit inside a comprehension just as well, with no test and nothing wasted. The real reason to switch to a loop is reading it - with three fors squeezed onto one line it is hard to see which range belongs to which variable, while the loop version reads from top to bottom, one level at a time.",
           "Both functions return the same list, as the last line checks. A reasonable rule of thumb: one for, or one for with an if, is a good comprehension; two fors is the limit; three, or anything with a side effect, is a loop."
         ],
         "zh": [
-          "\u63a8\u5bfc\u5f0f\u662f\u7528\u6765\u9020\u5217\u8868\u7684\u3002shout_all_comprehension \u7528\u5b83\u53ea\u662f\u4e3a\u4e86\u8c03\u7528 print\uff0c\u4e8e\u662f\u9020\u51fa\u4e00\u4e2a\u6ca1\u4eba\u8981\u7684\u5217\u8868\u2014\u2014\u8f93\u51fa\u91cc\u7684 [None, None]\uff0c\u6bcf\u8c03\u4e00\u6b21 print \u4e00\u4e2a None\u2014\u2014\u8bfb\u4ee3\u7801\u7684\u4eba\u8fd8\u4f1a\u4ee5\u4e3a\u6709\u4e2a\u7ed3\u679c\u8981\u7528\uff0c\u5176\u5b9e\u4ece\u6ca1\u7528\u4e0a\u3002\u5faa\u73af\u7684\u610f\u4e49\u5728\u4e8e\u5b83\u505a\u4e86\u4ec0\u4e48\u3001\u800c\u4e0d\u5728\u4e8e\u5b83\u9020\u51fa\u4ec0\u4e48\u65f6\uff0c\u5c31\u5199 for \u5faa\u73af\u3002",
+          "\u63a8\u5bfc\u5f0f\u662f\u7528\u6765\u9020\u5217\u8868\u7684\u3002shout_all_comprehension \u7528\u5b83\u53ea\u662f\u4e3a\u4e86\u8c03\u7528 print\uff0c\u4e8e\u662f\u9020\u51fa\u4e00\u4e2a\u6ca1\u4eba\u8981\u7684\u5217\u8868\u2014\u2014\u5c31\u662f\u90a3\u4e2a [None, None]\uff0c\u6bcf\u8c03\u4e00\u6b21 print \u4e00\u4e2a None\u2014\u2014\u8bfb\u4ee3\u7801\u7684\u4eba\u8fd8\u4f1a\u4ee5\u4e3a\u6709\u4e2a\u7ed3\u679c\u8981\u7528\uff0c\u5176\u5b9e\u4ece\u6ca1\u7528\u4e0a\u3002\u5faa\u73af\u7684\u610f\u4e49\u5728\u4e8e\u5b83\u505a\u4e86\u4ec0\u4e48\u3001\u800c\u4e0d\u5728\u4e8e\u5b83\u9020\u51fa\u4ec0\u4e48\u65f6\uff0c\u5c31\u5199 for \u5faa\u73af\u3002",
           "rising_triples_comprehension \u4e00\u884c\u5199\u5f97\u4e0b\uff0c\u4f46\u8981\u8bfb\u7684\u4eba\u540c\u65f6\u5728\u8111\u5b50\u91cc\u88c5\u4e0b\u4e09\u5c42\u5faa\u73af\u548c\u4e00\u4e2a\u6761\u4ef6\u3002\u5b83\u8fd8\u662f\u7167\u6700\u76f4\u767d\u7684\u65b9\u5f0f\u5199\u7684\uff1ab \u548c c \u90fd\u8dd1\u904d\u6574\u4e2a range(n)\uff0c\u6240\u4ee5 n = 4 \u65f6\u8bd5\u904d 64 \u79cd\u7ec4\u5408\uff0c\u518d\u7531\u5b83\u7684 if \u6254\u5f97\u53ea\u5269 4 \u79cd\u3002",
           "\u5faa\u73af\u7248\u672c\u8ba9\u6bcf\u5c42\u5185\u5faa\u73af\u7684 range \u90fd\u4ece\u5916\u5c42\u53d8\u91cf\u7684\u4e0b\u4e00\u4e2a\u6570\u5f00\u59cb\uff0c\u6240\u4ee5\u6839\u672c\u4e0d\u9700\u8981 a \u003c b \u003c c \u8fd9\u4e2a\u5224\u65ad\uff0c\u4e5f\u6ca1\u6709\u4efb\u4f55\u7ec4\u5408\u88ab\u6254\u6389\u3002\u4f46\u8fd9\u4e2a\u6280\u5de7\u4e0d\u662f\u5faa\u73af\u624d\u6709\u7684\uff1a\u540c\u6837\u7684\u8d77\u70b9\u5199\u8fdb\u63a8\u5bfc\u5f0f\u91cc\u4e5f\u5b8c\u5168\u53ef\u4ee5\uff0c\u4e00\u6837\u4e0d\u7528\u5224\u65ad\u3001\u4e00\u4e2a\u7ec4\u5408\u90fd\u4e0d\u6d6a\u8d39\u3002\u771f\u6b63\u8be5\u6362\u56de\u5faa\u73af\u7684\u7406\u7531\u662f\u597d\u4e0d\u597d\u8bfb\u2014\u2014\u4e09\u4e2a for \u6324\u5728\u4e00\u884c\uff0c\u54ea\u4e2a range \u5c5e\u4e8e\u54ea\u4e2a\u53d8\u91cf\u5f88\u96be\u4e00\u773c\u770b\u6e05\uff1b\u5faa\u73af\u7248\u672c\u5219\u4ece\u4e0a\u5f80\u4e0b\u3001\u4e00\u5c42\u4e00\u5c42\u5730\u8bfb\u3002",
           "\u4e24\u4e2a\u51fd\u6570\u8fd4\u56de\u540c\u4e00\u4e2a\u5217\u8868\uff0c\u6700\u540e\u4e00\u884c\u9a8c\u8bc1\u4e86\u8fd9\u4e00\u70b9\u3002\u4e00\u4e2a\u5408\u7406\u7684\u7ecf\u9a8c\u6cd5\u5219\uff1a\u4e00\u4e2a for\uff0c\u6216\u4e00\u4e2a for \u52a0\u4e00\u4e2a if\uff0c\u662f\u597d\u63a8\u5bfc\u5f0f\uff1b\u4e24\u4e2a for \u662f\u4e0a\u9650\uff1b\u4e09\u4e2a\uff0c\u6216\u8005\u5e26\u526f\u4f5c\u7528\u7684\uff0c\u5199\u6210\u5faa\u73af\u3002"

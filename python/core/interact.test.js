@@ -189,6 +189,20 @@ T.throws(function () { PI.clearScope('module', PROGS, 'b'); },
   T.ok(ind.message.indexOf('第 2 行') !== -1, '缩进消息报的是物理行号（0-based 的 1 → 第 2 行）');
   T.eq(ind.caret, 'for i in r:\n'.length, '缩进错时光标送到那一行行首');
 
+  /* kind==='block'（清理波）：行数不同时 Judge 比块层级；消息只报行号、不印层级与字面量。 */
+  const REF_BLK = '    if a:\n        if b:\n            c("x")\n        d("secret")';
+  T.ok(PI.blankFeedback(REF_BLK, REF_BLK, 'zh').ok, '（对照）标准答案判对');
+  const blk = PI.blankFeedback('    if a:\n        if b: c("x")\n    d("secret")', REF_BLK, 'zh');
+  T.ok(!blk.ok, 'd(...) 被移出外层 if：判错');
+  T.eq(blk.kind, 'block', '错法是 block');
+  T.ok(blk.message.indexOf('第 3 行') !== -1, 'block 消息报物理行号（0-based 的 2 → 第 3 行）');
+  T.ok(blk.message.indexOf('secret') === -1, 'block 消息不出现字面量原文');
+  T.eq(blk.caret, '    if a:\n        if b: c("x")\n'.length, 'block 时光标送到那一行行首');
+  const blkEn = PI.blankFeedback('    if a:\n        if b: c("x")\n    d("secret")', REF_BLK, 'en');
+  T.ok(blkEn.message.indexOf('line 3') !== -1, 'block 英文消息报行号');
+  T.ok(PI.blankFeedback('    if a:\n        if b: c("x")\n        d("secret")', REF_BLK, 'zh').ok,
+       '内层写成一行、d 仍在外层 if 里：判对');
+
   const miss = PI.blankFeedback('total = total', 'total = total + 1', 'zh');
   T.eq(miss.kind, 'missing', '少写了就是 missing');
   T.eq(miss.caret, 'total = total'.length, '少写时光标落在她写的末尾');

@@ -36,10 +36,10 @@ def delete_value(head, target):
             prev.next = current.next
 # <<< BLANK
             return head
-# >>> BLANK id=follow level=2 hint="两行，顺序要紧：先让 prev 跟上 current，再让 current 往前走一步——反过来，prev 会和 current 落在同一个节点上 || 第二行用的是 current 的 next" hintEn="Two lines, and the order matters: first prev catches up with current, then current moves one step on - the other way round, prev lands on the same node as current || The second line uses current's next"
+# >>> BLANK id=follow level=1 hint="current 马上就要往前走一步，在那之前先为下一轮把「身后那个节点」记下来——想一想：等 current 到了下一个节点，prev 应该指着哪一个？" hintEn="current is about to move one step on; before it does, record the node that will be behind it next time round - ask yourself: once current reaches the next node, which node should prev refer to?"
         prev = current
-        current = current.next
 # <<< BLANK
+        current = current.next
     return head
 
 

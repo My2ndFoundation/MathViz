@@ -19,7 +19,7 @@ class Car:
 # <<< BLANK
 
     def start(self):
-# >>> BLANK id=delegate-start level=2 hint="只写一行：把活转交给自己那台发动机的 start()，直接在一个双引号的 f-string 里调用它并返回，不先存进变量，不用 + 拼接 || 型号在前，接一个冒号和一个空格，后面是发动机交回来的那句话，和输出第二行对上" hintEn="One line only: pass the job on to its own engine's start(), calling it straight inside one double-quoted f-string that you return, with no temporary variable and no + concatenation || The model comes first, then a colon and a space, then whatever the engine handed back, matching the second line of output"
+# >>> BLANK id=delegate-start level=2 hint="只写一行：把活转交给自己那台发动机的 start()，直接在一个双引号的 f-string 里调用它并返回，不先存进变量，不用 + 拼接 || 型号在前，接一个冒号和一个空格，后面是发动机交回来的那句话；这辆车交回的整句是 Mini: engine started" hintEn="One line only: pass the job on to its own engine's start(), calling it straight inside one double-quoted f-string that you return, with no temporary variable and no + concatenation || The model comes first, then a colon and a space, then whatever the engine handed back; for this car the whole sentence is Mini: engine started"
         return f"{self.model}: {self.engine.start()}"
 # <<< BLANK
 

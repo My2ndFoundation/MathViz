@@ -30,4 +30,4 @@ if __name__ == "__main__":
     try:
         print(word[10])
     except IndexError as err:
-        print("IndexError:", err)
+        print(type(err).__name__)

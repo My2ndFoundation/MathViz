@@ -29,13 +29,18 @@
      跟着改。版本号要在三处同步：注册表 python-tools.json 的 version、这里的
      tool-version meta、右上角的徽章——徽章直接读 meta（见第二个脚本块里的
      VERSION），所以它永远不需要单独改。 -->
-<meta name="tool-version" content="1.0.1">
-<meta name="tool-engine" content="py-1.3.1">
+<meta name="tool-version" content="1.0.2">
+<meta name="tool-engine" content="py-1.3.2">
 <!-- >>> GENERATED:FAVICON -->
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAA/1BMVEUUVrceN6YEl50nKYgDod8FapoEX3V6I+AEZ8gDbtxPFYdQIJ4DOTgCwv+GE8sFU1kDQDtmIL8pEVcGyrkDgdAAAABoKNkWCSwDSasAevQEGSgBqfc3F3QBs/paKNADJTUAa/SPG+pPIawCFRdzJuQDNUcDNlcEZcUAW/dGGY0lBzgjDEUBnPMDRIcQJVMCK0kyEmYCU7AHV4WiE/MOXLoEQ1sMedVSIqsHZY50FLoFNpdRHqkEhYdNDHYEOWwBgfYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADRsqliAAAAQHRSTlOjjpdhy2lM7KvNXYwU/74wGMUn+bkA/AuR/Qf5TPz4Df39rwP/GCKt/mwPGfNVIxc5lU7/pSnOnV+tdaV0RjX/bR25hAAAAVdJREFUeNqtk2d/gyAQh40rq7sFRECDK0Oz92jz/b9V/ZmYgCTpm/JCT+7hTu7+p4E/lvZPQGiasbw/bA5FwH9mzJf8GE9FwGWMEYGwcQc7MkAIMd3S/4NxpyMDhFkZMcOLfzpVgLFPsq/iI8F4ARwFSECSkUZujzHuAhUgSe5qrDR/VPgVIGMxiO3NbKYdj01wA2BWrFvLeLmxut3iMk5PAvzZq34qQ7I6vZ1eTeqFfShr4C7OEXYX4C30dftaRbc4owkRPvXDk9iHkZE/dg3jAoRhtcMjVQ9oMBA2ayhfMjCYz1+E36i16uuKor7nvHUlqEFRVXJbztPS7rdpX9Ek4rxemjCi6ZqmqA9F0X5zfj4WQC9P8EGNSSqpesuj4ioUwslN2aM6fC8SwODOXEyiiJYJbg/OHsJ2ACG9O1l5dAi94MHo0cjzpATKbO49jz4cXlRJAMAvD+ldcxDlRcsAAAAASUVORK5CYII=">
 <!-- <<< GENERATED:FAVICON -->
 <title>Classes &amp; Objects · 类与对象</title>
 <!-- 版本记录（changelog，新→旧）：
+     1.0.2  2026-11-06  讲解与提示不再指向看不到的输出；继承那一空的第 1 级提示点名
+                        super()；指别的程序写标题、指页写页名；tag type-hints 统一为
+                        type-hint。 判定器（engine
+                        py-1.3.2）：答案与标准答案行数不同时也比较代码块结构（新反馈 kind
+                        block）。清理波：第 6 期账本 §十 第一、二组。
      1.0.1  2026-09-30  考试局按四家官方考纲重核（用户裁决：考纲外不写，[] 合法；依据见
                         docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md）：
                         str-and-repr AQA/OCR/Edexcel/CIE→[]；
@@ -1629,6 +1634,165 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     return { toks: toks, rel: ind.rel, relLines: ind.relLines };
   }
 
+  /* ---- 块层级：两边有效行条数不同时才用（清理波，phase1-deferred §一.3） ----
+
+     有效行条数相同时，compare() 照旧按相对缩进**宽度**严比（rel）。条数不同的
+     合法写法只有两种：单行复合语句（`if x: y` 对两行写法）与括号内断行。以前这时
+     完全不比缩进，于是 `if a:\n    if b: c()\nd()` 判等于 `d()` 缩进在外层 if
+     里的那四行——语义变了也判对。
+
+     这里把源码切成**逻辑行**（括号深度 > 0、或上一个有效 token 是反斜杠续行
+     `\`、或上一个 token 是跨行的三引号字符串时，并入上一逻辑行），用一个缩进栈
+     把每条逻辑行映射成**块层级**（第一条逻辑行为 0）；复合语句头（行首是
+     COMPOUND 里的关键字、或按 softKeywordHeader 判为语句头的 match / case，括号深度 0
+     的第一个 `:`）后面同一行的体算深一层。
+     compare() 再逐 token 比层级：原文相同、层级不同 → kind 'block'。
+
+     CPython 会拒绝的三种缩进：
+       · unexpected indent（上一逻辑行不是以 `:` 结尾的语句头，这一行却变深）：
+         「变深」时层级取上一逻辑行**最深处**加一——`if a: b` 之后多缩进一行，它比 b
+         还深、不与 b 同层——所以它的层级按构造就比合法的参考多一层；
+       · expected an indented block（以 `:` 结尾的语句头之后没有变深）：参考是合法
+         Python，同一串 token 在参考里语句头之后的那个 token 必在深一层，作答不深，
+         层级按构造就不同；
+       · unindent does not match any outer indentation level（退缩进到栈里没有的
+         宽度）：层级可能碰巧等于参考，只有这一种记成 bad，不论层级等不等都判错。
+     前两种另记 bad 是冗余的：负控制实测，另记的 bad 删掉，测试与门全绿，所以不留。 */
+  var COMPOUND = { 'if': 1, 'elif': 1, 'else': 1, 'for': 1, 'while': 1, 'try': 1,
+                   'except': 1, 'finally': 1, 'with': 1, 'def': 1, 'class': 1 };
+  var OPENERS = { '(': 1, '[': 1, '{': 1 };
+  var CLOSERS = { ')': 1, ']': 1, '}': 1 };
+
+  /* match / case 是**软关键字**（清理波终审 M2）：`match = 3`、`match.group(1)`、`case(x)` 是普通
+     语句。判据（逻辑行 toks[a..b)，首词是 match / case）：
+       1. 第二个 token 能开一个 subject / 模式：名字（不是 if / else / in / is / and / or / for /
+          as / lambda 这类只能接在表达式后面的关键字）、数字、字符串、`(` `[` `{`、`-` `+` `~` `*`。
+          于是 `=` / `.` / `:` / `,` / 增强赋值 / 下标之外的运算符开头的都不是语句头。
+       2. 行里有括号深度 0 的 `:`，而它之前（括号深度 0）没有 `=`、增强赋值、`:=`、`lambda`——
+          排除 `case = lambda: 0`、`case, x = lambda: 0, 1` 一类。
+       3. match 头的 `:` 必须是这一逻辑行最后一个 token：CPython 的 match 头之后只能换行
+          （`match x: case 1: …` 是语法错），所以 match 按构造不会有同一行的体——认它是头与否
+          不改变任何层级，这一条只防把 `match: T = v` 之类的行算进来。
+     没有括号深度 0 冒号的行（`case(x)`、`match.group(1)`、`match = 3`）分不分类都一样：
+     colon 是 -1，层级不变。
+     仍分不出的（记在这里，靠「只挖写法唯一的行」）：`case[0]: int = 1`（给名为 case 的东西的下标
+     加注解）与 `case [0]: int = 1`（序列模式 + 一行体）token 完全相同，只有「是否在 match 块里」能
+     区分，而挖空片段常常不含 match 那一行——这里一律按 case 头处理。 */
+  var SOFT_HEAD_BAD_NAME = { 'if': 1, 'else': 1, 'elif': 1, 'in': 1, 'is': 1, 'and': 1, 'or': 1,
+                             'for': 1, 'as': 1, 'lambda': 1, 'from': 1, 'import': 1 };
+  var SOFT_HEAD_OK_PUNCT = { '(': 1, '[': 1, '{': 1, '-': 1, '+': 1, '~': 1, '*': 1 };
+  function isAssignOp(t) {
+    return t === '=' || t === ':=' ||
+      (t.length >= 2 && t.charAt(t.length - 1) === '=' && t !== '==' && t !== '!=' && t !== '<=' && t !== '>=');
+  }
+  function softKeywordHeader(toks, a, b) {
+    var head = toks[a].text;
+    if ((head !== 'match' && head !== 'case') || a + 2 >= b) { return false; }
+    var nx = toks[a + 1].text;
+    var starts = SOFT_HEAD_OK_PUNCT[nx] ||
+      (/^[A-Za-z_]/.test(nx) && !SOFT_HEAD_BAD_NAME[nx]) ||
+      /^[0-9'"]/.test(nx) || /^\.[0-9]/.test(nx);
+    if (!starts) { return false; }
+    var d = 0;
+    for (var j = a + 1; j < b; j++) {
+      var t = toks[j].text;
+      if (OPENERS[t]) { d++; continue; }
+      if (CLOSERS[t] && d > 0) { d--; continue; }
+      if (d !== 0) { continue; }
+      if (t === ':') { return head === 'case' || j === b - 1; }
+      if (t === 'lambda' || isAssignOp(t)) { return false; }
+    }
+    return false;
+  }
+
+  function countNewlines(s) {
+    var n = 0;
+    for (var i = 0; i < s.length; i++) { if (s.charAt(i) === '\n') { n++; } }
+    return n;
+  }
+
+  /* blockLevels(toks) -> { lvl: number[], bad: boolean[] }，与 toks 一一对应。 */
+  function blockLevels(toks) {
+    var lvl = new Array(toks.length);
+    var bad = new Array(toks.length);
+    if (toks.length === 0) { return { lvl: lvl, bad: bad }; }
+
+    /* 1. 切逻辑行：每项是 toks 的下标区间 [from, to) */
+    var logical = [];
+    var depth = 0, from = 0;
+    for (var i = 0; i < toks.length; i++) {
+      if (i > 0) {
+        var prev = toks[i - 1];
+        var prevEnd = prev.line + countNewlines(prev.text);
+        if (depth === 0 && toks[i].line > prevEnd && prev.text !== '\\') {
+          logical.push([from, i]);
+          from = i;
+        }
+      }
+      var tx = toks[i].text;
+      if (OPENERS[tx]) { depth++; } else if (CLOSERS[tx] && depth > 0) { depth--; }
+    }
+    logical.push([from, toks.length]);
+
+    /* 2. 缩进栈 */
+    var stack = null;           /* [{ w, lvl }] */
+    var prevDeepest = 0;        /* 上一逻辑行最深的层级 */
+    for (var k = 0; k < logical.length; k++) {
+      var a = logical[k][0], b = logical[k][1];
+      var w = toks[a].col;
+      var level, isBad = false;
+      if (stack === null) {
+        stack = [{ w: w, lvl: 0 }];
+        level = 0;
+      } else {
+        var top = stack[stack.length - 1];
+        if (w > top.w) {
+          level = prevDeepest + 1;
+          stack.push({ w: w, lvl: level });
+        } else if (w === top.w) {
+          level = top.lvl;
+        } else {
+          var popped = null;
+          while (stack.length && stack[stack.length - 1].w > w) { popped = stack.pop(); }
+          if (stack.length === 0) {
+            /* 空的片段可以退到第一行之外（一个空从函数体末尾跨到模块顶层）：
+               记成比被弹掉的最外层浅一层的新栈底，不算不合法。 */
+            level = popped.lvl - 1;
+            stack.push({ w: w, lvl: level });
+          } else if (stack[stack.length - 1].w === w) {
+            level = stack[stack.length - 1].lvl;
+          } else {
+            level = stack[stack.length - 1].lvl + 1;
+            isBad = true;
+            stack.push({ w: w, lvl: level });
+          }
+        }
+      }
+
+      /* 3. 复合语句头：括号深度 0 的第一个 `:`，其后同一逻辑行的 token 深一层 */
+      var head = toks[a].text;
+      var isHeader = !!COMPOUND[head] ||
+        (head === 'async' && a + 1 < b && /^(def|for|with)$/.test(toks[a + 1].text)) ||
+        softKeywordHeader(toks, a, b);
+      var colon = -1;
+      if (isHeader) {
+        var d = 0;
+        for (var j = a; j < b; j++) {
+          var t = toks[j].text;
+          if (OPENERS[t]) { d++; } else if (CLOSERS[t] && d > 0) { d--; }
+          else if (t === ':' && d === 0) { colon = j; break; }
+        }
+      }
+      for (var m = a; m < b; m++) {
+        lvl[m] = (colon !== -1 && m > colon) ? level + 1 : level;
+        bad[m] = isBad;
+      }
+      /* 一行写法：体在同一行，这一逻辑行最深处深一层 */
+      prevDeepest = (colon !== -1 && colon < b - 1) ? level + 1 : level;
+    }
+    return { lvl: lvl, bad: bad };
+  }
+
   /* 两个数组第一处不同的下标；一个是另一个的前缀时，下标取较短那个的长度；
      完全相同返回 -1。 */
   function firstDiffIndex(a, b) {
@@ -1641,7 +1805,11 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
   }
 
   /* compare(answer, reference) -> { ok, index, expected, got, kind }
-     kind ∈ 'equal' | 'different' | 'missing' | 'extra' | 'indent'
+     kind ∈ 'equal' | 'different' | 'missing' | 'extra' | 'indent' | 'block'
+
+     'block'（清理波）：两边有效行条数不同、token 原文到此处都相同、而块层级不同
+     （或答案这一逻辑行的缩进 CPython 会拒绝）——见 blockLevels。index 与 'indent'
+     同语义（答案侧物理行号，0 起），expected/got 是块层级数字。
 
      顺序：先比 rel，**但只有两边有效行条数相同时**，值不同才归类 'indent'；
      rel 相同、或有效行条数本身就不同，都落到逐 token 比原文，短的一方先到头
@@ -1680,10 +1848,22 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     }
 
     var at = na.toks, rt = nr.toks;
+    /* 有效行条数不同：相对缩进宽度没法逐行对，改比块层级（见 blockLevels）。
+       条数相同时上面已经按宽度严比过，这里不再重复。 */
+    var la = null, lr = null;
+    if (na.rel.length !== nr.rel.length) {
+      la = blockLevels(at);
+      lr = blockLevels(rt);
+    }
     var n = Math.min(at.length, rt.length);
     for (var i = 0; i < n; i++) {
       if (at[i].text !== rt[i].text) {
         return { ok: false, index: i, expected: rt[i].text, got: at[i].text, kind: 'different' };
+      }
+      if (la && (la.bad[i] || la.lvl[i] !== lr.lvl[i])) {
+        /* 'block'：与 'indent' 同一套 index 语义（答案侧**物理行号**，0 起），
+           expected/got 是块层级（相对第一条逻辑行，数字）。从不涉及字面量原文。 */
+        return { ok: false, index: at[i].line - 1, expected: lr.lvl[i], got: la.lvl[i], kind: 'block' };
       }
     }
     if (at.length < rt.length) {
@@ -2109,6 +2289,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
                   en: 'token #{0} is extra: {1} does not belong here' },
     blankIndent: { zh: '第 {0} 行缩进对不上：期待相对缩进 {1} 格，你写了 {2} 格',
                   en: 'line {0} indent is off: expected {1} spaces relative, you wrote {2}' },
+    blankBlock:  { zh: '第 {0} 行落进了另一层代码块：块结构与参考不同（看这一行的缩进，和它前面写成一行的语句头）',
+                  en: 'line {0} lands in a different block: the block structure differs from the reference (check this line\'s indent and any header written on one line before it)' },
     blankLead:   { zh: '第 1 行缩进对不上：这个空从第 {1} 格开始，你写了 {2} 格',
                   en: 'line 1 indent is off: this blank starts at column {1}, you wrote {2}' },
     blankDiffLiteral: { zh: '第 {0} 个 token（{1}）里第 {2} 个字符起不同',
@@ -2504,6 +2686,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
          所以要用 PyLex.significant 现取它在 answer 里的偏移。
        kind 'indent'：index 是**物理行号**，expected/got 是**相对缩进数值**
          （不是 null、不是字符串）。光标去那一行的行首。裁决 R30/R31。
+       kind 'block'（清理波）：同 'indent' 的 index 语义，expected/got 是块层级；
+         消息只报行号。
 
      另有 Judge 结构上看不见的一种错：**整块的绝对缩进**。Judge.normalize 比的是
      行与行之间的相对缩进，所以单行挖空体 `    x = 1` 与 `x = 1` 在它眼里完全
@@ -2537,6 +2721,20 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     var cmp = judge().compare(a, r);
     if (cmp.ok) {
       return { ok: true, kind: 'equal', caret: 0, message: t('blankOk', lang) };
+    }
+
+    /* 'block'（清理波）：两边有效行条数不同时，Judge 比的是块层级，index 同样是
+       答案侧**物理行号**。消息不印层级数字——「第 1 层 / 第 0 层」对她没有意义——
+       也从不涉及字面量原文。 */
+    if (cmp.kind === 'block') {
+      var bStarts = editor().lineStarts(a);
+      var bi = Math.max(0, Math.min(cmp.index, bStarts.length - 1));
+      return {
+        ok: false,
+        kind: 'block',
+        caret: bStarts[bi],
+        message: ts('blankBlock', lang, [cmp.index + 1])
+      };
     }
 
     if (cmp.kind === 'indent') {
@@ -4493,8 +4691,8 @@ var PyPrograms = {
       "lineNotes": [
         {
           "at": "        self.tricks = []",
-          "en": "A new empty list per dog, because this line runs once for every object. Contrast class-vs-instance-attributes, where a list written in the class body is shared by all of them.",
-          "zh": "\u6bcf\u6761\u72d7\u4e00\u5f20\u65b0\u7684\u7a7a\u5217\u8868\uff0c\u56e0\u4e3a\u8fd9\u4e00\u884c\u6bcf\u9020\u4e00\u4e2a\u5bf9\u8c61\u5c31\u8dd1\u4e00\u6b21\u3002\u5bf9\u7167 class-vs-instance-attributes\uff1a\u5199\u5728\u7c7b\u4f53\u91cc\u7684\u5217\u8868\u662f\u6240\u6709\u5bf9\u8c61\u5171\u7528\u7684\u3002"
+          "en": "A new empty list per dog, because this line runs once for every object. Contrast Class vs Instance Attributes, where a list written in the class body is shared by all of them.",
+          "zh": "\u6bcf\u6761\u72d7\u4e00\u5f20\u65b0\u7684\u7a7a\u5217\u8868\uff0c\u56e0\u4e3a\u8fd9\u4e00\u884c\u6bcf\u9020\u4e00\u4e2a\u5bf9\u8c61\u5c31\u8dd1\u4e00\u6b21\u3002\u5bf9\u7167\u300c\u7c7b\u5c5e\u6027\u4e0e\u5b9e\u4f8b\u5c5e\u6027\u300d\uff1a\u5199\u5728\u7c7b\u4f53\u91cc\u7684\u5217\u8868\u662f\u6240\u6709\u5bf9\u8c61\u5171\u7528\u7684\u3002"
         },
         {
           "at": "    fido.age = 6",
@@ -4537,12 +4735,12 @@ var PyPrograms = {
         "en": [
           "Without either method, print(book) shows something like \u003c__main__.Book object at 0x10f3a2d90>: the class name and a memory address that changes every run. It tells you almost nothing, which is why nearly every class you write for real ends up with at least a __repr__.",
           "__str__ is for people. print() and str() and a plain {book} inside an f-string all ask for it. __repr__ is for programmers: it should be unambiguous, and where possible it should look like the code that would rebuild the object. That is why the title appears in quotes in the repr and not in the str - the quotes tell you it is a string and not a variable name.",
-          "Look at the fourth line of output. Printing a list shows the repr of each item, not its str, even though you called print. Containers always use repr for their contents, so a class with only __str__ still prints as the unhelpful default when it sits inside a list. If you only write one of the two, write __repr__: when __str__ is missing, Python falls back to __repr__, but never the other way round."
+          "Look at print([book, Book(\"Emma\", 474)]): it prints [Book('Dune', 412), Book('Emma', 474)]. Printing a list shows the repr of each item, not its str, even though you called print. Containers always use repr for their contents, so a class with only __str__ still prints as the unhelpful default when it sits inside a list. If you only write one of the two, write __repr__: when __str__ is missing, Python falls back to __repr__, but never the other way round."
         ],
         "zh": [
           "\u4e24\u4e2a\u65b9\u6cd5\u90fd\u4e0d\u5199\u65f6\uff0cprint(book) \u6253\u51fa\u6765\u7684\u662f \u003c__main__.Book object at 0x10f3a2d90> \u8fd9\u6837\u7684\u4e1c\u897f\uff1a\u7c7b\u540d\u52a0\u4e00\u4e2a\u6bcf\u6b21\u8fd0\u884c\u90fd\u4e0d\u540c\u7684\u5185\u5b58\u5730\u5740\u3002\u5b83\u51e0\u4e4e\u4ec0\u4e48\u90fd\u6ca1\u544a\u8bc9\u4f60\u2014\u2014\u8fd9\u5c31\u662f\u4e3a\u4ec0\u4e48\u4f60\u771f\u6b63\u5199\u7684\u7c7b\u51e0\u4e4e\u90fd\u81f3\u5c11\u5e26\u4e00\u4e2a __repr__\u3002",
           "__str__ \u7ed9\u4eba\u770b\u3002print()\u3001str()\u3001f-string \u91cc\u666e\u901a\u7684 {book} \u8981\u7684\u90fd\u662f\u5b83\u3002__repr__ \u7ed9\u7a0b\u5e8f\u5458\u770b\uff1a\u5b83\u8981\u6ca1\u6709\u6b67\u4e49\uff0c\u80fd\u505a\u5230\u7684\u8bdd\u6700\u597d\u957f\u5f97\u50cf\u80fd\u91cd\u65b0\u9020\u51fa\u8fd9\u4e2a\u5bf9\u8c61\u7684\u4ee3\u7801\u3002\u6240\u4ee5\u4e66\u540d\u5728 repr \u91cc\u5e26\u5f15\u53f7\u3001\u5728 str \u91cc\u4e0d\u5e26\u2014\u2014\u5f15\u53f7\u544a\u8bc9\u4f60\u90a3\u662f\u4e00\u4e2a\u5b57\u7b26\u4e32\uff0c\u800c\u4e0d\u662f\u4e00\u4e2a\u53d8\u91cf\u540d\u3002",
-          "\u770b\u8f93\u51fa\u7b2c\u56db\u884c\u3002\u6253\u5370\u4e00\u4e2a\u5217\u8868\u65f6\uff0c\u663e\u793a\u7684\u662f\u6bcf\u4e2a\u5143\u7d20\u7684 repr \u800c\u4e0d\u662f str\uff0c\u54ea\u6015\u4f60\u8c03\u7528\u7684\u662f print\u3002\u5bb9\u5668\u5bf9\u81ea\u5df1\u7684\u5185\u5bb9\u6c38\u8fdc\u7528 repr\uff0c\u6240\u4ee5\u53ea\u5199\u4e86 __str__ \u7684\u7c7b\u4e00\u65e6\u653e\u8fdb\u5217\u8868\uff0c\u6253\u51fa\u6765\u8fd8\u662f\u90a3\u4e2a\u6ca1\u7528\u7684\u9ed8\u8ba4\u6837\u5b50\u3002\u4e24\u4e2a\u53ea\u5199\u4e00\u4e2a\u7684\u8bdd\uff0c\u5199 __repr__\uff1a\u7f3a __str__ \u65f6 Python \u4f1a\u9000\u56de\u53bb\u7528 __repr__\uff0c\u53cd\u8fc7\u6765\u5219\u4e0d\u4f1a\u3002"
+          "\u770b print([book, Book(\"Emma\", 474)]) \u90a3\u4e00\u884c\uff1a\u5b83\u6253\u51fa\u7684\u662f [Book('Dune', 412), Book('Emma', 474)]\u3002\u6253\u5370\u4e00\u4e2a\u5217\u8868\u65f6\uff0c\u663e\u793a\u7684\u662f\u6bcf\u4e2a\u5143\u7d20\u7684 repr \u800c\u4e0d\u662f str\uff0c\u54ea\u6015\u4f60\u8c03\u7528\u7684\u662f print\u3002\u5bb9\u5668\u5bf9\u81ea\u5df1\u7684\u5185\u5bb9\u6c38\u8fdc\u7528 repr\uff0c\u6240\u4ee5\u53ea\u5199\u4e86 __str__ \u7684\u7c7b\u4e00\u65e6\u653e\u8fdb\u5217\u8868\uff0c\u6253\u51fa\u6765\u8fd8\u662f\u90a3\u4e2a\u6ca1\u7528\u7684\u9ed8\u8ba4\u6837\u5b50\u3002\u4e24\u4e2a\u53ea\u5199\u4e00\u4e2a\u7684\u8bdd\uff0c\u5199 __repr__\uff1a\u7f3a __str__ \u65f6 Python \u4f1a\u9000\u56de\u53bb\u7528 __repr__\uff0c\u53cd\u8fc7\u6765\u5219\u4e0d\u4f1a\u3002"
         ]
       },
       "lineNotes": [
@@ -4590,12 +4788,12 @@ var PyPrograms = {
       },
       "notes": {
         "en": [
-          "A name assigned in the class body, outside any method, is a class attribute: there is exactly one of it, stored on the class. A name assigned on self inside a method is an instance attribute: each object has its own. When you read obj.name, Python looks on the object first and, only if it is not there, on the class. That lookup order explains every line of this program's output.",
+          "A name assigned in the class body, outside any method, is a class attribute: there is exactly one of it, stored on the class. A name assigned on self inside a method is an instance attribute: each object has its own. When you read obj.name, Python looks on the object first and, only if it is not there, on the class. That lookup order explains every result in this program, from the shared count of 2 to Ben's private 99.",
           "The counter is updated through the class name on purpose. Reading through self would find the class attribute, but assigning through self never changes the class: it quietly creates a new attribute on that one object, which from then on hides the shared one. The last line shows exactly that: ben.count = 99 gives Ben a private count, while Student.count and ann.count still say 2.",
           "clubs is the trap. It is a class attribute holding a list, and join() never assigns to self.clubs - it calls append on it. append changes the one shared list in place, so a club Ann joins shows up for Ben and for the class as well. The fix is what subjects already does: create the list inside __init__, so each student gets a new one."
         ],
         "zh": [
-          "\u5728\u7c7b\u4f53\u91cc\u3001\u4efb\u4f55\u65b9\u6cd5\u4e4b\u5916\u8d4b\u503c\u7684\u540d\u5b57\u662f\u7c7b\u5c5e\u6027\uff1a\u5b83\u53ea\u6709\u4e00\u4efd\uff0c\u5b58\u5728\u7c7b\u4e0a\u3002\u5728\u65b9\u6cd5\u91cc\u6302\u5230 self \u4e0a\u7684\u540d\u5b57\u662f\u5b9e\u4f8b\u5c5e\u6027\uff1a\u6bcf\u4e2a\u5bf9\u8c61\u5404\u6709\u4e00\u4efd\u3002\u8bfb obj.name \u65f6\uff0cPython \u5148\u5728\u5bf9\u8c61\u4e0a\u627e\uff0c\u627e\u4e0d\u5230\u624d\u53bb\u7c7b\u4e0a\u627e\u3002\u8fd9\u4e2a\u67e5\u627e\u987a\u5e8f\u89e3\u91ca\u4e86\u672c\u7a0b\u5e8f\u8f93\u51fa\u7684\u6bcf\u4e00\u884c\u3002",
+          "\u5728\u7c7b\u4f53\u91cc\u3001\u4efb\u4f55\u65b9\u6cd5\u4e4b\u5916\u8d4b\u503c\u7684\u540d\u5b57\u662f\u7c7b\u5c5e\u6027\uff1a\u5b83\u53ea\u6709\u4e00\u4efd\uff0c\u5b58\u5728\u7c7b\u4e0a\u3002\u5728\u65b9\u6cd5\u91cc\u6302\u5230 self \u4e0a\u7684\u540d\u5b57\u662f\u5b9e\u4f8b\u5c5e\u6027\uff1a\u6bcf\u4e2a\u5bf9\u8c61\u5404\u6709\u4e00\u4efd\u3002\u8bfb obj.name \u65f6\uff0cPython \u5148\u5728\u5bf9\u8c61\u4e0a\u627e\uff0c\u627e\u4e0d\u5230\u624d\u53bb\u7c7b\u4e0a\u627e\u3002\u8fd9\u4e2a\u67e5\u627e\u987a\u5e8f\u89e3\u91ca\u4e86\u672c\u7a0b\u5e8f\u7684\u6bcf\u4e00\u4e2a\u7ed3\u679c\u2014\u2014\u4ece\u5927\u5bb6\u5171\u7528\u7684 2 \u5230 Ben \u79c1\u6709\u7684 99\u3002",
           "\u8ba1\u6570\u5668\u662f\u6709\u610f\u901a\u8fc7\u7c7b\u540d\u53bb\u6539\u7684\u3002\u901a\u8fc7 self \u53bb\u8bfb\uff0c\u786e\u5b9e\u4f1a\u627e\u5230\u7c7b\u5c5e\u6027\uff1b\u4f46\u901a\u8fc7 self \u53bb\u8d4b\u503c\u6c38\u8fdc\u6539\u4e0d\u5230\u7c7b\uff1a\u5b83\u4f1a\u6084\u6084\u5728\u8fd9\u4e00\u4e2a\u5bf9\u8c61\u4e0a\u65b0\u5efa\u4e00\u4e2a\u5c5e\u6027\uff0c\u4ece\u6b64\u628a\u5171\u7528\u7684\u90a3\u4e2a\u6321\u5728\u8eab\u540e\u3002\u6700\u540e\u4e00\u884c\u6f14\u793a\u7684\u6b63\u662f\u8fd9\u4ef6\u4e8b\uff1aben.count = 99 \u8ba9 Ben \u6709\u4e86\u4e00\u4efd\u79c1\u6709\u7684 count\uff0c\u800c Student.count \u548c ann.count \u4ecd\u7136\u662f 2\u3002",
           "clubs \u662f\u90a3\u4e2a\u9677\u9631\u3002\u5b83\u662f\u4e00\u4e2a\u88c5\u7740\u5217\u8868\u7684\u7c7b\u5c5e\u6027\uff0c\u800c join() \u4ece\u6765\u6ca1\u6709\u7ed9 self.clubs \u8d4b\u503c\u2014\u2014\u5b83\u662f\u5728\u5b83\u8eab\u4e0a\u8c03 append\u3002append \u5c31\u5730\u4fee\u6539\u90a3\u4e00\u5f20\u5171\u7528\u7684\u5217\u8868\uff0c\u6240\u4ee5 Ann \u53c2\u52a0\u7684\u793e\u56e2\uff0cBen \u548c\u7c7b\u8eab\u4e0a\u4e5f\u90fd\u5192\u4e86\u51fa\u6765\u3002\u4fee\u6cd5\u5c31\u662f subjects \u5df2\u7ecf\u5728\u505a\u7684\uff1a\u5728 __init__ \u91cc\u5efa\u5217\u8868\uff0c\u6bcf\u4e2a\u5b66\u751f\u5404\u5f97\u4e00\u5f20\u65b0\u7684\u3002"
         ]
@@ -4655,14 +4853,14 @@ var PyPrograms = {
       },
       "notes": {
         "en": [
-          "Encapsulation means the object guards its own data. Nobody outside should be able to set a balance to -500 or deposit a negative amount; the only doors in are deposit and withdraw, and both refuse bad amounts before touching anything. They return True or False so the caller can see whether the change happened. (A later page, py-files-errors, shows the other common answer: raising an exception.)",
+          "Encapsulation means the object guards its own data. Nobody outside should be able to set a balance to -500 or deposit a negative amount; the only doors in are deposit and withdraw, and both refuse bad amounts before touching anything. They return True or False so the caller can see whether the change happened. (The Files & Exceptions page shows the other common answer: raising an exception.)",
           "Python has no truly private attributes. The leading underscore in _balance is a convention that says \"internal, do not touch\", and the last line of the program proves it is only a convention - acc._balance can still be read. Exam pseudocode often marks attributes private; in Python, the underscore plus a read-only property is how that intention is written.",
-          "The property decorator turns a method into something read like an attribute: acc.balance, with no brackets, runs the method and returns its result. Because no setter was defined, the property has no way to be assigned - the fifth line of output checks that its fset is None - and acc.balance = 1000 would fail with an AttributeError."
+          "The property decorator turns a method into something read like an attribute: acc.balance, with no brackets, runs the method and returns its result. Because no setter was defined, the property has no way to be assigned - BankAccount.balance.fset is None prints True - and acc.balance = 1000 would fail with an AttributeError."
         ],
         "zh": [
-          "\u5c01\u88c5\u5c31\u662f\u5bf9\u8c61\u81ea\u5df1\u770b\u5b88\u81ea\u5df1\u7684\u6570\u636e\u3002\u5916\u9762\u8c01\u90fd\u4e0d\u8be5\u80fd\u628a\u4f59\u989d\u8bbe\u6210 -500\uff0c\u6216\u8005\u5b58\u8fdb\u4e00\u7b14\u8d1f\u6570\uff1b\u8fdb\u6765\u7684\u95e8\u53ea\u6709 deposit \u548c withdraw \u4e24\u6247\uff0c\u800c\u4e14\u4e24\u6247\u95e8\u90fd\u5148\u62d2\u6389\u4e0d\u5408\u6cd5\u7684\u91d1\u989d\uff0c\u518d\u53bb\u78b0\u4f59\u989d\u3002\u5b83\u4eec\u8fd4\u56de True \u6216 False\uff0c\u8ba9\u8c03\u7528\u65b9\u770b\u5f97\u51fa\u8fd9\u6b21\u6539\u52a8\u5230\u5e95\u6709\u6ca1\u6709\u53d1\u751f\u3002\uff08\u540e\u9762\u7684 py-files-errors \u9875\u4f1a\u8bb2\u53e6\u4e00\u79cd\u5e38\u89c1\u505a\u6cd5\uff1a\u629b\u5f02\u5e38\u3002\uff09",
+          "\u5c01\u88c5\u5c31\u662f\u5bf9\u8c61\u81ea\u5df1\u770b\u5b88\u81ea\u5df1\u7684\u6570\u636e\u3002\u5916\u9762\u8c01\u90fd\u4e0d\u8be5\u80fd\u628a\u4f59\u989d\u8bbe\u6210 -500\uff0c\u6216\u8005\u5b58\u8fdb\u4e00\u7b14\u8d1f\u6570\uff1b\u8fdb\u6765\u7684\u95e8\u53ea\u6709 deposit \u548c withdraw \u4e24\u6247\uff0c\u800c\u4e14\u4e24\u6247\u95e8\u90fd\u5148\u62d2\u6389\u4e0d\u5408\u6cd5\u7684\u91d1\u989d\uff0c\u518d\u53bb\u78b0\u4f59\u989d\u3002\u5b83\u4eec\u8fd4\u56de True \u6216 False\uff0c\u8ba9\u8c03\u7528\u65b9\u770b\u5f97\u51fa\u8fd9\u6b21\u6539\u52a8\u5230\u5e95\u6709\u6ca1\u6709\u53d1\u751f\u3002\uff08\u300c\u6587\u4ef6\u4e0e\u5f02\u5e38\u300d\u4e00\u9875\u4f1a\u8bb2\u53e6\u4e00\u79cd\u5e38\u89c1\u505a\u6cd5\uff1a\u629b\u5f02\u5e38\u3002\uff09",
           "Python \u6ca1\u6709\u771f\u6b63\u79c1\u6709\u7684\u5c5e\u6027\u3002_balance \u5f00\u5934\u7684\u4e0b\u5212\u7ebf\u662f\u4e00\u4e2a\u7ea6\u5b9a\uff0c\u610f\u601d\u662f\u300c\u5185\u90e8\u7528\uff0c\u522b\u78b0\u300d\uff1b\u7a0b\u5e8f\u6700\u540e\u4e00\u884c\u8bc1\u660e\u5b83\u53ea\u662f\u7ea6\u5b9a\u2014\u2014acc._balance \u7167\u6837\u8bfb\u5f97\u5230\u3002\u8003\u8bd5\u7684\u4f2a\u4ee3\u7801\u5e38\u628a\u5c5e\u6027\u6807\u6210 private\uff1b\u5728 Python \u91cc\uff0c\u8fd9\u4e2a\u610f\u56fe\u5c31\u5199\u6210\u300c\u4e0b\u5212\u7ebf + \u53ea\u8bfb property\u300d\u3002",
-          "property \u88c5\u9970\u5668\u628a\u4e00\u4e2a\u65b9\u6cd5\u53d8\u6210\u50cf\u5c5e\u6027\u4e00\u6837\u8bfb\u7684\u4e1c\u897f\uff1aacc.balance \u4e0d\u5e26\u62ec\u53f7\uff0c\u5c31\u4f1a\u8fd0\u884c\u90a3\u4e2a\u65b9\u6cd5\u5e76\u4ea4\u56de\u7ed3\u679c\u3002\u56e0\u4e3a\u6ca1\u6709\u5b9a\u4e49 setter\uff0c\u8fd9\u4e2a property \u6839\u672c\u6ca1\u6709\u88ab\u8d4b\u503c\u7684\u9014\u5f84\u2014\u2014\u8f93\u51fa\u7b2c\u4e94\u884c\u68c0\u67e5\u7684\u5c31\u662f\u5b83\u7684 fset \u4e3a None\u2014\u2014acc.balance = 1000 \u4f1a\u4ee5 AttributeError \u5931\u8d25\u3002"
+          "property \u88c5\u9970\u5668\u628a\u4e00\u4e2a\u65b9\u6cd5\u53d8\u6210\u50cf\u5c5e\u6027\u4e00\u6837\u8bfb\u7684\u4e1c\u897f\uff1aacc.balance \u4e0d\u5e26\u62ec\u53f7\uff0c\u5c31\u4f1a\u8fd0\u884c\u90a3\u4e2a\u65b9\u6cd5\u5e76\u4ea4\u56de\u7ed3\u679c\u3002\u56e0\u4e3a\u6ca1\u6709\u5b9a\u4e49 setter\uff0c\u8fd9\u4e2a property \u6839\u672c\u6ca1\u6709\u88ab\u8d4b\u503c\u7684\u9014\u5f84\u2014\u2014BankAccount.balance.fset is None \u6253\u51fa\u7684\u662f True\u2014\u2014acc.balance = 1000 \u4f1a\u4ee5 AttributeError \u5931\u8d25\u3002"
         ]
       },
       "lineNotes": [
@@ -4742,7 +4940,7 @@ var PyPrograms = {
         "expect": "Sam, 40\nAva, 17, studies at Hill College\nHi, I am Ava\nTrue False\nTrue\n",
         "timeout": 5
       },
-      "source": "\"\"\"A subclass reuses its parent's constructor and extends one method.\"\"\"\n\n\nclass Person:\n    def __init__(self, name, age):\n        self.name = name\n        self.age = age\n\n    def describe(self):\n        return f\"{self.name}, {self.age}\"\n\n    def greet(self):\n        return f\"Hi, I am {self.name}\"\n\n\n# >>> BLANK id=subclass level=1 hint=\"\u5b9a\u4e49\u4e00\u4e2a\u53eb Student \u7684\u7c7b\uff0c\u5e76\u628a\u5b83\u7684\u7236\u7c7b\u5199\u5728\u7c7b\u540d\u540e\u9762\u7684\u5706\u62ec\u53f7\u91cc\" hintEn=\"Define a class called Student, with its parent class written in round brackets after the name\"\nclass Student(Person):\n# \u003c\u003c\u003c BLANK\n    def __init__(self, name, age, school):\n# >>> BLANK id=parent-init level=2 hint=\"\u540d\u5b57\u548c\u5e74\u9f84\u4ea4\u7ed9\u7236\u7c7b\u7684\u6784\u9020\u65b9\u6cd5\u53bb\u5b58\uff1a\u7528\u7a7a\u62ec\u53f7\u7684 super()\uff0c\u4e0d\u76f4\u63a5\u5199\u7236\u7c7b\u7684\u540d\u5b57\uff1b\u5b9e\u53c2\u6309\u4f4d\u7f6e\u4f20\uff0c\u4e0d\u5199 name= \u8fd9\u79cd\u5173\u952e\u5b57 || super() \u5df2\u7ecf\u66ff\u4f60\u5e26\u4e0a\u4e86 self\uff0c\u6240\u4ee5\u5b9e\u53c2\u53ea\u6709\u7236\u7c7b\u8981\u7684\u90a3\u4e24\u4e2a\uff0c\u987a\u5e8f\u548c\u7236\u7c7b\u7684\u5f62\u53c2\u4e00\u6837\" hintEn=\"Hand name and age to the parent's constructor to store: use super() with empty brackets, not the parent's name written out; pass the arguments by position, not as name= keywords || super() already brings self along, so the only arguments are the two the parent asks for, in the parent's order\"\n        super().__init__(name, age)\n# \u003c\u003c\u003c BLANK\n        self.school = school\n\n    def describe(self):\n# >>> BLANK id=extend-describe level=2 hint=\"\u8fd4\u56de\u4e00\u4e2a\u53cc\u5f15\u53f7\u7684 f-string\uff0c\u4e0d\u7528 + \u62fc\u63a5\uff1b\u7b2c\u4e00\u4e2a\u82b1\u62ec\u53f7\u91cc\u653e\u7236\u7c7b\u90a3\u4efd describe() \u7684\u7ed3\u679c\uff0c\u4e0d\u8981\u628a name \u548c age \u518d\u5199\u4e00\u904d || \u7236\u7c7b\u90a3\u4efd\u540e\u9762\u7d27\u63a5\u7740\u7684\u6587\u5b57\u9010\u5b57\u662f\uff1a\u4e00\u4e2a\u9017\u53f7\u3001\u4e00\u4e2a\u7a7a\u683c\u3001studies at\u3001\u518d\u4e00\u4e2a\u7a7a\u683c\uff1b\u6700\u540e\u4e00\u4e2a\u82b1\u62ec\u53f7\u91cc\u653e\u5b66\u6821\" hintEn=\"Return one double-quoted f-string, not + concatenation; the first pair of braces holds the result of the parent's describe(), rather than writing name and age out again || Straight after the parent's part comes, exactly: a comma, a space, the words studies at and one more space; the last pair of braces holds the school\"\n        return f\"{super().describe()}, studies at {self.school}\"\n# \u003c\u003c\u003c BLANK\n\n\nif __name__ == \"__main__\":\n    p = Person(\"Sam\", 40)\n    s = Student(\"Ava\", 17, \"Hill College\")\n    print(p.describe())\n    print(s.describe())\n    print(s.greet())\n    print(isinstance(s, Person), isinstance(p, Student))\n    print(issubclass(Student, Person))\n",
+      "source": "\"\"\"A subclass reuses its parent's constructor and extends one method.\"\"\"\n\n\nclass Person:\n    def __init__(self, name, age):\n        self.name = name\n        self.age = age\n\n    def describe(self):\n        return f\"{self.name}, {self.age}\"\n\n    def greet(self):\n        return f\"Hi, I am {self.name}\"\n\n\n# >>> BLANK id=subclass level=1 hint=\"\u5b9a\u4e49\u4e00\u4e2a\u53eb Student \u7684\u7c7b\uff0c\u5e76\u628a\u5b83\u7684\u7236\u7c7b\u5199\u5728\u7c7b\u540d\u540e\u9762\u7684\u5706\u62ec\u53f7\u91cc\" hintEn=\"Define a class called Student, with its parent class written in round brackets after the name\"\nclass Student(Person):\n# \u003c\u003c\u003c BLANK\n    def __init__(self, name, age, school):\n# >>> BLANK id=parent-init level=2 hint=\"\u540d\u5b57\u548c\u5e74\u9f84\u4ea4\u7ed9\u7236\u7c7b\u7684\u6784\u9020\u65b9\u6cd5\u53bb\u5b58\uff1a\u7528\u7a7a\u62ec\u53f7\u7684 super()\uff0c\u4e0d\u76f4\u63a5\u5199\u7236\u7c7b\u7684\u540d\u5b57\uff1b\u5b9e\u53c2\u6309\u4f4d\u7f6e\u4f20\uff0c\u4e0d\u5199 name= \u8fd9\u79cd\u5173\u952e\u5b57 || super() \u5df2\u7ecf\u66ff\u4f60\u5e26\u4e0a\u4e86 self\uff0c\u6240\u4ee5\u5b9e\u53c2\u53ea\u6709\u7236\u7c7b\u8981\u7684\u90a3\u4e24\u4e2a\uff0c\u987a\u5e8f\u548c\u7236\u7c7b\u7684\u5f62\u53c2\u4e00\u6837\" hintEn=\"Hand name and age to the parent's constructor to store: use super() with empty brackets, not the parent's name written out; pass the arguments by position, not as name= keywords || super() already brings self along, so the only arguments are the two the parent asks for, in the parent's order\"\n        super().__init__(name, age)\n# \u003c\u003c\u003c BLANK\n        self.school = school\n\n    def describe(self):\n# >>> BLANK id=extend-describe level=2 hint=\"\u8fd4\u56de\u4e00\u4e2a\u53cc\u5f15\u53f7\u7684 f-string\uff0c\u4e0d\u7528 + \u62fc\u63a5\uff1b\u7b2c\u4e00\u4e2a\u82b1\u62ec\u53f7\u91cc\u653e\u7236\u7c7b\u90a3\u4efd describe() \u7684\u7ed3\u679c\uff0c\u7528\u7a7a\u62ec\u53f7\u7684 super() \u53bb\u8c03\uff0c\u4e0d\u76f4\u63a5\u5199\u7236\u7c7b\u7684\u540d\u5b57\uff0c\u4e5f\u4e0d\u8981\u628a name \u548c age \u518d\u5199\u4e00\u904d || \u7236\u7c7b\u90a3\u4efd\u540e\u9762\u7d27\u63a5\u7740\u7684\u6587\u5b57\u9010\u5b57\u662f\uff1a\u4e00\u4e2a\u9017\u53f7\u3001\u4e00\u4e2a\u7a7a\u683c\u3001studies at\u3001\u518d\u4e00\u4e2a\u7a7a\u683c\uff1b\u6700\u540e\u4e00\u4e2a\u82b1\u62ec\u53f7\u91cc\u653e\u5b66\u6821\" hintEn=\"Return one double-quoted f-string, not + concatenation; the first pair of braces holds the result of the parent's describe(), reached through super() with empty brackets, not by writing the parent's name, and not by writing name and age out again || Straight after the parent's part comes, exactly: a comma, a space, the words studies at and one more space; the last pair of braces holds the school\"\n        return f\"{super().describe()}, studies at {self.school}\"\n# \u003c\u003c\u003c BLANK\n\n\nif __name__ == \"__main__\":\n    p = Person(\"Sam\", 40)\n    s = Student(\"Ava\", 17, \"Hill College\")\n    print(p.describe())\n    print(s.describe())\n    print(s.greet())\n    print(isinstance(s, Person), isinstance(p, Student))\n    print(issubclass(Student, Person))\n",
       "lines": 32
     },
     {
@@ -4861,7 +5059,7 @@ var PyPrograms = {
         "expect": "False\nMini: engine started\nTrue\n136\nFalse True\n",
         "timeout": 5
       },
-      "source": "\"\"\"A car has an engine: build an object out of another object and delegate to it.\"\"\"\n\n\nclass Engine:\n    def __init__(self, horsepower):\n        self.horsepower = horsepower\n        self.running = False\n\n    def start(self):\n        self.running = True\n        return \"engine started\"\n\n\nclass Car:\n    def __init__(self, model, horsepower):\n        self.model = model\n# >>> BLANK id=has-an-engine level=1 hint=\"\u8f66\u5728\u81ea\u5df1\u7684\u6784\u9020\u65b9\u6cd5\u91cc\u9020\u4e00\u53f0\u53d1\u52a8\u673a\uff0c\u5b58\u8fdb self \u4e0a\u4e00\u4e2a\u53eb engine \u7684\u5c5e\u6027\uff1bhorsepower \u6309\u4f4d\u7f6e\u4f20\u8fdb\u53bb\uff0c\u4e0d\u5199\u6210\u5173\u952e\u5b57\uff1bCar \u4e0d\u7ee7\u627f Engine\" hintEn=\"The car builds an engine inside its own constructor and keeps it in an attribute on self called engine; pass horsepower by position, not as a keyword; Car does not inherit from Engine\"\n        self.engine = Engine(horsepower)\n# \u003c\u003c\u003c BLANK\n\n    def start(self):\n# >>> BLANK id=delegate-start level=2 hint=\"\u53ea\u5199\u4e00\u884c\uff1a\u628a\u6d3b\u8f6c\u4ea4\u7ed9\u81ea\u5df1\u90a3\u53f0\u53d1\u52a8\u673a\u7684 start()\uff0c\u76f4\u63a5\u5728\u4e00\u4e2a\u53cc\u5f15\u53f7\u7684 f-string \u91cc\u8c03\u7528\u5b83\u5e76\u8fd4\u56de\uff0c\u4e0d\u5148\u5b58\u8fdb\u53d8\u91cf\uff0c\u4e0d\u7528 + \u62fc\u63a5 || \u578b\u53f7\u5728\u524d\uff0c\u63a5\u4e00\u4e2a\u5192\u53f7\u548c\u4e00\u4e2a\u7a7a\u683c\uff0c\u540e\u9762\u662f\u53d1\u52a8\u673a\u4ea4\u56de\u6765\u7684\u90a3\u53e5\u8bdd\uff0c\u548c\u8f93\u51fa\u7b2c\u4e8c\u884c\u5bf9\u4e0a\" hintEn=\"One line only: pass the job on to its own engine's start(), calling it straight inside one double-quoted f-string that you return, with no temporary variable and no + concatenation || The model comes first, then a colon and a space, then whatever the engine handed back, matching the second line of output\"\n        return f\"{self.model}: {self.engine.start()}\"\n# \u003c\u003c\u003c BLANK\n\n    def is_running(self):\n# >>> BLANK id=delegate-query level=1 hint=\"\u8fd9\u4e2a\u95ee\u9898 Car \u81ea\u5df1\u4e5f\u7b54\u4e0d\u4e86\uff1a\u76f4\u63a5\u8fd4\u56de\u5b83\u90a3\u53f0\u53d1\u52a8\u673a\u4e0a\u7684 running \u5c5e\u6027\uff0c\u4e0d\u5199 if\" hintEn=\"Car cannot answer this one by itself either: return the running attribute of its own engine directly, with no if\"\n        return self.engine.running\n# \u003c\u003c\u003c BLANK\n\n\nif __name__ == \"__main__\":\n    car = Car(\"Mini\", 136)\n    print(car.is_running())\n    print(car.start())\n    print(car.is_running())\n    print(car.engine.horsepower)\n    print(isinstance(car, Engine), isinstance(car.engine, Engine))\n",
+      "source": "\"\"\"A car has an engine: build an object out of another object and delegate to it.\"\"\"\n\n\nclass Engine:\n    def __init__(self, horsepower):\n        self.horsepower = horsepower\n        self.running = False\n\n    def start(self):\n        self.running = True\n        return \"engine started\"\n\n\nclass Car:\n    def __init__(self, model, horsepower):\n        self.model = model\n# >>> BLANK id=has-an-engine level=1 hint=\"\u8f66\u5728\u81ea\u5df1\u7684\u6784\u9020\u65b9\u6cd5\u91cc\u9020\u4e00\u53f0\u53d1\u52a8\u673a\uff0c\u5b58\u8fdb self \u4e0a\u4e00\u4e2a\u53eb engine \u7684\u5c5e\u6027\uff1bhorsepower \u6309\u4f4d\u7f6e\u4f20\u8fdb\u53bb\uff0c\u4e0d\u5199\u6210\u5173\u952e\u5b57\uff1bCar \u4e0d\u7ee7\u627f Engine\" hintEn=\"The car builds an engine inside its own constructor and keeps it in an attribute on self called engine; pass horsepower by position, not as a keyword; Car does not inherit from Engine\"\n        self.engine = Engine(horsepower)\n# \u003c\u003c\u003c BLANK\n\n    def start(self):\n# >>> BLANK id=delegate-start level=2 hint=\"\u53ea\u5199\u4e00\u884c\uff1a\u628a\u6d3b\u8f6c\u4ea4\u7ed9\u81ea\u5df1\u90a3\u53f0\u53d1\u52a8\u673a\u7684 start()\uff0c\u76f4\u63a5\u5728\u4e00\u4e2a\u53cc\u5f15\u53f7\u7684 f-string \u91cc\u8c03\u7528\u5b83\u5e76\u8fd4\u56de\uff0c\u4e0d\u5148\u5b58\u8fdb\u53d8\u91cf\uff0c\u4e0d\u7528 + \u62fc\u63a5 || \u578b\u53f7\u5728\u524d\uff0c\u63a5\u4e00\u4e2a\u5192\u53f7\u548c\u4e00\u4e2a\u7a7a\u683c\uff0c\u540e\u9762\u662f\u53d1\u52a8\u673a\u4ea4\u56de\u6765\u7684\u90a3\u53e5\u8bdd\uff1b\u8fd9\u8f86\u8f66\u4ea4\u56de\u7684\u6574\u53e5\u662f Mini: engine started\" hintEn=\"One line only: pass the job on to its own engine's start(), calling it straight inside one double-quoted f-string that you return, with no temporary variable and no + concatenation || The model comes first, then a colon and a space, then whatever the engine handed back; for this car the whole sentence is Mini: engine started\"\n        return f\"{self.model}: {self.engine.start()}\"\n# \u003c\u003c\u003c BLANK\n\n    def is_running(self):\n# >>> BLANK id=delegate-query level=1 hint=\"\u8fd9\u4e2a\u95ee\u9898 Car \u81ea\u5df1\u4e5f\u7b54\u4e0d\u4e86\uff1a\u76f4\u63a5\u8fd4\u56de\u5b83\u90a3\u53f0\u53d1\u52a8\u673a\u4e0a\u7684 running \u5c5e\u6027\uff0c\u4e0d\u5199 if\" hintEn=\"Car cannot answer this one by itself either: return the running attribute of its own engine directly, with no if\"\n        return self.engine.running\n# \u003c\u003c\u003c BLANK\n\n\nif __name__ == \"__main__\":\n    car = Car(\"Mini\", 136)\n    print(car.is_running())\n    print(car.start())\n    print(car.is_running())\n    print(car.engine.horsepower)\n    print(isinstance(car, Engine), isinstance(car.engine, Engine))\n",
       "lines": 32
     },
     {
@@ -4889,8 +5087,8 @@ var PyPrograms = {
         "zh": "\u70b9\uff1a\u4eb2\u624b\u5199\u4e09\u4ef6\u5957"
       },
       "blurb": {
-        "en": "A small value class with its constructor, repr and equality all written out, so you can see what the dataclass version is saving you.",
-        "zh": "\u4e00\u4e2a\u5c0f\u5c0f\u7684\u503c\u7c7b\uff0c\u6784\u9020\u65b9\u6cd5\u3001repr\u3001\u76f8\u7b49\u6bd4\u8f83\u5168\u90e8\u4eb2\u624b\u5199\u51fa\u6765\u2014\u2014\u597d\u770b\u6e05 dataclass \u7248\u66ff\u4f60\u7701\u6389\u4e86\u4ec0\u4e48\u3002"
+        "en": "A small value class with its constructor, repr and equality all written out, so you can see what Point as a Dataclass is saving you.",
+        "zh": "\u4e00\u4e2a\u5c0f\u5c0f\u7684\u503c\u7c7b\uff0c\u6784\u9020\u65b9\u6cd5\u3001repr\u3001\u76f8\u7b49\u6bd4\u8f83\u5168\u90e8\u4eb2\u624b\u5199\u51fa\u6765\u2014\u2014\u597d\u770b\u6e05\u300c\u70b9\uff1a\u7528 dataclass\u300d\u66ff\u4f60\u7701\u6389\u4e86\u4ec0\u4e48\u3002"
       },
       "notes": {
         "en": [
@@ -4912,8 +5110,8 @@ var PyPrograms = {
         },
         {
           "at": "    print(a == b, a is b)",
-          "en": "Equal values, different objects. The dataclass version prints exactly the same line.",
-          "zh": "\u503c\u76f8\u7b49\uff0c\u5bf9\u8c61\u4e0d\u540c\u3002dataclass \u7248\u6253\u51fa\u7684\u662f\u4e00\u6a21\u4e00\u6837\u7684\u8fd9\u4e00\u884c\u3002"
+          "en": "Equal values, different objects: True False. Point as a Dataclass prints exactly the same.",
+          "zh": "\u503c\u76f8\u7b49\uff0c\u5bf9\u8c61\u4e0d\u540c\uff1aTrue False\u3002\u300c\u70b9\uff1a\u7528 dataclass\u300d\u6253\u51fa\u7684\u4e5f\u4e00\u6a21\u4e00\u6837\u3002"
         }
       ],
       "run": {
@@ -4921,7 +5119,7 @@ var PyPrograms = {
         "expect": "Point(x=1, y=2)\nTrue False\nFalse\n[Point(x=1, y=2), Point(x=3, y=4)]\nFalse\n",
         "timeout": 5
       },
-      "source": "\"\"\"A 2D point written by hand: constructor, repr and equality.\"\"\"\n\n\nclass Point:\n    def __init__(self, x, y):\n        self.x = x\n        self.y = y\n\n    def __repr__(self):\n# >>> BLANK id=repr-return level=2 hint=\"\u8fd4\u56de\u4e00\u4e2a\u53cc\u5f15\u53f7\u7684 f-string\uff0c\u4e0d\u7528 + \u62fc\u63a5\uff1b\u7c7b\u540d\u76f4\u63a5\u5199\u51fa\u6765\uff1b\u4e24\u4e2a\u5b57\u6bb5\u90fd\u7528 !r \u8f6c\u6362 || \u8f93\u51fa\u8981\u548c\u6253\u5370\u51fa\u6765\u7684\u90a3\u4e00\u884c\u4e00\u6a21\u4e00\u6837\uff1a\u7c7b\u540d\u3001\u5706\u62ec\u53f7\uff0c\u91cc\u9762\u662f x=\u3001y= \u5404\u5e26\u81ea\u5df1\u7684\u503c\uff0c\u9017\u53f7\u540e\u8ddf\u4e00\u4e2a\u7a7a\u683c\" hintEn=\"Return one double-quoted f-string, not + concatenation; write the class name out; apply !r to both fields || The text must be exactly the line that gets printed: the class name and round brackets, holding x= and y= each with its value, a space after the comma\"\n        return f\"Point(x={self.x!r}, y={self.y!r})\"\n# \u003c\u003c\u003c BLANK\n\n    def __eq__(self, other):\n        if not isinstance(other, Point):\n            return NotImplemented\n# >>> BLANK id=compare-fields level=2 hint=\"\u4e00\u884c return\uff1a\u6bd4\u8f83\u4e24\u4e2a\u5143\u7ec4\uff0c\u4e0d\u7528 and \u8fde\u4e24\u6b21\u6bd4\u8f83\uff1b\u81ea\u5df1\u7684\u5143\u7ec4\u5199\u5728 == \u5de6\u8fb9\uff0c\u4e24\u4e2a\u5143\u7ec4\u90fd\u5148 x \u540e y || \u5de6\u8fb9\u7684\u5143\u7ec4\u88c5\u7684\u662f self \u7684\u4e24\u4e2a\u5750\u6807\uff0c\u53f3\u8fb9\u7684\u88c5\u7684\u662f other \u7684\uff1b\u5143\u7ec4\u8981\u5e26\u5706\u62ec\u53f7\uff0c\u5426\u5219\u9017\u53f7\u4f1a\u628a\u6574\u884c\u62c6\u6210\u522b\u7684\u610f\u601d\" hintEn=\"A single return comparing two tuples, not two comparisons joined with and; your own tuple on the left of ==, and both tuples x first, then y || The left tuple holds self's two coordinates and the right one holds other's; the tuples need their round brackets, or the commas split the line into something else\"\n        return (self.x, self.y) == (other.x, other.y)\n# \u003c\u003c\u003c BLANK\n\n\nif __name__ == \"__main__\":\n    a = Point(1, 2)\n    b = Point(1, 2)\n    c = Point(3, 4)\n    print(a)\n    print(a == b, a is b)\n    print(a == c)\n    print([a, c])\n    print(a == (1, 2))\n",
+      "source": "\"\"\"A 2D point written by hand: constructor, repr and equality.\"\"\"\n\n\nclass Point:\n    def __init__(self, x, y):\n        self.x = x\n        self.y = y\n\n    def __repr__(self):\n# >>> BLANK id=repr-return level=2 hint=\"\u8fd4\u56de\u4e00\u4e2a\u53cc\u5f15\u53f7\u7684 f-string\uff0c\u4e0d\u7528 + \u62fc\u63a5\uff1b\u7c7b\u540d\u76f4\u63a5\u5199\u51fa\u6765\uff1b\u4e24\u4e2a\u5b57\u6bb5\u90fd\u7528 !r \u8f6c\u6362 || \u4ea4\u56de\u7684\u6587\u5b57\u662f Point(x=1, y=2) \u8fd9\u4e2a\u6837\u5b50\uff1a\u7c7b\u540d\u3001\u5706\u62ec\u53f7\uff0c\u91cc\u9762\u662f x=\u3001y= \u5404\u5e26\u81ea\u5df1\u7684\u503c\uff0c\u9017\u53f7\u540e\u8ddf\u4e00\u4e2a\u7a7a\u683c\" hintEn=\"Return one double-quoted f-string, not + concatenation; write the class name out; apply !r to both fields || The text comes out like Point(x=1, y=2): the class name and round brackets, holding x= and y= each with its value, a space after the comma\"\n        return f\"Point(x={self.x!r}, y={self.y!r})\"\n# \u003c\u003c\u003c BLANK\n\n    def __eq__(self, other):\n        if not isinstance(other, Point):\n            return NotImplemented\n# >>> BLANK id=compare-fields level=2 hint=\"\u4e00\u884c return\uff1a\u6bd4\u8f83\u4e24\u4e2a\u5143\u7ec4\uff0c\u4e0d\u7528 and \u8fde\u4e24\u6b21\u6bd4\u8f83\uff1b\u81ea\u5df1\u7684\u5143\u7ec4\u5199\u5728 == \u5de6\u8fb9\uff0c\u4e24\u4e2a\u5143\u7ec4\u90fd\u5148 x \u540e y || \u5de6\u8fb9\u7684\u5143\u7ec4\u88c5\u7684\u662f self \u7684\u4e24\u4e2a\u5750\u6807\uff0c\u53f3\u8fb9\u7684\u88c5\u7684\u662f other \u7684\uff1b\u5143\u7ec4\u8981\u5e26\u5706\u62ec\u53f7\uff0c\u5426\u5219\u9017\u53f7\u4f1a\u628a\u6574\u884c\u62c6\u6210\u522b\u7684\u610f\u601d\" hintEn=\"A single return comparing two tuples, not two comparisons joined with and; your own tuple on the left of ==, and both tuples x first, then y || The left tuple holds self's two coordinates and the right one holds other's; the tuples need their round brackets, or the commas split the line into something else\"\n        return (self.x, self.y) == (other.x, other.y)\n# \u003c\u003c\u003c BLANK\n\n\nif __name__ == \"__main__\":\n    a = Point(1, 2)\n    b = Point(1, 2)\n    c = Point(3, 4)\n    print(a)\n    print(a == b, a is b)\n    print(a == c)\n    print([a, c])\n    print(a == (1, 2))\n",
       "lines": 26
     },
     {
@@ -4939,7 +5137,7 @@ var PyPrograms = {
       "tags": [
         "dataclass",
         "decorator",
-        "type-hints"
+        "type-hint"
       ],
       "requires": [],
       "runtime": "cpython",
@@ -4954,12 +5152,12 @@ var PyPrograms = {
       },
       "notes": {
         "en": [
-          "Put this next to point-plain-class. The main block is identical and so is every line of output, because the decorator generates an __init__ taking x and y in the order the fields are declared, a __repr__ in the Point(x=1, y=2) form, and an __eq__ that compares the fields in order and refuses objects of any other class.",
+          "Put this next to Point, Written by Hand. The main block is identical and so is everything it prints, because the decorator generates an __init__ taking x and y in the order the fields are declared, a __repr__ in the Point(x=1, y=2) form, and an __eq__ that compares the fields in order and refuses objects of any other class.",
           "The two field lines in the class body are annotations, not assignments: a name, a colon and a type, with no equals sign. They declare that the class has these fields; the decorator reads them to decide what to generate. The type written there is documentation only - Python will not stop you from building Point(1.5, \"two\"), just as it ignores the type hints on an ordinary function.",
           "Use a dataclass when a class is mostly a bundle of named values. Write the methods by hand when construction needs checks or the repr needs a particular shape - and know what the generated versions look like, because the exam will expect you to write them out."
         ],
         "zh": [
-          "\u628a\u5b83\u548c point-plain-class \u5e76\u6392\u770b\u3002\u4e3b\u7a0b\u5e8f\u4e00\u6a21\u4e00\u6837\uff0c\u8f93\u51fa\u4e5f\u4e00\u884c\u4e0d\u5dee\uff0c\u56e0\u4e3a\u88c5\u9970\u5668\u751f\u6210\u4e86\uff1a\u4e00\u4e2a\u6309\u5b57\u6bb5\u58f0\u660e\u987a\u5e8f\u63a5\u6536 x\u3001y \u7684 __init__\uff0c\u4e00\u4e2a Point(x=1, y=2) \u6837\u5f0f\u7684 __repr__\uff0c\u4ee5\u53ca\u4e00\u4e2a\u6309\u987a\u5e8f\u6bd4\u8f83\u5404\u5b57\u6bb5\u3001\u5e76\u4e14\u5bf9\u522b\u7684\u7c7b\u7684\u5bf9\u8c61\u4e00\u5f8b\u4e0d\u8ba4\u7684 __eq__\u3002",
+          "\u628a\u5b83\u548c\u300c\u70b9\uff1a\u4eb2\u624b\u5199\u4e09\u4ef6\u5957\u300d\u5e76\u6392\u770b\u3002\u4e3b\u7a0b\u5e8f\u4e00\u6a21\u4e00\u6837\uff0c\u6253\u5370\u51fa\u6765\u7684\u4e5f\u4e00\u5b57\u4e0d\u5dee\uff0c\u56e0\u4e3a\u88c5\u9970\u5668\u751f\u6210\u4e86\uff1a\u4e00\u4e2a\u6309\u5b57\u6bb5\u58f0\u660e\u987a\u5e8f\u63a5\u6536 x\u3001y \u7684 __init__\uff0c\u4e00\u4e2a Point(x=1, y=2) \u6837\u5f0f\u7684 __repr__\uff0c\u4ee5\u53ca\u4e00\u4e2a\u6309\u987a\u5e8f\u6bd4\u8f83\u5404\u5b57\u6bb5\u3001\u5e76\u4e14\u5bf9\u522b\u7684\u7c7b\u7684\u5bf9\u8c61\u4e00\u5f8b\u4e0d\u8ba4\u7684 __eq__\u3002",
           "\u7c7b\u4f53\u91cc\u90a3\u4e24\u884c\u5b57\u6bb5\u662f\u6ce8\u89e3\uff0c\u4e0d\u662f\u8d4b\u503c\uff1a\u540d\u5b57\u3001\u5192\u53f7\u3001\u7c7b\u578b\uff0c\u6ca1\u6709\u7b49\u53f7\u3002\u5b83\u4eec\u58f0\u660e\u8fd9\u4e2a\u7c7b\u6709\u8fd9\u4e9b\u5b57\u6bb5\uff0c\u88c5\u9970\u5668\u8bfb\u4e86\u5b83\u4eec\u624d\u77e5\u9053\u8981\u751f\u6210\u4ec0\u4e48\u3002\u90a3\u91cc\u5199\u7684\u7c7b\u578b\u53ea\u8d77\u8bf4\u660e\u4f5c\u7528\u2014\u2014\u4f60\u9020 Point(1.5, \"two\")\uff0cPython \u4e0d\u4f1a\u62e6\u4f60\uff0c\u5c31\u50cf\u5b83\u4e0d\u7ba1\u666e\u901a\u51fd\u6570\u4e0a\u7684\u7c7b\u578b\u63d0\u793a\u4e00\u6837\u3002",
           "\u4e00\u4e2a\u7c7b\u4e3b\u8981\u662f\u4e00\u6346\u6709\u540d\u5b57\u7684\u503c\u65f6\uff0c\u7528 dataclass\u3002\u6784\u9020\u65f6\u9700\u8981\u68c0\u67e5\u3001\u6216\u8005 repr \u8981\u7279\u5b9a\u6837\u5b50\u65f6\uff0c\u5c31\u4eb2\u624b\u5199\u8fd9\u4e9b\u65b9\u6cd5\u2014\u2014\u800c\u4e14\u8981\u77e5\u9053\u751f\u6210\u51fa\u6765\u7684\u7248\u672c\u957f\u4ec0\u4e48\u6837\uff0c\u56e0\u4e3a\u8003\u8bd5\u4f1a\u8981\u4f60\u628a\u5b83\u4eec\u5199\u51fa\u6765\u3002"
         ]
@@ -5011,12 +5209,12 @@ var PyPrograms = {
       },
       "notes": {
         "en": [
-          "Every operator is a method call in disguise. u + v runs u.__add__(v), u * 2 runs u.__mul__(2), u == v runs u.__eq__(v), and abs(u) runs u.__abs__(). Define the method and the operator works for your class. Leave out __add__, __mul__ or __abs__ and +, * or abs() raises TypeError; leave out __eq__ and == does not fail but falls back to comparing identity, so a vector would equal only itself (as point-plain-class shows).",
+          "Every operator is a method call in disguise. u + v runs u.__add__(v), u * 2 runs u.__mul__(2), u == v runs u.__eq__(v), and abs(u) runs u.__abs__(). Define the method and the operator works for your class. Leave out __add__, __mul__ or __abs__ and +, * or abs() raises TypeError; leave out __eq__ and == does not fail but falls back to comparing identity, so a vector would equal only itself (as Point, Written by Hand explains).",
           "__add__ returns a new Vector and changes neither operand. That is what + means for numbers and strings too, and code that reads x = u + v would be very surprised to find u altered afterwards.",
           "Operator precedence does not change just because the methods are yours: in u + v * 2 the multiplication still happens first. One thing does not come for free: 2 * u fails, because Python first asks int to multiply by a Vector and int does not know how. Supporting it needs one more method, __rmul__, which this program leaves out."
         ],
         "zh": [
-          "\u6bcf\u4e2a\u8fd0\u7b97\u7b26\u90fd\u662f\u4e00\u6b21\u4e54\u88c5\u7684\u65b9\u6cd5\u8c03\u7528\u3002u + v \u8fd0\u884c u.__add__(v)\uff0cu * 2 \u8fd0\u884c u.__mul__(2)\uff0cu == v \u8fd0\u884c u.__eq__(v)\uff0cabs(u) \u8fd0\u884c u.__abs__()\u3002\u5b9a\u4e49\u4e86\u65b9\u6cd5\uff0c\u8fd0\u7b97\u7b26\u5c31\u5bf9\u4f60\u7684\u7c7b\u751f\u6548\u3002\u6ca1\u5b9a\u4e49 __add__\u3001__mul__ \u6216 __abs__\uff0c+\u3001* \u6216 abs() \u5c31\u629b TypeError\uff1b\u6ca1\u5b9a\u4e49 __eq__\uff0c== \u5374\u4e0d\u4f1a\u62a5\u9519\uff0c\u800c\u662f\u9000\u56de\u53bb\u6bd4\u8eab\u4efd\u2014\u2014\u4e00\u4e2a\u5411\u91cf\u53ea\u548c\u5b83\u81ea\u5df1\u76f8\u7b49\uff08\u89c1 point-plain-class\uff09\u3002",
+          "\u6bcf\u4e2a\u8fd0\u7b97\u7b26\u90fd\u662f\u4e00\u6b21\u4e54\u88c5\u7684\u65b9\u6cd5\u8c03\u7528\u3002u + v \u8fd0\u884c u.__add__(v)\uff0cu * 2 \u8fd0\u884c u.__mul__(2)\uff0cu == v \u8fd0\u884c u.__eq__(v)\uff0cabs(u) \u8fd0\u884c u.__abs__()\u3002\u5b9a\u4e49\u4e86\u65b9\u6cd5\uff0c\u8fd0\u7b97\u7b26\u5c31\u5bf9\u4f60\u7684\u7c7b\u751f\u6548\u3002\u6ca1\u5b9a\u4e49 __add__\u3001__mul__ \u6216 __abs__\uff0c+\u3001* \u6216 abs() \u5c31\u629b TypeError\uff1b\u6ca1\u5b9a\u4e49 __eq__\uff0c== \u5374\u4e0d\u4f1a\u62a5\u9519\uff0c\u800c\u662f\u9000\u56de\u53bb\u6bd4\u8eab\u4efd\u2014\u2014\u4e00\u4e2a\u5411\u91cf\u53ea\u548c\u5b83\u81ea\u5df1\u76f8\u7b49\uff08\u89c1\u300c\u70b9\uff1a\u4eb2\u624b\u5199\u4e09\u4ef6\u5957\u300d\uff09\u3002",
           "__add__ \u8fd4\u56de\u4e00\u4e2a\u65b0\u7684 Vector\uff0c\u4e24\u4e2a\u8fd0\u7b97\u5bf9\u8c61\u90fd\u4e0d\u6539\u3002\u6570\u5b57\u548c\u5b57\u7b26\u4e32\u7684 + \u4e5f\u662f\u8fd9\u4e2a\u610f\u601d\u2014\u2014\u5199\u4e0b x = u + v \u7684\u4ee3\u7801\uff0c\u8981\u662f\u4e8b\u540e\u53d1\u73b0 u \u53d8\u4e86\uff0c\u4f1a\u975e\u5e38\u610f\u5916\u3002",
           "\u65b9\u6cd5\u662f\u4f60\u5199\u7684\uff0c\u8fd0\u7b97\u7b26\u4f18\u5148\u7ea7\u4e5f\u4e0d\u4f1a\u56e0\u6b64\u6539\u53d8\uff1au + v * 2 \u91cc\u4ecd\u7136\u5148\u7b97\u4e58\u6cd5\u3002\u6709\u4e00\u4ef6\u4e8b\u4e0d\u662f\u767d\u9001\u7684\uff1a2 * u \u4f1a\u5931\u8d25\uff0c\u56e0\u4e3a Python \u5148\u53bb\u95ee int \u4f1a\u4e0d\u4f1a\u4e58\u4e00\u4e2a Vector\uff0c\u800c int \u4e0d\u4f1a\u3002\u8981\u652f\u6301\u5b83\u5f97\u518d\u52a0\u4e00\u4e2a\u65b9\u6cd5 __rmul__\uff0c\u672c\u7a0b\u5e8f\u6ca1\u6709\u5199\u3002"
         ]
@@ -5132,12 +5330,12 @@ var PyPrograms = {
         "en": [
           "An abstract class is a contract. Payment knows how to work out a total, but only in terms of a fee it cannot calculate itself. Marking fee as abstract says \"every real payment type must supply this\", and total can rely on it being there.",
           "Card and Transfer each implement fee, so they can be built and used. Voucher inherits from Payment but supplies nothing, so it is still abstract, and so is Payment itself. __abstractmethods__ lists what is missing, and trying to build either one raises TypeError straight away - at construction, not later when fee is first called.",
-          "That early failure is the whole value. Without the abstract marker, Voucher(1000) would build happily and only break on the first call to total, perhaps far away in some other part of the program. try and except are used here only to keep the program running past the error so you can see it happen; the py-files-errors page is where they are explained. The error's own message is not printed, because its wording differs between Python versions."
+          "That early failure is the whole value. Without the abstract marker, Voucher(1000) would build happily and only break on the first call to total, perhaps far away in some other part of the program. try and except are used here only to keep the program running past the error so you can see it happen; the Files & Exceptions page is where they are explained. The error's own message is not printed, because its wording differs between Python versions."
         ],
         "zh": [
           "\u62bd\u8c61\u7c7b\u662f\u4e00\u4efd\u5951\u7ea6\u3002Payment \u77e5\u9053\u600e\u4e48\u7b97\u603b\u989d\uff0c\u4f46\u53ea\u80fd\u501f\u4e00\u4e2a\u5b83\u81ea\u5df1\u7b97\u4e0d\u51fa\u6765\u7684\u624b\u7eed\u8d39\u6765\u7b97\u3002\u628a fee \u6807\u6210\u62bd\u8c61\uff0c\u5c31\u662f\u5728\u8bf4\u300c\u6bcf\u4e00\u79cd\u771f\u6b63\u7684\u4ed8\u6b3e\u65b9\u5f0f\u90fd\u5fc5\u987b\u63d0\u4f9b\u5b83\u300d\uff0c\u800c total \u53ef\u4ee5\u653e\u5fc3\u5730\u4f9d\u8d56\u5b83\u4e00\u5b9a\u5b58\u5728\u3002",
           "Card \u548c Transfer \u5404\u81ea\u5b9e\u73b0\u4e86 fee\uff0c\u6240\u4ee5\u80fd\u9020\u51fa\u6765\u3001\u80fd\u7528\u3002Voucher \u7ee7\u627f\u4e86 Payment \u5374\u4ec0\u4e48\u90fd\u6ca1\u63d0\u4f9b\uff0c\u6240\u4ee5\u5b83\u4ecd\u662f\u62bd\u8c61\u7684\uff0cPayment \u672c\u8eab\u4e5f\u662f\u3002__abstractmethods__ \u5217\u51fa\u7f3a\u7684\u662f\u4ec0\u4e48\uff1b\u8bd5\u56fe\u9020\u5176\u4e2d\u4efb\u4f55\u4e00\u4e2a\uff0c\u90fd\u4f1a\u7acb\u523b\u629b TypeError\u2014\u2014\u5728\u6784\u9020\u7684\u90a3\u4e00\u523b\uff0c\u800c\u4e0d\u662f\u7b49\u5230\u7b2c\u4e00\u6b21\u8c03\u7528 fee \u65f6\u3002",
-          "\u8fd9\u4e2a\u300c\u65e9\u65e9\u5931\u8d25\u300d\u5c31\u662f\u5168\u90e8\u4ef7\u503c\u3002\u6ca1\u6709\u62bd\u8c61\u6807\u8bb0\u7684\u8bdd\uff0cVoucher(1000) \u4f1a\u987a\u987a\u5f53\u5f53\u5730\u9020\u51fa\u6765\uff0c\u76f4\u5230\u7b2c\u4e00\u6b21\u8c03\u7528 total \u624d\u574f\u2014\u2014\u800c\u90a3\u53ef\u80fd\u8fdc\u5728\u7a0b\u5e8f\u53e6\u4e00\u4e2a\u89d2\u843d\u3002\u8fd9\u91cc\u7528 try \u548c except \u53ea\u662f\u4e3a\u4e86\u8ba9\u7a0b\u5e8f\u8d8a\u8fc7\u8fd9\u4e2a\u9519\u8bef\u7ee7\u7eed\u8dd1\uff0c\u597d\u8ba9\u4f60\u4eb2\u773c\u770b\u5230\u5b83\u53d1\u751f\uff1b\u8bb2\u89e3\u5b83\u4eec\u7684\u662f py-files-errors \u9875\u3002\u9519\u8bef\u81ea\u5e26\u7684\u6d88\u606f\u6ca1\u6709\u6253\u5370\uff0c\u56e0\u4e3a\u5b83\u7684\u63aa\u8f9e\u5728\u4e0d\u540c Python \u7248\u672c\u4e4b\u95f4\u4e0d\u4e00\u6837\u3002"
+          "\u8fd9\u4e2a\u300c\u65e9\u65e9\u5931\u8d25\u300d\u5c31\u662f\u5168\u90e8\u4ef7\u503c\u3002\u6ca1\u6709\u62bd\u8c61\u6807\u8bb0\u7684\u8bdd\uff0cVoucher(1000) \u4f1a\u987a\u987a\u5f53\u5f53\u5730\u9020\u51fa\u6765\uff0c\u76f4\u5230\u7b2c\u4e00\u6b21\u8c03\u7528 total \u624d\u574f\u2014\u2014\u800c\u90a3\u53ef\u80fd\u8fdc\u5728\u7a0b\u5e8f\u53e6\u4e00\u4e2a\u89d2\u843d\u3002\u8fd9\u91cc\u7528 try \u548c except \u53ea\u662f\u4e3a\u4e86\u8ba9\u7a0b\u5e8f\u8d8a\u8fc7\u8fd9\u4e2a\u9519\u8bef\u7ee7\u7eed\u8dd1\uff0c\u597d\u8ba9\u4f60\u4eb2\u773c\u770b\u5230\u5b83\u53d1\u751f\uff1b\u8bb2\u89e3\u5b83\u4eec\u7684\u662f\u300c\u6587\u4ef6\u4e0e\u5f02\u5e38\u300d\u4e00\u9875\u3002\u9519\u8bef\u81ea\u5e26\u7684\u6d88\u606f\u6ca1\u6709\u6253\u5370\uff0c\u56e0\u4e3a\u5b83\u7684\u63aa\u8f9e\u5728\u4e0d\u540c Python \u7248\u672c\u4e4b\u95f4\u4e0d\u4e00\u6837\u3002"
         ]
       },
       "lineNotes": [

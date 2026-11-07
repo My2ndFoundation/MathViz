@@ -68,9 +68,15 @@ description: >-
 | `"tier": "compile-only"`（普通 cpython 程序的例外豁免）必须带非空 `why`，每页至多 2 个 | `exemption_check` | `没有非空的 why` / `有 N 条例外豁免，上限是 2` |
 | 源码里写了 `_fixtures/<名>` 的程序：`notes` 中英两边都写出文件名，并把文件的**每一行各自写成一段、连续、按原顺序**（比较时去掉每行首尾空白）；源码提到 `_fixtures` 却没写全 `_fixtures/<名>`（如 `Path("_fixtures") / "x"`）也算错 | `fixture_notes_check`（#187） | `没有提到文件名` / `没有把 _fixtures/<名> 逐行抄出来……缺这几行` / `不是按原顺序连在一起` / `却没有一处写成 _fixtures/<文件名>` |
 | 每个程序在考纲依据表 `docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md` 的**附录**里有一行（章、`id`、boards、概念组、依据），boards 与 `chapter.json` 相同——**加程序就加行，改 boards 就两边一起改**（「计数」一节只加一句本波的增量，不改文件开头、不写累计数：程序总数看这道门的输出行） | `boards_map_check` | `在依据表附录里没有行` / `≠ 依据表的` / `概念组或依据是空的` / `出现不止一行` |
+| 依据表「一致性自查（按概念组）」一节与附录逐组一致：组集合双向相同、每组的程序数与点名的程序 id 等于附录该组的行；附录每写一家，「依据」栏都有那家的条目编号（缩写或全名）——**加程序时自查表那一组也要改** | `boards_groups_check`（清理波） | `附录里有概念组 … 自查表里没有它` / `自查表写 N 个程序，附录里 M 行` / `依据栏里没有 … 的条目编号` |
+| 磁盘上每个 `python/programs/*/_fixtures/*` 文件都在 `git ls-files` 里（`.DS_Store`、`._*` 除外） | `fixture_tracked_check`（清理波） | `在磁盘上、不在 git 索引里` |
+| 全库 tag 折叠大小写、空格、连字符后相同而原文不同（不折下划线） | `tag_normalize_check`（清理波） | `tag 写法分裂：…` |
+| 挖空答案（每行去缩进、两边都剥掉行尾注释）逐字、或剥掉一两层外壳后出现在同一程序没挖的行上（「照抄空」，口径见下） | `copied_blank_check`（清理波） | `原样出现在没挖的第 N 行（逐字）` / `剥掉外壳后出现在…（近照抄）` |
+| 判「全是数字」用 `isdecimal`：`isdigit()` 守着 `int()` / `float()`、判整串（`s.isdigit()`、`all(c.isdigit() for c in s)`、逐字符 `if not ch.isdigit(): return False`）、或决定哪些字符被收集起来当数字用 → 红（口径见下；有看不见的判整串形状） | `isdigit_check`（清理波） | `它守着一次 int() / float() 转换` / `它在判一个字符串是不是全是数字` / `它决定哪些字符被收集起来当数字用` |
 | MicroPython 程序（`runtime` 以 `micropython` 开头）的模块顶层同样只有 import / def / class / docstring / 常量赋值（调用只许 `const(...)` / `Image(...)`）和恰好一个 `if __name__ == "__main__":`；引脚、显示、无线电、主循环放进 `main()`；property 入口不许碰硬件（门装硬件桩，调用即 `HardwareStubCalled`） | `micropython_main_guard_check`（第 6 期开工前） | `顶层有 … 语句` / `顶层赋值里调用了 …` / `抛错 HardwareStubCalled` |
 | pygame 程序（`requires` 含 `pygame`）的模块顶层只有 import / def / class / docstring / 常量赋值（调用只许 `pygame.Color` / `Rect` / `Vector2`）和恰好一个 `if __name__ == "__main__":`；`pygame.init()`、`set_mode`、时钟、主循环都放进 `main()` | `pygame_main_guard_check`（第 5 期开工前） | `顶层有 … 语句` / `顶层赋值里调用了 …` / `` `if __name__ == "__main__":` 有 N 个，应恰好 1 个`` |
 | 带 `check.property` 的程序在 `gates/refs/` 里**同章文件**有参照 | `algorithm_property_check` | `没有它的参考实现` / `参照却登记在` |
+| `check.alsoEntries`（可选）：`entry` 之外也要比的函数名数组，每个在同章 refs 里以 `'<id>::<函数名>'` 登记一份参照；要有 `check.property`、不重复、不含 `entry` | `program_meta_check` / `algorithm_property_check` | `check.alsoEntries=… 有重复，或重复了 entry` / `没有 '<id>::<fn>' 的参考实现` |
 | 参照与被测函数对 200 组随机实参给出同值同类型（**逐层**：list / tuple 按位置、dict 按键含键类型、set 比元素类型、叶子比 type，#192） | `algorithm_property_check` | `与参考实现不符`，附反例实参与 `首个差异：…` |
 | 同一 `problem` 的变体标题互不相同 | `variant_check` | 点名组 |
 | `chapter.json` 与目录里的 `.py` 双向一致 | `chapter_manifest_check` | 点名文件 |
@@ -78,7 +84,7 @@ description: >-
 | accent 按模块配色表（M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 violet · M8 emerald） | `accent_module_check` | `accent 应为 …` |
 | 注册表 `version` == 页面 `tool-version` meta | `version_meta_check` | 点名两个值 |
 
-**靠人（没有门，评审逐条核）：**
+**靠人（评审逐条核；其中照抄空、tag 分裂、`isdigit` 三条清理波起另有门兜一部分，条目里写了门名）：**
 - **只挖写法唯一的行。** 判定严格比较引号风格、数字写法与相对缩进。一行若有同样好的另一种写法，
   使用者写出更好的答案会被判错——要么别挖，要么让提示把形式钉死。**这类「只是在两种同样好的写法
   之间选一种」的钉法放第 1 级提示**（她还没点开提示就写出另一种好写法时不该意外发现自己错了）；
@@ -95,15 +101,20 @@ description: >-
   都能从未挖的 down 行剥掉 `transpose(…)` 或 `[::-1]` 得到，裁定为照抄空一类，改成挖 right 与 down、up 留作范例。
   删掉的是参数、运算项、`as e` 一类，或答案只是长行里的一小截，都**不算**：`return node` 之于 `return [node.value] + preorder(node.left) + …`、`node = node.left` 之于 `node.left = insert(node.left, value)` 不是抄。
   挖空模式下所有空同时隐藏，两个空之间互相抄不到，只看没挖的行。
-  **没有门**（做成门很便宜，记在第 2 期账本里当建议）；写完自己扫本页，评审扫本波。
-  存量：ch01–ch14 按逐字口径 5 处（M3 4 处、第 1 期 1 处，清单在第 2 期账本 §三.4），改它们要升版，留给下一个动那几页的内容 PR；
-  近照抄口径没有人工清点（收尾时按上面的定义机扫全库另得 0 处——机扫只是近似，不替代逐空看）。
-- **不挖跨嵌套块的多行空。** 判定器在答案与标准答案**行数不同**时完全不比缩进（`python/core/judge.js` 里 `if (na.rel.length === nr.rel.length)` 那一处：只在行数相同时比相对缩进；按代码找，不写行号——行号会漂），
-  连改变语义的缩进也判对：三行的 `if a:` / `    if b: c()` / `d()` 被判等于 `d()` 缩进在外层 `if` 里的那四行。多行空只挖**同一层**的两三行，并用第 1 级提示钉住写法。
-  （第 1 期账本 §一.3；判定器没改，第 2 期是靠这条规矩避开的——M3 26 个、M4 6 个多行空都在同一层。）
-  **唯一的例外是「复合语句头（`if` / `elif` / `for` / `while` / `except`）+ 一行体」这种两行空**：体写错缩进时行数不变、判定器照比（实测判 `indent`）。
-  token 相同而行数不同的写法只有两种：写成一行 `if X: body`（语义与两行相同，判对是对的）；或在体里本来就有的括号里断行——后者若把体写到外层，
-  判定器照样判对、CPython 报 `IndentationError`（`judge.js` 里同一个 `na.rel.length === nr.rel.length` 的洞，罕见，接受）。
+  **门：`copied_blank_check`**（清理波）：逐字与近照抄两种口径都查；近照抄用门自己的轻量记号切分（一行可以是语句的半截），是近似，不替代逐空看；比较前两边都剥掉行尾注释（字符串里的 `#` 不算：字符串记号先整体切出来；跨行字符串的半截行里的 `#` 会被误当注释）。
+  **门：`copied_blank_check`**（清理波）按逐字与上面的近照抄口径扫全库。原存量 5 处（第 2 期账本 §三.4：M3 4 处、第 1 期 1 处）清理波已改挖，豁免表 `COPY_BLANK_STOCK` 已清空；
+  以后要豁免一处须带出处写进表里（对不上违例的豁免本身是红）。门是机扫的近似，不替代逐空看。
+- **多行空仍以同一层为主。** 判定器在答案与标准答案**有效行条数相同**时按相对缩进宽度严比（判 `indent`）；**条数不同**时（一行写法 `if X: body`、括号内断行）
+  比**块结构**（engine `py-1.3.2` 起，清理波）：两边各切成逻辑行（括号内、反斜杠续行、跨行三引号并入上一行），复合语句头同一行的体算深一层，用缩进栈映射成块层级，
+  token 原文相同而层级不同 → 判 `block`（反馈只报行号，不印层级与字面量）。所以 `if a:` / `    if b: c()` / `d()` 对 `d()` 在外层 `if` 里的那四行**判错**（以前判对）；
+  `if a: b` 对两行写法、体内括号里断行而续行顶格（合法 Python）仍判对；体的第一行写到外层的括号内断行（CPython 报 `IndentationError`）判错。
+  `match` / `case` 是软关键字：只有第二个 token 能开一个 subject / 模式、行里有括号深度 0 的 `:` 且它之前没有赋值号或 `lambda` 时才算语句头（`match` 头还要求 `:` 是行末），
+  所以 `case 1: a()` 写成一行判对，`case = lambda: 0`、`case.x: int = 1`、`match.group(1)` 照普通语句（清理波终审 M2；`case[0]: int = 1` 与 `case [0]: int = 1` token 相同，一律按 case 头）。
+  **条数恰好相等时仍按宽度比**（清理波终审 M1，没修）：一处写成单行 `if x: y`、另一处把括号断行，两边有效行条数碰巧相同，等价写法会被判 `indent`（终审模糊测试 3338 组等价写法里 560 组是这一种）；
+  反方向，非法代码 `if a: b` / `    f(x,` / `y)` 对参考 `if a:` / `    b` / `f(x, y)` 会被放过（判对；CPython 报 unexpected indent）。
+  判定器不再有「跨嵌套块就看不见」的洞，但多行空仍只挖**同一层**的两三行、或「语句头 + 一行体」，并用第 1 级提示钉住写法——跨块的空写法太多，钉不住。
+  （第 1 期账本 §一.3、第 6 期账本 §一.3；第 2 期起靠这条规矩避开了旧洞——M3 26 个、M4 6 个多行空都在同一层。）
+  **「复合语句头（`if` / `elif` / `for` / `while` / `except`）+ 一行体」这种两行空**：体写错缩进时行数不变、判定器照比（实测判 `indent`）；写成一行判对。
   第 3 期 ch21 有 6 个这样的空（5 个 `if` 头、1 个 `for` 头：`traffic-light-fsm`），终审接受；第 4 期 ch24 `broadcasting-table` 的 `except ValueError as e:` + `print(type(e).__name__)`
   同样（m6a 终审实测：体缩进错判 `indent`、写成一行判对、`as err` 与写死字符串由第 1 级钉住），ch25 `eigen-2x2`、ch26 `merge-left-join` 是 `if` 头。第 5 期 ch29–ch32 的 95 个空里 23 个两行空：16 个是这种头 + 一行体（13 个 `if`、1 个 `for`、2 个 **`elif`**——`keyboard-move-clamped` 的 keydown、`screen-states` 的 keymap），7 个是同一层的两行；
   `elif` 头第 5 期收尾实测（裸 vm、页面内联 core、`b.indent + 写法`）：标准答案判对，体少缩进或多缩进一层判 `indent`，写成一行判对——与 `if` 头相同。三行以上、或体不止一行的，仍按上面的规矩。
@@ -118,7 +129,7 @@ description: >-
 - `notes` / `blurb` 在三种模式都显示，不许逐字写出挖空答案；`lineNotes` 只在读模式显示，挂在被挖那行上没关系。
   也别让**未挖的字符串**（表头、标题）改个大小写就是答案（波 2 de-morgan）。
 - 讲解里指别的程序**写标题**，不写「下一个 / 上一个 / 本页最后一个程序」——页面可以筛选，顺序不可靠；提示里也一样，不用函数名指代别的程序
-  （本程序里没有那个函数）。指别的**页**：中文写注册表里的页名、用「」括起来（「递归的机制见「递归」一页」）；英文写 `the <注册表英文页名> page`，不加引号、不夹「」（`see the Recursion page`）——第 4 期收尾的控制方裁决（第 4 期裁决 P28）。存量里 ch20 11 段、ch23 10 段、ch26 9 段、ch27 6 段英文用「」、ch02 三处写成 `the Files and Errors page`（注册表是 Files & Exceptions），留账（第 4 期账本 §三.6），下次动那几页时改。
+  （本程序里没有那个函数）。指别的**页**：中文写注册表里的页名、用「」括起来（「递归的机制见「递归」一页」）；英文写 `the <注册表英文页名> page`，不加引号、不夹「」（`see the Recursion page`）——第 4 期收尾的控制方裁决（第 4 期裁决 P28）。原存量（ch20 / ch23 / ch26 / ch27 英文用「」36 段、ch02 三处写成 `the Files and Errors page`，第 4 期账本 §三.6）清理波已改，全库扫描 0 残留。
   英文里指别的**程序**（变体标题）怎么写，照派发简报里的本波共有约定表；**标题以冠词开头（A / An / The）时不再加 the**——写 `see An AI Paddle That Can Be Beaten`，
   不写 `the An AI Paddle…`（第 5 期 m7b 终审 M5 的裁决；收尾扫全库，ch29–ch32 修复后 0 处，存量 0 处——扫描在修复前的 `8a97b28` 上报出 2 处，是正对照）。**不用 `*星号*`**——`notes` 按纯文本渲染，
   星号会原样显示（第 2 期 M4 有 8 处）。
@@ -154,13 +165,19 @@ description: >-
   讲解里说出的随机结果（估出的 π、频率、平均等待）写明「这个种子下」，并说明换种子会变。
 - **交互程序**（井字棋、猜数、菜单）用 `run.stdin` 喂一串输入；`input()` 的提示语写进 stdout、不换行——讲解与提示照「页面不显示输出」写。
 - **判「全是数字」用 `isdecimal()`，不用 `isdigit()`**：`'²'.isdigit()` 为真，`int('²')` 却抛 `ValueError`（第 3 期 m5a 终审 I1：`date-format-manual` 用 `isdigit` 在 `'²²/12/2024'` 上崩，而同模块的 py-systems 教的是 `isdecimal`）。
-  存量 ch02 `string-method-tour` 的 `is_pin` 仍用 `isdigit`、提示还写着「不是 isdecimal」——见第 3 期账本 §二.8，别照抄。
+  **门：`isdigit_check`**（清理波）：`isdigit()` 守着一次 `int()` / `float()`、判一个字符串是不是全是数字、或决定哪些字符被收集起来当数字用（`number += ch`）→ 红；
+  「判整串」门认得的形状：`s.isdigit()` 本身；逐字符的 `all(c.isdigit() for c in s)`（列表 / 集合推导式、`c.isdigit() and …` 同样）与 `not any(not c.isdigit() …)`；
+  逐字符循环里 `if not ch.isdigit():`（可夹在 `or` 里）的体直接含 `return False`、`break` 或 `名字 = False`（清理波终审 I1 补上后两种）。
+  **门看不见、靠人的判整串（举例，不是穷举）**：`if ch.isdigit(): continue` + `else: return False`、`if any(not c.isdigit() for c in s): return False`、`if not ch.isdigit() and …:`、体是 `self.ok = False`、数字字符计数后与 `len(s)` 比、`all(map(str.isdigit, s))`（没有 `.isdigit()` 调用）、`ok = ok and ch.isdigit()` 一类累积写法。反过来，「读数字前缀」的 `if not ch.isdigit(): break` 会被报成「判整串」——它本来就该红（收集数字字符），报错文字不贴切（清理波范围复审 M-b，记账）。
+  逐字符只拿结果分类计数（`elif ch.isdigit(): has_digit = True`）、`any(c.isdigit() …)`（「有没有数字字符」）、在单字符常量上演示（`chr(178).isdigit()`）放行——放行按用法写，不看同一行有没有 `isdecimal`。
+  原存量 ch02 `string-method-tour` 的 `is_pin`（第 3 期账本 §二.8）清理波已改用 `isdecimal`；`password-rules` 的 `isdigit` 只给单个字符分类、不接 `int()`，按规矩保留。
 - 复制按钮只复制 `.py`，**不带 `_fixtures/`**：学生粘进 PyCharm 时没有数据文件，讲解里的手抄是她唯一的来源。读 fixture 的程序在讲解里写明
   文件放在哪（`_fixtures/<名>`），并把文件**一行一段**地抄出来——`fixture_notes_check`（见上表）守它与真文件一致，改 fixture 时门会逼你一起改讲解。
   为什么是「一段一行」而不是「某段里包含这行」：讲解段落渲染成 `<p>`、`white-space: normal`，段内换行会塌成空格，她看到的仍是一行（#187）。
   推论：fixture 要短（取向 ≤ 8 行、每行不长），**不要空行**，行首缩进会被去掉——JSON 写成每行一个完整对象（或一行外框）的紧凑形式，抄出来仍能拼回原文件。源码里路径写全 `_fixtures/<名>`，不拼路径。
-  **fixture 要被 git 跟踪，门看不见这一点**（门读磁盘）：根 `.gitignore` 的 `*.log` 曾静默挡掉 `_fixtures/access.log`——本地全绿、CI 会缺文件（第 3 期 m5a）。
-  今天根 `.gitignore` 有反向规则 `!python/programs/*/_fixtures/**`（并继续忽略其下的 `.DS_Store`、`._*`）；提交后仍要 `git ls-files 'python/programs/<章>/_fixtures/*'` 对一遍磁盘上的文件。
+  **fixture 要被 git 跟踪**：根 `.gitignore` 的 `*.log` 曾静默挡掉 `_fixtures/access.log`——别的门读磁盘、本地全绿，CI 会缺文件（第 3 期 m5a）。
+  今天根 `.gitignore` 有反向规则 `!python/programs/*/_fixtures/**`（并继续忽略其下的 `.DS_Store`、`._*`），清理波起 `fixture_tracked_check` 对一遍磁盘与 `git ls-files`
+  （它只在本地有判别力：CI 的 checkout 里磁盘就是索引）。
 - 整个程序约 10–40 行（不含 BLANK 指令行；是取向，不是门）。M5「综合运用」起放宽到**约 60 行**（第 3 期裁决）；M7 pygame 取向 40–70 行，完整游戏可到约 120 行、**必须声明 `chunks`**（第 5 期裁决；实交 basics / sprites / motion 39–70 行，games 页 60–97 行）；超过的写进报告。选择器按 20 / 40 / 80 行分档，超过 80 行的会被「不超过 80 行」筛掉（第 3 期 `library-loans` 86 行，第 5 期四个完整游戏 94–97 行）。
 - 一般 2–3 个空（门只要求至少 1 个），**挖整行**。
 - **分段临摹 `chunks`**（#198 起页面真的读它；此前 core 里一行都没有，第 3、4 期因此不用）。长程序（取向：超过约 80 行）在 `chapter.json` 里声明 `chunks`，临摹模式按段推进、逐段结算：
@@ -185,7 +202,10 @@ description: >-
   tag 显示在三种模式的说明面板上——分裂了，她看到的就是自相矛盾的元数据（同一模块三页，偏偏「NumPy 基础」那页没有 `numpy`：第 4 期 m6a 终审 I2）。
   选择器今天**不**按 tag 筛（`python/core/interact.js` 的 `filterPrograms` 只按 level / kind / boards / lines 筛；此前这里写的「选择器按 tag 筛」与代码不符，m6a 终审 m10），要不要加是产品决定。
   第 3 期 m5b 终审抓到 8 个新造的分裂（`state` / `state-machine`、`comprehension` / `list comprehension`……），m5a 漏了 1 个（`lookup-table` / `lookup table`）；
-  存量里的 `nested loops` / `nested-loops`、`2D list` / `list of lists`、`slice` / `slicing` 等清理（要升版），见第 3 期账本 §二.6。**没有门**。
+  清理波统一过存量（第 3 期账本 §二.6）：`nested loops`→`nested-loops`、`lookup table`→`lookup-table`、`list of lists`→`2D list`、`slicing`→`slice`、`tuples`→`tuple`、`arrays`→`array`、`pointer`→`pointers`、`count`→`counting`、
+  `integer-division`→`floor-division`、`type-hints`→`type-hint`、`exceptions`→`exception`、`%`→`modulo`；**方法 tag 写裸名**（`lower`、`get`、`isdecimal`，不写 `str.lower`；裁决 C2），模块函数照写带模块名（`json.load`、`re.sub`）。
+  故意不并的同形异义：`round` / `rounding`、`dtype` / `dtypes`、`groups` / `grouping`、`json.dump` / `json.dumps`、`len` / `__len__` 一类。
+  **门：`tag_normalize_check`**（清理波）只抓折叠大小写、空格、连字符后相同的分裂（不折下划线：`len` / `__len__` 不同义）；同义不同形的（`2D list` / `list of lists`）仍只靠「先 grep」。
 
 ## 一个程序长什么样
 
@@ -334,12 +354,14 @@ EOF
   波 2 的三角形生成器从不产生正边长的等边三角形，把 `"equilateral"` 改成 `"isosceles"` 门仍全绿。
   做法：每个 `return` 分支各做一次变异、确认门红（或统计一次种子下各分支命中数写进报告），抽不到的分支按一定概率专门构造。
   第 2 期 M4 的实例：`search-comparison-counts` 的原 `entry` 根本走不到「找到」那一支；修成每次都命中的 `binary_found_total` 之后，
-  「找不到」那一支又只剩 `run.expect` 守——**一个程序只有一个 `entry`**，两支不能都进 property（第 1 期账本 §二「一个程序要验两个函数」同一件事）。走不到的支写进报告。
+  「找不到」那一支又只剩 `run.expect` 守——当时**一个程序只有一个 `entry`**，两支不能都进 property（第 1 期账本 §二「一个程序要验两个函数」同一件事）。走不到的支写进报告。
+  清理波起可以用 `check.alsoEntries` 给别的函数各登记一份参照（见下一条）。
 - **被测里用了会取整 / 舍入的库函数时**（`pygame.Color.lerp`、`Rect` 的属性赋值——四舍五入、半数远离零，与构造和 `move` 的截断不同、与 Python `round` 的半数取偶也不同：第 5 期收尾在 pygame 2.6.1 上对 `r.x = k/8`、k ∈ [−4000, 4000] 共 8001 个值复测，0 处不符，换成 `round` 不符 500、换成截断不符 4000；`round`……），`cases` 要有一部分造在**舍入边界**上，
   并做一次「参照换成另一种舍入 → 门红」的负控制。第 5 期 `colour-lerp`：清单写的公式在实数上与 pygame 相等、浮点上在「恰为 .5」处差 1；t 随机取值时新旧参照都绿，
   专门造「真实值恰为 .5」的分支之后门同种子 200 组旧式错 22、新式 0（m7a 终审 I1）。写进讲解或 refs 头的「实测行为」标注测了多少组、怎么取的。
 - **每个空都要落在 `entry` 走得到的路径上。** 走不到的空（entry 是 `decode()`、空在 `encode()` 里），除 `compile()` 外没有任何门守——property 的 cases 自己造实参，从不经过它。
-  一个程序只有一个 `entry`（门按程序 id 登记一条参照），所以要两个函数都进 property，就把 entry 换成**往返包装**：`def roundtrip(device, temp, light): return decode(encode(device, temp, light))`，
+  要两个函数都进 property，有两种做法：**额外入口**（清理波起）——`"check": {"property": "pure", "alsoEntries": ["other_fn"]}`，refs 里键 `'<程序 id>::other_fn'` 另登记一份参照，
+  每个入口各比 200 组、各自与被测不同源（ch08 的 `word_lengths` / `first_letters` / `flatten` / `by_score_desc_then_name` / `drop_negatives` 是首批）；或者把 entry 换成**往返包装**（下例，两个函数互为逆运算时最自然）：`def roundtrip(device, temp, light): return decode(encode(device, temp, light))`，
   参照是恒等（把实参原样交回），cases 常取边界（有符号字节就取 −128、−1、0、127）——encode 或 decode 任一边的单边错都会红。
   第 6 期 m8a `radio-packet-bytes`：终审把 encode 的 `temp % 256` 改成 `% 255`，门照绿（I2）；换成往返 entry 之后同一变异断言红，`copyrun.py` 的「首空填 pass」负控制从 3/4 变成 4/4。
   **往返 entry 的盲区写进 refs 文件头**：两个空同时错、而且错得互相抵消（encode 多加的被 decode 多减回来）时恒等照样成立，门看不见。
@@ -395,7 +417,7 @@ python3 $R/.claude/skills/python-content-wave/resolve-registry-conflict.py --rep
   用 Python `subprocess.Popen(…, start_new_session=True)` + `communicate(timeout=…)`，超时或被打断时（`except BaseException`；SIGTERM 先用 `signal.signal` 转成异常）`os.killpg(p.pid, signal.SIGKILL)` 杀整个进程组（`subprocess.run(timeout=…)` 只杀直接子进程，`check.py` 起的孙进程会留下）。
 - **遇到 ENOSPC / 磁盘满：停下回报，不删任何不是你自己写的文件。**
 - 报告「红」时附上变红那一行，并说明是**断言失败**还是**脚本崩溃**——崩溃的红与有效的红长得一样。
-  门在被测**抛错或超时**时印的「参照返回：None」是占位（`library.py` 这时不再调用参照），不是参照真的返回了 None——引用时写「参照未计算」。
+  门在被测**抛错或超时**时不再调用参照，印「参照：未计算（被测已抛错 / 已超时…）」（清理波起；此前印「参照返回：None」，那是占位，不是参照真的返回了 None）。
 - **变异之后门是绿的，先问变异在语义上是不是等价**，再怀疑门：第 3 期 `competition-ranking` 把新名次 `place = position` 改成 `len(rows) + 1`——rows 每轮恰好多一行，两者恒等，是等价程序，门绿是对的。
   「等价」要对**整个程序**说，不只对挂 property 的函数说：Fisher–Yates 的 `range` 终点 0 改 -1，对 property 门是等价的（每次调用用新种子，多取的那一位在全部交换之后），
   对程序却不等价——`randrange(1)` 也消耗随机状态，演示块共用一个 `rng`，之后的输出全变了，`program_run_check` 断言红。所以它是「property 门看不见、`run.expect` 看得见」，不是「门绿是对的」。

@@ -29,13 +29,18 @@
      跟着改。版本号要在三处同步：注册表 python-tools.json 的 version、这里的
      tool-version meta、右上角的徽章——徽章直接读 meta（见第二个脚本块里的
      VERSION），所以它永远不需要单独改。 -->
-<meta name="tool-version" content="1.1.1">
-<meta name="tool-engine" content="py-1.3.1">
+<meta name="tool-version" content="1.1.2">
+<meta name="tool-engine" content="py-1.3.2">
 <!-- >>> GENERATED:FAVICON -->
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAA/1BMVEUUVrceN6YEl50nKYgDod8FapoEX3V6I+AEZ8gDbtxPFYdQIJ4DOTgCwv+GE8sFU1kDQDtmIL8pEVcGyrkDgdAAAABoKNkWCSwDSasAevQEGSgBqfc3F3QBs/paKNADJTUAa/SPG+pPIawCFRdzJuQDNUcDNlcEZcUAW/dGGY0lBzgjDEUBnPMDRIcQJVMCK0kyEmYCU7AHV4WiE/MOXLoEQ1sMedVSIqsHZY50FLoFNpdRHqkEhYdNDHYEOWwBgfYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADRsqliAAAAQHRSTlOjjpdhy2lM7KvNXYwU/74wGMUn+bkA/AuR/Qf5TPz4Df39rwP/GCKt/mwPGfNVIxc5lU7/pSnOnV+tdaV0RjX/bR25hAAAAVdJREFUeNqtk2d/gyAQh40rq7sFRECDK0Oz92jz/b9V/ZmYgCTpm/JCT+7hTu7+p4E/lvZPQGiasbw/bA5FwH9mzJf8GE9FwGWMEYGwcQc7MkAIMd3S/4NxpyMDhFkZMcOLfzpVgLFPsq/iI8F4ARwFSECSkUZujzHuAhUgSe5qrDR/VPgVIGMxiO3NbKYdj01wA2BWrFvLeLmxut3iMk5PAvzZq34qQ7I6vZ1eTeqFfShr4C7OEXYX4C30dftaRbc4owkRPvXDk9iHkZE/dg3jAoRhtcMjVQ9oMBA2ayhfMjCYz1+E36i16uuKor7nvHUlqEFRVXJbztPS7rdpX9Ek4rxemjCi6ZqmqA9F0X5zfj4WQC9P8EGNSSqpesuj4ioUwslN2aM6fC8SwODOXEyiiJYJbg/OHsJ2ACG9O1l5dAi94MHo0cjzpATKbO49jz4cXlRJAMAvD+ldcxDlRcsAAAAASUVORK5CYII=">
 <!-- <<< GENERATED:FAVICON -->
 <title>Small Systems · 小型系统</title>
 <!-- 版本记录（changelog，新→旧）：
+     1.1.2  2026-11-06  英文讲解指别的页改写成 the …
+                        page，不再用「」；菜单、便士计息、测试数据三个程序的空在第 1 级提示里补钉写法。
+                        判定器（engine
+                        py-1.3.2）：答案与标准答案行数不同时也比较代码块结构（新反馈 kind
+                        block）。清理波：第 6 期账本 §十 第一、二组。
      1.1.1  2026-09-30  考试局按四家官方考纲重核（用户裁决：考纲外不写，[] 合法；依据见
                         docs/superpowers/specs/2026-09-30-python-boards-syllabus-map.md）：
                         gradebook-json-persist AQA/OCR/Edexcel/CIE→AQA；
@@ -1630,6 +1635,165 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     return { toks: toks, rel: ind.rel, relLines: ind.relLines };
   }
 
+  /* ---- 块层级：两边有效行条数不同时才用（清理波，phase1-deferred §一.3） ----
+
+     有效行条数相同时，compare() 照旧按相对缩进**宽度**严比（rel）。条数不同的
+     合法写法只有两种：单行复合语句（`if x: y` 对两行写法）与括号内断行。以前这时
+     完全不比缩进，于是 `if a:\n    if b: c()\nd()` 判等于 `d()` 缩进在外层 if
+     里的那四行——语义变了也判对。
+
+     这里把源码切成**逻辑行**（括号深度 > 0、或上一个有效 token 是反斜杠续行
+     `\`、或上一个 token 是跨行的三引号字符串时，并入上一逻辑行），用一个缩进栈
+     把每条逻辑行映射成**块层级**（第一条逻辑行为 0）；复合语句头（行首是
+     COMPOUND 里的关键字、或按 softKeywordHeader 判为语句头的 match / case，括号深度 0
+     的第一个 `:`）后面同一行的体算深一层。
+     compare() 再逐 token 比层级：原文相同、层级不同 → kind 'block'。
+
+     CPython 会拒绝的三种缩进：
+       · unexpected indent（上一逻辑行不是以 `:` 结尾的语句头，这一行却变深）：
+         「变深」时层级取上一逻辑行**最深处**加一——`if a: b` 之后多缩进一行，它比 b
+         还深、不与 b 同层——所以它的层级按构造就比合法的参考多一层；
+       · expected an indented block（以 `:` 结尾的语句头之后没有变深）：参考是合法
+         Python，同一串 token 在参考里语句头之后的那个 token 必在深一层，作答不深，
+         层级按构造就不同；
+       · unindent does not match any outer indentation level（退缩进到栈里没有的
+         宽度）：层级可能碰巧等于参考，只有这一种记成 bad，不论层级等不等都判错。
+     前两种另记 bad 是冗余的：负控制实测，另记的 bad 删掉，测试与门全绿，所以不留。 */
+  var COMPOUND = { 'if': 1, 'elif': 1, 'else': 1, 'for': 1, 'while': 1, 'try': 1,
+                   'except': 1, 'finally': 1, 'with': 1, 'def': 1, 'class': 1 };
+  var OPENERS = { '(': 1, '[': 1, '{': 1 };
+  var CLOSERS = { ')': 1, ']': 1, '}': 1 };
+
+  /* match / case 是**软关键字**（清理波终审 M2）：`match = 3`、`match.group(1)`、`case(x)` 是普通
+     语句。判据（逻辑行 toks[a..b)，首词是 match / case）：
+       1. 第二个 token 能开一个 subject / 模式：名字（不是 if / else / in / is / and / or / for /
+          as / lambda 这类只能接在表达式后面的关键字）、数字、字符串、`(` `[` `{`、`-` `+` `~` `*`。
+          于是 `=` / `.` / `:` / `,` / 增强赋值 / 下标之外的运算符开头的都不是语句头。
+       2. 行里有括号深度 0 的 `:`，而它之前（括号深度 0）没有 `=`、增强赋值、`:=`、`lambda`——
+          排除 `case = lambda: 0`、`case, x = lambda: 0, 1` 一类。
+       3. match 头的 `:` 必须是这一逻辑行最后一个 token：CPython 的 match 头之后只能换行
+          （`match x: case 1: …` 是语法错），所以 match 按构造不会有同一行的体——认它是头与否
+          不改变任何层级，这一条只防把 `match: T = v` 之类的行算进来。
+     没有括号深度 0 冒号的行（`case(x)`、`match.group(1)`、`match = 3`）分不分类都一样：
+     colon 是 -1，层级不变。
+     仍分不出的（记在这里，靠「只挖写法唯一的行」）：`case[0]: int = 1`（给名为 case 的东西的下标
+     加注解）与 `case [0]: int = 1`（序列模式 + 一行体）token 完全相同，只有「是否在 match 块里」能
+     区分，而挖空片段常常不含 match 那一行——这里一律按 case 头处理。 */
+  var SOFT_HEAD_BAD_NAME = { 'if': 1, 'else': 1, 'elif': 1, 'in': 1, 'is': 1, 'and': 1, 'or': 1,
+                             'for': 1, 'as': 1, 'lambda': 1, 'from': 1, 'import': 1 };
+  var SOFT_HEAD_OK_PUNCT = { '(': 1, '[': 1, '{': 1, '-': 1, '+': 1, '~': 1, '*': 1 };
+  function isAssignOp(t) {
+    return t === '=' || t === ':=' ||
+      (t.length >= 2 && t.charAt(t.length - 1) === '=' && t !== '==' && t !== '!=' && t !== '<=' && t !== '>=');
+  }
+  function softKeywordHeader(toks, a, b) {
+    var head = toks[a].text;
+    if ((head !== 'match' && head !== 'case') || a + 2 >= b) { return false; }
+    var nx = toks[a + 1].text;
+    var starts = SOFT_HEAD_OK_PUNCT[nx] ||
+      (/^[A-Za-z_]/.test(nx) && !SOFT_HEAD_BAD_NAME[nx]) ||
+      /^[0-9'"]/.test(nx) || /^\.[0-9]/.test(nx);
+    if (!starts) { return false; }
+    var d = 0;
+    for (var j = a + 1; j < b; j++) {
+      var t = toks[j].text;
+      if (OPENERS[t]) { d++; continue; }
+      if (CLOSERS[t] && d > 0) { d--; continue; }
+      if (d !== 0) { continue; }
+      if (t === ':') { return head === 'case' || j === b - 1; }
+      if (t === 'lambda' || isAssignOp(t)) { return false; }
+    }
+    return false;
+  }
+
+  function countNewlines(s) {
+    var n = 0;
+    for (var i = 0; i < s.length; i++) { if (s.charAt(i) === '\n') { n++; } }
+    return n;
+  }
+
+  /* blockLevels(toks) -> { lvl: number[], bad: boolean[] }，与 toks 一一对应。 */
+  function blockLevels(toks) {
+    var lvl = new Array(toks.length);
+    var bad = new Array(toks.length);
+    if (toks.length === 0) { return { lvl: lvl, bad: bad }; }
+
+    /* 1. 切逻辑行：每项是 toks 的下标区间 [from, to) */
+    var logical = [];
+    var depth = 0, from = 0;
+    for (var i = 0; i < toks.length; i++) {
+      if (i > 0) {
+        var prev = toks[i - 1];
+        var prevEnd = prev.line + countNewlines(prev.text);
+        if (depth === 0 && toks[i].line > prevEnd && prev.text !== '\\') {
+          logical.push([from, i]);
+          from = i;
+        }
+      }
+      var tx = toks[i].text;
+      if (OPENERS[tx]) { depth++; } else if (CLOSERS[tx] && depth > 0) { depth--; }
+    }
+    logical.push([from, toks.length]);
+
+    /* 2. 缩进栈 */
+    var stack = null;           /* [{ w, lvl }] */
+    var prevDeepest = 0;        /* 上一逻辑行最深的层级 */
+    for (var k = 0; k < logical.length; k++) {
+      var a = logical[k][0], b = logical[k][1];
+      var w = toks[a].col;
+      var level, isBad = false;
+      if (stack === null) {
+        stack = [{ w: w, lvl: 0 }];
+        level = 0;
+      } else {
+        var top = stack[stack.length - 1];
+        if (w > top.w) {
+          level = prevDeepest + 1;
+          stack.push({ w: w, lvl: level });
+        } else if (w === top.w) {
+          level = top.lvl;
+        } else {
+          var popped = null;
+          while (stack.length && stack[stack.length - 1].w > w) { popped = stack.pop(); }
+          if (stack.length === 0) {
+            /* 空的片段可以退到第一行之外（一个空从函数体末尾跨到模块顶层）：
+               记成比被弹掉的最外层浅一层的新栈底，不算不合法。 */
+            level = popped.lvl - 1;
+            stack.push({ w: w, lvl: level });
+          } else if (stack[stack.length - 1].w === w) {
+            level = stack[stack.length - 1].lvl;
+          } else {
+            level = stack[stack.length - 1].lvl + 1;
+            isBad = true;
+            stack.push({ w: w, lvl: level });
+          }
+        }
+      }
+
+      /* 3. 复合语句头：括号深度 0 的第一个 `:`，其后同一逻辑行的 token 深一层 */
+      var head = toks[a].text;
+      var isHeader = !!COMPOUND[head] ||
+        (head === 'async' && a + 1 < b && /^(def|for|with)$/.test(toks[a + 1].text)) ||
+        softKeywordHeader(toks, a, b);
+      var colon = -1;
+      if (isHeader) {
+        var d = 0;
+        for (var j = a; j < b; j++) {
+          var t = toks[j].text;
+          if (OPENERS[t]) { d++; } else if (CLOSERS[t] && d > 0) { d--; }
+          else if (t === ':' && d === 0) { colon = j; break; }
+        }
+      }
+      for (var m = a; m < b; m++) {
+        lvl[m] = (colon !== -1 && m > colon) ? level + 1 : level;
+        bad[m] = isBad;
+      }
+      /* 一行写法：体在同一行，这一逻辑行最深处深一层 */
+      prevDeepest = (colon !== -1 && colon < b - 1) ? level + 1 : level;
+    }
+    return { lvl: lvl, bad: bad };
+  }
+
   /* 两个数组第一处不同的下标；一个是另一个的前缀时，下标取较短那个的长度；
      完全相同返回 -1。 */
   function firstDiffIndex(a, b) {
@@ -1642,7 +1806,11 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
   }
 
   /* compare(answer, reference) -> { ok, index, expected, got, kind }
-     kind ∈ 'equal' | 'different' | 'missing' | 'extra' | 'indent'
+     kind ∈ 'equal' | 'different' | 'missing' | 'extra' | 'indent' | 'block'
+
+     'block'（清理波）：两边有效行条数不同、token 原文到此处都相同、而块层级不同
+     （或答案这一逻辑行的缩进 CPython 会拒绝）——见 blockLevels。index 与 'indent'
+     同语义（答案侧物理行号，0 起），expected/got 是块层级数字。
 
      顺序：先比 rel，**但只有两边有效行条数相同时**，值不同才归类 'indent'；
      rel 相同、或有效行条数本身就不同，都落到逐 token 比原文，短的一方先到头
@@ -1681,10 +1849,22 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     }
 
     var at = na.toks, rt = nr.toks;
+    /* 有效行条数不同：相对缩进宽度没法逐行对，改比块层级（见 blockLevels）。
+       条数相同时上面已经按宽度严比过，这里不再重复。 */
+    var la = null, lr = null;
+    if (na.rel.length !== nr.rel.length) {
+      la = blockLevels(at);
+      lr = blockLevels(rt);
+    }
     var n = Math.min(at.length, rt.length);
     for (var i = 0; i < n; i++) {
       if (at[i].text !== rt[i].text) {
         return { ok: false, index: i, expected: rt[i].text, got: at[i].text, kind: 'different' };
+      }
+      if (la && (la.bad[i] || la.lvl[i] !== lr.lvl[i])) {
+        /* 'block'：与 'indent' 同一套 index 语义（答案侧**物理行号**，0 起），
+           expected/got 是块层级（相对第一条逻辑行，数字）。从不涉及字面量原文。 */
+        return { ok: false, index: at[i].line - 1, expected: lr.lvl[i], got: la.lvl[i], kind: 'block' };
       }
     }
     if (at.length < rt.length) {
@@ -2110,6 +2290,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
                   en: 'token #{0} is extra: {1} does not belong here' },
     blankIndent: { zh: '第 {0} 行缩进对不上：期待相对缩进 {1} 格，你写了 {2} 格',
                   en: 'line {0} indent is off: expected {1} spaces relative, you wrote {2}' },
+    blankBlock:  { zh: '第 {0} 行落进了另一层代码块：块结构与参考不同（看这一行的缩进，和它前面写成一行的语句头）',
+                  en: 'line {0} lands in a different block: the block structure differs from the reference (check this line\'s indent and any header written on one line before it)' },
     blankLead:   { zh: '第 1 行缩进对不上：这个空从第 {1} 格开始，你写了 {2} 格',
                   en: 'line 1 indent is off: this blank starts at column {1}, you wrote {2}' },
     blankDiffLiteral: { zh: '第 {0} 个 token（{1}）里第 {2} 个字符起不同',
@@ -2505,6 +2687,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
          所以要用 PyLex.significant 现取它在 answer 里的偏移。
        kind 'indent'：index 是**物理行号**，expected/got 是**相对缩进数值**
          （不是 null、不是字符串）。光标去那一行的行首。裁决 R30/R31。
+       kind 'block'（清理波）：同 'indent' 的 index 语义，expected/got 是块层级；
+         消息只报行号。
 
      另有 Judge 结构上看不见的一种错：**整块的绝对缩进**。Judge.normalize 比的是
      行与行之间的相对缩进，所以单行挖空体 `    x = 1` 与 `x = 1` 在它眼里完全
@@ -2538,6 +2722,20 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     var cmp = judge().compare(a, r);
     if (cmp.ok) {
       return { ok: true, kind: 'equal', caret: 0, message: t('blankOk', lang) };
+    }
+
+    /* 'block'（清理波）：两边有效行条数不同时，Judge 比的是块层级，index 同样是
+       答案侧**物理行号**。消息不印层级数字——「第 1 层 / 第 0 层」对她没有意义——
+       也从不涉及字面量原文。 */
+    if (cmp.kind === 'block') {
+      var bStarts = editor().lineStarts(a);
+      var bi = Math.max(0, Math.min(cmp.index, bStarts.length - 1));
+      return {
+        ok: false,
+        kind: 'block',
+        caret: bStarts[bi],
+        message: ts('blankBlock', lang, [cmp.index + 1])
+      };
     }
 
     if (cmp.kind === 'indent') {
@@ -4483,8 +4681,8 @@ var PyPrograms = {
       },
       "notes": {
         "en": [
-          "The split of jobs is the point. A Student knows only about itself: its name, its list of marks, and how to average them. The Gradebook knows about many students: it keeps them in a dictionary by name, creates a Student the first time a name gets a mark, and complains when asked about a name it has never seen. Neither class does the other's job. Classes themselves are nothing new here - see \u300cClasses & Objects\u300d.",
-          "StudentNotFound is the program's own exception, so a caller can catch exactly this failure and nothing else (your own exception classes are in \u300cFiles & Exceptions\u300d). find raises it, report lets it pass straight through, and run_ops is the one place that catches it and turns it into the words no such student.",
+          "The split of jobs is the point. A Student knows only about itself: its name, its list of marks, and how to average them. The Gradebook knows about many students: it keeps them in a dictionary by name, creates a Student the first time a name gets a mark, and complains when asked about a name it has never seen. Neither class does the other's job. Classes themselves are nothing new here - see the Classes & Objects page.",
+          "StudentNotFound is the program's own exception, so a caller can catch exactly this failure and nothing else (your own exception classes are on the Files & Exceptions page). find raises it, report lets it pass straight through, and run_ops is the one place that catches it and turns it into the words no such student.",
           "Grades come from a table instead of a chain of elif. GRADES runs from the highest cutoff down, so the loop hands back the first letter whose cutoff the average reaches, and an average that reaches none of them falls out of the loop and gets U. Moving a grade boundary means editing one line of data, not the code.",
           "In the demo Ada has 72 and 67, an average of 69.5 - half a mark below the A line, so a B. Ben has 58 and 61, an average of 59.5, so a C. In the run_ops call Dee's single mark of 40 is exactly on the D line and gets a D, while Cal, who never had a mark, is reported as no such student.",
           "run_ops drives the gradebook from a list of operations such as (\"mark\", \"Ada\", 72) and (\"report\", \"Ada\"), and returns what each report gave back."
@@ -4549,8 +4747,8 @@ var PyPrograms = {
       },
       "notes": {
         "en": [
-          "The json module only understands dictionaries, lists, strings, numbers, True, False and None. A Student object is none of those, so json.dump would refuse it with a TypeError. The fix is a pair of translators: to_dict turns an object into plain data that json can store, and from_dict builds an equal object back from that data. JSON itself - dump and load, and what turns into what - is covered in \u300cText & Data\u300d; this program is about the translation.",
-          "The translation follows the objects down: Gradebook.to_dict asks each Student for its own dictionary, and Gradebook.from_dict hands each stored dictionary to Student.from_dict. Each class translates only itself. from_dict is a classmethod, an alternative constructor, as in \u300cClasses & Objects\u300d.",
+          "The json module only understands dictionaries, lists, strings, numbers, True, False and None. A Student object is none of those, so json.dump would refuse it with a TypeError. The fix is a pair of translators: to_dict turns an object into plain data that json can store, and from_dict builds an equal object back from that data. JSON itself - dump and load, and what turns into what - is covered on the Text & Data page; this program is about the translation.",
+          "The translation follows the objects down: Gradebook.to_dict asks each Student for its own dictionary, and Gradebook.from_dict hands each stored dictionary to Student.from_dict. Each class translates only itself. from_dict is a classmethod, an alternative constructor, as on the Classes & Objects page.",
           "load checks whether the file exists before opening it. The very first run has nothing saved, so it starts from an empty gradebook instead of crashing - that is why the demo starts with 0 students. The file is written to the current folder, where a later run would find it. So running it again in PyCharm carries on from the students saved last time, adding more marks to them; delete gradebook.json to start again from scratch.",
           "Loading gives new objects, not the same ones: again == book is True while again is book is False. Without __eq__, == would fall back to asking whether they are the same object and say False even though every name and mark matches. Gradebook's __eq__ compares the two dictionaries, and comparing those compares each pair of Students with Student.__eq__.",
           "The saved file lists Ada with the marks 72 and 65 and Ben with 58, laid out with two-space indentation. Ada's marks come back as a list of ints, and she comes back as a Student."
@@ -4615,7 +4813,7 @@ var PyPrograms = {
       "notes": {
         "en": [
           "This is standard competition ranking: three people tied for third are all third, and the next person is sixth, not fourth, because five people finished ahead of them. The rule behind it is short. A competitor's place is its position in the sorted list, unless it has the same score as the row above, in which case it copies that row's place.",
-          "The sort key (-score, name) puts higher scores first and breaks ties alphabetically, so tied rows always come out in the same order. Negating the score is the usual way to sort one part of a key high-to-low and another low-to-high; sorted with key= is covered in \u300cComprehensions & Built-ins\u300d.",
+          "The sort key (-score, name) puts higher scores first and breaks ties alphabetically, so tied rows always come out in the same order. Negating the score is the usual way to sort one part of a key high-to-low and another low-to-high; sorted with key= is covered on the Comprehensions & Built-ins page.",
           "The place comes from the position, not from the previous place plus one. Counting up from the previous place would give 1, 2, 3, 3, 3, 4 - dense ranking, which is a different rule. Testing rows before looking at rows[-1] matters for the very first competitor, when there is no row above.",
           "In the demo Cal (95) is 1st and Ada (88) 2nd; Ben, Dee and Fay all scored 72 and share 3rd; Eve (60) is 6th. Two people tied at the top are both 1st, and an empty list ranks to an empty list."
         ],
@@ -4675,9 +4873,9 @@ var PyPrograms = {
       },
       "notes": {
         "en": [
-          "Item is a @dataclass, so its __init__, __repr__ and __eq__ are written for you from the three fields (see \u300cClasses & Objects\u300d). That is why printing an item shows its SKU, quantity and reorder level without any code for it.",
+          "Item is a @dataclass, so its __init__, __repr__ and __eq__ are written for you from the three fields (see the Classes & Objects page). That is why printing an item shows its SKU, quantity and reorder level without any code for it.",
           "The methods return results and raise exceptions; they never print. receive returns the new quantity, dispatch returns whether the item has fallen to its reorder level, and an impossible dispatch raises OutOfStock. What to show, and how, is left to the caller: the demo prints the answers one way, run_ops collects the same answers into a list. A method that printed would be no use to a caller that wanted to do something else with the answer.",
-          "OutOfStock carries the facts as attributes - sku, wanted, available - as well as a message, so a caller can work out how many are missing without taking the message text apart. The check comes before quantity is changed, so a refused dispatch leaves the stock exactly as it was. Your own exception classes are in \u300cFiles & Exceptions\u300d.",
+          "OutOfStock carries the facts as attributes - sku, wanted, available - as well as a message, so a caller can work out how many are missing without taking the message text apart. The check comes before quantity is changed, so a refused dispatch leaves the stock exactly as it was. Your own exception classes are on the Files & Exceptions page.",
           "In the demo 12 pens arrive; sending out 4 leaves 8, above the reorder level of 5, so the answer is False. Sending out 3 more leaves exactly 5, which counts as reaching the level, so the answer is True. A request for 9 is then refused with 5 in stock. In the run_ops call the ink reaches its reorder level of 2 after one sale, and a request for 5 is short by 3.",
           "run_ops drives the inventory from operations such as (\"new\", \"PEN\", 5), (\"in\", \"PEN\", 12) and (\"out\", \"PEN\", 4)."
         ],
@@ -4745,7 +4943,7 @@ var PyPrograms = {
       "notes": {
         "en": [
           "A batch job must not stop at the first bad row, and it must not quietly drop one either. Each problem is recorded with its line number and the loop moves on with continue; at the end every good row has been applied, and the list of problems says exactly what to go back and fix.",
-          "Line numbers start from 2 because the header is line 1 of the file. csv.DictReader reads the header for you and gives every later row as a dictionary keyed by the column names (see \u300cFiles & Exceptions\u300d); enumerate adds the count.",
+          "Line numbers start from 2 because the header is line 1 of the file. csv.DictReader reads the header for you and gives every later row as a dictionary keyed by the column names (see the Files & Exceptions page); enumerate adds the count.",
           "Two kinds of bad row are caught two different ways. An unknown SKU is tested for before anything happens. A quantity that is not a whole number is found by trying int() and catching the ValueError; the program then prints its own words, not the exception's message.",
           "restock works on a copy of the stock dictionary, so the STOCK it was given is untouched - after restock, STOCK still holds PEN 10, INK 3 and PAD 0. write_stock writes the result to stock.csv in the current folder, sorted by SKU, and the program reads it back: INK 15, PAD 20, PEN 55. Line 4 (quantity ten) and line 6 (unknown SKU GLUE) were skipped. Values read back from a CSV file are strings again.",
           "To run this in PyCharm you need the data file too: make a folder called _fixtures next to the program and put a file deliveries.csv in it. It has these seven lines, one per paragraph below:",
@@ -4823,7 +5021,7 @@ var PyPrograms = {
       "notes": {
         "en": [
           "A transfer changes two accounts. If the program took the money from the payer and only then found that the payee did not exist, the money would simply vanish: one side changed, the other not. The rule that prevents this is check everything first, then change: every reason the transfer could fail is tested before a single balance is touched, and the two changes are made together with nothing between them that can fail. All-or-nothing like this is called atomic.",
-          "Encapsulation: a Bank Account (in \u300cClasses & Objects\u300d) is about one account guarding its own balance. This program is about something else - keeping several objects consistent with each other - so no single account's rules are enough.",
+          "Encapsulation: a Bank Account (on the Classes & Objects page) is about one account guarding its own balance. This program is about something else - keeping several objects consistent with each other - so no single account's rules are enough.",
           "Every refusal raises TransferError with the program's own message, and the caller catches that one exception type. A line goes into the log only when a transfer has gone through, so the log is a record of what really happened.",
           "In the demo Ada pays Ben 30, which leaves Ada 20 and Ben 50. Then Ben tries to pay Ada 100 (insufficient funds), Ada tries to pay Cal, who has no account, and Ben tries to pay 0 - all three are refused, and the balances stay at 20 and 50 each time. The log holds the one transfer that happened.",
           "run_ops drives the bank from operations such as (\"open\", \"Ada\", 50) and (\"transfer\", \"Ada\", \"Ben\", 30); it returns what each transfer said, the final balances, and the log."
@@ -4916,7 +5114,7 @@ var PyPrograms = {
       "check": {
         "property": "pure"
       },
-      "source": "\"\"\"Keep money as a whole number of pence, so sums are exact and rounding is a rule you choose.\"\"\"\n\n\ndef add_interest(balance, rate_percent, months):\n    \"\"\"balance in pence (not negative); rate_percent a whole-number monthly rate; returns pence.\"\"\"\n    for _ in range(months):\n# >>> BLANK id=round-half-up level=2 hint=\"\u7b97\u51fa\u8fd9\u4e2a\u6708\u7684\u5229\u606f\uff08\u6574\u6570\u4fbf\u58eb\uff09\uff0c\u5b58\u8fdb interest\uff1abalance \u4e58\u4ee5 rate_percent \u518d\u9664\u4ee5 100\uff0c\u6309\u534a\u6570\u8fdb\u4f4d\u53d6\u6574\u2014\u2014\u5168\u7a0b\u53ea\u7528\u6574\u6570\u8fd0\u7b97\uff1b\u4e58\u79ef\u5199\u6210 balance \u5728\u524d\uff0c\u8fdb\u4f4d\u7528\u7684\u90a3\u4e2a\u52a0\u6570\u5199\u5728\u4e58\u79ef\u540e\u9762 || \u534a\u6570\u8fdb\u4f4d\u7684\u529e\u6cd5\uff1a\u5728\u4e58\u79ef\u540e\u9762\u52a0\u4e0a\u9664\u6570\u7684\u4e00\u534a\uff0c\u6574\u4e2a\u62ec\u8d77\u6765\uff0c\u518d\u7528\u6574\u9664 // \u9664\u4ee5 100\" hintEn=\"Work out this month's interest in whole pence and keep it in interest: balance times rate_percent divided by 100, rounded half up - using whole-number arithmetic only; write the product with balance first, and put the number added for rounding after the product || Rounding half up: add half of the divisor after the product, bracket the whole thing, then floor-divide by 100 with //\"\n        interest = (balance * rate_percent + 50) // 100\n# \u003c\u003c\u003c BLANK\n# >>> BLANK id=add-on level=1 hint=\"\u628a\u8fd9\u4e2a\u6708\u7684\u5229\u606f\u52a0\u8fdb\u4f59\u989d\u2014\u2014\u7528\u589e\u5f3a\u8d4b\u503c +=\" hintEn=\"Add this month's interest to the balance - use the augmented assignment +=\"\n        balance += interest\n# \u003c\u003c\u003c BLANK\n    return balance\n\n\ndef show(pence):\n# >>> BLANK id=split-pounds level=1 hint=\"\u4e00\u884c\u540c\u65f6\u5f97\u5230\u82f1\u9551\u6570\u548c\u4f59\u4e0b\u7684\u4fbf\u58eb\u6570\uff0c\u62c6\u5305\u8fdb pounds \u548c pennies\u2014\u2014\u7528\u5185\u7f6e\u7684 divmod\uff0c\u9664\u6570\u662f 100\" hintEn=\"Get the pounds and the pence left over in one line, unpacked into pounds and pennies - use the built-in divmod with 100 as the divisor\"\n    pounds, pennies = divmod(pence, 100)\n# \u003c\u003c\u003c BLANK\n    return f\"{pounds}.{pennies:02d}\"\n\n\nif __name__ == \"__main__\":\n    print(0.1 + 0.2, 0.1 + 0.2 == 0.3)\n    print(10 + 20, 10 + 20 == 30)\n    print(show(add_interest(1000, 5, 1)))\n    print(show(add_interest(1010, 5, 1)))\n    print(show(add_interest(1030, 5, 1)))\n    print(show(add_interest(250000, 1, 12)))\n    print(add_interest(1010, 5, 0), type(add_interest(1010, 5, 2)).__name__)\n",
+      "source": "\"\"\"Keep money as a whole number of pence, so sums are exact and rounding is a rule you choose.\"\"\"\n\n\ndef add_interest(balance, rate_percent, months):\n    \"\"\"balance in pence (not negative); rate_percent a whole-number monthly rate; returns pence.\"\"\"\n    for _ in range(months):\n# >>> BLANK id=round-half-up level=2 hint=\"\u7b97\u51fa\u8fd9\u4e2a\u6708\u7684\u5229\u606f\uff08\u6574\u6570\u4fbf\u58eb\uff09\uff0c\u5b58\u8fdb interest\uff1abalance \u4e58\u4ee5 rate_percent \u518d\u9664\u4ee5 100\uff0c\u6309\u534a\u6570\u8fdb\u4f4d\u53d6\u6574\u2014\u2014\u5168\u7a0b\u53ea\u7528\u6574\u6570\u8fd0\u7b97\uff1b\u4e58\u79ef\u5199\u6210 balance \u5728\u524d\uff0c\u8fdb\u4f4d\u7528\u7684\u90a3\u4e2a\u52a0\u6570\u5199\u5728\u4e58\u79ef\u540e\u9762 || \u534a\u6570\u8fdb\u4f4d\u7684\u529e\u6cd5\uff1a\u5728\u4e58\u79ef\u540e\u9762\u52a0\u4e0a\u9664\u6570\u7684\u4e00\u534a\uff0c\u6574\u4e2a\u62ec\u8d77\u6765\uff0c\u518d\u7528\u6574\u9664 // \u9664\u4ee5 100\" hintEn=\"Work out this month's interest in whole pence and keep it in interest: balance times rate_percent divided by 100, rounded half up - using whole-number arithmetic only; write the product with balance first, and put the number added for rounding after the product || Rounding half up: add half of the divisor after the product, bracket the whole thing, then floor-divide by 100 with //\"\n        interest = (balance * rate_percent + 50) // 100\n# \u003c\u003c\u003c BLANK\n# >>> BLANK id=add-on level=1 hint=\"\u628a\u8fd9\u4e2a\u6708\u7684\u5229\u606f\u52a0\u8fdb\u4f59\u989d\u2014\u2014\u7528\u589e\u5f3a\u8d4b\u503c +=\" hintEn=\"Add this month's interest to the balance - use the augmented assignment +=\"\n        balance += interest\n# \u003c\u003c\u003c BLANK\n    return balance\n\n\ndef show(pence):\n# >>> BLANK id=split-pounds level=1 hint=\"\u4e00\u884c\u540c\u65f6\u5f97\u5230\u82f1\u9551\u6570\u548c\u4f59\u4e0b\u7684\u4fbf\u58eb\u6570\uff0c\u62c6\u5305\u8fdb pounds \u548c pennies\uff08\u7b49\u53f7\u5de6\u8fb9\u4e0d\u52a0\u62ec\u53f7\uff09\u2014\u2014\u7528\u5185\u7f6e\u7684 divmod\uff0c\u9664\u6570\u662f 100\" hintEn=\"Get the pounds and the pence left over in one line, unpacked into pounds and pennies (no brackets on the left of the =) - use the built-in divmod with 100 as the divisor\"\n    pounds, pennies = divmod(pence, 100)\n# \u003c\u003c\u003c BLANK\n    return f\"{pounds}.{pennies:02d}\"\n\n\nif __name__ == \"__main__\":\n    print(0.1 + 0.2, 0.1 + 0.2 == 0.3)\n    print(10 + 20, 10 + 20 == 30)\n    print(show(add_interest(1000, 5, 1)))\n    print(show(add_interest(1010, 5, 1)))\n    print(show(add_interest(1030, 5, 1)))\n    print(show(add_interest(250000, 1, 12)))\n    print(add_interest(1010, 5, 0), type(add_interest(1010, 5, 2)).__name__)\n",
       "lines": 24
     },
     {
@@ -5106,7 +5304,7 @@ var PyPrograms = {
         "en": [
           "This is the shape of many exam programs: a while True loop that shows a menu, reads a choice, carries it out, and comes round again until the quit option breaks out of the loop.",
           "Choices are dispatched through ACTIONS, a dictionary from option to function. Adding an option means writing one function and one dictionary entry - no new elif. The functions are stored in the dictionary, not called: there are no brackets after their names there. The call happens later, once the choice is known. Looking up an option that is not in the dictionary gives None, and the loop says so and continues.",
-          "Every input is treated as untrusted text. The menu choice is stripped of surrounding spaces and compared as a string, so a letter or a 9 just gets the please-choose message. The task number is tested with isdecimal before int() is called on it, and checked against the length of the list, so removing can never crash. Asking again until the input is valid is covered in \u300cFiles & Exceptions\u300d.",
+          "Every input is treated as untrusted text. The menu choice is stripped of surrounding spaces and compared as a string, so a letter or a 9 just gets the please-choose message. The task number is tested with isdecimal before int() is called on it, and checked against the length of the list, so removing can never crash. Asking again until the input is valid is covered on the Files & Exceptions page.",
           "The input is fed in, so the run is always the same: list (no tasks yet), add Revise loops, add Past paper Q3, list both, try to remove task 7 (no such task), remove task 1, choose 9 (not an option), list again - only Past paper Q3 is left - and quit. The prompts Choice:, Task: and Number to remove: stay on the same line as what comes after them, because input() prints its prompt without a newline."
         ],
         "zh": [
@@ -5133,7 +5331,7 @@ var PyPrograms = {
         "expect": "1 Add | 2 List | 3 Remove | 4 Quit\nChoice: No tasks.\n1 Add | 2 List | 3 Remove | 4 Quit\nChoice: Task: Added.\n1 Add | 2 List | 3 Remove | 4 Quit\nChoice: Task: Added.\n1 Add | 2 List | 3 Remove | 4 Quit\nChoice: 1. Revise loops\n2. Past paper Q3\n1 Add | 2 List | 3 Remove | 4 Quit\nChoice: Number to remove: No such task.\n1 Add | 2 List | 3 Remove | 4 Quit\nChoice: Number to remove: Removed: Revise loops\n1 Add | 2 List | 3 Remove | 4 Quit\nChoice: Please choose 1, 2, 3 or 4.\n1 Add | 2 List | 3 Remove | 4 Quit\nChoice: 1. Past paper Q3\n1 Add | 2 List | 3 Remove | 4 Quit\nChoice: Goodbye.\n",
         "timeout": 5
       },
-      "source": "\"\"\"A menu-driven program: show the options, check the choice, and dispatch it to a function.\"\"\"\n\n\ndef add_task(tasks):\n    tasks.append(input(\"Task: \"))\n    print(\"Added.\")\n\n\ndef list_tasks(tasks):\n    if not tasks:\n        print(\"No tasks.\")\n    for number, text in enumerate(tasks, start=1):\n        print(f\"{number}. {text}\")\n\n\ndef remove_task(tasks):\n    choice = input(\"Number to remove: \")\n# >>> BLANK id=valid-number level=3 hint=\"\u4e00\u4e2a if \u7684\u5934\uff1achoice \u5168\u662f\u6570\u5b57\u3001\u800c\u4e14\u6362\u6210\u6574\u6570\u540e\u843d\u5728 1 \u5230\u4efb\u52a1\u4e2a\u6570\u4e4b\u95f4\uff08\u4e24\u7aef\u90fd\u7b97\uff09\u2014\u2014\u4e24\u4e2a\u6761\u4ef6\u7528 and \u8fde\u8d77\u6765\uff0c\u5148\u5224\u5168\u662f\u6570\u5b57\uff1b\u5224\u6570\u5b57\u7528\u5b57\u7b26\u4e32\u65b9\u6cd5 isdecimal()\uff0c\u4e0d\u7528 isdigit()\uff08\u00b2 \u8fd9\u7c7b\u4e0a\u6807\u6570\u5b57 isdigit() \u8ba4\u3001int() \u5374\u4e0d\u8ba4\uff09\uff1b\u8303\u56f4\u5199\u6210\u4e00\u4e2a\u8fde\u5199\u7684\u6bd4\u8f83\uff0c\u4e0d\u62c6\u6210\u4e24\u4e2a\u6bd4\u8f83\u518d\u7528 and \u8fde || \u5148\u5224\u6570\u5b57\u662f\u4e3a\u4e86\u8ba9 int() \u4e0d\u4f1a\u51fa\u9519\uff1aand \u5de6\u8fb9\u4e3a\u5047\u65f6\u53f3\u8fb9\u6839\u672c\u4e0d\u7b97 || \u8fde\u5199\u6bd4\u8f83\u91cc 1 \u5728\u6700\u5de6\u3001len(tasks) \u5728\u6700\u53f3\uff0c\u4e24\u5904\u90fd\u7528\u5c0f\u4e8e\u7b49\u4e8e\" hintEn=\"The head of an if: choice is all digits and, as a whole number, lies from 1 to the number of tasks (both ends included) - join the two conditions with and, testing for digits first; test for digits with the string method isdecimal(), not isdigit() (isdigit() accepts superscripts such as \u00b2, which int() rejects); write the range as one chained comparison, not two comparisons joined by and || Testing for digits first keeps int() from failing: when the left of and is false, the right is never worked out || In the chained comparison 1 is on the far left and len(tasks) on the far right, with less-than-or-equal at both places\"\n    if choice.isdecimal() and 1 \u003c= int(choice) \u003c= len(tasks):\n# \u003c\u003c\u003c BLANK\n        print(\"Removed:\", tasks.pop(int(choice) - 1))\n    else:\n        print(\"No such task.\")\n\n\nACTIONS = {\"1\": add_task, \"2\": list_tasks, \"3\": remove_task}\n\n\ndef main():\n    tasks = []\n    while True:\n        print(\"1 Add | 2 List | 3 Remove | 4 Quit\")\n        choice = input(\"Choice: \").strip()\n        if choice == \"4\":\n            print(\"Goodbye.\")\n            break\n# >>> BLANK id=look-up level=2 hint=\"\u5728\u5206\u6d3e\u5b57\u5178\u91cc\u627e\u8fd9\u4e2a\u9009\u9879\u5bf9\u5e94\u7684\u51fd\u6570\uff0c\u5b58\u8fdb action\uff1b\u627e\u4e0d\u5230\u65f6\u8981\u5f97\u5230 None \u800c\u4e0d\u662f\u629b\u9519\u2014\u2014\u4e0d\u5199\u9ed8\u8ba4\u503c\u90a3\u4e2a\u5b9e\u53c2\uff0c\u7f3a\u7701\u672c\u6765\u5c31\u662f None || \u7528\u5b57\u5178\u7684 get \u65b9\u6cd5\uff0c\u53ea\u7ed9\u4e00\u4e2a\u5b9e\u53c2 choice\" hintEn=\"Find the function for this choice in the dispatch dictionary and keep it in action; when the choice is not there you want None, not an exception - leave out the default-value argument, since the default is None already || Use the dictionary's get method with choice as its only argument\"\n        action = ACTIONS.get(choice)\n# \u003c\u003c\u003c BLANK\n        if action is None:\n            print(\"Please choose 1, 2, 3 or 4.\")\n            continue\n# >>> BLANK id=dispatch level=1 hint=\"\u8c03\u7528\u627e\u5230\u7684\u90a3\u4e2a\u51fd\u6570\uff0c\u628a\u4efb\u52a1\u5217\u8868\u4ea4\u7ed9\u5b83\u2014\u2014\u4e09\u4e2a\u83dc\u5355\u51fd\u6570\u90fd\u53ea\u6536\u8fd9\u4e00\u4e2a\u5b9e\u53c2\" hintEn=\"Call the function that was found, handing it the task list - all three menu functions take just that one argument\"\n        action(tasks)\n# \u003c\u003c\u003c BLANK\n\n\nif __name__ == \"__main__\":\n    main()\n",
+      "source": "\"\"\"A menu-driven program: show the options, check the choice, and dispatch it to a function.\"\"\"\n\n\ndef add_task(tasks):\n    tasks.append(input(\"Task: \"))\n    print(\"Added.\")\n\n\ndef list_tasks(tasks):\n    if not tasks:\n        print(\"No tasks.\")\n    for number, text in enumerate(tasks, start=1):\n        print(f\"{number}. {text}\")\n\n\ndef remove_task(tasks):\n    choice = input(\"Number to remove: \")\n# >>> BLANK id=valid-number level=3 hint=\"\u4e00\u4e2a if \u7684\u5934\uff1achoice \u5168\u662f\u6570\u5b57\u3001\u800c\u4e14\u6362\u6210\u6574\u6570\u540e\u843d\u5728 1 \u5230\u4efb\u52a1\u4e2a\u6570\u4e4b\u95f4\uff08\u4e24\u7aef\u90fd\u7b97\uff09\u2014\u2014\u4e24\u4e2a\u6761\u4ef6\u7528 and \u8fde\u8d77\u6765\uff0c\u5148\u5224\u5168\u662f\u6570\u5b57\uff1b\u5224\u6570\u5b57\u7528\u5b57\u7b26\u4e32\u65b9\u6cd5 isdecimal()\uff0c\u4e0d\u7528 isdigit()\uff08\u00b2 \u8fd9\u7c7b\u4e0a\u6807\u6570\u5b57 isdigit() \u8ba4\u3001int() \u5374\u4e0d\u8ba4\uff09\uff1b\u8303\u56f4\u5199\u6210\u4e00\u4e2a\u8fde\u5199\u7684\u6bd4\u8f83\uff0c\u4ece\u5c0f\u5199\u5230\u5927\uff08\u5c0f\u7684\u5728\u5de6\u8fb9\uff09\uff0c\u4e0d\u62c6\u6210\u4e24\u4e2a\u6bd4\u8f83\u518d\u7528 and \u8fde || \u5148\u5224\u6570\u5b57\u662f\u4e3a\u4e86\u8ba9 int() \u4e0d\u4f1a\u51fa\u9519\uff1aand \u5de6\u8fb9\u4e3a\u5047\u65f6\u53f3\u8fb9\u6839\u672c\u4e0d\u7b97 || \u8fde\u5199\u6bd4\u8f83\u91cc 1 \u5728\u6700\u5de6\u3001len(tasks) \u5728\u6700\u53f3\uff0c\u4e24\u5904\u90fd\u7528\u5c0f\u4e8e\u7b49\u4e8e\" hintEn=\"The head of an if: choice is all digits and, as a whole number, lies from 1 to the number of tasks (both ends included) - join the two conditions with and, testing for digits first; test for digits with the string method isdecimal(), not isdigit() (isdigit() accepts superscripts such as \u00b2, which int() rejects); write the range as one chained comparison running from small to large (the smaller end on the left), not two comparisons joined by and || Testing for digits first keeps int() from failing: when the left of and is false, the right is never worked out || In the chained comparison 1 is on the far left and len(tasks) on the far right, with less-than-or-equal at both places\"\n    if choice.isdecimal() and 1 \u003c= int(choice) \u003c= len(tasks):\n# \u003c\u003c\u003c BLANK\n        print(\"Removed:\", tasks.pop(int(choice) - 1))\n    else:\n        print(\"No such task.\")\n\n\nACTIONS = {\"1\": add_task, \"2\": list_tasks, \"3\": remove_task}\n\n\ndef main():\n    tasks = []\n    while True:\n        print(\"1 Add | 2 List | 3 Remove | 4 Quit\")\n        choice = input(\"Choice: \").strip()\n        if choice == \"4\":\n            print(\"Goodbye.\")\n            break\n# >>> BLANK id=look-up level=2 hint=\"\u5728\u5206\u6d3e\u5b57\u5178\u91cc\u627e\u8fd9\u4e2a\u9009\u9879\u5bf9\u5e94\u7684\u51fd\u6570\uff0c\u5b58\u8fdb action\uff1b\u627e\u4e0d\u5230\u65f6\u8981\u5f97\u5230 None \u800c\u4e0d\u662f\u629b\u9519\u2014\u2014\u4e0d\u5199\u9ed8\u8ba4\u503c\u90a3\u4e2a\u5b9e\u53c2\uff0c\u7f3a\u7701\u672c\u6765\u5c31\u662f None || \u7528\u5b57\u5178\u7684 get \u65b9\u6cd5\uff0c\u53ea\u7ed9\u4e00\u4e2a\u5b9e\u53c2 choice\" hintEn=\"Find the function for this choice in the dispatch dictionary and keep it in action; when the choice is not there you want None, not an exception - leave out the default-value argument, since the default is None already || Use the dictionary's get method with choice as its only argument\"\n        action = ACTIONS.get(choice)\n# \u003c\u003c\u003c BLANK\n        if action is None:\n            print(\"Please choose 1, 2, 3 or 4.\")\n            continue\n# >>> BLANK id=dispatch level=1 hint=\"\u8c03\u7528\u627e\u5230\u7684\u90a3\u4e2a\u51fd\u6570\uff0c\u628a\u4efb\u52a1\u5217\u8868\u4ea4\u7ed9\u5b83\u2014\u2014\u4e09\u4e2a\u83dc\u5355\u51fd\u6570\u90fd\u53ea\u6536\u8fd9\u4e00\u4e2a\u5b9e\u53c2\" hintEn=\"Call the function that was found, handing it the task list - all three menu functions take just that one argument\"\n        action(tasks)\n# \u003c\u003c\u003c BLANK\n\n\nif __name__ == \"__main__\":\n    main()\n",
       "lines": 43
     },
     {
@@ -5196,7 +5394,7 @@ var PyPrograms = {
         "expect": "  FAIL boundary   '120' should give True\nbuggy_is_valid_age: 8 of 9 tests passed\nis_valid_age: 9 of 9 tests passed\nTrue False\n",
         "timeout": 5
       },
-      "source": "\"\"\"Test a validator with normal, boundary and erroneous data, and watch the tests catch a boundary bug.\"\"\"\n\n\ndef buggy_is_valid_age(text):\n    \"\"\"First attempt, kept to show what the tests catch: the upper limit is off by one.\"\"\"\n    return text.isdecimal() and int(text) \u003c 120\n\n\ndef is_valid_age(text):\n    \"\"\"An age is a whole number of years from 0 to 120, typed as digits only.\"\"\"\n# >>> BLANK id=valid-age level=2 hint=\"\u8fd9\u662f\u4fee bug \u7684\u7ec3\u4e60\uff1a\u5199\u51fa buggy_is_valid_age \u4fee\u6389\u90a3\u4e2a\u5dee\u4e00\u9519\u8bef\u4e4b\u540e\u7684\u6837\u5b50\u3002\u4e00\u884c return\uff1a\u5148\u7528\u5b57\u7b26\u4e32\u65b9\u6cd5 isdecimal() \u5224\u5168\u662f\u6570\u5b57\uff0c\u518d\u7528 and \u63a5\u4e0a\u300c\u6362\u6210\u6574\u6570\u540e\u4e0d\u8d85\u8fc7 120\u300d\u2014\u2014int(text) \u5199\u5728\u6bd4\u8f83\u53f7\u5de6\u8fb9\uff0c\u53e6\u4e00\u8fb9\u4ecd\u662f 120\uff0c\u4e0d\u5199\u4e0b\u754c || 120 \u5c81\u672c\u8eab\u662f\u5408\u6cd5\u7684\uff1b\u8d1f\u53f7\u3001\u5c0f\u6570\u70b9\u3001\u7a7a\u4e32\u90fd\u8fc7\u4e0d\u4e86\u7b2c\u4e00\u4e2a\u5224\u65ad\uff0c\u6240\u4ee5\u4e0b\u754c\u7528\u4e0d\u7740\" hintEn=\"This is a bug-fixing exercise: write buggy_is_valid_age as it should be once its off-by-one mistake is fixed. One return line: first the string method isdecimal() to test for digits only, then and, then that the whole number is at most 120 - int(text) on the left of the comparison, 120 still on the other side, and no lower bound || 120 itself is a valid age; a minus sign, a decimal point or an empty string all fail the first test, so a lower bound is not needed\"\n    return text.isdecimal() and int(text) \u003c= 120\n# \u003c\u003c\u003c BLANK\n\n\nTESTS = [\n    (\"normal\", \"17\", True),\n    (\"normal\", \"64\", True),\n    (\"boundary\", \"0\", True),\n    (\"boundary\", \"120\", True),\n    (\"boundary\", \"-1\", False),\n    (\"boundary\", \"121\", False),\n    (\"erroneous\", \"abc\", False),\n    (\"erroneous\", \"12.5\", False),\n    (\"erroneous\", \"\", False),\n]\n\n\ndef run_tests(check):\n    passed = 0\n    for kind, text, expected in TESTS:\n        try:\n# >>> BLANK id=assert-row level=2 hint=\"\u65ad\u8a00\uff1a\u628a text \u4ea4\u7ed9 check \u5f97\u5230\u7684\u7ed3\u679c\u7b49\u4e8e\u8fd9\u4e00\u884c\u671f\u5f85\u7684 expected\u2014\u2014\u8c03\u7528\u5199\u5728 == \u5de6\u8fb9\uff0c\u4e0d\u5e26\u8bf4\u660e\u4fe1\u606f || \u65ad\u8a00\u4e0d\u6210\u7acb\u65f6\u629b AssertionError\uff0c\u7531\u4e0b\u9762\u7684 except \u63a5\u4f4f\" hintEn=\"Assert that handing text to check gives the expected value for this row - the call on the left of ==, with no message || When the assertion fails it raises AssertionError, which the except below catches\"\n            assert check(text) == expected\n# \u003c\u003c\u003c BLANK\n# >>> BLANK id=count-pass level=1 hint=\"\u8d70\u5230\u8fd9\u4e00\u884c\u8bf4\u660e\u65ad\u8a00\u6210\u7acb\uff1a\u901a\u8fc7\u6570\u52a0\u4e00\u2014\u2014\u7528\u589e\u5f3a\u8d4b\u503c +=\" hintEn=\"Reaching this line means the assertion held: add one to the pass count - use the augmented assignment +=\"\n            passed += 1\n# \u003c\u003c\u003c BLANK\n        except AssertionError:\n            print(f\"  FAIL {kind:\u003c9} {text!r:>6} should give {expected}\")\n    print(f\"{check.__name__}: {passed} of {len(TESTS)} tests passed\")\n\n\nif __name__ == \"__main__\":\n    run_tests(buggy_is_valid_age)\n    run_tests(is_valid_age)\n    print(is_valid_age(\"007\"), is_valid_age(\" 17\"))\n",
+      "source": "\"\"\"Test a validator with normal, boundary and erroneous data, and watch the tests catch a boundary bug.\"\"\"\n\n\ndef buggy_is_valid_age(text):\n    \"\"\"First attempt, kept to show what the tests catch: the upper limit is off by one.\"\"\"\n    return text.isdecimal() and int(text) \u003c 120\n\n\ndef is_valid_age(text):\n    \"\"\"An age is a whole number of years from 0 to 120, typed as digits only.\"\"\"\n# >>> BLANK id=valid-age level=2 hint=\"\u8fd9\u662f\u4fee bug \u7684\u7ec3\u4e60\uff1a\u5199\u51fa buggy_is_valid_age \u4fee\u6389\u90a3\u4e2a\u5dee\u4e00\u9519\u8bef\u4e4b\u540e\u7684\u6837\u5b50\u3002\u4e00\u884c return\uff1a\u5148\u7528\u5b57\u7b26\u4e32\u65b9\u6cd5 isdecimal() \u5224\u5168\u662f\u6570\u5b57\uff0c\u518d\u7528 and \u63a5\u4e0a\u300c\u6362\u6210\u6574\u6570\u540e\u4e0d\u8d85\u8fc7 120\u300d\u2014\u2014int(text) \u5199\u5728\u6bd4\u8f83\u53f7\u5de6\u8fb9\uff0c\u53e6\u4e00\u8fb9\u4ecd\u662f 120\uff0c\u4e0d\u5199\u4e0b\u754c || 120 \u5c81\u672c\u8eab\u662f\u5408\u6cd5\u7684\uff1b\u8d1f\u53f7\u3001\u5c0f\u6570\u70b9\u3001\u7a7a\u4e32\u90fd\u8fc7\u4e0d\u4e86\u7b2c\u4e00\u4e2a\u5224\u65ad\uff0c\u6240\u4ee5\u4e0b\u754c\u7528\u4e0d\u7740\" hintEn=\"This is a bug-fixing exercise: write buggy_is_valid_age as it should be once its off-by-one mistake is fixed. One return line: first the string method isdecimal() to test for digits only, then and, then that the whole number is at most 120 - int(text) on the left of the comparison, 120 still on the other side, and no lower bound || 120 itself is a valid age; a minus sign, a decimal point or an empty string all fail the first test, so a lower bound is not needed\"\n    return text.isdecimal() and int(text) \u003c= 120\n# \u003c\u003c\u003c BLANK\n\n\nTESTS = [\n    (\"normal\", \"17\", True),\n    (\"normal\", \"64\", True),\n    (\"boundary\", \"0\", True),\n    (\"boundary\", \"120\", True),\n    (\"boundary\", \"-1\", False),\n    (\"boundary\", \"121\", False),\n    (\"erroneous\", \"abc\", False),\n    (\"erroneous\", \"12.5\", False),\n    (\"erroneous\", \"\", False),\n]\n\n\ndef run_tests(check):\n    passed = 0\n    for kind, text, expected in TESTS:\n        try:\n# >>> BLANK id=assert-row level=2 hint=\"\u65ad\u8a00\uff1a\u628a text \u4ea4\u7ed9 check \u5f97\u5230\u7684\u7ed3\u679c\u7b49\u4e8e\u8fd9\u4e00\u884c\u671f\u5f85\u7684 expected\u2014\u2014\u8c03\u7528\u5199\u5728 == \u5de6\u8fb9\uff0c\u6574\u4e2a\u6761\u4ef6\u4e0d\u52a0\u62ec\u53f7\uff0c\u4e0d\u5e26\u8bf4\u660e\u4fe1\u606f || \u65ad\u8a00\u4e0d\u6210\u7acb\u65f6\u629b AssertionError\uff0c\u7531\u4e0b\u9762\u7684 except \u63a5\u4f4f\" hintEn=\"Assert that handing text to check gives the expected value for this row - the call on the left of ==, no brackets round the condition, and no message || When the assertion fails it raises AssertionError, which the except below catches\"\n            assert check(text) == expected\n# \u003c\u003c\u003c BLANK\n# >>> BLANK id=count-pass level=1 hint=\"\u8d70\u5230\u8fd9\u4e00\u884c\u8bf4\u660e\u65ad\u8a00\u6210\u7acb\uff1a\u901a\u8fc7\u6570\u52a0\u4e00\u2014\u2014\u7528\u589e\u5f3a\u8d4b\u503c +=\" hintEn=\"Reaching this line means the assertion held: add one to the pass count - use the augmented assignment +=\"\n            passed += 1\n# \u003c\u003c\u003c BLANK\n        except AssertionError:\n            print(f\"  FAIL {kind:\u003c9} {text!r:>6} should give {expected}\")\n    print(f\"{check.__name__}: {passed} of {len(TESTS)} tests passed\")\n\n\nif __name__ == \"__main__\":\n    run_tests(buggy_is_valid_age)\n    run_tests(is_valid_age)\n    print(is_valid_age(\"007\"), is_valid_age(\" 17\"))\n",
       "lines": 41
     }
   ]

@@ -24,9 +24,9 @@
 | 已上线的工具页 | **35**（模块 1–8） | ① |
 | 程序（`.py`） | **375** | ①、② |
 | `lines` 合计 | **12,247**（`lines` 口径见 `python.md` §4.1） | ① |
-| engine | 全库唯一 **`py-1.3.1`**，骨架同值（`py-1.3.0`：#203 boards；`py-1.3.1`：#204 一致性清理） | ①、②「页面镜像」行 |
-| 门 | **45**（生成 3 · A 8 · B 7 · C 5 · D·库 18 · D·词法 4；#206 加了 `boards_map_check`） | ② 最后一行 |
-| core 断言 | 7 个测试文件，**825** 条（editor 33 · exercise 43 · interact 368 · judge 37 · py-lex 273 · store 31 · trace 40） | ② 开头七行 |
+| engine | 全库唯一 **`py-1.3.2`**，骨架同值（`py-1.3.0`：#203 boards；`py-1.3.1`：#204 一致性清理；`py-1.3.2`：清理波，判定器行数不同时比块结构） | ①、②「页面镜像」行 |
+| 门 | **50**（生成 3 · A 8 · B 7 · C 5 · D·库 23 · D·词法 4；#206 加了 `boards_map_check`；清理波加了 `boards_groups_check`、`fixture_tracked_check`、`tag_normalize_check`、`copied_blank_check`、`isdigit_check`） | ② 最后一行 |
+| core 断言 | 7 个测试文件，**857** 条（editor 33 · exercise 43 · interact 376 · judge 61 · py-lex 273 · store 31 · trace 40；清理波） | ② 开头七行 |
 | 运行层 | stdlib **267** · scipy-stack **43** · pygame **36**（compile-only）· MicroPython **29**（compile-only；`micropython-microbit` 15、`micropython-pico` 14）；其余 346 个 `runtime` 是 `cpython` | ⑤ |
 | 真跑 / 只过 `compile` / 因缺库跳过 | **310 / 65 / 0**（严格模式） | ②「程序真跑」行 |
 | 带 property 的程序 | **259**（× 200 组实参；其中 MicroPython 24 个） | ②「性质比对」行；⑤ |
@@ -131,10 +131,13 @@ ls -d python/programs/*/_fixtures | wc -l
 | 加一页 | `python-drill-tool`「三种作业」A | 复制 `_skeleton.html` 改 6 处，建章目录，自己追加注册表条目，跑三个生成脚本 + `check.py` |
 | 给已有页加程序 | 同上 B；「一个程序长什么样」「生成 `run.expect`」「property 检查」 | `run.expect` 粘贴真实输出，不要想；参照机制必须与被测不同 |
 | 升级一页 | 同上 C | 版本三处；改了 `core/` 则 engine 全库一起升 |
-| 并行分支的注册表冲突 | 同上「堆叠分支之间的冲突」 | 不手工合并，跑 `resolve-registry-conflict.py`，用 `&&` 接提交 |
+| 并行分支的注册表冲突 | 同上「堆叠分支之间的冲突」 | 不手工合并，跑 `resolve-registry-conflict.py`（标准件，在 `python-content-wave/` 下），用 `&&` 接提交 |
 | 跑一波（一个模块的几页） | `python-content-wave`「运行」第 0–7 步 | 一波一个集成 worktree、一次终审、一轮修复、一次范围复审、一个 PR |
 | 浏览器验收 | `python-content-wave`「浏览器验收」+ `probe.js` | 用标准件探针，不要复制上一波台账里的探针 |
 | 起草一波的程序清单 | `python-content-wave` 第 1 步 | 每个 property 程序先做起草期原型，证明 cases 能触发它声称要测的分支 |
+| 复制内容真跑、数空 | `python-content-wave` 第 4 步 + `copyrun.py` | 用页面自己内联的 `Exercise` 取复制内容，按层真跑；逐章印空数，报告里的空数照它写 |
+| pygame 活体跑帧 | `python-content-wave` 第 4 步 + `live-frames.py` | 先 `--self-test` 四道对照（OK / SHORT / HANG / ERROR），再跑本波的 pygame 章 |
+| 填简报与 PR 描述 | `python-content-wave` 第 2、5、6 步 + `fill-template.py` | `--list` 列键 → 值写 JSON 文件 → `--values` 填；拒绝漏填与拼错的键，不经过 shell |
 
 ---
 
@@ -150,7 +153,7 @@ ls -d python/programs/*/_fixtures | wc -l
 | `Exercise.merge(source, answers) → string` | `exercise.js:366` | `answers[id]` **原样**替换整个指令块——不补缩进。答 `'return 2'` 给一个缩进 4 的空，拼出来就是顶格的 `return 2`（`exercise.test.js:59` 传的是带 8 个空格的整行）。缺的 id 用原 `body` 兜底。◆ |
 | `Exercise.DIRECTIVE_OPEN / DIRECTIVE_CLOSE` | `exercise.js:121-122` | 允许 `#`、`>>>`、`BLANK` 之间任意空白（`\s*`）。门以外的工具要识别指令行，用这两个正则或 `clean`，不要手写只认一个空格的前缀（第 2 期 M3 的复制真跑被 `# >>>BLANK` 骗过）。 |
 | `PyInteract.blankFeedback(answer, reference, lang) → { ok, kind, caret, message }` | `interact.js:508`（文档 `:482`） | **`answer` 的第一行必须带这个空自己的缩进**：`reference` 就是 `b.body`（带缩进），第一行前导空格数不同直接判 `lead-indent`。实跑：`blankFeedback('x = 1', '    x = 1', 'en')` → `lead-indent`；加上四个空格 → `equal`。页面里 textarea 的初值就是 `b.indent`（`interact.js:1557`），调用在 `:1630`。自己写判定器探针时一律「`b.indent` + 写法」，并先断言标准答案判对。◆ |
-| `Judge.compare(answer, reference) → { ok, index, expected, got, kind }` | `judge.js:158` | 它**看不见整块的绝对缩进**（`compare('x = 1', '    x = 1')` 判 `equal`），所以绝对缩进由 `blankFeedback` 另查。相对缩进**只在两边有效行数相同时比**（`:162`）——行数不同时连改变语义的缩进也判对（§9）。`index` 的语义随 `kind` 变：`indent` 时是物理行号（0 起），其余是有效 token 下标。◆ |
+| `Judge.compare(answer, reference) → { ok, index, expected, got, kind }` | `judge.js:158` | 它**看不见整块的绝对缩进**（`compare('x = 1', '    x = 1')` 判 `equal`），所以绝对缩进由 `blankFeedback` 另查。相对缩进在两边有效行数相同时逐行比宽度（`indent`）；行数不同时（单行复合语句、括号内断行）比块结构，把一行移出它的块判 `block`（清理波，`py-1.3.2`）。`index` 的语义随 `kind` 变：`indent` / `block` 时是物理行号（0 起），其余是有效 token 下标。◆ |
 | `PyInteract.hintAt(blank, tier, lang) → string` | `interact.js:360` | 按 `HINT_MARK = ' \|\| '`（`:357`）切；`tier` 是「给到第几级」，0 返回空串，超过 `level` 截到 `level`；多级之间用 `' · '` 拼回（`:358`）。`；` 与 `; ` 是普通标点。◆ |
 | `PyInteract.chunkSegments(cleanText, chunks) → null \| [{ index, title, start, end, text, fromLine, toLine }]` | `interact.js:783` | 参数是 **clean 文本**，不是带指令的源码。`[start, end)` 半开区间；段 = 从本段 `from` 行到**下一段 `from` 之前**（不是 `from…to` 闭区间），最后一段到文本末尾含结尾换行，所以各段拼回去逐字节等于 clean；`to` 只作校验。失败不抛，返回 `null`（页面退回不分段）。实跑 `'a\nb\n\nc\nd\n'` 两段 → `[0,5)`、`[5,9)`，段间空行归前一段。◆ |
 | `PyInteract.encodeChunkDraft(seg, typed)` / `decodeChunkDraft(raw, n)` | `interact.js:835` / `:848` | 草稿仍存在 `(id, 'trace')` 键下，值是 JSON `{"v":1,"seg":k,"typed":[…]}`；不分段程序的草稿仍是纯字符串。`decode` 在纯字符串、版本不认识、**数组长度 ≠ 段数 `n`**、`seg` 越界时都返回 `null`——「视为无」，不删旧字符串。◆ |
@@ -213,6 +216,13 @@ ls -d python/programs/*/_fixtures | wc -l
 | `fixture_notes_check` | notes.en 删一行；notes.zh 两行对调；不写文件名；fixture 改一个字符；源码写成 `Path("_fixtures") / "x"` | 五条都是断言红、无 traceback | 〔执〕#187 |
 | `pygame_main_guard_check` | 顶层 `pygame.init()` / `set_mode`；顶层 `while True`；没有 main 守卫 | 断言 | 〔执〕#196 |
 | `micropython_main_guard_check` | 顶层 `display.show(...)` / `Pin(25, Pin.OUT)`；顶层 `while True`；没有 main 守卫 | 断言。**`e342ba2` 时 0 个 MicroPython 程序（§1.1），这道门只在负控制里执行过** | 〔执〕#201 |
+| `boards_groups_check` | 自查表某组程序数 4 → 5；自查表少点名一个程序；附录一行换了概念组；依据栏去掉 `C` 的引用 | 四条都是断言红，点名组 / 程序 | 〔执〕清理波 gates 报告 |
+| `fixture_tracked_check` | 注入的「已跟踪集合」少 `access.log`；注入空集合（不碰真索引） | 断言红，点名文件。CI 上磁盘就是索引，这道门只在本地有判别力 | 〔执〕清理波 gates 报告 |
+| `tag_normalize_check` | `hello-name` 的 `f-string` 改成 `F String`；豁免表删一条；豁免表多一条对不上的 | 三条都是断言红。`len` / `__len__` 不撞（不折下划线）是正对照 | 〔执〕清理波 gates 报告 |
+| `copied_blank_check` | 在 `if-placement-in-comprehension` 注入答案的逐字孪生；注入 `sorted(…)` 套住的近照抄；豁免表删 / 多一条 | 四条都是断言红；注入只由关键字组成的 `pass` 行仍绿（正对照） | 〔执〕清理波 gates 报告 |
+| `isdigit_check` | `isdecimal() and int(` 改 `isdigit`；`tokenise-loop` 的逐字符 `isdecimal` 改 `isdigit`；`not part.isdecimal()` 改 `isdigit`；同一行带 `isdecimal` 的 `x.isdigit()`；豁免表删 / 多一条 | 六条都是断言红，分别报「守着转换」「收集数字字符」「判整串」 | 〔执〕清理波 gates 报告 |
+| `judge_strictness_check` | 判定器 `compare` 不比块层级（行数不同时） | 断言红：3 条块结构样例报「期望判异，实际判同」——这 3 条在改判定器之前就是红的（正对照） | 〔执〕清理波 gates 报告 |
+| 〃 · 额外入口 | ch08 五个新入口各一处变异（`len(word) - 1`、去掉 `.lower()`、`row[1:]`、key 去掉 `player[0]`、`>=` 改 `>`）；refs 少登记一个入口 | 断言红；被测抛错时报「参照：未计算」 | 〔执〕清理波 gates 报告 |
 | `lex_vs_cpython_check` | 把 `py-lex` 的 `//` 切成两个 `/` | 断言，报位置分歧。比对必须**双向逐区间相等**：「包含」式的探针在 44,081 个区间上报零不匹配、还通过了这条负控制 | 〔设〕主规格 §7.3；〔执〕第 0 期 R24 |
 | `lex_roundtrip_check` | 让词法器丢掉 token 间的空白片段 | 断言 | 〔设〕主规格 §7.3 |
 | 根级 `check_nav_contract.py` | 删某一页的 `target="_top"`；`#btnAlone` 的 `?v=` 写死成 `v=0` | 断言 | 〔设〕主规格 §7.3；〔执〕第 0 期 R45 |
@@ -220,7 +230,7 @@ ls -d python/programs/*/_fixtures | wc -l
 **没找到负控制记录的门**（设计规定与执行记录都没有）：`inline_core --check`、`build_programs --check`、`registry_check`、`version_meta_check`、`program_count_check`、
 `module_label_check`、`outbound_ref_check`、`script_literal_check`、`control_byte_check`、`skeleton_sentinel_check`、`skeleton_leak_check`、
 `node_check`、`browser_branch_check`、`chapter_manifest_check`、`source_bmp_check`（第 0 期 R22 只记了测量：注释里放一个 emoji，17 字符对 18 码元）、
-`program_meta_check`、`judge_strictness_check`、`lex_never_throws_check`。第一个动它们的人顺手补一条，写进本表。
+`program_meta_check`（清理波只做过 `alsoEntries` 重复了 `entry` 那一条）、`lex_never_throws_check`。第一个动它们的人顺手补一条，写进本表。
 
 **只在严格模式下有牙的**：`program_run_check` 与 `algorithm_property_check` 对 scipy-stack 层与 pygame 层——不设 `PYTHON_GATES_REQUIRE_SCIPY=1` 时
 缺库只是跳过、门照样绿。跳过分在两行里报：「程序真跑」行只数 scipy-stack 层，pygame 缺库只出现在「性质比对」行尾（`python-content-wave`「验收命令」）。
@@ -326,27 +336,24 @@ ls -d python/programs/*/_fixtures | wc -l
 
 **方向已定、存量未改**
 
-- **讲解与提示指向「页面上看不到的输出」**：第 1 期列的 27 处（25 个程序）加第 2 期 1 处，一直没改。「页面显示 `run.expect`」这条路已被用户否决，
-  所以存量只剩逐条改写一条路（要给涉及的页升版）。
+- **讲解与提示指向「页面上看不到的输出」**：第 1 期 27 处、第 2 期 1 处，清理波已逐条改写（另扫出同类 14 处一并改）。
 - **`boards`**：新规则已定（§2 第 9 条）；全库按新规则的审计已由 #203 做完（考纲对照文件随它进仓库），附录与 `chapter.json` 的防漂门由 #206（`boards_map_check`）加上。
 
 **门与判定器**
 
-- **判定器在行数不同时完全不比缩进**（`python/core/judge.js` 里 `na.rel.length === nr.rel.length` 那一处；按代码找，不写行号——行号会漂）。`compare('if a:\n    if b: c()\nd()', 'if a:\n    if b:\n        c()\n    d()')` 在 `e342ba2` 上实跑仍是 `equal`——`d()` 被移出了外层 `if`。
-  靠作者规矩挡着（多行空只挖同一层，或「复合语句头 + 一行体」）。第一次改 core 时先给 `judge_strictness_check` 加这条反例、看它红，再改判定器。
-- **一个程序只有一个 property 入口**：多函数的程序只验一个（第 1、2 期账本列了实例），其余靠 `run.expect`。
-- 建议的门，至 `e342ba2` 都还没做：fixture 必须被 git 跟踪；tag 规范化（存量两组分裂）；`isdigit` → `int()` 扫描；「照抄空」扫描（第 2 期账本 §三.4 列了 5 处存量，之后的账本没再跟踪；抽查 `infix-to-rpn`、`sentinel-running-total` 两处在 `e342ba2` 仍在）。
-- 门在被测抛错 / 超时时印「参照返回：None」——那是占位，参照没被调用（`python-drill-tool` 已写怎么读它）。
+- **判定器在行数不同时不比缩进**——清理波已修（engine `py-1.3.2`：行数不同时比块结构，判 `block`；`python.md` §8.2）。`judge_strictness_check` 加了反例，改判定器之前它是红的。
+- **一个程序只有一个 property 入口**——清理波起可用 `check.alsoEntries`（refs 键 `'<id>::<函数名>'`），ch08 四个程序已补；其余多函数程序（第 1、2 期账本列了实例）仍只验一个、其余靠 `run.expect`。
+- 建议的门，清理波已做：`fixture_tracked_check`、`tag_normalize_check`、`isdigit_check`、`copied_blank_check`、`boards_groups_check`。上线时带存量豁免表（`library.py` 的 `*_STOCK`），集成内容分支后删表。
+- 门在被测抛错 / 超时时印「参照：未计算」（清理波起；此前印「参照返回：None」，是占位）。
 
 **内容存量**（改就要给页升版，下一个动这些页的内容 PR 顺手做）
 
-- 5 个程序打印内置 / 操作系统的异常消息（ch02 三个、ch05 两个）——`e342ba2` 时在 3.9.6 与 3.12.x 上逐字相同，CI Python 升版时要复查。
-- 英文讲解里用「」括页名的存量（ch20、ch23、ch26、ch27），与 ch02 三处 `the Files and Errors page`（注册表页名是 Files & Exceptions）。
-- 讲解用程序 id 指代兄弟程序（ch01–ch07）；`library-loans` 86 行被「不超过 80 行」筛掉；各期记下的钉法缺口。
+- 清理波已改：5 个程序打印内置 / 操作系统的异常消息（改打印类名或自己的话）；英文讲解用「」括页名 36 段与 ch02 三处页名；讲解用程序 id 指兄弟程序（ch01–ch07）；各期记下的钉法缺口（第 1 期 §四、第 3 期 §二.3、第 4 期 §三.3）；`isdigit` 存量；照抄空 5 处；tag 分裂。
+- 仍开：`library-loans` 86 行被「不超过 80 行」筛掉（不修）。
 
 **流程与配置**
 
-- **`core.hooksPath` 改相对路径：待用户决定**（§6 第 15 条）。
+- **`core.hooksPath`**：2026-10-01 用户设成相对路径 `.githooks`；2026-11-06 清理波实测共享配置里又是指向主工作区 `.githooks` 的绝对路径（原因不明，未改动用户配置）。
 - 全库「只由 `run.expect` 守」的部分、各期的等价变异清单：见各期账本，做负控制前先查。
 
 ---
