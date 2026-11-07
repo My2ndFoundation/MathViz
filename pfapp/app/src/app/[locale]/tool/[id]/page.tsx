@@ -32,6 +32,11 @@ export default async function ToolPage(props: PageProps<"/[locale]/tool/[id]">) 
   if (app.target.id === "python" && typeof prog === "string" && prog) q.set("prog", prog);
   const src = `/c/${encodeURIComponent(content.version)}/tools/${encodeURIComponent(name)}?${q}`;
   return (
-    <ToolFrame toolId={id} src={src} title={locale === "zh" ? item.title_zh : item.title_en} />
+    <ToolFrame
+      key={src}
+      toolId={id}
+      src={src}
+      title={locale === "zh" ? item.title_zh : item.title_en}
+    />
   );
 }

@@ -63,6 +63,13 @@ const toolFrame = async (page: Page): Promise<Frame> => {
 
 test.describe.configure({ mode: "serial" });
 
+/** The iframe's src. The shell gives it only after hydration (tool-frame.tsx), so wait for it. */
+async function frameSrc(page: Page): Promise<string> {
+  const frame = page.getByTestId("tool-frame");
+  await expect(frame).toHaveAttribute("src", /./);
+  return (await frame.getAttribute("src")) ?? "";
+}
+
 test("sidebar: every group and tool of the pack, the first highlighted and clickable; the iframe is /c/<ver>/tools/…?lang=en", async ({
   page,
 }) => {
@@ -103,7 +110,7 @@ test("sidebar: every group and tool of the pack, the first highlighted and click
   await expect(page).toHaveURL(`${base()}/en/tool/${first.id}`);
   await expect(firstLink).toHaveAttribute("aria-current", "page");
 
-  const src = (await page.getByTestId("tool-frame").getAttribute("src")) ?? "";
+  const src = await frameSrc(page);
   expect(src.startsWith(`/c/${contentVersion()}/tools/`)).toBe(true);
   expect(src).toBe(`/c/${contentVersion()}/${first.file}?lang=en`);
   expect(new URL(src, base()).searchParams.get("lang")).toBe("en");
@@ -160,7 +167,7 @@ test("python ?prog= is passed on to the iframe", async ({ page }) => {
   const first = ordered()[0];
   if (!first) throw new Error("empty pack");
   await page.goto(`${base()}/en/tool/${first.id}?prog=some-program`);
-  const src = (await page.getByTestId("tool-frame").getAttribute("src")) ?? "";
+  const src = await frameSrc(page);
   const q = new URL(src, base()).searchParams;
   expect(q.get("lang")).toBe("en");
   expect(q.get("prog")).toBe("some-program");

@@ -4,7 +4,8 @@ import { usePyState } from "./use-py-state";
 
 /**
  * The tool view (design §7.3): the web version's page, as it is, in a same-origin iframe of
- * /c/<content version>/tools/<file>. Keyed by src, so a new language or program is a fresh load.
+ * /c/<content version>/tools/<file>. The page renders it with key={src}, so a new language or program
+ * is a fresh component: a fresh load, and the previous frame's python state is dropped with it.
  * The python page's state (usePyState) is mirrored to data-py-* attributes, which is also how the
  * e2e suite observes the bridge.
  *
@@ -21,7 +22,6 @@ export function ToolFrame({ src, title, toolId }: { src: string; title: string; 
   useEffect(() => setMounted(true), []);
   return (
     <iframe
-      key={src}
       ref={ref}
       className="tool-frame"
       data-testid="tool-frame"
