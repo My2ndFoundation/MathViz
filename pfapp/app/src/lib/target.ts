@@ -8,7 +8,10 @@ export type TargetId = "math" | "chess" | "crypto" | "python";
 export interface Target {
   id: TargetId;
   appId: string;
+  /** The full app name: "Viz Learn Buddy for <subject>" (manifest, store, window title). */
   name: { en: string; zh: string };
+  /** The subject half of the name ("for Python"), shown under the "Viz Learn Buddy" eyebrow. */
+  subject: { en: string; zh: string };
   port: number;
   defaultLang: "en";
   groupField: "cat" | "phase" | "chapter" | "module";

@@ -35,7 +35,7 @@ export default async function LocaleLayout(props: LayoutProps<"/[locale]">) {
           <Shell
             groups={groups}
             locale={locale}
-            appName={{ eyebrow: "MathViz", name: app.target.name[locale] }}
+            appName={{ eyebrow: "Viz Learn Buddy", name: app.target.subject[locale] }}
             text={{
               search: t.nav.search,
               searchPlaceholder: t.nav.searchPlaceholder,

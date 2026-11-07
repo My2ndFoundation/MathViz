@@ -98,14 +98,16 @@ MV/pfapp/
 
 为什么不是 4 个 Next 应用 + 共享包：4 份几乎一样的路由、布局与配置要维护四遍；内容已经搬进内容包，应用之间真正不同的部分小到可以用配置表达。为什么不是 4 个仓库：与「在当前项目下新建子目录」的要求不符。
 
-### 5.2 标识、端口与默认语言（端口与默认语言**用户定**；id 与名称控制方定）
+### 5.2 标识、端口与默认语言（端口、默认语言与名称**用户定**；id 控制方定）
 
-| 目标 | app id | 名称（中 / 英） | 端口 | 默认语言 |
+| 目标 | app id | 名称 | 端口 | 默认语言 |
 |---|---|---|---|---|
-| math | `app.primeforge.mathviz.math` | 数学可视化 / MathViz Maths | 26454 | 英文 |
-| chess | `app.primeforge.mathviz.chess` | 国际象棋算法 / MathViz Chess | 26455 | 英文 |
-| crypto | `app.primeforge.mathviz.crypto` | 密码学可视化 / MathViz Cryptography | 26456 | 英文 |
-| python | `app.primeforge.mathviz.python` | Python 练习 / MathViz Python | 26457 | 英文 |
+| math | `app.primeforge.mathviz.math` | Viz Learn Buddy for Math | 26454 | 英文 |
+| chess | `app.primeforge.mathviz.chess` | Viz Learn Buddy for Chess | 26455 | 英文 |
+| crypto | `app.primeforge.mathviz.crypto` | Viz Learn Buddy for Cryptography | 26456 | 英文 |
+| python | `app.primeforge.mathviz.python` | Viz Learn Buddy for Python | 26457 | 英文 |
+
+名称（用户 2026-11-07 定）：四个都以 **Viz Learn Buddy** 开头，后接「for <科目>」；中文界面写作「Viz Learn Buddy · <中文科目名>」，侧栏上方小字 Viz Learn Buddy、下面科目。app id 保持 `app.primeforge.mathviz.*` 不变（id 是协议标识，不是显示名）。
 
 端口 26454–26457 由用户指定；已知已占用的是 7616、7617、7620、7630、26421、26452、26903、26905，实现者在本机 Desktop 数据目录里再核一遍。**四个应用默认语言都是英文**（与网页版数学默认中文不同，这是用户的决定）；用户在应用里切换后记住选择（存 SQLite），切换时用新的 `?lang=` 重载工具页。
 

@@ -156,7 +156,7 @@ export function instructionFor(job: Pick<AiJobRow, "workflow" | "ticket" | "inpu
         ? "mv_get_task, mv_read_item, mv_submit_answer"
         : "mv_get_task, mv_submit_answer";
   return [
-    "You are the tutor inside MathViz, a practice app for an A-level Computer Science student.",
+    "You are the tutor inside Viz Learn Buddy, a practice app for an A-level Computer Science student.",
     WORKFLOW_BRIEF[workflow],
     `Ticket: ${job.ticket}`,
     `Use only these MCP tools: ${tools}.`,
