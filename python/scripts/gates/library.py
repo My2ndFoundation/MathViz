@@ -2304,10 +2304,19 @@ _PY_TOKEN_RE = re.compile(
     r'|\S')
 
 
+def _strip_comment(line: str) -> str:
+    """去掉行尾注释、再去首尾空白（终审 M7）。注释从第一个**独立成记号**的 `#` 起——字符串记号整体先被
+    `_PY_TOKEN_RE` 吃掉，所以 `"#"`、`f"{n:#x}"` 里的 `#` 不算。近似：一行若是跨行字符串的半截
+    （引号不配对），那里的 `#` 会被当成注释。"""
+    for m in _PY_TOKEN_RE.finditer(line):
+        if m.group() == '#':
+            return line[:m.start()].strip()
+    return line.strip()
+
+
 def _py_tokens(line: str) -> list:
-    """一行去缩进的代码 → 记号列表（门自己的轻量切分；行可以是一条语句的半截）。"""
-    code = line.split('#', 1)[0] if '#' in line and not re.search(r'''['"]''', line) else line
-    return _PY_TOKEN_RE.findall(code.strip())
+    """一行去缩进的代码 → 记号列表（门自己的轻量切分；行可以是一条语句的半截；行尾注释不算）。"""
+    return _PY_TOKEN_RE.findall(_strip_comment(line))
 
 
 def _keyword_only(tokens: list) -> bool:
@@ -2388,16 +2397,17 @@ def _copied_blanks(src: str) -> list:
     inside = set()
     for a, b in spans:
         inside.update(range(a, b + 1))
-    open_rows = [(i, lines[i].strip()) for i in range(len(lines))
-                 if i not in inside and lines[i].strip() and not lines[i].strip().startswith('#')]
+    # 两边都先剥行尾注释再比（终审 M7：`x = 1  # seed` 与 `x = 1` 是同一行代码）
+    open_rows = [(i, _strip_comment(lines[i])) for i in range(len(lines))
+                 if i not in inside and _strip_comment(lines[i])]
     by_text: dict = {}
     for i, s in open_rows:
         by_text.setdefault(s, i)
     hits = []
     for a, b in spans:
         for i in range(a + 1, b):
-            ans = lines[i].strip()
-            if not ans or ans.startswith('#'):
+            ans = _strip_comment(lines[i])
+            if not ans:
                 continue
             toks = _py_tokens(ans)
             if _keyword_only(toks):
@@ -2481,7 +2491,9 @@ def _isdigit_findings(src: str) -> list:
       · 接收者是 for / 推导式的循环变量：只拿结果分类、计数（`elif ch.isdigit(): has_digit = True`、
         `sum(1 for c in s if c.isdigit())`）→ 放行；被守着的那一段**用到了这个字符**（`number += ch`、
         `[c for c in s if c.isdigit()]`——把「数字字符」收集起来，之后要当数用）→ 红
-        （第 3 期 m5a 的 `tokenise-loop` 就是这一种）。
+        （第 3 期 m5a 的 `tokenise-loop` 就是这一种）；逐字符**判整串**——`all(c.isdigit() for c in s)`、
+        `not any(not c.isdigit() …)`、循环里 `if not ch.isdigit(): return False / break / ok = False`
+        → 红（清理波终审 I1；`any(c.isdigit() …)` 放行）。仍看不见的形状见 `whole_by_chars`。
       · 接收者是**单字符**字面量或 `chr(<字面量>)`（演示 `chr(178).isdigit()` 与 isdecimal 之别）→ 放行：
         结果编译期就定死，判的不是任何数据。多字符字面量（`"2026".isdigit()`）不放行——
         它演示的正是「用 isdigit 判一串是不是数字」。
@@ -2557,6 +2569,53 @@ def _isdigit_findings(src: str) -> list:
         return any(isinstance(n, ast.Name) and n.id == var
                    for part in guarded_part(node) for n in ast.walk(part))
 
+    def _is_call_to(node, name: str) -> bool:
+        return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == name
+                and len(node.args) == 1 and not node.keywords)
+
+    def whole_by_chars(node) -> bool:
+        """逐字符判整串的两种形状（终审 I1）——接收者是循环变量、却在判「整串全是数字」：
+          ① `all(c.isdigit() for c in s)`（列表 / 集合推导式、`c.isdigit() and …` 同样）；
+             以及它的德摩根写法 `not any(not c.isdigit() for c in s)`。
+             `any(c.isdigit() …)` 放行——那是「有没有数字字符」，不是判整串。
+          ② 逐字符循环里 `if not ch.isdigit():` 的体直接含 `return False`、`break` 或 `名字 = False`
+             （`not` 可以夹在 `or` 里：`if not ch.isdigit() or …:`）。
+        仍看不见的（靠人）：`if ch.isdigit(): continue` + `else: return False`、把结果累乘 / 计数后与
+        `len(s)` 比（`count == len(s)`）、`all(map(str.isdigit, s))`（那里根本没有 `.isdigit()` 调用）、
+        `ok = ok and ch.isdigit()` 一类累积写法。"""
+        cur = node
+        par = parent.get(cur)
+        while isinstance(par, ast.BoolOp) and isinstance(par.op, ast.And):
+            cur, par = par, parent.get(par)
+        negated = isinstance(par, ast.UnaryOp) and isinstance(par.op, ast.Not)
+        # ①
+        comp_cur, comp = (par, parent.get(par)) if negated else (cur, par)
+        if isinstance(comp, (ast.GeneratorExp, ast.ListComp, ast.SetComp)) and comp_cur is comp.elt:
+            call = parent.get(comp)
+            if not negated and _is_call_to(call, 'all') and call.args[0] is comp:
+                return True
+            if (negated and _is_call_to(call, 'any') and call.args[0] is comp
+                    and isinstance(parent.get(call), ast.UnaryOp) and isinstance(parent[call].op, ast.Not)):
+                return True
+        # ②
+        if not negated:
+            return False
+        cur, par = par, parent.get(par)
+        while isinstance(par, ast.BoolOp) and isinstance(par.op, ast.Or):
+            cur, par = par, parent.get(par)
+        if not (isinstance(par, ast.If) and cur is par.test):
+            return False
+        for s in par.body:
+            if isinstance(s, ast.Break):
+                return True
+            if (isinstance(s, ast.Return) and isinstance(s.value, ast.Constant)
+                    and s.value.value is False):
+                return True
+            if (isinstance(s, ast.Assign) and isinstance(s.value, ast.Constant) and s.value.value is False
+                    and all(isinstance(t, ast.Name) for t in s.targets)):
+                return True
+        return False
+
     out = []
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
@@ -2568,7 +2627,9 @@ def _isdigit_findings(src: str) -> list:
         elif _is_constant_receiver(recv):
             continue
         elif loop_var(recv):
-            if collects(node, recv.id):
+            if whole_by_chars(node):
+                out.append((node.lineno, 'whole'))
+            elif collects(node, recv.id):
                 out.append((node.lineno, 'collect'))
         else:
             out.append((node.lineno, 'whole'))
