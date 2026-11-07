@@ -155,9 +155,10 @@ export const notes = sqliteTable(
 );
 
 /**
- * Agent jobs on the PrimeForge platform. `status` follows MathTestBuddy's jobs.ts state machine:
- * queued → running → completed | failed | timed_out | cancelled (and submit_failed); no CHECK, so
- * Task 10's port can add states without a table rebuild. `ticket` is single-use and unique.
+ * Agent jobs on the PrimeForge platform (lib/ai/jobs.ts). `status` follows MathTestBuddy's jobs.ts
+ * state machine: queued → running → completed (the answer is in `messages`) | failed | timed_out |
+ * cancelled | lost; no CHECK, so states can be added without a table rebuild. `ticket` is
+ * single-use and unique; `mcp_segment` is the job's one-time MCP path (/api/mcp/t/<segment>).
  */
 export const ai_jobs = sqliteTable(
   "ai_jobs",
@@ -170,11 +171,31 @@ export const ai_jobs = sqliteTable(
     status: text().notNull(),
     ticket: text().notNull().unique(),
     platform_job_id: text(),
+    /** 'needs-blank-done' after the second leaked answer; else a platform code or reason. */
     error: text(),
     created_at: text().notNull(),
     updated_at: text().notNull(),
+    mcp_segment: text(),
+    /** JSON {subjects: {type, id}[], pyState: PyState | null}. */
+    input: text().notNull().default("{}"),
+    /** How many submit_answer calls leakCheck refused (the second one fails the job). */
+    leak_rejections: integer().notNull().default(0),
+    /** JSON string[]: python programs the agent read with mv_read_item (their blanks are guarded too). */
+    read_programs: text().notNull().default("[]"),
+    /** The platform's own status, as last polled. */
+    platform_status: text(),
+    engine: text(),
+    model: text(),
+    /** App-side time limit: past it, poll cancels the platform job and times ours out. */
+    deadline_at: text(),
+    /** When the platform job was seen ended; a settled job is not polled again. */
+    settled_at: text(),
   },
-  (t) => [index("ai_jobs_open").on(t.status), index("ai_jobs_thread").on(t.thread_id)],
+  (t) => [
+    index("ai_jobs_open").on(t.status),
+    index("ai_jobs_thread").on(t.thread_id),
+    uniqueIndex("ai_jobs_mcp_segment").on(t.mcp_segment),
+  ],
 );
 
 export type SettingRow = typeof settings.$inferSelect;

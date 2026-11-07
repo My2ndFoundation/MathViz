@@ -367,7 +367,11 @@ describe("openDb", () => {
         now: () => new Date(Date.UTC(2026, 10, 7, 9, 0, n, t++)).toISOString(),
       }).close();
     }
-    const backups = readdirSync(path.join(dir, "backups")).sort();
+    // oldest first by the timestamp in the name (a plain sort puts mathviz-10-… before mathviz-9-…)
+    const stampOf = (f: string) => f.replace(/^mathviz-\d+-/, "");
+    const backups = readdirSync(path.join(dir, "backups")).sort((a, b) =>
+      stampOf(a) < stampOf(b) ? -1 : stampOf(a) > stampOf(b) ? 1 : 0,
+    );
     expect(backups.length).toBe(KEEP_BACKUPS);
     for (const f of backups) expect(f).toMatch(/^mathviz-\d+-\d{8}T\d{9}Z(?:-\d+)?\.sqlite$/);
     // The oldest two were rotated out; the newest names the schema it was taken at.

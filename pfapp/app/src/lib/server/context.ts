@@ -1,11 +1,14 @@
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { type AddonsClient, createAddonsClient } from "../addons/client";
+import { createPlatformClient, type PlatformClient } from "../agent/platform/client";
 import { ensureIndexed } from "../content/index-builder";
 import { type FoundContent, findContent } from "../content/installed";
 import type { Db } from "../db/handle";
 import { openDb } from "../db/open";
 import { effectivePort, newCsrfToken, processCsrfToken } from "../http/guard";
 import { loadTarget, type Target } from "../target";
+import { startAi } from "./ai";
 
 /**
  * The server's process-wide state: the target, the open database, the content pack it runs on,
@@ -33,6 +36,15 @@ export interface AppEnv {
 
 export type Log = (event: string, fields?: Record<string, unknown>) => void;
 
+/** The AI side: the platform client (null outside PrimeForge) and the MCP secret it was given. */
+export interface AiState {
+  readonly platform: PlatformClient | null;
+  /** The bearer the platform must present on /api/mcp/** (registered with POST /ai/mcp). */
+  readonly mcpToken: string;
+  /** Whether the platform accepted mcpToken (lib/server/ai startAi). */
+  registered: boolean;
+}
+
 export interface AppContext {
   readonly target: Target;
   readonly db: Db;
@@ -44,6 +56,7 @@ export interface AppContext {
   readonly port: number;
   readonly csrfToken: string;
   readonly log: Log;
+  readonly ai: AiState;
   /** Find the content pack again (after an import, a store install) and re-index if it changed. */
   refreshContent(): Promise<FoundContent | null>;
   close(): void;
@@ -57,6 +70,10 @@ export interface CreateOptions {
   /** Overrides the client built from PRIMEFORGE_API_URL / _SECRET (tests). */
   addons?: Pick<AddonsClient, "installed"> | null;
   log?: Log;
+  /** Overrides the client built from PRIMEFORGE_API_URL / _SECRET (tests); null = no AI. */
+  platform?: PlatformClient | null;
+  /** Defaults to a fresh 64-hex secret (the platform requires at least 64 characters). */
+  mcpToken?: string;
 }
 
 const defaultLog: Log = (event, fields = {}) => {
@@ -80,6 +97,20 @@ export async function createAppContext(
             appId: target.appId,
           })
         : null;
+  const platform =
+    options.platform !== undefined
+      ? options.platform
+      : env.PRIMEFORGE_API_URL && env.PRIMEFORGE_API_SECRET
+        ? createPlatformClient({
+            apiUrl: env.PRIMEFORGE_API_URL,
+            secret: env.PRIMEFORGE_API_SECRET,
+          })
+        : null;
+  const ai: AiState = {
+    platform,
+    mcpToken: options.mcpToken ?? randomBytes(32).toString("hex"),
+    registered: false,
+  };
   const db = openDb(dataDir, { migrationsDir: options.migrationsDir });
 
   async function locate(): Promise<FoundContent | null> {
@@ -122,6 +153,7 @@ export async function createAppContext(
     port: effectivePort(env, target.port),
     csrfToken: options.csrfToken ?? newCsrfToken(),
     log,
+    ai,
     async refreshContent() {
       content = await locate();
       return content;
@@ -144,6 +176,8 @@ export function getAppContext(): Promise<AppContext> {
   if (!g[SLOT]) {
     const p = createAppContext(process.env as AppEnv, { csrfToken: processCsrfToken() });
     g[SLOT] = p;
+    // register the MCP secret, then reconcile unfinished jobs — in the background, once per process
+    p.then((ctx) => startAi(ctx)).catch(() => {});
     p.catch(() => {
       if (g[SLOT] === p) delete g[SLOT];
     });

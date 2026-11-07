@@ -1,13 +1,13 @@
 // Ported from MathTestBuddy trainer/src/proxy.ts (commit c7df343). Kept: the order — browser
-// guards → pages answer GET and HEAD only → a declared body over the limit is refused (413) →
-// pages get their CSP; never sets Access-Control-Allow-Origin. Dropped: the startup-failure page,
-// the MCP surface, the locale rewrite (the language is a setting, not a URL segment). Added: /c/…
-// is left to its route, which sets the tool pages' own CSP.
+// guards (the MCP surface only Host and Origin) → pages answer GET and HEAD only → a declared body
+// over the limit is refused (413) → pages get their CSP; never sets Access-Control-Allow-Origin.
+// Dropped: the startup-failure page, the locale rewrite (the language is a setting, not a URL
+// segment). Added: /c/… is left to its route, which sets the tool pages' own CSP.
 import { type NextRequest, NextResponse } from "next/server";
 import { bodyLimitFor } from "@/lib/http/body";
 import { shellCsp } from "@/lib/http/csp";
 import { errorResponse } from "@/lib/http/errors";
-import { check, effectivePort, processCsrfToken } from "@/lib/http/guard";
+import { check, effectivePort, isMcpPath, processCsrfToken } from "@/lib/http/guard";
 import { loadTarget } from "@/lib/target";
 
 /**
@@ -21,6 +21,7 @@ export function proxy(request: NextRequest): Response | undefined {
     {
       port: effectivePort(process.env, loadTarget().port),
       csrfToken: processCsrfToken(),
+      mcp: isMcpPath(pathname),
     },
   );
   if (refusal) return errorResponse(refusal.status, refusal.code);
