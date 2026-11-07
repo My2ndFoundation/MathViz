@@ -208,12 +208,9 @@ function verifyPayload(t: Target, mv: string, payload: string): string[] {
 function verifyLabels(t: Target, mv: string, payload: string): string[] {
   const bad: string[] = [];
   const labels = readGroupLabels(t, mv);
-  const page = readFileSync(join(mv, NAV_PAGE[t.id]), "utf8");
-  // Independent of the slicer: both strings must literally occur on the page.
-  for (const [g, l] of Object.entries(labels)) {
-    if (!page.includes(l.en) || !page.includes(l.zh))
-      bad.push(`组 ${g} 的标签不在 ${NAV_PAGE[t.id]} 原文里`);
-  }
+  // No "label text occurs verbatim on the page" check: a label written with an escape in source
+  // ('\u00b7', 'Bob\'s') evaluates to a string the raw page does not contain, so that check would
+  // turn a correct web PR red. A relabel is caught below, catalog vs. the page's evaluated labels.
   const p = join(payload, "catalog.json");
   if (!existsSync(p)) return [...bad, "没有 catalog.json"];
   const cat = JSON.parse(readFileSync(p, "utf8")) as Cat;

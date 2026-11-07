@@ -118,9 +118,10 @@ describe("catalog", () => {
 });
 
 describe("group labels", () => {
-  // No label text is restated here (a relabel on the web must not break pfapp). Instead: every
-  // group value in the registry has a label, and both strings occur verbatim in the page the
-  // label was read from — so they came from the page, not from the extractor.
+  // No label text is restated here (a relabel on the web must not break pfapp). Every group value
+  // in the registry has a label; that the labels come from the page (not the extractor) is shown
+  // below by relabelling a copy of the page. No "occurs verbatim on the page" check: a label
+  // written with an escape in source evaluates to a string the raw page does not contain.
   const PAGE: Record<TargetId, string> = {
     math: "index.html",
     chess: "chess/app.html",
@@ -130,14 +131,26 @@ describe("group labels", () => {
   for (const id of IDS) {
     test(`${id}: every registry group has a label taken from ${PAGE[id]}`, () => {
       const labels = readGroupLabels(loadTarget(id), MV);
-      const page = readFileSync(join(MV, PAGE[id]), "utf8");
       for (const g of new Set(registryOf(id).map((e) => String(e[REG_FIELD[id]])))) {
         const l = labels[g];
         expect(l).toBeDefined();
-        expect(page.includes(l?.en as string) && page.includes(l?.zh as string)).toBe(true);
+        expect((l?.en.length ?? 0) > 0 && (l?.zh.length ?? 0) > 0).toBe(true);
       }
     });
   }
+
+  test("a relabel on the page, escapes included, reaches the labels", () => {
+    const mv = tmp("relabel");
+    mkdirSync(join(mv, "chess"), { recursive: true });
+    const page = readFileSync(join(MV, "chess/app.html"), "utf8");
+    const g = String(registryOf("chess")[0]?.[REG_FIELD.chess]);
+    const before = readGroupLabels(loadTarget("chess"), MV)[g]?.en as string;
+    const quoted = `en: '${before.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+    expect(page.includes(quoted)).toBe(true);
+    // Source text with a \u escape and an escaped quote; the evaluated label has neither.
+    writeFileSync(join(mv, "chess/app.html"), page.replace(quoted, "en: 'Bob\\'s \\u00b7 X'"));
+    expect(readGroupLabels(loadTarget("chess"), mv)[g]?.en).toBe("Bob's \u00b7 X");
+  });
 });
 
 describe("python source", () => {
