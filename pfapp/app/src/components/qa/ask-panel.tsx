@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { Locale } from "@/lib/i18n/locale";
 import { MESSAGES } from "@/lib/i18n/locale";
 import type { PyState } from "@/lib/py-state";
@@ -11,7 +11,8 @@ import { useThread } from "./use-thread";
  * reports — the program, and in fill-in mode the focused blank — with "ask about this program"
  * and "get a hint" (`hint`; only in fill-in mode with a blank focused, the server refuses it
  * otherwise). Before the bridge has spoken, and on every other target: "ask about this tool".
- * A new program starts a new conversation (the old one was about another program).
+ * The panel opens on the newest conversation about its subject — the program (python, once the
+ * bridge has named one) or else the tool — and a new program switches to that program's.
  */
 export function AskPanel({
   toolId,
@@ -29,14 +30,17 @@ export function AskPanel({
   const t = MESSAGES[locale].qa;
   const inputId = useId();
   const [text, setText] = useState("");
-  const { thread, thinking, sending, failure, send, cancel, saveNote, reset } = useThread(locale);
+  const { thread, thinking, sending, failure, send, cancel, saveNote, reset, restore } =
+    useThread(locale);
   const prog = python ? (pyState?.progId ?? null) : null;
 
-  // a conversation is about the program it started on
-  const startedOn = useRef<string | null>(null);
+  // a conversation is about its subject: a new subject drops the old one and reopens its own
+  const subjectType = prog !== null ? "program" : "tool";
+  const subjectId = prog ?? toolId;
   useEffect(() => {
-    if (thread && startedOn.current !== prog) reset();
-  }, [prog, thread, reset]);
+    reset();
+    void restore({ type: subjectType, id: subjectId });
+  }, [subjectType, subjectId, reset, restore]);
 
   const canHint = !!pyState && pyState.mode === "blank" && !!pyState.blankId;
   const busy = thinking || sending;
@@ -48,7 +52,6 @@ export function AskPanel({
     if (!message) return;
     const subjects =
       prog !== null ? [{ type: "program", id: prog }] : [{ type: "tool", id: toolId }];
-    if (!thread) startedOn.current = prog;
     if (await send({ workflow, message, subjects, pyState: python ? pyState : null })) setText("");
   };
 

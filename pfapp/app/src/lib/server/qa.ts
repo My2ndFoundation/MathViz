@@ -30,12 +30,13 @@ import type { Handler } from "../http/route";
 import { LOCALES, type Locale } from "../i18n/locale";
 import { type PyState, toPyState } from "../py-state";
 import type { AppContext } from "./context";
-import { getLang } from "./settings";
+import { getAiLang, getLang } from "./settings";
 
 /**
  * The Q&A and notes API (design §7.4, §7.5; plan Task 11):
  *
  *   POST   /api/threads       {subjects, message, workflow, pyState?, locale?} → 202 {threadId, jobId}
+ *   GET    /api/threads?subject=<tool|program>:<id>   {thread: <as GET /api/threads/:id> | null}
  *   GET    /api/threads/:id   {id, title, subjects, messages, job}
  *   POST   /api/threads/:id   {message, workflow, pyState?, locale?}   a follow-up → 202 {threadId, jobId}
  *   GET    /api/jobs/:id      {id, status, threadId, error} (one platform poll while it is open)
@@ -55,6 +56,8 @@ export const MAX_SUBJECTS = 8;
 const MAX_TITLE_CHARS = 80;
 const MAX_NOTES = 500;
 const MAX_QUERY_CHARS = 200;
+/** `program:` + an id of at most 200 characters (subjectSchema's cap). */
+const MAX_LOOKUP_CHARS = 208;
 const LIBRARY: Subject = { type: "library", id: "all" };
 
 const SUBJECT_TYPES = ["tool", "program", "blank", "library"] as const satisfies SubjectType[];
@@ -174,9 +177,12 @@ async function ask(
     for (const s of subjects) sub.run(threadId, s.type, s.id);
     db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(at, threadId);
   });
+  // the reply language: the asking page's (else the shell's), unless the aiLang setting names one
+  const aiLang = getAiLang(db);
+  const replyIn = aiLang === "page" ? (locale ?? getLang(db, app.target)) : aiLang;
   const out = await submitJob(
     db,
-    { threadId, workflow, subjects, pyState, locale: locale ?? getLang(db, app.target) },
+    { threadId, workflow, subjects, pyState, locale: replyIn },
     { platform: app.ai.platform },
   );
   app.log("qa.asked", { workflow, submitted: out.submitted, error: out.error });
@@ -317,12 +323,13 @@ const jobView = (
   error: j.error ?? null,
 });
 
-export const getThread: Handler = (app, { params }) => {
+/** A thread as GET /api/threads/:id answers it; null when there is no such thread. */
+function threadView(app: AppContext, id: string) {
   const { db } = app;
   const t = db
     .prepare("SELECT id, title FROM threads WHERE id = ?")
-    .get<{ id: string; title: string }>(params.id ?? "");
-  if (!t) throw new HttpError(404, "not_found");
+    .get<{ id: string; title: string }>(id);
+  if (!t) return null;
   const rows = db
     .prepare(
       `SELECT m.id, m.role, m.text, m.citations, m.created_at, n.id AS note_id
@@ -349,15 +356,50 @@ export const getThread: Handler = (app, { params }) => {
     createdAt: m.created_at,
   }));
   return {
-    body: {
-      id: t.id,
-      title: t.title,
-      workflow: job?.workflow ?? null,
-      subjects: threadSubjects(db, t.id),
-      messages,
-      job: job ? jobView(job) : null,
-    },
+    id: t.id,
+    title: t.title,
+    workflow: job?.workflow ?? null,
+    subjects: threadSubjects(db, t.id),
+    messages,
+    job: job ? jobView(job) : null,
   };
+}
+
+export const getThread: Handler = (app, { params }) => {
+  const view = threadView(app, params.id ?? "");
+  if (!view) throw new HttpError(404, "not_found");
+  return { body: view };
+};
+
+const lookupSchema = z
+  .string()
+  .regex(/^(tool|program):.+$/)
+  .max(MAX_LOOKUP_CHARS)
+  .transform((v) => {
+    const i = v.indexOf(":");
+    return { type: v.slice(0, i) as "tool" | "program", id: v.slice(i + 1) };
+  });
+
+/**
+ * The conversation a tool page reopens with: the newest (updated_at, then id) non-archived thread
+ * about that tool or program, never a library thread. A program thread that has had a hint also
+ * has the blank as a subject, but it keeps the program (a hint is asked with the program subject,
+ * and plan() only adds to it), so it is still found here. An id with no thread is {thread: null}.
+ */
+export const findThread: Handler = (app, { query }) => {
+  const s = parse(lookupSchema, query.get("subject"));
+  const row = app.db
+    .prepare(
+      `SELECT t.id FROM threads t
+        WHERE t.archived = 0
+          AND EXISTS (SELECT 1 FROM thread_subjects s
+                       WHERE s.thread_id = t.id AND s.subject_type = ? AND s.subject_id = ?)
+          AND NOT EXISTS (SELECT 1 FROM thread_subjects s
+                           WHERE s.thread_id = t.id AND s.subject_type = 'library')
+        ORDER BY t.updated_at DESC, t.id DESC LIMIT 1`,
+    )
+    .get<{ id: string }>(s.type, s.id);
+  return { body: { thread: row ? threadView(app, row.id) : null } };
 };
 
 const jobRow = (db: Db, id: string) =>
