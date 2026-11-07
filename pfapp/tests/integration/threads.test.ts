@@ -12,6 +12,8 @@ import { DELETE as deleteJob, GET as getJob } from "../../app/src/app/api/jobs/[
 import { DELETE, GET, POST } from "../../app/src/app/api/mcp/[[...path]]/route";
 import { DELETE as deleteNote } from "../../app/src/app/api/notes/[id]/route";
 import { GET as listNotes, POST as postNote } from "../../app/src/app/api/notes/route";
+import { DELETE as deleteThreadNotes } from "../../app/src/app/api/notes/threads/[id]/route";
+import { GET as listNoteThreads } from "../../app/src/app/api/notes/threads/route";
 import { GET as getThread, POST as postFollowUp } from "../../app/src/app/api/threads/[id]/route";
 import { GET as findThread, POST as postThread } from "../../app/src/app/api/threads/route";
 import { failureText } from "../../app/src/components/qa/thread-view";
@@ -807,5 +809,224 @@ describe("the reply language (settings.aiLang)", () => {
     expect(up.status).toBe(202);
     await f.idle();
     expect(inputOf(jobRow(up.body.jobId)).locale).toBe("zh");
+  });
+});
+
+describe("GET /api/notes/threads (the notes page: one row per conversation)", () => {
+  interface Seed {
+    subjects: [string, string][];
+    title?: string;
+    /** [role, text, saved?]; a saved message is an assistant answer with a note. */
+    msgs: [string, string, boolean?][];
+  }
+  let clock = Date.parse("2026-02-01T10:00:00.000Z");
+  const tick = () => {
+    clock += 1000;
+    return new Date(clock).toISOString();
+  };
+
+  /** A thread written straight into the database, its messages one second apart, its notes in order. */
+  function seed(c: AppContext, s: Seed): { id: string; messageIds: string[] } {
+    const at = tick();
+    const id = newId(at);
+    c.db
+      .prepare("INSERT INTO threads (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)")
+      .run(id, s.title ?? s.msgs[0]?.[1] ?? "", at, at);
+    for (const [type, sid] of s.subjects) {
+      c.db
+        .prepare(
+          "INSERT INTO thread_subjects (thread_id, subject_type, subject_id) VALUES (?, ?, ?)",
+        )
+        .run(id, type, sid);
+    }
+    const messageIds: string[] = [];
+    for (const [role, text, saved] of s.msgs) {
+      const mAt = tick();
+      const mid = newId(mAt);
+      messageIds.push(mid);
+      c.db
+        .prepare(
+          "INSERT INTO messages (id, thread_id, role, text, created_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(mid, id, role, text, mAt);
+      if (saved) {
+        const nAt = tick();
+        c.db
+          .prepare("INSERT INTO notes (id, message_id, created_at) VALUES (?, ?, ?)")
+          .run(newId(nAt), mid, nAt);
+      }
+    }
+    return { id, messageIds };
+  }
+
+  const list = (qs = "") =>
+    call(listNoteThreads(req("GET", `/api/notes/threads${qs ? `?${qs}` : ""}`)));
+
+  /** A tool in a catalog group other than the program's tool's (picked from the catalog, never by id). */
+  function otherGroupTool(c: AppContext): { tool: string; group: string; progGroup: string } {
+    const progGroup = (
+      c.db
+        .prepare("SELECT grp FROM catalog_items WHERE id = ?")
+        .get<{ grp: string }>(PROG_TOOL) as {
+        grp: string;
+      }
+    ).grp;
+    const other = c.db
+      .prepare("SELECT id, grp FROM catalog_items WHERE grp <> ? ORDER BY ord LIMIT 1")
+      .get<{ id: string; grp: string }>(progGroup);
+    if (!other) throw new Error("the pack has one catalog group: no second group to filter by");
+    return { tool: other.id, group: other.grp, progGroup };
+  }
+
+  test("two saved answers in one thread are one row, with its question, note count and follow-ups", async () => {
+    const { ctx: c } = await start({}, { platform: false });
+    const a = seed(c, {
+      subjects: [["program", PROG]],
+      msgs: [
+        ["user", "First question about loops"],
+        ["assistant", "An unsaved answer about pebbles"],
+        ["user", "Second question"],
+        ["assistant", "Saved answer one about rivers", true],
+        ["user", "Third question"],
+        ["assistant", "Saved answer two about mountains", true],
+        ["user", "Fourth question"],
+      ],
+    });
+    // a conversation with nothing saved is not listed
+    seed(c, {
+      subjects: [["program", PROG]],
+      msgs: [
+        ["user", "Q"],
+        ["assistant", "A"],
+      ],
+    });
+    const r = await list();
+    expect(r.status).toBe(200);
+    expect(r.body.threads.length).toBe(1);
+    const row = r.body.threads[0];
+    expect(row).toMatchObject({
+      id: a.id,
+      question: "First question about loops",
+      notes: 2,
+      followUps: 2,
+      kind: "program",
+      href: `/tool/${PROG_TOOL}?prog=${PROG}`,
+    });
+    expect(row.subject).toMatchObject({ type: "program", id: PROG, toolId: PROG_TOOL });
+    expect(row.group.id).toBe(otherGroupTool(c).progGroup);
+    // the newest saved answer's date
+    const newest = c.db
+      .prepare(
+        "SELECT max(n.created_at) AS at FROM notes n JOIN messages m ON m.id = n.message_id WHERE m.thread_id = ?",
+      )
+      .get<{ at: string }>(a.id);
+    expect(row.latestNoteAt).toBe(newest?.at);
+    // the old one-row-per-note list still has both notes
+    expect((await call(listNotes(req("GET", "/api/notes")))).body.notes.length).toBe(2);
+  });
+
+  test("search: the question, the title and saved answers match; an unsaved answer does not", async () => {
+    const { ctx: c } = await start({}, { platform: false });
+    const a = seed(c, {
+      subjects: [["program", PROG]],
+      title: "Title about kettles",
+      msgs: [
+        ["user", "Question about loops"],
+        ["assistant", "Unsaved words about pebbles"],
+        ["user", "Asked about lanterns"],
+        ["assistant", "Saved words about rivers", true],
+      ],
+    });
+    const ids = async (q: string) =>
+      (await list(new URLSearchParams({ q }).toString())).body.threads.map((t: Json) => t.id);
+    expect(await ids("loops")).toEqual([a.id]);
+    expect(await ids("kettles")).toEqual([a.id]);
+    expect(await ids("rivers")).toEqual([a.id]);
+    // the question the saved answer replied to, as GET /api/notes matched it
+    expect(await ids("lanterns")).toEqual([a.id]);
+    expect(await ids("pebbles")).toEqual([]);
+    expect(await ids("%")).toEqual([]);
+  });
+
+  test("group filter: a catalog group's threads, the library's, and counts for the chips", async () => {
+    const { ctx: c } = await start({}, { platform: false });
+    const { tool, group, progGroup } = otherGroupTool(c);
+    const a = seed(c, {
+      subjects: [["program", PROG]],
+      msgs: [
+        ["user", "About the program"],
+        ["assistant", "Saved", true],
+      ],
+    });
+    const b = seed(c, {
+      subjects: [["tool", tool]],
+      msgs: [
+        ["user", "About the other tool"],
+        ["assistant", "Saved", true],
+      ],
+    });
+    const l = seed(c, {
+      subjects: [["library", "all"]],
+      msgs: [
+        ["user", "About everything"],
+        ["assistant", "Saved", true],
+      ],
+    });
+    const all = await list();
+    // newest saved answer first
+    expect(all.body.threads.map((t: Json) => t.id)).toEqual([l.id, b.id, a.id]);
+    expect(all.body.groups).toEqual({ [progGroup]: 1, [group]: 1, library: 1 });
+    const lib = all.body.threads[0];
+    expect(lib).toMatchObject({ kind: "library", group: null, href: `/ask?thread=${l.id}` });
+    expect(all.body.threads[1]).toMatchObject({ kind: "tool", href: `/tool/${tool}` });
+    const ids = async (g: string) =>
+      (await list(`group=${encodeURIComponent(g)}`)).body.threads.map((t: Json) => t.id);
+    expect(await ids(progGroup)).toEqual([a.id]);
+    expect(await ids(group)).toEqual([b.id]);
+    expect(await ids("library")).toEqual([l.id]);
+    expect(await ids("no-such-group")).toEqual([]);
+    // the counts are over the search, before the group filter
+    const filtered = await list(`group=${encodeURIComponent(group)}`);
+    expect(filtered.body.groups).toEqual(all.body.groups);
+  });
+
+  test("DELETE /api/notes/threads/:id removes that thread's notes only; the conversation stays", async () => {
+    const { ctx: c } = await start({}, { platform: false });
+    const a = seed(c, {
+      subjects: [["program", PROG]],
+      msgs: [
+        ["user", "Q1"],
+        ["assistant", "A1", true],
+        ["user", "Q2"],
+        ["assistant", "A2", true],
+      ],
+    });
+    const b = seed(c, {
+      subjects: [["program", PROG]],
+      msgs: [
+        ["user", "Other"],
+        ["assistant", "Kept", true],
+      ],
+    });
+    const del = await call(
+      deleteThreadNotes(req("DELETE", `/api/notes/threads/${a.id}`), params({ id: a.id })),
+    );
+    expect(del.status).toBe(204);
+    expect((await list()).body.threads.map((t: Json) => t.id)).toEqual([b.id]);
+    const t = await call(getThread(req("GET", `/api/threads/${a.id}`), params({ id: a.id })));
+    expect(t.body.messages.length).toBe(4);
+    expect(t.body.messages.every((m: Json) => m.noteId === null)).toBe(true);
+    const again = await call(
+      deleteThreadNotes(req("DELETE", `/api/notes/threads/${a.id}`), params({ id: a.id })),
+    );
+    expect(again.status).toBe(404);
+    const noCsrf = await call(
+      deleteThreadNotes(
+        req("DELETE", `/api/notes/threads/${b.id}`, undefined, { csrf: false }),
+        params({ id: b.id }),
+      ),
+    );
+    expect(noCsrf.status).toBe(403);
+    expect((await list()).body.threads.length).toBe(1);
   });
 });

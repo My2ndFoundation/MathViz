@@ -190,6 +190,11 @@ export const ai_jobs = sqliteTable(
     deadline_at: text(),
     /** When the platform job was seen ended; a settled job is not polled again. */
     settled_at: text(),
+    /**
+     * When our job ended (answered, failed, cancelled, timed out, lost) — set once, by whatever
+     * ended it; null while open. Unlike settled_at it does not wait for the platform.
+     */
+    ended_at: text(),
   },
   (t) => [
     index("ai_jobs_open").on(t.status),

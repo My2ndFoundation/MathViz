@@ -6,6 +6,7 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 import type { ShellGroup } from "@/lib/catalog";
 import type { Locale } from "@/lib/i18n/locale";
 import { AiIndicator } from "./ai/ai-indicator";
+import { AiJobsProvider } from "./ai/use-ai-jobs";
 import { accentColor, CommandK } from "./command-k";
 import { LangSwitch } from "./lang-switch";
 
@@ -88,126 +89,128 @@ export function Shell({
   };
 
   return (
-    <div className="shell" data-collapsed={collapsed}>
-      {/* inert when collapsed: its links leave the tab order and the accessibility tree */}
-      <nav className="sidebar" aria-label={appName.name} data-testid="sidebar" inert={collapsed}>
-        <div className="sb-head">
-          <Link href={`/${locale}`} className="brand no-underline">
-            <span className="eyebrow">{appName.eyebrow}</span>
-            <span className="name">{appName.name}</span>
-          </Link>
+    <AiJobsProvider>
+      <div className="shell" data-collapsed={collapsed}>
+        {/* inert when collapsed: its links leave the tab order and the accessibility tree */}
+        <nav className="sidebar" aria-label={appName.name} data-testid="sidebar" inert={collapsed}>
+          <div className="sb-head">
+            <Link href={`/${locale}`} className="brand no-underline">
+              <span className="eyebrow">{appName.eyebrow}</span>
+              <span className="name">{appName.name}</span>
+            </Link>
+            <button
+              type="button"
+              className="iconbtn"
+              title={text.collapse}
+              aria-label={text.collapse}
+              onClick={() => toggle(true)}
+            >
+              ◀
+            </button>
+          </div>
           <button
             type="button"
-            className="iconbtn"
-            title={text.collapse}
-            aria-label={text.collapse}
-            onClick={() => toggle(true)}
+            className="chip sb-search"
+            data-testid="search-open"
+            onClick={() => setSearching(true)}
           >
-            ◀
+            <span>{text.search}</span>
+            <kbd>⌘K</kbd>
           </button>
-        </div>
-        <button
-          type="button"
-          className="chip sb-search"
-          data-testid="search-open"
-          onClick={() => setSearching(true)}
-        >
-          <span>{text.search}</span>
-          <kbd>⌘K</kbd>
-        </button>
-        <div className="sb-links">
-          {(
-            [
-              ["ask", text.askLibrary],
-              ["notes", text.notes],
-            ] as const
-          ).map(([page, label]) => (
+          <div className="sb-links">
+            {(
+              [
+                ["ask", text.askLibrary],
+                ["notes", text.notes],
+              ] as const
+            ).map(([page, label]) => (
+              <Link
+                key={page}
+                href={`/${locale}/${page}`}
+                className="item"
+                data-testid={`nav-${page}`}
+                aria-current={pathname === `/${locale}/${page}` ? "page" : undefined}
+              >
+                <span className="dot" />
+                <span className="tx">{label}</span>
+              </Link>
+            ))}
+          </div>
+          <div className="sb-list">
+            {groups.map((g) => (
+              <section key={g.id} data-testid="sidebar-group" data-group={g.id}>
+                <div className="grp" data-testid="sidebar-group-label">
+                  {g.label[locale]}
+                </div>
+                {g.items.map((it) => (
+                  <Link
+                    key={it.id}
+                    href={`/${locale}/tool/${encodeURIComponent(it.id)}`}
+                    className="item"
+                    data-testid="sidebar-item"
+                    data-id={it.id}
+                    aria-current={it.id === current ? "page" : undefined}
+                    style={{ "--c": accentColor(it.accent) } as never}
+                  >
+                    <span className="dot" />
+                    <span className="tx">{it.title[locale]}</span>
+                    <span className="ver" data-testid="sidebar-item-version">
+                      v{it.version}
+                    </span>
+                  </Link>
+                ))}
+              </section>
+            ))}
+          </div>
+          {/* the "System" place at the bottom, as in Math Test Buddy's sidebar */}
+          <div className="sb-links sb-sys">
             <Link
-              key={page}
-              href={`/${locale}/${page}`}
+              href={`/${locale}/settings`}
               className="item"
-              data-testid={`nav-${page}`}
-              aria-current={pathname === `/${locale}/${page}` ? "page" : undefined}
+              data-testid="nav-settings"
+              aria-current={pathname === `/${locale}/settings` ? "page" : undefined}
             >
               <span className="dot" />
-              <span className="tx">{label}</span>
+              <span className="tx">{text.settings}</span>
             </Link>
-          ))}
-        </div>
-        <div className="sb-list">
-          {groups.map((g) => (
-            <section key={g.id} data-testid="sidebar-group" data-group={g.id}>
-              <div className="grp" data-testid="sidebar-group-label">
-                {g.label[locale]}
-              </div>
-              {g.items.map((it) => (
-                <Link
-                  key={it.id}
-                  href={`/${locale}/tool/${encodeURIComponent(it.id)}`}
-                  className="item"
-                  data-testid="sidebar-item"
-                  data-id={it.id}
-                  aria-current={it.id === current ? "page" : undefined}
-                  style={{ "--c": accentColor(it.accent) } as never}
-                >
-                  <span className="dot" />
-                  <span className="tx">{it.title[locale]}</span>
-                  <span className="ver" data-testid="sidebar-item-version">
-                    v{it.version}
-                  </span>
-                </Link>
-              ))}
-            </section>
-          ))}
-        </div>
-        {/* the "System" place at the bottom, as in Math Test Buddy's sidebar */}
-        <div className="sb-links sb-sys">
-          <Link
-            href={`/${locale}/settings`}
-            className="item"
-            data-testid="nav-settings"
-            aria-current={pathname === `/${locale}/settings` ? "page" : undefined}
-          >
-            <span className="dot" />
-            <span className="tx">{text.settings}</span>
-          </Link>
-        </div>
-        <div className="sb-foot">
-          <span data-testid="content-version">{text.contentVersion}</span>
-          <span className="sp" />
-          <LangSwitch locale={locale} label={text.switchTo} title={text.switchToLabel} />
-        </div>
-      </nav>
-      <button
-        type="button"
-        className="edge"
-        title={text.expand}
-        aria-label={text.expand}
-        onClick={() => toggle(false)}
-      >
-        ▶
-      </button>
-      <div className="main-col">
-        {/* the top bar (after Math Test Buddy's): where she is, and the AI indicator at the end */}
-        <header className="topbar" data-testid="topbar">
-          <div className="tb-title" data-testid="page-title">
-            {pageTitle}
           </div>
-          <AiIndicator locale={locale} />
-        </header>
-        <main className="stage" data-testid="stage">
-          {children}
-        </main>
+          <div className="sb-foot">
+            <span data-testid="content-version">{text.contentVersion}</span>
+            <span className="sp" />
+            <LangSwitch locale={locale} label={text.switchTo} title={text.switchToLabel} />
+          </div>
+        </nav>
+        <button
+          type="button"
+          className="edge"
+          title={text.expand}
+          aria-label={text.expand}
+          onClick={() => toggle(false)}
+        >
+          ▶
+        </button>
+        <div className="main-col">
+          {/* the top bar (after Math Test Buddy's): where she is, and the AI indicator at the end */}
+          <header className="topbar" data-testid="topbar">
+            <div className="tb-title" data-testid="page-title">
+              {pageTitle}
+            </div>
+            <AiIndicator locale={locale} />
+          </header>
+          <main className="stage" data-testid="stage">
+            {children}
+          </main>
+        </div>
+        <CommandK
+          items={items}
+          locale={locale}
+          open={searching}
+          onOpenChange={onOpenChange}
+          placeholder={text.searchPlaceholder}
+          noResults={text.noResults}
+          closeLabel={text.close}
+        />
       </div>
-      <CommandK
-        items={items}
-        locale={locale}
-        open={searching}
-        onOpenChange={onOpenChange}
-        placeholder={text.searchPlaceholder}
-        noResults={text.noResults}
-        closeLabel={text.close}
-      />
-    </div>
+    </AiJobsProvider>
   );
 }

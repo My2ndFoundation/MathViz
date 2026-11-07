@@ -331,6 +331,51 @@ describe("openDb", () => {
     }
   });
 
+  test("0004 ai_jobs.ended_at: a finished job is backfilled from its settlement (else its last change); an open one stays null", () => {
+    // the database as it was before 0004: the shipped folder with the journal cut there
+    const before = path.join(tmp(), "drizzle");
+    cpSync(DIR, before, { recursive: true });
+    const journalFile = path.join(before, "meta", "_journal.json");
+    const journal = JSON.parse(readFileSync(journalFile, "utf8"));
+    const cut = journal.entries.findIndex(
+      (e: { tag: string }) => e.tag === "0004_ai_jobs_ended_at",
+    );
+    expect(cut).toBeGreaterThan(0);
+    journal.entries = journal.entries.slice(0, cut);
+    writeFileSync(journalFile, JSON.stringify(journal));
+    const dir = tmp();
+    const old = openDb(dir, { migrationsDir: before });
+    old
+      .prepare(
+        "INSERT INTO threads (id, title, created_at, updated_at) VALUES ('t', 't', 'a', 'a')",
+      )
+      .run();
+    const job = old.prepare(
+      `INSERT INTO ai_jobs (id, thread_id, workflow, status, ticket, created_at, updated_at, settled_at)
+       VALUES (?, 't', 'ask', ?, ?, '2026-01-01T00:00:00.000Z', ?, ?)`,
+    );
+    job.run("settled", "completed", "k1", "2026-01-01T00:00:09.000Z", "2026-01-01T00:00:05.000Z");
+    job.run("unsettled", "cancelled", "k2", "2026-01-01T00:00:07.000Z", null);
+    job.run("open", "running", "k3", "2026-01-01T00:00:08.000Z", null);
+    old.close();
+    const db = openDb(dir, { migrationsDir: DIR });
+    try {
+      const ended = Object.fromEntries(
+        db
+          .prepare("SELECT id, ended_at FROM ai_jobs ORDER BY id")
+          .all<{ id: string; ended_at: string | null }>()
+          .map((r) => [r.id, r.ended_at]),
+      );
+      expect(ended).toEqual({
+        settled: "2026-01-01T00:00:05.000Z",
+        unsettled: "2026-01-01T00:00:07.000Z",
+        open: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   /** A copy of the shipped migrations plus `extra` new ones (a schema change on upgrade). */
   function migrationsPlus(extra: number, start = Date.now()): string {
     const out = path.join(tmp(), "drizzle");

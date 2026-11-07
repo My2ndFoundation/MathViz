@@ -29,7 +29,7 @@ export interface AiJobView {
   model: string | null;
   error: string | null;
   createdAt: string;
-  /** When it ended (settlement, or its last change before that); null while open. */
+  /** When our job ended (ai_jobs.ended_at; not the platform's settlement); null while open. */
   settledAt: string | null;
   durationMs: number | null;
 }
@@ -55,7 +55,7 @@ interface Row {
 
 const COLUMNS = `j.id, j.workflow, j.status, j.thread_id, t.title, j.engine, j.model, j.error,
   j.created_at, CASE WHEN j.status IN (${OPEN.map(() => "?").join(", ")}) THEN NULL
-  ELSE coalesce(j.settled_at, j.updated_at) END AS ended_at`;
+  ELSE coalesce(j.ended_at, j.settled_at, j.updated_at) END AS ended_at`;
 
 /** Where a thread was asked: the library page, a program on its tool's page, or a tool page. */
 function hrefOf(app: AppContext, threadId: string): string | null {
@@ -132,7 +132,7 @@ export async function aiJobsView(app: AppContext): Promise<AiJobsView> {
     .prepare(
       `SELECT ${COLUMNS} FROM ai_jobs j JOIN threads t ON t.id = j.thread_id
         WHERE j.status NOT IN (${marks})
-        ORDER BY coalesce(j.settled_at, j.updated_at) DESC, j.id DESC LIMIT ?`,
+        ORDER BY coalesce(j.ended_at, j.settled_at, j.updated_at) DESC, j.id DESC LIMIT ?`,
     )
     .all<Row>(...OPEN, ...OPEN, RECENT_JOBS)
     .map((r) => view(app, r));

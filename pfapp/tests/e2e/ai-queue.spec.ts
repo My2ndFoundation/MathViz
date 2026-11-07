@@ -123,7 +123,11 @@ test("a question being answered shows in the indicator and the queue; Cancel the
   await expect(row).toHaveAttribute("data-status", /^(queued|running)$/);
   await expect(row).toContainText("Question");
   await expect(row.getByTestId("ai-queue-title")).toHaveText(/\[hold\] Please wait on this one/);
-  await expect(row.getByTestId("ai-queue-title")).toHaveAttribute("href", /^\/en\/tool\//);
+  // asked on a python tool page, so about a program: its link opens that program in its tool
+  await expect(row.getByTestId("ai-queue-title")).toHaveAttribute(
+    "href",
+    /^\/en\/tool\/[^?]+\?prog=[^&]+$/,
+  );
   await expect(queue.getByTestId("ai-queue-settings")).toHaveAttribute("href", "/en/settings#ai");
   await shot(page, "b2-queue-active.png");
 
@@ -145,9 +149,175 @@ test("a question being answered shows in the indicator and the queue; Cancel the
   await expect(panel.getByTestId("ask-error")).toHaveText("Cancelled.");
 });
 
-test("Settings → AI shows what the indicator shows", async ({ page }) => {
+/** A GET /api/ai/jobs body (the shape lib/server/ai-jobs answers), for page.route. */
+const jobsBody = (state: "available" | "not_authorised", active = 0) => ({
+  ai:
+    state === "available"
+      ? { available: true, reason: null, state }
+      : { available: false, reason: "engine_not_granted", state },
+  active: Array.from({ length: active }, (_, i) => ({
+    id: `synthetic-${i}`,
+    workflow: "ask",
+    status: "running",
+    threadId: `t-${i}`,
+    title: `Synthetic job ${i}`,
+    href: null,
+    engine: "claude",
+    model: null,
+    error: null,
+    createdAt: "2026-11-07T09:00:00.000Z",
+    settledAt: null,
+    durationMs: null,
+  })),
+  recent: [],
+});
+
+/** Answer GET /api/ai/jobs from `reply()` (an object as JSON, or a status code to fail with). */
+async function fakeJobs(page: Page, reply: () => object | number) {
+  await page.route("**/api/ai/jobs", async (route) => {
+    const r = reply();
+    if (typeof r === "number") await route.fulfill({ status: r, body: "{}" });
+    else
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(r),
+      });
+  });
+}
+
+const fireQueueEvent = (page: Page) =>
+  page.evaluate(() => window.dispatchEvent(new Event("pfapp:ai-jobs")));
+
+test("Settings → AI and the indicator are one reader: both turn together, and a failed read keeps the card's last answer", async ({
+  page,
+}) => {
   await page.goto(`${app.base}/en/settings#ai`);
-  await expect(page.getByTestId("ai-indicator")).toHaveAttribute("data-tone", "ok");
-  await expect(page.getByTestId("set-ai")).toHaveAttribute("data-state", "available");
+  const indicator = page.getByTestId("ai-indicator");
+  const card = page.getByTestId("set-ai");
+  await expect(indicator).toHaveAttribute("data-tone", "ok");
+  await expect(card).toHaveAttribute("data-state", "available");
   await expect(page.getByTestId("page-title")).toHaveText("Settings");
+
+  // the engine is revoked after the page loaded: the next read turns both
+  let reply: object | number = jobsBody("not_authorised");
+  await fakeJobs(page, () => reply);
+  await fireQueueEvent(page);
+  await expect(indicator).toHaveAttribute("data-tone", "off");
+  await expect(card).toHaveAttribute("data-state", "not_authorised");
+
+  // a failed read: the light no longer claims to know; the card keeps the last answer (not page load)
+  reply = 500;
+  await fireQueueEvent(page);
+  await expect(indicator).toHaveAttribute("data-tone", "unknown");
+  await expect(card).toHaveAttribute("data-state", "not_authorised");
+  // one reader for both: a read is one request, not one per component
+  let requests = 0;
+  page.on("request", (r) => {
+    if (new URL(r.url()).pathname === "/api/ai/jobs") requests++;
+  });
+  reply = jobsBody("available");
+  await fireQueueEvent(page);
+  await expect(card).toHaveAttribute("data-state", "available");
+  await expect(indicator).toHaveAttribute("data-tone", "ok");
+  expect(requests).toBe(1);
+});
+
+test("a failed read keeps the queue's rows and their Cancel; becoming visible re-reads", async ({
+  page,
+}) => {
+  let reply: object | number = jobsBody("available", 1);
+  await fakeJobs(page, () => reply);
+  await page.goto(`${app.base}/en/notes`);
+  const indicator = page.getByTestId("ai-indicator");
+  await expect(page.getByTestId("ai-indicator-count")).toHaveText("1");
+  reply = 500;
+  await indicator.click(); // opening the panel reads again, and that read fails
+  const queue = page.getByTestId("ai-queue");
+  await expect(indicator).toHaveAttribute("data-tone", "unknown");
+  const row = queue.getByTestId("ai-queue-active").getByTestId("ai-queue-row");
+  await expect(row).toHaveCount(1);
+  await expect(row.getByTestId("ai-queue-cancel")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // the window comes back (no focus event): visibilitychange alone re-reads
+  reply = jobsBody("available", 2);
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect(page.getByTestId("ai-indicator-count")).toHaveText("2", { timeout: 5_000 });
+  await expect(indicator).toHaveAttribute("data-tone", "ok");
+});
+
+test("the open queue panel is above the Ask tab, the collapse edge and the narrow sidebar; Tab stays inside it", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`${app.base}/en/tool/${firstTool()}`);
+  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
+  await page.getByTestId("ask-hide").click();
+  const askOpen = page.getByTestId("ask-open");
+  await expect(askOpen).toBeVisible();
+  const tab = (await askOpen.boundingBox()) as {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  const indicator = page.getByTestId("ai-indicator");
+  await indicator.click();
+  const queue = page.getByTestId("ai-queue");
+  await expect(queue).toBeVisible();
+  const cx = tab.x + tab.width / 2;
+  const cy = tab.y + tab.height / 2;
+  const topAt = (x: number, y: number) =>
+    page.evaluate(
+      ([px, py]) => {
+        const el = document.elementFromPoint(px as number, py as number);
+        return el?.closest("[data-testid=ai-queue-scrim]") ? "queue" : (el?.className ?? "none");
+      },
+      [x, y],
+    );
+  expect(await topAt(cx, cy)).toBe("queue");
+  // a click where the Ask tab is lands on the panel: the ask panel stays hidden
+  await page.mouse.click(cx, cy);
+  await expect(page.getByTestId("ask-panel")).toBeHidden();
+  await expect(queue).toBeVisible();
+
+  // Tab and Shift-Tab wrap inside the panel (aria-modal): never the page or the tool iframe behind
+  for (let i = 0; i < 12; i++) {
+    await page.keyboard.press("Tab");
+    expect(await queue.evaluate((q) => q.contains(document.activeElement))).toBe(true);
+  }
+  for (let i = 0; i < 12; i++) {
+    await page.keyboard.press("Shift+Tab");
+    expect(await queue.evaluate((q) => q.contains(document.activeElement))).toBe(true);
+  }
+  await page.keyboard.press("Escape");
+  await expect(queue).toHaveCount(0);
+
+  // the collapse edge (sidebar collapsed)
+  await page.getByTestId("sidebar").getByRole("button", { name: "Collapse sidebar" }).click();
+  const edge = (await page.getByRole("button", { name: "Expand sidebar" }).boundingBox()) as {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  await indicator.click();
+  await expect(queue).toBeVisible();
+  expect(await topAt(edge.x + edge.width / 2, edge.y + edge.height / 2)).toBe("queue");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+
+  // a narrow window: the open sidebar floats; where it and the panel overlap, the panel is on top
+  await page.setViewportSize({ width: 600, height: 700 });
+  // the sidebar slides back in (0.22 s): measure it once it is there
+  await expect.poll(async () => (await page.getByTestId("sidebar").boundingBox())?.x).toBe(0);
+  await indicator.click();
+  await expect(queue).toBeVisible();
+  const sb = (await page.getByTestId("sidebar").boundingBox()) as { x: number; width: number };
+  const q = (await queue.boundingBox()) as { x: number };
+  expect(q.x).toBeLessThan(sb.x + sb.width);
+  expect(await topAt((q.x + sb.x + sb.width) / 2, 300)).toBe("queue");
+  await page.keyboard.press("Escape");
+  await page.setViewportSize({ width: 1280, height: 800 });
 });

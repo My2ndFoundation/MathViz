@@ -231,6 +231,16 @@ export async function submitJob(
       at,
       created.id,
     );
+    // cancelled (from the queue panel) while the submit was in flight: ours has ended, so the
+    // platform job it just started must not run on unpolled (review M1) — cancel it, best effort
+    const after = getRow(db, created.id);
+    if (after && !isOpen(after.status)) {
+      try {
+        await platform.cancelJob(String(r.platformJobId ?? r.jobId));
+      } catch {
+        // the platform's own runtime limit ends it
+      }
+    }
     return { jobId: created.id, submitted: true, error: null };
   } catch (e) {
     const code = submitErrorCode(e);
@@ -248,9 +258,10 @@ export function markSubmitFailed(
 ) {
   const at = now();
   db.prepare(
-    `UPDATE ai_jobs SET status = 'failed', error = ?, settled_at = coalesce(settled_at, ?), updated_at = ?
+    `UPDATE ai_jobs SET status = 'failed', error = ?, settled_at = coalesce(settled_at, ?),
+            ended_at = coalesce(ended_at, ?), updated_at = ?
       WHERE id = ? AND status IN ('queued', 'running')`,
-  ).run(code, at, at, id);
+  ).run(code, at, at, at, id);
 }
 
 /** The open job behind a per-job MCP path segment, or null (unknown, ended, past its deadline). */
@@ -326,8 +337,10 @@ export function acceptAnswer(
       const failed = n >= 2;
       db.prepare(
         `UPDATE ai_jobs SET leak_rejections = ?, status = CASE WHEN ? THEN 'failed' ELSE status END,
-                error = CASE WHEN ? THEN ? ELSE error END, updated_at = ? WHERE id = ?`,
-      ).run(n, failed ? 1 : 0, failed ? 1 : 0, NEEDS_BLANK_DONE, at, jobId);
+                error = CASE WHEN ? THEN ? ELSE error END,
+                ended_at = CASE WHEN ? THEN coalesce(ended_at, ?) ELSE ended_at END,
+                updated_at = ? WHERE id = ?`,
+      ).run(n, failed ? 1 : 0, failed ? 1 : 0, NEEDS_BLANK_DONE, failed ? 1 : 0, at, at, jobId);
       return { accepted: false, reason: "leak", failed };
     }
     const known = new Set<string>();
@@ -340,8 +353,9 @@ export function acceptAnswer(
     ).run(messageId, job.thread_id, text, JSON.stringify(kept), at);
     db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(at, job.thread_id);
     db.prepare(
-      "UPDATE ai_jobs SET status = 'completed', error = NULL, updated_at = ? WHERE id = ?",
-    ).run(at, jobId);
+      `UPDATE ai_jobs SET status = 'completed', error = NULL, ended_at = coalesce(ended_at, ?),
+              updated_at = ? WHERE id = ?`,
+    ).run(at, at, jobId);
     return { accepted: true, messageId, citations: kept };
   });
 }
@@ -369,11 +383,11 @@ function endOpen(db: Db, id: string, status: string, reason: string, now: Now, s
   return (
     db
       .prepare(
-        `UPDATE ai_jobs SET status = ?, error = ?, updated_at = ?,
+        `UPDATE ai_jobs SET status = ?, error = ?, updated_at = ?, ended_at = coalesce(ended_at, ?),
                 settled_at = CASE WHEN ? THEN coalesce(settled_at, ?) ELSE settled_at END
           WHERE id = ? AND status IN ('queued', 'running')`,
       )
-      .run(status, reason, at, settle ? 1 : 0, at, id).changes > 0
+      .run(status, reason, at, at, settle ? 1 : 0, at, id).changes > 0
   );
 }
 
