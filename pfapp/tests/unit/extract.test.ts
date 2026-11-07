@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { loadTarget, type TargetId } from "../../app/src/lib/target";
 import { assertCleanCheckout, extract } from "../../extract/index";
 import { readGroupLabels } from "../../extract/labels";
+import { readPythonSources } from "../../extract/python-source";
 
 // The extractor's input is a real MathViz checkout. Default: the repo this package lives in.
 const MV = resolve(process.env.MATHVIZ_PATH ?? join(import.meta.dir, "../../.."));
@@ -35,20 +36,45 @@ interface Catalog {
   groups: { id: string; label: { en: string; zh: string } }[];
 }
 
-const COUNTS: Record<TargetId, { tools: number; groups: number }> = {
-  math: { tools: 62, groups: 13 },
-  chess: { tools: 5, groups: 4 },
-  crypto: { tools: 27, groups: 5 },
-  python: { tools: 35, groups: 8 },
+const IDS: TargetId[] = ["math", "chess", "crypto", "python"];
+
+// Expected counts are derived from the web version itself, never hard-coded: adding a page to
+// the web version must not turn pfapp's gate red. The group field names are restated here on
+// purpose (independent of catalog.ts): tools.json says `category`, the subprojects match.
+const REG_FIELD: Record<TargetId, string> = {
+  math: "category",
+  chess: "phase",
+  crypto: "chapter",
+  python: "module",
 };
+const registryOf = (id: TargetId) =>
+  JSON.parse(readFileSync(join(MV, loadTarget(id).registry), "utf8")).tools as Record<
+    string,
+    unknown
+  >[];
+const expected = (id: TargetId) => {
+  const reg = registryOf(id);
+  return { tools: reg.length, groups: new Set(reg.map((e) => String(e[REG_FIELD[id]]))).size };
+};
+/** Program entries across every python chapter.json whose tool is registered. */
+function expectedPrograms(): number {
+  const tools = new Set(registryOf("python").map((e) => e.id));
+  const root = join(MV, "python/programs");
+  let n = 0;
+  for (const ch of readdirSync(root).filter((d) => d.startsWith("ch"))) {
+    const c = JSON.parse(readFileSync(join(root, ch, "chapter.json"), "utf8"));
+    if (tools.has(c.tool)) n += c.programs.length;
+  }
+  return n;
+}
 
 const outs = {} as Record<TargetId, { dir: string; fingerprint: string; files: string[] }>;
 
 beforeAll(async () => {
-  for (const id of Object.keys(COUNTS) as TargetId[]) {
+  for (const id of IDS) {
     const dir = tmp(id);
     const r = await extract(loadTarget(id), MV, dir, NO_CLEAN);
-    expect(r.tools).toBe(COUNTS[id].tools);
+    expect(r.tools).toBe(expected(id).tools);
     outs[id] = { dir, fingerprint: r.fingerprint, files: r.files };
   }
 }, 60_000);
@@ -57,13 +83,15 @@ const catalogOf = (id: TargetId): Catalog =>
   JSON.parse(readFileSync(join(outs[id].dir, "payload/catalog.json"), "utf8"));
 
 describe("catalog", () => {
-  for (const id of Object.keys(COUNTS) as TargetId[]) {
-    test(`${id}: ${COUNTS[id].tools} tools, ${COUNTS[id].groups} groups, tool files byte-identical`, () => {
+  for (const id of IDS) {
+    test(`${id}: one item per registry entry, one group per group value, files byte-identical`, () => {
+      const want = expected(id);
+      expect(want.tools).toBeGreaterThan(0);
       const t = loadTarget(id);
       const cat = catalogOf(id);
       expect(cat.target).toBe(id);
-      expect(cat.items.length).toBe(COUNTS[id].tools);
-      expect(cat.groups.length).toBe(COUNTS[id].groups);
+      expect(cat.items.length).toBe(want.tools);
+      expect(cat.groups.length).toBe(want.groups);
       const reg = JSON.parse(readFileSync(join(MV, t.registry), "utf8")).tools as {
         id: string;
         file: string;
@@ -80,7 +108,7 @@ describe("catalog", () => {
         expect(item.groupLabel.en.length > 0 && item.groupLabel.zh.length > 0).toBe(true);
       }
       const toolFiles = walk(join(outs[id].dir, "payload")).filter((f) => f.startsWith("tools/"));
-      expect(toolFiles.length).toBe(COUNTS[id].tools);
+      expect(toolFiles.length).toBe(want.tools);
     });
   }
 
@@ -90,26 +118,34 @@ describe("catalog", () => {
 });
 
 describe("group labels", () => {
-  test("read from the web pages' own literals", () => {
-    expect(readGroupLabels(loadTarget("python"), MV)["1"]).toEqual({
-      en: "Language Foundations",
-      zh: "语言基础",
+  // No label text is restated here (a relabel on the web must not break pfapp). Instead: every
+  // group value in the registry has a label, and both strings occur verbatim in the page the
+  // label was read from — so they came from the page, not from the extractor.
+  const PAGE: Record<TargetId, string> = {
+    math: "index.html",
+    chess: "chess/app.html",
+    crypto: "cryptography/app.html",
+    python: "python/app.html",
+  };
+  for (const id of IDS) {
+    test(`${id}: every registry group has a label taken from ${PAGE[id]}`, () => {
+      const labels = readGroupLabels(loadTarget(id), MV);
+      const page = readFileSync(join(MV, PAGE[id]), "utf8");
+      for (const g of new Set(registryOf(id).map((e) => String(e[REG_FIELD[id]])))) {
+        const l = labels[g];
+        expect(l).toBeDefined();
+        expect(page.includes(l?.en as string) && page.includes(l?.zh as string)).toBe(true);
+      }
     });
-    expect(Object.keys(readGroupLabels(loadTarget("python"), MV)).length).toBe(8);
-    expect(readGroupLabels(loadTarget("crypto"), MV)["3"]?.en).toBe("Chapter 3 · Cryptanalysis");
-    expect(readGroupLabels(loadTarget("chess"), MV)["4"]?.zh).toBe("阶段 4 · 搜索与博弈树");
-    expect(readGroupLabels(loadTarget("math"), MV).trig).toEqual({
-      en: "Trig & Hyperbolic Functions",
-      zh: "三角与双曲函数",
-    });
-  });
+  }
 });
 
 describe("python source", () => {
-  test("375 programs, none carries run", () => {
+  test("one source per registered program, none carries run", () => {
     const dir = join(outs.python.dir, "payload/source");
     const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
-    expect(files.length).toBe(375);
+    expect(files.length).toBeGreaterThan(0);
+    expect(files.length).toBe(expectedPrograms());
     for (const f of files) {
       const obj = JSON.parse(readFileSync(join(dir, f), "utf8"));
       expect("run" in obj).toBe(false);
@@ -141,6 +177,55 @@ describe("python source", () => {
 
   test("non-python targets have no source/ in phase 1", () => {
     expect(walk(join(outs.math.dir, "payload")).some((f) => f.startsWith("source/"))).toBe(false);
+  });
+});
+
+describe("python source completeness", () => {
+  // A throwaway python/programs tree: one good chapter, then the two ways a registered tool
+  // can end up with missing sources.
+  function fakeMv(): string {
+    const mv = tmp("pyfake");
+    const ch = join(mv, "python/programs/ch01-a");
+    mkdirSync(ch, { recursive: true });
+    writeFileSync(
+      join(ch, "chapter.json"),
+      JSON.stringify({ module: 1, tool: "py-a", programs: [{ id: "p1", file: "p1.py" }] }),
+    );
+    writeFileSync(join(ch, "p1.py"), "print(1)\n");
+    return mv;
+  }
+
+  test("a complete tree passes", () => {
+    expect(readPythonSources(fakeMv(), new Map([["py-a", 1]])).map((p) => p.id)).toEqual(["p1"]);
+  });
+
+  test("a registered tool with no chapter throws, naming the tool", () => {
+    expect(() =>
+      readPythonSources(
+        fakeMv(),
+        new Map<string, number | undefined>([
+          ["py-a", 1],
+          ["py-ghost", undefined],
+        ]),
+      ),
+    ).toThrow(/py-ghost/);
+  });
+
+  test("a chapter naming a missing .py throws, naming the tool", () => {
+    const mv = fakeMv();
+    const ch = join(mv, "python/programs/ch01-a");
+    writeFileSync(
+      join(ch, "chapter.json"),
+      JSON.stringify({
+        module: 1,
+        tool: "py-a",
+        programs: [
+          { id: "p1", file: "p1.py" },
+          { id: "p2", file: "p2.py" },
+        ],
+      }),
+    );
+    expect(() => readPythonSources(mv, new Map([["py-a", 2]]))).toThrow(/py-a.*p2/);
   });
 });
 
