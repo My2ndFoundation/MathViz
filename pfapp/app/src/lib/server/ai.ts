@@ -1,3 +1,4 @@
+import { ENGINE_PREFERENCE } from "../agent/platform/client";
 import { reconcileJobs } from "../ai/jobs";
 import type { AppContext } from "./context";
 
@@ -58,4 +59,61 @@ export async function startAi(
     ctx.log("ai.reconcile_failed", { error: e instanceof Error ? e.name : "Error" });
   }
   return true;
+}
+
+/**
+ * How long one /ai/engines answer (or failure) is reused. The top bar's indicator and the Settings
+ * card each read the AI status every 10 s; without this, every poll is a platform call per reader.
+ */
+export const ENGINES_TTL_MS = 10_000;
+const enginesCache = new WeakMap<object, { at: number; answer: Promise<unknown> }>();
+
+/** platform.engines(), shared by every caller within ENGINES_TTL_MS (in flight too). */
+function enginesOf(platform: NonNullable<AppContext["ai"]["platform"]>, at: number) {
+  const hit = enginesCache.get(platform);
+  if (hit && at - hit.at >= 0 && at - hit.at < ENGINES_TTL_MS) return hit.answer;
+  const answer = platform.engines ? platform.engines() : Promise.resolve(null);
+  answer.catch(() => {}); // a failure is read by its callers; never unhandled here
+  enginesCache.set(platform, { at, answer });
+  return answer;
+}
+
+export type AiAvailability = "available" | "not_authorised" | "unavailable";
+
+/**
+ * The Settings page's AI card (after MTB's aiStatus, lib/api/status.ts): `available` when the
+ * platform is there, this app's MCP secret is registered and an engine it may use can run;
+ * otherwise why, in the codes the Q&A already speaks — ai_unavailable (no platform),
+ * not_registered, engine_not_granted (no engine granted → not_authorised), engine_unavailable
+ * (granted but none can run). A platform without /ai/engines (null) is judged by registration
+ * alone; a failing engine read reads as unavailable.
+ */
+export async function aiStatus(
+  ctx: Pick<AppContext, "ai">,
+  { now = Date.now }: { now?: () => number } = {},
+): Promise<{ state: AiAvailability; code: string | null }> {
+  const { platform } = ctx.ai;
+  if (!platform) return { state: "unavailable", code: "ai_unavailable" };
+  let engines: unknown = null;
+  try {
+    engines = await enginesOf(platform, now());
+  } catch {
+    return { state: "unavailable", code: "engine_unavailable" };
+  }
+  if (Array.isArray(engines)) {
+    const ours = engines.filter(
+      (e) =>
+        typeof e === "object" &&
+        e !== null &&
+        ENGINE_PREFERENCE.some((p) => p.engine === (e as { engine?: unknown }).engine),
+    ) as { granted?: unknown; usable?: unknown }[];
+    if (!ours.some((e) => e.granted === true)) {
+      return { state: "not_authorised", code: "engine_not_granted" };
+    }
+    if (!ours.some((e) => e.granted === true && e.usable === true)) {
+      return { state: "unavailable", code: "engine_unavailable" };
+    }
+  }
+  if (!ctx.ai.registered) return { state: "unavailable", code: "not_registered" };
+  return { state: "available", code: null };
 }

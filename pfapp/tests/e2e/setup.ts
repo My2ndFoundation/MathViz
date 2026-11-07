@@ -6,7 +6,9 @@
  * PRIMEFORGE_API_URL, so the only content source is the manual import (what the empty state's
  * import writes). The Q&A and python specs start their own app with the fake platform
  * (startFakePlatform) behind PRIMEFORGE_API_URL / _SECRET — the variables PrimeForge itself sets,
- * so there is no test-only switch in the app.
+ * so there is no test-only switch in the app — except the development store (fakeStoreEnv:
+ * MATHVIZ_FAKE_ADDONS with MATHVIZ_E2E=1, after Math Test Buddy's MTB_FAKE_ADDONS / MTB_E2E),
+ * which the settings spec uses to install the content pack "from the store".
  *
  * globalSetup (default export): builds the app when .next is older than its sources, extracts the
  * python pack once (tests/e2e/prepare.ts, under Bun), and starts one app with the pack installed.
@@ -93,6 +95,27 @@ export function preparePack(): Pack {
   if (given) return JSON.parse(readFileSync(given, "utf8")) as Pack;
   return JSON.parse(bun(["tests/e2e/prepare.ts", "pack"])) as Pack;
 }
+
+/**
+ * A directory holding `pfaddon` as the development store's one offer (<dir>/content/{addon.json,
+ * payload/}), for an app started with fakeStoreEnv(dir).
+ */
+export function storeDir(pfaddon: string): string {
+  const dir = mkdtempSync(path.join(tmpdir(), "pfapp-e2e-store-"));
+  bun(["tests/e2e/prepare.ts", "store", pfaddon, dir]);
+  return dir;
+}
+
+/**
+ * The development store (app/src/lib/addons/fake.ts) instead of PrimeForge's: MATHVIZ_FAKE_ADDONS,
+ * which a production build honours only with MATHVIZ_E2E=1. The install takes `installMs`.
+ */
+export const fakeStoreEnv = (dir: string, installMs = 4000): Record<string, string> => ({
+  MATHVIZ_FAKE_ADDONS: "1",
+  MATHVIZ_E2E: "1",
+  MATHVIZ_FAKE_ADDONS_DIR: dir,
+  MATHVIZ_FAKE_ADDONS_INSTALL_MS: String(installMs),
+});
 
 export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {

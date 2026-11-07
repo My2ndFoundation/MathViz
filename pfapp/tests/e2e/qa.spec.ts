@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, type Frame, type Page, test } from "@playwright/test";
+import { expectNoNewWindows, hookWindowOpen } from "./new-windows";
 import {
   type FakePlatformProcess,
   freePort,
@@ -221,6 +222,7 @@ test("the ask panel reopens the conversation: ask, reload, the Q&A is there and 
 });
 
 test("/ask: the answer's citation opens /tool/<id>?prog=<programId> in place", async ({ page }) => {
+  await hookWindowOpen(page);
   await page.goto(`${app.base}/en`);
   await page.getByTestId("nav-ask").click();
   await expect(page).toHaveURL(`${app.base}/en/ask`);
@@ -233,8 +235,7 @@ test("/ask: the answer's citation opens /tool/<id>?prog=<programId> in place", a
   await expect(answer.locator('a[href="/en/notes"]')).toHaveCount(1);
   await expect(answer.locator('a[href^="http"]')).toHaveCount(0);
   await expect(answer).toContainText("https://docs.python.org/3/");
-  expect(await newWindowLinks(page)).toBe(0);
-  expect(await page.content()).not.toContain("window.open");
+  await expectNoNewWindows(page);
 
   const cite = answer.locator('[data-testid=citation][data-id^="program:"]').first();
   const programId = ((await cite.getAttribute("data-id")) as string).slice("program:".length);

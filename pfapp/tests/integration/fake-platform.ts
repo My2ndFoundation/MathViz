@@ -1,5 +1,5 @@
-import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { cpSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
@@ -27,6 +27,15 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
  * requireRegistration() makes the next submit fail 409 mcp_registration_required.
  * refuseEngines(code) makes the next submit fail as the platform does when no engine this app may
  * use can run (PFD platform-service api.ts: 403 engine_not_granted, 503 engine_unavailable).
+ *
+ * Add-ons (fake.addons; PFD platform-service/src/addons/routes.ts): GET /addons/v1 (ETag,
+ * If-None-Match → 304), GET /addons/v1/installed, POST /addons/v1/<id>/{install,update,get}. Off by
+ * default (supported: false → 404, as a desktop older than 1.45 answers). One offer, this app's
+ * content pack, plus another app's row and another add-on of this app, both of which the app must
+ * drop. An install answers 202 and stays
+ * "installing" until finishInstall(), which copies the offer's payload to
+ * <addonsDir>/content/<version>/payload (PFD app-installer's layout). `refuse` answers the next
+ * install / update with the given status and body, once.
  */
 
 interface Manifest {
@@ -96,6 +105,24 @@ export const DEFAULT_AGENTS: Readonly<Record<string, Agent>> = Object.freeze({
   library: goodAnswer,
 });
 
+export interface FakeAddons {
+  supported: boolean;
+  offline: boolean;
+  /** The store's offer of this app's content pack; null: not in the store. */
+  offer: { addonId: string; version: string; payload: string; title: string } | null;
+  owned: boolean;
+  installed: { version: string; path: string } | null;
+  installing: { version: string } | null;
+  refuse: { status: number; body: unknown } | null;
+  /** Where finishInstall puts the payload (the app's PRIMEFORGE_ADDONS_DIR). */
+  addonsDir: string | null;
+  gets: number;
+  lists: number;
+  /** How many GET /addons/v1/installed were asked; the call numbers (1-based) in failInstalled get a 500. */
+  installedCalls: number;
+  failInstalled: Set<number>;
+}
+
 export interface FakePlatform {
   secret: string;
   url: string;
@@ -111,6 +138,9 @@ export interface FakePlatform {
   requireRegistration(): void;
   refuseEngines(code: "engine_not_granted" | "engine_unavailable"): void;
   release(workflow: string): void;
+  addons: FakeAddons;
+  /** The running install lands: the payload is copied into addonsDir and reported installed. */
+  finishInstall(): void;
   /** End a job on the platform side (the agent's run is over, with or without an answer). */
   finish(id: string, status: string): void;
   idle(): Promise<void>;
@@ -148,6 +178,28 @@ export async function startFakePlatform(opts: FakePlatformOptions): Promise<Fake
     },
     refuseEngines(code) {
       engineRefusal = code;
+    },
+    addons: {
+      supported: false,
+      offline: false,
+      offer: null,
+      owned: true,
+      installed: null,
+      installing: null,
+      refuse: null,
+      addonsDir: null,
+      gets: 0,
+      lists: 0,
+      installedCalls: 0,
+      failInstalled: new Set(),
+    },
+    finishInstall() {
+      const a = fake.addons;
+      if (!a.installing || !a.offer || !a.addonsDir) throw new Error("nothing to finish");
+      const dir = path.join(a.addonsDir, "content", a.installing.version, "payload");
+      cpSync(a.offer.payload, dir, { recursive: true });
+      a.installed = { version: a.installing.version, path: dir };
+      a.installing = null;
     },
     release(workflow) {
       fake.sim.hold.delete(workflow);
@@ -230,6 +282,101 @@ export async function startFakePlatform(opts: FakePlatformOptions): Promise<Fake
     } catch {
       return null;
     }
+  }
+
+  function addonRows() {
+    const a = fake.addons;
+    const o = a.offer;
+    const rows: Json[] = [
+      {
+        addonId: "app.primeforge.someoneelse/content",
+        kind: "content",
+        title: "Not this app's",
+        owned: true,
+        state: "owned",
+      },
+    ];
+    if (o) {
+      // another add-on of this same app, listed first: the app shows its content pack only
+      rows.push({
+        addonId: o.addonId.replace(/\/content$/, "/extra"),
+        kind: "extra",
+        title: "Another add-on of this app",
+        owned: true,
+        state: "owned",
+      });
+      const state = a.installing
+        ? "installing"
+        : a.installed
+          ? a.installed.version === o.version
+            ? "installed"
+            : "update"
+          : a.owned
+            ? "owned"
+            : "available";
+      rows.push({
+        addonId: o.addonId,
+        kind: "content",
+        title: o.title,
+        summary: "The tools and programs.",
+        summaryZh: "工具与程序。",
+        price: a.owned ? null : { display: "£1.99", free: false },
+        owned: a.owned,
+        latestVersion: o.version,
+        installedVersion: a.installed?.version ?? null,
+        updateAvailable: state === "update",
+        state,
+        ...(a.installing && { progress: { receivedBytes: 40, totalBytes: 100 } }),
+        productId: "prod-content",
+      });
+    }
+    return rows;
+  }
+
+  async function addonsRoute(req: IncomingMessage, res: ServerResponse, url: URL) {
+    const a = fake.addons;
+    if (!a.supported) return json(res, 404, { error: "not found" });
+    if (url.pathname === "/addons/v1" && req.method === "GET") {
+      a.lists++;
+      const body = { offline: a.offline, addons: addonRows() };
+      const etag = `"${createHash("sha256").update(JSON.stringify(body)).digest("hex").slice(0, 16)}"`;
+      if (req.headers["if-none-match"] === etag) {
+        res.writeHead(304, { etag });
+        return res.end();
+      }
+      res.writeHead(200, { "content-type": "application/json", etag, "cache-control": "no-store" });
+      return res.end(JSON.stringify(body));
+    }
+    if (url.pathname === "/addons/v1/installed" && req.method === "GET") {
+      a.installedCalls++;
+      if (a.failInstalled.has(a.installedCalls)) return json(res, 500, { error: "internal" });
+      const rows =
+        a.installed && a.offer
+          ? [{ addonId: a.offer.addonId, kind: "content", ...a.installed }]
+          : [];
+      return json(res, 200, { addons: rows });
+    }
+    const m = /^\/addons\/v1\/([^/]+)\/(install|update|get)$/.exec(url.pathname);
+    if (m && req.method === "POST") {
+      const id = decodeURIComponent(m[1] as string);
+      if (!a.offer || id !== a.offer.addonId) return json(res, 404, { error: "not_found" });
+      if (m[2] === "get") {
+        a.gets++;
+        return json(res, 202, { opened: true });
+      }
+      if (a.refuse) {
+        const r = a.refuse;
+        a.refuse = null;
+        return json(res, r.status, r.body);
+      }
+      if (a.offline) return json(res, 503, { error: "offline" });
+      if (!a.owned) return json(res, 409, { action: "get", productId: "prod-content" });
+      if (a.installing) return json(res, 202, { state: "installing" });
+      if (a.installed?.version === a.offer.version) return json(res, 200, { state: "installed" });
+      a.installing = { version: a.offer.version };
+      return json(res, 202, { state: "installing" });
+    }
+    return json(res, 404, { error: "not found" });
   }
 
   async function submit(req: IncomingMessage, res: ServerResponse) {
@@ -318,6 +465,7 @@ export async function startFakePlatform(opts: FakePlatformOptions): Promise<Fake
         });
       }
       if (url.pathname === "/ai/jobs" && req.method === "POST") return submit(req, res);
+      if (url.pathname.startsWith("/addons/")) return addonsRoute(req, res, url);
       if (m) {
         const id = decodeURIComponent(m[1] as string);
         const j = fake.jobs.get(id);

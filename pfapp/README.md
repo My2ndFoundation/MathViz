@@ -29,3 +29,12 @@ and stages `build/<t>/`: `.next/` (without `cache/`, `dev/`), `drizzle/`, `prime
 `scripts/build-mathviz.ts` takes it from there: frozen production install, checks, signing.
 `build/` is gitignored. `--allow-stale-icon` turns the preflight's stale-icon refusal into a warning; CI uses it
 (a web design-token change must not turn pfapp red), the signing build does not.
+
+**The development store.** Outside PrimeForge there is no `/addons/v1`, so Settings → Content
+pack and the empty state's one-click install show "needs PrimeForge". To try them, start the app
+with `MATHVIZ_FAKE_ADDONS=1 MATHVIZ_FAKE_ADDONS_DIR=<dir>` where `<dir>/content/` holds an
+unpacked content pack (`addon.json` + `payload/`; `bun tests/e2e/prepare.ts store <pfaddon> <dir>`
+writes one). `MATHVIZ_FAKE_ADDONS_INSTALL_MS` sets how long an install takes,
+`MATHVIZ_FAKE_ADDONS_PAID=content` makes it unowned (Get → the store-window note). A production
+build honours these only with `MATHVIZ_E2E=1` (the e2e harness), after Math Test Buddy's
+`MTB_FAKE_ADDONS` / `MTB_E2E` (`app/src/lib/addons/fake.ts`, `app/src/lib/server/context.ts`).
