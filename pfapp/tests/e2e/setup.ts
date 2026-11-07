@@ -1,25 +1,31 @@
 /**
- * E2E harness (a minimal version of what plan Task 12 extends): the BUILT app under `next start`
- * (production: the shell CSP without 'unsafe-eval', as PrimeForge runs it), MATHVIZ_TARGET=python,
- * on a free 127.0.0.1 port, with its own temp PRIMEFORGE_DATA_DIR. No PrimeForge platform: no
+ * E2E harness: the BUILT app (MATHVIZ_TARGET=python) started the way PrimeForge starts it —
+ * `node app/primeforge-entry.mjs` (in-process Next, production, the shell CSP without
+ * 'unsafe-eval'), on a free 127.0.0.1 port, with its own temp PRIMEFORGE_DATA_DIR and the
+ * PRIMEFORGE_* variables the platform sets. Without the fake platform there is no
  * PRIMEFORGE_API_URL, so the only content source is the manual import (what the empty state's
- * import writes). The Q&A spec starts its own app with the fake platform (startFakePlatform)
- * behind PRIMEFORGE_API_URL / _SECRET — the variables PrimeForge itself sets, so there is no
- * test-only switch in the app.
+ * import writes). The Q&A and python specs start their own app with the fake platform
+ * (startFakePlatform) behind PRIMEFORGE_API_URL / _SECRET — the variables PrimeForge itself sets,
+ * so there is no test-only switch in the app.
  *
  * globalSetup (default export): builds the app when .next is older than its sources, extracts the
  * python pack once (tests/e2e/prepare.ts, under Bun), and starts one app with the pack installed.
  * The specs read where it is from process.env (E2E_*). startApp() starts further apps (the empty
- * state).
+ * state, the restart on another port).
+ *
+ * E2E_PACK=<pack.json> uses that pack ({payload, catalog, pfaddon, version}, as `prepare.ts pack`
+ * prints) instead of extracting one — for negative controls run against a doctored copy.
  */
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 const PFAPP = path.resolve(__dirname, "..", "..");
 const NEXT = path.join(PFAPP, "node_modules", ".bin", "next");
+const ENTRY = path.join(PFAPP, "app", "primeforge-entry.mjs");
+const PYTHON_APP_ID = "app.primeforge.mathviz.python";
 
 export interface Pack {
   payload: string;
@@ -51,13 +57,21 @@ function newest(p: string): number {
   return m;
 }
 
-/** `next build` unless .next/BUILD_ID is newer than every source the build reads. */
+/** The target a build is for (scripts/build-local.ts STAMP; the entry checks it). */
+const STAMP = path.join(PFAPP, "app", ".next", "mathviz-target");
+
+/**
+ * `next build` for python unless .next is a python build (its stamp) newer than every source the
+ * build reads: `bun run build -- --target math` leaves a math build in app/.next.
+ */
 export function ensureBuilt(): void {
   let built = 0;
   try {
-    built = statSync(path.join(PFAPP, "app", ".next", "BUILD_ID")).mtimeMs;
+    if (readFileSync(STAMP, "utf8").trim() === "python") {
+      built = statSync(path.join(PFAPP, "app", ".next", "BUILD_ID")).mtimeMs;
+    }
   } catch {
-    // never built
+    // never built, or not stamped
   }
   const sources = Math.max(
     newest(path.join(PFAPP, "app", "src")),
@@ -71,9 +85,12 @@ export function ensureBuilt(): void {
     stdio: "inherit",
     env: { ...process.env, MATHVIZ_TARGET: "python" },
   });
+  writeFileSync(STAMP, "python\n");
 }
 
 export function preparePack(): Pack {
+  const given = process.env.E2E_PACK;
+  if (given) return JSON.parse(readFileSync(given, "utf8")) as Pack;
   return JSON.parse(bun(["tests/e2e/prepare.ts", "pack"])) as Pack;
 }
 
@@ -91,7 +108,7 @@ export function freePort(): Promise<number> {
 async function waitReady(base: string, child: ChildProcess, ms = 60_000): Promise<void> {
   const until = Date.now() + ms;
   while (Date.now() < until) {
-    if (child.exitCode !== null) throw new Error(`next start exited with ${child.exitCode}`);
+    if (child.exitCode !== null) throw new Error(`the entry exited with ${child.exitCode}`);
     try {
       const res = await fetch(`${base}/api/session-token`);
       if (res.ok) return;
@@ -140,36 +157,38 @@ export function startFakePlatform(appPort: number): Promise<FakePlatformProcess>
 }
 
 /**
- * Start the built app on a free port (or `port`); `pfaddon` (if given) is installed first as a
- * manual import; `env` is added to the app's environment (the fake platform's PRIMEFORGE_API_*).
+ * Start the built app through its PrimeForge entry on a free port (or `port`), with a fresh temp
+ * data directory (or `dataDir`, to start again on the same data); `pfaddon` (if given) is
+ * installed first as a manual import; `env` is added to the app's environment (the fake
+ * platform's PRIMEFORGE_API_*). `stop()` sends SIGTERM, as PrimeForge does, and waits for exit.
  */
 export async function startApp({
   pfaddon,
   port: wanted,
+  dataDir: givenDataDir,
   env: extra = {},
 }: {
   pfaddon?: string;
   port?: number;
+  dataDir?: string;
   env?: Record<string, string>;
 } = {}): Promise<RunningApp> {
-  const dataDir = mkdtempSync(path.join(tmpdir(), "pfapp-e2e-data-"));
+  const dataDir = givenDataDir ?? mkdtempSync(path.join(tmpdir(), "pfapp-e2e-data-"));
   if (pfaddon) bun(["tests/e2e/prepare.ts", "install", pfaddon, dataDir]);
   const port = wanted ?? (await freePort());
   const base = `http://127.0.0.1:${port}`;
-  const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (v !== undefined && !k.startsWith("PRIMEFORGE_")) env[k] = v;
-  }
-  Object.assign(env, {
-    NODE_ENV: "production",
-    MATHVIZ_TARGET: "python",
+  // what PrimeForge gives an app: the PRIMEFORGE_* variables, HOME and TMPDIR — no PATH, no
+  // NODE_ENV, no MATHVIZ_TARGET (the entry derives the target from PRIMEFORGE_APP_ID)
+  const env: Record<string, string> = {
+    HOME: process.env.HOME ?? tmpdir(),
+    TMPDIR: tmpdir(),
+    PRIMEFORGE_APP_ID: PYTHON_APP_ID,
     PRIMEFORGE_DATA_DIR: dataDir,
     PRIMEFORGE_PORT: String(port),
-    PORT: String(port),
     ...extra,
-  });
-  const child: ChildProcess = spawn(NEXT, ["start", "app", "-H", "127.0.0.1", "-p", String(port)], {
-    cwd: PFAPP,
+  };
+  const child: ChildProcess = spawn(process.execPath, [ENTRY], {
+    cwd: tmpdir(),
     env: env as NodeJS.ProcessEnv,
     stdio: ["ignore", "pipe", "pipe"],
   });

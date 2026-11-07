@@ -11,6 +11,10 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const nextConfig = {
   outputFileTracingRoot: path.resolve(root, ".."),
   experimental: {
+    // As MathTestBuddy: a PrimeForge install directory is a signed, read-only artefact, so nothing
+    // may write to .next at run time. The only cost of not flushing ISR results to disk is
+    // regenerating a page on the first visit after a restart.
+    isrFlushToDisk: false,
     // With a proxy (src/proxy.ts) Next buffers each request body for it and silently truncates it
     // past this size (default 10 MB). The content-pack import takes up to 64 MiB plus multipart
     // framing (lib/http/body bodyLimitFor), so the buffer must be larger than the route's limit.
