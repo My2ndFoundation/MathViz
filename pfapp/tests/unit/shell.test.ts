@@ -100,6 +100,19 @@ describe("upgrading a database indexed before catalog_groups existed", () => {
   });
 });
 
+describe("a catalog with no items", () => {
+  test("is refused at index time; the old index stays", () => {
+    const dir = join(tmp("shell-noitems"), "payload");
+    cpSync(PAYLOAD, dir, { recursive: true });
+    writeFileSync(join(dir, "catalog.json"), JSON.stringify({ ...PACK, items: [], groups: [] }));
+    const d = openDb(tmp("shell-noitems-db"), { migrationsDir: MIGRATIONS });
+    expect(ensureIndexed(d, { dir: PAYLOAD, version: "1.0.0", source: "manual" })).toBe(true);
+    expect(() => ensureIndexed(d, { dir, version: "1.0.1", source: "manual" })).toThrow();
+    expect(loadCatalog(d).flatMap((g) => g.items).length).toBe(PACK.items.length);
+    d.close();
+  });
+});
+
 describe("filterCatalog (⌘K)", () => {
   test("an empty query keeps everything", () => {
     const all = loadCatalog(db).flatMap((g) => g.items);

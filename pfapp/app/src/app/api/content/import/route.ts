@@ -1,10 +1,11 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { importAddonFile } from "@/lib/content/manual-import";
+import { importAddonFile, MANUAL_DIR } from "@/lib/content/manual-import";
 import { AddonFileError } from "@/lib/content/pfaddon";
 import { bodyLimitFor, IMPORT_PATH, readRaw, UPLOAD_FILE_LIMIT } from "@/lib/http/body";
 import { HttpError } from "@/lib/http/errors";
 import { route } from "@/lib/http/route";
+import { firstToolId } from "@/lib/server/catalog";
 
 /**
  * POST /api/content/import (multipart, field `file`, CSRF): the empty state's "import a local
@@ -47,9 +48,14 @@ export const POST = route("POST", async (app, { req }) => {
   }
   app.log("content.imported", { version });
   const found = await app.refreshContent();
-  if (!found) throw new HttpError(422, "bad_addon");
-  const first = app.db
-    .prepare("SELECT id FROM catalog_items ORDER BY ord LIMIT 1")
-    .get<{ id: string }>();
-  return { body: { version: found.version, firstTool: first?.id ?? null } };
+  const first = found ? firstToolId(app.db) : null;
+  if (!found || !first) {
+    // the import is the pack findContent chose, and it would not index: take it out again so it
+    // does not stay installed (and shadow an older usable import), then look once more
+    rmSync(path.join(app.dataDir, MANUAL_DIR, version), { recursive: true, force: true });
+    app.log("content.import_unusable", { version });
+    await app.refreshContent();
+    throw new HttpError(422, "bad_addon");
+  }
+  return { body: { version: found.version, firstTool: first } };
 });

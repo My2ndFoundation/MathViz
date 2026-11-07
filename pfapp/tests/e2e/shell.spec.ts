@@ -193,6 +193,26 @@ test("⌘K filters by tag and opens the chosen tool", async ({ page }) => {
   await expect(page.getByTestId("cmdk")).toHaveCount(0);
 });
 
+test("a collapsed sidebar is inert (out of the tab order); the edge button brings it back", async ({
+  page,
+}) => {
+  const first = ordered()[0];
+  if (!first) throw new Error("empty pack");
+  await page.goto(`${base()}/en/tool/${first.id}`);
+  const nav = page.getByTestId("sidebar");
+  await expect(nav).not.toHaveAttribute("inert");
+  await nav.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(nav).toHaveAttribute("inert", "");
+  // Tab from the top of the page never lands on a sidebar link
+  for (let i = 0; i < 5; i++) {
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() => !!document.activeElement?.closest("nav"))).toBe(false);
+  }
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+  await expect(nav).not.toHaveAttribute("inert");
+  await page.evaluate(() => localStorage.removeItem("pfapp-sidebar"));
+});
+
 test.describe("no content pack", () => {
   let empty: RunningApp;
   test.beforeAll(async () => {

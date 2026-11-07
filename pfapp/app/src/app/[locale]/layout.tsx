@@ -26,12 +26,14 @@ export default async function LocaleLayout(props: LayoutProps<"/[locale]">) {
   const app = await getAppContext();
   const t = MESSAGES[locale];
   const content = app.content;
+  // the shell needs tools to list; a pack without catalog rows renders bare, like no pack
+  const groups = content ? loadCatalog(app.db) : [];
   return (
     <html lang={locale === "zh" ? "zh-CN" : "en"}>
       <body>
-        {content ? (
+        {content && groups.length ? (
           <Shell
-            groups={loadCatalog(app.db)}
+            groups={groups}
             locale={locale}
             appName={{ eyebrow: "MathViz", name: app.target.name[locale] }}
             text={{

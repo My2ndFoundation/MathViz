@@ -1,8 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import Empty from "../../app/src/app/[locale]/empty/page";
+import LocaleHome from "../../app/src/app/[locale]/page";
 import { POST as importContent } from "../../app/src/app/api/content/import/route";
 import { GET as getRoot } from "../../app/src/app/route";
+import { MANUAL_DIR } from "../../app/src/lib/content/manual-import";
 import { migrationsDir } from "../../app/src/lib/db/open";
 import { bodyLimitFor } from "../../app/src/lib/http/body";
 import { CSRF_HEADER } from "../../app/src/lib/http/guard";
@@ -25,12 +28,16 @@ let PAYLOAD = "";
 let PACK: { items: { id: string; order: number }[]; groups: { id: string }[] };
 const opened: AppContext[] = [];
 
+const dataDirOf = new Map<AppContext, string>();
+
 async function fresh(): Promise<AppContext> {
+  const dir = tmp("shell-routes");
   const c = await createAppContext(
-    { PRIMEFORGE_DATA_DIR: tmp("shell-routes"), MATHVIZ_TARGET: "python" },
+    { PRIMEFORGE_DATA_DIR: dir, MATHVIZ_TARGET: "python" },
     { migrationsDir: MIGRATIONS },
   );
   opened.push(c);
+  dataDirOf.set(c, dir);
   setAppContext(c);
   return c;
 }
@@ -175,4 +182,79 @@ describe("POST /api/content/import", () => {
     );
     expect(res.status).toBe(413);
   });
+});
+
+/** The python payload with an empty catalog (no items, no groups). */
+function emptyCatalogPayload(): string {
+  const dir = join(tmp("empty-payload"), "payload");
+  cpSync(PAYLOAD, dir, { recursive: true });
+  const cat = JSON.parse(readFileSync(join(dir, "catalog.json"), "utf8"));
+  writeFileSync(join(dir, "catalog.json"), JSON.stringify({ ...cat, items: [], groups: [] }));
+  return dir;
+}
+
+/** What a server component did: the redirect it threw (its target), or "rendered". */
+async function outcome(page: () => Promise<unknown>): Promise<string> {
+  try {
+    await page();
+    return "rendered";
+  } catch (e) {
+    const digest = (e as { digest?: unknown }).digest;
+    if (typeof digest === "string" && digest.startsWith("NEXT_REDIRECT")) {
+      return `redirect ${digest.split(";")[2]}`;
+    }
+    throw e;
+  }
+}
+
+const params = (locale: string) => ({
+  params: Promise.resolve({ locale }),
+  searchParams: Promise.resolve({}),
+});
+
+describe("a content pack with no tools", () => {
+  const send = (c: AppContext, file: string) => {
+    const form = new FormData();
+    form.append("file", new Blob([new Uint8Array(readFileSync(file))]), "content.pfaddon");
+    return importContent(
+      req("/api/content/import", {
+        method: "POST",
+        body: form,
+        headers: { [CSRF_HEADER]: c.csrfToken },
+      }),
+    );
+  };
+
+  test("importing it → 422 bad_addon, and it is not left installed", async () => {
+    const c = await fresh();
+    const res = await send(c, buildPfaddon(emptyCatalogPayload(), PY.appId, "2.0.0"));
+    expect(res.status).toBe(422);
+    expect((await res.json()).error.code).toBe("bad_addon");
+    expect(c.content).toBeNull();
+    expect(existsSync(join(dataDirOf.get(c) as string, MANUAL_DIR, "2.0.0"))).toBe(false);
+  }, 30_000);
+
+  test("over a usable import: refused and removed, and the older pack serves again", async () => {
+    const c = await fresh();
+    expect((await send(c, buildPfaddon(PAYLOAD, PY.appId, "1.0.0"))).status).toBe(200);
+    const res = await send(c, buildPfaddon(emptyCatalogPayload(), PY.appId, "2.0.0"));
+    expect(res.status).toBe(422);
+    expect(c.content?.version).toBe("1.0.0");
+    expect(existsSync(join(dataDirOf.get(c) as string, MANUAL_DIR, "2.0.0"))).toBe(false);
+  }, 60_000);
+
+  test("a pack without catalog rows: `/<l>` → /<l>/empty, and the empty page renders (no loop)", async () => {
+    const c = await fresh();
+    expect((await send(c, buildPfaddon(PAYLOAD, PY.appId, "1.0.0"))).status).toBe(200);
+    // with a usable pack both ends agree on the tool
+    expect(await outcome(() => Empty(params("en") as never))).toBe("redirect /en");
+    expect(await outcome(() => LocaleHome(params("en") as never))).toMatch(
+      /^redirect \/en\/tool\//,
+    );
+    // the rows gone by some other route: content is still non-null
+    c.db.exec("DELETE FROM catalog_items");
+    expect(c.content).not.toBeNull();
+    expect(await outcome(() => LocaleHome(params("en") as never))).toBe("redirect /en/empty");
+    expect(await outcome(() => Empty(params("en") as never))).toBe("rendered");
+  }, 60_000);
 });

@@ -25,21 +25,24 @@ import { type FoundContent, isRegularFile } from "./installed";
 const bilingual = z.object({ en: z.string(), zh: z.string() });
 
 const catalogSchema = z.object({
-  items: z.array(
-    z.object({
-      id: z.string().min(1),
-      file: z.string().min(1),
-      group: z.string(),
-      groupLabel: bilingual,
-      order: z.number().int(),
-      accent: z.string(),
-      version: z.string(),
-      title: bilingual,
-      kicker: bilingual.optional(),
-      desc: bilingual.optional(),
-      tag: bilingual.optional(),
-    }),
-  ),
+  items: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        file: z.string().min(1),
+        group: z.string(),
+        groupLabel: bilingual,
+        order: z.number().int(),
+        accent: z.string(),
+        version: z.string(),
+        title: bilingual,
+        kicker: bilingual.optional(),
+        desc: bilingual.optional(),
+        tag: bilingual.optional(),
+      }),
+    )
+    // a pack with no tools is refused at index time: the shell would have nothing to open
+    .min(1),
   /** The web navigation page's group order and labels (absent: first appearance among items). */
   groups: z.array(z.object({ id: z.string().min(1), label: bilingual })).optional(),
 });

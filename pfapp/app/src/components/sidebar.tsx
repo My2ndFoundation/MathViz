@@ -8,6 +8,15 @@ import type { Locale } from "@/lib/i18n/locale";
 import { accentColor, CommandK } from "./command-k";
 import { LangSwitch } from "./lang-switch";
 
+/** A path segment decoded; a malformed `%` escape stays as it is instead of throwing. */
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
 export interface ShellText {
   search: string;
   searchPlaceholder: string;
@@ -40,7 +49,7 @@ export function Shell({
   children: ReactNode;
 }) {
   const pathname = usePathname();
-  const current = decodeURIComponent(pathname.match(/^\/[^/]+\/tool\/([^/]+)/)?.[1] ?? "");
+  const current = safeDecode(pathname.match(/^\/[^/]+\/tool\/([^/]+)/)?.[1] ?? "");
   const [collapsed, setCollapsed] = useState(false);
   const [searching, setSearching] = useState(false);
   const onOpenChange = useCallback((o: boolean) => setSearching(o), []);
@@ -64,7 +73,8 @@ export function Shell({
 
   return (
     <div className="shell" data-collapsed={collapsed}>
-      <nav className="sidebar" aria-label={appName.name} data-testid="sidebar">
+      {/* inert when collapsed: its links leave the tab order and the accessibility tree */}
+      <nav className="sidebar" aria-label={appName.name} data-testid="sidebar" inert={collapsed}>
         <div className="sb-head">
           <Link href={`/${locale}`} className="brand no-underline">
             <span className="eyebrow">{appName.eyebrow}</span>

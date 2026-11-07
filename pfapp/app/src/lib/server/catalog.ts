@@ -10,6 +10,14 @@ export { filterCatalog } from "../catalog";
  * client sidebar as props.
  */
 
+/** The first tool in registry order; null when the catalog is empty (no pack, or none indexed). */
+export function firstToolId(db: Db): string | null {
+  return (
+    db.prepare("SELECT id FROM catalog_items ORDER BY ord LIMIT 1").get<{ id: string }>()?.id ??
+    null
+  );
+}
+
 interface ItemRow {
   id: string;
   grp: string;
