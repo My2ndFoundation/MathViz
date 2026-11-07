@@ -280,6 +280,8 @@ describe("an engine that does not follow the rules", () => {
     expect(r.job.error).toBe(NEEDS_BLANK_DONE);
     expect(r.job.error).toBe("needs-blank-done");
     expect(r.messages.map((m) => m.role)).toEqual(["user"]);
+    // our job ended, so the platform's is cancelled too
+    expect(f.cancels).toEqual([r.job.platform_job_id as string]);
   });
 
   test("the same paste is accepted once the student has had that blank filled in", async () => {
@@ -436,6 +438,42 @@ describe("the library workflow", () => {
     const { ctx: c, fake: f } = await start(agents);
     const r = await ask(c, f, "library", [{ type: "library", id: "all" }], null);
     expect(callsTo(r.calls, "mv_submit_answer")[0]?.text).toBe(LEAK_REFUSAL);
+  });
+});
+
+describe("tickets are bound to their job", () => {
+  test("job A's ticket presented on job B's path is refused", async () => {
+    let otherTicket = "";
+    let seen: ToolCall[] = [];
+    const agents = {
+      ask: (async ({ call, callT }) => {
+        seen = [
+          await call("mv_get_task", { ticket: otherTicket }),
+          await call("mv_submit_answer", { ticket: otherTicket, text: "hi", citations: [] }),
+        ];
+        await callT("mv_submit_answer", { text: "看看提示。", citations: [] });
+      }) as Agent,
+    };
+    const { ctx: c, fake: f } = await start(agents);
+    f.sim.hold.add("ask");
+    const a = await submitJob(
+      c.db,
+      { threadId: newThread(c, "A"), workflow: "ask", subjects: [], pyState: null },
+      { platform: c.ai.platform },
+    );
+    otherTicket =
+      c.db.prepare("SELECT ticket FROM ai_jobs WHERE id = ?").get<AiJobRow>(a.jobId)?.ticket ?? "";
+    expect(otherTicket).toMatch(/^[0-9a-f]{64}$/);
+    f.sim.hold.delete("ask");
+    const r = await ask(c, f, "ask", [{ type: "program", id: PROG }], blankState());
+    expect(seen.map((x) => [x.isError, x.text])).toEqual([
+      [true, "Refused: unknown ticket. Use the ticket from your instruction."],
+      [true, "Refused: unknown ticket. Use the ticket from your instruction."],
+    ]);
+    expect(r.job.status).toBe("completed");
+    // job A is untouched: still open, no answer
+    const rowA = c.db.prepare("SELECT status FROM ai_jobs WHERE id = ?").get<AiJobRow>(a.jobId);
+    expect(rowA?.status).toBe("queued");
   });
 });
 

@@ -4,7 +4,7 @@
 // then a segment that must name an open job (else 404), the body left unread for the transport.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { type Now, segmentJob } from "../ai/jobs";
+import { type JobsPlatform, type Now, segmentJob } from "../ai/jobs";
 import type { Db } from "../db/handle";
 import { tokensMatch } from "../http/guard";
 import { registerTools } from "./tools";
@@ -24,6 +24,8 @@ export interface McpRequestContext {
   /** The <segment> of /api/mcp/t/<segment>, or null for /api/mcp. */
   segment: string | null;
   now?: Now;
+  /** Lets the tools cancel a platform job they ended (needs-blank-done). */
+  platform?: JobsPlatform | null;
 }
 
 function bearerToken(req: Request): string | undefined {
@@ -40,7 +42,14 @@ const json = (status: number, body: unknown) =>
 /** Handle one MCP request. The request body must not have been consumed. */
 export async function handleMcpRequest(
   req: Request,
-  { db, contentDir, mcpToken, segment, now = () => new Date().toISOString() }: McpRequestContext,
+  {
+    db,
+    contentDir,
+    mcpToken,
+    segment,
+    now = () => new Date().toISOString(),
+    platform = null,
+  }: McpRequestContext,
 ): Promise<Response> {
   if (!tokensMatch(bearerToken(req), mcpToken)) {
     return json(401, { error: { code: "unauthorised", message: "error.unauthorised" } });
@@ -52,7 +61,7 @@ export async function handleMcpRequest(
     jobId = job.id;
   }
   const server = new McpServer(MCP_SERVER_INFO);
-  registerTools(server, { db, contentDir, jobId, now });
+  registerTools(server, { db, contentDir, jobId, now, platform });
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,

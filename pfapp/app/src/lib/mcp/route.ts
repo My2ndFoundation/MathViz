@@ -44,5 +44,6 @@ export async function serveMcp(
     contentDir: app.content?.dir ?? null,
     mcpToken: app.ai.mcpToken,
     segment,
+    platform: app.ai.platform,
   });
 }

@@ -7,7 +7,15 @@ import type { Db } from "../db/handle";
 import type { AiJobRow } from "../db/schema";
 import type { PyState } from "../py-state";
 import { inputOf, parseBlankSubject, readProgramsOf, type Subject } from "./jobs";
-import { allowedBlanks, blanksOf, forbiddenAnswerLines, isAllowed } from "./leak";
+import {
+  allowedBlanks,
+  type Blank,
+  blanksOf,
+  forbiddenAnswerLines,
+  isAllowed,
+  leakCheck,
+  normalize,
+} from "./leak";
 
 /**
  * The material an agent is handed for a python program (design §7.4): title, notes, lineNotes and
@@ -64,6 +72,30 @@ export interface ProgramContext {
   source: string;
 }
 
+/** What a hint tier that would give a hidden blank's answer away is replaced by. */
+export const HINT_WITHHELD = "(hint withheld)";
+const TIER_SEP = " || ";
+
+/**
+ * A hidden blank's hint tiers, with every tier that contains one of the blank's own answer lines
+ * (leakCheck) replaced by HINT_WITHHELD: the agent may use the hints, so it must never be handed
+ * one it cannot repeat (stack-array-top-pointer's `push` hint spells out `self.top = self.top + 1`).
+ */
+export function safeTiers(hint: string | null, blank: Blank, hidden: boolean): string[] {
+  if (hint === null) return [];
+  const tiers = hint.split(TIER_SEP);
+  if (!hidden) return tiers;
+  const own = blank.body.map(normalize).filter((l) => l !== "");
+  return tiers.map((t) => (leakCheck(t, own) === null ? t : HINT_WITHHELD));
+}
+
+/** The `# >>> BLANK` directive line with its hint / hintEn tiers passed through safeTiers. */
+function safeDirective(line: string, blank: Blank): string {
+  return line.replace(/\b(hint|hintEn)="([^"]*)"/g, (_m, name: string, value: string) => {
+    return `${name}="${safeTiers(value, blank, true).join(TIER_SEP)}"`;
+  });
+}
+
 export const placeholder = (indent: string, id: string) => `${indent}# ___ (blank ${id}) ___`;
 const indentOf = (lines: readonly string[]) =>
   /^\s*/.exec(lines.find((l) => l.trim() !== "") ?? "")?.[0] ?? "";
@@ -92,7 +124,8 @@ export function programContext(program: Program, allowed: "all" | Set<string>): 
     const out: string[] = [];
     let i = 0;
     for (const b of hidden) {
-      out.push(...lines.slice(i, b.open + 1));
+      out.push(...lines.slice(i, b.open));
+      out.push(safeDirective(lines[b.open] as string, b));
       out.push(placeholder(indentOf(b.body), b.id));
       i = b.close; // the `# <<< BLANK` line itself is kept
     }
@@ -118,7 +151,14 @@ export function programContext(program: Program, allowed: "all" | Set<string>): 
       ...(program.notes?.en ? { en: program.notes.en.map((n) => redactProse(n, long)) } : {}),
       ...(program.notes?.zh ? { zh: program.notes.zh.map((n) => redactProse(n, long)) } : {}),
     },
-    lineNotes: (program.lineNotes ?? []).filter((n) => !hiddenLines.has(n.at.trim())),
+    // notes on hidden lines go; the text of the rest is redacted like the other prose
+    lineNotes: (program.lineNotes ?? [])
+      .filter((n) => !hiddenLines.has(n.at.trim()))
+      .map((n) => ({
+        ...n,
+        ...(n.en !== undefined ? { en: redactProse(n.en, long) } : {}),
+        ...(n.zh !== undefined ? { zh: redactProse(n.zh, long) } : {}),
+      })),
     tags: program.tags ?? [],
     source,
   };
@@ -160,13 +200,15 @@ function blankMaterial(dir: string, subjectId: string, pyState: PyState | null) 
   );
   const from = Math.max(0, at - BLANK_EXCERPT_LINES);
   const to = Math.min(lines.length, at + BLANK_EXCERPT_LINES + 2);
-  const tiers = (h: string | null) => (h === null ? [] : h.split(" || "));
   return {
     program: { id: program.id, libraryId: programLibraryId(program.id), title: ctx.title },
     blank: {
       id: blank.id,
       answerShown: isAllowed(allowed, blank.id),
-      hints: { zh: tiers(blank.hint.zh), en: tiers(blank.hint.en) },
+      hints: {
+        zh: safeTiers(blank.hint.zh, blank, !isAllowed(allowed, blank.id)),
+        en: safeTiers(blank.hint.en, blank, !isAllowed(allowed, blank.id)),
+      },
     },
     excerpt: lines.slice(from, to).join("\n"),
     lineNotes: ctx.lineNotes,
@@ -235,6 +277,7 @@ export function buildTask(db: Db, dir: string | null, job: AiJobRow) {
     rules: [
       "A line `# ___ (blank <id>) ___` stands for code the student has not uncovered yet: never write that code out.",
       "The `hint` / `hintEn` of a `# >>> BLANK` line are tiered hints (split at ` || `) the student can already open; you may use them.",
+      "A tier shown as `(hint withheld)` would give the hidden code away and is not available to you.",
       "Cite library items by id (program:<id>, tool:<id>).",
     ],
   };

@@ -18,7 +18,7 @@ import type { Db } from "../db/handle";
 import { newId } from "../db/ids";
 import type { AiJobRow } from "../db/schema";
 import type { Locale } from "../i18n/locale";
-import type { PyState } from "../py-state";
+import { type PyState, toPyState } from "../py-state";
 
 /**
  * AI jobs (design §7.4): one per question sent to the platform. The agent behind a job reaches the
@@ -97,7 +97,8 @@ export function inputOf(job: Pick<AiJobRow, "input">): JobInput {
     const v = JSON.parse(job.input) as Partial<JobInput>;
     return {
       subjects: Array.isArray(v.subjects) ? v.subjects : [],
-      pyState: v.pyState ?? null,
+      // re-checked on every read: a malformed state (a string `given`…) must not widen anything
+      pyState: toPyState(v.pyState),
       locale: v.locale === "zh" ? "zh" : "en",
     };
   } catch {

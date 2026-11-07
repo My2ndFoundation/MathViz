@@ -25,6 +25,16 @@ export function parsePyState(
   const m = d as Record<string, unknown>;
   if (m.type !== "mathviz/py-state" || m.v !== 1) return null;
   if (m.page !== page) return null;
+  return toPyState(m);
+}
+
+/**
+ * The PyState fields of `v`, checked as parsePyState checks them; null when any is wrong. Also how
+ * a stored state is read back (lib/ai/jobs inputOf): an invalid one counts as no state at all.
+ */
+export function toPyState(v: unknown): PyState | null {
+  if (typeof v !== "object" || v === null) return null;
+  const m = v as Record<string, unknown>;
   if (typeof m.progId !== "string") return null;
   if (typeof m.mode !== "string" || !MODES.includes(m.mode)) return null;
   if (m.blankId !== null && typeof m.blankId !== "string") return null;

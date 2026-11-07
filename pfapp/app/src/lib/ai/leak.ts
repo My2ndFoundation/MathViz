@@ -65,8 +65,57 @@ export function allowedBlanks(programId: string, pyState: PyState | null): "all"
 export const isAllowed = (allowed: "all" | Set<string>, blankId: string) =>
   allowed === "all" || allowed.has(blankId);
 
-/** All Unicode whitespace removed (JS `\s` covers U+3000, NBSP, tabs, line breaks…). */
-export const normalize = (s: string) => s.replace(/\s+/gu, "");
+const ENTITIES: Readonly<Record<string, string>> = Object.freeze({
+  "&lt;": "<",
+  "&gt;": ">",
+  "&amp;": "&",
+  "&quot;": '"',
+  "&#39;": "'",
+});
+
+/**
+ * The form both sides are compared in: NFKC (full-width punctuation → ASCII), the five common
+ * HTML entities decoded, Markdown backslash escapes undone (`\*` → `*`), then zero-width
+ * characters (U+200B–U+200D, U+2060, U+FEFF) and all Unicode whitespace removed. Each of those
+ * renders the same for the student, so none may be a way past the check.
+ */
+export const normalize = (s: string) =>
+  s
+    .normalize("NFKC")
+    .replace(/&(?:lt|gt|amp|quot|#39);/g, (e) => ENTITIES[e] ?? e)
+    .replace(/\\([!-/:-@[-`{-~])/g, "$1")
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/gu, "")
+    .replace(/\s+/gu, "");
+
+/** Python's keywords (hard, and the soft ones that start a statement). */
+const PY_KEYWORDS = new Set(
+  "False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield match case".split(
+    " ",
+  ),
+);
+const PY_KEYWORD_LIST = [...PY_KEYWORDS].sort((a, b) => b.length - a.length);
+
+/**
+ * Whether a normalised answer line is only Python keywords and punctuation (`break`, `else:`,
+ * `returnNone`): whitespace is gone, so the letters are split back into keywords (any split
+ * counts). Such a line is an ordinary word in prose — "use break here" — and is matched against
+ * whole reply lines only (controller ruling, Task 10 fix round 1).
+ */
+export function keywordOnly(normalised: string): boolean {
+  if (!/[A-Za-z]/.test(normalised)) return false;
+  if (/[0-9\u0080-\uFFFF]/u.test(normalised)) return false;
+  const runs = normalised.split(/[^A-Za-z_]+/).filter((r) => r !== "");
+  const splits = (w: string): boolean => {
+    const ok = new Array<boolean>(w.length + 1).fill(false);
+    ok[0] = true;
+    for (let i = 0; i < w.length; i++) {
+      if (!ok[i]) continue;
+      for (const k of PY_KEYWORD_LIST) if (w.startsWith(k, i)) ok[i + k.length] = true;
+    }
+    return ok[w.length] === true;
+  };
+  return runs.every(splits);
+}
 
 /** The answer lines of the blanks `allowed` does not cover, whitespace removed, distinct. */
 export function forbiddenAnswerLines(
@@ -86,14 +135,26 @@ export function forbiddenAnswerLines(
 }
 
 /**
- * The first forbidden line `text` contains once both have their whitespace removed, else null.
- * No length floor: a one-word answer line (`else:`, `break`) is checked like any other.
+ * The first forbidden line `text` gives away, else null; both sides normalised (normalize). A line
+ * of only keywords and punctuation (keywordOnly: `break`, `else:`) hits only when some line of the
+ * text equals it — with or without a trailing `#` comment; every other line hits as a substring
+ * anywhere in the text. No length floor.
  */
 export function leakCheck(text: string, forbidden: readonly string[]): string | null {
   const flat = normalize(text);
+  let lines: Set<string> | null = null;
   for (const f of forbidden) {
     const n = normalize(f);
-    if (n !== "" && flat.includes(n)) return f;
+    if (n === "") continue;
+    if (keywordOnly(n)) {
+      lines ??= new Set(
+        text.split(/\r?\n/).flatMap((l) => {
+          const a = normalize(l);
+          return [a, a.split("#")[0] as string];
+        }),
+      );
+      if (lines.has(n)) return f;
+    } else if (flat.includes(n)) return f;
   }
   return null;
 }

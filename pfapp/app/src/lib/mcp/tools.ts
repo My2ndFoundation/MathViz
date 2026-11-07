@@ -10,6 +10,7 @@ import { buildTask, forbiddenForJob, listGroups, readItem } from "../ai/context"
 import {
   acceptAnswer,
   inputOf,
+  type JobsPlatform,
   jobAcceptsCalls,
   MAX_ANSWER_CHARS,
   type Now,
@@ -100,12 +101,17 @@ export interface ToolContext {
   /** The job behind the request's /api/mcp/t/<segment>, or null (the static /api/mcp). */
   jobId: string | null;
   now: Now;
+  /** For cancelling a job that ended on our side (needs-blank-done); null outside PrimeForge. */
+  platform?: JobsPlatform | null;
 }
 
 export const SEARCH_LIMIT_MAX = 20;
 
 /** Register the five tools on an McpServer for one request. */
-export function registerTools(server: McpServer, { db, contentDir, jobId, now }: ToolContext) {
+export function registerTools(
+  server: McpServer,
+  { db, contentDir, jobId, now, platform = null }: ToolContext,
+) {
   const gate = (tool: ToolName, ticket?: unknown) =>
     authorise(db, jobId, tool, { ticket: ticket ?? undefined, now });
   const ticket = z.string().describe("The ticket from your instruction.");
@@ -211,6 +217,15 @@ export function registerTools(server: McpServer, { db, contentDir, jobId, now }:
       const out = acceptAnswer(db, g.job.id, { text: body, citations, leak }, { now });
       if (out.accepted) return reply("Accepted.");
       if (out.reason === "job_closed") return reply(REFUSALS.job_closed, true);
+      if (out.failed && g.job.platform_job_id && platform?.cancelJob) {
+        // our job has ended; stop the platform's too (POST /ai/jobs/:id/cancel), best effort —
+        // poll settles it either way
+        try {
+          await platform.cancelJob(g.job.platform_job_id);
+        } catch {
+          // the platform's own limits end it
+        }
+      }
       return reply(
         out.failed
           ? `${LEAK_REFUSAL}. This was the second refusal: the job has ended.`
