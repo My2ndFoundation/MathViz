@@ -4,16 +4,13 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
-import { gzipSync } from "node:zlib";
+import { basename, join } from "node:path";
 import type { InstalledAddon } from "../../app/src/lib/addons/client";
 import { ensureIndexed, stripBlanks } from "../../app/src/lib/content/index-builder";
 import { findContent } from "../../app/src/lib/content/installed";
@@ -22,15 +19,20 @@ import { searchLibrary } from "../../app/src/lib/content/search";
 import type { Db } from "../../app/src/lib/db/handle";
 import { migrationsDir, openDb } from "../../app/src/lib/db/open";
 import { loadTarget } from "../../app/src/lib/target";
-import { extract } from "../../extract/index";
+import {
+  addonJson as addonJsonFor,
+  buildPfaddon,
+  type Entry,
+  extractPayload,
+  tmp,
+  walk,
+} from "../helpers/content-fixtures";
 
 // Input: the real python payload, extracted from this checkout. Every expected count is derived
 // from that payload, never hard-coded: a page added to the web version must not turn this red.
-const MV = resolve(process.env.MATHVIZ_PATH ?? join(import.meta.dir, "../../.."));
 const PY = loadTarget("python");
 const APP_ID = PY.appId;
 const MIGRATIONS = migrationsDir(join(import.meta.dir, "..", ".."));
-const tmp = (tag: string) => mkdtempSync(join(tmpdir(), `pfapp-content-${tag}-`));
 
 let PAYLOAD = "";
 let ITEMS = 0;
@@ -38,9 +40,7 @@ let SOURCES = 0;
 const dbs: Db[] = [];
 
 beforeAll(async () => {
-  const out = tmp("payload");
-  await extract(PY, MV, out, { requireClean: false });
-  PAYLOAD = join(out, "payload");
+  PAYLOAD = await extractPayload("python");
   ITEMS = (JSON.parse(readFileSync(join(PAYLOAD, "catalog.json"), "utf8")).items as unknown[])
     .length;
   SOURCES = readdirSync(join(PAYLOAD, "source")).filter((f) => f.endsWith(".json")).length;
@@ -59,16 +59,7 @@ function freshDb(): Db {
 // ---- fixtures: a store-installed add-on (PFD's layout) and a .pfaddon file ---------------------
 
 const addonJson = (version: string, over: Record<string, unknown> = {}) =>
-  JSON.stringify({
-    format: 1,
-    id: `${APP_ID}/content`,
-    appId: APP_ID,
-    version,
-    kind: "content",
-    title: "MathViz Python content",
-    unpackedBytes: 1024 * 1024 * 1024,
-    ...over,
-  });
+  addonJsonFor(APP_ID, version, { title: "MathViz Python content", ...over });
 
 /** PFD's app-installer layout under PRIMEFORGE_ADDONS_DIR (= <addonsRoot>/<appId>). */
 function storeInstall(addonsDir: string, version: string): InstalledAddon {
@@ -88,71 +79,9 @@ const fakeClient = (list: InstalledAddon[] | "unsupported") => ({
   installed: async () => list,
 });
 
-/** A raw ustar header: no path checks, any typeflag (so tests can build hostile archives). */
-function header(path: string, size: number, type: string, link = ""): Buffer {
-  const h = Buffer.alloc(512);
-  h.write(path, 0, 100, "utf8");
-  h.write("0000644\0", 100, 8, "latin1");
-  h.write("0000000\0", 108, 8, "latin1");
-  h.write("0000000\0", 116, 8, "latin1");
-  h.write(`${size.toString(8).padStart(11, "0")}\0`, 124, 12, "latin1");
-  h.write("00000000000\0", 136, 12, "latin1");
-  h.write(type, 156, 1, "latin1");
-  h.write(link, 157, 100, "utf8");
-  h.write("ustar\0", 257, 6, "latin1");
-  h.write("00", 263, 2, "latin1");
-  let sum = 0;
-  for (let i = 0; i < 512; i++) sum += i >= 148 && i < 156 ? 0x20 : (h[i] as number);
-  h.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148, 8, "latin1");
-  return h;
-}
-
-type Entry = { path: string; data?: Buffer; type?: string; link?: string };
-
-function tarOf(entries: Entry[]): Buffer {
-  const blocks: Buffer[] = [];
-  for (const e of entries) {
-    const data = e.data ?? Buffer.alloc(0);
-    blocks.push(header(e.path, data.length, e.type ?? (e.data ? "0" : "5"), e.link));
-    if (data.length) {
-      const padded = Buffer.alloc(Math.ceil(data.length / 512) * 512);
-      data.copy(padded);
-      blocks.push(padded);
-    }
-  }
-  blocks.push(Buffer.alloc(1024));
-  return Buffer.concat(blocks);
-}
-
-/** Payload-relative paths under dir, directories with a trailing slash, sorted. */
-function walk(dir: string, base = ""): string[] {
-  const out: string[] = [];
-  for (const e of readdirSync(join(dir, base), { withFileTypes: true })) {
-    const rel = base ? `${base}/${e.name}` : e.name;
-    if (e.isDirectory()) out.push(`${rel}/`, ...walk(dir, rel));
-    else out.push(rel);
-  }
-  return out.sort();
-}
-
 /** The real payload as a .pfaddon, plus optional extra (hostile) entries. */
-function pfaddon(version: string, over: Record<string, unknown> = {}, extra: Entry[] = []): string {
-  const entries: Entry[] = [
-    { path: "addon.json", data: Buffer.from(addonJson(version, over)) },
-    { path: "payload/" },
-  ];
-  for (const rel of walk(PAYLOAD)) {
-    entries.push(
-      rel.endsWith("/")
-        ? { path: `payload/${rel}` }
-        : { path: `payload/${rel}`, data: readFileSync(join(PAYLOAD, rel)) },
-    );
-  }
-  entries.push(...extra);
-  const file = join(tmp("pfaddon"), `content-${version}.pfaddon`);
-  writeFileSync(file, gzipSync(tarOf(entries)));
-  return file;
-}
+const pfaddon = (version: string, over: Record<string, unknown> = {}, extra: Entry[] = []) =>
+  buildPfaddon(PAYLOAD, APP_ID, version, over, extra);
 
 // ---- findContent ---------------------------------------------------------------------------------
 
