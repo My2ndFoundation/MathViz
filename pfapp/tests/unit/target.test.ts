@@ -4,8 +4,10 @@ import { loadTarget, type TargetId } from "../../app/src/lib/target";
 
 const IDS: TargetId[] = ["math", "chess", "crypto", "python"];
 const PORTS = [26454, 26455, 26456, 26457];
-const PFD_PARSER =
-  "/Users/nickma/Develop/darkhorseone/system/PrimeForge-Desktop/packages/app-contract/src/manifest.ts";
+const PFD_ROOT =
+  process.env.PRIMEFORGE_DESKTOP_PATH ??
+  "/Users/nickma/Develop/darkhorseone/system/PrimeForge-Desktop";
+const PFD_PARSER = `${PFD_ROOT}/packages/app-contract/src/manifest.ts`;
 
 const manifestText = (t: string) =>
   readFileSync(new URL(`../../targets/${t}/manifest.json`, import.meta.url), "utf8");
