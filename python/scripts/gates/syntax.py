@@ -485,3 +485,197 @@ process.stdout.write(JSON.stringify(out));
               f'挖空 id 与门的解析一致，clean() 行数与嵌入的 lines、'
               f'{len(page_sums)} 个工具的注册表 lines 一致；无 U+2028/U+2029/U+0085')
     return rc
+
+
+DOM_STUB = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dom_stub.js')
+BRIDGE_TYPE = 'mathviz/py-state'
+# 工具页手写区 getElementById 要找的四个元素（见骨架第二个脚本块）
+PAGE_IDS = ['stage', 'h1', 'verBadge', 'btnLang']
+
+
+def py_state_bridge_check() -> int:
+    """状态桥（engine py-1.4.0，pfapp 设计 §7.3）在**每个工具页的真实字节**上验一遍。
+
+    对 `all_tool_pages()`（含 `_skeleton.html`）逐页：取出内联 core 那个脚本块与手写区
+    那个脚本块，在 `vm` **裸 context** 里原样执行——全局对象就是 `dom_stub.js` 的假
+    window，所以页面的手写区真的去调 `PyInteract.mount({ …, page: TOOL.id })`。三个场景：
+
+      A. **没有父窗口**（`window.parent === window`，单独打开时的真实情形）：mount、切到
+         挖空、逐个聚焦输入框、点「填进去」、改一下那个框、切到临摹、换一题、回到读——
+         `postMessage` 一次都不许被调用。这是「单独打开时一行都不执行」的那半句承诺。
+      B. **有父窗口**：至少收到一条；每一条 `type === 'mathviz/py-state'`、`v === 1`、
+         `targetOrigin === location.origin`；第一条的 `page` 等于该页的 `TOOL.id`（手写区
+         那一行改漏了就是 null）、`progId` 是第一个程序、`mode === 'read'`；切到挖空后
+         最后一条报 `blank`。
+      C. **深链接**（本页有 ≥ 2 个程序时）：`?prog=<最后一个程序 id>` 打开，第一条消息的
+         `progId` 就是它。
+
+    一页都没验到 → 红（跑了个寂寞）。
+    """
+    pages = all_tool_pages()
+    if not pages:
+        print('ERROR: python/tools/ 下一个页面都没有——这道门跑了个寂寞', file=sys.stderr)
+        return 1
+    rc = 0
+    with tempfile.TemporaryDirectory() as td:
+        jobs = []
+        for page in pages:
+            text = read_text(page)
+            blocks = [m.group(1) for m in SCRIPT_RE.finditer(text)]
+            core = [b for b in blocks if '/* >>> GENERATED:INTERACT */' in b]
+            hand = [b for b in blocks if 'PyInteract.mount(' in b
+                    and '/* >>> GENERATED:INTERACT */' not in b]
+            if len(core) != 1 or len(hand) != 1:
+                print(f'ERROR: {page.name} 里找到 {len(core)} 个内联 core 脚本块、{len(hand)} 个'
+                      f'调用 PyInteract.mount( 的手写脚本块，各应恰好 1 个', file=sys.stderr)
+                rc = 1
+                continue
+            core_f = os.path.join(td, page.stem + '.core.js')
+            hand_f = os.path.join(td, page.stem + '.hand.js')
+            with open(core_f, 'w', encoding='utf-8') as fh:
+                fh.write(core[0])
+            with open(hand_f, 'w', encoding='utf-8') as fh:
+                fh.write(hand[0])
+            jobs.append({'page': page.name, 'core': core_f, 'hand': hand_f})
+
+        script = r'''
+const vm = require('vm'), fs = require('fs');
+const DOM = require(%s);
+const jobs = %s;
+const PAGE_IDS = %s;
+const TYPE = %s;
+const ORIGIN = 'http://127.0.0.1:8765';
+const out = [];
+
+function boot(job, search, parent) {
+  const win = DOM.makeWindow({ search: search, origin: ORIGIN, ids: PAGE_IDS });
+  if (parent) { win.parent = parent; }
+  win.setTimeout = setTimeout;
+  win.clearTimeout = clearTimeout;
+  vm.createContext(win);
+  if (typeof win.module !== 'undefined' || typeof win.require !== 'undefined') {
+    throw new Error('沙箱不干净：module/require 泄漏进来了，测的还是 node 分支');
+  }
+  vm.runInContext(fs.readFileSync(job.core, 'utf8'), win, { filename: job.page + ' (core)' });
+  vm.runInContext(fs.readFileSync(job.hand, 'utf8'), win, { filename: job.page + ' (手写区)' });
+  if (!win.ctl || typeof win.ctl.setMode !== 'function') {
+    throw new Error('手写区跑完了，全局里却没有 ctl（PyInteract.mount 没被调用？）');
+  }
+  return win;
+}
+function inputs(win) {
+  return win.document.body.findAll(function (n) {
+    return n.tagName === 'TEXTAREA' && /(^| )py-blank-in( |$)/.test(n.className);
+  });
+}
+function exercise(win) {
+  const ctl = win.ctl, progs = win.PROGRAMS || [];
+  ctl.setMode('blank');
+  const blanks = inputs(win);
+  blanks.forEach(function (ta) { ta.focus(); });
+  const label = win.PyInteract.ts('giveUp', 'en');
+  const fill = win.document.body.findAll(function (n) {
+    return n.tagName === 'BUTTON' && n.textContent === label;
+  });
+  if (fill.length) { fill[0].click(); }
+  const ta = inputs(win)[0];
+  if (ta) { ta.value = ta.value + ' '; ta.dispatch('input'); }
+  ctl.setMode('trace');
+  if (progs.length > 1) { ctl.setProgram(progs[1].id); }
+  ctl.setMode('read');
+  ctl.destroy();
+  return { blanks: blanks.length, fill: fill.length };
+}
+
+for (const job of jobs) {
+  const r = { page: job.page, errors: [] };
+  try {
+    /* A. 没有父窗口 */
+    const a = boot(job, '?lang=en', null);
+    r.tool = a.TOOL && a.TOOL.id;
+    r.programs = (a.PROGRAMS || []).map(function (p) { return p.id; });
+    const ex = exercise(a);
+    /* 每个程序至少一个空（blank_presence_check）：有程序却一个输入框都没摸到，
+       A 场景就只验了「切模式」，没验到聚焦 / 填进去 / 改动这三个触发点。 */
+    if (r.programs.length && (ex.blanks === 0 || ex.fill === 0)) {
+      r.errors.push('挖空模式下找到 ' + ex.blanks + ' 个输入框、' + ex.fill +
+                    ' 个「填进去」按钮——A 场景没驱动到挖空的触发点，验了个寂寞');
+    }
+    if (a.selfPosts.length !== 0) {
+      r.errors.push('没有父窗口时调用了 postMessage ' + a.selfPosts.length +
+                    ' 次（第一条：' + JSON.stringify(a.selfPosts[0].msg) + '）——单独打开时这座桥必须一行都不执行');
+    }
+    /* B. 有父窗口 */
+    const parent = DOM.makeParent();
+    const b = boot(job, '?lang=en', parent);
+    const posts = parent.posts;
+    if (!posts.length) {
+      r.errors.push('有父窗口时 mount 完成后一条消息都没收到');
+    } else {
+      const first = posts[0].msg;
+      posts.forEach(function (p, i) {
+        if (!p.msg || p.msg.type !== TYPE || p.msg.v !== 1) {
+          r.errors.push('第 ' + (i + 1) + ' 条消息 type/v 不对：' + JSON.stringify(p.msg));
+        }
+        if (p.target !== ORIGIN) {
+          r.errors.push('第 ' + (i + 1) + ' 条消息的 targetOrigin 是 ' + JSON.stringify(p.target) +
+                        '，应为 location.origin');
+        }
+      });
+      if (first.page !== r.tool) {
+        r.errors.push('第一条消息 page=' + JSON.stringify(first.page) + '，应为 TOOL.id=' +
+                      JSON.stringify(r.tool) + '（手写区的 PyInteract.mount({…}) 漏传 page: TOOL.id？）');
+      }
+      const want = r.programs.length ? r.programs[0] : null;
+      if (first.progId !== want || first.mode !== 'read' || first.blankId !== null ||
+          !Array.isArray(first.given) || first.given.length !== 0) {
+        r.errors.push('第一条消息应为 {progId:' + JSON.stringify(want) +
+                      ', mode:"read", blankId:null, given:[]}，实际 ' + JSON.stringify(first));
+      }
+      b.ctl.setMode('blank');
+      const lastMsg = posts[posts.length - 1].msg;
+      if (lastMsg.mode !== 'blank') {
+        r.errors.push('setMode("blank") 之后最后一条消息的 mode 是 ' + JSON.stringify(lastMsg.mode));
+      }
+    }
+    b.ctl.destroy();
+    r.posts = posts.length;
+    /* C. 深链接 */
+    if (r.programs.length > 1) {
+      const target = r.programs[r.programs.length - 1];
+      const p2 = DOM.makeParent();
+      const c = boot(job, '?lang=en&prog=' + encodeURIComponent(target), p2);
+      const got = p2.posts.length ? p2.posts[0].msg.progId : undefined;
+      if (got !== target) {
+        r.errors.push('?prog=' + target + ' 打开后第一条消息的 progId 是 ' + JSON.stringify(got));
+      }
+      c.ctl.destroy();
+      r.deep = true;
+    }
+  } catch (e) {
+    r.errors.push('装载 / 驱动页面时抛错：' + (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e));
+  }
+  out.push(r);
+}
+process.stdout.write(JSON.stringify(out));
+''' % (json.dumps(DOM_STUB), json.dumps(jobs), json.dumps(PAGE_IDS), json.dumps(BRIDGE_TYPE))
+        proc = run_node(script)
+
+    if proc.returncode != 0:
+        print('ERROR: 状态桥门的 node 驱动脚本失败：', file=sys.stderr)
+        print((proc.stderr or proc.stdout).strip(), file=sys.stderr)
+        return 1
+    got = json.loads(proc.stdout)
+    if not got:
+        print('ERROR: 一页都没验到——这道门跑了个寂寞', file=sys.stderr)
+        return 1
+    for r in got:
+        for err in r['errors']:
+            print(f'ERROR: {r["page"]} 状态桥：{err}', file=sys.stderr)
+            rc = 1
+    if rc == 0:
+        deep = sum(1 for r in got if r.get('deep'))
+        posts = sum(r.get('posts', 0) for r in got)
+        print(f'状态桥：{len(got)} 页在裸 vm 里装载真实脚本——无父窗口时 postMessage 0 次；'
+              f'有父窗口时共 {posts} 条消息形状、page、同源全对；{deep} 页 ?prog= 深链接选中')
+    return rc

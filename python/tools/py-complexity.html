@@ -29,13 +29,15 @@
      跟着改。版本号要在三处同步：注册表 python-tools.json 的 version、这里的
      tool-version meta、右上角的徽章——徽章直接读 meta（见第二个脚本块里的
      VERSION），所以它永远不需要单独改。 -->
-<meta name="tool-version" content="1.0.1">
-<meta name="tool-engine" content="py-1.3.2">
+<meta name="tool-version" content="1.1.0">
+<meta name="tool-engine" content="py-1.4.0">
 <!-- >>> GENERATED:FAVICON -->
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAA/1BMVEUUVrceN6YEl50nKYgDod8FapoEX3V6I+AEZ8gDbtxPFYdQIJ4DOTgCwv+GE8sFU1kDQDtmIL8pEVcGyrkDgdAAAABoKNkWCSwDSasAevQEGSgBqfc3F3QBs/paKNADJTUAa/SPG+pPIawCFRdzJuQDNUcDNlcEZcUAW/dGGY0lBzgjDEUBnPMDRIcQJVMCK0kyEmYCU7AHV4WiE/MOXLoEQ1sMedVSIqsHZY50FLoFNpdRHqkEhYdNDHYEOWwBgfYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADRsqliAAAAQHRSTlOjjpdhy2lM7KvNXYwU/74wGMUn+bkA/AuR/Qf5TPz4Df39rwP/GCKt/mwPGfNVIxc5lU7/pSnOnV+tdaV0RjX/bR25hAAAAVdJREFUeNqtk2d/gyAQh40rq7sFRECDK0Oz92jz/b9V/ZmYgCTpm/JCT+7hTu7+p4E/lvZPQGiasbw/bA5FwH9mzJf8GE9FwGWMEYGwcQc7MkAIMd3S/4NxpyMDhFkZMcOLfzpVgLFPsq/iI8F4ARwFSECSkUZujzHuAhUgSe5qrDR/VPgVIGMxiO3NbKYdj01wA2BWrFvLeLmxut3iMk5PAvzZq34qQ7I6vZ1eTeqFfShr4C7OEXYX4C30dftaRbc4owkRPvXDk9iHkZE/dg3jAoRhtcMjVQ9oMBA2ayhfMjCYz1+E36i16uuKor7nvHUlqEFRVXJbztPS7rdpX9Ek4rxemjCi6ZqmqA9F0X5zfj4WQC9P8EGNSSqpesuj4ioUwslN2aM6fC8SwODOXEyiiJYJbg/OHsJ2ACG9O1l5dAi94MHo0cjzpATKbO49jz4cXlRJAMAvD+ldcxDlRcsAAAAASUVORK5CYII=">
 <!-- <<< GENERATED:FAVICON -->
 <title>Complexity · 复杂度</title>
 <!-- 版本记录（changelog，新→旧）：
+     1.1.0  2026-11-07  可以用 ?prog=&lt;程序 id&gt; 直接打开某个程序；嵌在 PrimeForge 应用里时，
+                        会把当前的程序与模式告诉应用（engine py-1.4.0：只读状态桥）。
      1.0.1  2026-11-06  增长率表的 log2 一空，写法在第 1 级提示里钉死。 判定器（engine
                         py-1.3.2）：答案与标准答案行数不同时也比较代码块结构（新反馈 kind
                         block）。清理波：第 6 期账本 §十 第一、二组。
@@ -2183,8 +2185,10 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
    导出的纯函数：filterPrograms / copyPayload / requirementLine / hintAt /
    panelLineNotes / clearScope / variantsOf / blankFeedback / traceStates，以及分段临摹的
    chunkSegments / encodeChunkDraft / decodeChunkDraft / chunkDoneFlags / chunkTotals /
-   shouldSaveChunked / chunkTailFill / chunkResumedAny。
-   唯一带 DOM 的导出是 mount()，它在没有根节点时当场抛（node 下测得到这一条）。
+   shouldSaveChunked / chunkTailFill / chunkResumedAny，以及状态桥与深链接的
+   deepLinkProgId / stateMessage（engine py-1.4.0）。
+   唯一带 DOM 的导出是 mount()，它在没有根节点时当场抛（node 下测得到这一条）；
+   它真正装配起来的样子由 interact.test.js 末尾借 scripts/gates/dom_stub.js 的假 DOM 测。
 
    ── 剪贴板里只有纯源码 ──────────────────────────────────────────────
    `pip install numpy` 那行显示在按钮**旁边**，绝不进剪贴板：她复制完是要直接
@@ -3314,8 +3318,42 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
 
   var ACCENTS = { cyan: 1, rose: 1, violet: 1, emerald: 1, orange: 1 };
 
-  /* mount({ root, programs, lang, accent }) → controller
-     controller: { setMode, setProgram, setLang, destroy } */
+  /* ?prog=<程序 id> 深链接（engine py-1.4.0）：返回 search 里点名的、**且在 programs 里**
+     的那个 id；没写、写错、不在本页——一律 null，由调用方照旧取第一个，不报错。
+
+     手解析而不用 URLSearchParams：后者是宿主提供的全局，不是 JS 内建——门在 vm 裸
+     context 里跑这一段时它不存在。只认 `prog=` 这一个键，`+` 按表单编码当空格，
+     `%` 转义坏掉时（decodeURIComponent 抛）当没写。 */
+  function deepLinkProgId(search, programs) {
+    var m = /[?&]prog=([^&#]*)/.exec(typeof search === 'string' ? search : '');
+    if (!m) { return null; }
+    var id;
+    try { id = decodeURIComponent(m[1].replace(/\+/g, ' ')); } catch (e) { return null; }
+    var list = Array.isArray(programs) ? programs : [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].id === id) { return id; }
+    }
+    return null;
+  }
+
+  /* 状态桥的消息体（engine py-1.4.0）。形状是对 PrimeForge 外壳的**契约**，不要改：
+     { type: 'mathviz/py-state', v: 1, page, progId, mode, blankId, given }
+     blankId 只在挖空模式下有意义，别的模式一律 null；given 按「填进去」的先后排。 */
+  function stateMessage(page, S, blankId) {
+    return {
+      type: 'mathviz/py-state',
+      v: 1,
+      page: page,
+      progId: S.progId,
+      mode: S.mode,
+      blankId: S.mode === 'blank' ? blankId : null,
+      given: Object.keys(S.given)
+    };
+  }
+
+  /* mount({ root, programs, lang, accent, page }) → controller
+     controller: { setMode, setProgram, setLang, destroy }
+     page：工具页的 TOOL.id，只用来填状态桥消息的 page 字段；不传就是 null。 */
   function mount(opts) {
     opts = opts || {};
     var rootEl = opts.root;
@@ -3360,10 +3398,11 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     /* ---- 状态 ---- */
     var PROGRAMS = (opts.programs || []).slice();
     var prefs = St.getPrefs() || {};
+    var linked = deepLinkProgId(win && win.location ? win.location.search : '', PROGRAMS);
     var S = {
       lang: (opts.lang === 'en') ? 'en' : 'zh',
       mode: 'read',
-      progId: PROGRAMS.length ? PROGRAMS[0].id : null,
+      progId: linked || (PROGRAMS.length ? PROGRAMS[0].id : null),
       filters: (prefs.filters && typeof prefs.filters === 'object') ? prefs.filters : {},
       compareId: null,
       answers: {},
@@ -3387,6 +3426,23 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
                    之前一律不写存储，不因为打开页面、切一下段就把她的东西覆盖掉 */
       chunk: null
     };
+
+    /* ---- 状态桥（engine py-1.4.0，pfapp 设计 §7.3）----
+       嵌在 PrimeForge 应用的 iframe 里时，把「当前程序 / 模式 / 聚焦的空 / 已填入的空」
+       报给父窗口。**只发不收**：页面不监听 message，父窗口驱动不了它。
+       单独打开时 parent === window，判断在最前面，后面一行都不执行——行为与没有这座桥
+       时相同（py_state_bridge_check 在裸 vm 里断言 postMessage 从未被调用）。
+       targetOrigin 是本页自己的 origin：消息只给同源的外壳，跨源的父窗口收不到。
+       file:// 下 origin 是 'null'，postMessage 会因 targetOrigin 不合法而抛——try 接住，
+       桥不工作，页面照常。 */
+    var page = (typeof opts.page === 'string' && opts.page) ? opts.page : null;
+    var focusBlankId = null;
+    function emitState() {
+      if (!win || !win.parent || win.parent === win) { return; }
+      try {
+        win.parent.postMessage(stateMessage(page, S, focusBlankId), win.location.origin);
+      } catch (e) { /* 桥坏了不许带走页面 */ }
+    }
 
     /* ---- 骨架 ---- */
     ensureStyle(doc);
@@ -3609,9 +3665,12 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
       if (clearHitsCurrent(ids, S.progId)) {
         loadDrafts();
         S.run = null;
+        focusBlankId = null;
       }
       renderAll();
       toast(t('cleared', S.lang));
+      /* 清到当前这一题时 given 跟着草稿一起清空了，外壳得知道 */
+      emitState();
     }
 
     /* ================= 代码文档（读模式 / 对照）================= */
@@ -3768,8 +3827,13 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
           ta.className = ta.className.replace(/ ?py-given/, '');
           msg.className = 'py-msg';
           msg.textContent = '';
+          emitState();
         }
         saveBlank();
+      });
+      ta.addEventListener('focus', function () {
+        focusBlankId = b.id;
+        emitState();
       });
       ta.addEventListener('keydown', function (e) {
         if (e.key === 'Tab') {
@@ -3806,6 +3870,7 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
         msg.className = 'py-msg';
         msg.textContent = t('given', S.lang);
         saveBlank();
+        emitState();
       }));
       bar.appendChild(btn('py-btn', t('check', S.lang), function () { checkBlank(b); }));
 
@@ -4476,6 +4541,7 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
     function setMode(mode) {
       if (mode !== 'read' && mode !== 'blank' && mode !== 'trace') { return; }
       S.mode = mode;
+      focusBlankId = null;   /* 舞台整个重建，旧的输入框连同焦点都没了 */
       renderTopBar();
       renderStage();
       renderBottom();
@@ -4483,6 +4549,7 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
          不重渲的话按 2 切到挖空模式时，上一模式留在右侧的行注会原样挂着。 */
       renderPanel();
       if (mode === 'trace') { paintTrace(); }
+      emitState();
     }
 
     function setProgram(id) {
@@ -4493,7 +4560,9 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
       S.anchorLine = -1;
       loadDrafts();
       S.run = null;   /* 旧 run 属于上一题的参考 */
+      focusBlankId = null;
       renderAll();
+      emitState();
     }
 
     function setLang(lang) {
@@ -4562,6 +4631,7 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
 
     loadDrafts();
     renderAll();
+    emitState();
 
     return {
       setMode: setMode,
@@ -4580,6 +4650,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
 
   return {
     mount: mount,
+    deepLinkProgId: deepLinkProgId,
+    stateMessage: stateMessage,
     filterPrograms: filterPrograms,
     copyPayload: copyPayload,
     requirementLine: requirementLine,
@@ -5491,7 +5563,7 @@ if (typeof PyInteract === 'undefined' || typeof PyInteract.mount !== 'function')
     ? PyPrograms.programs : [];
 
   var ctl = PyInteract.mount({
-    root: stageEl, programs: PROGRAMS, lang: LANG, accent: TOOL.accent
+    root: stageEl, programs: PROGRAMS, lang: LANG, accent: TOOL.accent, page: TOOL.id
   });
 
   /* chrome 与面板分开刷：mount() 已经按 LANG 渲过一遍面板，载入时再调一次
