@@ -556,7 +556,8 @@ export const LIBRARY_GROUP = "library";
  * (the first message she wrote), the date of its newest saved answer, how many answers are saved,
  * how many questions she asked after the first saved one, what it is about (`subject`: the
  * program, else the tool, else the library), the catalog group that belongs to, and the page to
- * go back to (locale-less; null when the content no longer has it).
+ * go back to (locale-less; `/ask?thread=<id>` reopens a library conversation; null when the content
+ * no longer has it).
  */
 export interface NoteThreadView {
   id: string;
@@ -600,7 +601,7 @@ function noteThreadView(
   const kind = subject?.type === "library" ? "library" : subject?.programId ? "program" : "tool";
   let group: NoteThreadView["group"] = null;
   let href: string | null = null;
-  if (kind === "library") href = "/ask";
+  if (kind === "library") href = `/ask?thread=${encodeURIComponent(row.id)}`;
   const toolId = subject?.toolId ?? null;
   const tool = toolId
     ? db

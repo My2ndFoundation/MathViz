@@ -6,12 +6,45 @@
 // own CSS rather than a shadcn Sheet, each row links to where it was asked, and an open job has a
 // Cancel button (DELETE /api/jobs/:id) — beyond MTB, the student asked to be able to stop one.
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Locale } from "@/lib/i18n/locale";
 import { MESSAGES } from "@/lib/i18n/locale";
 import { api, errorText, OPEN_STATUSES } from "../qa/api";
 import { failureText } from "../qa/thread-view";
-import { type AiJobView, aiIndicator, notifyAiJobs, reasonText, useAiJobs } from "./use-ai-jobs";
+import {
+  type AiJobView,
+  aiIndicator,
+  notifyAiJobs,
+  reasonText,
+  useSharedAiJobs,
+} from "./use-ai-jobs";
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** Tab and Shift-Tab wrap inside the modal panel (review M4): nothing behind the scrim takes focus. */
+export function trapTab(e: ReactKeyboardEvent<HTMLElement>, box: HTMLElement | null) {
+  if (e.key !== "Tab" || !box) return;
+  const items = [...box.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+    (el) => el.getClientRects().length > 0,
+  );
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (!first || !last) {
+    e.preventDefault();
+    box.focus();
+    return;
+  }
+  const at = document.activeElement;
+  if (e.shiftKey && (at === first || at === box || !box.contains(at))) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && (at === last || !box.contains(at))) {
+    e.preventDefault();
+    first.focus();
+  }
+}
 
 const STATUS_KEY: Record<string, keyof (typeof MESSAGES)["en"]["aiQueue"]> = {
   queued: "statusQueued",
@@ -41,7 +74,7 @@ const when = (iso: string, locale: Locale) => {
 
 export function AiIndicator({ locale }: { locale: Locale }) {
   const t = MESSAGES[locale].aiQueue;
-  const { data, refresh } = useAiJobs();
+  const { data, failed, refresh } = useSharedAiJobs();
   const [open, setOpen] = useState(false);
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
@@ -67,7 +100,7 @@ export function AiIndicator({ locale }: { locale: Locale }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
-  const { tone, active, reason } = aiIndicator(data);
+  const { tone, active, reason } = aiIndicator(data, failed);
   const state = { ok: t.toneOk, paused: t.tonePaused, off: t.toneOff, unknown: t.toneUnknown }[
     tone
   ];
@@ -165,83 +198,89 @@ export function AiIndicator({ locale }: { locale: Locale }) {
           {active}
         </span>
       </button>
-      {open ? (
-        <div className="aiq-scrim">
-          {/* a click outside the panel closes it */}
-          <button
-            type="button"
-            className="aiq-outside"
-            data-testid="ai-queue-outside"
-            tabIndex={-1}
-            aria-label={t.close}
-            onClick={() => setOpen(false)}
-          />
-          <div
-            ref={panel}
-            className="aiq"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="aiq-title"
-            tabIndex={-1}
-            data-testid="ai-queue"
-          >
-            <div className="aiq-head">
-              <h2 id="aiq-title">{t.title}</h2>
+      {/* in document.body, above everything the shell positions (the Ask tab, the collapse edge,
+          the narrow sidebar), whatever stacking context the top bar makes (review I3) */}
+      {open
+        ? createPortal(
+            <div className="aiq-scrim" data-testid="ai-queue-scrim">
+              {/* a click outside the panel closes it */}
               <button
                 type="button"
-                className="iconbtn"
+                className="aiq-outside"
+                data-testid="ai-queue-outside"
+                tabIndex={-1}
                 aria-label={t.close}
-                title={t.close}
                 onClick={() => setOpen(false)}
+              />
+              <div
+                ref={panel}
+                className="aiq"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="aiq-title"
+                tabIndex={-1}
+                data-testid="ai-queue"
+                onKeyDown={(e) => trapTab(e, panel.current)}
               >
-                ✕
-              </button>
-            </div>
-            <p className="aiq-sentence" data-testid="ai-queue-status">
-              {state}
-              {why ? ` — ${why}` : null}
-            </p>
-            <div className="aiq-body">
-              <section>
-                <h3>{t.active}</h3>
-                {data?.active.length ? (
-                  <ul data-testid="ai-queue-active">{data.active.map(row)}</ul>
-                ) : (
-                  <p className="muted small">{t.noActive}</p>
-                )}
-                {cancelError ? (
-                  <p className="small err" role="alert">
-                    {cancelError}
-                  </p>
-                ) : null}
-              </section>
-              <section>
-                <h3>{t.recent}</h3>
-                {data?.recent.length ? (
-                  <ul data-testid="ai-queue-recent">{data.recent.map(row)}</ul>
-                ) : (
-                  <p className="muted small">{t.noRecent}</p>
-                )}
-              </section>
-              <Link
-                href={`/${locale}/settings#ai`}
-                className="aiq-settings"
-                data-testid="ai-queue-settings"
-                onClick={(e) => {
-                  setOpen(false);
-                  // already on Settings: a hash-only Link updates history without a hashchange
-                  if (window.location.pathname === `/${locale}/settings`) {
-                    e.preventDefault();
-                    window.location.hash = "ai";
-                  }
-                }}
-              >
-                {t.settings}
-              </Link>
-            </div>
-          </div>
-        </div>
-      ) : null}
+                <div className="aiq-head">
+                  <h2 id="aiq-title">{t.title}</h2>
+                  <button
+                    type="button"
+                    className="iconbtn"
+                    aria-label={t.close}
+                    title={t.close}
+                    onClick={() => setOpen(false)}
+                  >
+                    ✕
+                  </button>
+                </div>
+                <p className="aiq-sentence" data-testid="ai-queue-status">
+                  {state}
+                  {why ? ` — ${why}` : null}
+                </p>
+                <div className="aiq-body">
+                  <section>
+                    <h3>{t.active}</h3>
+                    {data?.active.length ? (
+                      <ul data-testid="ai-queue-active">{data.active.map(row)}</ul>
+                    ) : (
+                      <p className="muted small">{t.noActive}</p>
+                    )}
+                    {cancelError ? (
+                      <p className="small err" role="alert">
+                        {cancelError}
+                      </p>
+                    ) : null}
+                  </section>
+                  <section>
+                    <h3>{t.recent}</h3>
+                    {data?.recent.length ? (
+                      <ul data-testid="ai-queue-recent">{data.recent.map(row)}</ul>
+                    ) : (
+                      <p className="muted small">{t.noRecent}</p>
+                    )}
+                  </section>
+                  <Link
+                    href={`/${locale}/settings#ai`}
+                    className="aiq-settings"
+                    data-testid="ai-queue-settings"
+                    onClick={(e) => {
+                      setOpen(false);
+                      // already on Settings: a hash-only Link updates history without a hashchange
+                      if (window.location.pathname === `/${locale}/settings`) {
+                        e.preventDefault();
+                        window.location.hash = "ai";
+                      }
+                    }}
+                  >
+                    {t.settings}
+                  </Link>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </>
   );
 }

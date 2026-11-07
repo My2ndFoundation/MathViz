@@ -977,7 +977,7 @@ describe("GET /api/notes/threads (the notes page: one row per conversation)", ()
     expect(all.body.threads.map((t: Json) => t.id)).toEqual([l.id, b.id, a.id]);
     expect(all.body.groups).toEqual({ [progGroup]: 1, [group]: 1, library: 1 });
     const lib = all.body.threads[0];
-    expect(lib).toMatchObject({ kind: "library", group: null, href: "/ask" });
+    expect(lib).toMatchObject({ kind: "library", group: null, href: `/ask?thread=${l.id}` });
     expect(all.body.threads[1]).toMatchObject({ kind: "tool", href: `/tool/${tool}` });
     const ids = async (g: string) =>
       (await list(`group=${encodeURIComponent(g)}`)).body.threads.map((t: Json) => t.id);

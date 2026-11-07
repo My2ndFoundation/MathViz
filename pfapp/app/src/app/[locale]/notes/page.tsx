@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import { Suspense } from "react";
 import { NotesView } from "@/components/qa/notes-view";
 import { isLocale } from "@/lib/i18n/locale";
 import { loadCatalog } from "@/lib/server/catalog";
@@ -17,8 +16,7 @@ export default async function NotesPage(props: PageProps<"/[locale]/notes">) {
   const app = await getAppContext();
   const groups = loadCatalog(app.db).map((g) => ({ id: g.id, label: g.label }));
   return (
-    <Suspense>
-      <NotesView locale={locale} groups={groups} />
-    </Suspense>
+    // no Suspense: the page is dynamic, so useSearchParams renders on the server as it is
+    <NotesView locale={locale} groups={groups} />
   );
 }

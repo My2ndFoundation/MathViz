@@ -1,20 +1,51 @@
 "use client";
-import { useId, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useId, useState } from "react";
 import type { Locale } from "@/lib/i18n/locale";
 import { MESSAGES } from "@/lib/i18n/locale";
 import { ThreadView } from "./thread-view";
 import { useThread } from "./use-thread";
 
+/** `?thread=` in place (Next's router follows the native history calls). */
+function setThreadParam(id: string | null) {
+  const u = new URL(window.location.href);
+  if (id) u.searchParams.set("thread", id);
+  else u.searchParams.delete("thread");
+  window.history.replaceState(null, "", `${u.pathname}${u.search}`);
+}
+
 /**
  * "Ask the whole library" (design §7.5): a `library` question; the tutor searches this app's
  * tools and programs and cites what it used, each citation a link to that page in this app.
+ * `?thread=<id>` reopens that library conversation (the notes page's "open" link) and follow-ups
+ * continue it; the URL follows the conversation shown, so a reload keeps it.
  */
 export function LibraryAsk({ locale }: { locale: Locale }) {
   const t = MESSAGES[locale].qa;
   const inputId = useId();
   const [text, setText] = useState("");
-  const { thread, thinking, sending, failure, send, cancel, saveNote, reset } = useThread(locale);
+  const { thread, thinking, sending, failure, send, cancel, saveNote, reset, open } =
+    useThread(locale);
   const busy = thinking || sending;
+  const wanted = useSearchParams().get("thread");
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only the id in the URL on arrival
+  useEffect(() => {
+    if (wanted) void open(wanted);
+  }, [open]);
+  // a conversation that is not about the library cannot be continued here: start a new one
+  useEffect(() => {
+    if (thread && !thread.subjects.some((s) => s.type === "library")) {
+      reset();
+      setThreadParam(null);
+    } else if (thread && new URL(window.location.href).searchParams.get("thread") !== thread.id) {
+      setThreadParam(thread.id);
+    }
+  }, [thread, reset]);
+  const startOver = () => {
+    reset();
+    setThreadParam(null);
+  };
 
   const go = async () => {
     const message = text.trim();
@@ -69,7 +100,7 @@ export function LibraryAsk({ locale }: { locale: Locale }) {
             {t.libraryAsk}
           </button>
           {thread ? (
-            <button type="button" className="chip" data-testid="ask-new" onClick={reset}>
+            <button type="button" className="chip" data-testid="ask-new" onClick={startOver}>
               {t.newThread}
             </button>
           ) : null}

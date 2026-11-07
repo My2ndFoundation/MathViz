@@ -79,8 +79,8 @@ function setThreadParam(id: string | null, how: "push" | "replace") {
 /**
  * Notes (design §7.4), two panes: on the left the conversations that have saved answers, one row
  * each (GET /api/notes/threads), searchable and filtered by catalog group; on the right the one in
- * `?thread=` — its messages, the saved answers marked, the ones before the first saved answer
- * folded away — with a follow-up box that continues the same conversation (so it shows in the
+ * `?thread=` — its messages, the saved answers marked, the ones before the question the first
+ * saved answer replied to folded away — with a follow-up box that continues the same conversation (so it shows in the
  * tool page's ask panel too), "Open the exercise" and Delete (its notes, not the conversation).
  * Under 760 px one pane at a time.
  */
@@ -291,8 +291,11 @@ function NoteDetail({
   }, [thinking, onChanged]);
 
   const messages = thread?.messages ?? [];
+  // folded: what comes before the question the first saved answer replied to (that question stays)
   const firstSaved = messages.findIndex((m) => m.noteId !== null);
-  const earlier = firstSaved > 0 ? firstSaved : 0;
+  const asked =
+    firstSaved > 0 && messages[firstSaved - 1]?.role === "user" ? firstSaved - 1 : firstSaved;
+  const earlier = asked > 0 ? asked : 0;
   const from = showEarlier ? 0 : earlier;
   const library = !!thread?.subjects.some((s) => s.type === "library");
   const busy = thinking || sending;

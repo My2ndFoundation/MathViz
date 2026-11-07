@@ -104,34 +104,37 @@ test("a saved answer is one row; earlier messages fold; a follow-up is answered 
   await expect(detail.getByTestId("notes-subject")).toContainText("Program:");
   await expect(rows.first()).toBeVisible();
 
-  // before the first saved answer: folded behind a toggle (question, answer, question)
+  // before the question the first saved answer replied to: folded behind a toggle (Q1, A1);
+  // that question itself stays in view above its answer
   const shown = detail.getByTestId("qa-message");
-  await expect(shown).toHaveCount(1);
-  await expect(shown.first()).toHaveAttribute("data-saved", "true");
-  await expect(shown.first()).toContainText("Saved answer");
+  await expect(shown).toHaveCount(2);
+  await expect(shown.first()).toHaveAttribute("data-role", "user");
+  await expect(shown.first()).toHaveText(/Second question, saved\?/);
+  await expect(shown.nth(1)).toHaveAttribute("data-saved", "true");
+  await expect(shown.nth(1)).toContainText("Saved answer");
   const earlier = detail.getByTestId("notes-earlier");
-  await expect(earlier).toHaveText("Show 3 earlier messages");
+  await expect(earlier).toHaveText("Show 2 earlier messages");
   await earlier.click();
   await expect(shown).toHaveCount(4);
   await expect(shown.first()).toContainText("First question, not saved?");
   await earlier.click();
-  await expect(shown).toHaveCount(1);
+  await expect(shown).toHaveCount(2);
 
   // a follow-up continues the same conversation, answered in place with a Save control
   await detail.getByTestId("notes-followup-input").fill("A follow-up from the notes page?");
   await detail.getByTestId("notes-followup-submit").click();
-  await expect(shown).toHaveCount(3, { timeout: 30_000 });
+  await expect(shown).toHaveCount(4, { timeout: 30_000 });
   await expect(detail.getByTestId("thinking")).toHaveCount(0);
-  await expect(shown.nth(1)).toHaveText(/A follow-up from the notes page\?/);
-  await expect(shown.nth(2)).toContainText(ANSWER);
-  await expect(shown.nth(2).getByTestId("save-note")).toBeVisible();
+  await expect(shown.nth(2)).toHaveText(/A follow-up from the notes page\?/);
+  await expect(shown.nth(3)).toContainText(ANSWER);
+  await expect(shown.nth(3).getByTestId("save-note")).toBeVisible();
   await expect(rows.first().getByTestId("notes-row-followups")).toHaveText("1 follow-up");
   await shot(page, "notes-wide.png");
 
   // reload keeps the selection
   await page.reload();
   await expect(page.getByTestId("notes-detail")).toHaveAttribute("data-id", threadId);
-  await expect(page.getByTestId("notes-detail").getByTestId("qa-message")).toHaveCount(3);
+  await expect(page.getByTestId("notes-detail").getByTestId("qa-message")).toHaveCount(4);
 
   // "Open the exercise": the program in its tool, whose ask panel shows the follow-up
   const open = page.getByTestId("notes-open");
@@ -156,8 +159,10 @@ test("a narrow window shows one pane at a time: list, then the conversation with
   await page.goto(`${app.base}/en/notes`);
   // a narrow window's sidebar floats over the stage until it is collapsed (the shell's own rule)
   await page.getByTestId("sidebar").getByRole("button", { name: "Collapse sidebar" }).click();
-  const list = page.getByTestId("notes-list-pane");
-  const detail = page.getByTestId("notes-detail-pane");
+  // inside the stage: while the page streams in, Next keeps a hidden copy of it outside the shell
+  const stage = page.getByTestId("stage");
+  const list = stage.getByTestId("notes-list-pane");
+  const detail = stage.getByTestId("notes-detail-pane");
   await expect(list).toBeVisible();
   await expect(detail).toBeHidden();
   await page.getByTestId("notes-row").first().click();
@@ -190,4 +195,46 @@ test("Delete asks first, removes the notes, and keeps the conversation", async (
   const t = (await res.json()) as { messages: { noteId: string | null }[] };
   expect(t.messages.length).toBe(6);
   expect(t.messages.every((m) => m.noteId === null)).toBe(true);
+});
+
+test("a library conversation: Open lands on Ask the library with it reopened, and a follow-up there continues it", async ({
+  page,
+}) => {
+  await page.goto(`${app.base}/en/ask`);
+  await page.getByTestId("library-input").fill("Where is Fahrenheit converted?");
+  await page.getByTestId("library-submit").click();
+  const answers = page.locator('[data-testid=qa-message][data-role="assistant"]');
+  await expect(answers).toHaveCount(1, { timeout: 30_000 });
+  await expect(page.getByTestId("thinking")).toHaveCount(0);
+  // the page's URL follows its conversation
+  await expect(page).toHaveURL(/\/en\/ask\?thread=[^&]+$/);
+  await answers.first().getByTestId("save-note").click();
+  await expect(answers.first().getByTestId("note-saved")).toBeVisible();
+
+  await page.goto(`${app.base}/en/notes`);
+  await expect(page.getByTestId("notes-row")).toHaveCount(1);
+  const threadId = await page.getByTestId("notes-row").first().getAttribute("data-id");
+  await expect(page.getByTestId("notes-subject")).toHaveText("The whole library");
+  const open = page.getByTestId("notes-open");
+  await expect(open).toHaveText("Open “Ask the whole library”");
+  await expect(open).toHaveAttribute("href", `/en/ask?thread=${threadId}`);
+  await open.click();
+  await expect(page).toHaveURL(`${app.base}/en/ask?thread=${threadId}`);
+  const users = page.locator('[data-testid=qa-message][data-role="user"]');
+  await expect(users).toHaveCount(1);
+  await expect(users.first()).toHaveText(/Where is Fahrenheit converted\?/);
+
+  await page.getByTestId("library-input").fill("And a follow-up on the library page?");
+  await page.getByTestId("library-submit").click();
+  await expect(answers).toHaveCount(2, { timeout: 30_000 });
+  await expect(users).toHaveCount(2);
+  const res = await page.request.get(`${app.base}/api/threads/${threadId}`);
+  const t = (await res.json()) as { messages: { role: string }[] };
+  expect(t.messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+  // a reload keeps it; "New conversation" leaves it
+  await page.reload();
+  await expect(users).toHaveCount(2);
+  await page.getByTestId("ask-new").click();
+  await expect(page).toHaveURL(`${app.base}/en/ask`);
+  await expect(users).toHaveCount(0);
 });
