@@ -28,6 +28,7 @@ export interface EngineChoice {
   effort?: string;
 }
 
+/** One entry of GET /ai/engines, as the platform reports it. */
 export interface EngineInfo {
   engine?: unknown;
   granted?: unknown;
@@ -39,22 +40,14 @@ export interface EngineInfo {
  * The engine preference every job is sent with (design §4 item 11, §7.6): Claude first, Codex when
  * Claude cannot run it. The platform runs the first entry that is granted and usable; Codex is
  * granted only by the person, in Desktop. With neither usable the submit is refused with the
- * platform's code (engine_not_granted / engine_unavailable), which the job records as its error.
+ * platform's code (engine_not_granted / engine_unavailable), which the job records as its error
+ * and the panel turns into the clear guidance §7.6 asks for (MESSAGES.error.engine_*). No
+ * pre-check of /ai/engines: the platform's refusal is the one authority on what may run.
  */
 export const ENGINE_PREFERENCE: readonly EngineChoice[] = Object.freeze([
   Object.freeze({ engine: "claude" }),
   Object.freeze({ engine: "codex" }),
 ]);
-
-/** Whether an /ai/engines list has Codex granted and usable. */
-export function codexUsable(engines: unknown): boolean {
-  return (
-    Array.isArray(engines) &&
-    engines.some(
-      (e: EngineInfo | null) => e?.engine === "codex" && e.granted === true && e.usable === true,
-    )
-  );
-}
 
 export interface SubmitSpec {
   workflow: string;

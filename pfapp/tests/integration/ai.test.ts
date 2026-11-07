@@ -32,7 +32,13 @@ import type { PyState } from "../../app/src/lib/py-state";
 import { startAi } from "../../app/src/lib/server/ai";
 import { type AppContext, createAppContext, setAppContext } from "../../app/src/lib/server/context";
 import { loadTarget } from "../../app/src/lib/target";
-import { buildPfaddon, extractPayload, tmp } from "../helpers/content-fixtures";
+import {
+  answerLines,
+  buildPfaddon,
+  extractPayload,
+  pickBlankProgram,
+  tmp,
+} from "../helpers/content-fixtures";
 import {
   type Agent,
   type FakePlatform,
@@ -45,14 +51,16 @@ import {
  * AI jobs end to end over real HTTP and real MCP: the app's MCP route handler served on a loopback
  * port, the fake platform's scripted agents connecting to it the way the platform points an engine
  * at a job's one-time path. The content is the real python payload from this checkout (manual
- * import); which lines a blank holds is read from the program source, never hard-coded.
+ * import); the program is chosen by shape (pickBlankProgram), never by id, and which lines a blank
+ * holds is read from its source, never hard-coded.
  */
 
 setDefaultTimeout(60_000);
 
 const PY = loadTarget("python");
 const MIGRATIONS = migrationsDir(join(import.meta.dir, "..", ".."));
-const PROG = "celsius-to-fahrenheit";
+let PROG = "";
+let PROG_TOOL = "";
 
 let PAYLOAD = "";
 let ADDON = "";
@@ -158,9 +166,10 @@ const callsTo = (calls: ToolCall[], tool: string) => calls.filter((c) => c.tool 
 beforeAll(async () => {
   PAYLOAD = await extractPayload("python");
   ADDON = buildPfaddon(PAYLOAD, PY.appId, "1.0.0");
-  const program = loadProgram(PAYLOAD, PROG);
-  if (!program) throw new Error(`${PROG} is not in the payload`);
-  ANSWERS = blanksOf(program.source).flatMap((b) => b.body.filter((l) => l.trim() !== ""));
+  const program = pickBlankProgram(PAYLOAD);
+  PROG = program.id;
+  PROG_TOOL = program.tool as string;
+  ANSWERS = blanksOf(program.source).flatMap(answerLines);
   FIRST_ANSWER = ANSWERS[0] as string;
   expect(ANSWERS.length).toBeGreaterThanOrEqual(2);
 }, 120_000);
@@ -197,7 +206,7 @@ describe("workflow limits match the manifest", () => {
 
 describe("a well-behaved engine", () => {
   test("the answer lands in messages; only citations present in the library survive", async () => {
-    const tool = "py-basics";
+    const tool = PROG_TOOL;
     const agents = {
       ask: (async ({ callT }) =>
         callT("mv_submit_answer", {
@@ -330,7 +339,7 @@ describe("an engine that does not follow the rules", () => {
     );
     const task = JSON.parse(callsTo(r.calls, "mv_get_task")[0]?.text ?? "{}");
     expect(task.subjects[0].blank.answerShown).toBe(false);
-    expect(task.subjects[0].blank.hints.zh.length).toBe(2);
+    expect(task.subjects[0].blank.hints.zh.length).toBe(owner?.hint.zh?.split(" || ").length);
     expect(task.subjects[0].excerpt).toContain(`# ___ (blank ${owner?.id}) ___`);
     expect(task.subjects[0].excerpt).not.toContain(FIRST_ANSWER.trim());
     expect([r.job.status, r.job.error]).toEqual(["failed", NEEDS_BLANK_DONE]);

@@ -12,7 +12,8 @@ bun run check           # lint + typecheck + unit + integration
 bun run check:content   # 内容门：四个目标的提取 vs 网页版（见根 CLAUDE.md「pfapp/」）
 bun run test:e2e        # Playwright: the built python app through its PrimeForge entry
 bun run build -- --target python   # → build/python/, a PrimeForge package root (below)
-bun run icons           # regenerate targets/*/icon.svg (tests/unit/icons.test.ts checks them)
+bun run icons           # regenerate targets/*/icon.svg (the build preflight refuses a stale one;
+                        # tests/unit/icons.test.ts checks the committed SVGs against the icon rules)
 ```
 
 **Entry.** PrimeForge runs `primeforge-entry.mjs` (`app/primeforge-entry.mjs`) with cwd = the
@@ -26,4 +27,5 @@ and stages `build/<t>/`: `.next/` (without `cache/`, `dev/`), `drizzle/`, `prime
 `next.config.mjs`, `package.json` (its `version` set to the target manifest's), `bun.lock`,
 `public/` (when `app/public` exists), `manifest.json`, `icon.svg`. PrimeForge-Desktop's
 `scripts/build-mathviz.ts` takes it from there: frozen production install, checks, signing.
-`build/` is gitignored.
+`build/` is gitignored. `--allow-stale-icon` turns the preflight's stale-icon refusal into a warning; CI uses it
+(a web design-token change must not turn pfapp red), the signing build does not.

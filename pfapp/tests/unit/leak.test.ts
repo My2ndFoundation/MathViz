@@ -19,26 +19,40 @@ import {
 } from "../../app/src/lib/ai/leak";
 import { REDACTED } from "../../app/src/lib/content/index-builder";
 import type { PyState } from "../../app/src/lib/py-state";
-import { extractPayload } from "../helpers/content-fixtures";
+import {
+  answerLines,
+  extractPayload,
+  pickBlankProgram,
+  pickSelfRevealingHint,
+} from "../helpers/content-fixtures";
 
 /**
- * The anti-leak rules (design §7.4) on a real python program from this checkout's payload:
- * celsius-to-fahrenheit has two blanks (`formula`, `round-to-int`), each with a lineNote anchored
- * on its answer line. What the blanks hold is read from the source itself, never hard-coded.
+ * The anti-leak rules (design §7.4) on a real python program from this checkout's payload, chosen
+ * by shape (pickBlankProgram: two or more blanks, each with a lineNote anchored on its answer
+ * line), never by id: a content wave that re-blanks one program must not turn this red. What the
+ * blanks hold is read from the source itself, never hard-coded. A (first blank) and B (second)
+ * stand for its blank ids.
  */
 
-const PROG = "celsius-to-fahrenheit";
+let PROG = "";
+let A = "";
+let B = "";
 let PAYLOAD = "";
 let program: Program;
 let answers: Map<string, string[]>;
 
 beforeAll(async () => {
   PAYLOAD = await extractPayload("python");
-  program = loadProgram(PAYLOAD, PROG) as Program;
-  answers = new Map(
-    blanksOf(program.source).map((b) => [b.id, b.body.filter((l) => l.trim() !== "")]),
-  );
+  program = pickBlankProgram(PAYLOAD);
+  PROG = program.id;
+  const blanks = blanksOf(program.source);
+  answers = new Map(blanks.map((b) => [b.id, answerLines(b)]));
+  A = blanks[0]?.id as string;
+  B = blanks[1]?.id as string;
 }, 60_000);
+
+const others = (id: string) => [...answers].filter(([k]) => k !== id).flatMap(([, v]) => v);
+const indentOf = (l: string) => /^\s*/.exec(l)?.[0] ?? "";
 
 const lineNoteAts = (ctx: ReturnType<typeof programContext>) => ctx.lineNotes.map((n) => n.at);
 
@@ -52,10 +66,10 @@ describe("allowedBlanks", () => {
     const s = allowedBlanks(PROG, {
       progId: PROG,
       mode: "blank",
-      blankId: "formula",
-      given: ["formula"],
+      blankId: A,
+      given: [A],
     });
-    expect(s).toEqual(new Set(["formula"]));
+    expect(s).toEqual(new Set([A]));
     expect(allowedBlanks(PROG, { progId: PROG, mode: "trace", blankId: null, given: [] })).toEqual(
       new Set(),
     );
@@ -66,14 +80,14 @@ describe("allowedBlanks", () => {
       allowedBlanks(PROG, { progId: "other", mode: "read", blankId: null, given: [] }),
     ).toEqual(new Set());
     expect(
-      allowedBlanks(PROG, { progId: "other", mode: "blank", blankId: null, given: ["formula"] }),
+      allowedBlanks(PROG, { progId: "other", mode: "blank", blankId: null, given: [A] }),
     ).toEqual(new Set());
   });
 });
 
 describe("programContext", () => {
-  test("the program has two blanks, each with a lineNote on its answer line", () => {
-    expect([...answers.keys()].sort()).toEqual(["formula", "round-to-int"]);
+  test("the program has two or more blanks, each with a lineNote on its answer line", () => {
+    expect(answers.size).toBeGreaterThanOrEqual(2);
     const ats = (program.lineNotes ?? []).map((n) => n.at);
     for (const lines of answers.values()) expect(lines.some((l) => ats.includes(l))).toBe(true);
   });
@@ -87,26 +101,26 @@ describe("programContext", () => {
       }
     }
     expect(ctx.lineNotes).toEqual([]);
-    expect(ctx.source).toContain("    # ___ (blank formula) ___");
-    expect(ctx.source).toContain("    # ___ (blank round-to-int) ___");
-    // the hints stay: the directive lines are what the student is shown as tiered hints
-    expect(ctx.source).toMatch(/# >>> BLANK id=formula .*hint="/);
+    for (const [id, lines] of answers) {
+      expect(ctx.source).toContain(`${indentOf(lines[0] as string)}# ___ (blank ${id}) ___`);
+      // the hints stay: the directive lines are what the student is shown as tiered hints
+      expect(ctx.source).toMatch(new RegExp(`# >>> BLANK id=${id} .*hint="`));
+    }
     expect(ctx.title.en).toBeTruthy();
     expect(ctx.notes.en?.length).toBeGreaterThan(0);
   });
 
   test("one blank given: its answer and lineNote are back, the other blank's are not", () => {
-    const ctx = programContext(program, new Set(["formula"]));
-    for (const l of answers.get("formula") ?? []) {
-      expect(ctx.source).toContain(l);
-      expect(lineNoteAts(ctx)).toContain(l);
-    }
-    for (const l of answers.get("round-to-int") ?? []) {
+    const ctx = programContext(program, new Set([A]));
+    const given = answers.get(A) ?? [];
+    for (const l of given) expect(ctx.source).toContain(l);
+    expect(given.some((l) => lineNoteAts(ctx).includes(l))).toBe(true);
+    for (const l of others(A)) {
       expect(ctx.source).not.toContain(l.trim());
       expect(lineNoteAts(ctx)).not.toContain(l);
     }
-    expect(ctx.source).toContain("# ___ (blank round-to-int) ___");
-    expect(ctx.source).not.toContain("# ___ (blank formula) ___");
+    expect(ctx.source).toContain(`# ___ (blank ${B}) ___`);
+    expect(ctx.source).not.toContain(`# ___ (blank ${A}) ___`);
   });
 
   test("read mode: the source is the original, every lineNote kept", () => {
@@ -121,14 +135,14 @@ describe("forbiddenAnswerLines and leakCheck", () => {
     const all = [...answers.values()].flat().map(normalize);
     expect(forbiddenAnswerLines(program, new Set()).sort()).toEqual([...new Set(all)].sort());
     expect(forbiddenAnswerLines(program, "all")).toEqual([]);
-    const some = forbiddenAnswerLines(program, new Set(["formula"]));
-    expect(some).toEqual((answers.get("round-to-int") ?? []).map(normalize));
+    const some = forbiddenAnswerLines(program, new Set([A]));
+    expect(some.sort()).toEqual([...new Set(others(A).map(normalize))].sort());
     for (const f of some) expect(f).not.toMatch(/\s/);
   });
 
   test("an answer line with extra whitespace inside prose is caught", () => {
     const forbidden = forbiddenAnswerLines(program, new Set());
-    const line = (answers.get("formula") ?? [])[0] as string;
+    const line = (answers.get(A) ?? [])[0] as string;
     const spaced = line.trim().split("").join(" ").replace(/ {2}/g, "　 \t");
     const text = `你可以这样写：\n\n\`\`\`python\n${spaced}\n\`\`\`\n就好了。`;
     expect(leakCheck(text, forbidden)).toBe(normalize(line));
@@ -136,9 +150,7 @@ describe("forbiddenAnswerLines and leakCheck", () => {
 
   test("text unrelated to the blanks is clean", () => {
     const forbidden = forbiddenAnswerLines(program, new Set());
-    expect(
-      leakCheck("华氏度和摄氏度之间是线性关系；想想 0 度和 100 度分别对应什么。", forbidden),
-    ).toBeNull();
+    expect(leakCheck("想想这一步之前和之后，变量里分别装着什么。", forbidden)).toBeNull();
     expect(leakCheck("anything", [])).toBeNull();
   });
 
@@ -177,8 +189,9 @@ describe("fix round 1", () => {
   });
 
   test("normalisation: zero-width, NFKC, Markdown escapes and HTML entities do not hide a line", () => {
-    const forbidden = forbiddenAnswerLines(program, new Set());
-    const line = ((answers.get("formula") ?? [])[0] as string).trim();
+    // a synthetic answer line with every character these tricks act on (* + /)
+    const line = "fahrenheit = celsius * 9 / 5 + 32";
+    const forbidden = [normalize(line)];
     expect(leakCheck(line.replace(/\*/g, "\\*"), forbidden)).not.toBeNull();
     expect(leakCheck(line.split("").join("​"), forbidden)).not.toBeNull();
     expect(leakCheck(line.replace(/\*/g, "＊").replace(/\+/g, "＋"), forbidden)).not.toBeNull();
@@ -190,28 +203,28 @@ describe("fix round 1", () => {
     ).not.toBeNull();
   });
 
-  test("a hint tier that spells out its own hidden answer is withheld (stack-array-top-pointer)", () => {
-    const p = loadProgram(PAYLOAD, "stack-array-top-pointer") as Program;
-    const forbidden = forbiddenAnswerLines(p, new Set());
-    const raw = blanksOf(p.source).find((b) => b.id === "push") as NonNullable<
-      ReturnType<typeof blanksOf>[number]
-    >;
-    // the premise: some tier of the push hint does contain its own answer line
-    expect((raw.hint.zh ?? "").split(" || ").some((t) => leakCheck(t, forbidden) !== null)).toBe(
-      true,
-    );
+  test("a hint tier that spells out its own hidden answer is withheld", () => {
+    // chosen by property (pickSelfRevealingHint), which also proves the premise: some tier of this
+    // blank's hint contains its own answer line, and some tier does not
+    const { program: p, blank: raw } = pickSelfRevealingHint(PAYLOAD);
+    const own = answerLines(raw).map(normalize);
+    const tierCount = (raw.hint.zh ?? "").split(" || ").length;
     const hidden = programContext(p, new Set());
-    expect(leakCheck(hidden.source, forbidden)).toBeNull();
+    expect(leakCheck(hidden.source, own)).toBeNull();
     expect(hidden.source).toContain(HINT_WITHHELD);
-    // tiers that do not give it away are kept
-    expect(hidden.source).toMatch(/hint="\(hint withheld\) \|\| [^"(]/);
+    // the directive line handed over: the leaking tiers withheld, the others kept as written
     const tiers = safeTiers(raw.hint.zh, raw, true);
-    expect(tiers.length).toBe((raw.hint.zh ?? "").split(" || ").length);
+    expect(tiers.length).toBe(tierCount);
     expect(tiers).toContain(HINT_WITHHELD);
     expect(tiers.some((t) => t !== HINT_WITHHELD)).toBe(true);
+    const directive = hidden.source
+      .split("\n")
+      .find((l) => l.includes(`# >>> BLANK id=${raw.id} `)) as string;
+    expect(directive).toContain(`hint="${tiers.join(" || ")}"`);
     // allowed: the hints are as written
     expect(programContext(p, "all").source).toBe(p.source);
-    expect(programContext(p, new Set(["push", "pop"])).source).not.toContain(HINT_WITHHELD);
+    const every = new Set(blanksOf(p.source).map((b) => b.id));
+    expect(programContext(p, every).source).not.toContain(HINT_WITHHELD);
   });
 
   test("lineNote text on visible lines is redacted like the other prose", () => {
@@ -237,15 +250,13 @@ describe("fix round 1", () => {
 
   test("a stored pyState is re-validated when read; invalid means none", () => {
     const row = (pyState: unknown) => ({ input: JSON.stringify({ subjects: [], pyState }) });
-    const good = { progId: PROG, mode: "blank", blankId: null, given: ["formula"] };
+    const good = { progId: PROG, mode: "blank", blankId: null, given: [A] };
     expect(inputOf(row(good)).pyState).toEqual(good as PyState);
-    expect(inputOf(row({ ...good, given: "formula" })).pyState).toBeNull();
+    expect(inputOf(row({ ...good, given: A })).pyState).toBeNull();
     expect(inputOf(row({ ...good, mode: "everything" })).pyState).toBeNull();
     expect(inputOf(row({ ...good, progId: 7 })).pyState).toBeNull();
     expect(inputOf(row("read")).pyState).toBeNull();
     // and nothing is allowed under it
-    expect(allowedBlanks(PROG, inputOf(row({ ...good, given: "formula" })).pyState)).toEqual(
-      new Set(),
-    );
+    expect(allowedBlanks(PROG, inputOf(row({ ...good, given: A })).pyState)).toEqual(new Set());
   });
 });

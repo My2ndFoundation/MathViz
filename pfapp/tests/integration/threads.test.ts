@@ -14,8 +14,9 @@ import { DELETE as deleteNote } from "../../app/src/app/api/notes/[id]/route";
 import { GET as listNotes, POST as postNote } from "../../app/src/app/api/notes/route";
 import { GET as getThread, POST as postFollowUp } from "../../app/src/app/api/threads/[id]/route";
 import { POST as postThread } from "../../app/src/app/api/threads/route";
+import { failureText } from "../../app/src/components/qa/thread-view";
 import { createPlatformClient } from "../../app/src/lib/agent/platform/client";
-import { buildTask, loadProgram } from "../../app/src/lib/ai/context";
+import { buildTask } from "../../app/src/lib/ai/context";
 import { blankSubject, createJob, inputOf } from "../../app/src/lib/ai/jobs";
 import { blanksOf } from "../../app/src/lib/ai/leak";
 import { REDACTED } from "../../app/src/lib/content/index-builder";
@@ -24,10 +25,11 @@ import { newId } from "../../app/src/lib/db/ids";
 import { migrationsDir } from "../../app/src/lib/db/open";
 import type { AiJobRow } from "../../app/src/lib/db/schema";
 import { CSRF_HEADER } from "../../app/src/lib/http/guard";
+import { MESSAGES } from "../../app/src/lib/i18n/locale";
 import { startAi } from "../../app/src/lib/server/ai";
 import { type AppContext, createAppContext, setAppContext } from "../../app/src/lib/server/context";
 import { loadTarget } from "../../app/src/lib/target";
-import { buildPfaddon, extractPayload, tmp } from "../helpers/content-fixtures";
+import { buildPfaddon, extractPayload, pickBlankProgram, tmp } from "../helpers/content-fixtures";
 import { type Agent, type FakePlatform, startFakePlatform, type ToolCall } from "./fake-platform";
 
 /**
@@ -41,7 +43,7 @@ setDefaultTimeout(60_000);
 
 const PY = loadTarget("python");
 const MIGRATIONS = migrationsDir(join(import.meta.dir, "..", ".."));
-const PROG = "celsius-to-fahrenheit";
+let PROG = "";
 
 let PAYLOAD = "";
 let ADDON = "";
@@ -141,8 +143,9 @@ const getTask = (calls: ToolCall[]) =>
 beforeAll(async () => {
   PAYLOAD = await extractPayload("python");
   ADDON = buildPfaddon(PAYLOAD, PY.appId, "1.0.0");
-  const program = loadProgram(PAYLOAD, PROG);
-  if (!program) throw new Error(`${PROG} is not in the payload`);
+  // chosen by shape, never by id (a content wave must not turn this red)
+  const program = pickBlankProgram(PAYLOAD);
+  PROG = program.id;
   const first = blanksOf(program.source).find((b) => b.body.some((l) => l.trim() !== ""));
   if (!first) throw new Error(`${PROG} has no blank`);
   FIRST_BLANK = first.id;
@@ -270,6 +273,39 @@ describe("ask → answer → note", () => {
     const unknown = await call(postNote(req("POST", "/api/notes", { messageId: "nope" })));
     expect(unknown.status).toBe(404);
   });
+});
+
+describe("a machine with no AI engine this app may use (design §7.6)", () => {
+  for (const code of ["engine_not_granted", "engine_unavailable"] as const) {
+    test(`a submit refused ${code}: the job fails with that code and the panel says what to do`, async () => {
+      const { fake: f } = await start();
+      f.refuseEngines(code);
+      const r = await call(
+        postThread(
+          req("POST", "/api/threads", {
+            subjects: [{ type: "program", id: PROG }],
+            message: "Why?",
+            workflow: "ask",
+            pyState: blankState(),
+          }),
+        ),
+      );
+      expect(r.status).toBe(202);
+      const j = await call(
+        getJob(req("GET", `/api/jobs/${r.body.jobId}`), params({ id: r.body.jobId })),
+      );
+      expect(j.body).toMatchObject({ status: "failed", error: code });
+      expect(f.submits).toEqual([]);
+      // what the panel shows for that job: the guidance, never "try again"
+      const failure = { kind: "job", status: j.body.status, error: j.body.error } as const;
+      for (const locale of ["en", "zh"] as const) {
+        const text = failureText(failure, locale);
+        expect(text).toBe(MESSAGES[locale].error[code]);
+        expect(text).toContain("PrimeForge Desktop");
+        expect(text).not.toBe(MESSAGES[locale].qa.failed.replace("{code}", code));
+      }
+    });
+  }
 });
 
 describe("POST /api/threads validation", () => {
@@ -517,7 +553,7 @@ describe("follow-ups and the conversation handed to the agent", () => {
     const lib = await followUp(programThread, undefined, "library");
     expect([lib.status, lib.body.error.code]).toEqual([400, "workflow_mismatch"]);
     // a hint for a blank of another program than the thread is about
-    const other = await followUp(programThread, blankState({ progId: "hello-name" }), "hint");
+    const other = await followUp(programThread, blankState({ progId: `${PROG}-other` }), "hint");
     expect([other.status, other.body.error.code]).toEqual([400, "workflow_mismatch"]);
     // switching between ask and hint on the thread's own program is fine
     expect((await followUp(programThread, blankState(), "hint")).status).toBe(202);

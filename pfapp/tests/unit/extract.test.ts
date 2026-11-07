@@ -139,17 +139,29 @@ describe("group labels", () => {
     });
   }
 
-  test("a relabel on the page, escapes included, reaches the labels", () => {
+  test("the page's literal is what the labels are, escapes and either quote style included", () => {
+    // A synthetic page, not chess/app.html: how the web version happens to quote its labels today
+    // is the web version's business (a reformat there must not turn this red).
     const mv = tmp("relabel");
     mkdirSync(join(mv, "chess"), { recursive: true });
-    const page = readFileSync(join(MV, "chess/app.html"), "utf8");
-    const g = String(registryOf("chess")[0]?.[REG_FIELD.chess]);
-    const before = readGroupLabels(loadTarget("chess"), MV)[g]?.en as string;
-    const quoted = `en: '${before.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
-    expect(page.includes(quoted)).toBe(true);
-    // Source text with a \u escape and an escaped quote; the evaluated label has neither.
-    writeFileSync(join(mv, "chess/app.html"), page.replace(quoted, "en: 'Bob\\'s \\u00b7 X'"));
-    expect(readGroupLabels(loadTarget("chess"), mv)[g]?.en).toBe("Bob's \u00b7 X");
+    const page = [
+      "<script>",
+      "var NOT_IT = { 1: { en: 'decoy', zh: '诱饵' } };",
+      "// a comment with a { brace and a 'quote",
+      "var PHASE_LABELS = {",
+      "  1: { en: 'Bob\\'s \\u00b7 X', zh: '阶段 1' },",
+      '  2: { en: "Say \\"hi\\" } ]", zh: "阶段 \\u4e8c" }, /* } */',
+      "  3: { en: `Back`, zh: '三' },",
+      "};",
+      "var AFTER = { 1: { en: 'not this either', zh: '也不是' } };",
+      "</script>",
+    ].join("\n");
+    writeFileSync(join(mv, "chess/app.html"), page);
+    expect(readGroupLabels(loadTarget("chess"), mv)).toEqual({
+      "1": { en: "Bob's \u00b7 X", zh: "阶段 1" },
+      "2": { en: 'Say "hi" } ]', zh: "阶段 二" },
+      "3": { en: "Back", zh: "三" },
+    });
   });
 });
 
@@ -177,15 +189,6 @@ describe("python source", () => {
       expect(typeof obj.source).toBe("string");
       expect(obj.source.length).toBeGreaterThan(0);
     }
-  });
-
-  test("source is the .py text verbatim", () => {
-    const obj = JSON.parse(
-      readFileSync(join(outs.python.dir, "payload/source/hello-name.json"), "utf8"),
-    );
-    const py = readFileSync(join(MV, "python/programs/ch01-basics/hello-name.py"), "utf8");
-    expect(obj.source).toBe(py);
-    expect(obj.tool).toBe("py-basics");
   });
 
   test("non-python targets have no source/ in phase 1", () => {

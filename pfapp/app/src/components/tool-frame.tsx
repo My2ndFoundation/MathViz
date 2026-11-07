@@ -19,7 +19,10 @@ import { usePyState } from "./use-py-state";
  * before this component's effect hands the iframe its src.
  *
  * Beside the frame, the "ask" panel (Task 11), fed the same bridge state; it can be hidden (the
- * choice is remembered in localStorage, like the sidebar's).
+ * choice is remembered in localStorage, like the sidebar's). Hidden means `hidden` + `inert`, never
+ * unmounted: the panel owns the conversation (useThread), and a student who hides it to widen the
+ * code while the tutor is still answering must find the answer there when she opens it again
+ * (final review I-3). Focus follows the toggle, so it is never left inside a hidden panel.
  */
 export function ToolFrame({
   src,
@@ -38,6 +41,9 @@ export function ToolFrame({
   const py = usePyState(ref, toolId);
   const [mounted, setMounted] = useState(false);
   const [panel, setPanel] = useState(true);
+  const hideRef = useRef<HTMLButtonElement>(null);
+  const openRef = useRef<HTMLButtonElement>(null);
+  const toggled = useRef(false);
   useEffect(() => {
     setMounted(true);
     try {
@@ -46,7 +52,13 @@ export function ToolFrame({
       // no storage: shown
     }
   }, []);
+  useEffect(() => {
+    if (!toggled.current) return;
+    toggled.current = false;
+    (panel ? hideRef : openRef).current?.focus();
+  }, [panel]);
   const show = (v: boolean) => {
+    toggled.current = true;
     setPanel(v);
     try {
       localStorage.setItem("pfapp-ask", v ? "shown" : "hidden");
@@ -66,28 +78,23 @@ export function ToolFrame({
         src={mounted ? src : undefined}
         title={title}
       />
-      {panel ? (
-        <div className="ask-wrap">
-          <button
-            type="button"
-            className="iconbtn ask-hide"
-            title={t.hidePanel}
-            aria-label={t.hidePanel}
-            data-testid="ask-hide"
-            onClick={() => show(false)}
-          >
-            ▶
-          </button>
-          <AskPanel
-            toolId={toolId}
-            toolTitle={title}
-            locale={locale}
-            python={python}
-            pyState={py}
-          />
-        </div>
-      ) : (
+      <div className="ask-wrap" hidden={!panel} inert={!panel}>
         <button
+          ref={hideRef}
+          type="button"
+          className="iconbtn ask-hide"
+          title={t.hidePanel}
+          aria-label={t.hidePanel}
+          data-testid="ask-hide"
+          onClick={() => show(false)}
+        >
+          ▶
+        </button>
+        <AskPanel toolId={toolId} toolTitle={title} locale={locale} python={python} pyState={py} />
+      </div>
+      {panel ? null : (
+        <button
+          ref={openRef}
           type="button"
           className="ask-open"
           title={t.showPanel}

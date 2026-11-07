@@ -120,6 +120,31 @@ test("ask panel on a python tool page: answer shown, saved as a note; /notes lis
   await shot(page, "notes.png");
 });
 
+test("hiding the ask panel keeps the conversation: ask, hide at once, show, the answer is there", async ({
+  page,
+}) => {
+  await page.goto(`${app.base}/en/tool/${firstTool()}`);
+  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
+  const panel = page.getByTestId("ask-panel");
+  await panel.getByTestId("ask-input").fill("What if I hide the panel now?");
+  await panel.getByTestId("ask-submit").click();
+  // hidden straight after asking, while the tutor may still be answering (final review I-3)
+  await page.getByTestId("ask-hide").click();
+  await expect(panel).toBeHidden();
+  await expect(page.locator(".ask-wrap")).toHaveAttribute("inert", "");
+  await expect(page.getByTestId("ask-open")).toBeFocused();
+  await page.getByTestId("ask-open").click();
+  await expect(panel).toBeVisible();
+  await expect(page.getByTestId("ask-hide")).toBeFocused();
+  await expect(panel.locator('[data-testid=qa-message][data-role="user"]')).toHaveText(
+    /What if I hide the panel now\?/,
+  );
+  await expect(panel.locator('[data-testid=qa-message][data-role="assistant"]')).toContainText(
+    "which kind of division",
+    { timeout: 30_000 },
+  );
+});
+
 test("the hint button is disabled outside fill-in mode", async ({ page }) => {
   await page.goto(`${app.base}/en/tool/${firstTool()}`);
   const frameEl = page.getByTestId("tool-frame");

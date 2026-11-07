@@ -25,6 +25,8 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
  *   hold: Set of workflows   the agent waits until release(workflow); the job stays running
  *   notFound: Set of job ids GET/cancel answer 404 (the platform lost the job)
  * requireRegistration() makes the next submit fail 409 mcp_registration_required.
+ * refuseEngines(code) makes the next submit fail as the platform does when no engine this app may
+ * use can run (PFD platform-service api.ts: 403 engine_not_granted, 503 engine_unavailable).
  */
 
 interface Manifest {
@@ -107,6 +109,7 @@ export interface FakePlatform {
   cancels: string[];
   errors: { jobId: string; error: string }[];
   requireRegistration(): void;
+  refuseEngines(code: "engine_not_granted" | "engine_unavailable"): void;
   release(workflow: string): void;
   /** End a job on the platform side (the agent's run is over, with or without an answer). */
   finish(id: string, status: string): void;
@@ -125,6 +128,7 @@ export async function startFakePlatform(opts: FakePlatformOptions): Promise<Fake
   const secret = randomBytes(32).toString("hex");
   let jobN = 0;
   let mustRegister = false;
+  let engineRefusal: "engine_not_granted" | "engine_unavailable" | null = null;
   const running = new Set<Promise<void>>();
 
   const fake: FakePlatform = {
@@ -141,6 +145,9 @@ export async function startFakePlatform(opts: FakePlatformOptions): Promise<Fake
     errors: [],
     requireRegistration() {
       mustRegister = true;
+    },
+    refuseEngines(code) {
+      engineRefusal = code;
     },
     release(workflow) {
       fake.sim.hold.delete(workflow);
@@ -257,6 +264,11 @@ export async function startFakePlatform(opts: FakePlatformOptions): Promise<Fake
         error: "register this app's MCP secret first",
         code: "mcp_registration_required",
       });
+    }
+    if (engineRefusal) {
+      const code = engineRefusal;
+      engineRefusal = null;
+      return json(res, code === "engine_not_granted" ? 403 : 503, { error: code, code });
     }
     const id = `job-${++jobN}`;
     const j: FakeJob = {

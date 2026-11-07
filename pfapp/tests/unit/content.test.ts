@@ -320,8 +320,16 @@ describe("ensureIndexed", () => {
 });
 
 describe("ensureIndexed refuses symbolic links inside the payload", () => {
-  for (const rel of ["catalog.json", "provenance.json", "source/hello-name.json"]) {
-    test(rel, () => {
+  // a program source by position, not by id: a renamed program must not break this
+  const firstSource = () =>
+    `source/${
+      readdirSync(join(PAYLOAD, "source"))
+        .filter((f) => f.endsWith(".json"))
+        .sort()[0]
+    }`;
+  for (const which of ["catalog.json", "provenance.json", "a source/ file"]) {
+    test(which, () => {
+      const rel = which === "a source/ file" ? firstSource() : which;
       const dir = join(tmp("linked"), "payload");
       cpSync(PAYLOAD, dir, { recursive: true });
       const real = join(tmp("real"), basename(rel));

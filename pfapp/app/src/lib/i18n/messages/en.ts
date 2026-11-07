@@ -88,6 +88,11 @@ export const en = {
   },
   error: {
     ai_unavailable: "The AI tutor is available when the app runs inside PrimeForge.",
+    // the platform refused the job: no AI engine this app may use (design §7.6) — not a retry
+    engine_not_granted:
+      "This app is not allowed to use an AI engine yet. In PrimeForge Desktop, allow it Claude, or grant it Codex, then ask again.",
+    engine_unavailable:
+      "No AI engine this app may use can run right now. In PrimeForge Desktop, check that Claude (or Codex, if you granted it) is installed and signed in, then ask again.",
     hint_needs_blank: "A hint needs a blank: switch to fill-in mode and click into one.",
     thread_busy: "The tutor is still answering the last question.",
     unknown_subject: "That is not in the installed content pack.",

@@ -84,6 +84,11 @@ export const zh: Messages = {
   },
   error: {
     ai_unavailable: "应用在 PrimeForge 里运行时才能使用 AI 助教。",
+    // 平台拒了这个任务：没有本应用能用的 AI 引擎（design §7.6）——不是「再试一次」能解决的
+    engine_not_granted:
+      "本应用还没有可用的 AI 引擎授权。请在 PrimeForge Desktop 里允许它使用 Claude，或授权 Codex，然后再问。",
+    engine_unavailable:
+      "本应用能用的 AI 引擎现在都运行不了。请在 PrimeForge Desktop 里确认 Claude（或你授权过的 Codex）已安装并已登录，然后再问。",
     hint_needs_blank: "提示要针对一个空：切到挖空模式，点进一个空。",
     thread_busy: "助教还在回答上一个问题。",
     unknown_subject: "已安装的内容包里没有这一项。",

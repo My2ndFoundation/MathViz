@@ -78,8 +78,11 @@ export function parseTarget(argv: string[]): TargetId {
   return loadTarget(id).id;
 }
 
-/** The target's manifest and icon, checked against target.json and the icon generator. */
-export function readManifest(t: TargetId): Manifest {
+/**
+ * The target's manifest checked against target.json and the entry (no web-version input: this is
+ * what `bun run test` asserts, and a web PR must not turn that red — design §9).
+ */
+export function checkManifest(t: TargetId): Manifest {
   const target = loadTarget(t);
   const dir = join(PFAPP, "targets", t);
   const m = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")) as Manifest;
@@ -90,10 +93,25 @@ export function readManifest(t: TargetId): Manifest {
   if (m.runtime !== "node@24") problems.push(`runtime ${m.runtime}, expected node@24`);
   if (m.art?.icon !== "icon.svg") problems.push(`art.icon ${m.art?.icon}, expected icon.svg`);
   if (!/^\d+\.\d+\.\d+$/.test(m.version ?? "")) problems.push(`version ${m.version}`);
-  if (readFileSync(join(dir, "icon.svg"), "utf8") !== icons()[t]) {
-    problems.push("icon.svg is stale (run `bun scripts/icons.ts`)");
-  }
   if (problems.length) throw new Error(`targets/${t}/manifest.json: ${problems.join("; ")}`);
+  return m;
+}
+
+/**
+ * checkManifest plus the icon's freshness against the generator, whose inputs are the web
+ * version's design tokens and brand mark. Only the build's preflight checks this: a stale icon
+ * matters when a package is made, and nowhere else.
+ */
+export function readManifest(t: TargetId, opts: { allowStaleIcon?: boolean } = {}): Manifest {
+  const m = checkManifest(t);
+  if (readFileSync(join(PFAPP, "targets", t, "icon.svg"), "utf8") !== icons()[t]) {
+    const why = `targets/${t}/icon.svg is stale (run \`bun scripts/icons.ts\`)`;
+    // CI builds to prove the app still builds, not to ship it: a web design change that has not
+    // been carried into the icons yet must not turn that red (design §9). The signing build keeps
+    // the refusal.
+    if (!opts.allowStaleIcon) throw new Error(why);
+    console.warn(`warning: ${why}; continuing (--allow-stale-icon)`);
+  }
   return m;
 }
 
@@ -181,7 +199,7 @@ async function main(): Promise<void> {
   let manifest: Manifest;
   try {
     t = parseTarget(process.argv.slice(2));
-    manifest = readManifest(t);
+    manifest = readManifest(t, { allowStaleIcon: process.argv.includes("--allow-stale-icon") });
   } catch (e) {
     console.error((e as Error).message);
     console.error("usage: bun run build -- --target <math|chess|crypto|python>");
