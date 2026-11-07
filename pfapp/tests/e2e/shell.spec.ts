@@ -166,6 +166,33 @@ test("python ?prog= is passed on to the iframe", async ({ page }) => {
   expect(q.get("prog")).toBe("some-program");
 });
 
+test("the shell observes the python page's state: switching the frame to blank mode shows up", async ({
+  page,
+}) => {
+  const first = ordered()[0];
+  if (!first) throw new Error("empty pack");
+  await page.goto(`${base()}/en/tool/${first.id}`);
+  const frameEl = page.getByTestId("tool-frame");
+  const frame = await toolFrame(page);
+  // trace first, then blank, so each step is a real change whatever the default mode is
+  // the mode buttons end in their key: "Read  1", "Fill in  2", "Trace  3" (en)
+  await frame.getByRole("button", { name: /\s3$/ }).click();
+  await expect(frameEl).toHaveAttribute("data-py-mode", "trace");
+  await frame.getByRole("button", { name: /\s2$/ }).click();
+  await expect(frameEl).toHaveAttribute("data-py-mode", "blank");
+  expect(await frameEl.getAttribute("data-py-prog")).toBeTruthy();
+});
+
+test("the shell has the python page's state on load, before any interaction", async ({ page }) => {
+  const first = ordered()[0];
+  if (!first) throw new Error("empty pack");
+  await page.goto(`${base()}/en/tool/${first.id}`);
+  const frameEl = page.getByTestId("tool-frame");
+  // the page's on-mount message is the only one sent without an interaction
+  await expect(frameEl).toHaveAttribute("data-py-mode", /^(read|blank|trace)$/);
+  expect(await frameEl.getAttribute("data-py-prog")).toBeTruthy();
+});
+
 test("⌘K filters by tag and opens the chosen tool", async ({ page }) => {
   const items = ordered();
   const first = items[0];
