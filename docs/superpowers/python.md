@@ -358,7 +358,7 @@ root.Judge = factory(root.PyLex);                            // 错：装载时�
 
 为什么非要裸 `vm`：`node -e` 与从 stdin 读脚本的 `node` 都定义了 `module` 和 `require`，UMD 会走 **node 分支**，
 那样的门测的是浏览器里根本不执行的代码（根 `CLAUDE.md` cryptography 一节）。`core_tests` 跑的 `*.test.js` 只覆盖 node 分支，
-所以浏览器分支必须另有门。同一个裸 `vm` 手法也用在 `closed_set_mirror_check`、`js_parser_parity_check`、`program_embed_roundtrip_check`、`chunks_check`。
+所以浏览器分支必须另有门。同一个裸 `vm` 手法也用在 `closed_set_mirror_check`、`js_parser_parity_check`、`program_embed_roundtrip_check`、`chunks_check`、`py_state_bridge_check`。
 
 ### 6.3 `py-lex.js`：全覆盖、永不抛错
 
@@ -385,6 +385,25 @@ CPython 自己就拒绝的畸形语料跳过比对，由 `lex_never_throws_check
 它是文本扫描，防的是日常写法里意外多出的一条读取路径，不防蓄意混淆（它的 docstring 逐条列了盲区）。
 
 锚可以落在挖空体内（第 1 期拆掉了第 0 期的禁令，主规格 §2.3）；泄题的两道防线都在读取侧：`panelLineNotes` 的模式白名单与 `line_note_reader_check`。
+
+### 6.5 状态桥与深链接（engine `py-1.4.0`）
+
+为 PrimeForge 的 python 应用加的两样东西（`docs/superpowers/specs/2026-11-07-mathviz-pfapp-design.md` §7.3，用户定），都在 `mount()` 里：
+
+- **深链接 `?prog=<程序 id>`**：`deepLinkProgId(location.search, PROGRAMS)` 返回点名的、且在本页 `PROGRAMS` 里的 id，
+  初始 `S.progId` 取它；没写、写错、不在本页一律 `null`，照旧取第一个，不报错。手解析而不是 `URLSearchParams`——后者是宿主全局，
+  门的裸 `vm` 里没有它。单独打开的网页版同样受益。
+- **只读状态桥**：嵌在 iframe 里（`window.parent !== window`）时，向父窗口
+  `postMessage({type: 'mathviz/py-state', v: 1, page, progId, mode, blankId, given}, location.origin)`。
+  `page` 是手写区传进来的 `TOOL.id`（`PyInteract.mount({…, page: TOOL.id})`，不传为 `null`）；`blankId` 是挖空模式下最近聚焦的空，
+  别的模式、换题、切模式后为 `null`；`given` 是点过「填进去」、之后没再改动的空，按点的先后。
+  触发：mount 完成后一次；`setMode`、`setProgram`、挖空输入框 `focus`、`given` 增删（「填进去」、改动那个框、清空打到当前这一题）之后各一次。
+  消息体由纯函数 `stateMessage` 拼，**形状是对外壳的契约**，改它要同时改 pfapp。
+  **只发不收**：页面不监听 `message`，父窗口驱动不了它。`targetOrigin` 是本页自己的 origin，跨源的父窗口收不到；
+  `file://` 下 origin 是 `'null'`，`postMessage` 抛，被 `try` 接住，桥不工作、页面照常。
+  单独打开时 `parent === window`，`emitState()` 第一行就返回——这一半由 `py_state_bridge_check` 在每个工具页的真实字节上证明（§11.2）。
+- `interact.test.js` 末尾的 DOM 测试借 `scripts/gates/dom_stub.js`（一份最小假 DOM；放在 `scripts/` 而不是 `core/`，免得被当成第八个模块普查），
+  门也用同一份：在 node 外层建好假 window，把它当成裸 `vm` context 的全局对象，页面的内联 core 与手写区原样执行。
 
 ---
 
@@ -539,7 +558,7 @@ python-progress:<progId>     { blank: {…}, trace: { bestAcc, bestCpm, at } }
 
 **版本三处同步**：注册表 `version` + `changelog`、页面 `tool-version` meta、页面头部版本记录注释。版本号同时是缓存键——不升，线上用户会一直看到旧页面。
 **engine 全库唯一**：改了 `core/` 就把所有工具与 `_skeleton.html` 的 `engine` 一起升（`page_mirror_check`）；
-五次：`py-1.1.0`（#173，第 1 期规则）、`py-1.2.0`（#198，分段临摹）、`py-1.3.0`（boards PR：空考试局的占位改为「不在考纲」）、`py-1.3.1`（一致性清理：「清空本模块」改为与行为一致的「清空本页」，外加三处 core 注释订正；只动文案与注释，各页 `version` 不升）、`py-1.3.2`（清理波：判定器在行数不同时比块结构，§8.2；新反馈 `block`；各页 `version` 由控制方统一升）。
+六次：`py-1.1.0`（#173，第 1 期规则）、`py-1.2.0`（#198，分段临摹）、`py-1.3.0`（boards PR：空考试局的占位改为「不在考纲」）、`py-1.3.1`（一致性清理：「清空本模块」改为与行为一致的「清空本页」，外加三处 core 注释订正；只动文案与注释，各页 `version` 不升）、`py-1.3.2`（清理波：判定器在行数不同时比块结构，§8.2；新反馈 `block`；各页 `version` 由控制方统一升）、`py-1.4.0`（只读状态桥与 `?prog=` 深链接，§6.5；`?prog=` 单独打开也可见，所以各页 `version` minor 升）。
 
 ### 10.2 模块闭集与配色
 
@@ -636,6 +655,7 @@ accent 按**模块**事先定死：M1 cyan · M2 violet · M3 emerald · M4 rose
 | `browser_branch_check` | 裸 `vm` 里按依赖反序装载七个模块并真调（§6.2） |
 | `closed_set_mirror_check` | `interact.js` 的 `LEVELS` / `KINDS` / `BOARDS` / `RUNTIMES` / `HINT_MARK` 与门的规格常量逐项相同 |
 | `js_parser_parity_check` | 页面自己的 `Exercise.parse` / `clean` 在裸 `vm` 里跑遍全库：不抛、挖空 id 与门一致、行数与 `lines` 一致；`.py` 里无 U+2028 / U+2029 / U+0085 |
+| `py_state_bridge_check` | 每个工具页（含骨架）的真实脚本在裸 `vm` 里驱动：没有父窗口时 `postMessage` 零调用；有父窗口时消息形状、`page`、同源对；`?prog=` 选中（§6.5） |
 
 **D·库 · 程序库**（`gates/library.py`）
 
