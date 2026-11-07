@@ -47,6 +47,7 @@
 - `library-loans` 86 行被「不超过 80 行」筛掉（不修）。
 - `core.hooksPath`：2026-10-01 用户设成相对路径；本波实测共享配置里又是绝对路径（原因不明，没有改用户配置）。
 - 环境：本机 `python3` 现在是 Homebrew 3.14.8（PATH 在 miniconda 之前）。门要用 3.12（`/Users/nickma/miniconda3/bin/python3`）跑；3.14 上 `lex_vs_cpython_check` 红在 stdlib `dataclasses.py` 的嵌套同引号 f-string（PEP 701），另两道门因缺库红。提交钩子用 PATH 上的 `python3`，所以提交前把 miniconda 放到 PATH 前面。
+- 范围复审记账（Minor，不随本 PR 改）：判定器把 case 守卫里不加括号的 walrus（`case x if y := x: h(y)`）判 `block`（规则 2 把 `:=` 当赋值号；旧判定器也判错，全库 0 处）；`case[0]: int = 1` 与 `case [0]: int = 1` token 相同，一律按 case 头处理，非法代码上多一种误放；`pin` 空写成 `str.isdecimal(text)` 判 `different`，第 1 级没钉（早就存在）；`delete-by-value#follow` 降为 level 1，「先后顺序」只在提示里说、练不到。
 
 ## 四、原描述错在哪
 

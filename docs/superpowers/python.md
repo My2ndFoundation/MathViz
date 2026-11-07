@@ -663,7 +663,7 @@ accent 按**模块**事先定死：M1 cyan · M2 violet · M3 emerald · M4 rose
 | `fixture_tracked_check` | 磁盘上每个 `_fixtures` 文件都在 `git ls-files` 里（只在本地有判别力） |
 | `tag_normalize_check` | tag 折叠大小写 / 空格 / 连字符后相同而原文不同 → 红（不折下划线） |
 | `copied_blank_check` | 「照抄空」：挖空答案行逐字或剥壳后出现在同程序没挖的行上 |
-| `isdigit_check` | `isdigit()` 守着 `int()` / `float()`、判整串（`s.isdigit()`、`all(c.isdigit() …)`、逐字符 `if not ch.isdigit(): return False / break`）、收集数字字符 → 红；看不见的判整串：`else: return False` 写法、计数后与 `len` 比、`all(map(str.isdigit, s))`、`ok = ok and …` 累积 |
+| `isdigit_check` | `isdigit()` 守着 `int()` / `float()`、判整串（`s.isdigit()`、`all(c.isdigit() …)`、逐字符 `if not ch.isdigit(): return False / break / 名字 = False`）、收集数字字符 → 红；看不见的判整串（举例，不是穷举）：`else: return False` 写法、`if any(not c.isdigit() …): return False`、`if not ch.isdigit() and …:`、体是 `self.ok = False`、计数后与 `len` 比、`all(map(str.isdigit, s))`、`ok = ok and …` 累积 |
 
 **D·词法**（`gates/lexer.py`）
 

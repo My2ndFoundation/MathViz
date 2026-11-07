@@ -176,15 +176,15 @@ ok('if a: x = 1 + \\\n2', 'if a:\n    x = 1 + \\\n        2', '反斜杠续行�
   const ref = 'match x:\n    case 1:\n        a()\n    case _:\n        b()';
   ok('match x:\n    case 1: a()\n    case _: b()', ref, 'case 头 + 一行体写成一行：判同（以前判 block）');
   ok('match x:\n    case 1: a()\n    case _:\n        b()', ref, '只把第一个 case 写成一行：判同');
-  const r = J.compare('match x:\n    case 1: a()\n    b()', 'match x:\n    case 1:\n        a()\n    case _:\n        b()');
-  T.eq(r.ok, false, 'case 头写成一行之后，下一行写成与 case 同层：判错');
+  const r = J.compare('match x:\n    case 1: a()\n    b()', 'match x:\n    case 1:\n        a()\n        b()');
+  T.eq(r.kind, 'block', 'case 头写成一行之后，下一行写成与 case 同层（token 相同，只差层级）：判 block');
 })();
 ok('case (1 | 2): f()', 'case (1 | 2):\n    f()', 'case 的模式以括号开头仍是语句头');
 ok('case [x, y]: f(x)', 'case [x, y]:\n    f(x)', 'case 的序列模式');
 ok('case {"k": v} if v > 0: f(v)', 'case {"k": v} if v > 0:\n    f(v)', '映射模式里的冒号在括号里，语句头的冒号是守卫之后那一个');
 ok('case -1: f()', 'case -1:\n    f()', '负数字面量模式');
 /* 不是语句头的 match / case：只有行里有括号深度 0 的冒号时，分类才影响判决。
-   下面四条参考是合法 Python、作答在冒号后非法断行；若把这些行误当语句头，参考冒号之后的
+   下面几条参考是合法 Python、作答在冒号后非法断行；若把这些行误当语句头，参考冒号之后的
    token 会被抬一层，与作答「断到下一行、更深一层」恰好对上而误判同。 */
 (function () {
   const r = J.compare('case = lambda:\n    0\nb()', 'case = lambda: 0\nb()');

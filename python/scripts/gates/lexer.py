@@ -234,7 +234,7 @@ JUDGE_CASES = [
     ('块结构：内层单行 if 体、外层下一行仍在外层 if 里，判同',
      'if a:\n    if b:\n        c()\n    d()', 'if a:\n    if b: c()\n    d()', True),
     # ── match / case 是软关键字（清理波终审 M2）──
-    # 判同的两条在 COMPOUND 不认 case 时判 block；判异的两条防「只看首词」的过宽修法：
+    # 判同的两条在 COMPOUND 不认 case 时判 block；判异的三条防「只看首词」的过宽修法：
     # 把 `case[0] = lambda: 0` / `case.x: int = 1` 当语句头，参考冒号后的 token 会被抬一层，
     # 恰好与作答非法断到下一行的那一层对上而误判同。
     ('块结构：case 头 + 一行体写成一行，判同',

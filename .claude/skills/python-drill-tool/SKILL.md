@@ -168,7 +168,7 @@ description: >-
   **门：`isdigit_check`**（清理波）：`isdigit()` 守着一次 `int()` / `float()`、判一个字符串是不是全是数字、或决定哪些字符被收集起来当数字用（`number += ch`）→ 红；
   「判整串」门认得的形状：`s.isdigit()` 本身；逐字符的 `all(c.isdigit() for c in s)`（列表 / 集合推导式、`c.isdigit() and …` 同样）与 `not any(not c.isdigit() …)`；
   逐字符循环里 `if not ch.isdigit():`（可夹在 `or` 里）的体直接含 `return False`、`break` 或 `名字 = False`（清理波终审 I1 补上后两种）。
-  **门看不见、靠人的判整串**：`if ch.isdigit(): continue` + `else: return False`、数字字符计数后与 `len(s)` 比、`all(map(str.isdigit, s))`（没有 `.isdigit()` 调用）、`ok = ok and ch.isdigit()` 一类累积写法。
+  **门看不见、靠人的判整串（举例，不是穷举）**：`if ch.isdigit(): continue` + `else: return False`、`if any(not c.isdigit() for c in s): return False`、`if not ch.isdigit() and …:`、体是 `self.ok = False`、数字字符计数后与 `len(s)` 比、`all(map(str.isdigit, s))`（没有 `.isdigit()` 调用）、`ok = ok and ch.isdigit()` 一类累积写法。反过来，「读数字前缀」的 `if not ch.isdigit(): break` 会被报成「判整串」——它本来就该红（收集数字字符），报错文字不贴切（清理波范围复审 M-b，记账）。
   逐字符只拿结果分类计数（`elif ch.isdigit(): has_digit = True`）、`any(c.isdigit() …)`（「有没有数字字符」）、在单字符常量上演示（`chr(178).isdigit()`）放行——放行按用法写，不看同一行有没有 `isdecimal`。
   原存量 ch02 `string-method-tour` 的 `is_pin`（第 3 期账本 §二.8）清理波已改用 `isdecimal`；`password-rules` 的 `isdigit` 只给单个字符分类、不接 `int()`，按规矩保留。
 - 复制按钮只复制 `.py`，**不带 `_fixtures/`**：学生粘进 PyCharm 时没有数据文件，讲解里的手抄是她唯一的来源。读 fixture 的程序在讲解里写明
