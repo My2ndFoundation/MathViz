@@ -200,6 +200,19 @@ test("the shell has the python page's state on load, before any interaction", as
   expect(await frameEl.getAttribute("data-py-prog")).toBeTruthy();
 });
 
+test("the shell opens nothing in a new window (PrimeForge's app window hands those to the system browser)", async ({
+  page,
+}) => {
+  const first = ordered()[0];
+  if (!first) throw new Error("empty pack");
+  await page.goto(`${base()}/en/tool/${first.id}`);
+  await expect(page.getByTestId("tool-frame")).toHaveAttribute("src", /./);
+  // the shell's own DOM only: the tool page inside the iframe is the web version, unchanged
+  expect(await page.locator('[target="_blank"], [target="_new"]').count()).toBe(0);
+  const html = await page.content();
+  expect(html).not.toContain("window.open");
+});
+
 test("⌘K filters by tag and opens the chosen tool", async ({ page }) => {
   const items = ordered();
   const first = items[0];

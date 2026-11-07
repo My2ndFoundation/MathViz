@@ -109,9 +109,17 @@ MV/pfapp/
 
 端口 26454–26457 由用户指定；已知已占用的是 7616、7617、7620、7630、26421、26452、26903、26905，实现者在本机 Desktop 数据目录里再核一遍。**四个应用默认语言都是英文**（与网页版数学默认中文不同，这是用户的决定）；用户在应用里切换后记住选择（存 SQLite），切换时用新的 `?lang=` 重载工具页。
 
-### 5.3 打开方式（控制方定）
+### 5.3 打开方式（**用户定**，2026-11-07，取代原先的「在用户的浏览器里打开」）
 
-**在用户的浏览器里打开**（不声明 `ui.window`）。原因：有 10 个工具页用 `blob:` / `<a download>` 导出（8 个数学工具、`chess-search-minimax`、`chess-game-replay`），而 `ui.window` 窗口拒绝 `blob:` / `data:` 下载；工具页按决定不改，只能选浏览器。代价：拿不到 Desktop 窗口传来的主题与语言，语言由应用自己的设置决定。若以后要改用窗口，先解决这 10 页的下载。
+**在 PrimeForge Desktop 自己的窗口里打开**，不跳系统浏览器：四个 manifest 都声明 `"ui": {"window": {"width": 1280, "height": 820, "minWidth": 900, "minHeight": 600}}`（PFD `packages/app-contract`：480–2560 × 360–1600）。
+
+窗口的规矩（PFD `docs/superpowers/specs/2026-10-31-app-windows-design.md`）与对本项目的推论：
+
+- 窗口只显示 `http://127.0.0.1:<端口>`；别的地址、`window.open`、`target="_blank"` 都交给系统浏览器。外壳自己**不许**有这类链接（门：e2e 断言外壳里没有 `target="_blank"`）。工具页页脚里指向外站的链接（primeforge.app、darkhorseone）去系统浏览器，这是外站本来的去处，接受。
+- 下载只认指向**同源 URL**、能普通 GET 的 `<a download>`；`blob:` / `data:` 下载被拒。python 页没有下载，第 1 期不受影响。数学 8 个工具与 `chess-search-minimax`、`chess-game-replay` 用 `blob:` 导出：**第 2 期在 pfapp 送出这些工具页时注入一小段脚本**，把 `blob:` 下载改成「先 POST 字节到应用、再 `<a download>` 一个同源 URL」，网页版不改。
+- 窗口没有 IPC；主题与语言仍由应用自己的设置决定（缺省英文，§5.2）。
+- 剪贴板（python 页的复制按钮）要在真窗口里实测（第 1 期验收）。
+- 本机 Desktop 须升到支持 `ui.window` 的版本（≥ 1.45）才能验收。
 
 ## 6. 内容管线：网页版 → 内容包
 
@@ -219,7 +227,7 @@ python 包约 15 MB、crypto 约 8 MB、math 约 6 MB、chess 约 5 MB，远低�
 - `capabilities: ["ai", "addons"]`；`ai.mcp.path` 指向应用的 MCP 端点（按 job 的一次性路径，照 MTB）。
 - workflows：`ask`（主题问答）与 `library`（问整个库）；python 另有 `hint`（挖空时要一条提示，比 `ask` 更严：只能用 `get_task` / `submit_answer`）。每个 workflow 的 `tools.allow` 列出它能用的 MCP 工具；`maxTurns` / `maxRuntimeSeconds` 照 MTB 的量级给（`library` 比 `ask` 宽）；`maxBudgetUsd` 填一个固定值（平台必填），不做任何预算界面（**用户定**）。
 - 引擎：Claude 与 Codex 都支持（**用户定**）——按平台的方式发引擎偏好（PFD `CLAUDE.md` 引擎一节；MTB 的做法），Codex 需要用户在 Desktop 里授权。只装了 Codex 又没授权时，界面要给出明确的提示，而不是一个失败的任务。
-- 不声明 `ui.window`（§5.3）；`minDesktopVersion: "1.45.0"`；图标 `icon.svg` 照 PFD 的图标标准，从 `docs/logo.png` 的 M/V 标记派生，四个目标用网页版闭集里的四种 accent 区分。
+- 声明 `ui.window`（§5.3）；`minDesktopVersion: "1.45.0"`；图标 `icon.svg` 照 PFD 的图标标准，从 `docs/logo.png` 的 M/V 标记派生，四个目标用网页版闭集里的四种 accent 区分。
 
 ## 8. 构建与发布（**用户定**：脚本放 PFD）
 

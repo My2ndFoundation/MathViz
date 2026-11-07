@@ -68,7 +68,8 @@ describe("manifests", () => {
       const m = JSON.parse(manifestText(t));
       expect(m.id).toBe(loadTarget(t).appId);
       expect(m.port).toBe(loadTarget(t).port);
-      expect(m.ui).toBeUndefined();
+      // design §5.3 (user ruling): every app opens in PrimeForge Desktop's own window
+      expect(m.ui).toEqual({ window: { width: 1280, height: 820, minWidth: 900, minHeight: 600 } });
     }
   });
   test("workflows", () => {
@@ -82,6 +83,8 @@ describe("manifests", () => {
     for (const t of IDS) {
       const r = parseManifest(manifestText(t));
       expect(r).toMatchObject({ ok: true });
+      // the parser keeps ui.window: Desktop opens the app in its own window, not the browser
+      expect(r.ok && r.manifest.ui?.window?.width).toBe(1280);
     }
   });
   test.skipIf(!existsSync(PFD_PARSER))(
