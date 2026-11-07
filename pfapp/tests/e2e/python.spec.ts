@@ -89,6 +89,9 @@ const toolFrame = async (page: Page): Promise<Frame> => {
   await expect(page.getByTestId("tool-frame")).toHaveAttribute("src", /./);
   const frame = await (await page.getByTestId("tool-frame").elementHandle())?.contentFrame();
   if (!frame) throw new Error("no tool frame");
+  // the src is set, but the frame may still be on its initial about:blank, which is already
+  // "loaded": wait for the navigation to the tool page itself (seen flaking in a full run)
+  await expect.poll(() => frame.url()).not.toBe("about:blank");
   await frame.waitForLoadState("load");
   return frame;
 };

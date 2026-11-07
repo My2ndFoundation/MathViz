@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import type { ShellGroup } from "@/lib/catalog";
 import type { Locale } from "@/lib/i18n/locale";
+import { AiIndicator } from "./ai/ai-indicator";
 import { accentColor, CommandK } from "./command-k";
 import { LangSwitch } from "./lang-switch";
 
@@ -35,8 +36,9 @@ export interface ShellText {
 /**
  * The shell (design §7.2): the sidebar re-implemented natively after the web version's
  * python/app.html — groups in the pack's order, tools in registry order, labels in the URL's
- * language, the current tool highlighted (aria-current), each tool's version — plus the stage the
- * page renders into, the collapse edge and ⌘K.
+ * language, the current tool highlighted (aria-current), each tool's version — plus a thin top bar
+ * (the page's title, the AI indicator) above the stage the page renders into, the collapse edge
+ * and ⌘K.
  */
 export function Shell({
   groups,
@@ -57,6 +59,17 @@ export function Shell({
   const [searching, setSearching] = useState(false);
   const onOpenChange = useCallback((o: boolean) => setSearching(o), []);
   const items = groups.flatMap((g) => g.items);
+  const page = pathname.split("/")[2] ?? "";
+  const pageTitle =
+    page === "tool"
+      ? (items.find((it) => it.id === current)?.title[locale] ?? "")
+      : page === "ask"
+        ? text.askLibrary
+        : page === "notes"
+          ? text.notes
+          : page === "settings"
+            ? text.settings
+            : "";
 
   useEffect(() => {
     try {
@@ -174,7 +187,18 @@ export function Shell({
       >
         ▶
       </button>
-      <main className="stage">{children}</main>
+      <div className="main-col">
+        {/* the top bar (after Math Test Buddy's): where she is, and the AI indicator at the end */}
+        <header className="topbar" data-testid="topbar">
+          <div className="tb-title" data-testid="page-title">
+            {pageTitle}
+          </div>
+          <AiIndicator locale={locale} />
+        </header>
+        <main className="stage" data-testid="stage">
+          {children}
+        </main>
+      </div>
       <CommandK
         items={items}
         locale={locale}

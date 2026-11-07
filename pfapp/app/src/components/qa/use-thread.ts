@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Locale } from "@/lib/i18n/locale";
 import type { PyState } from "@/lib/py-state";
+import { notifyAiJobs } from "../ai/use-ai-jobs";
 import { ApiError, api, errorText, type Job, OPEN_STATUSES, type Thread } from "./api";
 
 /** How often the page asks whether the tutor is done (MathTestBuddy tutor-thread.tsx: 1.5 s). */
@@ -86,6 +87,7 @@ export function useThread(locale: Locale) {
       if (stop) return;
       if (j.status !== "completed") setFailure({ kind: "job", status: j.status, error: j.error });
       setJobId(null);
+      notifyAiJobs();
     };
     timer = window.setTimeout(poll, POLL_MS);
     return () => {
@@ -124,6 +126,7 @@ export function useThread(locale: Locale) {
         threadId.current = r.threadId;
         // the job exists now: poll it whatever happens to the reload (else the thread stays busy, 409)
         setJobId(r.jobId);
+        notifyAiJobs();
         try {
           await reload(r.threadId);
         } catch {
@@ -149,6 +152,7 @@ export function useThread(locale: Locale) {
     } catch (e) {
       setFailure({ kind: "http", text: errorText(e, locale) });
     }
+    notifyAiJobs();
     // the poll sees the ended job on its next round and shows "cancelled"
   }, [jobId, locale]);
 

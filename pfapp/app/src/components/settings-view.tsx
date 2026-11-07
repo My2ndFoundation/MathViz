@@ -13,6 +13,7 @@ import { type ReactNode, useCallback, useEffect, useId, useState } from "react";
 import type { Locale } from "@/lib/i18n/locale";
 import { MESSAGES } from "@/lib/i18n/locale";
 import type { AiLang } from "@/lib/server/settings";
+import { useAiJobs } from "./ai/use-ai-jobs";
 import { ImportPack } from "./import-pack";
 import { OnlinePack } from "./online-pack";
 import { api, errorText } from "./qa/api";
@@ -215,10 +216,15 @@ function Content({ locale, data }: { locale: Locale; data: SettingsData }) {
   );
 }
 
+/**
+ * The AI card reads GET /api/ai/jobs, the top bar's AI indicator's source, so the two never
+ * disagree; the server-rendered status shows until the first answer (and stays on a failed read).
+ */
 function Ai({ locale, data }: { locale: Locale; data: SettingsData }) {
   const t = MESSAGES[locale].settings;
   const errors = MESSAGES[locale].error as Record<string, string>;
-  const { state, code } = data.ai;
+  const live = useAiJobs().data;
+  const { state, code } = live ? { state: live.ai.state, code: live.ai.reason } : data.ai;
   const reason =
     code === "not_registered" ? t.aiNotRegistered : code ? (errors[code] ?? null) : null;
   return (
