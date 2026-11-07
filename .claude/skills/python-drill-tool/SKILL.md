@@ -71,8 +71,8 @@ description: >-
 | 依据表「一致性自查（按概念组）」一节与附录逐组一致：组集合双向相同、每组的程序数与点名的程序 id 等于附录该组的行；附录每写一家，「依据」栏都有那家的条目编号（缩写或全名）——**加程序时自查表那一组也要改** | `boards_groups_check`（清理波） | `附录里有概念组 … 自查表里没有它` / `自查表写 N 个程序，附录里 M 行` / `依据栏里没有 … 的条目编号` |
 | 磁盘上每个 `python/programs/*/_fixtures/*` 文件都在 `git ls-files` 里（`.DS_Store`、`._*` 除外） | `fixture_tracked_check`（清理波） | `在磁盘上、不在 git 索引里` |
 | 全库 tag 折叠大小写、空格、连字符后相同而原文不同（不折下划线） | `tag_normalize_check`（清理波） | `tag 写法分裂：…` |
-| 挖空答案（每行去缩进）逐字、或剥掉一两层外壳后出现在同一程序没挖的行上（「照抄空」，口径见下） | `copied_blank_check`（清理波） | `原样出现在没挖的第 N 行（逐字）` / `剥掉外壳后出现在…（近照抄）` |
-| 判「全是数字」用 `isdecimal`：`isdigit()` 守着 `int()` / `float()`、判整串、或决定哪些字符被收集起来当数字用 → 红（口径见下） | `isdigit_check`（清理波） | `它守着一次 int() / float() 转换` / `它在判一个字符串是不是全是数字` / `它决定哪些字符被收集起来当数字用` |
+| 挖空答案（每行去缩进、两边都剥掉行尾注释）逐字、或剥掉一两层外壳后出现在同一程序没挖的行上（「照抄空」，口径见下） | `copied_blank_check`（清理波） | `原样出现在没挖的第 N 行（逐字）` / `剥掉外壳后出现在…（近照抄）` |
+| 判「全是数字」用 `isdecimal`：`isdigit()` 守着 `int()` / `float()`、判整串（`s.isdigit()`、`all(c.isdigit() for c in s)`、逐字符 `if not ch.isdigit(): return False`）、或决定哪些字符被收集起来当数字用 → 红（口径见下；有看不见的判整串形状） | `isdigit_check`（清理波） | `它守着一次 int() / float() 转换` / `它在判一个字符串是不是全是数字` / `它决定哪些字符被收集起来当数字用` |
 | MicroPython 程序（`runtime` 以 `micropython` 开头）的模块顶层同样只有 import / def / class / docstring / 常量赋值（调用只许 `const(...)` / `Image(...)`）和恰好一个 `if __name__ == "__main__":`；引脚、显示、无线电、主循环放进 `main()`；property 入口不许碰硬件（门装硬件桩，调用即 `HardwareStubCalled`） | `micropython_main_guard_check`（第 6 期开工前） | `顶层有 … 语句` / `顶层赋值里调用了 …` / `抛错 HardwareStubCalled` |
 | pygame 程序（`requires` 含 `pygame`）的模块顶层只有 import / def / class / docstring / 常量赋值（调用只许 `pygame.Color` / `Rect` / `Vector2`）和恰好一个 `if __name__ == "__main__":`；`pygame.init()`、`set_mode`、时钟、主循环都放进 `main()` | `pygame_main_guard_check`（第 5 期开工前） | `顶层有 … 语句` / `顶层赋值里调用了 …` / `` `if __name__ == "__main__":` 有 N 个，应恰好 1 个`` |
 | 带 `check.property` 的程序在 `gates/refs/` 里**同章文件**有参照 | `algorithm_property_check` | `没有它的参考实现` / `参照却登记在` |
@@ -101,13 +101,17 @@ description: >-
   都能从未挖的 down 行剥掉 `transpose(…)` 或 `[::-1]` 得到，裁定为照抄空一类，改成挖 right 与 down、up 留作范例。
   删掉的是参数、运算项、`as e` 一类，或答案只是长行里的一小截，都**不算**：`return node` 之于 `return [node.value] + preorder(node.left) + …`、`node = node.left` 之于 `node.left = insert(node.left, value)` 不是抄。
   挖空模式下所有空同时隐藏，两个空之间互相抄不到，只看没挖的行。
-  **门：`copied_blank_check`**（清理波）：逐字与近照抄两种口径都查；近照抄用门自己的轻量记号切分（一行可以是语句的半截），是近似，不替代逐空看。
+  **门：`copied_blank_check`**（清理波）：逐字与近照抄两种口径都查；近照抄用门自己的轻量记号切分（一行可以是语句的半截），是近似，不替代逐空看；比较前两边都剥掉行尾注释（字符串里的 `#` 不算：字符串记号先整体切出来；跨行字符串的半截行里的 `#` 会被误当注释）。
   **门：`copied_blank_check`**（清理波）按逐字与上面的近照抄口径扫全库。原存量 5 处（第 2 期账本 §三.4：M3 4 处、第 1 期 1 处）清理波已改挖，豁免表 `COPY_BLANK_STOCK` 已清空；
   以后要豁免一处须带出处写进表里（对不上违例的豁免本身是红）。门是机扫的近似，不替代逐空看。
-- **多行空仍以同一层为主。** 判定器在答案与标准答案**行数相同**时按相对缩进宽度严比（判 `indent`）；**行数不同**时（一行写法 `if X: body`、括号内断行）
+- **多行空仍以同一层为主。** 判定器在答案与标准答案**有效行条数相同**时按相对缩进宽度严比（判 `indent`）；**条数不同**时（一行写法 `if X: body`、括号内断行）
   比**块结构**（engine `py-1.3.2` 起，清理波）：两边各切成逻辑行（括号内、反斜杠续行、跨行三引号并入上一行），复合语句头同一行的体算深一层，用缩进栈映射成块层级，
   token 原文相同而层级不同 → 判 `block`（反馈只报行号，不印层级与字面量）。所以 `if a:` / `    if b: c()` / `d()` 对 `d()` 在外层 `if` 里的那四行**判错**（以前判对）；
   `if a: b` 对两行写法、体内括号里断行而续行顶格（合法 Python）仍判对；体的第一行写到外层的括号内断行（CPython 报 `IndentationError`）判错。
+  `match` / `case` 是软关键字：只有第二个 token 能开一个 subject / 模式、行里有括号深度 0 的 `:` 且它之前没有赋值号或 `lambda` 时才算语句头（`match` 头还要求 `:` 是行末），
+  所以 `case 1: a()` 写成一行判对，`case = lambda: 0`、`case.x: int = 1`、`match.group(1)` 照普通语句（清理波终审 M2；`case[0]: int = 1` 与 `case [0]: int = 1` token 相同，一律按 case 头）。
+  **条数恰好相等时仍按宽度比**（清理波终审 M1，没修）：一处写成单行 `if x: y`、另一处把括号断行，两边有效行条数碰巧相同，等价写法会被判 `indent`（终审模糊测试 3338 组等价写法里 560 组是这一种）；
+  反方向，非法代码 `if a: b` / `    f(x,` / `y)` 对参考 `if a:` / `    b` / `f(x, y)` 会被放过（判对；CPython 报 unexpected indent）。
   判定器不再有「跨嵌套块就看不见」的洞，但多行空仍只挖**同一层**的两三行、或「语句头 + 一行体」，并用第 1 级提示钉住写法——跨块的空写法太多，钉不住。
   （第 1 期账本 §一.3、第 6 期账本 §一.3；第 2 期起靠这条规矩避开了旧洞——M3 26 个、M4 6 个多行空都在同一层。）
   **「复合语句头（`if` / `elif` / `for` / `while` / `except`）+ 一行体」这种两行空**：体写错缩进时行数不变、判定器照比（实测判 `indent`）；写成一行判对。
@@ -162,7 +166,10 @@ description: >-
 - **交互程序**（井字棋、猜数、菜单）用 `run.stdin` 喂一串输入；`input()` 的提示语写进 stdout、不换行——讲解与提示照「页面不显示输出」写。
 - **判「全是数字」用 `isdecimal()`，不用 `isdigit()`**：`'²'.isdigit()` 为真，`int('²')` 却抛 `ValueError`（第 3 期 m5a 终审 I1：`date-format-manual` 用 `isdigit` 在 `'²²/12/2024'` 上崩，而同模块的 py-systems 教的是 `isdecimal`）。
   **门：`isdigit_check`**（清理波）：`isdigit()` 守着一次 `int()` / `float()`、判一个字符串是不是全是数字、或决定哪些字符被收集起来当数字用（`number += ch`）→ 红；
-  逐字符只拿结果分类计数（`elif ch.isdigit(): has_digit = True`）、在单字符常量上演示（`chr(178).isdigit()`）放行——放行按用法写，不看同一行有没有 `isdecimal`。
+  「判整串」门认得的形状：`s.isdigit()` 本身；逐字符的 `all(c.isdigit() for c in s)`（列表 / 集合推导式、`c.isdigit() and …` 同样）与 `not any(not c.isdigit() …)`；
+  逐字符循环里 `if not ch.isdigit():`（可夹在 `or` 里）的体直接含 `return False`、`break` 或 `名字 = False`（清理波终审 I1 补上后两种）。
+  **门看不见、靠人的判整串**：`if ch.isdigit(): continue` + `else: return False`、数字字符计数后与 `len(s)` 比、`all(map(str.isdigit, s))`（没有 `.isdigit()` 调用）、`ok = ok and ch.isdigit()` 一类累积写法。
+  逐字符只拿结果分类计数（`elif ch.isdigit(): has_digit = True`）、`any(c.isdigit() …)`（「有没有数字字符」）、在单字符常量上演示（`chr(178).isdigit()`）放行——放行按用法写，不看同一行有没有 `isdecimal`。
   原存量 ch02 `string-method-tour` 的 `is_pin`（第 3 期账本 §二.8）清理波已改用 `isdecimal`；`password-rules` 的 `isdigit` 只给单个字符分类、不接 `int()`，按规矩保留。
 - 复制按钮只复制 `.py`，**不带 `_fixtures/`**：学生粘进 PyCharm 时没有数据文件，讲解里的手抄是她唯一的来源。读 fixture 的程序在讲解里写明
   文件放在哪（`_fixtures/<名>`），并把文件**一行一段**地抄出来——`fixture_notes_check`（见上表）守它与真文件一致，改 fixture 时门会逼你一起改讲解。

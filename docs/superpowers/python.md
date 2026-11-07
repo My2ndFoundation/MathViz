@@ -461,7 +461,10 @@ token 化不是为了放宽，是为了报错报得有意义：「第 4 个 toke
   条数不同（一行写法 `if x: y`、括号内断行）时，各切成逻辑行（括号内、反斜杠续行、跨行三引号并入上一行），复合语句头同一行的体算深一层，用缩进栈映射成块层级，
   token 原文相同而层级不同，或作答的退缩进对不上任何外层，判 `block`（`judge.js` 的 `blockLevels`；反馈只报行号）。
   从前「`if a:` / `    if b: c()` / `d()` 判等于 `d()` 在外层 if 里」的洞因此关上；`if a: b` 对两行写法、续行顶格的括号内断行（合法 Python）仍判同。
-  仍看不见的：行数相同而宽度不同、却不改变块结构的写法（例如外层缩进 4、内层缩进 2 对参考的 4 / 8）——那条路径按宽度严比，判 `indent`，是有意的严格。
+  `match` / `case` 是软关键字，按 `softKeywordHeader` 的判据（第二个 token 能开 subject / 模式、括号深度 0 有 `:` 且其前无赋值号与 `lambda`，`match` 的 `:` 须在行末）才算语句头（清理波终审 M2）。
+  仍看不见的：有效行条数相同而宽度不同、却不改变块结构的写法（例如外层缩进 4、内层缩进 2 对参考的 4 / 8）——那条路径按宽度严比，判 `indent`，是有意的严格。
+  **条数恰好相等时仍按宽度比**（清理波终审 M1，记录、没修）：答案一处写成单行 `if x: y`、另一处把括号断行，两边有效行条数碰巧相等，等价写法判 `indent`（终审模糊测试里 560 / 3338 组等价写法全是这一种）；
+  非法代码 `if a: b` / `    f(x,` / `y)` 对参考 `if a:` / `    b` / `f(x, y)` 判对（CPython 报 unexpected indent）。要修就在条数相等时也比逻辑行划分，划分不同改走 `blockLevels`。
   多行空仍只挖同一层（§5.3，`python-drill-tool`）。
 
 ### 8.3 反馈不泄露字面量
@@ -660,7 +663,7 @@ accent 按**模块**事先定死：M1 cyan · M2 violet · M3 emerald · M4 rose
 | `fixture_tracked_check` | 磁盘上每个 `_fixtures` 文件都在 `git ls-files` 里（只在本地有判别力） |
 | `tag_normalize_check` | tag 折叠大小写 / 空格 / 连字符后相同而原文不同 → 红（不折下划线） |
 | `copied_blank_check` | 「照抄空」：挖空答案行逐字或剥壳后出现在同程序没挖的行上 |
-| `isdigit_check` | `isdigit()` 守着 `int()` / `float()`、判整串、收集数字字符 → 红 |
+| `isdigit_check` | `isdigit()` 守着 `int()` / `float()`、判整串（`s.isdigit()`、`all(c.isdigit() …)`、逐字符 `if not ch.isdigit(): return False / break`）、收集数字字符 → 红；看不见的判整串：`else: return False` 写法、计数后与 `len` 比、`all(map(str.isdigit, s))`、`ok = ok and …` 累积 |
 
 **D·词法**（`gates/lexer.py`）
 

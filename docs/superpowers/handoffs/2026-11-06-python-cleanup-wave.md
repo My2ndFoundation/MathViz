@@ -13,7 +13,7 @@
 | fixture 必须被 git 跟踪 | `fixture_tracked_check`（7 个文件） | 注入「已跟踪集合」少一个 → 断言红 |
 | tag 规范化 | `tag_normalize_check`（折大小写、空格、连字符，不折下划线） | 改一个 tag 的大小写 / 空格 → 断言红 |
 | 照抄空 | `copied_blank_check`（逐字 + drill-tool 的近照抄口径，纯关键字行不算） | 注入逐字孪生、近孪生 → 断言红；2048 修复前的形状两条都报 |
-| `isdigit` → `int()` | `isdigit_check`（AST：守着转换、判整串、收集数字字符 → 红；逐字符分类计数、单字符演示放行；不看同一行有没有 `isdecimal`） | 三种形状各注入一处 → 断言红 |
+| `isdigit` → `int()` | `isdigit_check`（AST：守着转换、判整串、收集数字字符 → 红；逐字符分类计数、`any(c.isdigit() …)`、单字符演示放行；不看同一行有没有 `isdecimal`）。判整串认得 `s.isdigit()`、`all(c.isdigit() for c in s)` / `not any(not c.isdigit() …)`、逐字符 `if not ch.isdigit(): return False / break / ok = False`（后两类是终审 I1 补的）；**看不见**：`if ch.isdigit(): continue` + `else: return False`、计数后与 `len(s)` 比、`all(map(str.isdigit, s))`、`ok = ok and ch.isdigit()` | 三种形状各注入一处 → 断言红；终审修复另注入 `all(…)`、逐字符 `return False` 各一处 → 断言红 |
 | 依据表四家各节与计数 | `boards_groups_check`：按概念组的自查表与附录逐组一致；附录每写一家都引了那家的条目。**「条目编号在四家各节查得到」没做**：878 处引用里 50 个编号（157 处）在各节查不到——各节按主题列，不是全表；要做先补文档。「计数」一节是增量句，不做门。 | 4 条负控制断言红 |
 | 「参照返回：None」措辞 | 被测抛错 / 超时印「参照：未计算」 | 造一个抛错的被测 |
 | `properties.py` R6 | 改成「参照不能与任何一个被测同源」 | 注释 |
@@ -42,7 +42,7 @@
 
 - **第三组「测量没走到的」原样不动**：MicroPython 与 pygame 的 `main()`、matplotlib 的图、硬件行为据文档未实测、复制不带 `_fixtures/`、逐键首次正确率（第 6 期 §十）。
 - 其余多函数程序仍只有一个 property 入口（机制有了，只给 ch08 四个补了）；往返 entry 的 `radio-packet-bytes` 可以改成两个入口，没改。
-- 判定器：行数相同、块结构相同而缩进宽度不同（外层 4 / 内层 2）仍判 `indent`——有意的严格。
+- 判定器：行数相同、块结构相同而缩进宽度不同（外层 4 / 内层 2）仍判 `indent`——有意的严格。有效行条数恰好相等时仍按宽度比：一处单行 `if x: y` + 一处括号断行的等价写法判 `indent`，非法的 `if a: b` / `    f(x,` / `y)` 判对（终审 M1，`python.md` §8.2）。
 - 依据表各节的条目编号没有门（上表）。
 - `library-loans` 86 行被「不超过 80 行」筛掉（不修）。
 - `core.hooksPath`：2026-10-01 用户设成相对路径；本波实测共享配置里又是绝对路径（原因不明，没有改用户配置）。
