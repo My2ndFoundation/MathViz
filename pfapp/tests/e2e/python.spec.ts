@@ -248,10 +248,14 @@ test("restarted on another port with the same data directory, the note and the t
   expect(app.port).not.toBe(oldPort);
 
   await page.goto(`${app.base}/en/notes`);
-  const notes = page.getByTestId("note");
+  const notes = page.getByTestId("notes-row");
   await expect(notes).toHaveCount(1);
   await expect(notes.first()).toContainText(question);
-  await expect(notes.first()).toContainText("which kind of division");
+  // the newest conversation opens beside the list, its saved answer shown
+  await expect(page.getByTestId("notes-detail")).toHaveAttribute("data-id", threadId);
+  await expect(page.locator('[data-testid=qa-message][data-saved="true"]')).toContainText(
+    "which kind of division",
+  );
 
   const res = await page.request.get(`${app.base}/api/threads/${encodeURIComponent(threadId)}`);
   expect(res.status()).toBe(200);

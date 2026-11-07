@@ -58,6 +58,24 @@ export interface NoteSubject {
   programId: string | null;
 }
 
+/** A conversation with saved answers, one row of the notes page (lib/server/qa NoteThreadView). */
+export interface NoteThread {
+  id: string;
+  title: string;
+  question: string;
+  latestNoteAt: string;
+  notes: number;
+  followUps: number;
+  kind: "tool" | "program" | "library";
+  subject: NoteSubject | null;
+  group: { id: string; label: { en: string; zh: string } } | null;
+  /** Locale-less path back to the exercise (or /ask); null when the content no longer has it. */
+  href: string | null;
+}
+
+/** The notes page's filter value for library conversations (lib/server/qa LIBRARY_GROUP). */
+export const LIBRARY_GROUP = "library";
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,

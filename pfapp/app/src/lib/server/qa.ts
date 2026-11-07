@@ -44,6 +44,8 @@ import { getAiLang, getLang } from "./settings";
  *   POST   /api/notes         {messageId} → 201 {id} (200 with the existing note's id)
  *   GET    /api/notes?q=      {notes}, newest first
  *   DELETE /api/notes/:id     204
+ *   GET    /api/notes/threads?q=&group=   {threads, groups}: one row per conversation with notes
+ *   DELETE /api/notes/threads/:id          204: that conversation's notes (the conversation stays)
  *
  * `pyState` is checked field by field as the shell's bridge parser checks it (toPyState); an
  * invalid one is stored as null, which allows no answer line at all. `hint` needs the page in
@@ -540,6 +542,156 @@ export const getNotes: Handler = (app, { query }) => {
 
 export const deleteNote: Handler = (app, { params }) => {
   const r = app.db.prepare("DELETE FROM notes WHERE id = ?").run(params.id ?? "");
+  if (r.changes === 0) throw new HttpError(404, "not_found");
+  return { status: 204 };
+};
+
+// ---------------------------------------------------------------- notes, one row per conversation
+
+/** The notes page's group filter for library threads (a catalog group id is never this). */
+export const LIBRARY_GROUP = "library";
+
+/**
+ * A conversation with saved answers, as the notes page lists it (one row per thread): its question
+ * (the first message she wrote), the date of its newest saved answer, how many answers are saved,
+ * how many questions she asked after the first saved one, what it is about (`subject`: the
+ * program, else the tool, else the library), the catalog group that belongs to, and the page to
+ * go back to (locale-less; null when the content no longer has it).
+ */
+export interface NoteThreadView {
+  id: string;
+  title: string;
+  question: string;
+  latestNoteAt: string;
+  notes: number;
+  followUps: number;
+  kind: "tool" | "program" | "library";
+  subject: SubjectView | null;
+  group: { id: string; label: { en: string; zh: string } } | null;
+  href: string | null;
+}
+
+/** The subject a thread is listed under: the library, else its first program (or blank's), else its first tool. */
+function primarySubject(subjects: readonly SubjectView[]): SubjectView | null {
+  return (
+    subjects.find((s) => s.type === "library") ??
+    subjects.find((s) => s.type === "program") ??
+    subjects.find((s) => s.type === "blank") ??
+    subjects.find((s) => s.type === "tool") ??
+    null
+  );
+}
+
+function noteThreadView(
+  app: AppContext,
+  row: { id: string; title: string; question: string; latest: string },
+): NoteThreadView {
+  const { db } = app;
+  const msgs = db
+    .prepare(
+      `SELECT m.role, n.id AS note_id FROM messages m LEFT JOIN notes n ON n.message_id = m.id
+        WHERE m.thread_id = ? ORDER BY m.created_at, m.id`,
+    )
+    .all<{ role: string; note_id: string | null }>(row.id);
+  const first = msgs.findIndex((m) => m.note_id !== null);
+  const followUps = first < 0 ? 0 : msgs.slice(first + 1).filter((m) => m.role === "user").length;
+  const notes = msgs.filter((m) => m.note_id !== null).length;
+  const subject = primarySubject(subjectViews(app, threadSubjects(db, row.id)));
+  const kind = subject?.type === "library" ? "library" : subject?.programId ? "program" : "tool";
+  let group: NoteThreadView["group"] = null;
+  let href: string | null = null;
+  if (kind === "library") href = "/ask";
+  const toolId = subject?.toolId ?? null;
+  const tool = toolId
+    ? db
+        .prepare(
+          `SELECT i.id, i.grp, g.label_en, g.label_zh FROM catalog_items i
+             LEFT JOIN catalog_groups g ON g.id = i.grp WHERE i.id = ?`,
+        )
+        .get<{ id: string; grp: string; label_en: string | null; label_zh: string | null }>(toolId)
+    : undefined;
+  if (tool) {
+    group = {
+      id: tool.grp,
+      label: { en: tool.label_en ?? tool.grp, zh: tool.label_zh ?? tool.grp },
+    };
+    href =
+      kind === "program" && subject?.programId
+        ? `/tool/${encodeURIComponent(tool.id)}?prog=${encodeURIComponent(subject.programId)}`
+        : `/tool/${encodeURIComponent(tool.id)}`;
+  }
+  return {
+    id: row.id,
+    title: row.title,
+    question: row.question,
+    latestNoteAt: row.latest,
+    notes,
+    followUps,
+    kind,
+    subject,
+    group,
+    href,
+  };
+}
+
+/**
+ * GET /api/notes/threads?q=&group= — the conversations that have saved answers, newest saved answer
+ * first. `q` matches (LIKE, wildcards literal, as GET /api/notes) the thread's title, its first
+ * question, any saved answer, or the question a saved answer replied to. `group` keeps the threads
+ * of one catalog group (LIBRARY_GROUP: the library's); `groups` counts every group over the `q`
+ * matches before that filter, so the page can show its filter chips with their counts.
+ */
+export const getNoteThreads: Handler = (app, { query }) => {
+  const q = (query.get("q") ?? "").trim().slice(0, MAX_QUERY_CHARS);
+  const group = query.get("group") ?? "";
+  const like = `%${escapeLike(q)}%`;
+  const rows = app.db
+    .prepare(
+      `SELECT x.id, x.title, x.question, x.latest FROM (
+         SELECT t.id AS id, t.title AS title,
+                coalesce((SELECT u.text FROM messages u WHERE u.thread_id = t.id AND u.role = 'user'
+                           ORDER BY u.created_at, u.id LIMIT 1), '') AS question,
+                (SELECT max(n.created_at) FROM notes n JOIN messages m ON m.id = n.message_id
+                  WHERE m.thread_id = t.id) AS latest
+           FROM threads t) x
+        WHERE x.latest IS NOT NULL
+          AND (? = '' OR x.title LIKE ? ESCAPE '\\' OR x.question LIKE ? ESCAPE '\\'
+               OR EXISTS (
+                 SELECT 1 FROM notes n JOIN messages m ON m.id = n.message_id
+                  WHERE m.thread_id = x.id
+                    AND (m.text LIKE ? ESCAPE '\\'
+                         OR coalesce((SELECT u.text FROM messages u
+                                       WHERE u.thread_id = m.thread_id AND u.role = 'user'
+                                         AND (u.created_at < m.created_at
+                                              OR (u.created_at = m.created_at AND u.id < m.id))
+                                       ORDER BY u.created_at DESC, u.id DESC LIMIT 1), '')
+                            LIKE ? ESCAPE '\\')))
+        ORDER BY x.latest DESC, x.id DESC LIMIT ?`,
+    )
+    .all<{ id: string; title: string; question: string; latest: string }>(
+      q,
+      like,
+      like,
+      like,
+      like,
+      MAX_NOTES,
+    );
+  const all = rows.map((r) => noteThreadView(app, r));
+  const groupOf = (t: NoteThreadView) => (t.kind === "library" ? LIBRARY_GROUP : t.group?.id);
+  const groups: Record<string, number> = {};
+  for (const t of all) {
+    const g = groupOf(t);
+    if (g) groups[g] = (groups[g] ?? 0) + 1;
+  }
+  const threads = group ? all.filter((t) => groupOf(t) === group) : all;
+  return { body: { threads, groups } };
+};
+
+/** DELETE /api/notes/threads/:id — every saved answer of that thread (the conversation stays); 204. */
+export const deleteThreadNotes: Handler = (app, { params }) => {
+  const r = app.db
+    .prepare("DELETE FROM notes WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)")
+    .run(params.id ?? "");
   if (r.changes === 0) throw new HttpError(404, "not_found");
   return { status: 204 };
 };

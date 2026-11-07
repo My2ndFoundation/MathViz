@@ -21,6 +21,8 @@ export function failureText(f: Failure, locale: Locale): string {
 /**
  * A conversation: her questions as typed, the tutor's answers as Markdown with the library items
  * they cite and "save as note". `library` marks an answer that cites nothing (design §7.5).
+ * The notes page passes `from` (messages before it are not shown; it offers them itself) and
+ * `markSaved` (a saved answer gets the accent bar and the "Saved answer" label).
  */
 export function ThreadView({
   thread,
@@ -29,6 +31,8 @@ export function ThreadView({
   failure,
   onCancel,
   onSaveNote,
+  from = 0,
+  markSaved = false,
 }: {
   thread: Thread | null;
   locale: Locale;
@@ -36,6 +40,8 @@ export function ThreadView({
   failure: Failure | null;
   onCancel: () => void;
   onSaveNote: (messageId: string) => void;
+  from?: number;
+  markSaved?: boolean;
 }) {
   const t = MESSAGES[locale].qa;
   const library = thread?.workflow === "library";
@@ -43,9 +49,17 @@ export function ThreadView({
     <div className="qa-thread" data-testid="thread">
       {thread?.messages.length ? (
         <ol className="qa-messages">
-          {thread.messages.map((m) => (
-            <li key={m.id} className="qa-msg" data-role={m.role} data-testid="qa-message">
-              <span className="qa-who">{m.role === "user" ? t.you : t.tutor}</span>
+          {thread.messages.slice(from).map((m) => (
+            <li
+              key={m.id}
+              className="qa-msg"
+              data-role={m.role}
+              data-saved={markSaved && m.noteId ? "true" : undefined}
+              data-testid="qa-message"
+            >
+              <span className="qa-who">
+                {m.role === "user" ? t.you : markSaved && m.noteId ? t.savedAnswer : t.tutor}
+              </span>
               {m.role === "user" ? (
                 <p className="qa-q">{m.text}</p>
               ) : (

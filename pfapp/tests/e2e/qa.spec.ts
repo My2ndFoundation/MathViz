@@ -99,25 +99,27 @@ test("ask panel on a python tool page: answer shown, saved as a note; /notes lis
   await shot(page, "ask-panel.png");
 
   await page.getByTestId("nav-notes").click();
-  await expect(page).toHaveURL(`${app.base}/en/notes`);
-  const notes = page.getByTestId("note");
+  await expect(page).toHaveURL(new RegExp(`^${app.base}/en/notes(\\?thread=[^&]+)?$`));
+  const notes = page.getByTestId("notes-row");
   await expect(notes).toHaveCount(1);
   await expect(notes.first()).toContainText("Why is it written this way?");
-  await expect(notes.first()).toContainText("which kind of division");
+  await expect(page.locator('[data-testid=qa-message][data-saved="true"]')).toContainText(
+    "which kind of division",
+  );
   await page.getByTestId("notes-search").fill("division");
   await expect(notes).toHaveCount(1);
   await page.getByTestId("notes-search").fill("zzzz-no-such-word");
   await expect(notes).toHaveCount(0);
-  await expect(page.getByTestId("notes-empty")).toBeVisible();
+  await expect(page.getByTestId("notes-empty")).toHaveText("No saved conversation matches.");
   await page.getByTestId("notes-search").fill("");
   await expect(notes).toHaveCount(1);
-  // by subject: the program, and the tool it belongs to (spec §7.4)
-  const filter = page.getByTestId("notes-subject");
-  await filter.selectOption(`program:${prog}`);
+  // by group: the chip of the catalog group the program's tool is in, and "All"
+  const chips = page.getByTestId("notes-chip");
+  await expect(chips).toHaveCount(2);
+  await chips.nth(1).click();
+  await expect(chips.nth(1)).toHaveAttribute("aria-pressed", "true");
   await expect(notes).toHaveCount(1);
-  await filter.selectOption(`tool:${programTool(prog)}`);
-  await expect(notes).toHaveCount(1);
-  await filter.selectOption("");
+  await chips.first().click();
   await expect(notes).toHaveCount(1);
   expect(await newWindowLinks(page)).toBe(0);
   await shot(page, "notes.png");

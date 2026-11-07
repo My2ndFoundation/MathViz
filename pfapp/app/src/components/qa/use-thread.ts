@@ -35,6 +35,7 @@ export interface ThreadSubject {
  * the thread again. No streaming (design §7.4): "thinking…" until the answer is there.
  * `restore(subject)` reopens the newest conversation about a tool or program, resuming the poll
  * if its job is still open; a restore overtaken by another restore, a reset or a question is dropped.
+ * `open(id)` does the same for one thread by id (the notes page).
  */
 export function useThread(locale: Locale) {
   const [thread, setThread] = useState<Thread | null>(null);
@@ -186,6 +187,25 @@ export function useThread(locale: Locale) {
     if (found.job && OPEN_STATUSES.includes(found.job.status)) setJobId(found.job.id);
   }, []);
 
+  /** The same for a thread named by id (the notes page): GET /api/threads/:id. */
+  const open = useCallback(
+    async (id: string) => {
+      const mine = ++seq.current;
+      let found: Thread;
+      try {
+        found = await api<Thread>("GET", `/api/threads/${encodeURIComponent(id)}`);
+      } catch (e) {
+        if (mine === seq.current) setFailure({ kind: "http", text: errorText(e, locale) });
+        return;
+      }
+      if (mine !== seq.current) return;
+      threadId.current = found.id;
+      setThread(found);
+      if (found.job && OPEN_STATUSES.includes(found.job.status)) setJobId(found.job.id);
+    },
+    [locale],
+  );
+
   const reset = useCallback(() => {
     seq.current++;
     threadId.current = null;
@@ -204,5 +224,6 @@ export function useThread(locale: Locale) {
     saveNote,
     reset,
     restore,
+    open,
   };
 }
