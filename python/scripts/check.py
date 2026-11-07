@@ -103,6 +103,7 @@ GATES = [
     ('C', 'browser_branch_check',  syntax.browser_branch_check),
     ('C', 'closed_set_mirror_check',  syntax.closed_set_mirror_check),
     ('C', 'js_parser_parity_check',   syntax.js_parser_parity_check),
+    ('C', 'py_state_bridge_check',    syntax.py_state_bridge_check),
 
     ('D·库', 'program_run_check',              library.program_run_check),
     ('D·库', 'algorithm_property_check',       library.algorithm_property_check),

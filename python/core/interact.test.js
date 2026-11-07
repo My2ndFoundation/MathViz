@@ -948,4 +948,128 @@ function humanTrace(ref, opts) {
   }
 })();
 
+/* ==================== 状态桥与 ?prog= 深链接（engine py-1.4.0）====================
+   这几条要真把 mount() 跑起来：用 scripts/gates/dom_stub.js 的假 DOM（它不在 core/ 下，
+   免得被当成第八个模块普查）。py_state_bridge_check 在裸 vm 里对每个工具页再验一遍。 */
+(function () {
+  const DOM = require('../scripts/gates/dom_stub.js');
+  const SRC = function (name) {
+    return [
+      'def ' + name + '(n):',
+      '# >>> BLANK id=' + name + '-body level=1 hint="中一" hintEn="en1"',
+      '    return n + 1',
+      '# <<< BLANK',
+      '',
+      'print(' + name + '(1))',
+      ''
+    ].join('\n');
+  };
+  const prog = function (id, title) {
+    return {
+      id: id, level: 1, kind: 'syntax', boards: ['AQA'], requires: [], lines: 4, runtime: 'cpython',
+      tags: [], title: { en: title, zh: title }, blurb: { en: 'b', zh: 'b' },
+      notes: { en: ['n'], zh: ['n'] }, lineNotes: [], source: SRC(id.replace(/-/g, '_'))
+    };
+  };
+  const PROGS3 = [prog('p-one', 'Title-One'), prog('p-two', 'Title-Two'), prog('p-three', 'Title-Three')];
+
+  function setup(o) {
+    o = o || {};
+    const win = DOM.makeWindow({ search: o.search || '', origin: 'http://127.0.0.1:4321' });
+    const parent = o.parent ? DOM.makeParent() : null;
+    if (parent) { win.parent = parent; }
+    const root = win.document.createElement('div');
+    win.document.body.appendChild(root);
+    const ctl = PI.mount({ root: root, programs: PROGS3, lang: 'en', page: 'py-test' });
+    return { win: win, parent: parent, root: root, ctl: ctl };
+  }
+  function currentTitle(env) {
+    const hit = env.root.findAll(function (n) {
+      return n.tagName === 'LI' && n.getAttribute('aria-current') === 'true';
+    });
+    return hit.length === 1 ? hit[0].textContent : 'aria-current 选中了 ' + hit.length + ' 项';
+  }
+  function blankInputs(env) {
+    return env.root.findAll(function (n) {
+      return n.tagName === 'TEXTAREA' && /(^| )py-blank-in( |$)/.test(n.className);
+    });
+  }
+  function button(env, label) {
+    return env.root.findAll(function (n) { return n.tagName === 'BUTTON' && n.textContent === label; });
+  }
+  /* 一条都没收到时给一个空壳，让断言以「值不对」红，而不是以 TypeError 崩掉整个文件。 */
+  const NONE = { msg: {}, target: undefined };
+  function last(env) { return env.parent.posts[env.parent.posts.length - 1] || NONE; }
+
+  /* deepLinkProgId 纯函数：只认 prog= 这一个键，只认本页有的 id */
+  T.eq(PI.deepLinkProgId('?prog=p-two', PROGS3), 'p-two', 'deepLinkProgId: 点名本页的 id');
+  T.eq(PI.deepLinkProgId('?lang=zh&prog=p-three#x', PROGS3), 'p-three', 'deepLinkProgId: 夹在别的参数与 # 之间');
+  T.eq(PI.deepLinkProgId('?prog=p%2Done', PROGS3), 'p-one', 'deepLinkProgId: % 转义照解');
+  T.eq(PI.deepLinkProgId('?prog=%E0%A4%A', PROGS3), null, 'deepLinkProgId: 坏的 % 转义当没写，不抛');
+  T.eq(PI.deepLinkProgId('?xprog=p-two', PROGS3), null, 'deepLinkProgId: 别的键里含 prog= 不算');
+  T.eq(PI.deepLinkProgId('?prog=nope', PROGS3), null, 'deepLinkProgId: 不在本页 → null');
+  T.eq(PI.deepLinkProgId(undefined, PROGS3), null, 'deepLinkProgId: 没有 search → null');
+
+  /* bridge: 没有父窗口时不发消息 */
+  (function () {
+    const env = setup();
+    env.ctl.setMode('blank');
+    blankInputs(env).forEach(function (ta) { ta.focus(); });
+    env.ctl.setProgram('p-two');
+    env.ctl.setMode('trace');
+    T.eq(env.win.selfPosts.length, 0, 'bridge: 没有父窗口（parent === window）时一条消息都不发');
+    env.ctl.destroy();
+  })();
+
+  /* bridge: 有父窗口时报告状态 */
+  (function () {
+    const env = setup({ parent: true });
+    T.ok(env.parent.posts.length >= 1, 'bridge: mount 完成后至少发一条');
+    const first = env.parent.posts[0] || NONE;
+    T.eq(first.msg, { type: 'mathviz/py-state', v: 1, page: 'py-test', progId: 'p-one',
+                      mode: 'read', blankId: null, given: [] },
+         'bridge: 第一条消息的形状与值（读模式、第一个程序、没有空）');
+    T.eq(first.target, 'http://127.0.0.1:4321', 'bridge: targetOrigin === location.origin');
+    env.ctl.setMode('blank');
+    T.eq(last(env).msg.mode, 'blank', 'bridge: setMode 之后报告新模式');
+    const ta = blankInputs(env)[0];
+    ta.focus();
+    T.eq(last(env).msg.blankId, 'p_one-body', 'bridge: 挖空输入框 focus 之后报告这个空');
+    env.ctl.setProgram('p-two');
+    T.eq([last(env).msg.progId, last(env).msg.blankId], ['p-two', null],
+         'bridge: setProgram 之后报告新程序，聚焦的空清空');
+    env.ctl.setMode('read');
+    T.ok(env.parent.posts.every(function (p) { return p.target === 'http://127.0.0.1:4321'; }),
+         'bridge: 每一条都只发给同源');
+    env.ctl.destroy();
+  })();
+
+  /* bridge: 填进去与改动 */
+  (function () {
+    const env = setup({ parent: true });
+    env.ctl.setMode('blank');
+    const fill = button(env, PI.ts('giveUp', 'en'));
+    T.eq(fill.length, 1, 'bridge: 挖空模式下找得到唯一一个「填进去」按钮');
+    if (fill.length === 1) { fill[0].click(); }
+    T.eq(last(env).msg.given, ['p_one-body'], 'bridge: 点「填进去」后 given 含该空');
+    const ta = blankInputs(env)[0];
+    ta.value = ta.value + 'x';
+    ta.dispatch('input');
+    T.eq(last(env).msg.given, [], 'bridge: 再改动那个输入框后 given 不再含它');
+    env.ctl.destroy();
+  })();
+
+  /* deep link: ?prog= 选中程序 */
+  (function () {
+    const env = setup({ search: '?lang=en&prog=p-three' });
+    T.ok(currentTitle(env).indexOf('Title-Three') === 0,
+         'deep link: ?prog=p-three 初始选中第三个程序（实际：' + currentTitle(env) + '）');
+    env.ctl.destroy();
+    const bad = setup({ search: '?prog=nope' });
+    T.ok(currentTitle(bad).indexOf('Title-One') === 0,
+         'deep link: ?prog=nope 不在 PROGRAMS 里 → 照旧第一个、不抛（实际：' + currentTitle(bad) + '）');
+    bad.ctl.destroy();
+  })();
+})();
+
 T.report('interact');

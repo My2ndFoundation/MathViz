@@ -81,6 +81,7 @@ description: >-
 | 同一 `problem` 的变体标题互不相同 | `variant_check` | 点名组 |
 | `chapter.json` 与目录里的 `.py` 双向一致 | `chapter_manifest_check` | 点名文件 |
 | 工具页 `TOOL.id` / `accent` / `title` 与 `tool-engine` 等于注册表 | `page_mirror_check` | `TOOL.<字段> 与注册表不同` |
+| 每个工具页（含骨架）的真实脚本在裸 `vm` 里装载：单独打开（`parent === window`）时一路切模式、聚焦、填进去、换题，`postMessage` 一次都不调；有父窗口时每条消息 `type`/`v`/同源 `targetOrigin` 对、`page` 等于 `TOOL.id`（手写区的 `PyInteract.mount({…, page: TOOL.id})` 不许漏）；`?prog=<id>` 选中那个程序 | `py_state_bridge_check`（C 组，engine `py-1.4.0`） | `没有父窗口时调用了 postMessage N 次` / `第一条消息 page=null，应为 TOOL.id=…` / `?prog=… 打开后第一条消息的 progId 是 …` |
 | accent 按模块配色表（M1 cyan · M2 violet · M3 emerald · M4 rose · M5 orange · M6 cyan · M7 violet · M8 emerald） | `accent_module_check` | `accent 应为 …` |
 | 注册表 `version` == 页面 `tool-version` meta | `version_meta_check` | 点名两个值 |
 
