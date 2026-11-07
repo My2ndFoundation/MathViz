@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { type AddonsClient, createAddonsClient } from "../addons/client";
+import { createFakeAddons } from "../addons/fake";
+import { type AddonSync, createAddonSync } from "../addons/sync";
 import { createPlatformClient, type PlatformClient } from "../agent/platform/client";
 import { ensureIndexed } from "../content/index-builder";
 import { type FoundContent, findContent } from "../content/installed";
@@ -29,6 +31,16 @@ export interface AppEnv {
   PRIMEFORGE_API_URL?: string;
   PRIMEFORGE_API_SECRET?: string;
   MATHVIZ_TARGET?: string;
+  /** "1": the development stand-in for the store (lib/addons/fake), see fakeAddonsEnabled. */
+  MATHVIZ_FAKE_ADDONS?: string;
+  /** The fake store's offers: a directory of <slug>/{addon.json, payload/}. */
+  MATHVIZ_FAKE_ADDONS_DIR?: string;
+  /** Slugs the fake store sells and the account does not own, comma-separated. */
+  MATHVIZ_FAKE_ADDONS_PAID?: string;
+  MATHVIZ_FAKE_ADDONS_INSTALL_MS?: string;
+  /** "1": the e2e harness, the only way a production build honours MATHVIZ_FAKE_ADDONS. */
+  MATHVIZ_E2E?: string;
+  NODE_ENV?: string;
   PRIMEFORGE_PORT?: string;
   PORT?: string;
   [key: string]: string | undefined;
@@ -57,6 +69,10 @@ export interface AppContext {
   readonly csrfToken: string;
   readonly log: Log;
   readonly ai: AiState;
+  /** The platform's add-on API (or the development fake); null outside PrimeForge. */
+  readonly addons: AddonsClient | null;
+  /** Notices a store install finishing: asks /installed again, refreshContent when it changed. */
+  readonly addonSync: AddonSync;
   /** Find the content pack again (after an import, a store install) and re-index if it changed. */
   refreshContent(): Promise<FoundContent | null>;
   close(): void;
@@ -68,7 +84,7 @@ export interface CreateOptions {
   /** Defaults to a fresh token. getAppContext passes the process's (shared with the proxy). */
   csrfToken?: string;
   /** Overrides the client built from PRIMEFORGE_API_URL / _SECRET (tests). */
-  addons?: Pick<AddonsClient, "installed"> | null;
+  addons?: AddonsClient | null;
   log?: Log;
   /** Overrides the client built from PRIMEFORGE_API_URL / _SECRET (tests); null = no AI. */
   platform?: PlatformClient | null;
@@ -80,6 +96,16 @@ const defaultLog: Log = (event, fields = {}) => {
   console.warn(JSON.stringify({ event, ...fields }));
 };
 
+/**
+ * Whether to use the development store (MTB's MTB_FAKE_ADDONS rule): MATHVIZ_FAKE_ADDONS=1 in
+ * development, and in a production build only together with MATHVIZ_E2E=1 (the e2e harness), so a
+ * stray variable in a real install never replaces the store.
+ */
+export const fakeAddonsEnabled = (env: AppEnv): boolean =>
+  env.MATHVIZ_FAKE_ADDONS === "1" &&
+  !!env.MATHVIZ_FAKE_ADDONS_DIR &&
+  (env.NODE_ENV !== "production" || env.MATHVIZ_E2E === "1");
+
 export async function createAppContext(
   env: AppEnv,
   options: CreateOptions = {},
@@ -87,16 +113,29 @@ export async function createAppContext(
   const target = loadTarget(env.MATHVIZ_TARGET);
   const log = options.log ?? defaultLog;
   const dataDir = env.PRIMEFORGE_DATA_DIR || path.join(process.cwd(), ".data", target.id);
-  const addons =
+  const fake = options.addons === undefined && fakeAddonsEnabled(env);
+  const fakeRoot = fake ? path.resolve(env.MATHVIZ_FAKE_ADDONS_DIR as string) : null;
+  if (fake) log("addons.fake_enabled", { level: "warn" });
+  const addons: AddonsClient | null =
     options.addons !== undefined
       ? options.addons
-      : env.PRIMEFORGE_API_URL && env.PRIMEFORGE_API_SECRET
-        ? createAddonsClient({
-            apiUrl: env.PRIMEFORGE_API_URL,
-            secret: env.PRIMEFORGE_API_SECRET,
+      : fakeRoot
+        ? createFakeAddons({
             appId: target.appId,
+            root: fakeRoot,
+            stateFile: path.join(dataDir, "fake-addons.json"),
+            ...(Number(env.MATHVIZ_FAKE_ADDONS_INSTALL_MS) > 0 && {
+              installMs: Number(env.MATHVIZ_FAKE_ADDONS_INSTALL_MS),
+            }),
+            paid: (env.MATHVIZ_FAKE_ADDONS_PAID ?? "").split(",").filter(Boolean),
           })
-        : null;
+        : env.PRIMEFORGE_API_URL && env.PRIMEFORGE_API_SECRET
+          ? createAddonsClient({
+              apiUrl: env.PRIMEFORGE_API_URL,
+              secret: env.PRIMEFORGE_API_SECRET,
+              appId: target.appId,
+            })
+          : null;
   const platform =
     options.platform !== undefined
       ? options.platform
@@ -112,13 +151,30 @@ export async function createAppContext(
     registered: false,
   };
   const db = openDb(dataDir, { migrationsDir: options.migrationsDir });
+  // the fake installs in place: its offers directory is the root the reported paths sit in
+  const addonsDir = env.PRIMEFORGE_ADDONS_DIR || fakeRoot;
+  // every installed() answer findContent locates with is the sync's baseline (sync.observe)
+  const watched: Pick<AddonsClient, "installed"> | null = addons && {
+    async installed() {
+      const rows = await addons.installed();
+      sync.observe(rows);
+      return rows;
+    },
+  };
+  const sync: AddonSync = createAddonSync({
+    client: addons,
+    log,
+    onChange: async () => {
+      content = await locate();
+    },
+  });
 
   async function locate(): Promise<FoundContent | null> {
     const found = await findContent({
       appId: target.appId,
       dataDir,
-      addonsDir: env.PRIMEFORGE_ADDONS_DIR || null,
-      addons,
+      addonsDir,
+      addons: watched,
       log,
     });
     if (!found) return null;
@@ -136,7 +192,7 @@ export async function createAppContext(
     return found;
   }
 
-  let content: FoundContent | null;
+  let content: FoundContent | null = null;
   try {
     content = await locate();
   } catch (e) {
@@ -154,11 +210,14 @@ export async function createAppContext(
     csrfToken: options.csrfToken ?? newCsrfToken(),
     log,
     ai,
+    addons,
+    addonSync: sync,
     async refreshContent() {
       content = await locate();
       return content;
     },
     close() {
+      sync.stop();
       db.close();
     },
   };
@@ -178,6 +237,8 @@ export function getAppContext(): Promise<AppContext> {
     g[SLOT] = p;
     // register the MCP secret, then reconcile unfinished jobs — in the background, once per process
     p.then((ctx) => startAi(ctx)).catch(() => {});
+    // a store install finishing reaches the app within POLL_MS, whichever page is open
+    p.then((ctx) => ctx.addonSync.start()).catch(() => {});
     p.catch(() => {
       if (g[SLOT] === p) delete g[SLOT];
     });

@@ -29,6 +29,7 @@ export interface ShellText {
   contentVersion: string;
   notes: string;
   askLibrary: string;
+  settings: string;
 }
 
 /**
@@ -145,6 +146,18 @@ export function Shell({
               ))}
             </section>
           ))}
+        </div>
+        {/* the "System" place at the bottom, as in Math Test Buddy's sidebar */}
+        <div className="sb-links sb-sys">
+          <Link
+            href={`/${locale}/settings`}
+            className="item"
+            data-testid="nav-settings"
+            aria-current={pathname === `/${locale}/settings` ? "page" : undefined}
+          >
+            <span className="dot" />
+            <span className="tx">{text.settings}</span>
+          </Link>
         </div>
         <div className="sb-foot">
           <span data-testid="content-version">{text.contentVersion}</span>

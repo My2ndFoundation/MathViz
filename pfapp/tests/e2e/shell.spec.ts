@@ -212,9 +212,11 @@ test("the shell opens nothing in a new window (PrimeForge's app window hands tho
   expect(await page.locator('[target="_blank"], [target="_new"]').count()).toBe(0);
   expect(await page.content()).not.toContain("window.open");
   // the shell's own pages too (with answers in them: tests/e2e/qa.spec.ts)
-  for (const p of ["ask", "notes"]) {
+  for (const p of ["ask", "notes", "settings"]) {
     await page.goto(`${base()}/en/${p}`);
-    await expect(page.getByTestId(p === "ask" ? "library-ask" : "notes-view")).toBeVisible();
+    await expect(
+      page.getByTestId(p === "ask" ? "library-ask" : p === "notes" ? "notes-view" : "settings"),
+    ).toBeVisible();
     expect([p, await page.locator('[target="_blank"], [target="_new"]').count()]).toEqual([p, 0]);
     expect(await page.content()).not.toContain("window.open");
   }
@@ -287,6 +289,10 @@ test.describe("no content pack", () => {
     await expect(page).toHaveURL(`${empty.base}/en/empty`);
     await expect(page.getByTestId("empty-state")).toBeVisible();
     await expect(page.getByTestId("sidebar")).toHaveCount(0);
+    // outside PrimeForge the store install is one line; the import and a way to Settings remain
+    await expect(page.getByTestId("online-notice")).toBeVisible();
+    await expect(page.getByTestId("online-action")).toHaveCount(0);
+    await expect(page.getByTestId("empty-settings")).toHaveAttribute("href", "/en/settings");
     // a tool URL without content goes to the empty state too
     await page.goto(`${empty.base}/en/tool/${first.id}`);
     await expect(page).toHaveURL(`${empty.base}/en/empty`);
