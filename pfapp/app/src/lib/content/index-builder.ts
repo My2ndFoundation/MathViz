@@ -1,8 +1,8 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { Db } from "../db/handle";
-import type { FoundContent } from "./installed";
+import { type FoundContent, isRegularFile } from "./installed";
 
 /**
  * The catalog table and the library index, built from a content pack's payload (design §7.1
@@ -112,9 +112,23 @@ interface Doc {
   body: string;
 }
 
+/** A payload JSON file; a symbolic link (or anything not a regular file) is refused. */
 function readJson(file: string): unknown {
+  if (!isRegularFile(file)) {
+    throw new Error(`${path.basename(file)} is not a regular file (a symbolic link?): ${file}`);
+  }
   return JSON.parse(readFileSync(file, "utf8"));
 }
+
+/** Whether anything is at p, a dangling link included (existsSync follows links). */
+const present = (p: string): boolean => {
+  try {
+    lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 function buildDocs(dir: string) {
   const catalog = catalogSchema.parse(readJson(path.join(dir, "catalog.json")));
@@ -131,7 +145,10 @@ function buildDocs(dir: string) {
   // one program's blank is often another's plain line (128 of 988 long answer lines in the python
   // pack when this was written), and a search for the answer would otherwise find it there.
   const answers = new Set<string>();
-  if (existsSync(sourceDir)) {
+  if (present(sourceDir) && !lstatSync(sourceDir).isDirectory()) {
+    throw new Error(`source/ is not a directory (a symbolic link?): ${sourceDir}`);
+  }
+  if (present(sourceDir)) {
     for (const f of readdirSync(sourceDir).sort()) {
       if (!f.endsWith(".json")) continue;
       const p = sourceSchema.parse(readJson(path.join(sourceDir, f)));
@@ -167,9 +184,8 @@ function buildDocs(dir: string) {
 export function ensureIndexed(db: Db, content: FoundContent): boolean {
   if (db.readOnly) return false;
   const provFile = path.join(content.dir, "provenance.json");
-  const sha = existsSync(provFile)
-    ? (provenanceSchema.parse(readJson(provFile)).sha ?? null)
-    : null;
+  // absent → sha null; present must be a regular file (readJson refuses a link)
+  const sha = present(provFile) ? (provenanceSchema.parse(readJson(provFile)).sha ?? null) : null;
   const state = db
     .prepare("SELECT addon_version, mv_sha FROM content_state WHERE id = 1")
     .get<{ addon_version: string | null; mv_sha: string | null }>();

@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { AddonError, type AddonsClient } from "../addons/client";
 import { MANUAL_DIR } from "./manual-import";
@@ -58,11 +58,23 @@ const isRealDir = (p: string): boolean => {
   }
 };
 
-/** Why a payload directory is unusable, or null. */
-function placeProblem(dir: string, root: string | null | undefined): string | null {
+/** A regular file, not a symbolic link (PFD's installer reads its own files the same way). */
+export const isRegularFile = (p: string): boolean => {
+  try {
+    return lstatSync(p).isFile();
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Why a payload directory is unusable, or null. `root` is the directory the payload must sit in;
+ * null means none is required (the manual copy, which this app wrote itself).
+ */
+function placeProblem(dir: string, root: string | null): string | null {
   if (!path.isAbsolute(dir)) return "the payload path is not absolute";
   if (!isRealDir(dir)) return "the payload is not a directory (or is a symbolic link)";
-  if (root) {
+  if (root !== null) {
     try {
       const r = realpathSync(root);
       const real = realpathSync(dir);
@@ -73,9 +85,14 @@ function placeProblem(dir: string, root: string | null | undefined): string | nu
       return "the add-ons directory is missing";
     }
   }
-  if (!existsSync(path.join(dir, "catalog.json"))) return "the payload has no catalog.json";
+  if (!isRegularFile(path.join(dir, "catalog.json"))) {
+    return "the payload has no catalog.json (or it is a symbolic link)";
+  }
   return null;
 }
+
+/** Logged once per process: the platform reported store rows but named no add-ons directory. */
+let warnedNoRoot = false;
 
 async function storeCandidates(env: ContentEnv): Promise<FoundContent[]> {
   if (!env.addons) return [];
@@ -87,11 +104,19 @@ async function storeCandidates(env: ContentEnv): Promise<FoundContent[]> {
     env.log?.("content.installed_failed", { code: e instanceof AddonError ? e.code : "error" });
     return [];
   }
-  if (rows === "unsupported") return [];
+  if (rows === "unsupported" || rows.length === 0) return [];
+  // Fail closed: without PRIMEFORGE_ADDONS_DIR there is no root to hold the reported paths to,
+  // and an unchecked path would let any directory holding a catalog.json pass as the store pack.
+  const root = env.addonsDir?.trim() ? env.addonsDir : null;
+  if (root === null) {
+    if (!warnedNoRoot) env.log?.("content.store_no_addons_dir", { rows: rows.length });
+    warnedNoRoot = true;
+    return [];
+  }
   const out: FoundContent[] = [];
   for (const a of rows) {
     if (a.addonId !== contentAddonId(env.appId) || !SEMVER.test(a.version)) continue;
-    const problem = placeProblem(a.path, env.addonsDir);
+    const problem = placeProblem(a.path, root);
     if (problem) {
       env.log?.("content.store_refused", { version: a.version, problem });
       continue;

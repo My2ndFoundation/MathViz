@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -6,11 +7,12 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 import type { InstalledAddon } from "../../app/src/lib/addons/client";
 import { ensureIndexed, stripBlanks } from "../../app/src/lib/content/index-builder";
@@ -230,11 +232,76 @@ describe("findContent", () => {
       await findContent({ appId: APP_ID, dataDir, addonsDir, addons: fakeClient(rows) }),
     ).toBeNull();
   });
+
+  test("fail closed: store rows without PRIMEFORGE_ADDONS_DIR are not used (manual still is)", async () => {
+    const dataDir = tmp("data");
+    const somewhere = tmp("somewhere");
+    const rows = [storeInstall(somewhere, "5.0.0")];
+    const events: string[] = [];
+    const log = (e: string) => events.push(e);
+    for (const addonsDir of [undefined, null, "", "  "]) {
+      expect(
+        await findContent({ appId: APP_ID, dataDir, addonsDir, addons: fakeClient(rows), log }),
+      ).toBeNull();
+    }
+    await importAddonFile(pfaddon("1.0.0"), dataDir, APP_ID);
+    const found = await findContent({ appId: APP_ID, dataDir, addons: fakeClient(rows), log });
+    expect(found?.source).toBe("manual");
+    expect(found?.version).toBe("1.0.0");
+    // the same rows are accepted once the root is named
+    expect(
+      (
+        await findContent({
+          appId: APP_ID,
+          dataDir,
+          addonsDir: somewhere,
+          addons: fakeClient(rows),
+        })
+      )?.version,
+    ).toBe("5.0.0");
+    expect(events.filter((e) => e === "content.store_no_addons_dir").length).toBeLessThanOrEqual(1);
+  });
+
+  test("a store payload whose catalog.json is a symbolic link is ignored", async () => {
+    const dataDir = tmp("data");
+    const addonsDir = tmp("addons");
+    const row = storeInstall(addonsDir, "1.0.0");
+    const real = join(tmp("elsewhere"), "catalog.json");
+    cpSync(join(row.path, "catalog.json"), real);
+    rmSync(join(row.path, "catalog.json"));
+    symlinkSync(real, join(row.path, "catalog.json"));
+    expect(
+      await findContent({ appId: APP_ID, dataDir, addonsDir, addons: fakeClient([row]) }),
+    ).toBeNull();
+  });
 });
 
 // ---- importAddonFile -------------------------------------------------------------------------------
 
 describe("importAddonFile", () => {
+  test("reads a .pfaddon written by PFD's own packer (entriesFromDir + writeTar + gzip -9)", async () => {
+    // tests/fixtures/pfd-packed-content-0.0.1.pfaddon: PFD 6e5a968 packages/app-installer
+    // entriesFromDir + writeTar, then gzipSync level 9 — scripts/pack-addon.ts's own two steps,
+    // unsigned. One path is over 100 bytes, so it lands in the ustar prefix field.
+    const fixture = join(import.meta.dir, "../fixtures/pfd-packed-content-0.0.1.pfaddon");
+    const dataDir = tmp("data");
+    expect(await importAddonFile(fixture, dataDir, APP_ID)).toBe("0.0.1");
+    const payload = join(dataDir, "addons-manual", "0.0.1", "payload");
+    const files = walk(payload).filter((f) => !f.endsWith("/"));
+    expect(files).toEqual([
+      "catalog.json",
+      "provenance.json",
+      "source/a-directory-name-long-enough-to-push-the-path-past-the-ustar-name-field/program-with-a-long-name.json",
+      "source/hello-name.json",
+    ]);
+    expect(Buffer.byteLength(`payload/${files[2]}`)).toBeGreaterThan(100);
+    expect(JSON.parse(readFileSync(join(payload, files[2] as string), "utf8")).id).toBe(
+      "hello-name",
+    );
+    const found = await findContent({ appId: APP_ID, dataDir, addons: null });
+    expect(found).toEqual({ dir: payload, version: "0.0.1", source: "manual" });
+  });
+
   test("unpacks to addons-manual/<ver>/ with addon.json and payload/", async () => {
     const dataDir = tmp("data");
     const v = await importAddonFile(pfaddon("1.2.3"), dataDir, APP_ID);
@@ -321,6 +388,29 @@ describe("ensureIndexed", () => {
     expect(count(db, "library_docs")).toBe(ITEMS + SOURCES);
     db.exec("INSERT INTO library_fts(library_fts, rank) VALUES('integrity-check', 1)");
   });
+});
+
+describe("ensureIndexed refuses symbolic links inside the payload", () => {
+  for (const rel of ["catalog.json", "provenance.json", "source/hello-name.json"]) {
+    test(rel, () => {
+      const dir = join(tmp("linked"), "payload");
+      cpSync(PAYLOAD, dir, { recursive: true });
+      const real = join(tmp("real"), basename(rel));
+      cpSync(join(dir, rel), real);
+      rmSync(join(dir, rel));
+      symlinkSync(real, join(dir, rel));
+      const db = freshDb();
+      expect(ensureIndexed(db, { dir: PAYLOAD, version: "1.0.0", source: "store" })).toBe(true);
+      expect(() => ensureIndexed(db, { dir, version: "1.0.1", source: "store" })).toThrow(
+        /symbolic link/,
+      );
+      // the old index stays
+      expect(count(db, "catalog_items")).toBe(ITEMS);
+      expect(db.prepare("SELECT addon_version FROM content_state").get()).toEqual({
+        addon_version: "1.0.0",
+      });
+    });
+  }
 });
 
 // ---- searchLibrary --------------------------------------------------------------------------------
@@ -445,4 +535,86 @@ describe("searchLibrary", () => {
         en?.title.toLowerCase().includes("recursion"),
     ).toBe(true);
   });
+});
+
+// ---- the same search on node:sqlite (the packaged app runs under Node 24) -----------------------
+
+const NODE24_LOCAL = "/Users/nickma/.nvm/versions/node/v24.13.0/bin/node";
+/** As db.test.ts: MATHVIZ_NODE, else the local v24.13.0, else `node` on PATH; must be >= 24. */
+function findNode(): string | null {
+  const candidates = [process.env.MATHVIZ_NODE, NODE24_LOCAL, Bun.which("node")].filter(
+    (c): c is string => !!c && existsSync(c),
+  );
+  for (const bin of candidates) {
+    const r = spawnSync(bin, ["-p", "process.versions.node"], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    if (r.status === 0 && Number(r.stdout.trim().split(".")[0]) >= 24) return bin;
+  }
+  return null;
+}
+
+describe("searchLibrary on node:sqlite", () => {
+  const node = findNode();
+  if (node === null) {
+    test.skip("node:sqlite — skipped: no Node >= 24 binary found; set MATHVIZ_NODE", () => {});
+    return;
+  }
+  test("short, long, two-character Chinese and mixed queries give the same hits as bun:sqlite", async () => {
+    const src = join(import.meta.dir, "../../app/src/lib");
+    const work = tmp("node");
+    const entry = join(work, "entry.ts");
+    writeFileSync(
+      entry,
+      [
+        `export { openDb } from ${JSON.stringify(join(src, "db/open.ts"))};`,
+        `export { ensureIndexed } from ${JSON.stringify(join(src, "content/index-builder.ts"))};`,
+        `export { searchLibrary } from ${JSON.stringify(join(src, "content/search.ts"))};`,
+      ].join("\n"),
+    );
+    const built = await Bun.build({
+      entrypoints: [entry],
+      target: "node",
+      format: "esm",
+      outdir: work,
+    });
+    expect(built.success).toBe(true);
+    const queries = ["递归", "recursion", "二分查找", "递归 recursion", "_%", 'a"b'];
+    const r = spawnSync(
+      node,
+      [
+        "--input-type=module",
+        "-",
+        join(work, "entry.js"),
+        tmp("ndb"),
+        MIGRATIONS,
+        PAYLOAD,
+        JSON.stringify(queries),
+      ],
+      {
+        input: `const [mod, dataDir, migrationsDir, payload, qs] = process.argv.slice(2);
+          const { openDb, ensureIndexed, searchLibrary } = await import(mod);
+          const db = openDb(dataDir, { migrationsDir });
+          ensureIndexed(db, { dir: payload, version: "1.0.0", source: "store" });
+          const out = { backend: db.connection.backend, hits: JSON.parse(qs).map((q) => searchLibrary(db, q, 50)) };
+          db.close();
+          console.log(JSON.stringify(out));`,
+        encoding: "utf8",
+        timeout: 30_000,
+      },
+    );
+    expect({ status: r.status, stderr: r.stderr }).toMatchObject({ status: 0 });
+    const got = JSON.parse(r.stdout) as { backend: string; hits: { id: string }[][] };
+    expect(got.backend).toBe("node:sqlite");
+    const db = freshDb();
+    ensureIndexed(db, { dir: PAYLOAD, version: "1.0.0", source: "store" });
+    for (const [i, q] of queries.entries()) {
+      const want = searchLibrary(db, q, 50);
+      expect({ q, hits: got.hits[i] }).toEqual({ q, hits: want });
+    }
+    expect(got.hits[0]?.length).toBeGreaterThan(0);
+    expect(got.hits[1]?.length).toBeGreaterThan(0);
+    expect(got.hits[3]?.length).toBeGreaterThan(0);
+  }, 60_000);
 });

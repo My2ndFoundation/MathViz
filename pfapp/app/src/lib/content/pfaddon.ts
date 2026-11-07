@@ -75,7 +75,18 @@ const TYPE_NAMES: Record<string, string> = {
   K: "GNU longlink",
 };
 
-/** Read a ustar archive strictly (see the header). Throws AddonFileError. */
+/**
+ * Read a ustar archive strictly (see the header). Throws AddonFileError.
+ *
+ * The format, as PFD writes it (packages/app-installer/src/tar.ts writeTar, via
+ * scripts/pack-addon.ts: entriesFromDir → writeTar → gzipSync level 9): POSIX ustar, magic
+ * "ustar\0" + version "00"; typeflag "0" files / "5" directories only, directories named with a
+ * trailing slash; entries sorted depth-first by name, each directory before its contents; paths
+ * over 100 bytes split at a slash into name (≤100) + prefix (≤155), never PAX or GNU longname;
+ * mode 0644/0755, uid/gid 0, mtime 0, no owner names; two zero blocks at the end. Proven by
+ * tests/fixtures/pfd-packed-content-0.0.1.pfaddon (written by PFD 6e5a968's own writer, one path
+ * in the prefix field) in content.test.ts.
+ */
 export function readTar(
   tar: Uint8Array,
   {
