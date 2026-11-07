@@ -62,7 +62,9 @@ describe("refusal mapping", () => {
     [503, { error: "not_configured" }, "unsupported"],
     [403, { error: "addons_not_declared" }, "unsupported"],
     [404, { error: "not_found" }, "not_found"],
-    [409, { error: "dependency_cycle" }, "bad_reply"],
+    [409, { error: "dependency_cycle", addonId: "x" }, "dependency_cycle"],
+    [409, { error: "dependency_unavailable", addonId: "x" }, "dependency_unavailable"],
+    [409, { error: "something_new" }, "bad_reply"],
     [500, null, "bad_reply"],
   ];
   for (const [status, body, code] of cases) {
@@ -261,6 +263,64 @@ describe("installed-set sync", () => {
     });
     await Promise.all([sync.refresh(), sync.refresh(), sync.refresh(), sync.refresh()]);
     expect(calls).toBe(2);
+  });
+
+  test("installed() throwing inside onChange (the locate) clears the baseline: the next refresh reloads (review I1)", async () => {
+    let fail = false;
+    let changes = 0;
+    let served = null as string | null;
+    const answer = [a("1.0.0")];
+    const sync: ReturnType<typeof createAddonSync> = createAddonSync({
+      client: { installed: async () => answer },
+      onChange: async () => {
+        changes++;
+        // as context.ts: locate asks installed() through a wrapper; a failure forgets the baseline
+        try {
+          if (fail) throw new Error("timeout");
+          sync.observe(answer);
+          served = "store";
+        } catch {
+          sync.forget();
+          served = null;
+        }
+      },
+    });
+    fail = true;
+    expect(await sync.refresh()).toBe(true);
+    expect(served).toBeNull();
+    fail = false;
+    expect(await sync.refresh()).toBe(true);
+    expect(served).toBe("store");
+    expect(changes).toBe(2);
+    expect(await sync.refresh()).toBe(false);
+  });
+
+  test("onChange rejecting: refresh() still resolves, the queue keeps working, the next tick retries (review M1)", async () => {
+    let reject = true;
+    let changes = 0;
+    const logged: string[] = [];
+    const sync = createAddonSync({
+      client: {
+        async installed() {
+          await new Promise((r) => setTimeout(r, 5));
+          return [a("1.0.0")];
+        },
+      },
+      onChange: async () => {
+        changes++;
+        if (reject) throw new Error("EACCES");
+      },
+      log: (e) => logged.push(e),
+    });
+    // one running (it rejects inside), one queued behind it: both must resolve
+    const [first, second] = await Promise.all([sync.refresh(), sync.refresh()]);
+    expect(first).toBe(true);
+    expect(second).toBe(true); // the baseline was cleared, so the queued run reloads again
+    expect(logged).toContain("addons.reload_failed");
+    reject = false;
+    expect(await sync.refresh()).toBe(true);
+    expect(await sync.refresh()).toBe(false);
+    expect(changes).toBe(3);
   });
 
   test("without a client nothing runs", async () => {

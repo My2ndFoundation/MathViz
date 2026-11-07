@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, type Page, test } from "@playwright/test";
+import { expectNoNewWindows, hookWindowOpen } from "./new-windows";
 import { fakeStoreEnv, type RunningApp, startApp, storeDir } from "./setup";
 
 /**
@@ -27,10 +28,11 @@ function watch(page: Page) {
   return errors;
 }
 
-const noNewWindows = async (page: Page) => {
-  expect(await page.locator('[target="_blank"], [target="_new"]').count()).toBe(0);
-  expect(await page.content()).not.toContain("window.open");
-};
+const noNewWindows = expectNoNewWindows;
+
+test.beforeEach(async ({ page }) => {
+  await hookWindowOpen(page);
+});
 
 test("Settings: the sidebar links to it; the AI reply language saves and survives a reload", async ({
   page,
@@ -76,7 +78,83 @@ test("Settings: the section is in the URL hash; the content section shows the in
   await page.getByTestId("settings-tab-ai").click();
   await expect(page).toHaveURL(`${base()}/en/settings#ai`);
   await expect(page.getByTestId("set-ai")).toHaveAttribute("data-state", "unavailable");
+  // with a content pack the sidebar is the way back: no extra link
+  await expect(page.getByTestId("settings-back")).toHaveCount(0);
   await noNewWindows(page);
+});
+
+test("Settings: the section menu is one tab stop; arrow keys, Home and End move between sections (review M4)", async ({
+  page,
+}) => {
+  await page.goto(`${base()}/en/settings`);
+  const tab = (id: string) => page.getByTestId(`settings-tab-${id}`);
+  await expect(page.getByTestId("settings-panel-general")).toBeVisible();
+  // roving tabindex: only the chosen tab is in the tab order
+  await expect(tab("general")).toHaveAttribute("tabindex", "0");
+  await expect(tab("content")).toHaveAttribute("tabindex", "-1");
+  await expect(tab("ai")).toHaveAttribute("tabindex", "-1");
+  await tab("general").focus();
+  const at = async (id: string) => {
+    await expect(tab(id)).toBeFocused();
+    await expect(tab(id)).toHaveAttribute("aria-selected", "true");
+    await expect(tab(id)).toHaveAttribute("tabindex", "0");
+    await expect(page.getByTestId(`settings-panel-${id}`)).toBeVisible();
+    await expect(page).toHaveURL(`${base()}/en/settings#${id}`);
+  };
+  await page.keyboard.press("ArrowDown");
+  await at("content");
+  await page.keyboard.press("End");
+  await at("ai");
+  await page.keyboard.press("ArrowDown"); // wraps
+  await at("general");
+  await page.keyboard.press("ArrowUp"); // wraps back
+  await at("ai");
+  await page.keyboard.press("Home");
+  await at("general");
+  // Tab leaves the tab list for the panel's content
+  await page.keyboard.press("Tab");
+  await expect(tab("content")).not.toBeFocused();
+  await expect(tab("ai")).not.toBeFocused();
+});
+
+test.describe("an install that finishes after she left the empty state", () => {
+  let app: RunningApp;
+  test.beforeAll(async () => {
+    app = await startApp({ env: fakeStoreEnv(storeDir(process.env.E2E_PFADDON as string), 1500) });
+  });
+  test.afterAll(async () => {
+    await app?.stop();
+  });
+
+  test("a store reply still in flight does not pull her off Settings (review M2)", async ({
+    page,
+  }) => {
+    // hold the store-row replies; note when one says the pack is installed
+    let hold = true;
+    let sawInstalled = false;
+    const held: (() => Promise<void>)[] = [];
+    await page.route(/\/api\/content\/online\?/, async (route) => {
+      if (!hold) return route.continue();
+      const response = await route.fetch();
+      const text = response.status() === 200 ? await response.text() : "";
+      if (text.includes('"state":"installed"')) sawInstalled = true;
+      held.push(() => route.fulfill({ response }));
+    });
+    hold = false;
+    await page.goto(`${app.base}/en/empty`);
+    await page.getByTestId("online-action").click();
+    await expect(page.getByTestId("online-progress")).toBeVisible();
+    // from now on the empty state's polls stay in flight until released
+    hold = true;
+    await expect.poll(() => sawInstalled, { timeout: 20_000 }).toBe(true);
+    await page.getByTestId("empty-settings").click();
+    await expect(page).toHaveURL(`${app.base}/en/settings`);
+    hold = false;
+    for (const release of held.splice(0)) await release().catch(() => {});
+    // the empty state's late reply said "installed": nothing may navigate now
+    await page.waitForTimeout(2_500);
+    await expect(page).toHaveURL(`${app.base}/en/settings`);
+  });
 });
 
 test.describe("the content pack from the store", () => {

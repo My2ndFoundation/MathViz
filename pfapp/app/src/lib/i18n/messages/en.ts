@@ -20,6 +20,7 @@ export const en = {
     switchToLabel: "Switch to Chinese",
   },
   settings: {
+    back: "← Back",
     title: "Settings",
     intro: "Language, the content pack and the AI tutor.",
     menu: "Settings sections",
@@ -102,7 +103,7 @@ export const en = {
     offline:
       "The PrimeForge store can't be reached right now. An installed content pack keeps working.",
     unsupported:
-      "Installing from the store needs this app to run in PrimeForge 1.45 or newer. You can still import a content pack file.",
+      "The PrimeForge store does not offer this app's content pack here, or the app is not running inside PrimeForge. You can still import a content pack file.",
     notListed: "This app's content pack is not in the store yet.",
     blockedAppTooOld:
       "This content pack needs a newer version of the app. Update the app in PrimeForge.",
@@ -209,7 +210,12 @@ export const en = {
       "PrimeForge does not list this app as installed. Reinstall it from the store.",
     installing: "The content pack is already installing.",
     offline: "The PrimeForge store can't be reached right now. Try again later.",
-    unsupported: "Installing from the store needs this app to run in PrimeForge 1.45 or newer.",
+    unsupported:
+      "The PrimeForge store does not offer this app's content pack here, or the app is not running inside PrimeForge.",
+    dependency_unavailable:
+      "The content pack needs another add-on that the store cannot install right now. Try again later.",
+    dependency_cycle:
+      "The store cannot install the content pack: its add-on requirements depend on each other.",
     addon_failed: "The store could not install the content pack. Try again.",
   },
 };

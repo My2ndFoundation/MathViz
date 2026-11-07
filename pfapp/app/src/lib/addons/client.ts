@@ -94,6 +94,9 @@ export type AddonErrorCode =
   | "offline"
   | "unsupported"
   | "not_found"
+  /** install: a pack this one requires cannot be installed, or the requirements form a cycle */
+  | "dependency_unavailable"
+  | "dependency_cycle"
   /** the platform did not answer (network or timeout) */
   | "unreachable"
   /** an answer outside the contract */
@@ -172,7 +175,11 @@ export function refusal(status: number, body: unknown): AddonError {
   }
   if (
     status === 409 &&
-    (error === "signed_out" || error === "app_not_installed" || error === "installing")
+    (error === "signed_out" ||
+      error === "app_not_installed" ||
+      error === "installing" ||
+      error === "dependency_unavailable" ||
+      error === "dependency_cycle")
   ) {
     return new AddonError(error, status);
   }

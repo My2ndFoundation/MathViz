@@ -153,10 +153,18 @@ export async function createAppContext(
   const db = openDb(dataDir, { migrationsDir: options.migrationsDir });
   // the fake installs in place: its offers directory is the root the reported paths sit in
   const addonsDir = env.PRIMEFORGE_ADDONS_DIR || fakeRoot;
-  // every installed() answer findContent locates with is the sync's baseline (sync.observe)
+  // every installed() answer findContent locates with is the sync's baseline (sync.observe); a
+  // failed one clears it (sync.forget), so the next poll re-locates
   const watched: Pick<AddonsClient, "installed"> | null = addons && {
     async installed() {
-      const rows = await addons.installed();
+      let rows: Awaited<ReturnType<AddonsClient["installed"]>>;
+      try {
+        rows = await addons.installed();
+      } catch (e) {
+        // findContent goes on without the store: what it serves matches no baseline (review I1)
+        sync.forget();
+        throw e;
+      }
       sync.observe(rows);
       return rows;
     },

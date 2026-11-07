@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, type Frame, type Page, test } from "@playwright/test";
+import { expectNoNewWindows, hookWindowOpen } from "./new-windows";
 import { type RunningApp, startApp } from "./setup";
 
 /**
@@ -205,20 +206,19 @@ test("the shell opens nothing in a new window (PrimeForge's app window hands tho
 }) => {
   const first = ordered()[0];
   if (!first) throw new Error("empty pack");
+  await hookWindowOpen(page);
   await page.goto(`${base()}/en/tool/${first.id}`);
   await expect(page.getByTestId("tool-frame")).toHaveAttribute("src", /./);
   await expect(page.getByTestId("ask-panel")).toBeVisible();
-  // the shell's own DOM only: the tool page inside the iframe is the web version, unchanged
-  expect(await page.locator('[target="_blank"], [target="_new"]').count()).toBe(0);
-  expect(await page.content()).not.toContain("window.open");
+  // the shell's own DOM and scripts only: the tool page inside the iframe is the web version
+  await expectNoNewWindows(page);
   // the shell's own pages too (with answers in them: tests/e2e/qa.spec.ts)
   for (const p of ["ask", "notes", "settings"]) {
     await page.goto(`${base()}/en/${p}`);
     await expect(
       page.getByTestId(p === "ask" ? "library-ask" : p === "notes" ? "notes-view" : "settings"),
     ).toBeVisible();
-    expect([p, await page.locator('[target="_blank"], [target="_new"]').count()]).toEqual([p, 0]);
-    expect(await page.content()).not.toContain("window.open");
+    await expectNoNewWindows(page);
   }
 });
 
@@ -293,6 +293,12 @@ test.describe("no content pack", () => {
     await expect(page.getByTestId("online-notice")).toBeVisible();
     await expect(page.getByTestId("online-action")).toHaveCount(0);
     await expect(page.getByTestId("empty-settings")).toHaveAttribute("href", "/en/settings");
+    // Settings without a pack has no sidebar: it has its own way back (review M5)
+    await page.getByTestId("empty-settings").click();
+    await expect(page).toHaveURL(`${empty.base}/en/settings`);
+    await expect(page.getByTestId("sidebar")).toHaveCount(0);
+    await page.getByTestId("settings-back").click();
+    await expect(page).toHaveURL(`${empty.base}/en/empty`);
     // a tool URL without content goes to the empty state too
     await page.goto(`${empty.base}/en/tool/${first.id}`);
     await expect(page).toHaveURL(`${empty.base}/en/empty`);

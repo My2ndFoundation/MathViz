@@ -52,6 +52,9 @@ export function OnlinePack({
   changed.current = onChange;
   const installed = useRef(onInstalled);
   installed.current = onInstalled;
+  // false once unmounted: a reply still in flight then changes nothing and calls nobody back — an
+  // install finishing after she left the empty state must not pull her off the page (review M2)
+  const alive = useRef(true);
 
   const request = useCallback(async () => {
     const seq = ++sent.current;
@@ -67,6 +70,7 @@ export function OnlinePack({
     }
     if (res.status === 304 || !res.ok) return;
     const body = (await res.json()) as OnlineView;
+    if (!alive.current) return;
     if (seq < applied.current) return; // a later reply already landed
     applied.current = seq;
     etag.current = res.headers.get("etag");
@@ -91,6 +95,7 @@ export function OnlinePack({
   }, [request]);
 
   useEffect(() => {
+    alive.current = true;
     void poll();
     const tick = () => {
       if (document.visibilityState !== "visible" || inflight.current) return;
@@ -100,6 +105,7 @@ export function OnlinePack({
     const timer = setInterval(tick, POLL_MS);
     document.addEventListener("visibilitychange", tick);
     return () => {
+      alive.current = false;
       clearInterval(timer);
       document.removeEventListener("visibilitychange", tick);
     };
@@ -115,13 +121,13 @@ export function OnlinePack({
         // not owned yet: the store window takes over, and installs it once bought or claimed
         if (!(e instanceof ApiError) || e.code !== "addon_not_owned") throw e;
         await api("POST", "/api/content/online/get");
-        setNote({ ok: true, text: t.finishInStore });
+        if (alive.current) setNote({ ok: true, text: t.finishInStore });
       }
     } catch (e) {
-      setNote({ ok: false, text: errorText(e, locale) });
+      if (alive.current) setNote({ ok: false, text: errorText(e, locale) });
     } finally {
-      await poll();
-      setBusy(false);
+      if (alive.current) await poll();
+      if (alive.current) setBusy(false);
     }
   };
 

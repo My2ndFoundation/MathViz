@@ -61,6 +61,23 @@ export async function startAi(
   return true;
 }
 
+/**
+ * How long one /ai/engines answer (or failure) is reused. The top bar's indicator and the Settings
+ * card each read the AI status every 10 s; without this, every poll is a platform call per reader.
+ */
+export const ENGINES_TTL_MS = 10_000;
+const enginesCache = new WeakMap<object, { at: number; answer: Promise<unknown> }>();
+
+/** platform.engines(), shared by every caller within ENGINES_TTL_MS (in flight too). */
+function enginesOf(platform: NonNullable<AppContext["ai"]["platform"]>, at: number) {
+  const hit = enginesCache.get(platform);
+  if (hit && at - hit.at >= 0 && at - hit.at < ENGINES_TTL_MS) return hit.answer;
+  const answer = platform.engines ? platform.engines() : Promise.resolve(null);
+  answer.catch(() => {}); // a failure is read by its callers; never unhandled here
+  enginesCache.set(platform, { at, answer });
+  return answer;
+}
+
 export type AiAvailability = "available" | "not_authorised" | "unavailable";
 
 /**
@@ -73,12 +90,13 @@ export type AiAvailability = "available" | "not_authorised" | "unavailable";
  */
 export async function aiStatus(
   ctx: Pick<AppContext, "ai">,
+  { now = Date.now }: { now?: () => number } = {},
 ): Promise<{ state: AiAvailability; code: string | null }> {
   const { platform } = ctx.ai;
   if (!platform) return { state: "unavailable", code: "ai_unavailable" };
   let engines: unknown = null;
   try {
-    engines = platform.engines ? await platform.engines() : null;
+    engines = await enginesOf(platform, now());
   } catch {
     return { state: "unavailable", code: "engine_unavailable" };
   }

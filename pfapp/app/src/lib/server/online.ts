@@ -55,6 +55,8 @@ const STATUS: Record<string, [number, string]> = {
   signed_out: [409, "signed_out"],
   app_not_installed: [409, "app_not_installed"],
   installing: [409, "installing"],
+  dependency_unavailable: [409, "dependency_unavailable"],
+  dependency_cycle: [409, "dependency_cycle"],
   offline: [503, "offline"],
   unreachable: [503, "offline"],
   unsupported: [503, "unsupported"],

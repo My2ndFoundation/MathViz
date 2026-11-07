@@ -14,6 +14,7 @@ import { POST as updateRoute } from "../../app/src/app/api/content/online/update
 import { contentAddonId } from "../../app/src/lib/content/pfaddon";
 import { migrationsDir } from "../../app/src/lib/db/open";
 import { CSRF_HEADER } from "../../app/src/lib/http/guard";
+import { MESSAGES } from "../../app/src/lib/i18n/locale";
 import { type AppContext, createAppContext, setAppContext } from "../../app/src/lib/server/context";
 import { loadTarget } from "../../app/src/lib/target";
 import { extractPayload, tmp } from "../helpers/content-fixtures";
@@ -178,6 +179,21 @@ describe("install / update / get", () => {
     expect(await c.addonSync.refresh()).toBe(false);
   });
 
+  test("installed() failing inside the reload is retried on the next poll (review I1)", async () => {
+    const { c, f } = await start();
+    await post(c, installRoute, "install");
+    f.finishInstall();
+    // the poll's own read succeeds; the read the reload locates with (the next call) fails
+    f.addons.failInstalled = new Set([f.addons.installedCalls + 2]);
+    expect(await c.addonSync.refresh()).toBe(true);
+    expect(c.content).toBeNull(); // located without the store
+    // the platform answers again: the sync must not take the unchanged set as "nothing to do"
+    expect(await c.addonSync.refresh()).toBe(true);
+    expect(c.content?.source).toBe("store");
+    expect(c.content?.version).toBe("1.4.0");
+    expect(await c.addonSync.refresh()).toBe(false);
+  });
+
   test("not owned → 409 addon_not_owned; get → 202 opened, the platform asked once", async () => {
     const { c, f } = await start((x) => {
       x.addons.owned = false;
@@ -202,7 +218,9 @@ describe("install / update / get", () => {
     [409, { error: "installing" }, 409, "installing"],
     [503, { error: "offline" }, 503, "offline"],
     [503, { error: "not_configured" }, 503, "unsupported"],
-    [409, { error: "dependency_cycle" }, 502, "addon_failed"],
+    [409, { error: "dependency_cycle", addonId: "x" }, 409, "dependency_cycle"],
+    [409, { error: "dependency_unavailable", addonId: "x" }, 409, "dependency_unavailable"],
+    [409, { error: "something_new" }, 502, "addon_failed"],
   ];
   for (const [status, body, want, code] of refusals) {
     test(`a platform ${status} ${JSON.stringify(body)} → ${want} ${code}`, async () => {
@@ -211,6 +229,10 @@ describe("install / update / get", () => {
       });
       const r = await post(c, updateRoute, "update");
       expect([r.status, (await r.json()).error.code]).toEqual([want, code]);
+      // the page shows error.<code>: each code has its own sentence in both languages
+      for (const l of ["en", "zh"] as const) {
+        expect((MESSAGES[l].error as Record<string, string>)[code]).toBeTruthy();
+      }
     });
   }
 

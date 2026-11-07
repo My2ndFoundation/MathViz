@@ -8,8 +8,9 @@
 // each section a heading, a help line and one card. Changed: our CSS instead of shadcn Tabs (a
 // tablist of buttons with aria-selected), three sections (general, content, ai), no
 // router.refresh() after a save (nothing server-rendered here reads aiLang).
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useCallback, useEffect, useId, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useId, useState } from "react";
 import type { Locale } from "@/lib/i18n/locale";
 import { MESSAGES } from "@/lib/i18n/locale";
 import type { AiLang } from "@/lib/server/settings";
@@ -260,6 +261,27 @@ export function SettingsView({ locale, data }: { locale: Locale; data: SettingsD
     setTab(next);
     window.history.replaceState(window.history.state, "", `#${next}`);
   };
+  // the WAI-ARIA tabs pattern (vertical, automatic activation): one tab stop, Up/Down wrap,
+  // Home/End; the chosen tab takes the focus (review M4)
+  const onTabKey = (e: KeyboardEvent<HTMLButtonElement>) => {
+    const i = SETTINGS_TABS.indexOf(tab);
+    const n = SETTINGS_TABS.length;
+    const to =
+      e.key === "ArrowDown"
+        ? (i + 1) % n
+        : e.key === "ArrowUp"
+          ? (i - 1 + n) % n
+          : e.key === "Home"
+            ? 0
+            : e.key === "End"
+              ? n - 1
+              : -1;
+    if (to < 0) return;
+    e.preventDefault();
+    const next = SETTINGS_TABS[to] as SettingsTab;
+    choose(next);
+    document.getElementById(`set-tab-${next}`)?.focus();
+  };
 
   const sections: { id: SettingsTab; title: string; help: string; body: ReactNode }[] = [
     {
@@ -280,6 +302,12 @@ export function SettingsView({ locale, data }: { locale: Locale; data: SettingsD
   return (
     <div className="qa-page set-page" data-testid="settings">
       <div className="qa-page-head">
+        {/* no content pack: no sidebar either, and the app window has no back button (review M5) */}
+        {data.content ? null : (
+          <Link href={`/${locale}`} className="set-back" data-testid="settings-back">
+            {t.back}
+          </Link>
+        )}
         <h1>{t.title}</h1>
         <p>{t.intro}</p>
       </div>
@@ -293,8 +321,10 @@ export function SettingsView({ locale, data }: { locale: Locale; data: SettingsD
               id={`set-tab-${s.id}`}
               aria-selected={tab === s.id}
               aria-controls={`set-panel-${s.id}`}
+              tabIndex={tab === s.id ? 0 : -1}
               data-testid={`settings-tab-${s.id}`}
               onClick={() => choose(s.id)}
+              onKeyDown={onTabKey}
             >
               {s.title}
             </button>
@@ -308,6 +338,8 @@ export function SettingsView({ locale, data }: { locale: Locale; data: SettingsD
             aria-labelledby={`set-tab-${s.id}`}
             hidden={tab !== s.id}
             className="set-panel"
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: WAI-ARIA tabs — a panel whose first content is not focusable (AI) takes the tab stop after the tab list
+            tabIndex={0}
             data-testid={`settings-panel-${s.id}`}
           >
             <h2>{s.title}</h2>

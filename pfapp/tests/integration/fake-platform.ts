@@ -118,6 +118,9 @@ export interface FakeAddons {
   addonsDir: string | null;
   gets: number;
   lists: number;
+  /** How many GET /addons/v1/installed were asked; the call numbers (1-based) in failInstalled get a 500. */
+  installedCalls: number;
+  failInstalled: Set<number>;
 }
 
 export interface FakePlatform {
@@ -187,6 +190,8 @@ export async function startFakePlatform(opts: FakePlatformOptions): Promise<Fake
       addonsDir: null,
       gets: 0,
       lists: 0,
+      installedCalls: 0,
+      failInstalled: new Set(),
     },
     finishInstall() {
       const a = fake.addons;
@@ -343,6 +348,8 @@ export async function startFakePlatform(opts: FakePlatformOptions): Promise<Fake
       return res.end(JSON.stringify(body));
     }
     if (url.pathname === "/addons/v1/installed" && req.method === "GET") {
+      a.installedCalls++;
+      if (a.failInstalled.has(a.installedCalls)) return json(res, 500, { error: "internal" });
       const rows =
         a.installed && a.offer
           ? [{ addonId: a.offer.addonId, kind: "content", ...a.installed }]

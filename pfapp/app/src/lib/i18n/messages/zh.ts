@@ -19,6 +19,7 @@ export const zh: Messages = {
     switchToLabel: "切换到英文",
   },
   settings: {
+    back: "← 返回",
     title: "设置",
     intro: "语言、内容包与 AI 助教。",
     menu: "设置分区",
@@ -96,7 +97,8 @@ export const zh: Messages = {
     finishInStore: "请在 PrimeForge 商店窗口里完成——完成后会自动安装。",
     failed: "上次安装没有完成，请重试。",
     offline: "现在连不上 PrimeForge 商店。已安装的内容包照常可用。",
-    unsupported: "从商店安装需要本应用运行在 PrimeForge 1.45 或更新版本里。仍可以导入内容包文件。",
+    unsupported:
+      "PrimeForge 商店在这里不提供本应用的内容包，或本应用没有在 PrimeForge 里运行。仍可以导入内容包文件。",
     notListed: "本应用的内容包还没有上架商店。",
     blockedAppTooOld: "这个内容包需要更新版本的应用。请在 PrimeForge 里更新本应用。",
     blockedNotEntitled: "这个账号不能使用这个内容包。",
@@ -196,7 +198,9 @@ export const zh: Messages = {
     app_not_installed: "PrimeForge 没把本应用列为已安装。请从商店重新安装。",
     installing: "内容包已经在安装了。",
     offline: "现在连不上 PrimeForge 商店，请稍后再试。",
-    unsupported: "从商店安装需要本应用运行在 PrimeForge 1.45 或更新版本里。",
+    unsupported: "PrimeForge 商店在这里不提供本应用的内容包，或本应用没有在 PrimeForge 里运行。",
+    dependency_unavailable: "内容包需要的另一个附加组件商店现在装不了，请稍后再试。",
+    dependency_cycle: "商店装不了内容包：它要求的附加组件互相依赖。",
     addon_failed: "商店没能安装内容包，请重试。",
   },
 };

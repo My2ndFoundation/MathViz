@@ -4,9 +4,10 @@
 // running, one queued), the set compared in a canonical order. Dropped: the persisted
 // addons-installed.json (findContent asks the platform itself, so the content is never located
 // from a stale list; the platform is local and the call is bounded by the client's timeout), the
-// failed-reload backoff (onChange is refreshContent, which never throws past a log), the base
-// resolver (this app has one content pack). Added: observe() — every installed() answer the
-// content was located with becomes the baseline, so a change is measured against what is served.
+// failed-reload backoff, the base resolver (this app has one content pack). Added: observe() —
+// every installed() answer the content was located with becomes the baseline, so a change is
+// measured against what is served — and forget(): a locate that could not ask the platform, or an
+// onChange that threw, clears the baseline, so the next tick locates again (review I1, M1).
 import type { AddonsClient, InstalledAddon } from "./client";
 
 export const POLL_MS = 10_000;
@@ -14,6 +15,8 @@ export const POLL_MS = 10_000;
 export interface AddonSync {
   /** Record an installed() answer that the content was just located with. */
   observe(rows: InstalledAddon[] | "unsupported"): void;
+  /** Drop the baseline: the next refresh() reloads whatever the platform says. */
+  forget(): void;
   /** Ask the platform again; true when the installed set changed (onChange has run). */
   refresh(): Promise<boolean>;
   start(): void;
@@ -61,7 +64,13 @@ export function createAddonSync({
     if (key === seen) return false;
     seen = key;
     log("addons.installed_changed");
-    await onChange();
+    try {
+      await onChange();
+    } catch (e) {
+      // what is served may not match `key`: try again on the next tick; never reject (the timer)
+      seen = null;
+      log("addons.reload_failed", { error: e instanceof Error ? e.name : "Error" });
+    }
     return true;
   }
 
@@ -73,16 +82,21 @@ export function createAddonSync({
       return running;
     }
     // one queued run, after the one in flight: it sees whatever finished meanwhile
-    queued ??= running.then(() => {
+    const next = () => {
       queued = null;
       return refresh();
-    });
+    };
+    // after the one in flight however it ended, so a rejection can never wedge the queue
+    queued ??= running.then(next, next);
     return queued;
   }
 
   return {
     observe(rows) {
       seen = keyOf(rows);
+    },
+    forget() {
+      seen = null;
     },
     refresh,
     start() {
