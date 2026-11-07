@@ -171,6 +171,47 @@ ok('if a: x = 1 + \\\n2', 'if a:\n    x = 1 + \\\n        2', '反斜杠续行�
   T.eq(r.kind, 'different', '行数不同、token 不同时照旧报 token 差异（c 对 反斜杠）');
 })();
 
+/* ---- 清理波终审 M2：match / case 是软关键字 ---- */
+(function () {
+  const ref = 'match x:\n    case 1:\n        a()\n    case _:\n        b()';
+  ok('match x:\n    case 1: a()\n    case _: b()', ref, 'case 头 + 一行体写成一行：判同（以前判 block）');
+  ok('match x:\n    case 1: a()\n    case _:\n        b()', ref, '只把第一个 case 写成一行：判同');
+  const r = J.compare('match x:\n    case 1: a()\n    b()', 'match x:\n    case 1:\n        a()\n    case _:\n        b()');
+  T.eq(r.ok, false, 'case 头写成一行之后，下一行写成与 case 同层：判错');
+})();
+ok('case (1 | 2): f()', 'case (1 | 2):\n    f()', 'case 的模式以括号开头仍是语句头');
+ok('case [x, y]: f(x)', 'case [x, y]:\n    f(x)', 'case 的序列模式');
+ok('case {"k": v} if v > 0: f(v)', 'case {"k": v} if v > 0:\n    f(v)', '映射模式里的冒号在括号里，语句头的冒号是守卫之后那一个');
+ok('case -1: f()', 'case -1:\n    f()', '负数字面量模式');
+/* 不是语句头的 match / case：只有行里有括号深度 0 的冒号时，分类才影响判决。
+   下面四条参考是合法 Python、作答在冒号后非法断行；若把这些行误当语句头，参考冒号之后的
+   token 会被抬一层，与作答「断到下一行、更深一层」恰好对上而误判同。 */
+(function () {
+  const r = J.compare('case = lambda:\n    0\nb()', 'case = lambda: 0\nb()');
+  T.eq(r.kind, 'block', '`case = lambda: 0` 不是语句头（第二个 token 是 =）');
+})();
+(function () {
+  const r = J.compare('case:\n    int = 3\nb()', 'case: int = 3\nb()');
+  T.eq(r.kind, 'block', '`case: int = 3` 是带注解赋值，不是语句头（冒号紧跟 case）');
+})();
+(function () {
+  const r = J.compare('case.x:\n    int = 1\nb()', 'case.x: int = 1\nb()');
+  T.eq(r.kind, 'block', '`case.x: int = 1` 是带注解赋值，不是语句头（第二个 token 是 .）');
+})();
+(function () {
+  /* 第二个 token 是 [（序列模式也以 [ 开头），只有「冒号前有赋值号」能把它排除 */
+  const r = J.compare('case[0] = lambda:\n    0\nb()', 'case[0] = lambda: 0\nb()');
+  T.eq(r.kind, 'block', '`case[0] = lambda: 0` 不是语句头（冒号之前有 =）');
+})();
+(function () {
+  const r = J.compare('match = lambda:\n    0\nb()', 'match = lambda: 0\nb()');
+  T.eq(r.kind, 'block', '`match = lambda: 0` 不是语句头');
+})();
+/* 没有括号深度 0 冒号的软关键字行：分类按构造不影响判决，这几条只防「把它们当关键字处理时崩了」 */
+ok('match = 3\nif a: b', 'match = 3\nif a:\n    b', '`match = 3` 照常');
+ok('m = match.group(1)\nif m: f(m)', 'm = match.group(1)\nif m:\n    f(m)', '`match.group(1)` 照常');
+ok('case(x)\nif a: b', 'case(x)\nif a:\n    b', '`case(x)` 调用照常');
+
 /* ---- normalize 暴露出来供门复用 ---- */
 (function () {
   const n = J.normalize('a = 1  # c\nb = 2');

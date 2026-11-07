@@ -37,8 +37,8 @@
 <title>Strings: Text as Data · 字符串：把文本当数据</title>
 <!-- 版本记录（changelog，新→旧）：
      1.0.2  2026-11-06  三个程序改为只打印异常的类名、不再打印 Python 自带的异常消息；PIN 判断改用
-                        isdecimal()；讲解用文字说出结果、用标题指别的程序，页名改为 Files &
-                        Exceptions；密码规则空格那一空的引号写法挪进第 1 级提示。
+                        isdecimal()，那一空的第 1 级提示写明不加括号；讲解用文字说出结果、用标题指别的程序，英文讲解里的
+                        页名改为 Files & Exceptions；密码规则空格那一空的引号写法挪进第 1 级提示。
                         判定器（engine
                         py-1.3.2）：答案与标准答案行数不同时也比较代码块结构（新反馈 kind
                         block）。清理波：第 6 期账本 §十 第一、二组。
@@ -1640,7 +1640,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
      这里把源码切成**逻辑行**（括号深度 > 0、或上一个有效 token 是反斜杠续行
      `\`、或上一个 token 是跨行的三引号字符串时，并入上一逻辑行），用一个缩进栈
      把每条逻辑行映射成**块层级**（第一条逻辑行为 0）；复合语句头（行首是
-     COMPOUND 里的关键字，括号深度 0 的第一个 `:`）后面同一行的体算深一层。
+     COMPOUND 里的关键字、或按 softKeywordHeader 判为语句头的 match / case，括号深度 0
+     的第一个 `:`）后面同一行的体算深一层。
      compare() 再逐 token 比层级：原文相同、层级不同 → kind 'block'。
 
      CPython 会拒绝的三种缩进：
@@ -1657,6 +1658,48 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
                    'except': 1, 'finally': 1, 'with': 1, 'def': 1, 'class': 1 };
   var OPENERS = { '(': 1, '[': 1, '{': 1 };
   var CLOSERS = { ')': 1, ']': 1, '}': 1 };
+
+  /* match / case 是**软关键字**（清理波终审 M2）：`match = 3`、`match.group(1)`、`case(x)` 是普通
+     语句。判据（逻辑行 toks[a..b)，首词是 match / case）：
+       1. 第二个 token 能开一个 subject / 模式：名字（不是 if / else / in / is / and / or / for /
+          as / lambda 这类只能接在表达式后面的关键字）、数字、字符串、`(` `[` `{`、`-` `+` `~` `*`。
+          于是 `=` / `.` / `:` / `,` / 增强赋值 / 下标之外的运算符开头的都不是语句头。
+       2. 行里有括号深度 0 的 `:`，而它之前（括号深度 0）没有 `=`、增强赋值、`:=`、`lambda`——
+          排除 `case = lambda: 0`、`case, x = lambda: 0, 1` 一类。
+       3. match 头的 `:` 必须是这一逻辑行最后一个 token：CPython 的 match 头之后只能换行
+          （`match x: case 1: …` 是语法错），所以 match 按构造不会有同一行的体——认它是头与否
+          不改变任何层级，这一条只防把 `match: T = v` 之类的行算进来。
+     没有括号深度 0 冒号的行（`case(x)`、`match.group(1)`、`match = 3`）分不分类都一样：
+     colon 是 -1，层级不变。
+     仍分不出的（记在这里，靠「只挖写法唯一的行」）：`case[0]: int = 1`（给名为 case 的东西的下标
+     加注解）与 `case [0]: int = 1`（序列模式 + 一行体）token 完全相同，只有「是否在 match 块里」能
+     区分，而挖空片段常常不含 match 那一行——这里一律按 case 头处理。 */
+  var SOFT_HEAD_BAD_NAME = { 'if': 1, 'else': 1, 'elif': 1, 'in': 1, 'is': 1, 'and': 1, 'or': 1,
+                             'for': 1, 'as': 1, 'lambda': 1, 'from': 1, 'import': 1 };
+  var SOFT_HEAD_OK_PUNCT = { '(': 1, '[': 1, '{': 1, '-': 1, '+': 1, '~': 1, '*': 1 };
+  function isAssignOp(t) {
+    return t === '=' || t === ':=' ||
+      (t.length >= 2 && t.charAt(t.length - 1) === '=' && t !== '==' && t !== '!=' && t !== '<=' && t !== '>=');
+  }
+  function softKeywordHeader(toks, a, b) {
+    var head = toks[a].text;
+    if ((head !== 'match' && head !== 'case') || a + 2 >= b) { return false; }
+    var nx = toks[a + 1].text;
+    var starts = SOFT_HEAD_OK_PUNCT[nx] ||
+      (/^[A-Za-z_]/.test(nx) && !SOFT_HEAD_BAD_NAME[nx]) ||
+      /^[0-9'"]/.test(nx) || /^\.[0-9]/.test(nx);
+    if (!starts) { return false; }
+    var d = 0;
+    for (var j = a + 1; j < b; j++) {
+      var t = toks[j].text;
+      if (OPENERS[t]) { d++; continue; }
+      if (CLOSERS[t] && d > 0) { d--; continue; }
+      if (d !== 0) { continue; }
+      if (t === ':') { return head === 'case' || j === b - 1; }
+      if (t === 'lambda' || isAssignOp(t)) { return false; }
+    }
+    return false;
+  }
 
   function countNewlines(s) {
     var n = 0;
@@ -1725,7 +1768,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
       /* 3. 复合语句头：括号深度 0 的第一个 `:`，其后同一逻辑行的 token 深一层 */
       var head = toks[a].text;
       var isHeader = !!COMPOUND[head] ||
-        (head === 'async' && a + 1 < b && /^(def|for|with)$/.test(toks[a + 1].text));
+        (head === 'async' && a + 1 < b && /^(def|for|with)$/.test(toks[a + 1].text)) ||
+        softKeywordHeader(toks, a, b);
       var colon = -1;
       if (isHeader) {
         var d = 0;
@@ -4797,7 +4841,7 @@ var PyPrograms = {
         "expect": "'ada LOVELACE'\nada lovelace | ADA LOVELACE\nAda Lovelace\nTrue False\n6 -1\nValueError\nreport_draft.py report_final.py\n2 3\nTrue False False\nTrue False False\n'1234' True\n'12a4' False\n'12345' False\n'' False\n",
         "timeout": 5
       },
-      "source": "\"\"\"A tour of the string methods you will reach for every week.\"\"\"\n\n\ndef tidy_name(raw):\n# >>> BLANK id=tidy level=2 hint=\"\u4e00\u4e2a\u8868\u8fbe\u5f0f\u3001\u4e24\u4e2a\u65b9\u6cd5\u4e32\u5728\u4e00\u8d77\uff1a\u5148\u53bb\u6389\u4e24\u5934\u7684\u7a7a\u767d\uff0c\u518d\u628a\u6bcf\u4e2a\u8bcd\u6539\u6210\u9996\u5b57\u6bcd\u5927\u5199\uff1b\u987a\u5e8f\u5c31\u662f\u8fd9\u4e2a\u987a\u5e8f || \u5148\u8c03\u7684\u65b9\u6cd5\u5199\u5728\u5de6\u8fb9\u3001\u7d27\u8ddf\u5728 raw \u540e\u9762\uff0c\u5b83\u4ea4\u56de\u7684\u65b0\u4e32\u518d\u63a5\u7740\u8c03\u7b2c\u4e8c\u4e2a\u65b9\u6cd5\" hintEn=\"One expression with two methods chained: first remove the whitespace at both ends, then give every word a capital first letter - in exactly that order || The method called first sits on the left, straight after raw, and the new string it hands back is what the second method is called on\"\n    return raw.strip().title()\n# \u003c\u003c\u003c BLANK\n\n\ndef is_pin(text):\n# >>> BLANK id=pin level=2 hint=\"\u4e00\u4e2a PIN \u5fc5\u987b\u6070\u597d 4 \u4e2a\u5b57\u7b26\u3001\u800c\u4e14\u5168\u662f\u6570\u5b57\uff1a\u4ea4\u56de\u7528 and \u8fde\u8d77\u6765\u7684\u4e24\u4e2a\u5224\u65ad\uff0c\u957f\u5ea6\u90a3\u4e2a\u5199\u5728\u524d\u9762\uff0c\u957f\u5ea6\u5199\u5728 == \u7684\u5de6\u8fb9\uff1b\u6570\u5b57\u90a3\u4e2a\u5224\u65ad\u7528\u4e0b\u9762\u6f14\u793a\u5757\u91cc\u4e5f\u51fa\u73b0\u8fc7\u7684\u90a3\u4e2a is \u65b9\u6cd5\uff08\u4e0d\u662f isdigit \u6216 isnumeric\uff09 || \u6570\u5b57\u90a3\u4e2a\u65b9\u6cd5\u95ee\u7684\u662f\uff1a\u6bcf\u4e2a\u5b57\u7b26\u662f\u4e0d\u662f\u90fd\u662f int() \u8ba4\u5f97\u7684\u5341\u8fdb\u5236\u6570\u5b57\" hintEn=\"A PIN must be exactly 4 characters and all digits: hand back two tests joined with and, the length test first, with the length on the left of ==; for the digit test use the is-method that also appears in the demo block below (not isdigit or isnumeric) || The digit method asks whether every single character is a decimal digit that int() understands\"\n    return len(text) == 4 and text.isdecimal()\n# \u003c\u003c\u003c BLANK\n\n\nif __name__ == \"__main__\":\n    raw = \"   ada LOVELACE  \"\n    print(repr(raw.strip()))\n    print(raw.strip().lower(), \"|\", raw.strip().upper())\n    print(tidy_name(raw))\n    file_name = \"report_final.py\"\n    print(file_name.startswith(\"report\"), file_name.endswith(\".txt\"))\n    print(file_name.find(\"_\"), file_name.find(\"z\"))\n    try:\n        file_name.index(\"z\")\n    except ValueError as err:\n        print(type(err).__name__)\n    print(file_name.replace(\"final\", \"draft\"), file_name)\n    print(\"banana\".count(\"an\"), \"banana\".count(\"a\"))\n    print(\"2026\".isdecimal(), \"20.5\".isdecimal(), \"-7\".isdecimal())\n    print(\"Ada\".isalpha(), \"Ada L\".isalpha(), \"\".isalpha())\n    for attempt in (\"1234\", \"12a4\", \"12345\", \"\"):\n        print(repr(attempt), is_pin(attempt))\n",
+      "source": "\"\"\"A tour of the string methods you will reach for every week.\"\"\"\n\n\ndef tidy_name(raw):\n# >>> BLANK id=tidy level=2 hint=\"\u4e00\u4e2a\u8868\u8fbe\u5f0f\u3001\u4e24\u4e2a\u65b9\u6cd5\u4e32\u5728\u4e00\u8d77\uff1a\u5148\u53bb\u6389\u4e24\u5934\u7684\u7a7a\u767d\uff0c\u518d\u628a\u6bcf\u4e2a\u8bcd\u6539\u6210\u9996\u5b57\u6bcd\u5927\u5199\uff1b\u987a\u5e8f\u5c31\u662f\u8fd9\u4e2a\u987a\u5e8f || \u5148\u8c03\u7684\u65b9\u6cd5\u5199\u5728\u5de6\u8fb9\u3001\u7d27\u8ddf\u5728 raw \u540e\u9762\uff0c\u5b83\u4ea4\u56de\u7684\u65b0\u4e32\u518d\u63a5\u7740\u8c03\u7b2c\u4e8c\u4e2a\u65b9\u6cd5\" hintEn=\"One expression with two methods chained: first remove the whitespace at both ends, then give every word a capital first letter - in exactly that order || The method called first sits on the left, straight after raw, and the new string it hands back is what the second method is called on\"\n    return raw.strip().title()\n# \u003c\u003c\u003c BLANK\n\n\ndef is_pin(text):\n# >>> BLANK id=pin level=2 hint=\"\u4e00\u4e2a PIN \u5fc5\u987b\u6070\u597d 4 \u4e2a\u5b57\u7b26\u3001\u800c\u4e14\u5168\u662f\u6570\u5b57\uff1a\u4ea4\u56de\u7528 and \u8fde\u8d77\u6765\u7684\u4e24\u4e2a\u5224\u65ad\uff0c\u957f\u5ea6\u90a3\u4e2a\u5199\u5728\u524d\u9762\uff0c\u957f\u5ea6\u5199\u5728 == \u7684\u5de6\u8fb9\uff0c\u4e24\u4e2a\u5224\u65ad\u548c\u6574\u4e2a\u8868\u8fbe\u5f0f\u90fd\u4e0d\u52a0\u62ec\u53f7\uff1b\u6570\u5b57\u90a3\u4e2a\u5224\u65ad\u7528\u4e0b\u9762\u6f14\u793a\u5757\u91cc\u4e5f\u51fa\u73b0\u8fc7\u7684\u90a3\u4e2a is \u65b9\u6cd5\uff08\u4e0d\u662f isdigit \u6216 isnumeric\uff09 || \u6570\u5b57\u90a3\u4e2a\u65b9\u6cd5\u95ee\u7684\u662f\uff1a\u6bcf\u4e2a\u5b57\u7b26\u662f\u4e0d\u662f\u90fd\u662f int() \u8ba4\u5f97\u7684\u5341\u8fdb\u5236\u6570\u5b57\" hintEn=\"A PIN must be exactly 4 characters and all digits: hand back two tests joined with and, the length test first, with the length on the left of ==, and no brackets round either test or round the whole expression; for the digit test use the is-method that also appears in the demo block below (not isdigit or isnumeric) || The digit method asks whether every single character is a decimal digit that int() understands\"\n    return len(text) == 4 and text.isdecimal()\n# \u003c\u003c\u003c BLANK\n\n\nif __name__ == \"__main__\":\n    raw = \"   ada LOVELACE  \"\n    print(repr(raw.strip()))\n    print(raw.strip().lower(), \"|\", raw.strip().upper())\n    print(tidy_name(raw))\n    file_name = \"report_final.py\"\n    print(file_name.startswith(\"report\"), file_name.endswith(\".txt\"))\n    print(file_name.find(\"_\"), file_name.find(\"z\"))\n    try:\n        file_name.index(\"z\")\n    except ValueError as err:\n        print(type(err).__name__)\n    print(file_name.replace(\"final\", \"draft\"), file_name)\n    print(\"banana\".count(\"an\"), \"banana\".count(\"a\"))\n    print(\"2026\".isdecimal(), \"20.5\".isdecimal(), \"-7\".isdecimal())\n    print(\"Ada\".isalpha(), \"Ada L\".isalpha(), \"\".isalpha())\n    for attempt in (\"1234\", \"12a4\", \"12345\", \"\"):\n        print(repr(attempt), is_pin(attempt))\n",
       "lines": 29
     },
     {

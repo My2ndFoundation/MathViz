@@ -36,8 +36,8 @@
 <!-- <<< GENERATED:FAVICON -->
 <title>Stacks &amp; Queues · 栈与队列</title>
 <!-- 版本记录（changelog，新→旧）：
-     1.0.2  2026-11-06  中缀转逆波兰、两个栈做队列各换挖一行（原空的答案在程序里原样可抄）；tag
-                        pointer 统一为 pointers。 判定器（engine
+     1.0.2  2026-11-06  中缀转逆波兰、两个栈做队列各换挖一行（原空的答案在程序里原样可抄），
+                        新挖的倒栈循环头的提示不再念出整行；tag pointer 统一为 pointers。 判定器（engine
                         py-1.3.2）：答案与标准答案行数不同时也比较代码块结构（新反馈 kind
                         block）。清理波：第 6 期账本 §十 第一、二组。
      1.0.1  2026-09-30  考试局按四家官方考纲重核（用户裁决：考纲外不写，[] 合法；依据见
@@ -1639,7 +1639,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
      这里把源码切成**逻辑行**（括号深度 > 0、或上一个有效 token 是反斜杠续行
      `\`、或上一个 token 是跨行的三引号字符串时，并入上一逻辑行），用一个缩进栈
      把每条逻辑行映射成**块层级**（第一条逻辑行为 0）；复合语句头（行首是
-     COMPOUND 里的关键字，括号深度 0 的第一个 `:`）后面同一行的体算深一层。
+     COMPOUND 里的关键字、或按 softKeywordHeader 判为语句头的 match / case，括号深度 0
+     的第一个 `:`）后面同一行的体算深一层。
      compare() 再逐 token 比层级：原文相同、层级不同 → kind 'block'。
 
      CPython 会拒绝的三种缩进：
@@ -1656,6 +1657,48 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
                    'except': 1, 'finally': 1, 'with': 1, 'def': 1, 'class': 1 };
   var OPENERS = { '(': 1, '[': 1, '{': 1 };
   var CLOSERS = { ')': 1, ']': 1, '}': 1 };
+
+  /* match / case 是**软关键字**（清理波终审 M2）：`match = 3`、`match.group(1)`、`case(x)` 是普通
+     语句。判据（逻辑行 toks[a..b)，首词是 match / case）：
+       1. 第二个 token 能开一个 subject / 模式：名字（不是 if / else / in / is / and / or / for /
+          as / lambda 这类只能接在表达式后面的关键字）、数字、字符串、`(` `[` `{`、`-` `+` `~` `*`。
+          于是 `=` / `.` / `:` / `,` / 增强赋值 / 下标之外的运算符开头的都不是语句头。
+       2. 行里有括号深度 0 的 `:`，而它之前（括号深度 0）没有 `=`、增强赋值、`:=`、`lambda`——
+          排除 `case = lambda: 0`、`case, x = lambda: 0, 1` 一类。
+       3. match 头的 `:` 必须是这一逻辑行最后一个 token：CPython 的 match 头之后只能换行
+          （`match x: case 1: …` 是语法错），所以 match 按构造不会有同一行的体——认它是头与否
+          不改变任何层级，这一条只防把 `match: T = v` 之类的行算进来。
+     没有括号深度 0 冒号的行（`case(x)`、`match.group(1)`、`match = 3`）分不分类都一样：
+     colon 是 -1，层级不变。
+     仍分不出的（记在这里，靠「只挖写法唯一的行」）：`case[0]: int = 1`（给名为 case 的东西的下标
+     加注解）与 `case [0]: int = 1`（序列模式 + 一行体）token 完全相同，只有「是否在 match 块里」能
+     区分，而挖空片段常常不含 match 那一行——这里一律按 case 头处理。 */
+  var SOFT_HEAD_BAD_NAME = { 'if': 1, 'else': 1, 'elif': 1, 'in': 1, 'is': 1, 'and': 1, 'or': 1,
+                             'for': 1, 'as': 1, 'lambda': 1, 'from': 1, 'import': 1 };
+  var SOFT_HEAD_OK_PUNCT = { '(': 1, '[': 1, '{': 1, '-': 1, '+': 1, '~': 1, '*': 1 };
+  function isAssignOp(t) {
+    return t === '=' || t === ':=' ||
+      (t.length >= 2 && t.charAt(t.length - 1) === '=' && t !== '==' && t !== '!=' && t !== '<=' && t !== '>=');
+  }
+  function softKeywordHeader(toks, a, b) {
+    var head = toks[a].text;
+    if ((head !== 'match' && head !== 'case') || a + 2 >= b) { return false; }
+    var nx = toks[a + 1].text;
+    var starts = SOFT_HEAD_OK_PUNCT[nx] ||
+      (/^[A-Za-z_]/.test(nx) && !SOFT_HEAD_BAD_NAME[nx]) ||
+      /^[0-9'"]/.test(nx) || /^\.[0-9]/.test(nx);
+    if (!starts) { return false; }
+    var d = 0;
+    for (var j = a + 1; j < b; j++) {
+      var t = toks[j].text;
+      if (OPENERS[t]) { d++; continue; }
+      if (CLOSERS[t] && d > 0) { d--; continue; }
+      if (d !== 0) { continue; }
+      if (t === ':') { return head === 'case' || j === b - 1; }
+      if (t === 'lambda' || isAssignOp(t)) { return false; }
+    }
+    return false;
+  }
 
   function countNewlines(s) {
     var n = 0;
@@ -1724,7 +1767,8 @@ for(var i=0;i<n.length;i++)n[i].textContent=y;})();
       /* 3. 复合语句头：括号深度 0 的第一个 `:`，其后同一逻辑行的 token 深一层 */
       var head = toks[a].text;
       var isHeader = !!COMPOUND[head] ||
-        (head === 'async' && a + 1 < b && /^(def|for|with)$/.test(toks[a + 1].text));
+        (head === 'async' && a + 1 < b && /^(def|for|with)$/.test(toks[a + 1].text)) ||
+        softKeywordHeader(toks, a, b);
       var colon = -1;
       if (isHeader) {
         var d = 0;
@@ -5308,7 +5352,7 @@ var PyPrograms = {
       "check": {
         "property": "pure"
       },
-      "source": "\"\"\"A first-in, first-out queue built from two last-in, first-out stacks.\"\"\"\n\n\nclass TwoStackQueue:\n    def __init__(self):\n        self.inbox = []\n        self.outbox = []\n\n    def enqueue(self, item):\n        self.inbox.append(item)\n\n    def dequeue(self):\n        if not self.outbox:\n# >>> BLANK id=pour-all level=2 hint=\"\u4e00\u4e2a while \u7684\u5934\uff1a\u53ea\u8981 inbox \u91cc\u8fd8\u6709\u4e1c\u897f\u5c31\u63a5\u7740\u5012\u2014\u2014\u76f4\u63a5\u62ff self.inbox \u672c\u8eab\u5f53\u6761\u4ef6\uff0c\u4e0d\u52a0\u62ec\u53f7\uff0c\u4e0d\u7528 len()\uff0c\u4e5f\u4e0d\u548c [] \u6bd4 || \u8981\u5012\u5c31\u5012\u5e72\u51c0\uff1a\u4e00\u9879\u4e00\u9879\u5730\u5012\uff0c\u76f4\u5230 inbox \u7a7a\u4e86\u4e3a\u6b62\uff0c\u6700\u65e9\u5165\u961f\u7684\u90a3\u4e00\u9879\u624d\u4f1a\u843d\u5230 outbox \u7684\u9876\u4e0a\" hintEn=\"The head of a while: keep pouring as long as inbox still holds something - use self.inbox itself as the condition, with no brackets, without len() and without comparing with [] || Pour it all: one item at a time until inbox is empty, and only then is the item that joined first on top of outbox\"\n            while self.inbox:\n# \u003c\u003c\u003c BLANK\n# >>> BLANK id=pour level=2 hint=\"\u4e00\u884c\uff1a\u4ece inbox \u9876\u4e0a\u5f39\u51fa\u4e00\u9879\uff0c\u76f4\u63a5\u538b\u5230 outbox \u4e0a\u2014\u2014\u5f39\u51fa\u7684\u8c03\u7528\u5199\u5728\u538b\u6808\u8c03\u7528\u7684\u62ec\u53f7\u91cc || \u4e24\u4e2a\u90fd\u662f\u5217\u8868\u7684\u6808\u65b9\u6cd5\uff1a\u5f39\u51fa\u7528 pop\uff0c\u538b\u6808\u7528 append\" hintEn=\"One line: pop an item off the top of inbox and push it straight onto outbox - the pop call goes inside the brackets of the push call || Both are the list's stack methods: pop to take off, append to put on\"\n                self.outbox.append(self.inbox.pop())\n# \u003c\u003c\u003c BLANK\n        if not self.outbox:\n            return None\n# >>> BLANK id=take level=1 hint=\"\u4ece outbox \u7684\u9876\u4e0a\u5f39\u51fa\u4e00\u9879\u4ea4\u56de\u53bb\u2014\u2014\u5012\u8fc7\u6765\u4e4b\u540e\uff0c\u6700\u65e9\u5165\u961f\u7684\u90a3\u4e00\u9879\u6b63\u5728\u9876\u4e0a\uff1bpop \u4e0d\u5e26\u5b9e\u53c2\" hintEn=\"Pop an item off the top of outbox and return it - after the pour, the item that joined first is on top; pop with no argument\"\n        return self.outbox.pop()\n# \u003c\u003c\u003c BLANK\n\n\ndef run_ops(ops):\n    queue = TwoStackQueue()\n    results = []\n    for op in ops:\n        if op[0] == \"enqueue\":\n            queue.enqueue(op[1])\n        else:\n            results.append(queue.dequeue())\n    return results\n\n\nif __name__ == \"__main__\":\n    q = TwoStackQueue()\n    for n in [1, 2, 3]:\n        q.enqueue(n)\n    print(q.dequeue(), q.inbox, q.outbox)\n    q.enqueue(4)\n    print(q.dequeue(), q.inbox, q.outbox)\n    print(q.dequeue(), q.dequeue(), q.dequeue())\n    print(run_ops([(\"enqueue\", \"a\"), (\"dequeue\",), (\"enqueue\", \"b\"), (\"dequeue\",), (\"dequeue\",)]))\n",
+      "source": "\"\"\"A first-in, first-out queue built from two last-in, first-out stacks.\"\"\"\n\n\nclass TwoStackQueue:\n    def __init__(self):\n        self.inbox = []\n        self.outbox = []\n\n    def enqueue(self, item):\n        self.inbox.append(item)\n\n    def dequeue(self):\n        if not self.outbox:\n# >>> BLANK id=pour-all level=2 hint=\"\u4e00\u4e2a while \u7684\u5934\uff0c\u6761\u4ef6\u662f\u4e00\u4e2a\u5217\u8868\u81ea\u5df1\u7684\u771f\u5047\u503c\uff08\u5217\u8868\u975e\u7a7a\u5373\u4e3a\u771f\uff09\uff1a\u4e0d\u8c03\u7528 len() \u6216 bool()\u3001\u4e0d\u548c [] \u6bd4\u3001\u4e0d\u52a0\u62ec\u53f7 || \u8981\u5012\u7684\u662f\u4e24\u4e2a\u6808\u91cc\u7684\u54ea\u4e00\u4e2a\uff1f\u4e00\u9879\u4e00\u9879\u5730\u5012\uff0c\u76f4\u5230\u5b83\u7a7a\u4e86\u4e3a\u6b62\u2014\u2014\u5012\u5e72\u51c0\u4e4b\u540e\uff0c\u6700\u65e9\u5165\u961f\u7684\u90a3\u4e00\u9879\u624d\u4f1a\u843d\u5230\u53e6\u4e00\u4e2a\u6808\u7684\u9876\u4e0a\" hintEn=\"The head of a while whose condition is a list's own truth value (a non-empty list counts as true): no len() or bool(), no comparing with [], no brackets || Which of the two stacks is being poured? One item at a time until it is empty - only once it is poured out completely is the item that joined first on top of the other stack\"\n            while self.inbox:\n# \u003c\u003c\u003c BLANK\n# >>> BLANK id=pour level=2 hint=\"\u4e00\u884c\uff1a\u4ece inbox \u9876\u4e0a\u5f39\u51fa\u4e00\u9879\uff0c\u76f4\u63a5\u538b\u5230 outbox \u4e0a\u2014\u2014\u5f39\u51fa\u7684\u8c03\u7528\u5199\u5728\u538b\u6808\u8c03\u7528\u7684\u62ec\u53f7\u91cc || \u4e24\u4e2a\u90fd\u662f\u5217\u8868\u7684\u6808\u65b9\u6cd5\uff1a\u5f39\u51fa\u7528 pop\uff0c\u538b\u6808\u7528 append\" hintEn=\"One line: pop an item off the top of inbox and push it straight onto outbox - the pop call goes inside the brackets of the push call || Both are the list's stack methods: pop to take off, append to put on\"\n                self.outbox.append(self.inbox.pop())\n# \u003c\u003c\u003c BLANK\n        if not self.outbox:\n            return None\n# >>> BLANK id=take level=1 hint=\"\u4ece outbox \u7684\u9876\u4e0a\u5f39\u51fa\u4e00\u9879\u4ea4\u56de\u53bb\u2014\u2014\u5012\u8fc7\u6765\u4e4b\u540e\uff0c\u6700\u65e9\u5165\u961f\u7684\u90a3\u4e00\u9879\u6b63\u5728\u9876\u4e0a\uff1bpop \u4e0d\u5e26\u5b9e\u53c2\" hintEn=\"Pop an item off the top of outbox and return it - after the pour, the item that joined first is on top; pop with no argument\"\n        return self.outbox.pop()\n# \u003c\u003c\u003c BLANK\n\n\ndef run_ops(ops):\n    queue = TwoStackQueue()\n    results = []\n    for op in ops:\n        if op[0] == \"enqueue\":\n            queue.enqueue(op[1])\n        else:\n            results.append(queue.dequeue())\n    return results\n\n\nif __name__ == \"__main__\":\n    q = TwoStackQueue()\n    for n in [1, 2, 3]:\n        q.enqueue(n)\n    print(q.dequeue(), q.inbox, q.outbox)\n    q.enqueue(4)\n    print(q.dequeue(), q.inbox, q.outbox)\n    print(q.dequeue(), q.dequeue(), q.dequeue())\n    print(run_ops([(\"enqueue\", \"a\"), (\"dequeue\",), (\"enqueue\", \"b\"), (\"dequeue\",), (\"dequeue\",)]))\n",
       "lines": 40
     }
   ]

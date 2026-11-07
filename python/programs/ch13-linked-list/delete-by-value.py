@@ -36,7 +36,7 @@ def delete_value(head, target):
             prev.next = current.next
 # <<< BLANK
             return head
-# >>> BLANK id=follow level=2 hint="一行赋值，写在 current 往前走的那一行之前：让 prev 跟上 current，指向 current 此刻指着的那个节点 || 顺序要紧：这一行要是挪到下一行之后，prev 会和 current 落在同一个节点上，再也不在它身后" hintEn="One assignment, written before the line that moves current on: make prev catch up with current, referring to the node current refers to right now || The order matters: moved below the next line, this would leave prev on the same node as current instead of one behind it"
+# >>> BLANK id=follow level=1 hint="current 马上就要往前走一步，在那之前先为下一轮把「身后那个节点」记下来——想一想：等 current 到了下一个节点，prev 应该指着哪一个？" hintEn="current is about to move one step on; before it does, record the node that will be behind it next time round - ask yourself: once current reaches the next node, which node should prev refer to?"
         prev = current
 # <<< BLANK
         current = current.next
