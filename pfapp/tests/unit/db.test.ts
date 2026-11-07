@@ -83,6 +83,9 @@ function findNode(): { bin: string } | { skip: string } {
   };
 }
 
+/** Per node-spawn test: Node's startup plus a bun build, well past the child's own 20 s timeout. */
+const NODE_TEST_TIMEOUT = 30_000;
+
 function runNode(bin: string, script: string, args: string[] = []) {
   return spawnSync(bin, ["--input-type=module", "-", ...args], {
     input: script,
@@ -109,10 +112,12 @@ describe("fts5 + trigram support", () => {
   if ("skip" in node) {
     test.skip(`node:sqlite — skipped: ${node.skip}`, () => {});
   } else {
-    test("node:sqlite", () => {
-      const r = runNode(
-        node.bin,
-        `import { DatabaseSync } from "node:sqlite";
+    test(
+      "node:sqlite",
+      () => {
+        const r = runNode(
+          node.bin,
+          `import { DatabaseSync } from "node:sqlite";
          const db = new DatabaseSync(":memory:");
          db.exec("create virtual table t using fts5(x, tokenize='trigram')");
          db.exec("insert into t values ('binary search tree'), ('递归函数的基例')");
@@ -120,24 +125,28 @@ describe("fts5 + trigram support", () => {
            db.prepare("select x from t where t match 'sea'").all().map((r) => r.x),
            db.prepare("select x from t where t match '递归函'").all().map((r) => r.x),
          ]));`,
-      );
-      expect(r.stderr.replace(/^.*ExperimentalWarning.*\n?|^.*--trace-warnings.*\n?/gm, "")).toBe(
-        "",
-      );
-      expect(r.status).toBe(0);
-      expect(JSON.parse(r.stdout)).toEqual([["binary search tree"], ["递归函数的基例"]]);
-    });
+        );
+        expect(r.stderr.replace(/^.*ExperimentalWarning.*\n?|^.*--trace-warnings.*\n?/gm, "")).toBe(
+          "",
+        );
+        expect({ status: r.status, stderr: r.stderr }).toMatchObject({ status: 0 });
+        expect(JSON.parse(r.stdout)).toEqual([["binary search tree"], ["递归函数的基例"]]);
+      },
+      NODE_TEST_TIMEOUT,
+    );
 
-    test("node:sqlite runs the shipped migrations and library_fts matches", () => {
-      const statements = listMigrations(DIR).flatMap((m) => m.statements);
-      const writeTemp = (name: string, text: string) => {
-        const f = path.join(tmp(), name);
-        writeFileSync(f, text);
-        return f;
-      };
-      const r = runNode(
-        node.bin,
-        `import { DatabaseSync } from "node:sqlite";
+    test(
+      "node:sqlite runs the shipped migrations and library_fts matches",
+      () => {
+        const statements = listMigrations(DIR).flatMap((m) => m.statements);
+        const writeTemp = (name: string, text: string) => {
+          const f = path.join(tmp(), name);
+          writeFileSync(f, text);
+          return f;
+        };
+        const r = runNode(
+          node.bin,
+          `import { DatabaseSync } from "node:sqlite";
          import { readFileSync } from "node:fs";
          const statements = JSON.parse(readFileSync(process.argv[2], "utf8"));
          const db = new DatabaseSync(":memory:", { enableForeignKeyConstraints: true });
@@ -147,26 +156,30 @@ describe("fts5 + trigram support", () => {
          console.log(JSON.stringify(db.prepare(
            "select d.id from library_fts f join library_docs d on d.rowid = f.rowid where library_fts match ?"
          ).all("递归函").map((r) => r.id)));`,
-        // A file, not argv: Linux caps one argv element at 128 KiB (MAX_ARG_STRLEN).
-        [writeTemp("statements.json", JSON.stringify(statements))],
-      );
-      expect(r.status).toBe(0);
-      expect(JSON.parse(r.stdout)).toEqual(["program:fact"]);
-    });
+          // A file, not argv: Linux caps one argv element at 128 KiB (MAX_ARG_STRLEN).
+          [writeTemp("statements.json", JSON.stringify(statements))],
+        );
+        expect({ status: r.status, stderr: r.stderr }).toMatchObject({ status: 0 });
+        expect(JSON.parse(r.stdout)).toEqual(["program:fact"]);
+      },
+      NODE_TEST_TIMEOUT,
+    );
 
-    test("node:sqlite runs openDb itself (bundled for node), twice, and searches", async () => {
-      // The app's runtime path: connection.ts's openNode branch, not just the SQL.
-      const out = tmp();
-      const built = await Bun.build({
-        entrypoints: [path.join(import.meta.dir, "../../app/src/lib/db/open.ts")],
-        target: "node",
-        format: "esm",
-        outdir: out,
-      });
-      expect(built.success).toBe(true);
-      const r = runNode(
-        node.bin,
-        `const { openDb } = await import(process.argv[2]);
+    test(
+      "node:sqlite runs openDb itself (bundled for node), twice, and searches",
+      async () => {
+        // The app's runtime path: connection.ts's openNode branch, not just the SQL.
+        const out = tmp();
+        const built = await Bun.build({
+          entrypoints: [path.join(import.meta.dir, "../../app/src/lib/db/open.ts")],
+          target: "node",
+          format: "esm",
+          outdir: out,
+        });
+        expect(built.success).toBe(true);
+        const r = runNode(
+          node.bin,
+          `const { openDb } = await import(process.argv[2]);
          const [dataDir, migrationsDir] = process.argv.slice(3);
          const first = openDb(dataDir, { migrationsDir });
          const backend = first.connection.backend;
@@ -174,21 +187,29 @@ describe("fts5 + trigram support", () => {
            .run("program:fact", "program", "Factorial", "递归函数的基例");
          first.close();
          const db = openDb(dataDir, { migrationsDir });
+         db.prepare("INSERT OR REPLACE INTO library_docs (id, kind, title, body) VALUES (?, ?, ?, ?)")
+           .run("program:fact", "program", "Factorial", "递归函数的基例 again");
+         db.prepare("INSERT INTO library_fts(library_fts, rank) VALUES('integrity-check', 1)").run();
+         const stale = db.prepare("SELECT count(*) AS n FROM library_fts WHERE library_fts MATCH ?")
+           .get("递归函").n; // the old and the new body both contain it: 2 means a stale entry
          const ids = db.prepare(
            "SELECT d.id FROM library_fts f JOIN library_docs d ON d.rowid = f.rowid WHERE library_fts MATCH ?"
          ).all("递归函").map((r) => r.id);
          const applied = db.prepare("SELECT count(*) AS n FROM __drizzle_migrations").get().n;
          db.close();
-         console.log(JSON.stringify({ backend, ids, applied }));`,
-        [path.join(out, "open.js"), tmp(), DIR],
-      );
-      expect(r.status).toBe(0);
-      expect(JSON.parse(r.stdout)).toEqual({
-        backend: "node:sqlite",
-        ids: ["program:fact"],
-        applied: listMigrations(DIR).length,
-      });
-    });
+         console.log(JSON.stringify({ backend, ids, applied, stale }));`,
+          [path.join(out, "open.js"), tmp(), DIR],
+        );
+        expect({ status: r.status, stderr: r.stderr }).toMatchObject({ status: 0 });
+        expect(JSON.parse(r.stdout)).toEqual({
+          backend: "node:sqlite",
+          ids: ["program:fact"],
+          applied: listMigrations(DIR).length,
+          stale: 1,
+        });
+      },
+      NODE_TEST_TIMEOUT,
+    );
   }
 });
 
@@ -251,9 +272,26 @@ describe("openDb", () => {
 
       db.prepare("DELETE FROM library_docs WHERE id = ?").run("tool:py-sorting");
       expect(hits("sort")).toEqual(["program:fact"]);
-      expect(
-        db.prepare("INSERT INTO library_fts(library_fts) VALUES('integrity-check')").run().changes,
-      ).toBeGreaterThanOrEqual(0);
+      // rank = 1 makes fts5 also check the index against library_docs (external content); it
+      // throws SQLITE_CORRUPT if they differ. Without it only the index's own structure is checked.
+      const integrity = () =>
+        db.prepare("INSERT INTO library_fts(library_fts, rank) VALUES('integrity-check', 1)").run();
+      // Index entries, whether or not a library_docs row still has their rowid.
+      const indexed = (q: string) =>
+        db
+          .prepare("SELECT count(*) AS n FROM library_fts WHERE library_fts MATCH ?")
+          .get<{ n: number }>(q)?.n;
+      expect(integrity).not.toThrow();
+
+      // REPLACE deletes the old row implicitly (and gives the new one a new rowid): without
+      // recursive_triggers the delete trigger never fires and the old index entry stays behind.
+      db.prepare(
+        "INSERT OR REPLACE INTO library_docs (id, kind, title, body) VALUES (?, ?, ?, ?)",
+      ).run("program:fact", "program", "Factorial", "quicksort pivot");
+      expect(hits("merge")).toEqual([]);
+      expect(indexed("merge")).toBe(0);
+      expect(hits("pivot")).toEqual(["program:fact"]);
+      expect(integrity).not.toThrow();
     } finally {
       db.close();
     }
@@ -440,6 +478,16 @@ describe("schema constraints", () => {
       }
     } finally {
       db.close();
+    }
+  });
+
+  test("every connection has recursive_triggers on, not only openDb's", async () => {
+    // library_fts's sync triggers need it for REPLACE; a connection opened elsewhere writes too.
+    const conn = new SqliteConnection(path.join(tmp(), "bare.sqlite"));
+    try {
+      expect((await conn.execute("PRAGMA recursive_triggers")).rows).toEqual([[1]]);
+    } finally {
+      conn.close();
     }
   });
 

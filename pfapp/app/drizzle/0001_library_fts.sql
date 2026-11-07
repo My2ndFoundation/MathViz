@@ -2,7 +2,12 @@
 -- library_fts indexes library_docs as external content (fts5 reads title/body back by rowid), with
 -- the trigram tokenizer so any 3+ character substring matches, Chinese included; Task 6 falls back
 -- to LIKE for shorter queries. The triggers are fts5's documented external-content pattern, so the
--- index can never drift from library_docs whoever writes it.
+-- index can never drift from library_docs whoever writes it — given PRAGMA recursive_triggers = ON,
+-- which every connection sets (sqlite/connection.ts): without it INSERT OR REPLACE's implicit delete
+-- skips library_docs_ad and leaves a stale entry (fts5 integrity-check then reports corruption).
+-- library_docs has no INTEGER PRIMARY KEY, so VACUUM may renumber its rowids: any VACUUM (or a
+-- restore from a VACUUM INTO backup) must be followed by
+--   INSERT INTO library_fts(library_fts) VALUES('rebuild');
 CREATE VIRTUAL TABLE `library_fts` USING fts5(title, body, content='library_docs', tokenize='trigram');
 --> statement-breakpoint
 CREATE TRIGGER `library_docs_ai` AFTER INSERT ON `library_docs` BEGIN

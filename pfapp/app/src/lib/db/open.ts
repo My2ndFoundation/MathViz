@@ -108,6 +108,9 @@ function appliedMigrations(db: Db): Map<number, string> {
 function applyPragmas(db: Db): void {
   db.prepare("PRAGMA journal_mode = WAL").get();
   db.exec("PRAGMA foreign_keys = ON");
+  // Already on from the connection (sqlite/connection.ts); restated because library_fts depends on
+  // it — without it INSERT OR REPLACE into library_docs leaves a stale index entry behind.
+  db.exec("PRAGMA recursive_triggers = ON");
 }
 
 /** ISO timestamp → 20261107T090000000Z */

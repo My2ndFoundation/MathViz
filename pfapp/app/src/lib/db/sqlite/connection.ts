@@ -1,5 +1,6 @@
 // Copied from MathTestBuddy trainer/src/lib/db/sqlite/connection.ts (commit d2ff986). Changes: no
 // `import "server-only"` (pfapp has no such package and bun test has no stub for it). Node-version message names MathViz.
+// recursive_triggers is turned on in both backends (see the list below).
 import type { Database as BunDatabase, Statement as BunStatement } from "bun:sqlite";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
@@ -21,7 +22,9 @@ import { assertSingleStatement } from "./statement";
  *   Infinity and bigints beyond 64 bits throw;
  * - errors carry `code` (base name, e.g. SQLITE_CONSTRAINT), `extendedCode` (e.g.
  *   SQLITE_CONSTRAINT_UNIQUE) and `rawCode`;
- * - busy_timeout 5000, foreign keys on, double-quoted string literals off.
+ * - busy_timeout 5000, foreign keys on, double-quoted string literals off;
+ * - recursive_triggers on (MathViz addition): REPLACE's implicit delete then fires DELETE triggers,
+ *   which library_fts's sync triggers (drizzle/0001_library_fts.sql) depend on.
  *
  * Stricter than that driver in one place: one statement per string (statement.ts).
  *
@@ -225,6 +228,7 @@ function openNode(file: string, timeout: number, readOnly: boolean): Backend {
     enableForeignKeyConstraints: true,
     enableDoubleQuotedStringLiterals: false,
   });
+  db.exec("PRAGMA recursive_triggers = ON");
   return {
     kind: "node:sqlite",
     execute(sql, args) {
@@ -262,6 +266,7 @@ function openBun(file: string, timeout: number, readOnly: boolean): Backend {
   // double-quoted string literals; that only affects tests and scripts under Bun, never the app.
   db.run(`PRAGMA busy_timeout = ${Math.trunc(timeout)}`);
   db.run("PRAGMA foreign_keys = ON");
+  db.run("PRAGMA recursive_triggers = ON");
   return {
     kind: "bun:sqlite",
     execute(sql, args) {
