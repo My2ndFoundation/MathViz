@@ -1,0 +1,611 @@
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  setDefaultTimeout,
+  test,
+} from "bun:test";
+import { join } from "node:path";
+import { DELETE as deleteJob, GET as getJob } from "../../app/src/app/api/jobs/[id]/route";
+import { DELETE, GET, POST } from "../../app/src/app/api/mcp/[[...path]]/route";
+import { DELETE as deleteNote } from "../../app/src/app/api/notes/[id]/route";
+import { GET as listNotes, POST as postNote } from "../../app/src/app/api/notes/route";
+import { GET as getThread, POST as postFollowUp } from "../../app/src/app/api/threads/[id]/route";
+import { POST as postThread } from "../../app/src/app/api/threads/route";
+import { failureText } from "../../app/src/components/qa/thread-view";
+import { createPlatformClient } from "../../app/src/lib/agent/platform/client";
+import { buildTask } from "../../app/src/lib/ai/context";
+import { blankSubject, createJob, inputOf } from "../../app/src/lib/ai/jobs";
+import { blanksOf } from "../../app/src/lib/ai/leak";
+import { REDACTED } from "../../app/src/lib/content/index-builder";
+import { importAddonFile } from "../../app/src/lib/content/manual-import";
+import { newId } from "../../app/src/lib/db/ids";
+import { migrationsDir } from "../../app/src/lib/db/open";
+import type { AiJobRow } from "../../app/src/lib/db/schema";
+import { CSRF_HEADER } from "../../app/src/lib/http/guard";
+import { MESSAGES } from "../../app/src/lib/i18n/locale";
+import { startAi } from "../../app/src/lib/server/ai";
+import { type AppContext, createAppContext, setAppContext } from "../../app/src/lib/server/context";
+import { loadTarget } from "../../app/src/lib/target";
+import { buildPfaddon, extractPayload, pickBlankProgram, tmp } from "../helpers/content-fixtures";
+import { type Agent, type FakePlatform, startFakePlatform, type ToolCall } from "./fake-platform";
+
+/**
+ * The Q&A and notes API (plan Task 11) over the route handlers, called as Next calls them, with
+ * the MCP route served on a real loopback port for the fake platform's scripted agents. The
+ * content is the real python payload from this checkout; which lines a blank holds and which tool
+ * a program belongs to are read from the program, never hard-coded.
+ */
+
+setDefaultTimeout(60_000);
+
+const PY = loadTarget("python");
+const MIGRATIONS = migrationsDir(join(import.meta.dir, "..", ".."));
+let PROG = "";
+
+let PAYLOAD = "";
+let ADDON = "";
+let FIRST_ANSWER = "";
+let FIRST_BLANK = "";
+let PROG_TOOL = "";
+
+let app: { port: number; stop: () => void } | null = null;
+let ctx: AppContext | null = null;
+let fake: FakePlatform | null = null;
+const opened: AppContext[] = [];
+
+function serveMcp() {
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(req) {
+      const url = new URL(req.url);
+      if (url.pathname !== "/api/mcp" && !url.pathname.startsWith("/api/mcp/")) {
+        return new Response("not found", { status: 404 });
+      }
+      const rest = url.pathname.slice("/api/mcp".length).split("/").filter(Boolean);
+      const params = Promise.resolve(rest.length ? { path: rest } : {});
+      const h = req.method === "POST" ? POST : req.method === "DELETE" ? DELETE : GET;
+      return h(req, { params });
+    },
+  });
+  return { port: server.port as number, stop: () => server.stop(true) };
+}
+
+async function start(
+  agents: Partial<Record<string, Agent>> = {},
+  { platform = true }: { platform?: boolean } = {},
+): Promise<{ ctx: AppContext; fake: FakePlatform }> {
+  app ??= serveMcp();
+  fake = await startFakePlatform({ appPort: app.port, agents });
+  const dataDir = tmp("threads-data");
+  await importAddonFile(ADDON, dataDir, PY.appId);
+  ctx = await createAppContext(
+    { PRIMEFORGE_DATA_DIR: dataDir, MATHVIZ_TARGET: "python", PRIMEFORGE_PORT: String(app.port) },
+    {
+      migrationsDir: MIGRATIONS,
+      platform: platform ? createPlatformClient({ apiUrl: fake.url, secret: fake.secret }) : null,
+      log: () => {},
+    },
+  );
+  opened.push(ctx);
+  setAppContext(ctx);
+  if (platform) expect(await startAi(ctx, { retryMs: 0 })).toBe(true);
+  return { ctx, fake };
+}
+
+/** A request as the shell's own page sends it: right Host, same-origin, the CSRF token on writes. */
+function req(method: string, path: string, body?: unknown, { csrf = true } = {}) {
+  const c = ctx as AppContext;
+  const headers: Record<string, string> = {
+    host: `127.0.0.1:${c.port}`,
+    "sec-fetch-site": "same-origin",
+  };
+  if (csrf && method !== "GET") headers[CSRF_HEADER] = c.csrfToken;
+  if (body !== undefined) headers["content-type"] = "application/json";
+  return new Request(`http://127.0.0.1:${c.port}${path}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+const params = (p: Record<string, string>) => ({ params: Promise.resolve(p) });
+
+// biome-ignore lint/suspicious/noExplicitAny: JSON bodies of the API under test
+type Json = any;
+async function call(res: Promise<Response> | Response): Promise<{ status: number; body: Json }> {
+  const r = await res;
+  const text = await r.text();
+  return { status: r.status, body: text ? JSON.parse(text) : null };
+}
+
+const blankState = (over: Record<string, unknown> = {}) => ({
+  progId: PROG,
+  mode: "blank",
+  blankId: FIRST_BLANK,
+  given: [],
+  ...over,
+});
+
+const jobRow = (id: string) =>
+  (ctx as AppContext).db
+    .prepare("SELECT * FROM ai_jobs WHERE id = ?")
+    .get<AiJobRow>(id) as AiJobRow;
+
+const fakeJobOf = (f: FakePlatform, row: AiJobRow) =>
+  [...f.jobs.values()].find((j) => j.id === row.platform_job_id);
+
+const getTask = (calls: ToolCall[]) =>
+  JSON.parse(calls.find((c) => c.tool === "mv_get_task")?.text ?? "{}");
+
+beforeAll(async () => {
+  PAYLOAD = await extractPayload("python");
+  ADDON = buildPfaddon(PAYLOAD, PY.appId, "1.0.0");
+  // chosen by shape, never by id (a content wave must not turn this red)
+  const program = pickBlankProgram(PAYLOAD);
+  PROG = program.id;
+  const first = blanksOf(program.source).find((b) => b.body.some((l) => l.trim() !== ""));
+  if (!first) throw new Error(`${PROG} has no blank`);
+  FIRST_BLANK = first.id;
+  FIRST_ANSWER = (first.body.find((l) => l.trim() !== "") as string).trim();
+  PROG_TOOL = program.tool ?? "";
+  expect(PROG_TOOL).not.toBe("");
+}, 120_000);
+
+afterEach(async () => {
+  await fake?.close();
+  fake = null;
+});
+
+afterAll(() => {
+  setAppContext(null);
+  app?.stop();
+  for (const c of opened) c.close();
+});
+
+describe("ask → answer → note", () => {
+  test("POST /api/threads 202; the fake platform answers; the thread holds one question and one answer", async () => {
+    const { fake: f } = await start();
+    const r = await call(
+      postThread(
+        req("POST", "/api/threads", {
+          subjects: [{ type: "program", id: PROG }],
+          message: "Why multiply by 9/5?",
+          workflow: "ask",
+          pyState: blankState(),
+        }),
+      ),
+    );
+    expect(r.status).toBe(202);
+    expect(typeof r.body.threadId).toBe("string");
+    expect(typeof r.body.jobId).toBe("string");
+    await f.idle();
+
+    const j = await call(
+      getJob(req("GET", `/api/jobs/${r.body.jobId}`), params({ id: r.body.jobId })),
+    );
+    expect(j.status).toBe(200);
+    expect(j.body).toMatchObject({ status: "completed", threadId: r.body.threadId, error: null });
+
+    const t = await call(
+      getThread(req("GET", `/api/threads/${r.body.threadId}`), params({ id: r.body.threadId })),
+    );
+    expect(t.status).toBe(200);
+    expect(t.body.messages.map((m: Json) => m.role)).toEqual(["user", "assistant"]);
+    expect(t.body.messages[0].text).toBe("Why multiply by 9/5?");
+    expect(t.body.subjects).toEqual([{ type: "program", id: PROG }]);
+    // the citation is resolved to the program's page inside its tool
+    expect(t.body.messages[1].citations).toEqual([
+      {
+        id: `program:${PROG}`,
+        title: { en: expect.any(String), zh: expect.any(String) },
+        href: `/tool/${PROG_TOOL}?prog=${PROG}`,
+      },
+    ]);
+    expect(t.body.job).toMatchObject({ id: r.body.jobId, status: "completed" });
+
+    // save the answer as a note, list it, filter it, delete it
+    const answerId = t.body.messages[1].id as string;
+    const n = await call(postNote(req("POST", "/api/notes", { messageId: answerId })));
+    expect(n.status).toBe(201);
+    const again = await call(postNote(req("POST", "/api/notes", { messageId: answerId })));
+    expect([again.status, again.body.id]).toEqual([200, n.body.id]);
+    const all = await call(listNotes(req("GET", "/api/notes")));
+    expect(all.body.notes.length).toBe(1);
+    expect(all.body.notes[0]).toMatchObject({
+      id: n.body.id,
+      messageId: answerId,
+      threadId: r.body.threadId,
+      question: "Why multiply by 9/5?",
+    });
+    // what the notes page filters by: the program, and the tool it belongs to
+    expect(all.body.notes[0].subjects).toEqual([
+      {
+        type: "program",
+        id: PROG,
+        title: { en: expect.any(String), zh: expect.any(String) },
+        toolId: PROG_TOOL,
+        programId: PROG,
+      },
+    ]);
+    const hit = await call(listNotes(req("GET", "/api/notes?q=division")));
+    expect(hit.body.notes.length).toBe(1);
+    const byQuestion = await call(listNotes(req("GET", "/api/notes?q=multiply")));
+    expect(byQuestion.body.notes.length).toBe(1);
+    const miss = await call(listNotes(req("GET", "/api/notes?q=zzzz-no-such-word")));
+    expect(miss.body.notes.length).toBe(0);
+    // a LIKE wildcard is a literal character, not "anything"
+    const wild = await call(listNotes(req("GET", "/api/notes?q=%25")));
+    expect(wild.body.notes.length).toBe(0);
+    const del = await call(
+      deleteNote(req("DELETE", `/api/notes/${n.body.id}`), params({ id: n.body.id })),
+    );
+    expect(del.status).toBe(204);
+    const none = await call(listNotes(req("GET", "/api/notes")));
+    expect(none.body.notes).toEqual([]);
+    const gone = await call(
+      deleteNote(req("DELETE", `/api/notes/${n.body.id}`), params({ id: n.body.id })),
+    );
+    expect(gone.status).toBe(404);
+  });
+
+  test("a student's own message cannot be saved as a note; an unknown one is 404", async () => {
+    await start();
+    const r = await call(
+      postThread(
+        req("POST", "/api/threads", {
+          subjects: [{ type: "tool", id: PROG_TOOL }],
+          message: "What is this page for?",
+          workflow: "ask",
+        }),
+      ),
+    );
+    await fake?.idle();
+    const t = await call(
+      getThread(req("GET", `/api/threads/${r.body.threadId}`), params({ id: r.body.threadId })),
+    );
+    const mine = await call(
+      postNote(req("POST", "/api/notes", { messageId: t.body.messages[0].id })),
+    );
+    expect(mine.status).toBe(400);
+    const unknown = await call(postNote(req("POST", "/api/notes", { messageId: "nope" })));
+    expect(unknown.status).toBe(404);
+  });
+});
+
+describe("a machine with no AI engine this app may use (design §7.6)", () => {
+  for (const code of ["engine_not_granted", "engine_unavailable"] as const) {
+    test(`a submit refused ${code}: the job fails with that code and the panel says what to do`, async () => {
+      const { fake: f } = await start();
+      f.refuseEngines(code);
+      const r = await call(
+        postThread(
+          req("POST", "/api/threads", {
+            subjects: [{ type: "program", id: PROG }],
+            message: "Why?",
+            workflow: "ask",
+            pyState: blankState(),
+          }),
+        ),
+      );
+      expect(r.status).toBe(202);
+      const j = await call(
+        getJob(req("GET", `/api/jobs/${r.body.jobId}`), params({ id: r.body.jobId })),
+      );
+      expect(j.body).toMatchObject({ status: "failed", error: code });
+      expect(f.submits).toEqual([]);
+      // what the panel shows for that job: the guidance, never "try again"
+      const failure = { kind: "job", status: j.body.status, error: j.body.error } as const;
+      for (const locale of ["en", "zh"] as const) {
+        const text = failureText(failure, locale);
+        expect(text).toBe(MESSAGES[locale].error[code]);
+        expect(text).toContain("PrimeForge Desktop");
+        expect(text).not.toBe(MESSAGES[locale].qa.failed.replace("{code}", code));
+      }
+    });
+  }
+});
+
+describe("POST /api/threads validation", () => {
+  const hint = (pyState: unknown) =>
+    call(
+      postThread(
+        req("POST", "/api/threads", {
+          subjects: [{ type: "program", id: PROG }],
+          message: "A hint, please.",
+          workflow: "hint",
+          ...(pyState === undefined ? {} : { pyState }),
+        }),
+      ),
+    );
+
+  test("hint is 400 unless the page reports blank mode with a focused blank", async () => {
+    await start();
+    expect((await hint(undefined)).status).toBe(400);
+    expect((await hint(null)).status).toBe(400);
+    expect((await hint(blankState({ mode: "read" }))).status).toBe(400);
+    expect((await hint(blankState({ mode: "trace" }))).status).toBe(400);
+    expect((await hint(blankState({ blankId: null }))).status).toBe(400);
+    // invalid state = no state at all
+    expect((await hint(blankState({ given: "all" }))).status).toBe(400);
+    expect((await hint(blankState({ mode: "BLANK" }))).status).toBe(400);
+    expect((await hint(undefined)).body.error.code).toBe("hint_needs_blank");
+    expect(
+      (ctx as AppContext).db.prepare("SELECT COUNT(*) AS n FROM threads").get<{ n: number }>()?.n,
+    ).toBe(0);
+  });
+
+  test("a valid hint is about the focused blank: its blank subject is added to the job", async () => {
+    const { fake: f } = await start();
+    const r = await hint(blankState());
+    expect(r.status).toBe(202);
+    await f.idle();
+    const row = jobRow(r.body.jobId);
+    expect(row.workflow).toBe("hint");
+    expect(inputOf(row).subjects).toContainEqual({
+      type: "blank",
+      id: blankSubject(PROG, FIRST_BLANK),
+    });
+    expect(row.status).toBe("completed");
+  });
+
+  test("an invalid pyState on an ask is stored as no state (nothing allowed)", async () => {
+    const { fake: f } = await start();
+    const r = await call(
+      postThread(
+        req("POST", "/api/threads", {
+          subjects: [{ type: "program", id: PROG }],
+          message: "Explain the formula",
+          workflow: "ask",
+          pyState: { progId: PROG, mode: "read", blankId: null, given: [1] },
+        }),
+      ),
+    );
+    expect(r.status).toBe(202);
+    await f.idle();
+    expect(inputOf(jobRow(r.body.jobId)).pyState).toBeNull();
+    expect(JSON.parse(jobRow(r.body.jobId).input).pyState).toBeNull();
+  });
+
+  test("bad bodies are 400, unknown subjects 404, a write without the CSRF token 403", async () => {
+    await start();
+    const post = (body: unknown, opts?: { csrf?: boolean }) =>
+      call(postThread(req("POST", "/api/threads", body, opts)));
+    const ok = { subjects: [{ type: "program", id: PROG }], message: "Hi", workflow: "ask" };
+    expect((await post({ ...ok, workflow: "solve" })).status).toBe(400);
+    expect((await post({ ...ok, message: "   " })).status).toBe(400);
+    expect((await post({ ...ok, message: "x".repeat(4001) })).status).toBe(400);
+    expect((await post({ ...ok, subjects: [] })).status).toBe(400);
+    expect((await post({ ...ok, subjects: [{ type: "page", id: "x" }] })).status).toBe(400);
+    expect((await post({ ...ok, subjects: [{ type: "program", id: "no-such" }] })).status).toBe(
+      404,
+    );
+    expect((await post({ ...ok, subjects: [{ type: "tool", id: "no-such" }] })).status).toBe(404);
+    expect((await post(ok, { csrf: false })).status).toBe(403);
+  });
+
+  test("without the platform: 503 ai_unavailable, nothing stored", async () => {
+    await start({}, { platform: false });
+    const r = await call(
+      postThread(
+        req("POST", "/api/threads", {
+          subjects: [{ type: "program", id: PROG }],
+          message: "Hi",
+          workflow: "ask",
+        }),
+      ),
+    );
+    expect([r.status, r.body.error.code]).toEqual([503, "ai_unavailable"]);
+    expect(
+      (ctx as AppContext).db.prepare("SELECT COUNT(*) AS n FROM threads").get<{ n: number }>()?.n,
+    ).toBe(0);
+  });
+});
+
+describe("the library workflow", () => {
+  test("subjects become the library; the answer's citations resolve to tool and program pages", async () => {
+    const library: Agent = async ({ call: c, callT }) => {
+      const s = await c("mv_search_library", { query: "Fahrenheit", limit: 5 });
+      const { hits } = JSON.parse(s.text) as { hits: { id: string }[] };
+      const prog = hits.find((h) => h.id === `program:${PROG}`);
+      return callT("mv_submit_answer", {
+        text: "See the conversion program.",
+        citations: [prog?.id ?? `program:${PROG}`, `tool:${PROG_TOOL}`],
+        revealsAnswer: false,
+      });
+    };
+    const { fake: f } = await start({ library });
+    const r = await call(
+      postThread(
+        req("POST", "/api/threads", {
+          subjects: [{ type: "program", id: PROG }],
+          message: "Where do I convert temperatures?",
+          workflow: "library",
+        }),
+      ),
+    );
+    expect(r.status).toBe(202);
+    await f.idle();
+    expect(inputOf(jobRow(r.body.jobId)).subjects).toEqual([{ type: "library", id: "all" }]);
+    const t = await call(
+      getThread(req("GET", `/api/threads/${r.body.threadId}`), params({ id: r.body.threadId })),
+    );
+    expect(t.body.messages[1].citations.map((c: Json) => c.href)).toEqual([
+      `/tool/${PROG_TOOL}?prog=${PROG}`,
+      `/tool/${PROG_TOOL}`,
+    ]);
+    expect(t.body.workflow).toBe("library");
+  });
+});
+
+describe("follow-ups and the conversation handed to the agent", () => {
+  /** A thread whose earlier turns quote the first answer line: a pasted attempt and a read-mode answer. */
+  function seededThread(c: AppContext): string {
+    const at = "2026-01-01T10:00:00.000Z";
+    const id = newId(at);
+    c.db
+      .prepare("INSERT INTO threads (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)")
+      .run(id, "seeded", at, at);
+    c.db
+      .prepare(
+        "INSERT INTO thread_subjects (thread_id, subject_type, subject_id) VALUES (?, 'program', ?)",
+      )
+      .run(id, PROG);
+    const msg = c.db.prepare(
+      "INSERT INTO messages (id, thread_id, role, text, created_at) VALUES (?, ?, ?, ?, ?)",
+    );
+    msg.run(newId(at), id, "user", `Is this right?\n    ${FIRST_ANSWER}\nthanks`, at);
+    const at2 = "2026-01-01T10:00:01.000Z";
+    msg.run(newId(at2), id, "assistant", `In read mode you can see it: \`${FIRST_ANSWER}\`.`, at2);
+    return id;
+  }
+
+  const followUp = (threadId: string, pyState: unknown, workflow = "ask") =>
+    call(
+      postFollowUp(
+        req("POST", `/api/threads/${threadId}`, {
+          message: "And the next line?",
+          workflow,
+          pyState,
+        }),
+        params({ id: threadId }),
+      ),
+    );
+
+  test("not read mode: earlier messages reach the agent with the answer lines redacted", async () => {
+    const { ctx: c, fake: f } = await start();
+    const threadId = seededThread(c);
+    const r = await followUp(threadId, blankState());
+    expect(r.status).toBe(202);
+    expect(r.body.threadId).toBe(threadId);
+    await f.idle();
+    const row = jobRow(r.body.jobId);
+    const task = getTask(fakeJobOf(f, row)?.calls ?? []);
+    expect(task.question).toBe("And the next line?");
+    expect(task.conversation.map((m: Json) => m.role)).toEqual(["student", "tutor"]);
+    const flat = JSON.stringify(task.conversation);
+    expect(flat).not.toContain(FIRST_ANSWER);
+    expect(flat.replace(/\s+/g, "")).not.toContain(FIRST_ANSWER.replace(/\s+/g, ""));
+    expect(task.conversation[0].text).toContain("Is this right?");
+    expect(task.conversation[0].text).toContain(REDACTED);
+    expect(task.conversation[1].text).toContain(REDACTED);
+    expect(row.status).toBe("completed");
+  });
+
+  test("the same with no bridge state at all", async () => {
+    const { ctx: c, fake: f } = await start();
+    const threadId = seededThread(c);
+    const r = await followUp(threadId, undefined);
+    await f.idle();
+    const task = getTask(fakeJobOf(f, jobRow(r.body.jobId))?.calls ?? []);
+    expect(JSON.stringify(task.conversation)).not.toContain(FIRST_ANSWER);
+  });
+
+  test("read mode: the conversation is handed over as it was", async () => {
+    const { ctx: c, fake: f } = await start();
+    const threadId = seededThread(c);
+    const r = await followUp(threadId, { progId: PROG, mode: "read", blankId: null, given: [] });
+    await f.idle();
+    const task = getTask(fakeJobOf(f, jobRow(r.body.jobId))?.calls ?? []);
+    expect(task.conversation[0].text).toBe(`Is this right?\n    ${FIRST_ANSWER}\nthanks`);
+    expect(task.conversation[1].text).toContain(FIRST_ANSWER);
+  });
+
+  test("a follow-up while the thread's job is still open is 409; cancel ends it", async () => {
+    const { fake: f } = await start();
+    f.sim.hold.add("ask");
+    const r = await call(
+      postThread(
+        req("POST", "/api/threads", {
+          subjects: [{ type: "program", id: PROG }],
+          message: "Hold on",
+          workflow: "ask",
+          pyState: blankState(),
+        }),
+      ),
+    );
+    expect(r.status).toBe(202);
+    const busy = await followUp(r.body.threadId, blankState());
+    expect([busy.status, busy.body.error.code]).toEqual([409, "thread_busy"]);
+    const running = await call(
+      getJob(req("GET", `/api/jobs/${r.body.jobId}`), params({ id: r.body.jobId })),
+    );
+    expect(["queued", "running"]).toContain(running.body.status);
+    const cancel = await call(
+      deleteJob(req("DELETE", `/api/jobs/${r.body.jobId}`), params({ id: r.body.jobId })),
+    );
+    expect([cancel.status, cancel.body.status]).toEqual([200, "cancelled"]);
+    const after = await call(
+      getJob(req("GET", `/api/jobs/${r.body.jobId}`), params({ id: r.body.jobId })),
+    );
+    expect(after.body.status).toBe("cancelled");
+    const unknown = await call(getJob(req("GET", "/api/jobs/nope"), params({ id: "nope" })));
+    expect(unknown.status).toBe(404);
+    f.release("ask");
+    await f.idle();
+  });
+
+  test("a thread's subjects are fixed: a follow-up that would change them is 400 workflow_mismatch", async () => {
+    const { ctx: c, fake: f } = await start();
+    const programThread = seededThread(c);
+    const lib = await followUp(programThread, undefined, "library");
+    expect([lib.status, lib.body.error.code]).toEqual([400, "workflow_mismatch"]);
+    // a hint for a blank of another program than the thread is about
+    const other = await followUp(programThread, blankState({ progId: `${PROG}-other` }), "hint");
+    expect([other.status, other.body.error.code]).toEqual([400, "workflow_mismatch"]);
+    // switching between ask and hint on the thread's own program is fine
+    expect((await followUp(programThread, blankState(), "hint")).status).toBe(202);
+    await f.idle();
+
+    const r = await call(
+      postThread(
+        req("POST", "/api/threads", {
+          subjects: [{ type: "library", id: "all" }],
+          message: "Where are loops?",
+          workflow: "library",
+        }),
+      ),
+    );
+    await f.idle();
+    for (const w of ["ask", "hint"]) {
+      const x = await followUp(r.body.threadId, blankState(), w);
+      expect([w, x.status, x.body.error.code]).toEqual([w, 400, "workflow_mismatch"]);
+    }
+    expect((await followUp(r.body.threadId, undefined, "library")).status).toBe(202);
+    await f.idle();
+    const jobs = c.db.prepare("SELECT COUNT(*) AS n FROM ai_jobs").get<{ n: number }>()?.n;
+    expect(jobs).toBe(3);
+  });
+
+  test("history is redacted against every subject the thread has had, not only the job's", async () => {
+    const { ctx: c } = await start();
+    const threadId = seededThread(c);
+    const at = new Date().toISOString();
+    c.db
+      .prepare(
+        "INSERT INTO messages (id, thread_id, role, text, created_at) VALUES (?, ?, 'user', ?, ?)",
+      )
+      .run(newId(at), threadId, "Now about the library", at);
+    // a job about the library alone, with no bridge state (as a crafted request might make one)
+    const job = createJob(c.db, {
+      threadId,
+      workflow: "library",
+      subjects: [{ type: "library", id: "all" }],
+      pyState: null,
+    });
+    const task = buildTask(c.db, c.content?.dir ?? null, jobRow(job.id));
+    const flat = JSON.stringify(task.conversation);
+    expect(flat).not.toContain(FIRST_ANSWER);
+    expect(flat).toContain(REDACTED);
+  });
+
+  test("an unknown thread is 404", async () => {
+    await start();
+    expect(
+      (await call(getThread(req("GET", "/api/threads/nope"), params({ id: "nope" })))).status,
+    ).toBe(404);
+    expect((await followUp("nope", blankState())).status).toBe(404);
+  });
+});

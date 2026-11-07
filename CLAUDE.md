@@ -215,6 +215,48 @@ rulebook (how to write a program, blank a line, add a page, and which gate guard
 `.claude/skills/python-content-wave/SKILL.md` is the orchestrator's run for a batch of pages — program
 list, parallel builders, one integration branch, one final review, one PR per wave.
 
+## pfapp/
+
+`pfapp/` 是**一份代码构建四个 PrimeForge Desktop 应用**（math / chess / crypto / python，按
+`MATHVIZ_TARGET` 选目标，配置在 `pfapp/targets/<t>/`），外加每个目标一个**内容包**。内容包由
+`pfapp/extract/` 从网页版提取（注册表、工具页原样、导航页的组标签、python 的 `.py` 原文）——
+**网页版是唯一的内容源**，pfapp 里不写、不改任何内容。设计：`docs/superpowers/specs/2026-11-07-mathviz-pfapp-design.md`。
+它是 Bun + Next.js 项目，与四个注册表互不相干：不在 `tools.json` 或子项目注册表里登记任何东西。
+
+**门：`cd pfapp && bun run check:content`**（`pfapp/scripts/check.ts`）。四个目标各提取一次，
+逐项比对**同一棵树**里的网页版：每页 sha256、注册表每一条都在 catalog 里且没有多余条目、
+payload 没有多余文件、组标签与导航页一致、python source 是 `.py` 原文；再查同一棵树提取两次
+逐字节相同、`pfapp/` 下被 git 跟踪的 `.html` 为 0。条数全从注册表推，网页版加一页不会让它变红；
+它也**不**与已发布的内容包比——「内容包版本前进」在 PFD 的构建脚本里，网页版的 PR 不因 pfapp
+没重发而变红。钩子在 `pfapp/`、四个注册表、四处工具页目录、`python/programs/` 或四个组标签所在
+导航页（`index.html`、三个子项目的 `app.html`）有改动时跑它（以工作区为准、不要求干净；本机没有
+`bun` 就警告跳过）。**钩子只跑 `check:content`**；`registry-sync.yml` 的独立 `pfapp` job 每次都跑它，
+外加 `bun run test`、类型检查、Biome 和一次 `bun run build -- --target python --allow-stale-icon`。
+所以 `bun run test` 不许依赖网页版的具体内容（某个程序 id、某个空的 id、某段提示、导航页的引号风格、
+设计 token）——那样的测试本机钩子看不见、只在 CI 红，正是 §9 不许的「网页版的 PR 因 pfapp 变红」。
+要真实程序就**按性质挑**（`tests/helpers/content-fixtures.ts` 的 `pickBlankProgram` /
+`pickSelfRevealingHint`，挑不到就红、不跳过），要页面文本就**合成**。图标是否跟得上设计 token 只在
+构建预检里查（`readManifest`）；CI 带 `--allow-stale-icon` 降为警告，签名机的构建不带。
+
+用 **`bun run test`**（= `bun test ./tests/unit ./tests/integration`），不用裸 `bun test`：后者扫整个
+`pfapp/`，会把 Playwright spec 当单元测试捡走。`bun run test:e2e`（Playwright，走真入口）只在本机跑，
+本机 Node 25、生产是 node@24。构建只用 **`bun run build -- --target <t>`**：它在 `next build` 成功后写
+`.next/mathviz-target` 戳（在 `pfapp/app/` 下），入口与打包都拒绝没戳或戳是别的目标的构建——裸 `bun run build:next`
+出来的构建入口不认。
+
+**窗口（§5.3）**：四个应用都声明 `ui.window`，在 PrimeForge Desktop 自己的窗口里开。推论：外壳里
+不许有 `target="_blank"` / `window.open`（窗口把它们交给系统浏览器；e2e 断言为 0）；下载只认指向
+**同源 URL** 的 `<a download>`，`blob:` / `data:` 被拒——数学 8 页与两页 chess 的导出要等第 2 期在送出
+工具页时改写。内容包与 API 同源，按第一方对待（§7.3）。
+
+**`pfapp/` 下不许提交任何 `.html`**（平台规定，门会抓）。工具页只在提取出的内容包里。
+
+日常流程：
+1. 网页版加内容，走网页版自己的门与评审，合并到 main。
+2. `bun run extract <target> --compare <上次的输出>` 本地看一眼差异（要求 checkout 干净）。
+3. 在 PFD 里 `build-mathviz-addon <target>` → `publish:addon`。应用本身没改就不发应用。
+4. 只有应用代码改了，才 `build-mathviz <target>` → `publish:app`，并升该目标 manifest 的版本。
+
 ## Branding is generated too
 
 `docs/logo.png` is the source of truth for the brand mark. `scripts/apply_branding.py` derives a

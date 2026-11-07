@@ -1,0 +1,118 @@
+/**
+ * The shell's English strings. zh.ts has exactly the same keys (typed as Messages, and
+ * tests/unit/i18n.test.ts compares them at run time). Tool pages carry their own strings.
+ */
+export const en = {
+  app: {
+    loading: "Loading…",
+  },
+  nav: {
+    search: "Search tools",
+    collapse: "Collapse sidebar",
+    expand: "Expand sidebar",
+    notes: "Notes",
+    askLibrary: "Ask the whole library",
+    settings: "Settings",
+    searchPlaceholder: "Filter by title or tag…",
+    noResults: "No tool matches.",
+    close: "Close",
+    switchTo: "中文",
+    switchToLabel: "Switch to Chinese",
+  },
+  settings: {
+    language: "Language",
+    langEn: "English",
+    langZh: "中文",
+  },
+  content: {
+    none: "No content pack is installed.",
+    noneBody:
+      "The tools come in a content pack. Install it from the PrimeForge store, or import a .pfaddon file you already have.",
+    fromStore: "Install from the store",
+    fromStoreBody:
+      "Open this app's page in the PrimeForge store and install its content pack; the app picks it up when you reload.",
+    importLocal: "Import a local content pack",
+    importing: "Importing…",
+    version: "Content version {version}",
+  },
+  tool: {
+    notFound: "This tool is not in the installed content pack.",
+  },
+  qa: {
+    panel: "Ask",
+    hidePanel: "Hide the ask panel",
+    showPanel: "Ask a question",
+    program: "Program: {id}",
+    blank: "blank {id}",
+    thisTool: "About this tool",
+    noState: "The page has not reported which program is open yet.",
+    inputLabel: "Your question",
+    placeholder: "Ask about what you see on the left…",
+    askProgram: "Ask about this program",
+    askTool: "Ask about this tool",
+    hint: "Get a hint",
+    hintDisabled: "Hints are for a blank: switch to fill-in mode and click into a blank.",
+    hintMessage: "Could I have a hint for blank {id}?",
+    newThread: "New conversation",
+    thinking: "Thinking…",
+    cancel: "Cancel",
+    cancelled: "Cancelled.",
+    needsBlankDone: "Finish this blank first, or ask in read mode.",
+    timedOut: "The tutor took too long. Try again.",
+    failed: "The tutor could not answer ({code}). Try again.",
+    you: "You",
+    tutor: "Tutor",
+    sources: "From the library",
+    noCitations: "Cites no item in the library.",
+    saveNote: "Save as note",
+    saved: "Saved",
+    libraryTitle: "Ask the whole library",
+    libraryIntro:
+      "The tutor searches every tool and program in this app and links to the ones it used.",
+    libraryPlaceholder: "For example: how does binary search keep its invariant?",
+    libraryAsk: "Ask the library",
+    notesTitle: "Notes",
+    notesIntro: "Answers you saved, newest first.",
+    notesSearch: "Search notes",
+    notesSearchPlaceholder: "Search questions and answers…",
+    notesEmpty: "No notes yet. Save an answer with “Save as note”.",
+    notesNoMatch: "No note matches.",
+    question: "Question",
+    subjectFilter: "Filter by subject",
+    subjectAll: "All subjects",
+    subjectTool: "Tool: {title}",
+    subjectProgram: "Program: {title}",
+    subjectLibrary: "The whole library",
+    deleteNote: "Delete",
+    deleteNoteLabel: "Delete this note",
+  },
+  error: {
+    ai_unavailable: "The AI tutor is available when the app runs inside PrimeForge.",
+    // the platform refused the job: no AI engine this app may use (design §7.6) — not a retry
+    engine_not_granted:
+      "This app is not allowed to use an AI engine yet. In PrimeForge Desktop, allow it Claude, or grant it Codex, then ask again.",
+    engine_unavailable:
+      "No AI engine this app may use can run right now. In PrimeForge Desktop, check that Claude (or Codex, if you granted it) is installed and signed in, then ask again.",
+    hint_needs_blank: "A hint needs a blank: switch to fill-in mode and click into one.",
+    thread_busy: "The tutor is still answering the last question.",
+    unknown_subject: "That is not in the installed content pack.",
+    workflow_mismatch: "This conversation is about something else. Start a new one.",
+    bad_host: "The request did not come from this app's address.",
+    bad_origin: "The request came from another site.",
+    cross_site: "The request came from another site.",
+    bad_csrf: "The page's session has expired. Reload the page and try again.",
+    method_not_allowed: "That action is not allowed here.",
+    body_too_large: "The request is too large.",
+    bad_json: "The request could not be read.",
+    bad_request: "The request is not valid.",
+    not_gzip: "That file is not a content pack (.pfaddon).",
+    bad_addon: "That file is not a content pack for this app, or it is damaged.",
+    not_found: "Not found.",
+    read_only:
+      "This data was written by a newer version of the app; it can be read but not changed.",
+    not_ready: "The app is still starting. Try again in a moment.",
+    internal: "Something went wrong.",
+  },
+};
+
+export type Messages = typeof en;
