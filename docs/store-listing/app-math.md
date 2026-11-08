@@ -1,7 +1,7 @@
 # Viz Learn Buddy for Math
 
-> MathViz commit **ac34b59** . Counts: 62 pages (tools.json). Follows python (design §10, phase 2). App manifest version 0.1.0.
-> App `app.primeforge.mathviz.math`, manifest `pfapp/targets/math/manifest.json` (version 0.1.0, `minDesktopVersion` 1.45.0, capabilities `ai`, `addons`, opens in a PrimeForge window 1280 × 820). In-app name (`target.json`): en “Viz Learn Buddy for Math”, zh “Viz Learn Buddy · 数学可视化”.
+> MathViz commit **ac34b59** . Counts: 62 pages (tools.json). Follows python (design §10, phase 2). App manifest version 1.0.0.
+> App `app.primeforge.mathviz.math`, manifest `pfapp/targets/math/manifest.json` (version 1.0.0, `minDesktopVersion` 1.45.0, capabilities `ai`, `addons`, opens in a PrimeForge window 1280 × 820). In-app name (`target.json`): en “Viz Learn Buddy for Math”, zh “Viz Learn Buddy · 数学可视化”.
 > Remaining ⟦OWNER DECISION⟧ items are open on purpose; see `README.md` §5. Price, billing and separate add-on products are decided (README, "Owner rulings").
 
 ## A. Console → Products → Add a product (creation form, field order of `apps/console/app/products/new/page.tsx`)
@@ -56,7 +56,7 @@ dict(folder="mathviz", name="math", ground="../main-images/mathviz/math-1920x108
 - Counts: title “Viz Learn Buddy” (15), “for Math” (8); pitch “Maths you can turn” (18), “around and look at” (18) (≈25 per line); points “62 interactive pages, 13 topics” (31), “A preset view for each idea” (27), “Ask the tutor about any page” (28) (≤ ≈32).
 - Words checked against: tools.json at ac34b59 (62 tools); index.html CATS (13 groups); CLAUDE.md principle 5 (epiphany view).
 
-**store-gallery-image** (1920 × 1080 PNGs; the skill decides the story): shoot **Viz Learn Buddy for Math 0.1.0** with this pack's published version, interface **English**. Headline claims the code supports, with the screen that proves each (≤ ≈35 chars):
+**store-gallery-image** (1920 × 1080 PNGs; the skill decides the story): shoot **Viz Learn Buddy for Math 1.0.0** with this pack's published version, interface **English**. Headline claims the code supports, with the screen that proves each (≤ ≈35 chars):
 
 - “62 pages you can turn in 3D” (27 chars) — shown by: *The Essence of the Fourier Transform* (fourier-essence-3d) at its default tab, scene drawn, panel visible. Clip to the scene and the panel; leave out the app's top bar.
 - “One view for each big idea” (26 chars) — shown by: *Unit Circle · Sine · Tangent* (trig-essence-3d-new) switched to its orthographic preset view where sine reads as the shadow of the circle; the tab's tip visible.

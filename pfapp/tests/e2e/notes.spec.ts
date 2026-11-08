@@ -3,8 +3,10 @@ import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { expectNoNewWindows, hookWindowOpen } from "./new-windows";
 import {
+  askSubject,
   type FakePlatformProcess,
   freePort,
+  IS_PYTHON,
   type RunningApp,
   startApp,
   startFakePlatform,
@@ -33,7 +35,8 @@ const programTool = (programId: string): string =>
 
 let fake: FakePlatformProcess;
 let app: RunningApp;
-const state: { prog?: string; threadId?: string } = {};
+/** The subject the first conversation is about, and the locale-less link to it in this app. */
+const state: { href?: string; threadId?: string } = {};
 
 test.describe.configure({ mode: "serial" });
 
@@ -71,10 +74,12 @@ test("a saved answer is one row; earlier messages fold; a follow-up is answered 
 }) => {
   await hookWindowOpen(page);
   await page.goto(`${app.base}/en/tool/${firstTool()}`);
-  const frameEl = page.getByTestId("tool-frame");
-  await expect(frameEl).toHaveAttribute("data-py-prog", /./);
-  const prog = (await frameEl.getAttribute("data-py-prog")) as string;
-  state.prog = prog;
+  const subject = await askSubject(page, firstTool());
+  // python: the program inside its tool (read from the pack); elsewhere the tool itself
+  const href = IS_PYTHON
+    ? `/tool/${programTool(subject.id)}?prog=${subject.id}`
+    : `/tool/${firstTool()}`;
+  state.href = href;
   const panel = page.getByTestId("ask-panel");
   const answers = panel.locator('[data-testid=qa-message][data-role="assistant"]');
   await panel.getByTestId("ask-input").fill("First question, not saved?");
@@ -101,7 +106,7 @@ test("a saved answer is one row; earlier messages fold; a follow-up is answered 
   const detail = page.getByTestId("notes-detail");
   await expect(detail).toHaveAttribute("data-id", threadId);
   await expect(detail.getByTestId("notes-question")).toHaveText("First question, not saved?");
-  await expect(detail.getByTestId("notes-subject")).toContainText("Program:");
+  await expect(detail.getByTestId("notes-subject")).toContainText(IS_PYTHON ? "Program:" : "Tool:");
   await expect(rows.first()).toBeVisible();
 
   // before the question the first saved answer replied to: folded behind a toggle (Q1, A1);
@@ -136,16 +141,19 @@ test("a saved answer is one row; earlier messages fold; a follow-up is answered 
   await expect(page.getByTestId("notes-detail")).toHaveAttribute("data-id", threadId);
   await expect(page.getByTestId("notes-detail").getByTestId("qa-message")).toHaveCount(4);
 
-  // "Open the exercise": the program in its tool, whose ask panel shows this conversation (named
-  // in the link; the panel takes ?thread= out of the URL once it has opened it)
+  // "Open the exercise" (python) / "Open the tool": its page, whose ask panel shows this
+  // conversation (named in the link; the panel takes ?thread= out of the URL once it opened it)
   const open = page.getByTestId("notes-open");
+  await expect(open).toHaveText(IS_PYTHON ? "Open the exercise" : "Open the tool");
   await expect(open).toHaveAttribute(
     "href",
-    `/en/tool/${programTool(prog)}?prog=${prog}&thread=${threadId}`,
+    `/en${href}${IS_PYTHON ? "&" : "?"}thread=${threadId}`,
   );
   await open.click();
-  await expect(page).toHaveURL(`${app.base}/en/tool/${programTool(prog)}?prog=${prog}`);
-  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", prog);
+  await expect(page).toHaveURL(`${app.base}/en${href}`);
+  if (IS_PYTHON) {
+    await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", subject.id);
+  }
   await expect(panel.locator('[data-testid=qa-message][data-role="user"]').last()).toHaveText(
     /A follow-up from the notes page\?/,
   );
@@ -156,12 +164,12 @@ test("a saved answer is one row; earlier messages fold; a follow-up is answered 
   await expect(page.getByTestId("notes-detail")).toHaveAttribute("data-id", threadId);
 });
 
-test("Open the exercise opens this conversation, not the newest one about the program; a gone subject offers no follow-up", async ({
+test("Open opens this conversation, not the newest one about its subject; a gone subject offers no follow-up", async ({
   page,
 }) => {
-  const { threadId, prog } = state;
-  if (!threadId || !prog) throw new Error("the earlier test left no thread");
-  const toolUrl = `${app.base}/en/tool/${programTool(prog)}?prog=${prog}`;
+  const { threadId, href } = state;
+  if (!threadId || !href) throw new Error("the earlier test left no thread");
+  const toolUrl = `${app.base}/en${href}`;
   const panel = page.getByTestId("ask-panel");
   const users = panel.locator('[data-testid=qa-message][data-role="user"]');
   // a newer conversation about the same program (not saved, so Notes still lists only the first)
@@ -248,8 +256,8 @@ test("a narrow window shows one pane at a time: list, then the conversation with
 });
 
 test("Delete asks first, removes the notes, and keeps the conversation", async ({ page }) => {
-  const { threadId, prog } = state;
-  if (!threadId || !prog) throw new Error("the earlier test left no thread");
+  const { threadId, href } = state;
+  if (!threadId || !href) throw new Error("the earlier test left no thread");
   await page.goto(`${app.base}/en/notes?thread=${encodeURIComponent(threadId)}`);
   await page.getByTestId("notes-delete").click();
   await page.getByTestId("notes-delete-no").click();

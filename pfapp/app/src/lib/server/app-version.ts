@@ -27,7 +27,10 @@ export function appVersion(
     path.join(cwd, "targets", target, "manifest.json"),
   ]) {
     try {
-      const m = JSON.parse(readFileSync(file, "utf8")) as { id?: unknown; version?: unknown };
+      // read at run time from the install dir, never traced into the build: without the ignore,
+      // Turbopack cannot scope this path and traces the whole project (a build warning)
+      const text = readFileSync(/* turbopackIgnore: true */ file, "utf8");
+      const m = JSON.parse(text) as { id?: unknown; version?: unknown };
       if (m.id === appId && typeof m.version === "string" && SEMVER.test(m.version)) {
         version = m.version;
         break;

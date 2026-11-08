@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, type Frame, type Page, test } from "@playwright/test";
 import { expectNoNewWindows, hookWindowOpen } from "./new-windows";
-import { type RunningApp, startApp } from "./setup";
+import { IS_PYTHON, type RunningApp, startApp } from "./setup";
 
 /**
  * The shell (task 8): sidebar, tool iframe, language switch, ⌘K, the empty state's import. Every
@@ -165,6 +165,7 @@ test("switching to Chinese: group labels in Chinese, the iframe reloads with lan
 });
 
 test("python ?prog= is passed on to the iframe", async ({ page }) => {
+  test.skip(!IS_PYTHON, "python only");
   const first = ordered()[0];
   if (!first) throw new Error("empty pack");
   await page.goto(`${base()}/en/tool/${first.id}?prog=some-program`);
@@ -177,6 +178,7 @@ test("python ?prog= is passed on to the iframe", async ({ page }) => {
 test("the shell observes the python page's state: switching the frame to blank mode shows up", async ({
   page,
 }) => {
+  test.skip(!IS_PYTHON, "python only");
   const first = ordered()[0];
   if (!first) throw new Error("empty pack");
   await page.goto(`${base()}/en/tool/${first.id}`);
@@ -192,6 +194,7 @@ test("the shell observes the python page's state: switching the frame to blank m
 });
 
 test("the shell has the python page's state on load, before any interaction", async ({ page }) => {
+  test.skip(!IS_PYTHON, "python only");
   const first = ordered()[0];
   if (!first) throw new Error("empty pack");
   await page.goto(`${base()}/en/tool/${first.id}`);

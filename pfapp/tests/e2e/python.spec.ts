@@ -6,6 +6,7 @@ import { expect, type Frame, type Page, test } from "@playwright/test";
 import {
   type FakePlatformProcess,
   freePort,
+  IS_PYTHON,
   type RunningApp,
   startApp,
   startFakePlatform,
@@ -58,6 +59,8 @@ let app: RunningApp;
 const saved: { threadId?: string; question?: string } = {};
 
 test.describe.configure({ mode: "serial" });
+// the python page's bridge, blanks and hints: nothing to test on the other targets
+test.skip(!IS_PYTHON, "python only");
 
 test.beforeAll(async () => {
   const port = await freePort();

@@ -387,7 +387,11 @@ function NoteDetail({
         <div className="notes-head-actions">
           {row?.href ? (
             <Link href={`/${locale}${row.href}`} className="chip primary" data-testid="notes-open">
-              {row.kind === "library" ? t.openLibrary : t.openExercise}
+              {row.kind === "library"
+                ? t.openLibrary
+                : row.kind === "program"
+                  ? t.openExercise
+                  : t.openTool}
             </Link>
           ) : null}
           {unsaved ? null : confirming ? (

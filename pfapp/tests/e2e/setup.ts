@@ -1,5 +1,5 @@
 /**
- * E2E harness: the BUILT app (MATHVIZ_TARGET=python) started the way PrimeForge starts it —
+ * E2E harness: the BUILT app (MATHVIZ_TARGET=$E2E_TARGET, default python) started the way PrimeForge starts it —
  * `node app/primeforge-entry.mjs` (in-process Next, production, the shell CSP without
  * 'unsafe-eval'), on a free 127.0.0.1 port, with its own temp PRIMEFORGE_DATA_DIR and the
  * PRIMEFORGE_* variables the platform sets. Without the fake platform there is no
@@ -15,6 +15,9 @@
  * The specs read where it is from process.env (E2E_*). startApp() starts further apps (the empty
  * state, the restart on another port).
  *
+ * E2E_TARGET=math|chess|crypto runs the suite against that target (its build, its pack, its app
+ * id); the python-only tests skip themselves (`onlyPython`).
+ *
  * E2E_PACK=<pack.json> uses that pack ({payload, catalog, pfaddon, version}, as `prepare.ts pack`
  * prints) instead of extracting one — for negative controls run against a doctored copy.
  */
@@ -23,11 +26,26 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { expect, type Page } from "@playwright/test";
 
 const PFAPP = path.resolve(__dirname, "..", "..");
 const NEXT = path.join(PFAPP, "node_modules", ".bin", "next");
 const ENTRY = path.join(PFAPP, "app", "primeforge-entry.mjs");
-const PYTHON_APP_ID = "app.primeforge.mathviz.python";
+/** The target under test (E2E_TARGET, default python). */
+export const TARGET = process.env.E2E_TARGET ?? "python";
+if (!["math", "chess", "crypto", "python"].includes(TARGET)) {
+  throw new Error(`E2E_TARGET=${JSON.stringify(TARGET)}: expected math|chess|crypto|python`);
+}
+export const IS_PYTHON = TARGET === "python";
+/** targets/<TARGET>/target.json: the names the app shows come from here, never from a spec. */
+export const TARGET_INFO = JSON.parse(
+  readFileSync(path.join(PFAPP, "targets", TARGET, "target.json"), "utf8"),
+) as {
+  appId: string;
+  pack: { en: string; zh: string };
+  libraryExample: { en: string; zh: string };
+};
+const APP_ID = TARGET_INFO.appId;
 
 export interface Pack {
   payload: string;
@@ -63,13 +81,13 @@ function newest(p: string): number {
 const STAMP = path.join(PFAPP, "app", ".next", "mathviz-target");
 
 /**
- * `next build` for python unless .next is a python build (its stamp) newer than every source the
+ * `next build` for TARGET unless .next is a TARGET build (its stamp) newer than every source the
  * build reads: `bun run build -- --target math` leaves a math build in app/.next.
  */
 export function ensureBuilt(): void {
   let built = 0;
   try {
-    if (readFileSync(STAMP, "utf8").trim() === "python") {
+    if (readFileSync(STAMP, "utf8").trim() === TARGET) {
       built = statSync(path.join(PFAPP, "app", ".next", "BUILD_ID")).mtimeMs;
     }
   } catch {
@@ -85,9 +103,9 @@ export function ensureBuilt(): void {
   execFileSync(NEXT, ["build", "app"], {
     cwd: PFAPP,
     stdio: "inherit",
-    env: { ...process.env, MATHVIZ_TARGET: "python" },
+    env: { ...process.env, MATHVIZ_TARGET: TARGET },
   });
-  writeFileSync(STAMP, "python\n");
+  writeFileSync(STAMP, `${TARGET}\n`);
 }
 
 export function preparePack(): Pack {
@@ -205,7 +223,7 @@ export async function startApp({
   const env: Record<string, string> = {
     HOME: process.env.HOME ?? tmpdir(),
     TMPDIR: tmpdir(),
-    PRIMEFORGE_APP_ID: PYTHON_APP_ID,
+    PRIMEFORGE_APP_ID: APP_ID,
     PRIMEFORGE_DATA_DIR: dataDir,
     PRIMEFORGE_PORT: String(port),
     ...extra,
@@ -264,4 +282,55 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     removeRoot();
     throw e;
   }
+}
+
+/** What the ask panel on a tool page is about: python's open program (its bridge), else the tool. */
+export interface AskSubject {
+  type: "program" | "tool";
+  id: string;
+  /** `<type>:<id>`, as /api/threads?subject= takes it. */
+  key: string;
+  /** Locale-less link to it in this app (a citation's href without the /<locale>). */
+  href: string;
+  /** The ask button's English label. */
+  askLabel: string;
+  /** Text the panel's context line contains. */
+  context: string;
+}
+
+/**
+ * Wait until the tool page `toolId` is ready to be asked about and say what a question is about.
+ * Python: the page has reported its open program (data-py-prog). Elsewhere: the frame has its src
+ * and the subject is the tool itself.
+ */
+export async function askSubject(page: Page, toolId: string): Promise<AskSubject> {
+  const frameEl = page.getByTestId("tool-frame");
+  if (IS_PYTHON) {
+    await expect(frameEl).toHaveAttribute("data-py-prog", /./);
+    const id = (await frameEl.getAttribute("data-py-prog")) as string;
+    return {
+      type: "program",
+      id,
+      key: `program:${id}`,
+      href: `/tool/${toolId}?prog=${id}`,
+      askLabel: "Ask about this program",
+      context: id,
+    };
+  }
+  await expect(frameEl).toHaveAttribute("src", /./);
+  return {
+    type: "tool",
+    id: toolId,
+    key: `tool:${toolId}`,
+    href: `/tool/${toolId}`,
+    askLabel: "Ask about this tool",
+    context: "About this tool",
+  };
+}
+
+/** The tool page is ready to be asked about (askSubject without the answer). */
+export async function frameReady(page: Page): Promise<void> {
+  const frameEl = page.getByTestId("tool-frame");
+  if (IS_PYTHON) await expect(frameEl).toHaveAttribute("data-py-prog", /./);
+  else await expect(frameEl).toHaveAttribute("src", /./);
 }
