@@ -15,7 +15,8 @@
  *                     share one package.json and version independently; PFD's builders require the
  *                     two to agree)
  *   bun.lock          verbatim, for the frozen install
- *   public/           when app/public exists (it does not today)
+ *   public/           when app/public exists: the maths recorder (scripts/recorder.ts writes it for
+ *                     the math target only, from the web shell app.html)
  *   manifest.json     targets/<target>/manifest.json
  *   icon.svg          targets/<target>/icon.svg (scripts/icons.ts)
  *
@@ -41,6 +42,7 @@ import {
 import { join, resolve } from "node:path";
 import { loadTarget, type TargetId } from "../app/src/lib/target";
 import { icons } from "./icons";
+import { writeRecorder } from "./recorder";
 
 export const PFAPP = resolve(import.meta.dir, "..");
 const APP = join(PFAPP, "app");
@@ -176,8 +178,9 @@ export function stage(t: TargetId, out: string, manifest: Manifest): void {
   cpSync(join(PFAPP, "targets", t, "icon.svg"), join(out, "icon.svg"));
 }
 
-/** `next build app` for `t`, then stamp the build. */
+/** `next build app` for `t` (with its public/ assets: the maths recorder), then stamp the build. */
 async function nextBuild(t: TargetId): Promise<void> {
+  writeRecorder(t);
   const proc = Bun.spawn([join(PFAPP, "node_modules", ".bin", "next"), "build", "app"], {
     cwd: PFAPP,
     env: { ...process.env, MATHVIZ_TARGET: t, NODE_ENV: "production" },

@@ -45,5 +45,20 @@ export const shellCsp = (): string =>
 export const TOOL_CSP =
   "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'self'";
 
+/**
+ * The maths tool pages' policy: TOOL_CSP plus 'unsafe-eval'. The shell's video recorder (the web
+ * shell's, components/recorder.tsx) reads a tool's top-level `const`s — its state, camera and
+ * draw function — with `contentWindow.eval`, which runs under the tool page's policy; that is how
+ * it renders a recording frame by frame. Only these pages, which come from the signed content
+ * pack: the shell keeps its own policy without it (owner ruling 2026-11-08).
+ */
+export const TOOL_CSP_EVAL = TOOL_CSP.replace(
+  "script-src 'self' 'unsafe-inline'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+);
+
+/** The tool pages' policy for a target. */
+export const toolCsp = (target: string): string => (target === "math" ? TOOL_CSP_EVAL : TOOL_CSP);
+
 /** The URL carries the content version, so a tool page never changes under its URL. */
 export const TOOL_CACHE_CONTROL = "public, max-age=31536000, immutable";

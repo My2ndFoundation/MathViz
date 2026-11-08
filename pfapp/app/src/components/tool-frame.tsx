@@ -5,6 +5,8 @@ import { MESSAGES } from "@/lib/i18n/locale";
 import { AskPanel } from "./qa/ask-panel";
 import { useAskPanel } from "./qa/use-ask-panel";
 import { useAskWidth } from "./qa/use-ask-width";
+import { Recorder } from "./recorder";
+import { bridgeDownloads } from "./save-file";
 import { usePyState } from "./use-py-state";
 
 /**
@@ -28,6 +30,11 @@ import { usePyState } from "./use-py-state";
  * (final review I-3). Focus follows the toggle: opening focuses into the panel, hiding from inside it
  * focuses the top-bar toggle, so it is never left inside a hidden panel. Its left edge resizes it
  * (useAskWidth); while dragging, the iframe takes no pointer events, or it would swallow the drag.
+ *
+ * The frame sits in `.rec-stage`, the area the maths recorder floats over and resizes the frame in
+ * while it records (components/recorder.tsx; `recorder` carries the overlay's words). On every
+ * load the frame's own `blob:` exports are routed through the app's save (save-file
+ * bridgeDownloads), since PrimeForge's window refuses `blob:` downloads.
  */
 export function ToolFrame({
   src,
@@ -36,6 +43,7 @@ export function ToolFrame({
   locale,
   python,
   thread = null,
+  recorder = null,
 }: {
   src: string;
   title: string;
@@ -44,8 +52,14 @@ export function ToolFrame({
   python: boolean;
   /** `?thread=`: the conversation the ask panel opens (Notes, the AI queue). */
   thread?: string | null;
+  /** The maths app only: the tool's title and kicker in both languages, for the recording overlay. */
+  recorder?: {
+    title: { en: string; zh: string };
+    kicker: { en: string; zh: string } | null;
+  } | null;
 }) {
   const ref = useRef<HTMLIFrameElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const py = usePyState(ref, toolId);
   const [mounted, setMounted] = useState(false);
   const { change, set } = useAskPanel();
@@ -56,6 +70,20 @@ export function ToolFrame({
   useEffect(() => {
     setMounted(true);
   }, []);
+  // the page's own `blob:` exports, on every load (a reload is a new window)
+  useEffect(() => {
+    const frame = ref.current;
+    if (!frame) return;
+    const bridge = () => {
+      try {
+        bridgeDownloads(frame.contentWindow);
+      } catch {
+        // not same-origin: nothing to bridge
+      }
+    };
+    frame.addEventListener("load", bridge);
+    return () => frame.removeEventListener("load", bridge);
+  }, []);
   // opened from either control: focus moves into the panel
   useEffect(() => {
     if (change.from && change.shown) hideRef.current?.focus();
@@ -63,15 +91,27 @@ export function ToolFrame({
   const t = MESSAGES[locale].qa;
   return (
     <div ref={viewRef} className="tool-view" data-panel={panel} data-resizing={size.dragging}>
-      <iframe
-        ref={ref}
-        className="tool-frame"
-        data-testid="tool-frame"
-        data-py-mode={py?.mode}
-        data-py-prog={py?.progId}
-        src={mounted ? src : undefined}
-        title={title}
-      />
+      <div ref={stageRef} className="rec-stage" data-testid="rec-stage">
+        <iframe
+          ref={ref}
+          className="tool-frame"
+          data-testid="tool-frame"
+          data-py-mode={py?.mode}
+          data-py-prog={py?.progId}
+          src={mounted ? src : undefined}
+          title={title}
+        />
+        {recorder ? (
+          <Recorder
+            frameRef={ref}
+            stageRef={stageRef}
+            toolId={toolId}
+            locale={locale}
+            title={recorder.title}
+            kicker={recorder.kicker}
+          />
+        ) : null}
+      </div>
       <div className="ask-wrap" hidden={!panel} inert={!panel} style={size.style}>
         {size.narrow ? null : (
           // the left edge: drag (or ←/→) to resize, double-click for the default width

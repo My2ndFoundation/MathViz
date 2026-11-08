@@ -84,6 +84,14 @@ const STAMP = path.join(PFAPP, "app", ".next", "mathviz-target");
  * `next build` for TARGET unless .next is a TARGET build (its stamp) newer than every source the
  * build reads: `bun run build -- --target math` leaves a math build in app/.next.
  */
+const hasRecorder = (): boolean => {
+  try {
+    return statSync(path.join(PFAPP, "app", "public", "recorder", "rec.js")).isFile();
+  } catch {
+    return false;
+  }
+};
+
 export function ensureBuilt(): void {
   let built = 0;
   try {
@@ -99,7 +107,9 @@ export function ensureBuilt(): void {
     newest(path.join(PFAPP, "targets")),
     newest(path.join(PFAPP, "package.json")),
   );
-  if (built > sources) return;
+  if (built > sources && (TARGET !== "math" || hasRecorder())) return;
+  // the maths recorder, from the web shell (scripts/recorder.ts runs under Bun)
+  bun(["scripts/recorder.ts", "--target", TARGET]);
   execFileSync(NEXT, ["build", "app"], {
     cwd: PFAPP,
     stdio: "inherit",

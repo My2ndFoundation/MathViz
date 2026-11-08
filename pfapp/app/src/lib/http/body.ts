@@ -14,13 +14,23 @@ const MULTIPART_SLACK = 64 * 1024;
 export const IMPORT_PATH = "/api/content/import";
 
 /**
+ * One chunk of a file the app hands the student to save (a recorded video, a tool's export:
+ * lib/server/exports.ts). A whole recording can be far larger than the proxy may buffer, so the
+ * client sends it in chunks of at most this size, each its own request.
+ */
+export const EXPORT_CHUNK_LIMIT = 16 * 1024 * 1024;
+const EXPORT_CHUNK_PATH = /^\/api\/exports\/[0-9a-f]{32}$/;
+
+/**
  * The body limit of an /api path. The proxy refuses a declared Content-Length over it before Next
  * buffers the body; the route counts the bytes it reads. next.config.mjs's
  * `proxyClientMaxBodySize` must stay above the largest of these, or Next truncates the body it
  * buffers for the proxy and the route reads a cut-off upload.
  */
 export function bodyLimitFor(pathname: string): number {
-  return pathname === IMPORT_PATH ? UPLOAD_FILE_LIMIT + MULTIPART_SLACK : JSON_LIMIT;
+  if (pathname === IMPORT_PATH) return UPLOAD_FILE_LIMIT + MULTIPART_SLACK;
+  if (EXPORT_CHUNK_PATH.test(pathname)) return EXPORT_CHUNK_LIMIT;
+  return JSON_LIMIT;
 }
 
 /**
