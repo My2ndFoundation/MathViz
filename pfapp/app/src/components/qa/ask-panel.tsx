@@ -1,10 +1,10 @@
 "use client";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { Locale } from "@/lib/i18n/locale";
 import { MESSAGES } from "@/lib/i18n/locale";
 import type { PyState } from "@/lib/py-state";
 import { ThreadView } from "./thread-view";
-import { useThread } from "./use-thread";
+import { type ThreadSubject, useThread } from "./use-thread";
 
 /**
  * The tool page's "ask" panel (design §7.4; plan Task 11). Python: what the page's state bridge
@@ -13,6 +13,10 @@ import { useThread } from "./use-thread";
  * otherwise). Before the bridge has spoken, and on every other target: "ask about this tool".
  * The panel opens on the newest conversation about its subject — the program (python, once the
  * bridge has named one) or else the tool — and a new program switches to that program's.
+ * `thread` (the page's `?thread=`, from Notes or the AI queue) names the conversation to open
+ * instead, once it is about the panel's subject; a thread about something else, or one the app
+ * does not have, falls back to the newest. Once opened, `?thread=` leaves the URL, so a reload
+ * after "New conversation" does not bring the old one back.
  */
 export function AskPanel({
   toolId,
@@ -20,27 +24,65 @@ export function AskPanel({
   locale,
   python,
   pyState,
+  thread: wantedThread = null,
 }: {
   toolId: string;
   toolTitle: string;
   locale: Locale;
   python: boolean;
   pyState: PyState | null;
+  thread?: string | null;
 }) {
   const t = MESSAGES[locale].qa;
   const inputId = useId();
   const [text, setText] = useState("");
-  const { thread, thinking, sending, failure, send, cancel, saveNote, reset, restore } =
+  const { thread, thinking, sending, failure, send, cancel, saveNote, reset, restore, open } =
     useThread(locale);
   const prog = python ? (pyState?.progId ?? null) : null;
 
   // a conversation is about its subject: a new subject drops the old one and reopens its own
-  const subjectType = prog !== null ? "program" : "tool";
+  const subjectType: ThreadSubject["type"] = prog !== null ? "program" : "tool";
   const subjectId = prog ?? toolId;
+  // the conversation `?thread=` names, until it has been opened (a python page names its program
+  // only once the bridge speaks: before that the subject is the tool, which a program thread is not about)
+  const wanted = useRef(wantedThread);
+  // a later `?thread=` on the same page (the AI queue's link, same frame): open that one too
+  const [asked, setAsked] = useState(0);
+  const firstThread = useRef(wantedThread);
+  useEffect(() => {
+    if (wantedThread === firstThread.current) return;
+    firstThread.current = wantedThread;
+    if (!wantedThread) return;
+    wanted.current = wantedThread;
+    setAsked((n) => n + 1);
+  }, [wantedThread]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: asked re-runs it for a new ?thread=
   useEffect(() => {
     reset();
-    void restore({ type: subjectType, id: subjectId });
-  }, [subjectType, subjectId, reset, restore]);
+    const subject: ThreadSubject = { type: subjectType, id: subjectId };
+    const id = wanted.current;
+    if (!id) {
+      void restore(subject);
+      return;
+    }
+    const fits = (t: { subjects: { type: string; id: string }[] }) =>
+      t.subjects.some((s) => s.type === subject.type && s.id === subject.id) &&
+      !t.subjects.some((s) => s.type === "library");
+    void open(id, { fits, quiet: true }).then((r) => {
+      if (r === "refused") {
+        // final unless this is a python page whose bridge has not named the program yet
+        if (!python || subject.type === "program") wanted.current = null;
+        void restore(subject);
+      } else if (r === "opened") {
+        wanted.current = null;
+        const u = new URL(window.location.href);
+        u.searchParams.delete("thread");
+        // null, never history.state: Next treats a state carrying its own keys as its own call and
+        // would not follow the URL
+        window.history.replaceState(null, "", `${u.pathname}${u.search}`);
+      }
+    });
+  }, [subjectType, subjectId, python, reset, restore, open, asked]);
 
   const canHint = !!pyState && pyState.mode === "blank" && !!pyState.blankId;
   const busy = thinking || sending;

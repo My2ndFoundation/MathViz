@@ -183,6 +183,8 @@ export const zh: Messages = {
     followUpLabel: "追问",
     followUpPlaceholder: "在这段对话里接着问…",
     followUpSend: "追问",
+    followUpGone: "已安装的内容包里已经没有这段对话讲的内容，无法再追问。",
+    notesNoneHere: "这段对话里已经没有存下的回答。",
   },
   error: {
     ai_unavailable: "应用在 PrimeForge 里运行时才能使用 AI 助教。",

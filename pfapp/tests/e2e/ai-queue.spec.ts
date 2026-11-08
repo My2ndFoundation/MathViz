@@ -123,10 +123,11 @@ test("a question being answered shows in the indicator and the queue; Cancel the
   await expect(row).toHaveAttribute("data-status", /^(queued|running)$/);
   await expect(row).toContainText("Question");
   await expect(row.getByTestId("ai-queue-title")).toHaveText(/\[hold\] Please wait on this one/);
-  // asked on a python tool page, so about a program: its link opens that program in its tool
+  // asked on a python tool page, so about a program: its link opens that program in its tool,
+  // and this conversation in its ask panel
   await expect(row.getByTestId("ai-queue-title")).toHaveAttribute(
     "href",
-    /^\/en\/tool\/[^?]+\?prog=[^&]+$/,
+    /^\/en\/tool\/[^?]+\?prog=[^&]+&thread=[^&]+$/,
   );
   await expect(queue.getByTestId("ai-queue-settings")).toHaveAttribute("href", "/en/settings#ai");
   await shot(page, "b2-queue-active.png");

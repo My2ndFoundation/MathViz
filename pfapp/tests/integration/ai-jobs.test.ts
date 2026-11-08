@@ -168,7 +168,7 @@ describe("GET /api/ai/jobs", () => {
       status: "queued",
       threadId: lib,
       title: "library-q",
-      href: "/ask",
+      href: `/ask?thread=${lib}`,
       engine: null,
       model: null,
       error: null,
@@ -176,7 +176,7 @@ describe("GET /api/ai/jobs", () => {
       settledAt: null,
       durationMs: null,
     });
-    expect(v.active[1].href).toBe("/tool/py-x");
+    expect(v.active[1].href).toBe(`/tool/py-x?thread=${tool}`);
     const [f, x, d] = v.recent;
     expect(f).toMatchObject({ status: "failed", error: "engine_unavailable", href: null });
     expect(f.settledAt).toBe(at(4, 30));
@@ -314,13 +314,14 @@ describe("GET /api/ai/jobs", () => {
     expect(v.recent.map((j: Json) => j.status)).toEqual(["cancelled"]);
   });
 
-  test("a program or blank thread links to the program inside its tool (?prog=); a gone program falls back", async () => {
+  test("a program or blank thread links to the program inside its tool (?prog=, &thread=); a gone program falls back", async () => {
     const c = await start({ content: true });
     // chosen by shape, never by id (a content wave must not turn this red)
     const program = pickBlankProgram((await pythonPack()).payload);
     const blank = blanksOf(program.source)[0];
     if (!program.tool || !blank) throw new Error(`${program.id}: no tool or no blank`);
-    const want = `/tool/${encodeURIComponent(program.tool)}?prog=${encodeURIComponent(program.id)}`;
+    const want = (t: string) =>
+      `/tool/${encodeURIComponent(program.tool as string)}?prog=${encodeURIComponent(program.id)}&thread=${t}`;
     const prog = thread(c, "prog", { type: "program", id: program.id });
     const blankOnly = thread(c, "blank", {
       type: "blank",
@@ -336,10 +337,10 @@ describe("GET /api/ai/jobs", () => {
     for (const t of [prog, blankOnly, gone, goneWithTool]) job(c, t, at(1));
     const href = Object.fromEntries((await queue(c)).active.map((j: Json) => [j.title, j.href]));
     expect(href).toEqual({
-      prog: want,
-      blank: want,
+      prog: want(prog),
+      blank: want(blankOnly),
       gone: null,
-      "gone-tool": `/tool/${encodeURIComponent(program.tool)}`,
+      "gone-tool": `/tool/${encodeURIComponent(program.tool)}?thread=${goneWithTool}`,
     });
   });
 

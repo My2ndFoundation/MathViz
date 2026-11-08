@@ -136,9 +136,13 @@ test("a saved answer is one row; earlier messages fold; a follow-up is answered 
   await expect(page.getByTestId("notes-detail")).toHaveAttribute("data-id", threadId);
   await expect(page.getByTestId("notes-detail").getByTestId("qa-message")).toHaveCount(4);
 
-  // "Open the exercise": the program in its tool, whose ask panel shows the follow-up
+  // "Open the exercise": the program in its tool, whose ask panel shows this conversation (named
+  // in the link; the panel takes ?thread= out of the URL once it has opened it)
   const open = page.getByTestId("notes-open");
-  await expect(open).toHaveAttribute("href", `/en/tool/${programTool(prog)}?prog=${prog}`);
+  await expect(open).toHaveAttribute(
+    "href",
+    `/en/tool/${programTool(prog)}?prog=${prog}&thread=${threadId}`,
+  );
   await open.click();
   await expect(page).toHaveURL(`${app.base}/en/tool/${programTool(prog)}?prog=${prog}`);
   await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", prog);
@@ -150,6 +154,54 @@ test("a saved answer is one row; earlier messages fold; a follow-up is answered 
   // back keeps the selection too
   await page.goBack();
   await expect(page.getByTestId("notes-detail")).toHaveAttribute("data-id", threadId);
+});
+
+test("Open the exercise opens this conversation, not the newest one about the program; a gone subject offers no follow-up", async ({
+  page,
+}) => {
+  const { threadId, prog } = state;
+  if (!threadId || !prog) throw new Error("the earlier test left no thread");
+  const toolUrl = `${app.base}/en/tool/${programTool(prog)}?prog=${prog}`;
+  const panel = page.getByTestId("ask-panel");
+  const users = panel.locator('[data-testid=qa-message][data-role="user"]');
+  // a newer conversation about the same program (not saved, so Notes still lists only the first)
+  await page.goto(toolUrl);
+  await expect(users.last()).toHaveText(/A follow-up from the notes page\?/);
+  await panel.getByTestId("ask-new").click();
+  await panel.getByTestId("ask-input").fill("A newer conversation?");
+  await panel.getByTestId("ask-submit").click();
+  await expect(panel.locator('[data-testid=qa-message][data-role="assistant"]')).toHaveCount(1, {
+    timeout: 30_000,
+  });
+  await expect(panel.getByTestId("thinking")).toHaveCount(0);
+  // the bare program link now reopens the newer one: what Notes' link must not do
+  await page.reload();
+  await expect(users).toHaveCount(1);
+  await expect(users.first()).toHaveText(/A newer conversation\?/);
+
+  await page.goto(`${app.base}/en/notes?thread=${encodeURIComponent(threadId)}`);
+  await expect(page.getByTestId("notes-row")).toHaveCount(1);
+  await page.getByTestId("notes-open").click();
+  await expect(page).toHaveURL(toolUrl);
+  await expect(users).toHaveCount(3);
+  await expect(users.last()).toHaveText(/A follow-up from the notes page\?/);
+
+  // the content no longer has what a conversation is about (the list says so): no follow-up box
+  await page.route("**/api/notes/threads*", async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { threads: { available: boolean }[] };
+    for (const t of body.threads) t.available = false;
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.goto(`${app.base}/en/notes?thread=${encodeURIComponent(threadId)}`);
+  const detail = page.getByTestId("notes-detail");
+  await expect(detail.getByTestId("notes-followup-gone")).toBeVisible();
+  await expect(detail.getByTestId("notes-followup-input")).toBeDisabled();
+  await expect(detail.getByTestId("notes-followup-submit")).toBeDisabled();
+  await page.unroute("**/api/notes/threads*");
+  await page.reload();
+  await expect(detail.getByTestId("notes-followup-input")).toBeEnabled();
+  await expect(detail.getByTestId("notes-followup-gone")).toHaveCount(0);
 });
 
 test("a narrow window shows one pane at a time: list, then the conversation with a back control", async ({
@@ -165,13 +217,29 @@ test("a narrow window shows one pane at a time: list, then the conversation with
   const detail = stage.getByTestId("notes-detail-pane");
   await expect(list).toBeVisible();
   await expect(detail).toBeHidden();
-  await page.getByTestId("notes-row").first().click();
+  const row = stage.getByTestId("notes-row").first();
+  const question = stage.getByTestId("notes-question");
+  // the pane is in history: Back from a conversation is the list, not the page before Notes;
+  // focus follows the pane shown (the heading, then the row), never left on <body>
+  await row.click();
   await expect(detail).toBeVisible();
   await expect(list).toBeHidden();
+  await expect(question).toBeFocused();
   await shot(page, "notes-narrow-detail.png");
+  await page.goBack();
+  await expect(page).toHaveURL(/\/en\/notes\?thread=[^&]+$/);
+  await expect(list).toBeVisible();
+  await expect(detail).toBeHidden();
+  await expect(row).toBeFocused();
+  // the keyboard: Enter on the row, then the back chip, which goes back over that entry
+  await row.press("Enter");
+  await expect(detail).toBeVisible();
+  await expect(question).toBeFocused();
   await page.getByTestId("notes-back").click();
   await expect(list).toBeVisible();
   await expect(detail).toBeHidden();
+  await expect(page).toHaveURL(/\/en\/notes\?thread=[^&]+$/);
+  await expect(row).toBeFocused();
   // the back control is for narrow windows only
   await page.setViewportSize({ width: 1400, height: 900 });
   await expect(list).toBeVisible();
@@ -195,6 +263,12 @@ test("Delete asks first, removes the notes, and keeps the conversation", async (
   const t = (await res.json()) as { messages: { noteId: string | null }[] };
   expect(t.messages.length).toBe(6);
   expect(t.messages.every((m) => m.noteId === null)).toBe(true);
+  // the conversation, named in the URL again (Back, a pasted link): shown, but nothing to delete
+  await page.goto(`${app.base}/en/notes?thread=${encodeURIComponent(threadId)}`);
+  const detail = page.getByTestId("notes-detail");
+  await expect(detail).toHaveAttribute("data-id", threadId);
+  await expect(detail.getByTestId("notes-none-here")).toBeVisible();
+  await expect(detail.getByTestId("notes-delete")).toHaveCount(0);
 });
 
 test("a library conversation: Open lands on Ask the library with it reopened, and a follow-up there continues it", async ({
@@ -215,26 +289,60 @@ test("a library conversation: Open lands on Ask the library with it reopened, an
   await expect(page.getByTestId("notes-row")).toHaveCount(1);
   const threadId = await page.getByTestId("notes-row").first().getAttribute("data-id");
   await expect(page.getByTestId("notes-subject")).toHaveText("The whole library");
+  // a follow-up from Notes continues the library conversation (its own workflow, `library`)
+  const detail = page.getByTestId("notes-detail");
+  const shown = detail.getByTestId("qa-message");
+  await expect(shown).toHaveCount(2);
+  await detail.getByTestId("notes-followup-input").fill("A library follow-up from Notes?");
+  await detail.getByTestId("notes-followup-submit").click();
+  await expect(shown).toHaveCount(4, { timeout: 30_000 });
+  await expect(detail.getByTestId("thinking")).toHaveCount(0);
+  await expect(detail.getByTestId("ask-error")).toHaveCount(0);
+  await expect(shown.nth(2)).toHaveText(/A library follow-up from Notes\?/);
+  await expect(shown.nth(3)).toHaveAttribute("data-role", "assistant");
   const open = page.getByTestId("notes-open");
   await expect(open).toHaveText("Open “Ask the whole library”");
   await expect(open).toHaveAttribute("href", `/en/ask?thread=${threadId}`);
   await open.click();
   await expect(page).toHaveURL(`${app.base}/en/ask?thread=${threadId}`);
   const users = page.locator('[data-testid=qa-message][data-role="user"]');
-  await expect(users).toHaveCount(1);
+  await expect(users).toHaveCount(2);
   await expect(users.first()).toHaveText(/Where is Fahrenheit converted\?/);
+  await expect(users.last()).toHaveText(/A library follow-up from Notes\?/);
 
   await page.getByTestId("library-input").fill("And a follow-up on the library page?");
   await page.getByTestId("library-submit").click();
-  await expect(answers).toHaveCount(2, { timeout: 30_000 });
-  await expect(users).toHaveCount(2);
+  await expect(answers).toHaveCount(3, { timeout: 30_000 });
+  await expect(users).toHaveCount(3);
   const res = await page.request.get(`${app.base}/api/threads/${threadId}`);
   const t = (await res.json()) as { messages: { role: string }[] };
-  expect(t.messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+  expect(t.messages.map((m) => m.role)).toEqual([
+    "user",
+    "assistant",
+    "user",
+    "assistant",
+    "user",
+    "assistant",
+  ]);
   // a reload keeps it; "New conversation" leaves it
   await page.reload();
-  await expect(users).toHaveCount(2);
+  await expect(users).toHaveCount(3);
   await page.getByTestId("ask-new").click();
   await expect(page).toHaveURL(`${app.base}/en/ask`);
   await expect(users).toHaveCount(0);
+  // the sidebar's link to a bare /ask leaves a conversation the URL named, without a remount
+  await page.goto(`${app.base}/en/ask?thread=${threadId}`);
+  await expect(users).toHaveCount(3);
+  await page.getByTestId("nav-ask").click();
+  await expect(page).toHaveURL(`${app.base}/en/ask`);
+  await expect(users).toHaveCount(0);
+  // and on /notes its bare link picks the newest conversation again
+  await page.goto(`${app.base}/en/notes?thread=${threadId}`);
+  await expect(page.getByTestId("notes-detail")).toHaveAttribute("data-id", threadId as string);
+  // (the URL already names it, so wait for the link's own history entry before reading the URL)
+  const entries = await page.evaluate(() => window.history.length);
+  await page.getByTestId("nav-notes").click();
+  await expect.poll(() => page.evaluate(() => window.history.length)).toBe(entries + 1);
+  await expect(page).toHaveURL(`${app.base}/en/notes?thread=${threadId}`);
+  await expect(page.getByTestId("notes-detail")).toHaveAttribute("data-id", threadId as string);
 });
