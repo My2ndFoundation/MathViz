@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, type Frame, type Page, test } from "@playwright/test";
 import { expectNoNewWindows, hookWindowOpen } from "./new-windows";
-import { IS_PYTHON, type RunningApp, startApp } from "./setup";
+import { APP_VERSION, IS_PYTHON, type RunningApp, startApp } from "./setup";
 
 /**
  * The shell (task 8): sidebar, tool iframe, language switch, ⌘K, the empty state's import. Every
@@ -71,7 +71,7 @@ async function frameSrc(page: Page): Promise<string> {
   return (await frame.getAttribute("src")) ?? "";
 }
 
-test("sidebar: every group and tool of the pack, the first highlighted and clickable; the iframe is /c/<ver>/tools/…?lang=en", async ({
+test("sidebar: every group and tool of the pack, the first highlighted and clickable; the iframe is /c/<ver>/tools/…?lang=en&app=<app version>", async ({
   page,
 }) => {
   await setLang(page, "en");
@@ -113,7 +113,8 @@ test("sidebar: every group and tool of the pack, the first highlighted and click
 
   const src = await frameSrc(page);
   expect(src.startsWith(`/c/${contentVersion()}/tools/`)).toBe(true);
-  expect(src).toBe(`/c/${contentVersion()}/${first.file}?lang=en`);
+  // the app's version too: a new app release must not get its pages (and their CSP) from the cache
+  expect(src).toBe(`/c/${contentVersion()}/${first.file}?lang=en&app=${APP_VERSION}`);
   expect(new URL(src, base()).searchParams.get("lang")).toBe("en");
 
   // the tool page itself: loaded, 0 console errors, 0 CSP violations
@@ -150,7 +151,7 @@ test("switching to Chinese: group labels in Chinese, the iframe reloads with lan
   );
   await expect(page.getByTestId("tool-frame")).toHaveAttribute(
     "src",
-    `/c/${contentVersion()}/${first.file}?lang=zh`,
+    `/c/${contentVersion()}/${first.file}?lang=zh&app=${APP_VERSION}`,
   );
   await expect
     .poll(async () => new URL((await toolFrame(page)).url()).searchParams.get("lang"))

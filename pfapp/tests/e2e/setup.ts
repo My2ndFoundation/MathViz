@@ -46,6 +46,12 @@ export const TARGET_INFO = JSON.parse(
   libraryExample: { en: string; zh: string };
 };
 const APP_ID = TARGET_INFO.appId;
+/** targets/<TARGET>/manifest.json's version: the tool frame's URL carries it (`&app=`). */
+export const APP_VERSION = (
+  JSON.parse(readFileSync(path.join(PFAPP, "targets", TARGET, "manifest.json"), "utf8")) as {
+    version: string;
+  }
+).version;
 
 export interface Pack {
   payload: string;

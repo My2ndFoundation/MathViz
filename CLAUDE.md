@@ -254,7 +254,10 @@ payload 没有多余文件、组标签与导航页一致、python source 是 `.p
 `app/public/recorder/`（不提交，只有 math 目标有），两处 `.stage` 查找换成 `REC_HOST.stage()`，每处都**计数**——
 网页版改了这几处，math 的签名构建就红，不会悄悄发出一个半残的录屏器。`components/recorder.tsx` 补上网页外壳的
 全局（`frame` / `curId` / `LANG` / `byId`）、生命周期与下载。录屏器靠 `contentWindow.eval` 逐帧驱动工具，
-所以**只有 math 的工具页**带 `'unsafe-eval'`（`toolCsp`，用户 2026-11-08 裁决），外壳自己的 CSP 不变。
+所以 math 的工具页带 `'unsafe-eval'`；chess 的两页算法单步器用 `new Function`，chess 的工具页也带
+（`EVAL_TARGETS`，用户 2026-11-08 两次裁决）；外壳自己的 CSP 不变。工具页按 URL 永久缓存（连响应头一起），
+所以 iframe 的 URL 带 `&app=<应用版本>`：只升应用、不升内容包时，旧 CSP 不会从缓存里回来（math 1.0.1 就栽在这）。
+`e2e/pages.spec` 把 math / chess / crypto 的每一页都打开查 CSP 违规——之前只有 python 有这道门，chess 两页坏着发了出去。
 
 **`pfapp/` 下不许提交任何 `.html`**（平台规定，门会抓）。工具页只在提取出的内容包里。
 

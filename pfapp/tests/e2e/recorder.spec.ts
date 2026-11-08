@@ -53,14 +53,14 @@ test("a tool page's blob: export is saved through the app, even when the page re
   expect(readFileSync(await d.path(), "utf8")).toBe('{"hello":"export"}');
 });
 
-test("the tool pages allow eval on the maths app only (the recorder reads the tool through it)", async ({
+test("the tool pages allow eval on the maths and chess apps only (the recorder; the chess stepper)", async ({
   page,
 }) => {
   await page.goto(`${base()}/en/tool/${firstTool()}`);
   const src = (await page.getByTestId("tool-frame").getAttribute("src")) as string;
   const res = await page.request.get(`${base()}${src}`);
   const csp = res.headers()["content-security-policy"] as string;
-  expect(csp.includes("'unsafe-eval'")).toBe(TARGET === "math");
+  expect(csp.includes("'unsafe-eval'")).toBe(TARGET === "math" || TARGET === "chess");
   // and the shell's own policy never
   const shell = await page.request.get(`${base()}/en/tool/${firstTool()}`);
   expect(shell.headers()["content-security-policy"]).not.toContain("'unsafe-eval'");
