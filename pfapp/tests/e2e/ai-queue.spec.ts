@@ -248,16 +248,16 @@ test("a failed read keeps the queue's rows and their Cancel; becoming visible re
   await expect(indicator).toHaveAttribute("data-tone", "ok");
 });
 
-test("the open queue panel is above the Ask tab, the collapse edge and the narrow sidebar; Tab stays inside it", async ({
+test("the open queue panel is above the top-bar Ask toggle, the collapse edge and the narrow sidebar; Tab stays inside it", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`${app.base}/en/tool/${firstTool()}`);
   await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
   await page.getByTestId("ask-hide").click();
-  const askOpen = page.getByTestId("ask-open");
-  await expect(askOpen).toBeVisible();
-  const tab = (await askOpen.boundingBox()) as {
+  const askToggle = page.getByTestId("ask-toggle");
+  await expect(askToggle).toHaveAttribute("aria-pressed", "false");
+  const tab = (await askToggle.boundingBox()) as {
     x: number;
     y: number;
     width: number;
@@ -278,7 +278,7 @@ test("the open queue panel is above the Ask tab, the collapse edge and the narro
       [x, y],
     );
   expect(await topAt(cx, cy)).toBe("queue");
-  // a click where the Ask tab is lands on the panel: the ask panel stays hidden
+  // a click where the Ask toggle is lands on the queue panel: the ask panel stays hidden
   await page.mouse.click(cx, cy);
   await expect(page.getByTestId("ask-panel")).toBeHidden();
   await expect(queue).toBeVisible();

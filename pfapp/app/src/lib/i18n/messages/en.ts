@@ -131,6 +131,8 @@ export const en = {
     panel: "Ask",
     hidePanel: "Hide the ask panel",
     showPanel: "Ask a question",
+    toggle: "Ask AI Tutor",
+    resize: "Resize the ask panel (drag, or ← →; double-click to reset)",
     program: "Program: {id}",
     blank: "blank {id}",
     thisTool: "About this tool",

@@ -137,9 +137,14 @@ test("hiding the ask panel keeps the conversation: ask, hide at once, show, the 
   await page.getByTestId("ask-hide").click();
   await expect(panel).toBeHidden();
   await expect(page.locator(".ask-wrap")).toHaveAttribute("inert", "");
-  await expect(page.getByTestId("ask-open")).toBeFocused();
-  await page.getByTestId("ask-open").click();
+  // the top bar's toggle is the way back: not pressed, and focus moved to it from the hidden panel
+  const toggle = page.getByTestId("topbar").getByTestId("ask-toggle");
+  await expect(toggle).toHaveText("Ask AI Tutor");
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(toggle).toBeFocused();
+  await toggle.click();
   await expect(panel).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("ask-hide")).toBeFocused();
   // the panel reopened the earlier tests' conversation: this question is the latest in it
   await expect(panel.locator('[data-testid=qa-message][data-role="user"]').last()).toHaveText(
@@ -149,6 +154,136 @@ test("hiding the ask panel keeps the conversation: ask, hide at once, show, the 
     panel.locator('[data-testid=qa-message][data-role="assistant"]').last(),
   ).toContainText("which kind of division", { timeout: 30_000 });
   await expect(panel.getByTestId("thinking")).toHaveCount(0);
+});
+
+test("the top-bar Ask toggle: hides and shows the panel, survives a reload, only on tool pages", async ({
+  page,
+}) => {
+  await page.goto(`${app.base}/en/tool/${firstTool()}`);
+  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
+  const panel = page.getByTestId("ask-panel");
+  const toggle = page.getByTestId("ask-toggle");
+  await expect(panel).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  // hidden from the toggle itself: focus stays on it
+  await toggle.click();
+  await expect(panel).toBeHidden();
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(toggle).toBeFocused();
+  // it glows (cyan) and, while the panel is hidden, pulses, unless reduced motion is asked for
+  const look = () =>
+    toggle.evaluate((b) => {
+      const c = getComputedStyle(b);
+      return { shadow: c.boxShadow, anim: c.animationName };
+    });
+  const hiddenLook = await look();
+  expect(hiddenLook.shadow).toContain("rgba(45, 212, 234");
+  expect(hiddenLook.anim).toBe("ask-glow");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect((await look()).anim).toBe("none");
+  expect((await look()).shadow).toContain("rgba(45, 212, 234");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  // the edge tab it replaces is gone
+  await expect(page.getByTestId("ask-open")).toHaveCount(0);
+  // remembered across a reload
+  await page.reload();
+  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(panel).toBeHidden();
+  await toggle.click();
+  await expect(panel).toBeVisible();
+  await expect(page.getByTestId("ask-hide")).toBeFocused();
+  await page.reload();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(panel).toBeVisible();
+  // pressed: lit but calm (no pulse, a smaller glow than when hidden)
+  const pressedLook = await look();
+  expect(pressedLook.anim).toBe("none");
+  expect(pressedLook.shadow).toContain("rgba(45, 212, 234");
+  expect(pressedLook.shadow).not.toBe(hiddenLook.shadow);
+  // in Chinese
+  await page.goto(`${app.base}/zh/tool/${firstTool()}`);
+  await expect(toggle).toHaveText("问 AI 导师");
+  // not on pages without the panel
+  await page.goto(`${app.base}/en/notes`);
+  await expect(page.getByTestId("topbar")).toBeVisible();
+  await expect(page.getByTestId("ask-toggle")).toHaveCount(0);
+});
+
+test("the ask panel's left edge resizes it: drag, clamp, keyboard, reload, reset; none when narrow", async ({
+  page,
+}) => {
+  await page.goto(`${app.base}/en/tool/${firstTool()}`);
+  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
+  const wrap = page.locator(".ask-wrap");
+  const frame = page.getByTestId("tool-frame");
+  const handle = page.getByTestId("ask-resize");
+  const width = async () => Math.round(((await wrap.boundingBox()) as { width: number }).width);
+  await expect(handle).toHaveAttribute("role", "separator");
+  await expect(handle).toHaveAttribute("aria-orientation", "vertical");
+  await expect(handle).toHaveAttribute("aria-valuemin", "280");
+  await expect(handle).toHaveAttribute("aria-valuenow", "340");
+  expect(await width()).toBe(340);
+  const drag = async (dx: number, during?: () => Promise<void>) => {
+    const b = (await handle.boundingBox()) as {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+    const x = b.x + b.width / 2;
+    const y = b.y + b.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx / 2, y, { steps: 4 });
+    await page.mouse.move(x + dx, y, { steps: 4 });
+    await during?.();
+    await page.mouse.up();
+  };
+  // a drag 100 px to the left widens it by 100 px; meanwhile the iframe takes no pointer events
+  await drag(-100, async () => {
+    expect(await frame.evaluate((f) => getComputedStyle(f).pointerEvents)).toBe("none");
+    // the width follows the pointer live, before the button is released
+    await expect.poll(width).toBe(440);
+  });
+  await expect(handle).toHaveAttribute("aria-valuenow", "440");
+  expect(await width()).toBe(440);
+  expect(await frame.evaluate((f) => getComputedStyle(f).pointerEvents)).toBe("auto");
+  // remembered across a reload
+  await page.reload();
+  await expect(frame).toHaveAttribute("data-py-prog", /./);
+  await expect(handle).toHaveAttribute("aria-valuenow", "440");
+  expect(await width()).toBe(440);
+  // clamped: the tool page keeps at least 480 px, the panel at least 280 px
+  await drag(-3000);
+  const fw = Math.round(((await frame.boundingBox()) as { width: number }).width);
+  expect(fw).toBe(480);
+  await expect(handle).toHaveAttribute("aria-valuenow", String(await width()));
+  await expect(handle).toHaveAttribute("aria-valuemax", String(await width()));
+  await drag(3000);
+  expect(await width()).toBe(280);
+  await expect(handle).toHaveAttribute("aria-valuenow", "280");
+  // the keyboard: ← widens, → narrows, by 16 px
+  await handle.focus();
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft");
+  await expect(handle).toHaveAttribute("aria-valuenow", "312");
+  expect(await width()).toBe(312);
+  await page.keyboard.press("ArrowRight");
+  await expect(handle).toHaveAttribute("aria-valuenow", "296");
+  expect(await width()).toBe(296);
+  // double-click: back to the default, and the stored width is gone
+  await handle.dblclick();
+  await expect(handle).toHaveAttribute("aria-valuenow", "340");
+  expect(await width()).toBe(340);
+  expect(await page.evaluate(() => localStorage.getItem("pfapp-ask-width"))).toBeNull();
+  // a narrow window: the fixed CSS width, no handle (a stored width is not applied)
+  await drag(-60);
+  await page.setViewportSize({ width: 700, height: 800 });
+  await expect(handle).toHaveCount(0);
+  expect(await width()).toBe(300);
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await expect(handle).toHaveAttribute("aria-valuenow", "400");
 });
 
 test("the hint button is disabled outside fill-in mode", async ({ page }) => {

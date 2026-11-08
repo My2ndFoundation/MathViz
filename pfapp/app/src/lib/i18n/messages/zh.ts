@@ -124,6 +124,8 @@ export const zh: Messages = {
     panel: "问",
     hidePanel: "收起提问面板",
     showPanel: "提问",
+    toggle: "问 AI 导师",
+    resize: "调整提问面板宽度（拖动，或按 ← →；双击恢复默认）",
     program: "程序：{id}",
     blank: "空 {id}",
     thisTool: "关于这个工具",
