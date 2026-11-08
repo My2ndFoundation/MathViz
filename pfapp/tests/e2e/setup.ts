@@ -19,7 +19,7 @@
  * prints) instead of extracting one — for negative controls run against a doctored copy.
  */
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -244,11 +244,24 @@ export async function startApp({
 
 export default async function globalSetup(): Promise<() => Promise<void>> {
   ensureBuilt();
-  const pack = preparePack();
-  const app = await startApp({ pfaddon: pack.pfaddon });
-  process.env.E2E_BASE = app.base;
-  process.env.E2E_CATALOG = pack.catalog;
-  process.env.E2E_PFADDON = pack.pfaddon;
-  process.env.E2E_CONTENT_VERSION = pack.version;
-  return () => app.stop();
+  // One root per run, removed at the end: specs restart apps on an existing data dir, so a data
+  // dir cannot be removed when its app stops. Workers inherit TMPDIR like the E2E_* below.
+  const root = mkdtempSync(path.join(tmpdir(), "pfapp-e2e-run-"));
+  process.env.TMPDIR = root;
+  const removeRoot = () => rmSync(root, { recursive: true, force: true });
+  try {
+    const pack = preparePack();
+    const app = await startApp({ pfaddon: pack.pfaddon });
+    process.env.E2E_BASE = app.base;
+    process.env.E2E_CATALOG = pack.catalog;
+    process.env.E2E_PFADDON = pack.pfaddon;
+    process.env.E2E_CONTENT_VERSION = pack.version;
+    return async () => {
+      await app.stop();
+      removeRoot();
+    };
+  } catch (e) {
+    removeRoot();
+    throw e;
+  }
 }
