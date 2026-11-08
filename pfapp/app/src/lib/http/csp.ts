@@ -46,19 +46,30 @@ export const TOOL_CSP =
   "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'self'";
 
 /**
- * The maths tool pages' policy: TOOL_CSP plus 'unsafe-eval'. The shell's video recorder (the web
- * shell's, components/recorder.tsx) reads a tool's top-level `const`s — its state, camera and
- * draw function — with `contentWindow.eval`, which runs under the tool page's policy; that is how
- * it renders a recording frame by frame. Only these pages, which come from the signed content
- * pack: the shell keeps its own policy without it (owner ruling 2026-11-08).
+ * TOOL_CSP plus 'unsafe-eval', for the targets whose tool pages need it (EVAL_TARGETS). The shell
+ * keeps its own policy without it; these pages come from the signed content pack (owner rulings
+ * 2026-11-08: math, then chess).
  */
 export const TOOL_CSP_EVAL = TOOL_CSP.replace(
   "script-src 'self' 'unsafe-inline'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
 );
 
+/**
+ * Whose tool pages may eval, and why:
+ * - math: the shell's video recorder (the web shell's, components/recorder.tsx) reads a tool's
+ *   top-level `const`s — its state, camera and draw function — with `contentWindow.eval`, which
+ *   runs under the tool page's policy; that is how it renders a recording frame by frame.
+ * - chess: the algorithm stepper of chess-board-algorithms and chess-search-minimax compiles the
+ *   source it shows with `new Function`; without it the pages cannot run (chess 1.0.0 shipped so).
+ * Cryptography and python pages need neither (e2e pages.spec / python.spec: every page opens with
+ * 0 CSP violations).
+ */
+export const EVAL_TARGETS: ReadonlySet<string> = new Set(["math", "chess"]);
+
 /** The tool pages' policy for a target. */
-export const toolCsp = (target: string): string => (target === "math" ? TOOL_CSP_EVAL : TOOL_CSP);
+export const toolCsp = (target: string): string =>
+  EVAL_TARGETS.has(target) ? TOOL_CSP_EVAL : TOOL_CSP;
 
 /** The URL carries the content version, so a tool page never changes under its URL. */
 export const TOOL_CACHE_CONTROL = "public, max-age=31536000, immutable";
