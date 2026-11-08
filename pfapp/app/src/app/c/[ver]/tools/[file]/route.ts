@@ -1,5 +1,5 @@
 import { openToolFile } from "@/lib/content/serve";
-import { TOOL_CACHE_CONTROL, TOOL_CSP } from "@/lib/http/csp";
+import { TOOL_CACHE_CONTROL, toolCsp } from "@/lib/http/csp";
 import { HttpError } from "@/lib/http/errors";
 import { route } from "@/lib/http/route";
 
@@ -18,7 +18,7 @@ export const GET = route("GET", (app, { params }) => {
     headers: {
       "content-type": "text/html; charset=utf-8",
       "content-length": String(found.size),
-      "content-security-policy": TOOL_CSP,
+      "content-security-policy": toolCsp(app.target.id),
       "cache-control": TOOL_CACHE_CONTROL,
       "x-content-type-options": "nosniff",
     },

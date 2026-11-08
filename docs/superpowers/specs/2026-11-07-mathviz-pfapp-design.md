@@ -118,7 +118,7 @@ MV/pfapp/
 窗口的规矩（PFD `docs/superpowers/specs/2026-10-31-app-windows-design.md`）与对本项目的推论：
 
 - 窗口只显示 `http://127.0.0.1:<端口>`；别的地址、`window.open`、`target="_blank"` 都交给系统浏览器。外壳自己**不许**有这类链接（门：e2e 断言外壳里没有 `target="_blank"`）。工具页页脚里指向外站的链接（primeforge.app、darkhorseone）去系统浏览器，这是外站本来的去处，接受。
-- 下载只认指向**同源 URL**、能普通 GET 的 `<a download>`；`blob:` / `data:` 下载被拒。python 页没有下载，第 1 期不受影响。数学 8 个工具与 `chess-search-minimax`、`chess-game-replay` 用 `blob:` 导出：**第 2 期在 pfapp 送出这些工具页时注入一小段脚本**，把 `blob:` 下载改成「先 POST 字节到应用、再 `<a download>` 一个同源 URL」，网页版不改。
+- 下载只认指向**同源 URL**、能普通 GET 的 `<a download>`；`blob:` / `data:` 下载被拒。python 页没有下载，第 1 期不受影响。数学 8 个工具与 `chess-search-minimax`、`chess-game-replay` 用 `blob:` 导出：外壳在 iframe 每次 load 时接管页面的 `URL.createObjectURL` 与 `<a>.click()`，把 `blob:` 下载改成「先分块 POST 字节到 `/api/exports`、再 `<a download>` 一个同源 URL」（`components/save-file.ts`），网页版与送出的页面都不改（2026-11-08 实现，原计划的送出时注入被换掉：同源 iframe 让外壳直接够得着，不必改页面字节，也不碰页面的缓存）。数学的录屏器（网页外壳 `app.html` 的「录制器」）同样走这条路存视频，见 `scripts/recorder.ts`。
 - 窗口没有 IPC；主题与语言仍由应用自己的设置决定（缺省英文，§5.2）。
 - 剪贴板（python 页的复制按钮）要在真窗口里实测（第 1 期验收）。
 - 本机 Desktop 须升到支持 `ui.window` 的版本（≥ 1.45）才能验收。

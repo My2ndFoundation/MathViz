@@ -246,8 +246,15 @@ payload 没有多余文件、组标签与导航页一致、python source 是 `.p
 
 **窗口（§5.3）**：四个应用都声明 `ui.window`，在 PrimeForge Desktop 自己的窗口里开。推论：外壳里
 不许有 `target="_blank"` / `window.open`（窗口把它们交给系统浏览器；e2e 断言为 0）；下载只认指向
-**同源 URL** 的 `<a download>`，`blob:` / `data:` 被拒——数学 8 页与两页 chess 的导出要等第 2 期在送出
-工具页时改写。内容包与 API 同源，按第一方对待（§7.3）。
+**同源 URL** 的 `<a download>`，`blob:` / `data:` 被拒。所以存文件一律走 `/api/exports`：先分块上传、再
+`<a download>` 同源地址（`components/save-file.ts`）；工具页自己的 `blob:` 导出（数学 8 页、chess 2 页）由外壳
+在 iframe 每次 load 时接管（`bridgeDownloads`），工具页原样不改。内容包与 API 同源，按第一方对待（§7.3）。
+
+**数学的录屏器是网页外壳的**：`scripts/recorder.ts` 在构建时把根 `app.html` 的「录制器」脚本与样式抽到
+`app/public/recorder/`（不提交，只有 math 目标有），两处 `.stage` 查找换成 `REC_HOST.stage()`，每处都**计数**——
+网页版改了这几处，math 的签名构建就红，不会悄悄发出一个半残的录屏器。`components/recorder.tsx` 补上网页外壳的
+全局（`frame` / `curId` / `LANG` / `byId`）、生命周期与下载。录屏器靠 `contentWindow.eval` 逐帧驱动工具，
+所以**只有 math 的工具页**带 `'unsafe-eval'`（`toolCsp`，用户 2026-11-08 裁决），外壳自己的 CSP 不变。
 
 **`pfapp/` 下不许提交任何 `.html`**（平台规定，门会抓）。工具页只在提取出的内容包里。
 

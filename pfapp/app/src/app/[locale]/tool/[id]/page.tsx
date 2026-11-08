@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { redirect } from "next/navigation";
 import { ToolFrame } from "@/components/tool-frame";
 import { isLocale, MESSAGES } from "@/lib/i18n/locale";
@@ -10,6 +12,23 @@ import { getAppContext } from "@/lib/server/context";
  * conversation it opens (Notes' "Open the exercise", the AI queue's links).
  */
 export const dynamic = "force-dynamic";
+
+type Bilingual = { en: string; zh: string };
+
+/** A catalog item's kicker (catalog.json; the database keeps titles only), for the recording overlay. */
+function kickerOf(dir: string, id: string): Bilingual | null {
+  try {
+    const cat = JSON.parse(readFileSync(path.join(dir, "catalog.json"), "utf8")) as {
+      items?: { id?: unknown; kicker?: Partial<Bilingual> }[];
+    };
+    const k = cat.items?.find((it) => it.id === id)?.kicker;
+    return k && typeof k.en === "string" && typeof k.zh === "string"
+      ? { en: k.en, zh: k.zh }
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 export default async function ToolPage(props: PageProps<"/[locale]/tool/[id]">) {
   const { locale, id } = await props.params;
@@ -43,6 +62,11 @@ export default async function ToolPage(props: PageProps<"/[locale]/tool/[id]">) 
       locale={locale}
       python={app.target.id === "python"}
       thread={thread}
+      recorder={
+        app.target.id === "math"
+          ? { title: { en: item.title_en, zh: item.title_zh }, kicker: kickerOf(content.dir, id) }
+          : null
+      }
     />
   );
 }
