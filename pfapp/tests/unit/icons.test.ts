@@ -19,7 +19,9 @@ const MV = resolve(import.meta.dir, "..", "..", "..");
 const onDisk = (t: TargetId) => readFileSync(iconFile(t), "utf8");
 const HEX = "#[0-9a-f]{6}";
 const groundOf = (svg: string) => new RegExp(`<rect\\b[^>]*fill="(${HEX})"`).exec(svg)?.[1];
-const accentOf = (svg: string) => new RegExp(`<path fill="(${HEX})"`).exec(svg)?.[1];
+/** The M's stroke: the first thing drawn in the mark's colour. */
+const accentOf = (svg: string) =>
+  new RegExp(`<path d="[^"]*" fill="none" stroke="(${HEX})"`).exec(svg)?.[1];
 
 describe("pfapp icons", () => {
   test("each manifest declares icon.svg at the package root", () => {
@@ -38,7 +40,7 @@ describe("pfapp icons", () => {
       expect(svg).not.toMatch(/\son[a-z]+=/i);
       // only the elements an icon of this shape needs
       const tags = [...svg.matchAll(/<([a-zA-Z]+)/g)].map((m) => m[1]);
-      expect(new Set(tags)).toEqual(new Set(["svg", "title", "rect", "path"]));
+      expect(new Set(tags)).toEqual(new Set(["svg", "title", "rect", "g", "path", "circle"]));
       // a square viewBox; the root carries no opacity, clip, mask or transform of its own
       const root = /^<svg\b([^>]*)>/.exec(svg)?.[1] ?? "";
       const vb = /viewBox="0 0 (\d+) (\d+)"/.exec(root);
@@ -55,15 +57,20 @@ describe("pfapp icons", () => {
       expect(a).toMatch(/\by="0"/);
       expect(a).not.toMatch(/\b(rx|ry|stroke|opacity|fill-opacity|clip-path|mask|transform)=/);
       expect(a).toMatch(new RegExp(`fill="${HEX}"`));
-      // the mark: one solid colour of its own
-      expect(accentOf(svg)).toBeDefined();
-      expect(accentOf(svg)).not.toBe(groundOf(svg));
+      // the mark: one colour of its own, and only that colour and the ground's anywhere in it
+      const accent = accentOf(svg);
+      expect(accent).toBeDefined();
+      expect(accent).not.toBe(groundOf(svg));
+      const colours = new Set(
+        [...svg.matchAll(/(?:fill|stroke)="(#[0-9a-f]{6})"/g)].map((m) => m[1]),
+      );
+      expect(colours).toEqual(new Set([accent, groundOf(svg)]));
     });
   }
 
   test("one mark: the four icons differ only in the accent", () => {
     const strip = (s: string) =>
-      s.replace(/<path fill="#[0-9a-f]{6}"/, '<path fill="X"').replace(/<title>[^<]*</, "<title><");
+      s.replaceAll(accentOf(s) as string, "X").replace(/<title>[^<]*</, "<title><");
     const marks = new Set(TARGETS.map((t) => strip(onDisk(t))));
     expect(marks.size).toBe(1);
     expect(new Set(TARGETS.map((t) => accentOf(onDisk(t)))).size).toBe(4);
