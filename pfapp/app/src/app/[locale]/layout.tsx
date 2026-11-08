@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { Shell } from "@/components/sidebar";
 import { isLocale, MESSAGES } from "@/lib/i18n/locale";
+import { appVersion } from "@/lib/server/app-version";
 import { loadCatalog } from "@/lib/server/catalog";
 import { getAppContext } from "@/lib/server/context";
 
@@ -49,6 +50,16 @@ export default async function LocaleLayout(props: LayoutProps<"/[locale]">) {
               notes: t.nav.notes,
               askLibrary: t.nav.askLibrary,
               settings: t.nav.settings,
+              appVersion: t.nav.appVersion,
+            }}
+            build={{
+              app: appVersion(app.target.id, app.target.appId),
+              pack: {
+                name: app.target.pack[locale],
+                version: content.version,
+                source:
+                  content.source === "store" ? t.settings.sourceStore : t.settings.sourceManual,
+              },
             }}
           >
             {props.children}

@@ -386,3 +386,99 @@ test("/ask: the answer's citation opens /tool/<id>?prog=<programId> in place", a
   );
   expect(page.context().pages()).toHaveLength(1);
 });
+
+test("the conversation switcher: two conversations on one program, pick the older, a follow-up goes to it", async ({
+  page,
+}) => {
+  // a tool no earlier test asked about, so the counts are this test's
+  await page.goto(`${app.base}/en/tool/${nthTool(2)}`);
+  const frameEl = page.getByTestId("tool-frame");
+  await expect(frameEl).toHaveAttribute("data-py-prog", /./);
+  const prog = (await frameEl.getAttribute("data-py-prog")) as string;
+  const panel = page.getByTestId("ask-panel");
+  const users = panel.locator('[data-testid=qa-message][data-role="user"]');
+  const answers = panel.locator('[data-testid=qa-message][data-role="assistant"]');
+  const switcher = panel.getByTestId("ask-threads");
+  const options = panel.getByTestId("ask-thread");
+  const ask = async (q: string, n: number) => {
+    await panel.getByTestId("ask-input").fill(q);
+    await panel.getByTestId("ask-submit").click();
+    await expect(answers).toHaveCount(n, { timeout: 30_000 });
+    await expect(panel.getByTestId("thinking")).toHaveCount(0);
+  };
+  await expect(users).toHaveCount(0);
+  await expect(switcher).toHaveCount(0);
+  await ask("Older conversation?", 1);
+  // the only conversation is the open one: nothing to switch to
+  await expect(switcher).toHaveCount(0);
+  await panel.getByTestId("ask-new").click();
+  await expect(users).toHaveCount(0);
+  // after "New conversation" the earlier one is one pick away
+  await expect(switcher).toHaveText("Conversations (1)");
+  await ask("Newer conversation?", 1);
+  await expect(switcher).toHaveText("Conversations (2)");
+
+  // the list: newest first, the open one marked
+  await switcher.click();
+  await expect(switcher).toHaveAttribute("aria-expanded", "true");
+  const list = panel.getByTestId("ask-threads-list");
+  await expect(list).toHaveAttribute("role", "listbox");
+  await expect(list).toBeFocused();
+  await expect(options).toHaveCount(2);
+  await expect(options.nth(0)).toContainText("Newer conversation?");
+  await expect(options.nth(0)).toHaveAttribute("aria-selected", "true");
+  await expect(options.nth(0)).toContainText("2 messages");
+  await expect(options.nth(1)).toContainText("Older conversation?");
+  await expect(options.nth(1)).toHaveAttribute("aria-selected", "false");
+  // Esc closes it and focus goes back to the button
+  await page.keyboard.press("Escape");
+  await expect(list).toHaveCount(0);
+  await expect(switcher).toBeFocused();
+  await expect(switcher).toHaveAttribute("aria-expanded", "false");
+
+  // the keyboard: ↓ opens on the open one, ↓ again, Enter picks the older
+  await page.keyboard.press("ArrowDown");
+  await expect(list).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(options.nth(1)).toHaveAttribute("data-active", "true");
+  await page.keyboard.press("Enter");
+  await expect(list).toHaveCount(0);
+  await expect(switcher).toBeFocused();
+  await expect(users).toHaveCount(1);
+  await expect(users.first()).toHaveText(/Older conversation\?/);
+  await expect(answers.first()).toContainText("which kind of division");
+
+  // a follow-up goes to the older conversation, which becomes the newest
+  await ask("A follow-up to the older one", 2);
+  await expect(users).toHaveCount(2);
+  await expect(users.last()).toHaveText(/A follow-up to the older one/);
+  const rows = await page.evaluate(
+    async (s) =>
+      (await (await fetch(`/api/threads?subject=${encodeURIComponent(s)}&list=1`)).json()).threads,
+    `program:${prog}`,
+  );
+  expect(
+    rows.map((r: { title: string; messageCount: number }) => [r.title, r.messageCount]),
+  ).toEqual([
+    ["Older conversation?", 4],
+    ["Newer conversation?", 2],
+  ]);
+  await switcher.click();
+  await expect(options.nth(0)).toContainText("Older conversation?");
+  await expect(options.nth(0)).toHaveAttribute("aria-selected", "true");
+  await expect(options.nth(0)).toContainText("4 messages");
+  // a click picks the other one
+  await options.nth(1).click();
+  await expect(users).toHaveCount(1);
+  await expect(users.first()).toHaveText(/Newer conversation\?/);
+  // a click elsewhere closes the list
+  await switcher.click();
+  await expect(list).toBeVisible();
+  await panel.getByTestId("ask-input").click();
+  await expect(list).toHaveCount(0);
+
+  // in Chinese
+  await page.goto(`${app.base}/zh/tool/${nthTool(2)}`);
+  await expect(frameEl).toHaveAttribute("data-py-prog", /./);
+  await expect(switcher).toHaveText("对话（2）");
+});

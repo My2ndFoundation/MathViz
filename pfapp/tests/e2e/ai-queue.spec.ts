@@ -278,9 +278,13 @@ test("the open queue panel is above the top-bar Ask toggle, the collapse edge an
       [x, y],
     );
   expect(await topAt(cx, cy)).toBe("queue");
-  // a click where the Ask toggle is lands on the queue panel: the ask panel stays hidden
+  // a click where the Ask toggle is lands on the queue's scrim (the panel, or the outside that
+  // closes it, depending on how wide the top bar's chips are), never on the toggle: the ask panel
+  // stays hidden
   await page.mouse.click(cx, cy);
   await expect(page.getByTestId("ask-panel")).toBeHidden();
+  await expect(askToggle).toHaveAttribute("aria-pressed", "false");
+  if ((await queue.count()) === 0) await indicator.click();
   await expect(queue).toBeVisible();
 
   // Tab and Shift-Tab wrap inside the panel (aria-modal): never the page or the tool iframe behind

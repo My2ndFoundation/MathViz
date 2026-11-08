@@ -10,6 +10,7 @@ import { AiJobsProvider } from "./ai/use-ai-jobs";
 import { accentColor, CommandK } from "./command-k";
 import { LangSwitch } from "./lang-switch";
 import { AskToggle } from "./qa/ask-toggle";
+import { type BuildInfo, VersionChip } from "./version-chip";
 
 /** A path segment decoded; a malformed `%` escape stays as it is instead of throwing. */
 function safeDecode(s: string): string {
@@ -33,13 +34,15 @@ export interface ShellText {
   notes: string;
   askLibrary: string;
   settings: string;
+  /** "App {version}" */
+  appVersion: string;
 }
 
 /**
  * The shell (design §7.2): the sidebar re-implemented natively after the web version's
  * python/app.html — groups in the pack's order, tools in registry order, labels in the URL's
  * language, the current tool highlighted (aria-current), each tool's version — plus a thin top bar
- * (the page's title, on a tool page the ask panel's toggle, the AI indicator) above the stage the page renders into, the collapse edge
+ * (the page's title, on a tool page the ask panel's toggle, the AI indicator, the versions) above the stage the page renders into, the collapse edge
  * and ⌘K.
  */
 export function Shell({
@@ -47,12 +50,14 @@ export function Shell({
   locale,
   appName,
   text,
+  build,
   children,
 }: {
   groups: ShellGroup[];
   locale: Locale;
   appName: { eyebrow: string; name: string };
   text: ShellText;
+  build: BuildInfo;
   children: ReactNode;
 }) {
   const pathname = usePathname();
@@ -201,6 +206,8 @@ export function Shell({
               <AskToggle locale={locale} />
             ) : null}
             <AiIndicator locale={locale} />
+            {/* the app's and the content pack's versions, last at the right */}
+            <VersionChip locale={locale} info={build} appLabel={text.appVersion} />
           </header>
           <main className="stage" data-testid="stage">
             {children}
