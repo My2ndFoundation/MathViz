@@ -30,12 +30,15 @@ export function ToolFrame({
   toolId,
   locale,
   python,
+  thread = null,
 }: {
   src: string;
   title: string;
   toolId: string;
   locale: Locale;
   python: boolean;
+  /** `?thread=`: the conversation the ask panel opens (Notes, the AI queue). */
+  thread?: string | null;
 }) {
   const ref = useRef<HTMLIFrameElement>(null);
   const py = usePyState(ref, toolId);
@@ -90,7 +93,14 @@ export function ToolFrame({
         >
           ▶
         </button>
-        <AskPanel toolId={toolId} toolTitle={title} locale={locale} python={python} pyState={py} />
+        <AskPanel
+          toolId={toolId}
+          toolTitle={title}
+          locale={locale}
+          python={python}
+          pyState={py}
+          thread={thread}
+        />
       </div>
       {panel ? null : (
         <button

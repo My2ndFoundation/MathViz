@@ -66,13 +66,22 @@ function sections(rows: readonly NoteThread[], locale: Locale, t: Text) {
   return out;
 }
 
-/** `?thread=<id>` in place (Next's router follows the native history calls). */
-function setThreadParam(id: string | null, how: "push" | "replace") {
+/** Marks a history entry this page pushed for the detail pane (the back chip goes back over it). */
+const DETAIL_STATE = "notesDetail";
+
+/**
+ * `?thread=<id>` and `view=detail` in place (Next's router follows the native history calls; the
+ * state passed must not carry Next's own keys, or it takes the call for its own and ignores it).
+ * `view=detail` is the narrow window's pane: in the URL, so Back from a conversation shows the list.
+ */
+function setThreadParam(id: string | null, how: "push" | "replace", detail = false) {
   const u = new URL(window.location.href);
   if (id) u.searchParams.set("thread", id);
   else u.searchParams.delete("thread");
+  if (id && detail) u.searchParams.set("view", "detail");
+  else u.searchParams.delete("view");
   const next = `${u.pathname}${u.search}`;
-  if (how === "push") window.history.pushState(null, "", next);
+  if (how === "push") window.history.pushState({ [DETAIL_STATE]: detail }, "", next);
   else window.history.replaceState(null, "", next);
 }
 
@@ -82,7 +91,8 @@ function setThreadParam(id: string | null, how: "push" | "replace") {
  * `?thread=` — its messages, the saved answers marked, the ones before the question the first
  * saved answer replied to folded away — with a follow-up box that continues the same conversation (so it shows in the
  * tool page's ask panel too), "Open the exercise" and Delete (its notes, not the conversation).
- * Under 760 px one pane at a time.
+ * Under 760 px one pane at a time; which one is in the URL (`view=detail`), so Back from a
+ * conversation returns to the list, and focus follows the pane that is shown.
  */
 export function NotesView({ locale, groups }: { locale: Locale; groups: NotesGroup[] }) {
   const t = MESSAGES[locale].qa;
@@ -96,12 +106,43 @@ export function NotesView({ locale, groups }: { locale: Locale; groups: NotesGro
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
-  const [pane, setPane] = useState<"list" | "detail">(selected ? "detail" : "list");
+  const pane: "list" | "detail" = selected && params.get("view") === "detail" ? "detail" : "list";
+  const root = useRef<HTMLElement>(null);
   // the rows seen so far: the detail keeps its header while a search hides its row
   const known = useRef(new Map<string, NoteThread>());
   // the next list picks its newest row (first load, after a delete)
   const pickNewest = useRef(!selected);
   const refresh = useCallback(() => setVersion((v) => v + 1), []);
+  const rowsRef = useRef<NoteThread[] | null>(null);
+
+  // the URL lost its ?thread= without a remount (the sidebar's "Notes" link): pick the newest again
+  const wasSelected = useRef(selected);
+  useEffect(() => {
+    const was = wasSelected.current;
+    wasSelected.current = selected;
+    if (selected || !was) return;
+    const newest = rowsRef.current?.[0]?.id;
+    if (newest) setThreadParam(newest, "replace");
+    else pickNewest.current = true;
+  }, [selected]);
+
+  // a narrow window hides the pane that had focus: move it to the one shown (its heading, or the
+  // open row), never leave it on <body>. A wide window hides nothing, so nothing moves there.
+  const wasPane = useRef(pane);
+  useEffect(() => {
+    if (wasPane.current === pane) return;
+    wasPane.current = pane;
+    const a = document.activeElement;
+    const lost = !a || a === document.body || (a instanceof HTMLElement && !a.checkVisibility());
+    if (!lost) return;
+    const el = root.current;
+    const to =
+      pane === "detail"
+        ? el?.querySelector<HTMLElement>("[data-testid=notes-question]")
+        : (el?.querySelector<HTMLElement>('[data-testid=notes-row][aria-current="true"]') ??
+          el?.querySelector<HTMLElement>("[data-testid=notes-search]"));
+    to?.focus();
+  }, [pane]);
 
   useEffect(() => {
     const h = window.setTimeout(() => setQuery(q.trim()), SEARCH_DELAY_MS);
@@ -120,6 +161,7 @@ export function NotesView({ locale, groups }: { locale: Locale; groups: NotesGro
         if (stop) return;
         for (const row of r.threads) known.current.set(row.id, row);
         setRows(r.threads);
+        rowsRef.current = r.threads;
         setCounts(r.groups);
         setError(null);
         if (pickNewest.current) {
@@ -136,14 +178,20 @@ export function NotesView({ locale, groups }: { locale: Locale; groups: NotesGro
   }, [query, group, version, locale]);
 
   const choose = (id: string) => {
-    if (id !== selected) setThreadParam(id, "push");
-    setPane("detail");
+    if (id !== selected || pane !== "detail") setThreadParam(id, "push", true);
+  };
+
+  // back over the entry choose() pushed; a detail reached otherwise (a reload) is replaced
+  const back = () => {
+    const s = window.history.state as Record<string, unknown> | null;
+    if (s?.[DETAIL_STATE] === true) window.history.back();
+    else setThreadParam(selected, "replace");
   };
 
   const deleted = () => {
     if (selected) known.current.delete(selected);
     pickNewest.current = true;
-    setPane("list");
+    setThreadParam(selected, "replace");
     refresh();
   };
 
@@ -162,7 +210,7 @@ export function NotesView({ locale, groups }: { locale: Locale; groups: NotesGro
   const row = selected ? (known.current.get(selected) ?? null) : null;
 
   return (
-    <section className="notes" data-testid="notes-view" data-pane={pane}>
+    <section ref={root} className="notes" data-testid="notes-view" data-pane={pane}>
       <div className="notes-list" data-testid="notes-list-pane">
         <div className="notes-tools">
           <label htmlFor={searchId} className="sr-only">
@@ -245,7 +293,7 @@ export function NotesView({ locale, groups }: { locale: Locale; groups: NotesGro
             locale={locale}
             onChanged={refresh}
             onDeleted={deleted}
-            onBack={() => setPane("list")}
+            onBack={back}
           />
         ) : (
           <p className="qa-note notes-pad">{nothingSaved ? "" : t.notesPick}</p>
@@ -301,6 +349,10 @@ function NoteDetail({
   const busy = thinking || sending;
   const question =
     row?.question || messages.find((m) => m.role === "user")?.text || thread?.title || "";
+  // the content no longer has what it is about: every follow-up would be 404 unknown_subject
+  const gone = row?.available === false;
+  // nothing saved in it (its notes deleted, then Back; a ?thread= of a conversation never saved)
+  const unsaved = !!thread && !messages.some((m) => m.noteId !== null);
 
   const go = async () => {
     const message = text.trim();
@@ -324,7 +376,7 @@ function NoteDetail({
         <button type="button" className="chip notes-back" data-testid="notes-back" onClick={onBack}>
           ← {t.notesBack}
         </button>
-        <h1 className="notes-title" data-testid="notes-question">
+        <h1 className="notes-title" data-testid="notes-question" tabIndex={-1}>
           {question}
         </h1>
         {row ? (
@@ -338,7 +390,7 @@ function NoteDetail({
               {row.kind === "library" ? t.openLibrary : t.openExercise}
             </Link>
           ) : null}
-          {confirming ? (
+          {unsaved ? null : confirming ? (
             <span className="notes-confirm" role="alert">
               <span>{t.deleteConfirm}</span>
               <button
@@ -370,6 +422,11 @@ function NoteDetail({
             </button>
           )}
         </div>
+        {unsaved ? (
+          <p className="qa-note" data-testid="notes-none-here">
+            {t.notesNoneHere}
+          </p>
+        ) : null}
         {deleteError ? (
           <p className="qa-error" role="alert">
             {deleteError}
@@ -404,6 +461,11 @@ function NoteDetail({
         />
       </div>
       <div className="ask-form notes-form">
+        {gone ? (
+          <p className="qa-note" data-testid="notes-followup-gone">
+            {t.followUpGone}
+          </p>
+        ) : null}
         <label htmlFor={inputId} className="sr-only">
           {t.followUpLabel}
         </label>
@@ -414,7 +476,7 @@ function NoteDetail({
           rows={2}
           maxLength={4000}
           placeholder={t.followUpPlaceholder}
-          disabled={busy || !thread}
+          disabled={busy || !thread || gone}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -428,7 +490,7 @@ function NoteDetail({
             type="button"
             className="chip primary"
             data-testid="notes-followup-submit"
-            disabled={busy || !thread || !text.trim()}
+            disabled={busy || !thread || gone || !text.trim()}
             onClick={() => void go()}
           >
             {t.followUpSend}

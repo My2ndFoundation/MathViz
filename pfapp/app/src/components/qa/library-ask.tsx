@@ -18,7 +18,8 @@ function setThreadParam(id: string | null) {
  * "Ask the whole library" (design §7.5): a `library` question; the tutor searches this app's
  * tools and programs and cites what it used, each citation a link to that page in this app.
  * `?thread=<id>` reopens that library conversation (the notes page's "open" link) and follow-ups
- * continue it; the URL follows the conversation shown, so a reload keeps it.
+ * continue it; the URL follows the conversation shown, so a reload keeps it, and a new URL (the
+ * sidebar's bare `/ask`, the AI queue's `?thread=`) changes the conversation shown.
  */
 export function LibraryAsk({ locale }: { locale: Locale }) {
   const t = MESSAGES[locale].qa;
@@ -29,10 +30,16 @@ export function LibraryAsk({ locale }: { locale: Locale }) {
   const busy = thinking || sending;
   const wanted = useSearchParams().get("thread");
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: only the id in the URL on arrival
+  // the id in the URL, on arrival and whenever it changes without a remount (the sidebar's link,
+  // the AI queue's): open that conversation, or leave the one shown when the URL names none
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a change of the URL's id
   useEffect(() => {
-    if (wanted) void open(wanted);
-  }, [open]);
+    if (wanted) {
+      if (wanted !== thread?.id) void open(wanted);
+    } else if (thread) {
+      reset();
+    }
+  }, [wanted]);
   // a conversation that is not about the library cannot be continued here: start a new one
   useEffect(() => {
     if (thread && !thread.subjects.some((s) => s.type === "library")) {

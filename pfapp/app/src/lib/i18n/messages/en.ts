@@ -192,6 +192,9 @@ export const en = {
     followUpLabel: "Ask a follow-up",
     followUpPlaceholder: "Ask a follow-up in this conversation…",
     followUpSend: "Ask",
+    followUpGone:
+      "The installed content no longer has what this conversation is about, so it cannot be continued.",
+    notesNoneHere: "Nothing in this conversation is saved as a note any more.",
   },
   error: {
     ai_unavailable: "The AI tutor is available when the app runs inside PrimeForge.",

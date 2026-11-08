@@ -6,7 +6,8 @@ import { getAppContext } from "@/lib/server/context";
 /**
  * `/<locale>/tool/<id>` (design §7.3): the shell around a same-origin iframe of
  * `/c/<content version>/tools/<file>?lang=<locale>`. The python target passes `&prog=<id>` on
- * when this URL has `?prog=` (the program deep link).
+ * when this URL has `?prog=` (the program deep link). `?thread=` is the ask panel's: the
+ * conversation it opens (Notes' "Open the exercise", the AI queue's links).
  */
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,9 @@ export default async function ToolPage(props: PageProps<"/[locale]/tool/[id]">) 
   }
   const name = item.file.replace(/^tools\//, "");
   const q = new URLSearchParams({ lang: locale });
-  const prog = (await props.searchParams).prog;
+  const search = await props.searchParams;
+  const prog = search.prog;
+  const thread = typeof search.thread === "string" && search.thread ? search.thread : null;
   if (app.target.id === "python" && typeof prog === "string" && prog) q.set("prog", prog);
   const src = `/c/${encodeURIComponent(content.version)}/tools/${encodeURIComponent(name)}?${q}`;
   return (
@@ -39,6 +42,7 @@ export default async function ToolPage(props: PageProps<"/[locale]/tool/[id]">) 
       title={locale === "zh" ? item.title_zh : item.title_en}
       locale={locale}
       python={app.target.id === "python"}
+      thread={thread}
     />
   );
 }

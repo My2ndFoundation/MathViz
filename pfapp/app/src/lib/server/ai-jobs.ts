@@ -57,14 +57,18 @@ const COLUMNS = `j.id, j.workflow, j.status, j.thread_id, t.title, j.engine, j.m
   j.created_at, CASE WHEN j.status IN (${OPEN.map(() => "?").join(", ")}) THEN NULL
   ELSE coalesce(j.ended_at, j.settled_at, j.updated_at) END AS ended_at`;
 
-/** Where a thread was asked: the library page, a program on its tool's page, or a tool page. */
+/**
+ * Where a thread was asked, naming the thread so the page reopens this conversation rather than
+ * the newest one about the same thing: the library page, a program on its tool's page, or a tool page.
+ */
 function hrefOf(app: AppContext, threadId: string): string | null {
   const subjects = app.db
     .prepare(
       "SELECT subject_type AS type, subject_id AS id FROM thread_subjects WHERE thread_id = ? ORDER BY rowid",
     )
     .all<{ type: string; id: string }>(threadId);
-  if (subjects.some((s) => s.type === "library")) return "/ask";
+  const thread = `thread=${encodeURIComponent(threadId)}`;
+  if (subjects.some((s) => s.type === "library")) return `/ask?${thread}`;
   const tool = app.db.prepare("SELECT 1 AS x FROM catalog_items WHERE id = ?");
   const program = subjects.find((s) => s.type === "program" || s.type === "blank");
   if (program && app.content) {
@@ -72,11 +76,11 @@ function hrefOf(app: AppContext, threadId: string): string | null {
       program.type === "blank" ? parseBlankSubject(program.id)?.programId : program.id;
     const p = programId ? loadProgram(app.content.dir, programId) : null;
     if (p?.tool && programId && tool.get(p.tool)) {
-      return `/tool/${encodeURIComponent(p.tool)}?prog=${encodeURIComponent(programId)}`;
+      return `/tool/${encodeURIComponent(p.tool)}?prog=${encodeURIComponent(programId)}&${thread}`;
     }
   }
   const t = subjects.find((s) => s.type === "tool");
-  if (t && tool.get(t.id)) return `/tool/${encodeURIComponent(t.id)}`;
+  if (t && tool.get(t.id)) return `/tool/${encodeURIComponent(t.id)}?${thread}`;
   return null;
 }
 

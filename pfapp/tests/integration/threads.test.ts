@@ -910,7 +910,8 @@ describe("GET /api/notes/threads (the notes page: one row per conversation)", ()
       notes: 2,
       followUps: 2,
       kind: "program",
-      href: `/tool/${PROG_TOOL}?prog=${PROG}`,
+      href: `/tool/${PROG_TOOL}?prog=${PROG}&thread=${a.id}`,
+      available: true,
     });
     expect(row.subject).toMatchObject({ type: "program", id: PROG, toolId: PROG_TOOL });
     expect(row.group.id).toBe(otherGroupTool(c).progGroup);
@@ -978,7 +979,10 @@ describe("GET /api/notes/threads (the notes page: one row per conversation)", ()
     expect(all.body.groups).toEqual({ [progGroup]: 1, [group]: 1, library: 1 });
     const lib = all.body.threads[0];
     expect(lib).toMatchObject({ kind: "library", group: null, href: `/ask?thread=${l.id}` });
-    expect(all.body.threads[1]).toMatchObject({ kind: "tool", href: `/tool/${tool}` });
+    expect(all.body.threads[1]).toMatchObject({
+      kind: "tool",
+      href: `/tool/${tool}?thread=${b.id}`,
+    });
     const ids = async (g: string) =>
       (await list(`group=${encodeURIComponent(g)}`)).body.threads.map((t: Json) => t.id);
     expect(await ids(progGroup)).toEqual([a.id]);
@@ -988,6 +992,87 @@ describe("GET /api/notes/threads (the notes page: one row per conversation)", ()
     // the counts are over the search, before the group filter
     const filtered = await list(`group=${encodeURIComponent(group)}`);
     expect(filtered.body.groups).toEqual(all.body.groups);
+  });
+
+  test("what it is about: a blank alone, a program or tool the content no longer has, no subject at all", async () => {
+    const { ctx: c } = await start({}, { platform: false });
+    const { progGroup } = otherGroupTool(c);
+    const saved = (q: string): [string, string, boolean?][] => [
+      ["user", q],
+      ["assistant", "Saved", true],
+    ];
+    const blank = seed(c, {
+      subjects: [["blank", blankSubject(PROG, FIRST_BLANK)]],
+      msgs: saved("About a blank"),
+    });
+    const goneProg = seed(c, {
+      subjects: [["program", "no-such-program"]],
+      msgs: saved("Gone program"),
+    });
+    const goneProgTool = seed(c, {
+      subjects: [
+        ["program", "no-such-program"],
+        ["tool", PROG_TOOL],
+      ],
+      msgs: saved("Gone program, its tool kept"),
+    });
+    const goneTool = seed(c, { subjects: [["tool", "no-such-tool"]], msgs: saved("Gone tool") });
+    const none = seed(c, { subjects: [], msgs: saved("No subject") });
+    const r = await list();
+    expect(r.status).toBe(200);
+    const by = Object.fromEntries(r.body.threads.map((t: Json) => [t.question, t]));
+    expect(by["About a blank"]).toMatchObject({
+      id: blank.id,
+      kind: "program",
+      available: true,
+      href: `/tool/${PROG_TOOL}?prog=${PROG}&thread=${blank.id}`,
+      subject: { type: "blank", programId: PROG, toolId: PROG_TOOL },
+    });
+    expect(by["About a blank"].group.id).toBe(progGroup);
+    expect(by["Gone program"]).toMatchObject({
+      id: goneProg.id,
+      kind: "program",
+      available: false,
+      href: null,
+      group: null,
+      subject: { type: "program", id: "no-such-program", toolId: null },
+    });
+    // as the AI queue does: a tool the thread is also about, when the program's is gone
+    expect(by["Gone program, its tool kept"]).toMatchObject({
+      id: goneProgTool.id,
+      kind: "program",
+      available: false,
+      href: `/tool/${PROG_TOOL}?thread=${goneProgTool.id}`,
+    });
+    expect(by["Gone program, its tool kept"].group.id).toBe(progGroup);
+    expect(by["Gone tool"]).toMatchObject({
+      id: goneTool.id,
+      kind: "tool",
+      available: false,
+      href: null,
+      group: null,
+    });
+    expect(by["No subject"]).toMatchObject({
+      id: none.id,
+      kind: "tool",
+      subject: null,
+      available: true,
+      href: null,
+      group: null,
+    });
+    // `available` is what a follow-up meets: a gone subject is 404 unknown_subject (checked before
+    // the platform, so without one every other thread gets as far as 503 ai_unavailable)
+    for (const t of r.body.threads as Json[]) {
+      const f = await call(
+        postFollowUp(
+          req("POST", `/api/threads/${t.id}`, { message: "More?", workflow: "ask" }),
+          params({ id: t.id }),
+        ),
+      );
+      expect([t.question, f.status, f.body.error.code]).toEqual(
+        t.available ? [t.question, 503, "ai_unavailable"] : [t.question, 404, "unknown_subject"],
+      );
+    }
   });
 
   test("DELETE /api/notes/threads/:id removes that thread's notes only; the conversation stays", async () => {

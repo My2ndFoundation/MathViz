@@ -69,8 +69,10 @@ export interface NoteThread {
   kind: "tool" | "program" | "library";
   subject: NoteSubject | null;
   group: { id: string; label: { en: string; zh: string } } | null;
-  /** Locale-less path back to the exercise (or /ask); null when the content no longer has it. */
+  /** Locale-less path back to this conversation (its exercise, or /ask); null when the content no longer has it. */
   href: string | null;
+  /** False when the content no longer has one of its subjects: no follow-up is possible. */
+  available: boolean;
 }
 
 /** The notes page's filter value for library conversations (lib/server/qa LIBRARY_GROUP). */

@@ -556,8 +556,11 @@ export const LIBRARY_GROUP = "library";
  * (the first message she wrote), the date of its newest saved answer, how many answers are saved,
  * how many questions she asked after the first saved one, what it is about (`subject`: the
  * program, else the tool, else the library), the catalog group that belongs to, and the page to
- * go back to (locale-less; `/ask?thread=<id>` reopens a library conversation; null when the content
- * no longer has it).
+ * go back to (locale-less, always naming this conversation: `/ask?thread=<id>` for the library,
+ * `/tool/<t>?prog=<p>&thread=<id>` or `/tool/<t>?thread=<id>` otherwise; when the program's tool
+ * is gone, a tool the thread is also about that the content still has; null when none is left).
+ * `available` is false when the installed content no longer has one of its subjects: a follow-up
+ * would be refused (404 unknown_subject), so the page does not offer one.
  */
 export interface NoteThreadView {
   id: string;
@@ -570,6 +573,7 @@ export interface NoteThreadView {
   subject: SubjectView | null;
   group: { id: string; label: { en: string; zh: string } } | null;
   href: string | null;
+  available: boolean;
 }
 
 /** The subject a thread is listed under: the library, else its first program (or blank's), else its first tool. */
@@ -597,29 +601,40 @@ function noteThreadView(
   const first = msgs.findIndex((m) => m.note_id !== null);
   const followUps = first < 0 ? 0 : msgs.slice(first + 1).filter((m) => m.role === "user").length;
   const notes = msgs.filter((m) => m.note_id !== null).length;
-  const subject = primarySubject(subjectViews(app, threadSubjects(db, row.id)));
+  const had = threadSubjects(db, row.id);
+  const views = subjectViews(app, had);
+  const subject = primarySubject(views);
   const kind = subject?.type === "library" ? "library" : subject?.programId ? "program" : "tool";
+  // a follow-up re-checks every subject the thread has (plan → subjectExists); the library always fits
+  const available = kind === "library" || had.every((s) => subjectExists(app, s));
+  const thread = `thread=${encodeURIComponent(row.id)}`;
   let group: NoteThreadView["group"] = null;
   let href: string | null = null;
-  if (kind === "library") href = `/ask?thread=${encodeURIComponent(row.id)}`;
-  const toolId = subject?.toolId ?? null;
-  const tool = toolId
-    ? db
-        .prepare(
-          `SELECT i.id, i.grp, g.label_en, g.label_zh FROM catalog_items i
-             LEFT JOIN catalog_groups g ON g.id = i.grp WHERE i.id = ?`,
-        )
-        .get<{ id: string; grp: string; label_en: string | null; label_zh: string | null }>(toolId)
-    : undefined;
+  if (kind === "library") href = `/ask?${thread}`;
+  const toolRow = db.prepare(
+    `SELECT i.id, i.grp, g.label_en, g.label_zh FROM catalog_items i
+       LEFT JOIN catalog_groups g ON g.id = i.grp WHERE i.id = ?`,
+  );
+  type ToolRow = { id: string; grp: string; label_en: string | null; label_zh: string | null };
+  // the subject's own tool, else (its program gone) a tool the thread is also about, as the queue does
+  const own = subject?.toolId ? toolRow.get<ToolRow>(subject.toolId) : undefined;
+  const tool =
+    own ??
+    (kind === "library"
+      ? undefined
+      : views
+          .filter((v) => v.type === "tool")
+          .map((v) => toolRow.get<ToolRow>(v.id))
+          .find((t) => t !== undefined));
   if (tool) {
     group = {
       id: tool.grp,
       label: { en: tool.label_en ?? tool.grp, zh: tool.label_zh ?? tool.grp },
     };
     href =
-      kind === "program" && subject?.programId
-        ? `/tool/${encodeURIComponent(tool.id)}?prog=${encodeURIComponent(subject.programId)}`
-        : `/tool/${encodeURIComponent(tool.id)}`;
+      own && kind === "program" && subject?.programId
+        ? `/tool/${encodeURIComponent(tool.id)}?prog=${encodeURIComponent(subject.programId)}&${thread}`
+        : `/tool/${encodeURIComponent(tool.id)}?${thread}`;
   }
   return {
     id: row.id,
@@ -632,6 +647,7 @@ function noteThreadView(
     subject,
     group,
     href,
+    available,
   };
 }
 
