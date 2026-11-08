@@ -3,11 +3,15 @@ import path from "node:path";
 import { expect, type Frame, type Page, test } from "@playwright/test";
 import { expectNoNewWindows, hookWindowOpen } from "./new-windows";
 import {
+  askSubject,
   type FakePlatformProcess,
+  frameReady,
   freePort,
+  IS_PYTHON,
   type RunningApp,
   startApp,
   startFakePlatform,
+  TARGET_INFO,
 } from "./setup";
 
 /**
@@ -26,6 +30,13 @@ const catalog = (): Catalog => JSON.parse(readFileSync(process.env.E2E_CATALOG a
 const nthTool = (n: number) =>
   [...catalog().items].sort((a, b) => a.order - b.order)[n]?.id as string;
 const firstTool = () => nthTool(0);
+/** The first tool's English title, from the pack (a library search for it finds it). */
+const firstToolTitle = (): string =>
+  (
+    JSON.parse(readFileSync(process.env.E2E_CATALOG as string, "utf8")) as {
+      items: { id: string; title: { en: string } }[];
+    }
+  ).items.find((i) => i.id === firstTool())?.title.en as string;
 const programTool = (programId: string): string =>
   JSON.parse(
     readFileSync(
@@ -69,16 +80,14 @@ const toolFrame = async (page: Page): Promise<Frame> => {
 
 const newWindowLinks = (page: Page) => page.locator('[target="_blank"], [target="_new"]').count();
 
-test("ask panel on a python tool page: answer shown, saved as a note; /notes lists it and search filters it", async ({
+test("ask panel on a tool page: answer shown, saved as a note; /notes lists it and search filters it", async ({
   page,
 }) => {
   await page.goto(`${app.base}/en/tool/${firstTool()}`);
-  const frameEl = page.getByTestId("tool-frame");
-  await expect(frameEl).toHaveAttribute("data-py-prog", /./);
-  const prog = (await frameEl.getAttribute("data-py-prog")) as string;
+  const subject = await askSubject(page, firstTool());
   const panel = page.getByTestId("ask-panel");
-  await expect(panel.getByTestId("ask-context")).toContainText(prog);
-  await expect(panel.getByTestId("ask-submit")).toHaveText("Ask about this program");
+  await expect(panel.getByTestId("ask-context")).toContainText(subject.context);
+  await expect(panel.getByTestId("ask-submit")).toHaveText(subject.askLabel);
 
   await panel.getByTestId("ask-input").fill("Why is it written this way?");
   await panel.getByTestId("ask-submit").click();
@@ -88,10 +97,10 @@ test("ask panel on a python tool page: answer shown, saved as a note; /notes lis
   await expect(panel.locator('[data-testid=qa-message][data-role="user"]')).toHaveText(
     /Why is it written this way\?/,
   );
-  // the answer cites the program it was about: a link to it inside its tool
+  // the answer cites what it was about: python's program inside its tool, else the tool
   await expect(answer.getByTestId("citation")).toHaveAttribute(
     "href",
-    `/en/tool/${programTool(prog)}?prog=${prog}`,
+    IS_PYTHON ? `/en/tool/${programTool(subject.id)}?prog=${subject.id}` : `/en${subject.href}`,
   );
   await answer.getByTestId("save-note").click();
   await expect(answer.getByTestId("note-saved")).toBeVisible();
@@ -129,7 +138,7 @@ test("hiding the ask panel keeps the conversation: ask, hide at once, show, the 
   page,
 }) => {
   await page.goto(`${app.base}/en/tool/${firstTool()}`);
-  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
+  await frameReady(page);
   const panel = page.getByTestId("ask-panel");
   await panel.getByTestId("ask-input").fill("What if I hide the panel now?");
   await panel.getByTestId("ask-submit").click();
@@ -160,7 +169,7 @@ test("the top-bar Ask toggle: hides and shows the panel, survives a reload, only
   page,
 }) => {
   await page.goto(`${app.base}/en/tool/${firstTool()}`);
-  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
+  await frameReady(page);
   const panel = page.getByTestId("ask-panel");
   const toggle = page.getByTestId("ask-toggle");
   await expect(panel).toBeVisible();
@@ -187,7 +196,7 @@ test("the top-bar Ask toggle: hides and shows the panel, survives a reload, only
   await expect(page.getByTestId("ask-open")).toHaveCount(0);
   // remembered across a reload
   await page.reload();
-  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
+  await frameReady(page);
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await expect(panel).toBeHidden();
   await toggle.click();
@@ -214,7 +223,7 @@ test("the ask panel's left edge resizes it: drag, clamp, keyboard, reload, reset
   page,
 }) => {
   await page.goto(`${app.base}/en/tool/${firstTool()}`);
-  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
+  await frameReady(page);
   const wrap = page.locator(".ask-wrap");
   const frame = page.getByTestId("tool-frame");
   const handle = page.getByTestId("ask-resize");
@@ -251,7 +260,7 @@ test("the ask panel's left edge resizes it: drag, clamp, keyboard, reload, reset
   expect(await frame.evaluate((f) => getComputedStyle(f).pointerEvents)).toBe("auto");
   // remembered across a reload
   await page.reload();
-  await expect(frame).toHaveAttribute("data-py-prog", /./);
+  await frameReady(page);
   await expect(handle).toHaveAttribute("aria-valuenow", "440");
   expect(await width()).toBe(440);
   // clamped: the tool page keeps at least 480 px, the panel at least 280 px
@@ -287,6 +296,7 @@ test("the ask panel's left edge resizes it: drag, clamp, keyboard, reload, reset
 });
 
 test("the hint button is disabled outside fill-in mode", async ({ page }) => {
+  test.skip(!IS_PYTHON, "python only: the hint is about a blank");
   await page.goto(`${app.base}/en/tool/${firstTool()}`);
   const frameEl = page.getByTestId("tool-frame");
   const frame = await toolFrame(page);
@@ -306,6 +316,7 @@ test("the hint button is disabled outside fill-in mode", async ({ page }) => {
 test("the hint button is enabled in fill-in mode with a blank focused, and a hint comes back", async ({
   page,
 }) => {
+  test.skip(!IS_PYTHON, "python only: the hint is about a blank");
   await page.goto(`${app.base}/en/tool/${firstTool()}`);
   const frameEl = page.getByTestId("tool-frame");
   const frame = await toolFrame(page);
@@ -333,7 +344,7 @@ test("the ask panel reopens the conversation: ask, reload, the Q&A is there and 
 }) => {
   // a tool no earlier test asked about: nothing to reopen yet, so the counts below are this test's
   await page.goto(`${app.base}/en/tool/${nthTool(1)}`);
-  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
+  await frameReady(page);
   const panel = page.getByTestId("ask-panel");
   const users = panel.locator('[data-testid=qa-message][data-role="user"]');
   const answers = panel.locator('[data-testid=qa-message][data-role="assistant"]');
@@ -344,7 +355,7 @@ test("the ask panel reopens the conversation: ask, reload, the Q&A is there and 
   await expect(panel.getByTestId("thinking")).toHaveCount(0);
 
   await page.reload();
-  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
+  await frameReady(page);
   await expect(users).toHaveCount(1);
   await expect(users.first()).toHaveText(/Will this still be here after a reload\?/);
   await expect(answers.first()).toContainText("which kind of division");
@@ -358,12 +369,18 @@ test("the ask panel reopens the conversation: ask, reload, the Q&A is there and 
   await expect(users.last()).toHaveText(/And a follow-up\?/);
 });
 
-test("/ask: the answer's citation opens /tool/<id>?prog=<programId> in place", async ({ page }) => {
+test("/ask: the answer's citation opens its page in place (python: /tool/<id>?prog=<programId>)", async ({
+  page,
+}) => {
   await hookWindowOpen(page);
   await page.goto(`${app.base}/en`);
   await page.getByTestId("nav-ask").click();
   await expect(page).toHaveURL(`${app.base}/en/ask`);
-  await page.getByTestId("library-input").fill("Fahrenheit");
+  await expect(page.getByTestId("library-input")).toHaveAttribute(
+    "placeholder",
+    TARGET_INFO.libraryExample.en,
+  );
+  await page.getByTestId("library-input").fill(IS_PYTHON ? "Fahrenheit" : firstToolTitle());
   await page.getByTestId("library-submit").click();
   const answer = page.locator('[data-testid=qa-message][data-role="assistant"]');
   await expect(answer).toContainText("worked program", { timeout: 30_000 });
@@ -374,27 +391,37 @@ test("/ask: the answer's citation opens /tool/<id>?prog=<programId> in place", a
   await expect(answer).toContainText("https://docs.python.org/3/");
   await expectNoNewWindows(page);
 
-  const cite = answer.locator('[data-testid=citation][data-id^="program:"]').first();
-  const programId = ((await cite.getAttribute("data-id")) as string).slice("program:".length);
-  const href = `/en/tool/${programTool(programId)}?prog=${programId}`;
-  await expect(cite).toHaveAttribute("href", href);
-  await cite.click();
-  await expect(page).toHaveURL(`${app.base}${href}`);
-  await expect(page.getByTestId("tool-frame")).toHaveAttribute(
-    "src",
-    new RegExp(`[?&]prog=${programId}(&|$)`),
-  );
+  if (IS_PYTHON) {
+    const cite = answer.locator('[data-testid=citation][data-id^="program:"]').first();
+    const programId = ((await cite.getAttribute("data-id")) as string).slice("program:".length);
+    const href = `/en/tool/${programTool(programId)}?prog=${programId}`;
+    await expect(cite).toHaveAttribute("href", href);
+    await cite.click();
+    await expect(page).toHaveURL(`${app.base}${href}`);
+    await expect(page.getByTestId("tool-frame")).toHaveAttribute(
+      "src",
+      new RegExp(`[?&]prog=${programId}(&|$)`),
+    );
+  } else {
+    // no programs here: the tutor cites a tool, a link to its page
+    await expect(answer.locator('[data-testid=citation][data-id^="program:"]')).toHaveCount(0);
+    const cite = answer.locator('[data-testid=citation][data-id^="tool:"]').first();
+    const toolId = ((await cite.getAttribute("data-id")) as string).slice("tool:".length);
+    const href = `/en/tool/${toolId}`;
+    await expect(cite).toHaveAttribute("href", href);
+    await cite.click();
+    await expect(page).toHaveURL(`${app.base}${href}`);
+    await expect(page.getByTestId("tool-frame")).toHaveAttribute("src", /\/tools\/[^?]+\?lang=en/);
+  }
   expect(page.context().pages()).toHaveLength(1);
 });
 
-test("the conversation switcher: two conversations on one program, pick the older, a follow-up goes to it", async ({
+test("the conversation switcher: two conversations on one subject, pick the older, a follow-up goes to it", async ({
   page,
 }) => {
   // a tool no earlier test asked about, so the counts are this test's
   await page.goto(`${app.base}/en/tool/${nthTool(2)}`);
-  const frameEl = page.getByTestId("tool-frame");
-  await expect(frameEl).toHaveAttribute("data-py-prog", /./);
-  const prog = (await frameEl.getAttribute("data-py-prog")) as string;
+  const subject = await askSubject(page, nthTool(2));
   const panel = page.getByTestId("ask-panel");
   const users = panel.locator('[data-testid=qa-message][data-role="user"]');
   const answers = panel.locator('[data-testid=qa-message][data-role="assistant"]');
@@ -455,7 +482,7 @@ test("the conversation switcher: two conversations on one program, pick the olde
   const rows = await page.evaluate(
     async (s) =>
       (await (await fetch(`/api/threads?subject=${encodeURIComponent(s)}&list=1`)).json()).threads,
-    `program:${prog}`,
+    subject.key,
   );
   expect(
     rows.map((r: { title: string; messageCount: number }) => [r.title, r.messageCount]),
@@ -479,6 +506,6 @@ test("the conversation switcher: two conversations on one program, pick the olde
 
   // in Chinese
   await page.goto(`${app.base}/zh/tool/${nthTool(2)}`);
-  await expect(frameEl).toHaveAttribute("data-py-prog", /./);
+  await frameReady(page);
   await expect(switcher).toHaveText("对话（2）");
 });

@@ -1,7 +1,7 @@
 # Viz Learn Buddy for Cryptography
 
-> MathViz commit **ac34b59** . Counts: 27 pages (cryptography/cryptography-tools.json). Follows python (design §10, phase 2). App manifest version 0.1.0.
-> App `app.primeforge.mathviz.crypto`, manifest `pfapp/targets/crypto/manifest.json` (version 0.1.0, `minDesktopVersion` 1.45.0, capabilities `ai`, `addons`, opens in a PrimeForge window 1280 × 820). In-app name (`target.json`): en “Viz Learn Buddy for Cryptography”, zh “Viz Learn Buddy · 密码学可视化”.
+> MathViz commit **ac34b59** . Counts: 27 pages (cryptography/cryptography-tools.json). Follows python (design §10, phase 2). App manifest version 1.0.0.
+> App `app.primeforge.mathviz.crypto`, manifest `pfapp/targets/crypto/manifest.json` (version 1.0.0, `minDesktopVersion` 1.45.0, capabilities `ai`, `addons`, opens in a PrimeForge window 1280 × 820). In-app name (`target.json`): en “Viz Learn Buddy for Cryptography”, zh “Viz Learn Buddy · 密码学可视化”.
 > Remaining ⟦OWNER DECISION⟧ items are open on purpose; see `README.md` §5. Price, billing and separate add-on products are decided (README, "Owner rulings").
 
 ## A. Console → Products → Add a product (creation form, field order of `apps/console/app/products/new/page.tsx`)
@@ -56,7 +56,7 @@ dict(folder="mathviz", name="crypto", ground="../main-images/mathviz/crypto-1920
 - Counts: title “Viz Learn Buddy” (15), “for Cryptography” (16); pitch “From Caesar to quantum” (22), “key distribution” (16) (≈25 per line); points “27 pages in 5 chapters” (22), “Classical, modern and quantum” (29), “Ask the tutor about any page” (28) (≤ ≈32).
 - Words checked against: cryptography/cryptography-tools.json at ac34b59 (27 tools; chapter counts 13/2/1/6/5); cryptography/app.html CHAPTER_LABELS.
 
-**store-gallery-image** (1920 × 1080 PNGs; the skill decides the story): shoot **Viz Learn Buddy for Cryptography 0.1.0** with this pack's published version, interface **English**. Headline claims the code supports, with the screen that proves each (≤ ≈35 chars):
+**store-gallery-image** (1920 × 1080 PNGs; the skill decides the story): shoot **Viz Learn Buddy for Cryptography 1.0.0** with this pack's published version, interface **English**. Headline claims the code supports, with the screen that proves each (≤ ≈35 chars):
 
 - “Follow one keypress through Enigma” (34 chars) — shown by: *Enigma* (crypto-enigma) with one keypress traced through plugboard, rotors and reflector.
 - “Thirteen classical ciphers” (26 chars) — shown by: *The Vigenère Family* (crypto-vigenere-family) mid-encryption.

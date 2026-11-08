@@ -161,7 +161,7 @@ Folder naming is my assumption: one `mathviz` folder per asset type holding all 
 - Content packs get their **own add-on-kind products** (so the Desktop row and in-app *In the PrimeForge store*
   card show a real name, summary and icon) rather than being bundled under the app product.
 - Pack names "Viz Learn Buddy for <Subject>: Content Pack"; the app calls it a "content pack" / 内容包 everywhere.
-- Listed versions: apps 0.1.0 (manifests), first pack version 1.0.0 with `minAppVersion` 0.1.0 (build manual).
+- Listed versions: apps 1.0.0 (manifests; python 1.0.1 after a same-version reinstall), first pack version 1.0.0 with `minAppVersion` = the app's version when the pack is built (build manual).
 - "PrimeForge Desktop 1.45.0 or newer" from `minDesktopVersion`; no OS is named because nothing at hand states
   which platforms the MathViz apps are released for.
 

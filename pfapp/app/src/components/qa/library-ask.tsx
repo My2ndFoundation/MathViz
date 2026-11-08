@@ -21,7 +21,17 @@ function setThreadParam(id: string | null) {
  * continue it; the URL follows the conversation shown, so a reload keeps it, and a new URL (the
  * sidebar's bare `/ask`, the AI queue's `?thread=`) changes the conversation shown.
  */
-export function LibraryAsk({ locale }: { locale: Locale }) {
+export function LibraryAsk({
+  locale,
+  programs,
+  example,
+}: {
+  locale: Locale;
+  /** Whether this app's library has programs (python) as well as tools: the intro says which. */
+  programs: boolean;
+  /** The placeholder question, about one of this app's tools (target.json libraryExample). */
+  example: string;
+}) {
   const t = MESSAGES[locale].qa;
   const inputId = useId();
   const [text, setText] = useState("");
@@ -66,7 +76,7 @@ export function LibraryAsk({ locale }: { locale: Locale }) {
     <section className="qa-page" data-testid="library-ask">
       <header className="qa-page-head">
         <h1>{t.libraryTitle}</h1>
-        <p>{t.libraryIntro}</p>
+        <p>{programs ? t.libraryIntro : t.libraryIntroTools}</p>
       </header>
       <ThreadView
         thread={thread}
@@ -86,7 +96,7 @@ export function LibraryAsk({ locale }: { locale: Locale }) {
           value={text}
           rows={3}
           maxLength={4000}
-          placeholder={t.libraryPlaceholder}
+          placeholder={example}
           disabled={busy}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {

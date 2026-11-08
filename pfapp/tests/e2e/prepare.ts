@@ -8,7 +8,7 @@
  *                                                       payload/}: the development store's offer
  *                                                       (MATHVIZ_FAKE_ADDONS_DIR, lib/addons/fake)
  *
- * The python pack is extracted from this checkout with requireClean: false, so a dirty working
+ * The pack of E2E_TARGET (default python) is extracted from this checkout with requireClean: false, so a dirty working
  * tree can still run the tests.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -18,13 +18,13 @@ import { unpackContentAddon } from "../../app/src/lib/content/pfaddon";
 import { loadTarget } from "../../app/src/lib/target";
 import { buildPfaddon, extractPayload } from "../helpers/content-fixtures";
 
-const PY = loadTarget("python");
+const TARGET = loadTarget(process.env.E2E_TARGET ?? "python");
 const E2E_VERSION = "1.0.0";
 
 const [cmd, a, b] = process.argv.slice(2);
 if (cmd === "pack") {
-  const payload = await extractPayload("python");
-  const pfaddon = buildPfaddon(payload, PY.appId, E2E_VERSION);
+  const payload = await extractPayload(TARGET.id);
+  const pfaddon = buildPfaddon(payload, TARGET.appId, E2E_VERSION);
   console.log(
     JSON.stringify({
       payload,
@@ -34,9 +34,9 @@ if (cmd === "pack") {
     }),
   );
 } else if (cmd === "install" && a && b) {
-  console.log(JSON.stringify({ version: await importAddonFile(a, b, PY.appId) }));
+  console.log(JSON.stringify({ version: await importAddonFile(a, b, TARGET.appId) }));
 } else if (cmd === "store" && a && b) {
-  const { addon, manifestText, payload } = unpackContentAddon(readFileSync(a), PY.appId);
+  const { addon, manifestText, payload } = unpackContentAddon(readFileSync(a), TARGET.appId);
   const root = join(b, "content");
   mkdirSync(join(root, "payload"), { recursive: true });
   writeFileSync(join(root, "addon.json"), manifestText);

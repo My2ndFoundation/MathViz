@@ -3,7 +3,9 @@ import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import {
   type FakePlatformProcess,
+  frameReady,
   freePort,
+  IS_PYTHON,
   type RunningApp,
   startApp,
   startFakePlatform,
@@ -95,7 +97,7 @@ test("a question being answered shows in the indicator and the queue; Cancel the
   page,
 }) => {
   await page.goto(`${app.base}/en/tool/${firstTool()}`);
-  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
+  await frameReady(page);
   const indicator = page.getByTestId("ai-indicator");
   await expect(indicator).toHaveAttribute("data-tone", "ok");
   await expect(page.getByTestId("ai-indicator-count")).toHaveText("0");
@@ -123,11 +125,13 @@ test("a question being answered shows in the indicator and the queue; Cancel the
   await expect(row).toHaveAttribute("data-status", /^(queued|running)$/);
   await expect(row).toContainText("Question");
   await expect(row.getByTestId("ai-queue-title")).toHaveText(/\[hold\] Please wait on this one/);
-  // asked on a python tool page, so about a program: its link opens that program in its tool,
-  // and this conversation in its ask panel
+  // its link opens what it was asked about (python: the program in its tool; elsewhere the
+  // tool), and this conversation in its ask panel
   await expect(row.getByTestId("ai-queue-title")).toHaveAttribute(
     "href",
-    /^\/en\/tool\/[^?]+\?prog=[^&]+&thread=[^&]+$/,
+    IS_PYTHON
+      ? /^\/en\/tool\/[^?]+\?prog=[^&]+&thread=[^&]+$/
+      : new RegExp(`^/en/tool/${firstTool()}\\?thread=[^&]+$`),
   );
   await expect(queue.getByTestId("ai-queue-settings")).toHaveAttribute("href", "/en/settings#ai");
   await shot(page, "b2-queue-active.png");
@@ -253,7 +257,7 @@ test("the open queue panel is above the top-bar Ask toggle, the collapse edge an
 }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`${app.base}/en/tool/${firstTool()}`);
-  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
+  await frameReady(page);
   await page.getByTestId("ask-hide").click();
   const askToggle = page.getByTestId("ask-toggle");
   await expect(askToggle).toHaveAttribute("aria-pressed", "false");

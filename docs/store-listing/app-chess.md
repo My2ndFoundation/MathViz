@@ -1,7 +1,7 @@
 # Viz Learn Buddy for Chess
 
-> MathViz commit **ac34b59** . Counts: 5 pages (chess/chess-tools.json). Follows python (design §10, phase 2). App manifest version 0.1.0.
-> App `app.primeforge.mathviz.chess`, manifest `pfapp/targets/chess/manifest.json` (version 0.1.0, `minDesktopVersion` 1.45.0, capabilities `ai`, `addons`, opens in a PrimeForge window 1280 × 820). In-app name (`target.json`): en “Viz Learn Buddy for Chess”, zh “Viz Learn Buddy · 国际象棋算法”.
+> MathViz commit **ac34b59** . Counts: 5 pages (chess/chess-tools.json). Follows python (design §10, phase 2). App manifest version 1.0.0.
+> App `app.primeforge.mathviz.chess`, manifest `pfapp/targets/chess/manifest.json` (version 1.0.0, `minDesktopVersion` 1.45.0, capabilities `ai`, `addons`, opens in a PrimeForge window 1280 × 820). In-app name (`target.json`): en “Viz Learn Buddy for Chess”, zh “Viz Learn Buddy · 国际象棋算法”.
 > Remaining ⟦OWNER DECISION⟧ items are open on purpose; see `README.md` §5. Price, billing and separate add-on products are decided (README, "Owner rulings").
 
 ## A. Console → Products → Add a product (creation form, field order of `apps/console/app/products/new/page.tsx`)
@@ -56,7 +56,7 @@ dict(folder="mathviz", name="chess", ground="../main-images/mathviz/chess-1920x1
 - Counts: title “Viz Learn Buddy” (15), “for Chess” (9); pitch “Chess as geometry,” (18), “search and algorithms” (21) (≈25 per line); points “5 pages, rules to search” (24), “30 games from 1750 to 2017” (26), “Source code beside the board” (28) (≤ ≈32).
 - Words checked against: chess/chess-tools.json at ac34b59 (5 tools; desc of chess-game-replay: 30 games 1750–2017; chess-search-minimax and chess-board-algorithms: source stepping).
 
-**store-gallery-image** (1920 × 1080 PNGs; the skill decides the story): shoot **Viz Learn Buddy for Chess 0.1.0** with this pack's published version, interface **English**. Headline claims the code supports, with the screen that proves each (≤ ≈35 chars):
+**store-gallery-image** (1920 × 1080 PNGs; the skill decides the story): shoot **Viz Learn Buddy for Chess 1.0.0** with this pack's published version, interface **English**. Headline claims the code supports, with the screen that proves each (≤ ≈35 chars):
 
 - “A piece is a set of vectors” (27 chars) — shown by: *Geometry of Movement* (chess-moves-geometry) with a knight on d4 and the minimum-move field stood up as columns.
 - “Thirty games, one line per piece” (32 chars) — shown by: *Reading a Game* (chess-game-replay) with a game loaded and the piece traces drawn along the move axis; the evaluation curves visible.

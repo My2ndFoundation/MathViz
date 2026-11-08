@@ -14,6 +14,8 @@ export interface Target {
   subject: { en: string; zh: string };
   /** What its content pack is called in the top bar ("Python content"). */
   pack: { en: string; zh: string };
+  /** The example question in "Ask the whole library" (about one of this target's tools). */
+  libraryExample: { en: string; zh: string };
   port: number;
   defaultLang: "en";
   groupField: "cat" | "phase" | "chapter" | "module";

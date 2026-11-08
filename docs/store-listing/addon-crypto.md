@@ -1,7 +1,7 @@
 # Viz Learn Buddy for Cryptography: Content Pack
 
-> MathViz commit **ac34b59** . Counts: 27 pages (cryptography/cryptography-tools.json). Follows python (design §10, phase 2). App manifest version 0.1.0.
-> Content add-on `app.primeforge.mathviz.crypto/content` of **Viz Learn Buddy for Cryptography** (`app.primeforge.mathviz.crypto`). `addon.json` is written by PrimeForge-Desktop `scripts/build-mathviz-addon.ts`: `kind: "content"`, title “Viz Learn Buddy for Cryptography content”, first version `1.0.0`, `minAppVersion` = the app manifest's version (0.1.0 today) (`docs/build-manual.md:880-920`).
+> MathViz commit **ac34b59** . Counts: 27 pages (cryptography/cryptography-tools.json). Follows python (design §10, phase 2). App manifest version 1.0.0.
+> Content add-on `app.primeforge.mathviz.crypto/content` of **Viz Learn Buddy for Cryptography** (`app.primeforge.mathviz.crypto`). `addon.json` is written by PrimeForge-Desktop `scripts/build-mathviz-addon.ts`: `kind: "content"`, title “Viz Learn Buddy for Cryptography content”, first version `1.0.0`, `minAppVersion` = the app manifest's version (1.0.0 today) (`docs/build-manual.md:880-920`).
 > Remaining ⟦OWNER DECISION⟧ items are open on purpose; see `README.md` §5. Price, billing and separate add-on products are decided (README, "Owner rulings").
 
 ## A. Console → Products → Add a product (creation form, field order of `apps/console/app/products/new/page.tsx`)
@@ -58,7 +58,7 @@ dict(folder="mathviz", name="crypto-content", ground="../main-images/mathviz/cry
 - Counts: title “Cryptography” (12), “Content Pack” (12); pitch “27 pages in 5 chapters” (22) (≈25 per line); points “13 classical ciphers” (20), “Enigma, AES, RSA, BB84” (22), “The pages the app needs” (23) (≤ ≈32).
 - Words checked against: 27 pages (cryptography/cryptography-tools.json) at ac34b59. The skill must recount against the built `payload/` of the pack being published.
 
-**store-gallery-image** (1920 × 1080 PNGs; the skill decides the story): shoot **Viz Learn Buddy for Cryptography 0.1.0** with this pack's published version, interface **English**. Headline claims the code supports, with the screen that proves each (≤ ≈35 chars):
+**store-gallery-image** (1920 × 1080 PNGs; the skill decides the story): shoot **Viz Learn Buddy for Cryptography 1.0.0** with this pack's published version, interface **English**. Headline claims the code supports, with the screen that proves each (≤ ≈35 chars):
 
 - “27 pages in 5 chapters” (22 chars) — shown by: The sidebar with the five chapters fully expanded beside *Caesar Cipher*.
 - “Enigma, wheel by wheel” (22 chars) — shown by: *Enigma* with the rotor stepping visible.
@@ -79,7 +79,7 @@ First paragraph = the store card excerpt (cut at 200)and the Desktop add-on row'
 
 ### Good to know
 
-- **Needs Viz Learn Buddy for Cryptography** (version 0.1.0 or newer), installed from the store first.
+- **Needs Viz Learn Buddy for Cryptography** (version 1.0.0 or newer), installed from the store first.
 - **Installs from inside the app:** the first time you open the app, press *Install from the store*; updates appear in *Settings → Content pack*.
 - **The same pages as the MathViz website,** byte for byte. New and updated pages arrive as updates to this pack, without a new version of the app.
 ```
@@ -99,7 +99,7 @@ First paragraph = the store card excerpt (cut at 200)and the Desktop add-on row'
 
 ### 说明
 
-- **需要 Viz Learn Buddy for Cryptography**（0.1.0 或更新版本），请先从商店安装应用。
+- **需要 Viz Learn Buddy for Cryptography**（1.0.0 或更新版本），请先从商店安装应用。
 - **在应用里就能安装**：第一次打开应用时点 *从商店安装*；有更新时会出现在 *设置 → 内容包* 里。
 - **与 MathViz 网站上的页面逐字节相同。** 新增和更新的页面会作为这个内容包的更新推出，不需要等应用发新版。
 ```

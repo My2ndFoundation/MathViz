@@ -2,11 +2,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { expectNoNewWindows, hookWindowOpen } from "./new-windows";
-import { fakeStoreEnv, type RunningApp, startApp, storeDir } from "./setup";
+import { fakeStoreEnv, type RunningApp, startApp, storeDir, TARGET, TARGET_INFO } from "./setup";
 
 /**
  * Settings and the store install (PR B: items 4 and 5 of the owner's AI feedback). The store is
- * the development fake (fakeStoreEnv) serving the same python pack the other specs import; counts
+ * the development fake (fakeStoreEnv) serving the same pack (E2E_TARGET's) the other specs import; counts
  * and ids come from the extracted catalog (E2E_CATALOG), never from here.
  */
 
@@ -79,16 +79,16 @@ test("the top bar shows the app's version (its manifest) and the served pack's, 
 }) => {
   // the app's version is the target manifest's, read here from the file, never written in
   const manifest = JSON.parse(
-    readFileSync(path.resolve(__dirname, "..", "..", "targets", "python", "manifest.json"), "utf8"),
+    readFileSync(path.resolve(__dirname, "..", "..", "targets", TARGET, "manifest.json"), "utf8"),
   ) as { version: string };
   const pack = process.env.E2E_CONTENT_VERSION as string;
   await page.goto(`${base()}/en/tool/${encodeURIComponent(firstTool())}`);
   const chip = page.getByTestId("topbar").getByTestId("version-chip");
   await expect(chip.getByTestId("version-app")).toHaveText(`App ${manifest.version}`);
-  await expect(chip.getByTestId("version-pack")).toHaveText(`Python content ${pack}`);
+  await expect(chip.getByTestId("version-pack")).toHaveText(`${TARGET_INFO.pack.en} ${pack}`);
   await expect(chip).toHaveAttribute(
     "title",
-    `App ${manifest.version} · Python content ${pack} — imported from a file`,
+    `App ${manifest.version} · ${TARGET_INFO.pack.en} ${pack} — imported from a file`,
   );
   await expect(chip).toHaveAttribute("href", "/en/settings#content");
   // the top bar stays one line with it
@@ -105,7 +105,7 @@ test("the top bar shows the app's version (its manifest) and the served pack's, 
   // Chinese
   await page.goto(`${base()}/zh/notes`);
   await expect(page.getByTestId("version-app")).toHaveText(`应用 ${manifest.version}`);
-  await expect(page.getByTestId("version-pack")).toHaveText(`Python 内容包 ${pack}`);
+  await expect(page.getByTestId("version-pack")).toHaveText(`${TARGET_INFO.pack.zh} ${pack}`);
   // a narrow window: no chip, the top bar still one line
   await page.setViewportSize({ width: 700, height: 800 });
   await expect(page.getByTestId("version-chip")).toBeHidden();

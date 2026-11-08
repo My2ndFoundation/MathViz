@@ -166,7 +166,7 @@ export const en = {
     libraryTitle: "Ask the whole library",
     libraryIntro:
       "The tutor searches every tool and program in this app and links to the ones it used.",
-    libraryPlaceholder: "For example: how does binary search keep its invariant?",
+    libraryIntroTools: "The tutor searches every tool in this app and links to the ones it used.",
     libraryAsk: "Ask the library",
     notesTitle: "Notes",
     notesList: "Saved conversations",
@@ -186,6 +186,7 @@ export const en = {
     notesPick: "Pick a conversation from the list.",
     notesBack: "All notes",
     openExercise: "Open the exercise",
+    openTool: "Open the tool",
     openLibrary: "Open “Ask the whole library”",
     deleteNotes: "Delete",
     deleteNotesLabel: "Delete this conversation’s saved answers",
