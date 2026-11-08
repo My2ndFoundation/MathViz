@@ -230,7 +230,7 @@ python 包约 15 MB、crypto 约 8 MB、math 约 6 MB、chess 约 5 MB，远低�
 - `capabilities: ["ai", "addons"]`；`ai.mcp.path` 指向应用的 MCP 端点（按 job 的一次性路径，照 MTB）。
 - workflows：`ask`（主题问答）与 `library`（问整个库）；python 另有 `hint`（挖空时要一条提示，比 `ask` 更严：只能用 `get_task` / `submit_answer`）。每个 workflow 的 `tools.allow` 列出它能用的 MCP 工具；`maxTurns` / `maxRuntimeSeconds` 照 MTB 的量级给（`library` 比 `ask` 宽）；`maxBudgetUsd` 填一个固定值（平台必填），不做任何预算界面（**用户定**）。
 - 引擎：Claude 与 Codex 都支持（**用户定**）——按平台的方式发引擎偏好（PFD `CLAUDE.md` 引擎一节；MTB 的做法），Codex 需要用户在 Desktop 里授权。只装了 Codex 又没授权时，界面要给出明确的提示，而不是一个失败的任务。
-- 声明 `ui.window`（§5.3）；`minDesktopVersion: "1.45.0"`；图标 `icon.svg` 照 PFD 的图标标准，从 `docs/logo.png` 的 M/V 标记派生，四个目标用网页版闭集里的四种 accent 区分。
+- 声明 `ui.window`（§5.3）；`minDesktopVersion: "1.45.0"`；图标 `icon.svg` 照 PFD 的图标标准，是 `docs/logo.png` 的 M/V 标记**按几何重画**的矢量图（2026-11-08 起；几何与 PFD `assets/logos/mathviz/make.py` 同一份，`scripts/icons.ts` 生成的字节与它相同。此前描的是 64 px 位图，边缘发毛），四个目标用网页版闭集里的四种 accent 区分。
 
 ## 8. 构建与发布（**用户定**：脚本放 PFD）
 
