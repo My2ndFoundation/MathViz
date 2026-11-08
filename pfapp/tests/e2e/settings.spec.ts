@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { expectNoNewWindows, hookWindowOpen } from "./new-windows";
 import { fakeStoreEnv, type RunningApp, startApp, storeDir } from "./setup";
@@ -47,6 +48,17 @@ test("Settings: the sidebar links to it; the AI reply language saves and survive
   await expect(page.getByTestId("settings-panel-content")).toBeHidden();
   await noNewWindows(page);
 
+  // left-aligned in the stage (24 px in, as Notes), not centred: on this wide window a centred
+  // 920 px column would start well over 100 px in
+  const left = async (id: string) =>
+    ((await page.getByTestId(id).boundingBox()) as { x: number }).x;
+  const stage = await left("stage");
+  const settings = page.getByTestId("settings");
+  expect(await left("settings")).toBe(stage);
+  expect(await settings.evaluate((el) => getComputedStyle(el).paddingLeft)).toBe("24px");
+  const menu = ((await page.locator(".set-menu").boundingBox()) as { x: number }).x;
+  expect(menu - stage).toBe(24);
+
   const aiLang = page.getByTestId("set-ai-lang");
   await expect(aiLang.getByLabel("Same as the page (default)")).toBeChecked();
   await aiLang.getByLabel("简体中文").check();
@@ -60,6 +72,45 @@ test("Settings: the sidebar links to it; the AI reply language saves and survive
   await expect(page.getByTestId("save-status")).toHaveText("Saved");
   expect((await (await page.request.get(`${base()}/api/settings`)).json()).aiLang).toBe("page");
   expect(errors).toEqual([]);
+});
+
+test("the top bar shows the app's version (its manifest) and the served pack's, and links to Settings → Content", async ({
+  page,
+}) => {
+  // the app's version is the target manifest's, read here from the file, never written in
+  const manifest = JSON.parse(
+    readFileSync(path.resolve(__dirname, "..", "..", "targets", "python", "manifest.json"), "utf8"),
+  ) as { version: string };
+  const pack = process.env.E2E_CONTENT_VERSION as string;
+  await page.goto(`${base()}/en/tool/${encodeURIComponent(firstTool())}`);
+  const chip = page.getByTestId("topbar").getByTestId("version-chip");
+  await expect(chip.getByTestId("version-app")).toHaveText(`App ${manifest.version}`);
+  await expect(chip.getByTestId("version-pack")).toHaveText(`Python content ${pack}`);
+  await expect(chip).toHaveAttribute(
+    "title",
+    `App ${manifest.version} · Python content ${pack} — imported from a file`,
+  );
+  await expect(chip).toHaveAttribute("href", "/en/settings#content");
+  // the top bar stays one line with it
+  expect(((await page.getByTestId("topbar").boundingBox()) as { height: number }).height).toBe(36);
+  await chip.click();
+  await expect(page).toHaveURL(`${base()}/en/settings#content`);
+  await expect(page.getByTestId("settings-panel-content")).toBeVisible();
+  await expect(page.getByTestId("set-installed-version")).toHaveText(`Version ${pack}`);
+  // from Settings itself: the hash changes and the content section shows
+  await page.goto(`${base()}/en/settings#ai`);
+  await expect(page.getByTestId("settings-panel-content")).toBeHidden();
+  await page.getByTestId("version-chip").click();
+  await expect(page.getByTestId("settings-panel-content")).toBeVisible();
+  // Chinese
+  await page.goto(`${base()}/zh/notes`);
+  await expect(page.getByTestId("version-app")).toHaveText(`应用 ${manifest.version}`);
+  await expect(page.getByTestId("version-pack")).toHaveText(`Python 内容包 ${pack}`);
+  // a narrow window: no chip, the top bar still one line
+  await page.setViewportSize({ width: 700, height: 800 });
+  await expect(page.getByTestId("version-chip")).toBeHidden();
+  expect(((await page.getByTestId("topbar").boundingBox()) as { height: number }).height).toBe(36);
+  await page.setViewportSize({ width: 1400, height: 900 });
 });
 
 test("Settings: the section is in the URL hash; the content section shows the installed version", async ({

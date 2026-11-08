@@ -37,6 +37,15 @@ export interface Thread {
   job: Job | null;
 }
 
+/** One row of GET /api/threads?subject=…&list=1 (the ask panel's conversation switcher). */
+export interface ThreadRow {
+  id: string;
+  title: string;
+  updatedAt: string;
+  messageCount: number;
+  hasNotes: boolean;
+}
+
 export interface Note {
   id: string;
   messageId: string;

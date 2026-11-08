@@ -37,6 +37,7 @@ import { getAiLang, getLang } from "./settings";
  *
  *   POST   /api/threads       {subjects, message, workflow, pyState?, locale?} → 202 {threadId, jobId}
  *   GET    /api/threads?subject=<tool|program>:<id>   {thread: <as GET /api/threads/:id> | null}
+ *   GET    /api/threads?subject=…&list=1   {threads: [{id, title, updatedAt, messageCount, hasNotes}]}
  *   GET    /api/threads/:id   {id, title, subjects, messages, job}
  *   POST   /api/threads/:id   {message, workflow, pyState?, locale?}   a follow-up → 202 {threadId, jobId}
  *   GET    /api/jobs/:id      {id, status, threadId, error} (one platform poll while it is open)
@@ -382,22 +383,67 @@ const lookupSchema = z
     return { type: v.slice(0, i) as "tool" | "program", id: v.slice(i + 1) };
   });
 
+/** Every thread a tool page may reopen for a subject: non-archived, about it, never a library thread. */
+const ABOUT_SUBJECT = `t.archived = 0
+          AND EXISTS (SELECT 1 FROM thread_subjects s
+                       WHERE s.thread_id = t.id AND s.subject_type = ? AND s.subject_id = ?)
+          AND NOT EXISTS (SELECT 1 FROM thread_subjects s
+                           WHERE s.thread_id = t.id AND s.subject_type = 'library')`;
+/** The ask panel's conversation switcher lists at most this many, newest first. */
+export const MAX_SUBJECT_THREADS = 50;
+
+/** One row of the ask panel's conversation switcher. */
+export interface SubjectThreadRow {
+  id: string;
+  title: string;
+  updatedAt: string;
+  messageCount: number;
+  hasNotes: boolean;
+}
+
 /**
  * The conversation a tool page reopens with: the newest (updated_at, then id) non-archived thread
  * about that tool or program, never a library thread. A program thread that has had a hint also
  * has the blank as a subject, but it keeps the program (a hint is asked with the program subject,
  * and plan() only adds to it), so it is still found here. An id with no thread is {thread: null}.
+ *
+ * With `&list=1`: every such thread instead, newest first, capped at MAX_SUBJECT_THREADS —
+ * {threads: [{id, title, updatedAt, messageCount, hasNotes}]} — for the panel's switcher, so an
+ * earlier conversation about the same program stays reachable.
  */
 export const findThread: Handler = (app, { query }) => {
   const s = parse(lookupSchema, query.get("subject"));
+  if (query.get("list") === "1") {
+    const rows = app.db
+      .prepare(
+        `SELECT t.id, t.title, t.updated_at,
+                (SELECT COUNT(*) FROM messages m WHERE m.thread_id = t.id) AS message_count,
+                EXISTS (SELECT 1 FROM notes n JOIN messages m ON m.id = n.message_id
+                         WHERE m.thread_id = t.id) AS has_notes
+           FROM threads t
+          WHERE ${ABOUT_SUBJECT}
+          ORDER BY t.updated_at DESC, t.id DESC LIMIT ?`,
+      )
+      .all<{
+        id: string;
+        title: string;
+        updated_at: string;
+        message_count: number;
+        has_notes: number;
+      }>(s.type, s.id, MAX_SUBJECT_THREADS);
+    const threads: SubjectThreadRow[] = rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      updatedAt: r.updated_at,
+      messageCount: Number(r.message_count),
+      hasNotes: Boolean(r.has_notes),
+    }));
+    return { body: { threads } };
+  }
   const row = app.db
     .prepare(
       `SELECT t.id FROM threads t
-        WHERE t.archived = 0
-          AND EXISTS (SELECT 1 FROM thread_subjects s
-                       WHERE s.thread_id = t.id AND s.subject_type = ? AND s.subject_id = ?)
-          AND NOT EXISTS (SELECT 1 FROM thread_subjects s
-                           WHERE s.thread_id = t.id AND s.subject_type = 'library')
+        WHERE ${ABOUT_SUBJECT}
         ORDER BY t.updated_at DESC, t.id DESC LIMIT 1`,
     )
     .get<{ id: string }>(s.type, s.id);

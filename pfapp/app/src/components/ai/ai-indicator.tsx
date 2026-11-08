@@ -198,7 +198,7 @@ export function AiIndicator({ locale }: { locale: Locale }) {
           {active}
         </span>
       </button>
-      {/* in document.body, above everything the shell positions (the Ask tab, the collapse edge,
+      {/* in document.body, above everything the shell positions (the ask panel, the collapse edge,
           the narrow sidebar), whatever stacking context the top bar makes (review I3) */}
       {open
         ? createPortal(

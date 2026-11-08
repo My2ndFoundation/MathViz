@@ -35,7 +35,8 @@ export interface ThreadSubject {
  * the thread again. No streaming (design §7.4): "thinking…" until the answer is there.
  * `restore(subject)` reopens the newest conversation about a tool or program, resuming the poll
  * if its job is still open; a restore overtaken by another restore, a reset or a question is dropped.
- * `open(id)` does the same for one thread by id (the notes page, a tool page's `?thread=`).
+ * `open(id)` does the same for one thread by id (the notes page, a tool page's `?thread=`, the ask
+ * panel's conversation switcher).
  */
 export function useThread(locale: Locale) {
   const [thread, setThread] = useState<Thread | null>(null);
@@ -211,7 +212,9 @@ export function useThread(locale: Locale) {
       if (fits && !fits(found)) return "refused";
       threadId.current = found.id;
       setThread(found);
-      if (found.job && OPEN_STATUSES.includes(found.job.status)) setJobId(found.job.id);
+      // a switch from another conversation: its wait and its failure are not this one's
+      setFailure(null);
+      setJobId(found.job && OPEN_STATUSES.includes(found.job.status) ? found.job.id : null);
       return "opened";
     },
     [locale],

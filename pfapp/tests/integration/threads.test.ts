@@ -30,6 +30,7 @@ import { CSRF_HEADER } from "../../app/src/lib/http/guard";
 import { MESSAGES } from "../../app/src/lib/i18n/locale";
 import { startAi } from "../../app/src/lib/server/ai";
 import { type AppContext, createAppContext, setAppContext } from "../../app/src/lib/server/context";
+import { MAX_SUBJECT_THREADS } from "../../app/src/lib/server/qa";
 import { setAiLang } from "../../app/src/lib/server/settings";
 import { loadTarget } from "../../app/src/lib/target";
 import { buildPfaddon, extractPayload, pickBlankProgram, tmp } from "../helpers/content-fixtures";
@@ -739,6 +740,106 @@ describe("GET /api/threads?subject= (the tool page reopens its conversation)", (
     expect((await find(`program:${PROG}`)).body.thread).toBeNull();
   });
 
+  test("&list=1: every conversation about the subject, newest first, with counts and a notes mark", async () => {
+    const { ctx: c, fake: f } = await start();
+    const list = async (subject: string) => {
+      const r = await call(
+        findThread(req("GET", `/api/threads?subject=${encodeURIComponent(subject)}&list=1`)),
+      );
+      expect(r.status).toBe(200);
+      return r.body.threads as Json[];
+    };
+    expect(await list(`program:${PROG}`)).toEqual([]);
+    const older = await ask([{ type: "program", id: PROG }], "First question");
+    await f.idle();
+    const newer = await ask([{ type: "program", id: PROG }], "Second question");
+    await f.idle();
+    // a follow-up: two more messages on the older one
+    expect(
+      (
+        await call(
+          postFollowUp(
+            req("POST", `/api/threads/${older.body.threadId}`, {
+              message: "And then?",
+              workflow: "ask",
+            }),
+            params({ id: older.body.threadId }),
+          ),
+        )
+      ).status,
+    ).toBe(202);
+    await f.idle();
+    // not listed: another subject, a library thread, an archived one
+    await ask([{ type: "tool", id: PROG_TOOL }], "About the tool");
+    await f.idle();
+    const lib = await ask([{ type: "program", id: PROG }], "Library question", "library");
+    await f.idle();
+    // a library thread that also names the program (plan() never stores this; the list refuses it)
+    c.db
+      .prepare(
+        "INSERT INTO thread_subjects (thread_id, subject_type, subject_id) VALUES (?, 'program', ?)",
+      )
+      .run(lib.body.threadId, PROG);
+    const gone = await ask([{ type: "program", id: PROG }], "Archived question");
+    await f.idle();
+    c.db.prepare("UPDATE threads SET archived = 1 WHERE id = ?").run(gone.body.threadId);
+    // a saved note on the newer one
+    const nt = await call(
+      getThread(
+        req("GET", `/api/threads/${newer.body.threadId}`),
+        params({ id: newer.body.threadId }),
+      ),
+    );
+    const answer = nt.body.messages.find((m: Json) => m.role === "assistant");
+    expect((await call(postNote(req("POST", "/api/notes", { messageId: answer.id })))).status).toBe(
+      201,
+    );
+
+    const rows = await list(`program:${PROG}`);
+    // the older one was followed up last: updated_at orders, not creation
+    expect(rows.map((r) => r.id)).toEqual([older.body.threadId, newer.body.threadId]);
+    expect(rows.map((r) => [r.title, r.messageCount, r.hasNotes])).toEqual([
+      ["First question", 4, false],
+      ["Second question", 2, true],
+    ]);
+    for (const r of rows) {
+      expect(Object.keys(r).sort()).toEqual([
+        "hasNotes",
+        "id",
+        "messageCount",
+        "title",
+        "updatedAt",
+      ]);
+      expect(Number.isNaN(Date.parse(r.updatedAt))).toBe(false);
+    }
+    // the first row is the thread the single lookup reopens
+    expect((await find(`program:${PROG}`)).body.thread.id).toBe(rows[0].id);
+    expect((await list(`tool:${PROG_TOOL}`)).length).toBe(1);
+
+    // capped at MAX_SUBJECT_THREADS, the newest kept
+    const add = c.db.prepare(
+      "INSERT INTO threads (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+    );
+    const about = c.db.prepare(
+      "INSERT INTO thread_subjects (thread_id, subject_type, subject_id) VALUES (?, 'program', ?)",
+    );
+    for (let i = 0; i < MAX_SUBJECT_THREADS + 5; i++) {
+      const at = new Date(Date.UTC(2001, 0, 1, 0, i)).toISOString();
+      add.run(`bulk-${String(i).padStart(3, "0")}`, `bulk ${i}`, at, at);
+      about.run(`bulk-${String(i).padStart(3, "0")}`, PROG);
+    }
+    const capped = await list(`program:${PROG}`);
+    expect(MAX_SUBJECT_THREADS).toBe(50);
+    expect(capped.length).toBe(MAX_SUBJECT_THREADS);
+    expect(capped.slice(0, 2).map((r) => r.id)).toEqual([older.body.threadId, newer.body.threadId]);
+    expect(capped[2].id).toBe(`bulk-0${MAX_SUBJECT_THREADS + 4}`);
+    expect(capped.at(-1).id).toBe(`bulk-00${7}`);
+    expect(capped.at(-1).messageCount).toBe(0);
+    // newest first throughout
+    const stamps = capped.map((r) => r.updatedAt);
+    expect([...stamps].sort().reverse()).toEqual(stamps);
+  });
+
   test("a bad subject is 400", async () => {
     await start();
     for (const bad of [
@@ -754,6 +855,15 @@ describe("GET /api/threads?subject= (the tool page reopens its conversation)", (
     ]) {
       const r = await find(bad);
       expect([bad, r.status, r.body.error.code]).toEqual([bad, 400, "bad_request"]);
+      const l = await call(
+        findThread(
+          req(
+            "GET",
+            `/api/threads?${bad === null ? "" : `subject=${encodeURIComponent(bad)}&`}list=1`,
+          ),
+        ),
+      );
+      expect([bad, l.status]).toEqual([bad, 400]);
     }
   });
 });

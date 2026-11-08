@@ -137,9 +137,14 @@ test("hiding the ask panel keeps the conversation: ask, hide at once, show, the 
   await page.getByTestId("ask-hide").click();
   await expect(panel).toBeHidden();
   await expect(page.locator(".ask-wrap")).toHaveAttribute("inert", "");
-  await expect(page.getByTestId("ask-open")).toBeFocused();
-  await page.getByTestId("ask-open").click();
+  // the top bar's toggle is the way back: not pressed, and focus moved to it from the hidden panel
+  const toggle = page.getByTestId("topbar").getByTestId("ask-toggle");
+  await expect(toggle).toHaveText("Ask AI Tutor");
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(toggle).toBeFocused();
+  await toggle.click();
   await expect(panel).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("ask-hide")).toBeFocused();
   // the panel reopened the earlier tests' conversation: this question is the latest in it
   await expect(panel.locator('[data-testid=qa-message][data-role="user"]').last()).toHaveText(
@@ -149,6 +154,136 @@ test("hiding the ask panel keeps the conversation: ask, hide at once, show, the 
     panel.locator('[data-testid=qa-message][data-role="assistant"]').last(),
   ).toContainText("which kind of division", { timeout: 30_000 });
   await expect(panel.getByTestId("thinking")).toHaveCount(0);
+});
+
+test("the top-bar Ask toggle: hides and shows the panel, survives a reload, only on tool pages", async ({
+  page,
+}) => {
+  await page.goto(`${app.base}/en/tool/${firstTool()}`);
+  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
+  const panel = page.getByTestId("ask-panel");
+  const toggle = page.getByTestId("ask-toggle");
+  await expect(panel).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  // hidden from the toggle itself: focus stays on it
+  await toggle.click();
+  await expect(panel).toBeHidden();
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(toggle).toBeFocused();
+  // it glows (cyan) and, while the panel is hidden, pulses, unless reduced motion is asked for
+  const look = () =>
+    toggle.evaluate((b) => {
+      const c = getComputedStyle(b);
+      return { shadow: c.boxShadow, anim: c.animationName };
+    });
+  const hiddenLook = await look();
+  expect(hiddenLook.shadow).toContain("rgba(45, 212, 234");
+  expect(hiddenLook.anim).toBe("ask-glow");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect((await look()).anim).toBe("none");
+  expect((await look()).shadow).toContain("rgba(45, 212, 234");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  // the edge tab it replaces is gone
+  await expect(page.getByTestId("ask-open")).toHaveCount(0);
+  // remembered across a reload
+  await page.reload();
+  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(panel).toBeHidden();
+  await toggle.click();
+  await expect(panel).toBeVisible();
+  await expect(page.getByTestId("ask-hide")).toBeFocused();
+  await page.reload();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(panel).toBeVisible();
+  // pressed: lit but calm (no pulse, a smaller glow than when hidden)
+  const pressedLook = await look();
+  expect(pressedLook.anim).toBe("none");
+  expect(pressedLook.shadow).toContain("rgba(45, 212, 234");
+  expect(pressedLook.shadow).not.toBe(hiddenLook.shadow);
+  // in Chinese
+  await page.goto(`${app.base}/zh/tool/${firstTool()}`);
+  await expect(toggle).toHaveText("问 AI 导师");
+  // not on pages without the panel
+  await page.goto(`${app.base}/en/notes`);
+  await expect(page.getByTestId("topbar")).toBeVisible();
+  await expect(page.getByTestId("ask-toggle")).toHaveCount(0);
+});
+
+test("the ask panel's left edge resizes it: drag, clamp, keyboard, reload, reset; none when narrow", async ({
+  page,
+}) => {
+  await page.goto(`${app.base}/en/tool/${firstTool()}`);
+  await expect(page.getByTestId("tool-frame")).toHaveAttribute("data-py-prog", /./);
+  const wrap = page.locator(".ask-wrap");
+  const frame = page.getByTestId("tool-frame");
+  const handle = page.getByTestId("ask-resize");
+  const width = async () => Math.round(((await wrap.boundingBox()) as { width: number }).width);
+  await expect(handle).toHaveAttribute("role", "separator");
+  await expect(handle).toHaveAttribute("aria-orientation", "vertical");
+  await expect(handle).toHaveAttribute("aria-valuemin", "280");
+  await expect(handle).toHaveAttribute("aria-valuenow", "340");
+  expect(await width()).toBe(340);
+  const drag = async (dx: number, during?: () => Promise<void>) => {
+    const b = (await handle.boundingBox()) as {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+    const x = b.x + b.width / 2;
+    const y = b.y + b.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx / 2, y, { steps: 4 });
+    await page.mouse.move(x + dx, y, { steps: 4 });
+    await during?.();
+    await page.mouse.up();
+  };
+  // a drag 100 px to the left widens it by 100 px; meanwhile the iframe takes no pointer events
+  await drag(-100, async () => {
+    expect(await frame.evaluate((f) => getComputedStyle(f).pointerEvents)).toBe("none");
+    // the width follows the pointer live, before the button is released
+    await expect.poll(width).toBe(440);
+  });
+  await expect(handle).toHaveAttribute("aria-valuenow", "440");
+  expect(await width()).toBe(440);
+  expect(await frame.evaluate((f) => getComputedStyle(f).pointerEvents)).toBe("auto");
+  // remembered across a reload
+  await page.reload();
+  await expect(frame).toHaveAttribute("data-py-prog", /./);
+  await expect(handle).toHaveAttribute("aria-valuenow", "440");
+  expect(await width()).toBe(440);
+  // clamped: the tool page keeps at least 480 px, the panel at least 280 px
+  await drag(-3000);
+  const fw = Math.round(((await frame.boundingBox()) as { width: number }).width);
+  expect(fw).toBe(480);
+  await expect(handle).toHaveAttribute("aria-valuenow", String(await width()));
+  await expect(handle).toHaveAttribute("aria-valuemax", String(await width()));
+  await drag(3000);
+  expect(await width()).toBe(280);
+  await expect(handle).toHaveAttribute("aria-valuenow", "280");
+  // the keyboard: ← widens, → narrows, by 16 px
+  await handle.focus();
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft");
+  await expect(handle).toHaveAttribute("aria-valuenow", "312");
+  expect(await width()).toBe(312);
+  await page.keyboard.press("ArrowRight");
+  await expect(handle).toHaveAttribute("aria-valuenow", "296");
+  expect(await width()).toBe(296);
+  // double-click: back to the default, and the stored width is gone
+  await handle.dblclick();
+  await expect(handle).toHaveAttribute("aria-valuenow", "340");
+  expect(await width()).toBe(340);
+  expect(await page.evaluate(() => localStorage.getItem("pfapp-ask-width"))).toBeNull();
+  // a narrow window: the fixed CSS width, no handle (a stored width is not applied)
+  await drag(-60);
+  await page.setViewportSize({ width: 700, height: 800 });
+  await expect(handle).toHaveCount(0);
+  expect(await width()).toBe(300);
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await expect(handle).toHaveAttribute("aria-valuenow", "400");
 });
 
 test("the hint button is disabled outside fill-in mode", async ({ page }) => {
@@ -250,4 +385,100 @@ test("/ask: the answer's citation opens /tool/<id>?prog=<programId> in place", a
     new RegExp(`[?&]prog=${programId}(&|$)`),
   );
   expect(page.context().pages()).toHaveLength(1);
+});
+
+test("the conversation switcher: two conversations on one program, pick the older, a follow-up goes to it", async ({
+  page,
+}) => {
+  // a tool no earlier test asked about, so the counts are this test's
+  await page.goto(`${app.base}/en/tool/${nthTool(2)}`);
+  const frameEl = page.getByTestId("tool-frame");
+  await expect(frameEl).toHaveAttribute("data-py-prog", /./);
+  const prog = (await frameEl.getAttribute("data-py-prog")) as string;
+  const panel = page.getByTestId("ask-panel");
+  const users = panel.locator('[data-testid=qa-message][data-role="user"]');
+  const answers = panel.locator('[data-testid=qa-message][data-role="assistant"]');
+  const switcher = panel.getByTestId("ask-threads");
+  const options = panel.getByTestId("ask-thread");
+  const ask = async (q: string, n: number) => {
+    await panel.getByTestId("ask-input").fill(q);
+    await panel.getByTestId("ask-submit").click();
+    await expect(answers).toHaveCount(n, { timeout: 30_000 });
+    await expect(panel.getByTestId("thinking")).toHaveCount(0);
+  };
+  await expect(users).toHaveCount(0);
+  await expect(switcher).toHaveCount(0);
+  await ask("Older conversation?", 1);
+  // the only conversation is the open one: nothing to switch to
+  await expect(switcher).toHaveCount(0);
+  await panel.getByTestId("ask-new").click();
+  await expect(users).toHaveCount(0);
+  // after "New conversation" the earlier one is one pick away
+  await expect(switcher).toHaveText("Conversations (1)");
+  await ask("Newer conversation?", 1);
+  await expect(switcher).toHaveText("Conversations (2)");
+
+  // the list: newest first, the open one marked
+  await switcher.click();
+  await expect(switcher).toHaveAttribute("aria-expanded", "true");
+  const list = panel.getByTestId("ask-threads-list");
+  await expect(list).toHaveAttribute("role", "listbox");
+  await expect(list).toBeFocused();
+  await expect(options).toHaveCount(2);
+  await expect(options.nth(0)).toContainText("Newer conversation?");
+  await expect(options.nth(0)).toHaveAttribute("aria-selected", "true");
+  await expect(options.nth(0)).toContainText("2 messages");
+  await expect(options.nth(1)).toContainText("Older conversation?");
+  await expect(options.nth(1)).toHaveAttribute("aria-selected", "false");
+  // Esc closes it and focus goes back to the button
+  await page.keyboard.press("Escape");
+  await expect(list).toHaveCount(0);
+  await expect(switcher).toBeFocused();
+  await expect(switcher).toHaveAttribute("aria-expanded", "false");
+
+  // the keyboard: ↓ opens on the open one, ↓ again, Enter picks the older
+  await page.keyboard.press("ArrowDown");
+  await expect(list).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(options.nth(1)).toHaveAttribute("data-active", "true");
+  await page.keyboard.press("Enter");
+  await expect(list).toHaveCount(0);
+  await expect(switcher).toBeFocused();
+  await expect(users).toHaveCount(1);
+  await expect(users.first()).toHaveText(/Older conversation\?/);
+  await expect(answers.first()).toContainText("which kind of division");
+
+  // a follow-up goes to the older conversation, which becomes the newest
+  await ask("A follow-up to the older one", 2);
+  await expect(users).toHaveCount(2);
+  await expect(users.last()).toHaveText(/A follow-up to the older one/);
+  const rows = await page.evaluate(
+    async (s) =>
+      (await (await fetch(`/api/threads?subject=${encodeURIComponent(s)}&list=1`)).json()).threads,
+    `program:${prog}`,
+  );
+  expect(
+    rows.map((r: { title: string; messageCount: number }) => [r.title, r.messageCount]),
+  ).toEqual([
+    ["Older conversation?", 4],
+    ["Newer conversation?", 2],
+  ]);
+  await switcher.click();
+  await expect(options.nth(0)).toContainText("Older conversation?");
+  await expect(options.nth(0)).toHaveAttribute("aria-selected", "true");
+  await expect(options.nth(0)).toContainText("4 messages");
+  // a click picks the other one
+  await options.nth(1).click();
+  await expect(users).toHaveCount(1);
+  await expect(users.first()).toHaveText(/Newer conversation\?/);
+  // a click elsewhere closes the list
+  await switcher.click();
+  await expect(list).toBeVisible();
+  await panel.getByTestId("ask-input").click();
+  await expect(list).toHaveCount(0);
+
+  // in Chinese
+  await page.goto(`${app.base}/zh/tool/${nthTool(2)}`);
+  await expect(frameEl).toHaveAttribute("data-py-prog", /./);
+  await expect(switcher).toHaveText("对话（2）");
 });

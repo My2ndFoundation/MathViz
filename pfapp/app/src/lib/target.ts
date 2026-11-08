@@ -12,6 +12,8 @@ export interface Target {
   name: { en: string; zh: string };
   /** The subject half of the name ("for Python"), shown under the "Viz Learn Buddy" eyebrow. */
   subject: { en: string; zh: string };
+  /** What its content pack is called in the top bar ("Python content"). */
+  pack: { en: string; zh: string };
   port: number;
   defaultLang: "en";
   groupField: "cat" | "phase" | "chapter" | "module";

@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { Locale } from "@/lib/i18n/locale";
 import { MESSAGES } from "@/lib/i18n/locale";
 import type { PyState } from "@/lib/py-state";
+import { ThreadSwitcher } from "./thread-switcher";
 import { ThreadView } from "./thread-view";
 import { type ThreadSubject, useThread } from "./use-thread";
 
@@ -16,7 +17,9 @@ import { type ThreadSubject, useThread } from "./use-thread";
  * `thread` (the page's `?thread=`, from Notes or the AI queue) names the conversation to open
  * instead, once it is about the panel's subject; a thread about something else, or one the app
  * does not have, falls back to the newest. Once opened, `?thread=` leaves the URL, so a reload
- * after "New conversation" does not bring the old one back.
+ * after "New conversation" does not bring the old one back. The header's switcher lists every
+ * conversation about the subject, and picking one opens it (useThread.open, polling resumed if
+ * its job is still open).
  */
 export function AskPanel({
   toolId,
@@ -112,11 +115,21 @@ export function AskPanel({
             <span>{python ? t.noState : `${t.thisTool}: ${toolTitle}`}</span>
           )}
         </div>
-        {thread ? (
-          <button type="button" className="chip" data-testid="ask-new" onClick={reset}>
-            {t.newThread}
-          </button>
-        ) : null}
+        <div className="ask-head-actions">
+          {/* every conversation about this subject: an earlier one is one pick away */}
+          <ThreadSwitcher
+            subject={`${subjectType}:${subjectId}`}
+            currentId={thread?.id ?? null}
+            version={`${thread?.id ?? ""}:${thread?.messages.length ?? 0}`}
+            locale={locale}
+            onPick={(id) => void open(id)}
+          />
+          {thread ? (
+            <button type="button" className="chip" data-testid="ask-new" onClick={reset}>
+              {t.newThread}
+            </button>
+          ) : null}
+        </div>
       </header>
       <ThreadView
         thread={thread}
