@@ -101,6 +101,14 @@ const addonFor = (t: string, version: string, unpackedBytes = 1) =>
   });
 
 describe("stage-addon", () => {
+  // pf dev rebuilds when the content's sources change; they live outside content/<t>/. Math's
+  // pages include files at the checkout's root (index.html, tools.json), so it watches all of it.
+  const CONTENT_WATCH: Record<string, string[]> = {
+    chess: ["../../../chess", "../../extract"],
+    crypto: ["../../../cryptography", "../../extract"],
+    python: ["../../../python", "../../extract"],
+    math: ["../../.."],
+  };
   test("each target's content pack is a pf add-on project: content/<t>/primeforge.json", () => {
     for (const t of TARGETS) {
       const p = JSON.parse(readFileSync(join(contentProjectDir(t), "primeforge.json"), "utf8"));
@@ -108,6 +116,7 @@ describe("stage-addon", () => {
         kind: "addon",
         stage: STAGE,
         build: ["bun", "../../scripts/stage-addon.ts", "--target", t],
+        watch: CONTENT_WATCH[t],
       });
       expect(existsSync(join(contentProjectDir(t), "package.json"))).toBe(false);
       expect(addonStageDir(t)).toBe(join(contentProjectDir(t), "dist", "addon"));

@@ -53,6 +53,8 @@ describe("stage-pfapp", () => {
         stage: STAGE,
         build: ["bun", "../../scripts/stage-pfapp.ts", "--target", t],
         lockfile: `${STAGE}/bun.lock`,
+        // the four targets share one codebase outside targets/<t>/: pf dev rebuilds when it changes
+        watch: ["../../app", "../../scripts"],
       });
       // no package.json in the project: pf's versions gate then compares the manifest with the
       // stage's package.json, which build-local sets to the target's version

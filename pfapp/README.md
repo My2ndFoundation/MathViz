@@ -67,8 +67,10 @@ pf publish <file.pfapp>        # needs the store's admin key
   refuses any uncommitted change in MathViz (before and after the build), then `pf pack` packs that
   stage. Without `--release` a dirty checkout is only a warning, because `pf dev` builds while you
   edit.
-- **`pf dev` watches `targets/<t>/` only** (the manifest, the icon), not `app/`. After a code
-  change, stop it (Ctrl-C) and run it again; for fast UI work use `bun run dev` (`next dev`).
+- **`pf dev` also watches `app/` and `scripts/`** (`"watch"` in each `targets/<t>/primeforge.json`;
+  pf from 2026-11-10 on): a code change rebuilds and restarts the app. For fast UI work `bun run dev`
+  (`next dev`) is still quicker. The content packs watch their own sources the same way
+  (`content/<t>/primeforge.json`; math watches the whole checkout, since its pages include files at the root).
 
 ### The content packs with pf
 
