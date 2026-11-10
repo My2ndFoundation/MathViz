@@ -79,7 +79,10 @@ function newest(p: string): number {
   const st = statSync(p);
   if (!st.isDirectory()) return st.mtimeMs;
   let m = st.mtimeMs;
-  for (const e of readdirSync(p)) m = Math.max(m, newest(path.join(p, e)));
+  // targets/<t>/dist/ holds a pf stage and its packages (scripts/stage-pfapp.ts), output and not a source
+  for (const e of readdirSync(p)) {
+    if (e !== "dist" && e !== "node_modules") m = Math.max(m, newest(path.join(p, e)));
+  }
   return m;
 }
 

@@ -38,3 +38,34 @@ writes one). `MATHVIZ_FAKE_ADDONS_INSTALL_MS` sets how long an install takes,
 `MATHVIZ_FAKE_ADDONS_PAID=content` makes it unowned (Get → the store-window note). A production
 build honours these only with `MATHVIZ_E2E=1` (the e2e harness), after Math Test Buddy's
 `MTB_FAKE_ADDONS` / `MTB_E2E` (`app/src/lib/addons/fake.ts`, `app/src/lib/server/context.ts`).
+
+## Developing with pf
+
+Each target is its own project for pf, PrimeForge-SDK's CLI:
+`targets/<t>/primeforge.json` builds with `bun ../../scripts/stage-pfapp.ts --target <t>`
+(`bun run stage:pfapp -- --target <t>` from here) into the stage `targets/<t>/dist/pfapp/`
+(`targets/*/dist/` is gitignored; `pf pack` writes into `targets/<t>/dist/packages/`). That
+script runs `bun install --frozen-lockfile`, `build-local` (so `build/<t>/` is unchanged), copies `build/<t>/` into the stage, holds it to the target's manifest and to
+`bun.lock`, and runs the production install PrimeForge-Desktop's `build:mathviz` runs — so no
+PrimeForge-Desktop checkout is needed. Run pf **from the target's folder**:
+
+```bash
+cd pfapp/targets/math          # or chess / crypto / python
+pf dev                         # build, link into PrimeForge (Developer mode on), start, follow the log
+pf check                       # every gate over the stage that exists
+pf build                       # build, then pack: dist/packages/app.primeforge.mathviz.math-<v>.pfapp
+pf publish <file.pfapp>        # needs the store's admin key
+```
+
+- **Certificate namespace:** `app.primeforge.mathviz.` covers all four apps
+  (`app.primeforge.mathviz.{math,chess,crypto,python}`). A developer-certificate pack raises the
+  package's `minDesktopVersion` to 1.47.0.
+- **Versions** stay per target, in `targets/<t>/manifest.json`; `pfapp/package.json`'s `1.0.0` is
+  not compared (the project folder has no package.json; the stage's carries the target's version).
+- **A release is built from a clean checkout.** pf's clean-git gate sees only `targets/<t>/`, so the
+  whole-checkout rule is the stage script's: `bun run stage:pfapp -- --target <t> --release`
+  refuses any uncommitted change in MathViz (before and after the build), then `pf pack` packs that
+  stage. Without `--release` a dirty checkout is only a warning, because `pf dev` builds while you
+  edit.
+- **`pf dev` watches `targets/<t>/` only** (the manifest, the icon), not `app/`. After a code
+  change, stop it (Ctrl-C) and run it again; for fast UI work use `bun run dev` (`next dev`).

@@ -175,7 +175,10 @@ export function stage(t: TargetId, out: string, manifest: Manifest): void {
     join(out, "manifest.json"),
     readFileSync(join(PFAPP, "targets", t, "manifest.json")),
   );
-  cpSync(join(PFAPP, "targets", t, "icon.svg"), join(out, "icon.svg"));
+  // By bytes, not cpSync: on APFS that clones, and FSEvents can then report the source,
+  // targets/<t>/icon.svg, which is inside the pf project `pf dev` watches (measured on a large
+  // tree in Live Studio Lab; not reproduced for this one file, kept as the safe form).
+  writeFileSync(join(out, "icon.svg"), readFileSync(join(PFAPP, "targets", t, "icon.svg")));
 }
 
 /** `next build app` for `t` (with its public/ assets: the maths recorder), then stamp the build. */

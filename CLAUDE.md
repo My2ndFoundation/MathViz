@@ -267,6 +267,8 @@ payload 没有多余文件、组标签与导航页一致、python source 是 `.p
 3. 在 PFD 里 `build-mathviz-addon <target>` → `publish:addon`。应用本身没改就不发应用。
 4. 只有应用代码改了，才 `build-mathviz <target>` → `publish:app`，并升该目标 manifest 的版本。
 
+**也可以不经 PFD，用 pf（PrimeForge-SDK）**：每个目标是一个 pf 项目，`pfapp/targets/<t>/primeforge.json`，构建是 `pfapp/scripts/stage-pfapp.ts`（= PFD `build-mathviz.ts` 去掉签名：`build/<t>/` 照旧，再拷进 `targets/<t>/dist/pfapp/` 做生产安装）。它的 `BUILD_ENTRIES` 与 PFD 的同名清单必须一致，改一处就改两处。发布用的暂存要 `--release`（整个 checkout 必须干净——pf 的 clean-git 只看 `targets/<t>/`）。用法见 `pfapp/README.md`「Developing with pf」。
+
 ## Branding is generated too
 
 `docs/logo.png` is the source of truth for the brand mark. `scripts/apply_branding.py` derives a
