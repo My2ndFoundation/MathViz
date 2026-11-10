@@ -69,3 +69,40 @@ pf publish <file.pfapp>        # needs the store's admin key
   edit.
 - **`pf dev` watches `targets/<t>/` only** (the manifest, the icon), not `app/`. After a code
   change, stop it (Ctrl-C) and run it again; for fast UI work use `bun run dev` (`next dev`).
+
+### The content packs with pf
+
+Each target's content pack (`app.primeforge.mathviz.<t>/content`) is a pf add-on project of its
+own, `content/<t>/primeforge.json`, built by `scripts/stage-addon.ts` into `content/<t>/dist/addon/`
+(`addon.json` + `payload/`, the extractor's output). It is PrimeForge-Desktop's
+`build:mathviz-addon` without the signing, with the same payload, the same `addon.json` and the same
+version rule — and the release record now lives here, in **`content/releases.json`** (seeded with the
+desktop's `scripts/mathviz-content-releases.json` as it stood on 2026-11-10).
+
+- **The version is decided from the record**: content whose fingerprint equals the last recorded
+  release's is that release, never a new version; anything else is a patch above it (`1.0.0` for a
+  first). `bun run stage:addon -- --target <t> --status` prints the fingerprint, the last release,
+  what changed and the version a build would make, and exits 2 when there is nothing to release.
+- **Only a published pack moves the record.** pf has no hook after `pf publish`, so the build prints
+  the command; it reads the version and fingerprint from the signed package and is safe to repeat.
+
+```bash
+cd pfapp/content/math          # or chess / crypto / python
+pf dev                         # with the app already linked by pf dev: build and link the pack
+# a release, from a clean checkout:
+cd ../.. && bun run stage:addon -- --target math --release   # in pfapp/
+cd content/math && pf pack     # → dist/packages/content-<v>.pfaddon (+ .sig)
+pf publish dist/packages/content-<v>.pfaddon
+cd ../.. && bun run record:addon -- "$PWD/content/math/dist/packages/content-<v>.pfaddon"
+git add content/releases.json && git commit -m "content(math): <v> published"
+```
+
+- `--release` refuses a dirty checkout (the payload's provenance must say `clean: true`, and
+  `record:addon` refuses one that does not) and exits 2, leaving no stage, when nothing changed.
+- A package already built for the decided version with other bytes is refused (it may be the
+  published, unrecorded one): record it, or delete it and its `.sig`.
+- The namespace is the apps' own: `app.primeforge.mathviz.` covers all four packs.
+- **Until PrimeForge-Desktop's `build:mathviz-addon` is retired, two records exist.** A pack
+  published from the desktop (`publish:addon`) is recorded only there; record it here too
+  (`bun run record:addon -- <that .pfaddon>`, it reads the same package) or this build will decide
+  that version again.

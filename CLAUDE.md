@@ -227,7 +227,7 @@ list, parallel builders, one integration branch, one final review, one PR per wa
 逐项比对**同一棵树**里的网页版：每页 sha256、注册表每一条都在 catalog 里且没有多余条目、
 payload 没有多余文件、组标签与导航页一致、python source 是 `.py` 原文；再查同一棵树提取两次
 逐字节相同、`pfapp/` 下被 git 跟踪的 `.html` 为 0。条数全从注册表推，网页版加一页不会让它变红；
-它也**不**与已发布的内容包比——「内容包版本前进」在 PFD 的构建脚本里，网页版的 PR 不因 pfapp
+它也**不**与已发布的内容包比——「内容包版本前进」在 `stage:addon`（以及 PFD 的 `build-mathviz-addon`）里，网页版的 PR 不因 pfapp
 没重发而变红。钩子在 `pfapp/`、四个注册表、四处工具页目录、`python/programs/` 或四个组标签所在
 导航页（`index.html`、三个子项目的 `app.html`）有改动时跑它（以工作区为准、不要求干净；本机没有
 `bun` 就警告跳过）。**钩子只跑 `check:content`**；`registry-sync.yml` 的独立 `pfapp` job 每次都跑它，
@@ -268,6 +268,8 @@ payload 没有多余文件、组标签与导航页一致、python source 是 `.p
 4. 只有应用代码改了，才 `build-mathviz <target>` → `publish:app`，并升该目标 manifest 的版本。
 
 **也可以不经 PFD，用 pf（PrimeForge-SDK）**：每个目标是一个 pf 项目，`pfapp/targets/<t>/primeforge.json`，构建是 `pfapp/scripts/stage-pfapp.ts`（= PFD `build-mathviz.ts` 去掉签名：`build/<t>/` 照旧，再拷进 `targets/<t>/dist/pfapp/` 做生产安装）。它的 `BUILD_ENTRIES` 与 PFD 的同名清单必须一致，改一处就改两处。发布用的暂存要 `--release`（整个 checkout 必须干净——pf 的 clean-git 只看 `targets/<t>/`）。用法见 `pfapp/README.md`「Developing with pf」。
+
+**内容包也一样**：每个目标的内容包是一个 pf 附加内容项目，`pfapp/content/<t>/primeforge.json`，构建是 `pfapp/scripts/stage-addon.ts`（= PFD `build-mathviz-addon.ts` 去掉签名：同一个提取器、同样的 `addon.json`、同样的版本规则）。**发布记录在本仓库 `pfapp/content/releases.json`**（2026-11-10 用 PFD 的 `scripts/mathviz-content-releases.json` 原样起头，已发布的不会被重新定版本）：指纹等于上次记录的就是那一版、不出新版本，否则补丁号 +1。只有发布成功才动记录——`pf publish` 之后跑 `bun run record:addon -- <那个 .pfaddon>`（从签名包里读版本和指纹，可重复跑），然后提交 `releases.json`。发布用 `stage:addon -- --target <t> --release`（整个 checkout 必须干净）。在 PFD 退役它的 `build-mathviz-addon` 之前有两份记录：从 PFD `publish:addon` 发的，这边也要 `record:addon` 一次。
 
 ## Branding is generated too
 
