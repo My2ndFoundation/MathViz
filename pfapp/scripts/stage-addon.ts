@@ -178,6 +178,21 @@ export function addonManifestFor(o: {
 
 export const addonJsonText = (a: AddonJson): string => `${JSON.stringify(a, null, 2)}\n`;
 
+/**
+ * The same pack, for a package already built: every addon.json field equal but `unpackedBytes`,
+ * which counts provenance.json too — and that file names the commit and whether the checkout was
+ * clean, neither of which is content (the fingerprint, compared beside this, is the content).
+ */
+export function sameAddon(a: AddonJson, b: AddonJson): boolean {
+  const canon = (m: AddonJson) =>
+    JSON.stringify(
+      Object.entries(m)
+        .filter(([k]) => k !== "unpackedBytes")
+        .sort(([x], [y]) => (x < y ? -1 : 1)),
+    );
+  return canon(a) === canon(b);
+}
+
 const sha256 = (data: Buffer): string => createHash("sha256").update(data).digest("hex");
 
 export interface Provenance {
@@ -546,8 +561,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     if (existsSync(file)) {
       const packed = readPackedAddon(file);
       const same =
-        packed.digest.fingerprint === digest.fingerprint &&
-        packed.addonText.toString("utf8") === addonJsonText(addon);
+        packed.digest.fingerprint === digest.fingerprint && sameAddon(packed.manifest, addon);
       if (same) {
         writeStage(stage, packed.addonText, packed.payload);
         console.log(`${file} already holds exactly this pack: the stage is its own bytes`);

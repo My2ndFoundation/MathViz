@@ -23,6 +23,7 @@ import {
   recordPublished,
   releasesPath,
   STAGE,
+  sameAddon,
   TARGETS,
   writeReleases,
   writeStage,
@@ -162,6 +163,14 @@ describe("stage-addon", () => {
         2,
       )}\n`,
     );
+  });
+
+  test("an already-built package is the same pack whatever its unpackedBytes, not otherwise", () => {
+    const a = addonFor("math", "1.0.1", 100);
+    expect(sameAddon(a, addonFor("math", "1.0.1", 101))).toBe(true);
+    expect(sameAddon(a, addonFor("math", "1.0.2", 100))).toBe(false);
+    expect(sameAddon(a, { ...a, minAppVersion: "1.0.4" })).toBe(false);
+    expect(sameAddon(a, { ...a, title: "x" })).toBe(false);
   });
 
   test("the digest is recomputed from the files and held to provenance.json", () => {
